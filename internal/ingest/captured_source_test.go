@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,6 +28,12 @@ type capturedSourceCase struct {
 	Append            string   `yaml:"append"`
 	Malformed         string   `yaml:"malformed"`
 	BoundedSessionIDs []string `yaml:"bounded_session_ids"`
+	Entries           []struct {
+		Role   ingest.Role `yaml:"role"`
+		Depth  int         `yaml:"depth"`
+		Parent *int        `yaml:"parent"`
+		Text   string      `yaml:"text"`
+	} `yaml:"entries"`
 }
 
 func TestCapturedFileOrdinaryLifecycle(t *testing.T) {
@@ -126,9 +133,16 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 		t.Fatal("completed record not consumed")
 	}
 	entries, err := db.ListEntries(t.Context(), sid)
-	if err != nil || len(entries) != 2 {
+	if err != nil || len(entries) != len(fixture.Entries) {
 		t.Fatalf("stored entries=%d error=%v", len(entries), err)
 	}
+	for i, want := range fixture.Entries {
+		got := entries[i]
+		if got.EntryIndex != i || got.Role != want.Role || got.Depth != want.Depth || !reflect.DeepEqual(got.ParentIndex, want.Parent) || got.ContentPreview == nil || *got.ContentPreview != want.Text {
+			t.Fatalf("stored entry %d lost its captured structure or text: %+v", i, got)
+		}
+	}
+	stableEntries := entries
 	if repeat := run(); repeat.Summary.Unchanged != 1 {
 		t.Fatalf("updated no-op: %+v", repeat)
 	}
@@ -155,7 +169,7 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 		t.Fatalf("failed capture replaced artifact: %v", err)
 	}
 	entries, err = db.ListEntries(t.Context(), sid)
-	if err != nil || len(entries) != 2 {
+	if err != nil || !reflect.DeepEqual(entries, stableEntries) {
 		t.Fatalf("failed capture changed entries: %v", err)
 	}
 }

@@ -1,0 +1,167 @@
+required_names:
+  - cursor-user-literal-query-whitespace
+  - opencode-control-with-input
+  - cursor-literal-query-prose
+  - claude-system-second-block
+  - claude-system-thinking-block
+  - opencode-compaction-recent
+  - opencode-upstream-omitted
+  - strike-output-object-siblings
+  - cursor-aborted-full-error
+  - cursor-tool-without-id
+  - cursor-tool-without-name
+  - cursor-aborted-with-conversation
+  - claude-unicode-tail
+  - cursor-unicode-tail
+  - codex-unicode-tail
+  - strike-unicode-tail
+  - opencode-legacy-unicode-tail
+  - opencode-current-unicode-tail
+  - claude-same-prefix-different-tail
+  - claude-malformed-json
+  - claude-missing-tool-input
+  - cursor-unknown-block
+  - codex-missing-tool-output
+  - strike-unknown-event
+  - strike-malformed-json
+  - opencode-missing-tool-state
+  - opencode-unknown-part
+  - codex-unknown-event-message
+  - strike-orphan-tool-output
+  - claude-missing-text
+  - claude-summary-full-text
+  - claude-result-full-text
+  - claude-error-full-text
+  - codex-reasoning-full-text
+cases:
+  - name: cursor-user-literal-query-whitespace
+    harness: cursor
+    text: " \n before <user_query> example </user_query> SYNTHETIC-SAFE-TAIL \n "
+    source: '{"role":"user","content":TEXT}'
+  - name: opencode-control-with-input
+    harness: opencode
+    origin: current
+    projection_part: '{"id":"part_control","type":"step-start","input":{"text":"SYNTHETIC-SAFE-TAIL"}}'
+    reject: true
+  - name: cursor-literal-query-prose
+    harness: cursor
+    text: "  before <user_query>example</user_query> SYNTHETIC-SAFE-TAIL \n "
+    source: '{"role":"assistant","content":[{"type":"text","text":TEXT}]}'
+  - name: claude-system-second-block
+    harness: claude-code
+    source: '{"type":"system","content":[{"type":"text","text":"first"},{"type":"text","text":TEXT}]}'
+  - name: claude-system-thinking-block
+    harness: claude-code
+    source: '{"type":"system","content":[{"type":"text","text":"first"},{"type":"thinking","thinking":TEXT}]}'
+  - name: opencode-compaction-recent
+    harness: opencode
+    origin: current
+    contains: true
+    projection_part: '{"id":"part_compaction","type":"compaction","text":"summary","content":TEXT}'
+  - name: opencode-upstream-omitted
+    harness: opencode
+    origin: current
+    omitted: true
+    reject: true
+  - name: strike-output-object-siblings
+    harness: strike
+    contains: true
+    tool_output: true
+    source: |
+      {"type":"tool.begin","data":{"callId":"c","name":"read","input":{}}}
+      {"type":"tool.end","data":{"callId":"c","output":{"text":"visible","details":TEXT}}}
+  - name: strike-malformed-json
+    harness: strike
+    source: '{"type":'
+    reject: true
+  - name: cursor-aborted-with-conversation
+    harness: cursor
+    source: '{"type":"turn_ended","status":"aborted","error":"synthetic abort","content":TEXT}'
+    reject: true
+  - name: cursor-aborted-full-error
+    harness: cursor
+    want_error: true
+    source: '{"type":"turn_ended","status":"aborted","error":TEXT}'
+  - name: cursor-tool-without-id
+    harness: cursor
+    source: '{"role":"assistant","message":{"content":[{"type":"text","text":TEXT},{"type":"tool_use","name":"Read","input":{"path":"/synthetic/file.go"}}]}}'
+  - name: cursor-tool-without-name
+    harness: cursor
+    source: '{"role":"assistant","message":{"content":[{"type":"tool_use","input":{"path":"/synthetic/file.go"}}]}}'
+    reject: true
+  - name: claude-summary-full-text
+    harness: claude-code
+    source: '{"type":"summary","summary":TEXT}'
+  - name: claude-result-full-text
+    harness: claude-code
+    source: '{"type":"result","result":TEXT}'
+  - name: claude-error-full-text
+    harness: claude-code
+    source: '{"type":"system","subtype":"api_error","error":TEXT}'
+  - name: codex-reasoning-full-text
+    harness: codex
+    source: '{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":TEXT}]}}'
+  - name: opencode-missing-tool-state
+    harness: opencode
+    origin: current
+    projection_part: '{"id":"part_bad","type":"tool","tool":"read"}'
+    reject: true
+  - name: opencode-unknown-part
+    harness: opencode
+    origin: legacy
+    projection_part: '{"id":"part_bad","type":"future_tool","text":"unsupported trace"}'
+    reject: true
+  - name: codex-unknown-event-message
+    harness: codex
+    source: '{"type":"event_msg","payload":{"type":"future_tool","message":"unrepresented trace"}}'
+    reject: true
+  - name: strike-orphan-tool-output
+    harness: strike
+    source: '{"type":"tool.output","data":{"callId":"missing","output":"unrepresented trace"}}'
+    reject: true
+  - name: claude-missing-text
+    harness: claude-code
+    source: '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text"}]}}'
+    reject: true
+  - name: claude-same-prefix-different-tail
+    harness: claude-code
+    second_tail: true
+    source: '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":TEXT}]}}'
+  - name: opencode-legacy-unicode-tail
+    harness: opencode
+    origin: legacy
+  - name: opencode-current-unicode-tail
+    harness: opencode
+    origin: current
+  - name: claude-unicode-tail
+    harness: claude-code
+    source: '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":TEXT}]}}'
+  - name: cursor-unicode-tail
+    harness: cursor
+    source: '{"role":"assistant","content":[{"type":"text","text":TEXT}]}'
+  - name: codex-unicode-tail
+    harness: codex
+    source: '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":TEXT}]}}'
+  - name: strike-unicode-tail
+    harness: strike
+    source: '{"type":"assistant.text","data":{"text":TEXT}}'
+  - name: claude-malformed-json
+    harness: claude-code
+    source: '{"type":'
+    reject: true
+  - name: claude-missing-tool-input
+    harness: claude-code
+    source: '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_a","name":"read"}]}}'
+    reject: true
+  - name: cursor-unknown-block
+    harness: cursor
+    source: '{"role":"assistant","content":[{"type":"future_tool","text":"not represented"}]}'
+    reject: true
+  - name: codex-missing-tool-output
+    harness: codex
+    source: '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_a"}}'
+    reject: true
+  - name: strike-unknown-event
+    harness: strike
+    source: '{"type":"assistant.future","data":{"text":"not represented"}}'
+    reject: true

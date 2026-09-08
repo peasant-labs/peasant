@@ -20,8 +20,8 @@ import (
 // lets the preview show the transcript the push will send rather than a second
 // approximation of it.
 //
-// It returns no entries (not an error) for a session the store holds no
-// transcript for, and an error only when the read itself failed.
+// It returns no entries for a verified empty capture. Missing, incomplete, or
+// corrupt captures return errors; a bounded preview is not publication input.
 type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
 
 // PublishedTurnsFunc returns one session's turns AS THEY WILL BE PUBLISHED:

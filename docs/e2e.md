@@ -247,8 +247,12 @@ test process and inherited CLI environments. These are test budgets, not a claim
 that child allocations explain historical parent `e2e.test` RSS.
 
 Set `E2E_MEMORY_MAX` and `E2E_MEMORY_HIGH` in bytes to change the hard budget.
-`GOMEMLIMIT`, `PEASANT_INGEST_ARENA_BYTES`, `GOMAXPROCS` (default 2), and
+`GOMEMLIMIT`, `PEASANT_INGEST_ARENA_BYTES`, `GOMAXPROCS`, and
 `E2E_BUILD_PARALLELISM` (default 2, inherited by child Go builds) are configurable.
+Scheduler concurrency uses Go's CPU/container-aware default unless the caller
+sets `GOMAXPROCS`, for example `GOMAXPROCS=8 make e2e`. Memory limits are independent
+of this scheduler setting. Run `make check`, `make build`, and the full-stack gate
+sequentially. A memory-limit termination is a failed gate, not a passing test.
 Tests retain `-race` and use `-parallel=1`. For a focused run:
 
 ```bash

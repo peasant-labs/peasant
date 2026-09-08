@@ -3,8 +3,16 @@ package ingest
 import (
 	"strings"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 )
+
+func cursorContentPreview(text string, full bool) string {
+	if full {
+		return text
+	}
+	return truncateString(text, defaults.ContentPreviewLimit)
+}
 
 // classifyCursorToolKind maps Cursor IDE tool names to schema.ToolCallKind.
 // Names are matched case-insensitively and cover both PascalCase (agent SDK)
@@ -50,4 +58,13 @@ func stripCursorQueryTag(s string) string {
 		inner = inner[:end]
 	}
 	return strings.TrimSpace(inner)
+}
+
+// Source strings are evidence, not framing to interpret. Compatibility previews
+// keep their historical normalization; changed projections require force remap.
+func cursorCapturedText(s string, fullContent bool) string {
+	if fullContent {
+		return s
+	}
+	return stripCursorQueryTag(s)
 }

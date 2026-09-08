@@ -219,9 +219,13 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 
 // claudeIndexLine is the minimal parsed shape for indexing (subset of claudeJSONLLine).
 type claudeIndexLine struct {
-	Type       string `json:"type"`
-	UUID       string `json:"uuid"`
-	ParentUUID string `json:"parentUuid"`
+	Type       string          `json:"type"`
+	Subtype    string          `json:"subtype"`
+	Summary    *string         `json:"summary"`
+	Result     json.RawMessage `json:"result"`
+	Error      json.RawMessage `json:"error"`
+	UUID       string          `json:"uuid"`
+	ParentUUID string          `json:"parentUuid"`
 	// IsMeta is Claude Code's own marker for a user-role entry the HARNESS
 	// injected rather than the human typing it: skill bodies, the
 	// "[Image: original WxH, displayed at ...]" note attached to an image the
@@ -305,6 +309,20 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 	content := line.Message.Content
 	if len(content) == 0 {
 		content = line.Content
+	}
+	if fullContent && len(content) == 0 {
+		switch line.Type {
+		case "summary":
+			if line.Summary != nil {
+				plainText = *line.Summary
+			}
+		case "result":
+			plainText = rawMessagePreview(line.Result)
+		case "system":
+			if line.Subtype == "api_error" {
+				plainText = rawMessagePreview(line.Error)
+			}
+		}
 	}
 
 	if len(content) > 0 {
@@ -497,6 +515,8 @@ type claudeFullBlock struct {
 // (genuine user responses), while all other tool_result blocks are reclassified to role=tool.
 func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, raw []byte, fullContent bool, askUserCallIDs map[string]bool) []schema.SessionEntry {
 	var line struct {
+		Type    string          `json:"type"`
+		Content json.RawMessage `json:"content"`
 		Message struct {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
@@ -504,6 +524,10 @@ func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 	}
 	if err := json.Unmarshal(raw, &line); err != nil {
 		return nil
+	}
+	if fullContent && len(line.Message.Content) == 0 && line.Type == "system" {
+		line.Message.Content = line.Content
+		line.Message.Role = RoleSystem.String()
 	}
 
 	if len(line.Message.Content) == 0 {

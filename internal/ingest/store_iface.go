@@ -143,13 +143,15 @@ type MetricsStore interface {
 // index state. Non-zero IndexVersion updates sessions.index_version and
 // sessions.indexed_at inside the same per-session atomic write.
 type SessionEntryWrite struct {
-	// CaptureRevision proves which capture supplied the indexed input. Zero
-	// invalidates publication readiness; a stale positive revision is refused.
-	CaptureRevision int64
-	SessionID       SessionID
-	Entries         []schema.SessionEntry
-	IndexVersion    int
-	IndexedAtMs     int64
+	// CaptureRevision binds this index write to the captured publication metadata.
+	CaptureRevision    int64
+	Mode               SessionEntryWriteMode
+	RequireFullContent bool
+	ContentCapture     SessionContentCaptureWrite
+	SessionID          SessionID
+	Entries            []schema.SessionEntry
+	IndexVersion       int
+	IndexedAtMs        int64
 }
 
 // SessionEntryWriteResult reports the outcome for one SessionEntryWrite.

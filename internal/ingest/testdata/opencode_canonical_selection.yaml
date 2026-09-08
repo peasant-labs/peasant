@@ -11,6 +11,18 @@ required_cases:
   - current-parent-graph-and-missing-parent
   - legacy-missing-parent-and-orphan-part
 source_fixture: canonical-selection-mixed
+# Discovery/storage includes every named identity. Capture eligibility is separate:
+# the legacy orphan case deliberately drops malformed/control orphan rows.
+mounted_captures:
+  all-three-prefers-current: {session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, eligible: true}
+  current-and-legacy-prefers-current: {session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, eligible: true}
+  current-and-json-prefers-current: {session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, eligible: true}
+  legacy-and-json-prefers-legacy: {session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, eligible: true}
+  current-only: {session_id: ses_3cd91f52effeXd3QAJ54jOyzv9, eligible: true}
+  legacy-only: {session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, eligible: true}
+  json-only: {session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, eligible: true}
+  current-parent-graph-and-missing-parent: {session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, eligible: true}
+  legacy-missing-parent-and-orphan-part: {session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, eligible: false, source_artifact_omission: true}
 json_mtime_ms: 3000
 json_sessions:
   - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, marker: JSON_ALL}
@@ -40,6 +52,8 @@ cases:
   - {name: current-parent-graph-and-missing-parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, representations: [current_sqlite], expected: current_sqlite, marker: CURRENT_PARENT, expected_freshness_ms: 2430, missing_parent: msg_absent, linked_parent: msg_current_root, linked_child: msg_current_child, missing_entry: msg_current_parent, tool_call_id: call_current_parent}
   - {name: legacy-missing-parent-and-orphan-part, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, representations: [legacy_sqlite], expected: legacy_sqlite, marker: LEGACY_PARENT, expected_freshness_ms: 1410, missing_parent: msg_absent, orphan_entry: part_legacy_orphan, orphan_parent: msg_missing_part_parent, orphan_marker: LEGACY_ORPHAN_PART, orphan_tool_entry: part_legacy_orphan_tool, dropped_orphan_parts: [part_legacy_truncated, part_legacy_step_start]}
 loader_mutations:
+  - {name: missing-named-capture, kind: missing_capture}
+  - {name: cannot-certify-omitted-source, kind: certify_omission}
   - {name: unknown-field, kind: unknown_field}
   - {name: wrong-count, kind: wrong_count}
   - {name: duplicate-name, kind: duplicate_name}
@@ -48,6 +62,8 @@ loader_mutations:
   - {name: orphan-json-session, kind: orphan_json_session}
   - {name: dropped-part-without-row, kind: dropped_part_without_row}
 required_loader_mutations:
+  - missing-named-capture
+  - cannot-certify-omitted-source
   - unknown-field
   - wrong-count
   - duplicate-name

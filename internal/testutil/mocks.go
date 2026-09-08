@@ -1267,6 +1267,22 @@ func (s *StubPushStore) GetQualityMetrics(_ context.Context, sessionID ingest.Se
 	return s.Metrics[sessionID], nil
 }
 
+var _ ingest.FullSessionEntryReader = (*StubPushStore)(nil)
+
+// LoadFullSessionEntries models an authoritative snapshot for synthetic fixtures.
+func (s *StubPushStore) LoadFullSessionEntries(ctx context.Context, sessionID ingest.SessionID, _ int64) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
+	entries, err := s.ListEntries(ctx, sessionID)
+	return entries, ingest.SessionContentCapture{SessionID: sessionID, Status: ingest.ContentCaptureComplete, EntryCount: len(entries), FullCaptureSHA256: "synthetic-capture"}, err
+}
+
+// ReadSessionEntries models an authoritative read for synthetic push fixtures.
+func (s *StubPushStore) ReadSessionEntries(ctx context.Context, sessionID ingest.SessionID, opts ingest.SessionEntryReadOptions) (ingest.SessionEntryReadPage, error) {
+	entries, err := s.ListEntries(ctx, sessionID)
+	return ingest.SessionEntryReadPage{Entries: entries, Capture: ingest.SessionContentCapture{
+		SessionID: sessionID, Status: ingest.ContentCaptureComplete, EntryCount: len(entries), FullCaptureSHA256: "synthetic-capture",
+	}}, err
+}
+
 func (s *StubPushStore) ListEntries(_ context.Context, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

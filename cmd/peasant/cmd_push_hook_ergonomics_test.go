@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/peasant-labs/peasant/internal/testutil"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 )
 
@@ -197,6 +197,9 @@ func seedPushableSession(t *testing.T, dir string) {
 	entry := makeCmdStoreEntry(t, "cccc3333-cccc-4ccc-8ccc-cccccccccccc", "github.com-user-repo",
 		"git@github.com:user/repo.git", "main", 1700000000000)
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteFullEntries(t.Context(), db, entry.Metadata.SessionID, nil); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -198,17 +198,20 @@ type SourceConfig struct {
 
 // DiscoveredSession represents a session found during discovery.
 type DiscoveredSession struct {
-	SessionID     SessionID
-	Harness       Harness
-	SourcePath    ResolvedPath   // Path to the main transcript file
-	SourceFormat  SourceFormat   // "jsonl" for Claude, "json" for OpenCode
-	OriginalRoot  ResolvedPath   // Harness root for multi-directory access (e.g. OpenCode message/part)
-	ParentUUID    *SessionID     // nil for root sessions
-	SubagentPaths []ResolvedPath // Child session transcript paths
-	DebugPaths    []ResolvedPath // Debug artifact paths
-	ModTime       time.Time      // Changed time of the source: when its content last changed
-	ActiveModTime time.Time      // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
-	ProjectName   string         // Human-readable project name (optional, populated during discovery when cheap to extract)
+	// ContentOmitted is carried from retained metadata when ingestion removed
+	// source records. A filtered artifact cannot certify a complete capture.
+	ContentOmitted bool
+	SessionID      SessionID
+	Harness        Harness
+	SourcePath     ResolvedPath   // Path to the main transcript file
+	SourceFormat   SourceFormat   // "jsonl" for Claude, "json" for OpenCode
+	OriginalRoot   ResolvedPath   // Harness root for multi-directory access (e.g. OpenCode message/part)
+	ParentUUID     *SessionID     // nil for root sessions
+	SubagentPaths  []ResolvedPath // Child session transcript paths
+	DebugPaths     []ResolvedPath // Debug artifact paths
+	ModTime        time.Time      // Changed time of the source: when its content last changed
+	ActiveModTime  time.Time      // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
+	ProjectName    string         // Human-readable project name (optional, populated during discovery when cheap to extract)
 	// ProjectWorktree is the project's canonical root path, resolved from the
 	// OpenCode project tables when present. It refines project naming and worktree
 	// grouping without changing CWD, which stays the session's own directory. It

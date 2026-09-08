@@ -69,15 +69,9 @@ cases:
       # The session title is not repeated above the transcript that produced it.
       - imported session
 
-  - name: a-truncated-stored-body-with-no-overlay-still-renders
+  - name: a-preview-only-stored-body-requests-content-recovery
     highlight: 8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68
-    wantContains:
-      - "harness: claude code"
-      - you
-      # the head of the stored body survives; only its tail was lost
-      - the store cut this body at its preview limit
-    wantMissing:
-      - not imported yet
+    wantError: "harvest index --force"
 
   # The store does not hold this session. Its transcript is still on disk where
   # its harness wrote it, so the pane reads that file and shows the whole

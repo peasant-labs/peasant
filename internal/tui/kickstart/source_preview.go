@@ -217,9 +217,9 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 		git:       &ingest.ExecGitResolver{},
 		byID:      byID,
 		limit:     DefaultSourceTurnsCacheSize,
-		budget:    defaults.OpenCodePreviewMaterializeMaxBytes,
-		firstPage: defaults.OpenCodePreviewFirstPageMaxBytes,
-		slice:     defaults.OpenCodePreviewSliceMaxBytes,
+		budget:    defaults.TranscriptContinuationReadBytes,
+		firstPage: defaults.TranscriptInitialReadBytes,
+		slice:     defaults.TranscriptContinuationReadBytes,
 		cached:    make(map[string]sourcePreview),
 	}
 	for _, opt := range opts {

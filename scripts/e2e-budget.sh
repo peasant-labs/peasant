@@ -9,7 +9,8 @@ fail() {
 
 export PEASANT_INGEST_ARENA_BYTES=${PEASANT_INGEST_ARENA_BYTES:-67108864}
 export GOMEMLIMIT=${GOMEMLIMIT:-2GiB}
-export GOMAXPROCS=${GOMAXPROCS:-2}
+# Leave scheduler concurrency to Go's CPU-aware default or the caller's
+# GOMAXPROCS. Memory limits and build parallelism are independent controls.
 # GOFLAGS is inherited by the harness's Peasant and Village builds too.
 if [[ ${1:-} != --inside ]]; then
     export GOFLAGS="${GOFLAGS:-} -p=${E2E_BUILD_PARALLELISM:-2}"

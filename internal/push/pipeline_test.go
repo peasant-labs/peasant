@@ -28,6 +28,9 @@ import (
 //go:embed testdata/authoritative-receipt-mismatches.yaml
 var authoritativeReceiptMismatchYAML []byte
 
+var _ push.PipelineStore = (*testutil.StubPushStore)(nil)
+var _ push.PipelineStore = (*storepkg.Store)(nil)
+
 type authoritativeReceiptMismatchDocument struct {
 	ExpectedCaseCount int                                `yaml:"expectedCaseCount"`
 	Cases             []authoritativeReceiptMismatchCase `yaml:"cases"`

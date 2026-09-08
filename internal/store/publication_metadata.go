@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -168,6 +169,7 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 	defer func() {
 		if err != nil {
 			bundle.Readiness = ingest.PublicationNeedsIngest
+			bundle.Entries = nil
 		}
 	}()
 	end := sqlitex.Transaction(conn)
@@ -187,9 +189,15 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 	if !found {
 		return bundle, publicationRepairError("session is missing from database")
 	}
-	bundle.Entries, err = listEntriesOnConn(conn, id)
+	if bundle.Readiness != ingest.PublicationReady {
+		return bundle, nil
+	}
+	bundle.Entries, bundle.ContentCapture, err = loadFullSessionEntriesOnConn(ctx, conn, id, 0)
 	if err != nil {
 		return bundle, err
+	}
+	if bundle.ContentCapture.SessionID != id || bundle.ContentCapture.PublicationCaptureRevision != bundle.CaptureRevision {
+		return bundle, publicationRepairError("full content identity or publication revision disagrees with eligible metadata")
 	}
 	metrics, err := getMetricsOnConn(conn, id)
 	if err != nil {
@@ -216,12 +224,51 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 const publicationMetadataSelect = `SELECT s.project_hash,s.session_origin,s.publication_capture_revision,
  s.indexed_publication_capture_revision,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,
  COALESCE(s.parent_id,''),h.host_slug,COALESCE(h.git_remote,''),
- p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash,s.session_id
+ p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash,s.session_id,
+ c.status,c.full_capture_sha256,c.publication_capture_revision
  FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id
- LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id`
+ LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
+ LEFT JOIN session_content_captures c ON c.session_id=s.session_id`
 
 // Both the full bundle and list projection validate exactly the same evidence.
 func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+	bundle, err = scanPublicationMetadataProof(stmt, id)
+	eligible, captureErr := publicationContentEligible(stmt, 15, bundle.CaptureRevision)
+	if err != nil || captureErr != nil || !eligible {
+		bundle.Readiness = ingest.PublicationNeedsIngest
+	}
+	if err == nil {
+		err = captureErr
+	}
+	return bundle, err
+}
+
+// Capture-state columns only: eligibility deliberately does not verify payload.
+func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (bool, error) {
+	if stmt.ColumnType(offset) == sqlite.TypeNull {
+		return false, nil
+	}
+	status, err := ingest.NewContentCaptureStatus(stmt.ColumnText(offset))
+	if err != nil {
+		return false, publicationRepairError("invalid full content capture status")
+	}
+	hash := stmt.ColumnText(offset + 1)
+	if hash != "" || status == ingest.ContentCaptureComplete {
+		decoded, decodeErr := hex.DecodeString(hash)
+		if decodeErr != nil || len(decoded) != 32 {
+			return false, publicationRepairError("malformed full content SHA-256 proof")
+		}
+	}
+	contentRevision := stmt.ColumnInt64(offset + 2)
+	if contentRevision < 0 {
+		return false, publicationRepairError("negative full content publication revision")
+	}
+	return status == ingest.ContentCaptureComplete && revision > 0 && contentRevision == revision, nil
+}
+
+// Metadata/index proof is also used to bind content-only retained backfills.
+// It does not require a previous full capture: that is the state being repaired.
+func scanPublicationMetadataProof(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
 	bundle.Readiness = ingest.PublicationNeedsIngest
 	err = func() error {
 		var parseErr error
@@ -231,7 +278,7 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 		}
 		bundle.SessionOrigin, parseErr = sessionorigin.Parse(stmt.ColumnText(1))
 		if parseErr != nil {
-			return parseErr
+			return publicationRepairError("invalid stored session origin")
 		}
 		bundle.CaptureRevision = stmt.ColumnInt64(2)
 		if stmt.ColumnType(9) == sqlite.TypeNull || stmt.ColumnInt(10) != ingest.CurrentSchemaVersion {
@@ -239,7 +286,7 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 		}
 		kind, parseErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(5))
 		if parseErr != nil {
-			return parseErr
+			return publicationRepairError("invalid stored CWD provenance")
 		}
 		if kind == ingest.CWDNotRecovered {
 			return nil

@@ -14,14 +14,49 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
 // doorSecret is planted in an indexed entry's content, which is the field this
 // whole path exists to protect.
 const doorSecret = "sk-ant-api03-CLIDOORKEY000000000000x"
+
+func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
+	dir := t.TempDir()
+	const sessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
+	seedUploadableSession(t, dir, sessionID)
+	full := strings.Repeat("safe text ", 300) + "FULL-PREVIEW-TAIL " + doorSecret
+	seedEntryCarrying(t, dir, sessionID, full)
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := push.NewPublishedTurns(storedSessionEntries(t.Context(), db), redactor)
+	turns, err := preview(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 || !strings.Contains(turns[0].Content, "FULL-PREVIEW-TAIL") || strings.Contains(turns[0].Content, doorSecret) || !strings.Contains(turns[0].Content, "ANTHROPIC_KEY") {
+		t.Fatal("publication preview lost full tail or late redaction")
+	}
+	// Replacing the capture with a legacy preview must make the same mounted
+	// reader fail closed, rather than label its preview as publishable text.
+	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preview(sessionID); err == nil || !strings.Contains(err.Error(), "run peasant ingest") {
+		t.Fatalf("incomplete preview did not fail with remediation: %v", err)
+	}
+}
 
 // capturedPublish is every part of one real multipart publish, keyed by form
 // name, as the village received it off the socket.
