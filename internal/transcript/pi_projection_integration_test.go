@@ -231,6 +231,9 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if c.WantUTCTimestamps && (exported.StartTime.Location() != time.UTC || exported.EndTime.Location() != time.UTC || !exported.StartTime.Equal(local.StartTime) || !exported.EndTime.Equal(local.EndTime)) {
+				t.Fatalf("export changed timestamp instant or UTC form: local=%s..%s export=%s..%s", local.StartTime, local.EndTime, exported.StartTime, exported.EndTime)
+			}
 			if localDetail == nil || !reflect.DeepEqual(localDetail.Turns, decoded.SessionDetail.Turns) || !reflect.DeepEqual(exported.Turns, localDetail.Turns) || !reflect.DeepEqual(exported.NativeMetadata, localDetail.NativeMetadata) {
 				t.Fatal("local detail, export and upload diverged after reopening SQLite")
 			}
