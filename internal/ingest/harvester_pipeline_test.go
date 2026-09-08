@@ -8,9 +8,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -69,22 +69,19 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 				meta := makeReindexMeta(t, string(session.ID), "/missing/native.jsonl")
 				meta.ModelHarness = session.Harness
 				meta.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-				_, path := setupPeasantSyncSession(t, fs, testOutputDir, testutil.TestHostSlug, string(session.ID), meta)
-				if err := fs.WriteFile(path, []byte(session.Transcript), 0600); err != nil {
-					t.Fatal(err)
-				}
-				if err := db.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta, Session: ingest.DiscoveredSession{SessionID: session.ID, Harness: session.Harness}}}); err != nil {
-					t.Fatal(err)
-				}
-				previous := 15
+				storetest.SeedManagedInput(t, db, fs, testOutputDir, *meta, []byte(session.Transcript))
+				previous := ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion
 				if session.Harness == ingest.HarnessClaudeCode {
-					previous = fixture.ClaudeStored
-				}
-				content := "last-good " + string(session.Harness)
-				entries := []schema.SessionEntry{{SessionID: session.ID, Harness: session.Harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &content}}
-				write := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: session.ID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: previous, IndexedAtMs: 1700000001000}})
-				if len(write) != 1 || !write[0].Written {
-					t.Fatalf("seed index: %+v", write)
+					if fixture.ClaudeStored < previous {
+						t.Fatal("harvester fixture cannot certify an older producer from the current parser")
+					}
+					if fixture.ClaudeStored > previous {
+						// Simulate an intervening newer writer for the downgrade
+						// refusal; the legacy stamp API clears its unproven input.
+						if err := db.UpdateIndexState(ctx, session.ID, fixture.ClaudeStored, 1700000001000); err != nil {
+							t.Fatal(err)
+						}
+					}
 				}
 				before[session.ID], err = db.ListEntries(ctx, session.ID)
 				if err != nil {
@@ -136,7 +133,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := 15
+				want := ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion
 				if session.Harness == ingest.HarnessClaudeCode {
 					want = fixture.ClaudeStored
 				}
