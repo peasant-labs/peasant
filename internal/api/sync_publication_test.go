@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"io"
 	"mime"
@@ -23,11 +24,75 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
 // syncDoorSecret is planted in an indexed entry, the field the outward redaction
 // exists to protect.
 const syncDoorSecret = "sk-ant-api03-SYNCDOORKEY00000000000x"
+
+//go:embed testdata/sync_publication_validation.yaml
+var syncPublicationValidationYAML []byte
+
+func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
+	var cases []struct {
+		Name          string `yaml:"name"`
+		Action        string `yaml:"action"`
+		ExpectedError string `yaml:"expectedError"`
+	}
+	if err := yaml.Unmarshal(syncPublicationValidationYAML, &cases); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, tc := range cases {
+		seen[tc.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("Share publication validation", "case", strings.Fields("incomplete-capture missing-model database-unavailable"), seen); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, "config"))
+			t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
+			t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, "state"))
+			db := seedSyncDoorSession(t, testutil.TestSessionUUID, filepath.Join(home, "output"))
+			defer db.Close()
+			input, err := db.LoadPublicationInput(t.Context(), testutil.TestSessionUUID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch tc.Action {
+			case "invalidate":
+				if err := db.IndexSessionEntries(t.Context(), input.Metadata.SessionID, input.Entries); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-model":
+				input.Metadata.Model = ""
+				testutil.SeedReadyPublication(t, db, &input.Metadata, input.Entries)
+			case "close":
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				t.Fatalf("unknown fixture action %q", tc.Action)
+			}
+			handler := &syncHandler{store: db, config: config.BaseConfig()}
+			response := httptest.NewRecorder()
+			handler.handleSyncRedactions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncRedactions.String()+"?session_id="+testutil.TestSessionUUID, nil))
+			var failure map[string]string
+			if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
+				t.Fatalf("scan did not return an error response: %v; body=%s", err, response.Body)
+			}
+			if tc.ExpectedError == "" || response.Code != http.StatusNotFound || !strings.Contains(failure["error"], tc.ExpectedError) {
+				t.Fatalf("scan status=%d error=%q, want 404 containing %q", response.Code, failure["error"], tc.ExpectedError)
+			}
+			if strings.Contains(response.Body.String(), syncDoorSecret) {
+				t.Fatal("refused scan included transcript content")
+			}
+		})
+	}
+}
 
 // TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor pins the second
 // production push door — the one the /share wizard drives.

@@ -1,0 +1,9 @@
+- name: incomplete-capture
+  action: invalidate
+  expectedError: metadata and indexed entries are not a verified capture
+- name: missing-model
+  action: missing-model
+  expectedError: run peasant ingest with source model evidence and retry
+- name: database-unavailable
+  action: close
+  expectedError: load publication input from peasant.db before publication

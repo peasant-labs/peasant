@@ -2014,8 +2014,11 @@ func storedSessionEntries(ctx context.Context, db *store.Store) push.StoredEntri
 		if err != nil {
 			return nil, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		input, err := push.LoadReadyPublicationInput(ctx, db, string(id))
+		input, err := push.LoadPublicationInput(ctx, db, string(id))
 		if err != nil {
+			return nil, err
+		}
+		if err := push.ValidatePublicationInput(input); err != nil {
 			return nil, err
 		}
 		return input.Entries, nil
