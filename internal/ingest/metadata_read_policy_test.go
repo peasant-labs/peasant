@@ -53,6 +53,7 @@ type metadataReadPolicyFixtures struct {
 		RawMetadata           string              `yaml:"rawMetadata"`
 		Nested                bool                `yaml:"nested"`
 		Database              bool                `yaml:"database"`
+		Reconciled            bool                `yaml:"reconciled"`
 		SourceChanged         bool                `yaml:"sourceChanged"`
 		Reindex               bool                `yaml:"reindex"`
 		Force                 bool                `yaml:"force"`
@@ -336,6 +337,21 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 					if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &seed, Session: session}}); err != nil {
 						t.Fatal(err)
 					}
+					if fixture.Reconciled {
+						// A known unchanged producer is already mirrored. Preserve
+						// the separate fixtures that intentionally start unproven.
+						publisher, err := ingest.NewArtifactPublisher(filesystem, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: database})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, _, err := publisher.ReconcileStored(ctx, sid, metaPath, nil); err != nil {
+							t.Fatal(err)
+						}
+						beforeMetadata, err = filesystem.MemFS.ReadFile(metaPath)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					producer := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion
 					if fixture.Stale {
 						producer--
@@ -508,7 +524,9 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				}
 				afterLocations, err := database.BulkLookupSessionLocations(ctx, []ingest.SessionID{sid})
 				if err != nil || !reflect.DeepEqual(afterLocations, beforeLocations) {
-					t.Fatalf("session metadata stamps changed: %v", err)
+					beforeJSON, _ := json.Marshal(beforeLocations)
+					afterJSON, _ := json.Marshal(afterLocations)
+					t.Fatalf("session metadata stamps changed: %v\nbefore: %s\nafter: %s", err, beforeJSON, afterJSON)
 				}
 				afterMetrics, err := database.GetMetrics(ctx, sid)
 				if err != nil || !reflect.DeepEqual(afterMetrics, beforeMetrics) {

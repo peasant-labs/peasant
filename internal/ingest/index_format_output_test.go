@@ -184,20 +184,29 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			beforeMetadata, err := fs.ReadFile(metadataPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			beforeTranscript, err := fs.ReadFile(transcriptPath)
-			if err != nil {
-				t.Fatal(err)
-			}
 			db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
 			if err := db.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+				t.Fatal(err)
+			}
+			// These cases test index output, not first-time file reconciliation.
+			// Establish the actual mirror before asserting immutable input bytes.
+			publisher, err := ingest.NewArtifactPublisher(fs, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: db})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := publisher.ReconcileStored(ctx, sid, metadataPath, nil); err != nil {
+				t.Fatal(err)
+			}
+			beforeMetadata, err := fs.ReadFile(metadataPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeTranscript, err := fs.ReadFile(transcriptPath)
+			if err != nil {
 				t.Fatal(err)
 			}
 			old := "last-good stored result"
@@ -266,7 +275,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				}
 			}
 			if err != nil || !bytes.Equal(beforeMetadata, afterMetadata) {
-				t.Fatalf("indexing changed managed metadata: %v", err)
+				t.Fatalf("indexing changed managed metadata: %v\nbefore: %s\nafter: %s", err, beforeMetadata, afterMetadata)
 			}
 			afterTranscript, err := fs.ReadFile(transcriptPath)
 			if err != nil || !bytes.Equal(beforeTranscript, afterTranscript) {

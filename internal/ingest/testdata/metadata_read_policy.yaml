@@ -381,6 +381,7 @@ cases:
     schemaVersion: 10
     adapterVersion: 1
     database: true
+    reconciled: true
   - name: retained v9 index does not reread native input
     schemaVersion: 9
     database: true
