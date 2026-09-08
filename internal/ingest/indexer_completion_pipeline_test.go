@@ -123,14 +123,23 @@ func seedCompletionPeer(t *testing.T, filesystem *testutil.MemFS, database *stor
 		t.Fatal(err)
 	}
 	before[transcriptPath] = []byte(transcript)
+	if err := database.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: metadata}}); err != nil {
+		t.Fatal(err)
+	}
+	// Establish the real retained-artifact mirror before recording an immutable
+	// baseline. Its first reconciliation legitimately adds the DerivedAt cache.
+	publisher, err := ingest.NewArtifactPublisher(filesystem, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: database})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := publisher.ReconcileStored(t.Context(), sessionID, metadataPath, nil); err != nil {
+		t.Fatal(err)
+	}
 	data, err := filesystem.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	before[metadataPath] = data
-	if err := database.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: metadata}}); err != nil {
-		t.Fatal(err)
-	}
 	previous := "last-good indexed content"
 	entries := []schema.SessionEntry{{SessionID: sessionID, Harness: harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &previous}}
 	result := database.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[harness].IndexerVersion - 1, IndexedAtMs: 1700000000000}})
