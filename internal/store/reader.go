@@ -636,7 +636,7 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version, s.source_fingerprint, COALESCE(h.git_remote, '')
+	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version, s.source_fingerprint, COALESCE(h.git_remote, ''), s.project_hash
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 WHERE s.session_id IN (` +
@@ -657,6 +657,7 @@ WHERE s.session_id IN (` +
 			result[id] = ingest.SessionLocation{
 				HostSlug:                stmt.ColumnText(1),
 				GitRemote:               stmt.ColumnText(6),
+				ProjectHash:             stmt.ColumnText(7),
 				ParentID:                stmt.ColumnText(2),
 				IngestedMs:              &ingestedMs,
 				SchemaVersion:           schemaVersion,

@@ -1,3 +1,9 @@
+requiredNames:
+  - recorded branch tracks non-origin
+  - checkout falls back to origin
+  - provider remote remains authoritative
+  - recorded untracked branch ignores checkout upstream
+  - recorded untracked branch falls back to path
 cases:
   - name: recorded branch tracks non-origin
     recordedBranch: recorded
@@ -9,3 +15,12 @@ cases:
     recordedBranch: recorded
     explicitRemote: ssh://git@example.test/provider/repository.git
     wantRemote: ssh://git@example.test/provider/repository.git
+  - name: recorded untracked branch ignores checkout upstream
+    recordedBranch: untracked
+    trackedCheckout: true
+    wantRemote: git@github.com:testuser/testrepo.git
+  - name: recorded untracked branch falls back to path
+    recordedBranch: untracked
+    trackedCheckout: true
+    removeOrigin: true
+    wantRemote: ""

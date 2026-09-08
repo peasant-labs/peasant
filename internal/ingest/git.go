@@ -31,7 +31,10 @@ type GitResolver interface {
 // values, so production resolution uses the branch's current configuration.
 type RecordedBranchRemoteResolver interface {
 	RemoteURLForBranch(ctx context.Context, dir, branch string) (remoteURL, trackingBranch string, err error)
+	OriginRemoteURL(ctx context.Context, dir string) (string, error)
 }
+
+var _ RecordedBranchRemoteResolver = (*ExecGitResolver)(nil)
 
 // RepositoryIdentityResolver resolves a physical worktree path to its logical
 // repository cohort and physical Git directory. Callers retain the original
@@ -373,10 +376,11 @@ func (g *ExecGitResolver) RemoteURL(ctx context.Context, dir string) (string, er
 			return remote, nil
 		}
 	}
-	return g.originRemoteURL(ctx, dir)
+	return g.OriginRemoteURL(ctx, dir)
 }
 
-func (g *ExecGitResolver) originRemoteURL(ctx context.Context, dir string) (string, error) {
+// OriginRemoteURL resolves only origin, without consulting checkout tracking.
+func (g *ExecGitResolver) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
 	return runGit(ctx, "git", "-C", dir, "remote", "get-url", "origin")
 }
 
@@ -405,7 +409,7 @@ func (g *ExecGitResolver) RemoteURLForBranch(ctx context.Context, dir, branch st
 // ResolveGitRemote applies the attribution policy shared by adapters and
 // repository-scoped operations. Explicit provider evidence wins; otherwise a
 // recorded branch uses its current upstream configuration, followed by the
-// checkout branch upstream and then origin. Callers retain path identity when
+// origin only. Checkout upstream is used only without a recorded branch. Callers retain path identity when
 // this returns an empty remote.
 func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string) (remoteURL, trackingBranch string) {
 	if explicitRemote != "" {
@@ -419,7 +423,12 @@ func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch,
 			if remote, tracking, err := resolver.RemoteURLForBranch(ctx, dir, recordedBranch); err == nil && remote != "" {
 				return remote, tracking
 			}
+			remote, _ := resolver.OriginRemoteURL(ctx, dir)
+			return remote, ""
 		}
+		// Legacy resolvers expose only origin through RemoteURL.
+		remote, _ := git.RemoteURL(ctx, dir)
+		return remote, ""
 	}
 	remote, _ := git.RemoteURL(ctx, dir)
 	tracking, _ := git.TrackingBranch(ctx, dir)

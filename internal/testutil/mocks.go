@@ -505,6 +505,19 @@ type StubGitResolver struct {
 }
 
 var _ ingest.GitResolver = (*StubGitResolver)(nil)
+var _ ingest.RecordedBranchRemoteResolver = (*StubGitResolver)(nil)
+
+func (s *StubGitResolver) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
+	return s.RemoteURL(ctx, dir)
+}
+
+func (s *StubGitResolver) RemoteURLForBranch(ctx context.Context, dir, branch string) (string, string, error) {
+	if branch != s.BranchName || s.TrackingBranchName == "" || s.TrackingBranchErr != nil {
+		return "", "", nil
+	}
+	remote, err := s.RemoteURL(ctx, dir)
+	return remote, s.TrackingBranchName, err
+}
 
 // DefaultGitResolver returns a StubGitResolver with sensible test defaults.
 func DefaultGitResolver() *StubGitResolver {

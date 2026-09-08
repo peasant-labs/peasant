@@ -549,7 +549,7 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		meta.Git.Tracking = &tracking
 	}
 
-	projectHash, hostSlug, derErr := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remoteURL, cwd)
+	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
 	if derErr != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "derive_identity_error",
