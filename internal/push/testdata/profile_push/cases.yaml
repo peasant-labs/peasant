@@ -7,7 +7,7 @@ cases:
     expectedPublished: 1
     expectedSaved: 1
     expectedRequests: 2
-    expectedDBReads: 6
+    expectedDBReads: 4
     expectedHighWater: 1
     stages: [push.discovery, push.selection, push.session, push.session.load, push.session.redact, push.payload.build, push.negotiate, push.publish, push.receipt.persist]
   - <<: *success
@@ -17,7 +17,7 @@ cases:
     publishStatus: 422
     expectedFailed: 1
     expectedRequests: 3
-    expectedDBReads: 10
+    expectedDBReads: 6
   - <<: *success
     name: push_retryable_publish_failure
     publishStatus: 503
@@ -57,7 +57,7 @@ cases:
     annotations: true
     expectedRequests: 4
     expectedAnnotationRequests: 2
-    expectedDBReads: 9
+    expectedDBReads: 7
     stages: [push.publish, push.annotations.publish]
   - <<: *success
     name: push_annotation_partial_failure
@@ -65,7 +65,7 @@ cases:
     annotationErrors: 1
     expectedRequests: 4
     expectedAnnotationRequests: 2
-    expectedDBReads: 9
+    expectedDBReads: 7
     failedStage: push.annotations.publish
     stages: [push.annotations.publish]
   - <<: *success
@@ -98,7 +98,7 @@ cases:
     expectedPublished: 3
     expectedSaved: 3
     expectedRequests: 4
-    expectedDBReads: 14
+    expectedDBReads: 8
     expectedHighWater: 3
   - <<: *success
     name: push_disabled_invariance
@@ -109,7 +109,7 @@ cases:
     expectedPublished: 0
     expectedSaved: 0
     expectedRequests: 0
-    expectedDBReads: 5
+    expectedDBReads: 3
     expectedHighWater: 0
     stages: [push.discovery, push.selection, push.session.load, push.session.redact, push.payload.build]
   - <<: *success
@@ -130,13 +130,13 @@ cases:
     expectedFailed: 1
     expectedSaved: 0
     expectedRequests: 1
-    expectedDBReads: 5
+    expectedDBReads: 4
     failedStage: push.session.load
     stages: [push.session, push.session.load]
   - <<: *success
     name: push_provider_query_accounting
     sources: [claude-code, codex]
-    expectedDBReads: 7
+    expectedDBReads: 5
   - <<: *success
     name: push_selection_excludes_everything
     excludeAll: true
@@ -166,8 +166,8 @@ cases:
     expectedFailed: 1
     expectedSaved: 0
     expectedRequests: 1
-    failedStage: push.payload.build
-    stages: [push.session, push.payload.build]
+    failedStage: push.session.load
+    stages: [push.session, push.session.load]
   - <<: *success
     name: push_negotiation_fallback_is_skipped
     negotiateStatus: 503

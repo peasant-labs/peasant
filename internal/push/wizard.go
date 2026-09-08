@@ -31,6 +31,8 @@ type PushWizardSession struct {
 	// selection tree never toggles them and SelectedSessionIDs never returns
 	// them.
 	Locked bool
+	// NeedsIngest prevents selection when the database capture cannot publish.
+	NeedsIngest bool
 }
 
 // WizardCandidates partitions sessions into the wizard's display order: kept
@@ -206,7 +208,7 @@ func NewPushWizard(th theme.Theme, sessions []PushWizardSession, turns Published
 		sessions: sessions,
 		tree:     tree,
 		leaves:   leaves,
-		confirm:  kit.NewConfirm(th, startPrompt(len(sessions))),
+		confirm:  kit.NewConfirm(th, startPrompt(publishableSessionCount(sessions))),
 		overlay:  kit.NewOverlay(th),
 	}
 	m.split = kit.NewPreviewSplitWithBodies(th, kit.NewTreeLeftPane(m.tree),
@@ -225,6 +227,16 @@ func startPrompt(count int) string {
 	return fmt.Sprintf("push %d sessions to the village?", count)
 }
 
+func publishableSessionCount(sessions []PushWizardSession) int {
+	count := 0
+	for _, s := range sessions {
+		if !s.Locked && !s.NeedsIngest {
+			count++
+		}
+	}
+	return count
+}
+
 // Confirmed returns true if the user confirmed the push.
 func (m PushWizardModel) Confirmed() bool { return m.confirmed }
 
@@ -236,7 +248,7 @@ func (m PushWizardModel) Quitting() bool { return m.quitting }
 func (m PushWizardModel) SelectedSessionIDs() []string {
 	var ids []string
 	for _, s := range m.sessions {
-		if s.Locked {
+		if s.Locked || s.NeedsIngest {
 			continue
 		}
 		if s.Action == PushWithRedaction {
@@ -250,7 +262,7 @@ func (m PushWizardModel) SelectedSessionIDs() []string {
 func (m PushWizardModel) selectedSessions() []PushWizardSession {
 	var out []PushWizardSession
 	for _, s := range m.sessions {
-		if s.Locked {
+		if s.Locked || s.NeedsIngest {
 			continue
 		}
 		if s.Action == PushWithRedaction {
@@ -312,7 +324,7 @@ func newSelectionTree(th theme.Theme, sessions []PushWizardSession) (*kit.Tree, 
 // selection needs.
 func leafState(s PushWizardSession) kit.TriState {
 	switch {
-	case s.Locked:
+	case s.Locked || s.NeedsIngest:
 		return kit.Conflict
 	case s.Action == PushWithRedaction:
 		return kit.Checked
@@ -324,6 +336,9 @@ func leafState(s PushWizardSession) kit.TriState {
 // sessionRowLabel is one selection row: the session, the harness that recorded
 // it, and when it started.
 func sessionRowLabel(s PushWizardSession) string {
+	if s.NeedsIngest {
+		return fmt.Sprintf("needs ingest  %s", shortSessionID(s.Row.SessionID))
+	}
 	return fmt.Sprintf("%s  %s  %s",
 		shortSessionID(s.Row.SessionID), s.Row.ModelHarness, sessionStartText(s.Row))
 }
@@ -347,7 +362,7 @@ func sessionStartText(row ingest.PushSessionRow) string {
 // leaf, so nothing can move them into the push set.
 func (m *PushWizardModel) syncSelection() {
 	for i := range m.sessions {
-		if m.sessions[i].Locked {
+		if m.sessions[i].Locked || m.sessions[i].NeedsIngest {
 			continue
 		}
 		leaf, ok := m.leaves[m.sessions[i].Row.SessionID]
@@ -563,7 +578,7 @@ func (m PushWizardModel) updateSelection(action keymap.ActionID, msg tea.KeyPres
 		return m, nil
 	case keymap.ActionBack:
 		m.page = pageInitialConfirm
-		m.confirm = kit.NewConfirm(m.th, startPrompt(len(m.sessions)))
+		m.confirm = kit.NewConfirm(m.th, startPrompt(publishableSessionCount(m.sessions)))
 		m.confirm.Focus()
 		m.setSize(m.width, m.height)
 		return m, nil
@@ -702,7 +717,7 @@ func (m PushWizardModel) startBody(width, height int) string {
 	styles := m.th.Styles()
 	panel := kit.NewPanel(m.th)
 	panel.SetSize(width, height)
-	panel.Wrapped(styles.Base, fmt.Sprintf("%d session(s) are ready to push.", len(m.sessions)))
+	panel.Wrapped(styles.Base, fmt.Sprintf("%d session(s) are ready to push.", publishableSessionCount(m.sessions)))
 	panel.Blank()
 	panel.Wrapped(styles.Muted, "the village keeps what you publish. you choose the sessions on the next page.")
 	panel.Blank()
@@ -725,7 +740,11 @@ func (m PushWizardModel) selectionBody(width, height int) string {
 // selection withheld.
 func (m PushWizardModel) selectionSummary() string {
 	withheld := 0
+	needsIngest := 0
 	for _, s := range m.sessions {
+		if s.NeedsIngest {
+			needsIngest++
+		}
 		if s.Locked {
 			withheld++
 		}
@@ -733,6 +752,9 @@ func (m PushWizardModel) selectionSummary() string {
 	summary := fmt.Sprintf("selected %d of %d sessions", len(m.selectedSessions()), len(m.sessions))
 	if withheld > 0 {
 		summary += fmt.Sprintf("  -  %d withheld by a branch conflict", withheld)
+	}
+	if needsIngest > 0 {
+		summary += fmt.Sprintf("  -  %d need ingest", needsIngest)
 	}
 	return summary
 }

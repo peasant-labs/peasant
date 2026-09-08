@@ -1135,7 +1135,9 @@ type StubPushStore struct {
 	// Metrics holds pre-mapped QualityMetrics keyed by SessionID.
 	Metrics map[ingest.SessionID]*schema.QualityMetrics
 	// Entries holds session entries keyed by SessionID, returned by ListEntries.
-	Entries map[ingest.SessionID][]schema.SessionEntry
+	Entries             map[ingest.SessionID][]schema.SessionEntry
+	PublicationInputs   map[ingest.SessionID]ingest.PublicationInputBundle
+	PublicationInputErr error
 	// Associations holds durable current commit associations keyed by session ID.
 	Associations        map[ingest.SessionID][]ingest.CurrentCommitAssociation
 	Publications        map[string]store.PublicationRecord

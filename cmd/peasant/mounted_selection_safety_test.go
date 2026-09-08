@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"io"
 	"os"
 	"path/filepath"
@@ -363,9 +364,8 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 		}
 		entries = append(entries, entry)
 	}
-	if err := db.InsertSessions(t.Context(), entries); err != nil {
-		db.Close()
-		t.Fatalf("insert mounted selection sessions: %v", err)
+	for _, entry := range entries {
+		testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close mounted selection store after seeding: %v", err)
@@ -523,8 +523,6 @@ func mountedChooserIDs(t *testing.T, fixture mountedSelectionSafetyCase, world m
 	wizardSessions, err := buildPushWizardSessions(
 		t.Context(),
 		db,
-		&ingest.OSFileSystem{},
-		cfg.Output.BasePath,
 		push.PushCandidateQuery{Force: fixture.Force, Method: cfg.Push.Method, Sources: cfg.Push.Sources},
 		selection,
 	)

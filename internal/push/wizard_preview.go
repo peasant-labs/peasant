@@ -117,6 +117,10 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 			continue
 		}
 		body := previewBody{th: p.th, header: sessionHeaderLines(s)}
+		if s.NeedsIngest {
+			body.note = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
+			return body, nil
+		}
 		if p.turns == nil {
 			body.note = previewNoTranscript
 			return body, nil
@@ -143,7 +147,7 @@ func (p wizardPreview) projectLines(project string) []string {
 			continue
 		}
 		total++
-		if !s.Locked && s.Action == PushWithRedaction {
+		if !s.Locked && !s.NeedsIngest && s.Action == PushWithRedaction {
 			selected++
 		}
 	}
@@ -174,6 +178,8 @@ func sessionHeaderLines(s PushWizardSession) []string {
 // session.
 func sessionStateNote(s PushWizardSession) string {
 	switch {
+	case s.NeedsIngest:
+		return previewUnselectedNote
 	case s.Locked:
 		return previewWithheldNote
 	case s.Action == PushWithRedaction:
