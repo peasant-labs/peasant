@@ -35,10 +35,9 @@ skip-gate and pull contracts.
    path is the fixture's `sessions/` dir ITSELF (`CodexFixtureSourcePath()`),
    since the codex adapter does a strict depth-4 `{root}/YYYY/MM/DD/rollout-*.jsonl`
    walk.
-5. **`peasant ingest --include-active`** (the `--include-active` is load-bearing
-   for determinism: a fresh checkout stamps the committed fixtures with a current
-   mtime, so without it ingest debounces them under the 60s staleness hold and
-   yields fewer than expected) → the committed fixtures become exactly the total
+5. **`peasant ingest`** includes active sessions by default. The harness may still
+   pass `--include-active` as a deprecated compatibility flag; fresh fixture
+   mtimes do not exclude sessions. The committed fixtures become exactly the total
    pinned by `ExpectedTranscriptCount` in `internal/e2e/fixture.go`
    (`ExpectedClaudeTranscripts` + `ExpectedCodexTranscripts` +
    `ExpectedCursorTranscripts`). **`peasant annotate create`** adds a system-origin

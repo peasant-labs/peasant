@@ -1,9 +1,9 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,8 +62,10 @@ type DiffResult struct {
 
 // DiffEntry associates a DiscoveredSession with its computed DiffStatus.
 type DiffEntry struct {
-	Session DiscoveredSession
-	Status  DiffStatus
+	Session      DiscoveredSession
+	Status       DiffStatus
+	captured     *MaterializedTranscript
+	captureError error
 }
 
 // PipelineResult summarizes a pipeline run.
@@ -543,30 +545,13 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 
 	// Stage 3: FILTER + Stage 4a: EXTRACT + WRITE
 	filterProfileStart := time.Now()
-	//
-	// Pre-pass: identify active sessions that are required as parents by
-	// sessions that will be processed (New, Updated). These active parents
-	// must be ingested so the DB FK constraint on parent_id is satisfied.
-	requiredParents := make(map[SessionID]bool)
-	toProcess := 0
-	for _, entry := range diffResult.Sessions {
-		if entry.Status == DiffNew || entry.Status == DiffUpdated {
-			toProcess++
-			if entry.Session.ParentUUID != nil {
-				requiredParents[*entry.Session.ParentUUID] = true
-			}
-		} else if entry.Status == DiffActive {
-			toProcess++ // may be included as required parent
-		}
-	}
-
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: len(diffResult.Sessions)})
 
 	// (indexedMeta defined at package level for use by helper methods)
 
 	// Separate sessions into two buckets:
-	//   skipped  — Unchanged or Active-but-not-required: recorded as-is, no processing.
-	//   toProcess — New, Updated, and Active-required: run through processSession.
+	//   skipped — unselected or unchanged captured sources: no processing.
+	//   toProcess — new or changed sources, including active sessions.
 	var sessionResults []SessionResult
 	var indexSessions []indexedMeta // sessions to index after write
 	var toProcessEntries []DiffEntry
@@ -667,6 +652,23 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			}
 		}
 
+		// Selection scopes source acquisition too. The earlier diff is only a
+		// discovery hint: accepted source evidence decides the authoritative no-op.
+		if entry.Session.TranscriptOrigin != TranscriptOriginFile || (entry.Session.SourceFormat == SourceFormatJSONL && entry.Session.Harness != HarnessStrike) {
+			entry.captured, entry.captureError = p.captureSession(ctx, entry.Session)
+			if entry.captured != nil && entry.captured.Session != nil {
+				entry.Session = *entry.captured.Session
+			}
+			if entry.captureError != nil {
+				entry.Status = DiffUpdated
+			} else {
+				status, err := p.classifyCapturedSession(ctx, entry.Session, entry.captured)
+				if err != nil {
+					return nil, err
+				}
+				entry.Status = status
+			}
+		}
 		switch entry.Status {
 		case DiffUnchanged:
 			recordDryRun(entry, DiffUnchanged)
@@ -688,6 +690,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
+	toProcess := len(toProcessEntries)
 
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
 	// denial, and parent-inheritance decisions as a real run. It stops only after
@@ -1742,13 +1745,11 @@ func pipelineCancellation(ctx context.Context, err error) error {
 	return nil
 }
 
-// ClassifyAgainstStore returns the DiffStatus of a discovered session that the
-// store already holds a record for: it compares the source file against the
-// recorded ingest timestamp and metadata schema version, honouring the same
-// staleness threshold. It is the DB-first branch of classifySession, exported so
-// a caller that already knows what the store recorded (the kickstart re-scan)
-// asks the pipeline's own diff rule instead of writing a second one that can
-// drift from it.
+// ClassifyAgainstStore provides a preliminary discovery hint from source time
+// and metadata schema version. The ingest pipeline supersedes this hint with
+// captured evidence before deciding a supported source is unchanged. Callers
+// such as Kickstart may use the hint to avoid redundant discovery work, but it
+// is not proof that the source bytes were consumed.
 //
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
@@ -1767,29 +1768,19 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, _ time
 	return DiffUnchanged
 }
 
-// classifySession determines the DiffStatus for a single session.
-//
-// The implementation uses a single staleness threshold check
-// (time.Since(ModTime) < threshold). A future debounce for actively written
-// sessions would need to poll ModTime twice with a bounded delay.
-//
-// Order of precedence (per spec):
-//  1. --force flag: always DiffNew (but DiffActive takes priority over force if
-//     IncludeActive is false, per "respect staleness unless --include-active")
-//  2. No existing metadata: DiffNew
-//  3. Source newer than last ingest: DiffUpdated
-//  4. Schema version behind CurrentSchemaVersion: DiffUpdated
-//  5. Source within staleness threshold (still being written): DiffActive
-//  6. Otherwise: DiffUnchanged
+// classifySession provides the discovery-time hint. Selected supported sources
+// are classified again with captured bytes before the authoritative no-op.
 func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSession) (DiffStatus, error) {
+	return p.classifyCapturedSession(ctx, session, nil)
+}
+
+func (p *Pipeline) classifyCapturedSession(ctx context.Context, session DiscoveredSession, captured *MaterializedTranscript) (DiffStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return DiffNew, err
 	}
 	isActive := p.config.StalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold
 
-	// Force: re-ingest, but only if we're also including active sessions (or
-	// the session is not active). With --force and without --include-active,
-	// active sessions are still skipped.
+	// Force always processes a session; activity is diagnostic, not exclusion.
 	if p.config.Force {
 		if isActive {
 			return DiffActive, nil
@@ -1802,6 +1793,12 @@ func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSessio
 	// This is the primary code path for sessions already in the DB.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
 		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		if captured != nil && loc.SourceEvidenceSupported {
+			status = DiffUnchanged
+			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || loc.SchemaVersion < CurrentSchemaVersion {
+				status = DiffUpdated
+			}
+		}
 		if loc.SourceEvidenceSupported && loc.SourceFingerprint == nil && status == DiffUnchanged {
 			if isActive {
 				return DiffActive, nil
@@ -2010,15 +2007,57 @@ func (p *Pipeline) findMetadataPath(ctx context.Context, session DiscoveredSessi
 	return "", nil // not found
 }
 
-// processSession extracts metadata and atomically writes output for one session.
-// Returns a workerResult carrying the SessionResult, metadata, redacted transcript
-// bytes (for JSONL/JSON providers — nil for directory-based providers), the output
-// transcript path, and the session start timestamp.
-//
-// The transcript bytes returned are the copy written to disk, which is the
-// transcript as recorded - no level a user can choose redacts content here.
-// Callers may store them in a StagingBuffer arena to avoid re-reading from disk
-// during the INDEX stage.
+// captureSession detaches source bytes and metadata before any managed writes.
+// Legacy mutable multi-file formats retain their existing reader limitations.
+func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession) (*MaterializedTranscript, error) {
+	factory, ok := p.adapters[session.Harness]
+	if !ok {
+		return nil, fmt.Errorf("no adapter for provider %s", session.Harness)
+	}
+	if err := session.TranscriptOrigin.Validate(); err != nil {
+		return nil, err
+	}
+	adapterFS := p.fs
+	var data []byte
+	var err error
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		if reader, ok := p.fs.(sourcePrefixReader); ok && session.SourceFormat == SourceFormatJSONL {
+			data, err = reader.ReadSourcePrefix(session.SourcePath.String())
+		} else {
+			data, err = p.fs.ReadFile(session.SourcePath.String())
+		}
+		if err == nil && session.SourceFormat == SourceFormatJSONL && session.Harness != HarnessStrike {
+			data, err = completeJSONLPrefix(data)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("capture transcript source for %s: %w; prior stored state remains unchanged; restore source readability and retry", session.SessionID, err)
+		}
+		if session.Harness != HarnessOpenCode {
+			adapterFS = capturedSourceFileSystem{FileSystem: p.fs, path: session.SourcePath.String(), data: data}
+		}
+	}
+	adapter := factory(adapterFS, p.git, p.salt)
+	if session.TranscriptOrigin != TranscriptOriginFile {
+		materializer, ok := adapter.(TranscriptMaterializer)
+		if !ok {
+			return nil, fmt.Errorf("materialize session %s: adapter lacks managed source support; no state written; use the production OpenCode adapter", session.SessionID)
+		}
+		captured, err := materializer.MaterializeTranscript(ctx, session)
+		if err != nil {
+			return nil, err
+		}
+		return &captured, nil
+	}
+	meta, err := adapter.ExtractMetadata(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	captured := newMaterializedTranscript(meta, data, session.EventSeq)
+	return &captured, nil
+}
+
+// processSession atomically writes the accepted capture and carries its bytes
+// and evidence into the existing store and streamed indexing path.
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
 	session := entry.Session
 	result := SessionResult{
@@ -2031,47 +2070,24 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		result.Error = err
 		return workerResult{result: result}
 	}
-
-	// Find the adapter for this provider.
-	factory, ok := p.adapters[session.Harness]
-	if !ok {
-		return fail(fmt.Errorf("no adapter for provider %s", session.Harness))
+	if entry.captureError != nil {
+		return fail(entry.captureError)
 	}
-	if err := session.TranscriptOrigin.Validate(); err != nil {
-		return fail(fmt.Errorf("prepare transcript for session %s failed before source access: %w; the session was not written or stored; update the discovering adapter to return a supported typed origin", session.SessionID, err))
-	}
-	var rawData []byte
-	var meta *UnifiedMetadata
-	var err error
-	adapterFS := p.fs
-	if session.TranscriptOrigin == TranscriptOriginFile {
-		rawData, err = p.fs.ReadFile(string(session.SourcePath))
+	captured := entry.captured
+	if captured == nil {
+		var err error
+		captured, err = p.captureSession(ctx, session)
 		if err != nil {
-			return fail(fmt.Errorf("capture transcript source for %s: %w; prior stored state remains unchanged; restore source readability and retry", session.SessionID, err))
-		}
-		if session.SourceFormat == SourceFormatJSONL {
-			rawData = completeJSONLPrefix(rawData)
-		}
-		if session.Harness != HarnessOpenCode {
-			adapterFS = capturedSourceFileSystem{FileSystem: p.fs, path: session.SourcePath.String(), data: rawData}
+			return fail(err)
 		}
 	}
-	adapter := factory(adapterFS, p.git, p.salt)
-	if session.TranscriptOrigin != TranscriptOriginFile {
-		materializer, ok := adapter.(TranscriptMaterializer)
-		if !ok {
-			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: typed transcript origin %d requires a managed materializer but adapter %T has none; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, session.TranscriptOrigin, adapter))
-		}
-		var captured MaterializedTranscript
-		captured, err = materializer.MaterializeTranscript(ctx, session)
-		meta, rawData = captured.Metadata, captured.Data
-		session.EventSeq = captured.EventSeq
-	} else {
-		meta, err = adapter.ExtractMetadata(ctx, session)
+	if captured.Session != nil {
+		session = *captured.Session
+		result.ParentUUID = session.ParentUUID
 	}
-	if err != nil {
-		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
-	}
+	rawData, meta := captured.Data, captured.Metadata
+	session.EventSeq = captured.EventSeq
+	var err error
 
 	// Set ingested timestamp.
 	ingested := time.Now().UnixMilli()
@@ -2126,7 +2142,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	tmpTranscriptPath := fmt.Sprintf("%s/%s", tmpDir, transcriptFilename)
 	var transcriptData []byte
 
-	sourceFingerprint := sha256.Sum256(rawData)
+	sourceFingerprint := captured.SourceFingerprint
 	if session.Harness == HarnessStrike && session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
 		rawData, diagnostics = filterStrikeOversizedRecords(rawData, session.SourcePath.String())
@@ -2348,7 +2364,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	return workerResult{
 		result:               result,
 		meta:                 meta,
-		sourceFingerprint:    sourceFingerprint[:],
+		sourceFingerprint:    sourceFingerprint,
 		eventSeq:             session.EventSeq,
 		transcriptData:       transcriptData,
 		outputTranscriptPath: outputTranscriptPath,

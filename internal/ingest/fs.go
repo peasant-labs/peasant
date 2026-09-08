@@ -31,6 +31,12 @@ type capturedSourceFileSystem struct {
 	data []byte
 }
 
+type sourcePrefixReader interface {
+	ReadSourcePrefix(string) ([]byte, error)
+}
+
+var _ sourcePrefixReader = (*OSFileSystem)(nil)
+
 func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
 	if path == f.path {
 		return append([]byte(nil), f.data...), nil
@@ -38,18 +44,36 @@ func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
 	return f.FileSystem.ReadFile(path)
 }
 
-func completeJSONLPrefix(data []byte) []byte {
-	if len(data) == 0 || data[len(data)-1] == '\n' {
-		return data
-	}
+func completeJSONLPrefix(data []byte) ([]byte, error) {
 	lastComplete := bytes.LastIndexByte(data, '\n')
-	if json.Valid(bytes.TrimSpace(data[lastComplete+1:])) {
-		return data
+	for i, record := range bytes.Split(data[:lastComplete+1], []byte{'\n'}) {
+		if len(bytes.TrimSpace(record)) > 0 && !json.Valid(record) {
+			return nil, fmt.Errorf("capture JSONL record %d: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest", i+1)
+		}
 	}
-	if lastComplete >= 0 {
-		return data[:lastComplete+1]
+	if len(bytes.TrimSpace(data[lastComplete+1:])) == 0 || json.Valid(data[lastComplete+1:]) {
+		return data, nil
 	}
-	return nil
+	return data[:lastComplete+1], nil
+}
+
+// ReadSourcePrefix fixes the acquisition boundary at the opened descriptor size.
+// Appends after Stat belong to a later ingest, even when the writer stays busy.
+func (f *OSFileSystem) ReadSourcePrefix(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, info.Size()))
+	if err == nil && int64(len(data)) != info.Size() {
+		err = io.ErrUnexpectedEOF
+	}
+	return data, err
 }
 
 // OSFileSystem is the production implementation wrapping os.* calls.
