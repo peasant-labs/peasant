@@ -82,6 +82,7 @@ func contentOverlayFromEntries(sourceEntries []schema.SessionEntry) map[int]stri
 	}
 	return overlay
 }
+
 // AnyContentTruncated conservatively detects bounded text or tool output.
 // At the limit, an exact-size value and a cut value are indistinguishable;
 // full readers cannot claim complete Cursor content in either case.
