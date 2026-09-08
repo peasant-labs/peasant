@@ -222,21 +222,22 @@ type IndexFormatSupport interface {
 type AnnotationRunState struct {
 	SessionID          SessionID
 	SessionEntriesHash string
+	MetricsOutputHash  string
 	ComputeVersion     int
 	ClassifierVersion  int
 	AnnotatedAt        time.Time
 }
 
 // AnnotationRunInputs carries the bounded session state needed to decide
-// whether a classifier annotation pass is current. The full metrics row is not
-// included because the skip path only needs the compute version; callers load
-// full metrics only when they must run classifiers.
+// whether a classifier annotation pass is current. MetricsOutputHash reflects
+// actual metric values, not merely the stored producer version or proof column.
 type AnnotationRunInputs struct {
 	SessionID             SessionID
 	SessionEntriesHash    string
 	HasSessionEntriesHash bool
 	ComputeVersion        int
 	HasComputeVersion     bool
+	MetricsOutputHash     string
 	State                 *AnnotationRunState
 }
 
@@ -629,7 +630,15 @@ type SessionAnnotationBatch struct {
 	SessionID SessionID
 	Writes    []SessionAnnotationWrite
 	RunState  *AnnotationRunState
+	Input     *MetricInput
+	Owners    []ClassifierAnnotationOwner
 	Skipped   bool
+}
+
+// ClassifierAnnotationOwner declares output responsibility even for empty results.
+type ClassifierAnnotationOwner struct {
+	AnnotatorID      string
+	AnnotationTypeID string
 }
 
 // SessionAnnotationBatchResult reports the best-effort outcome for one prepared
