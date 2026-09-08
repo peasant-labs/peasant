@@ -194,6 +194,20 @@ type SessionIndexState struct {
 	IndexedAt                  *int64
 	IndexedInputHash           *string
 	SessionEntriesHash         *string
+	// PublicationBound reports that the stored index write is bound to the
+	// current publication metadata capture. It is read in the same snapshot as
+	// the fields above, by the revision predicate the publication readiness
+	// query already uses: the captured metadata revision is positive, equals
+	// sessions.publication_capture_revision, equals
+	// sessions.indexed_publication_capture_revision, and the recorded working
+	// directory provenance is not 'not_recovered'. It does not assert that the
+	// captured metadata matches the current wire schema version; readiness adds
+	// that check separately.
+	PublicationBound bool
+	// ContentStatus is the stored session_content_captures.status for this
+	// session. A session with no capture row reads as ContentCaptureIncomplete:
+	// absent content is never evidence of a complete capture.
+	ContentStatus ContentCaptureStatus
 }
 
 // StaleIndexWorkError means the captured SQL state changed before the index

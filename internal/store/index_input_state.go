@@ -55,6 +55,7 @@ func sameIndexState(a, b *ingest.SessionIndexState) bool {
 	}
 	return a.SessionID == b.SessionID && a.Harness == b.Harness && a.IndexerVersion == b.IndexerVersion &&
 		a.PublicationCaptureRevision == b.PublicationCaptureRevision &&
+		a.PublicationBound == b.PublicationBound && a.ContentStatus == b.ContentStatus &&
 		sameIndexValue(a.ArtifactHash, b.ArtifactHash) && sameIndexValue(a.IndexVersion, b.IndexVersion) &&
 		sameIndexValue(a.IndexedAt, b.IndexedAt) && sameIndexValue(a.IndexedInputHash, b.IndexedInputHash) &&
 		sameIndexValue(a.SessionEntriesHash, b.SessionEntriesHash)

@@ -10,7 +10,22 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/schema"
 )
+
+// ContentCaptureResult is one retained-content capture, as the adapter that
+// parsed it reports it. The adapter declares its own completeness: Complete is
+// false whenever the adapter knows that rows were filtered or omitted, so a
+// partial recovery can never be stored as a verified complete capture.
+type ContentCaptureResult struct {
+	Entries   []schema.SessionEntry
+	Authority ContentSourceAuthority
+	// Complete reports that the entries are the whole session, as parsed.
+	Complete bool
+	// InputHash is the index input digest over the retained bytes actually
+	// parsed, so a later run can tell whether the same input was consumed.
+	InputHash string
+}
 
 // backfillIncompleteContent traverses by key, not by offset or a repeated first
 // page: a broken first snapshot cannot starve later recoverable sessions.
@@ -25,20 +40,21 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 		if err := ctx.Err(); err != nil {
 			return recovered, err
 		}
-		ids, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return recovered, cancelErr
 		}
 		if err != nil {
 			return recovered, err
 		}
-		if len(ids) == 0 {
+		if len(targets) == 0 {
 			return recovered, nil
 		}
-		for _, id := range ids {
+		for _, target := range targets {
 			if err := ctx.Err(); err != nil {
 				return recovered, err
 			}
+			id := target.SessionID
 			after = id
 			if err := p.backfillContentSession(ctx, store, id); err != nil {
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {

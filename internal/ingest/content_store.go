@@ -71,6 +71,12 @@ type SessionEntryWriteMode string
 const (
 	SessionEntryWriteReplaceAll      SessionEntryWriteMode = "replace_all"
 	SessionEntryWriteContentBackfill SessionEntryWriteMode = "content_backfill"
+	// SessionEntryWriteFormatConversion rewrites the stored representation of
+	// entries that a prior parser run already produced. It is not a parser run:
+	// it preserves the producing indexer, its timestamp and the retained input
+	// proof. The store does not perform the conversion yet; the mode exists so
+	// callers and the store agree on one closed set of write intents.
+	SessionEntryWriteFormatConversion SessionEntryWriteMode = "format_conversion"
 )
 
 func NewSessionEntryWriteMode(s string) (SessionEntryWriteMode, error) {
@@ -79,8 +85,10 @@ func NewSessionEntryWriteMode(s string) (SessionEntryWriteMode, error) {
 		return SessionEntryWriteReplaceAll, nil
 	case "content_backfill":
 		return SessionEntryWriteContentBackfill, nil
+	case "format_conversion":
+		return SessionEntryWriteFormatConversion, nil
 	}
-	return "", fmt.Errorf("content write: unknown mode %q; use replace_all or content_backfill", s)
+	return "", fmt.Errorf("content write: unknown mode %q; use replace_all, content_backfill or format_conversion", s)
 }
 
 type SessionContentCaptureWrite struct {
@@ -112,6 +120,12 @@ type SessionEntryReadMode string
 const (
 	SessionEntryReadPreview     SessionEntryReadMode = "preview"
 	SessionEntryReadFullContent SessionEntryReadMode = "full_content"
+	// SessionEntryReadAvailable reads the content that is actually stored: the
+	// full content when the capture is complete, the bounded preview projection
+	// otherwise. It is never gated on capture completeness, publication
+	// readiness, recovery or a native source. It never certifies content for
+	// export or publication; use SessionEntryReadFullContent for that.
+	SessionEntryReadAvailable SessionEntryReadMode = "available"
 )
 
 func NewSessionEntryReadMode(s string) (SessionEntryReadMode, error) {
@@ -120,8 +134,10 @@ func NewSessionEntryReadMode(s string) (SessionEntryReadMode, error) {
 		return SessionEntryReadPreview, nil
 	case "full_content":
 		return SessionEntryReadFullContent, nil
+	case "available":
+		return SessionEntryReadAvailable, nil
 	}
-	return "", fmt.Errorf("content read: unknown mode %q; use preview or full_content", s)
+	return "", fmt.Errorf("content read: unknown mode %q; use preview, full_content or available", s)
 }
 
 type SessionEntryReadOptions struct {
@@ -151,9 +167,19 @@ type SessionEntryFullReader interface {
 	ReadSessionEntries(context.Context, SessionID, SessionEntryReadOptions) (SessionEntryReadPage, error)
 	GetSessionContentCapture(context.Context, SessionID) (SessionContentCapture, bool, error)
 }
+
+// ContentCaptureIncompleteSession names one recovery target. The harness and
+// the session start time travel with the identifier so a caller can scope,
+// order and report recovery work without a second lookup per session.
+type ContentCaptureIncompleteSession struct {
+	SessionID SessionID
+	Harness   Harness
+	StartMs   int64
+}
+
 type ContentBackfillTargetStore interface {
 	ListContentCaptureIncompleteSessions(context.Context, int) ([]SessionID, error)
-	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int) ([]SessionID, error)
+	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int) ([]ContentCaptureIncompleteSession, error)
 	LookupSessionLocation(context.Context, SessionID) (string, string, error)
 	LookupSourceInfo(context.Context, SessionID) (string, SourceFormat, string, error)
 	IndexSessionEntryBatch(context.Context, []SessionEntryWrite) []SessionEntryWriteResult

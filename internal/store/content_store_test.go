@@ -263,9 +263,12 @@ func TestFullContentLegacyBackfillAndKeyset(t *testing.T) {
 	if err != nil || len(targets) != 1 || targets[0] != id {
 		t.Fatalf("first targets: %v %v", targets, err)
 	}
-	targets, err = s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
-	if err != nil || len(targets) != 1 || targets[0] != next {
-		t.Fatalf("later targets: %v %v", targets, err)
+	later, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
+	if err != nil || len(later) != 1 || later[0].SessionID != next {
+		t.Fatalf("later targets: %v %v", later, err)
+	}
+	if later[0].Harness != ingest.HarnessClaudeCode || later[0].StartMs != 1700000000000 {
+		t.Fatalf("later target lost its harness or start time: %+v", later[0])
 	}
 	hash := sessionEntriesHash(t, s, id)
 	writeFull(t, s, id, entries, ingest.SessionEntryWriteContentBackfill)
