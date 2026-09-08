@@ -86,6 +86,13 @@ func OpenReadOnly(path string) (*Store, error) {
 }
 
 func readCheckpointedDatabase(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("database path must name a regular file, not a symbolic link; use the database's actual path so its sidecars can be checked")
+	}
 	if err := requireCheckpointedDatabase(path); err != nil {
 		return nil, err
 	}
@@ -116,7 +123,7 @@ func readCheckpointedDatabase(path string) ([]byte, error) {
 	if _, err := io.Copy(digest, file); err != nil {
 		return nil, err
 	}
-	after, err := os.Stat(path)
+	after, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
