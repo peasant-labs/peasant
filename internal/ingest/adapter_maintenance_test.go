@@ -162,8 +162,24 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := baseline.Run(t.Context()); err != nil {
+				baselineResult, err := baseline.Run(t.Context())
+				if err != nil {
 					t.Fatal(err)
+				}
+				// The retained transcript cannot backfill an absent projection.
+				// Report that failure, then let ordinary indexing establish it.
+				recoveryReported := false
+				for _, diagnostic := range baselineResult.Diagnostics {
+					if diagnostic.ErrorType == "content_recovery_unavailable" {
+						recoveryReported = true
+					}
+				}
+				if !recoveryReported {
+					t.Fatal("retained content recovery failure was not reported")
+				}
+				state, err := database.ReadIndexState(t.Context(), sid)
+				if err != nil || state == nil || state.IndexedInputHash == nil || state.IndexerVersion != ingest.HarvesterVersionRegistry[metadata.ModelHarness].IndexerVersion {
+					t.Fatalf("failed content recovery excluded supported fallback indexing: %+v %v", state, err)
 				}
 			}
 			adapter := &adapterMaintenanceAdapter{SourceAdapter: ingest.NewClaudeAdapter(filesystem, testutil.DefaultGitResolver(), salt.Salt{}), discoveryFailure: row.DiscoveryFailure}

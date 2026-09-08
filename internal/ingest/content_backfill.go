@@ -15,31 +15,44 @@ import (
 // backfillIncompleteContent traverses by key, not by offset or a repeated first
 // page: a broken first snapshot cannot starve later recoverable sessions.
 func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID]bool, error) {
-	visited := make(map[SessionID]bool)
+	recovered := make(map[SessionID]bool)
 	store, ok := p.metricsStore.(ContentBackfillTargetStore)
 	if !ok || p.config.DryRun {
-		return visited, nil
+		return recovered, nil
 	}
 	var after SessionID
-	var failures []error
 	for {
+		if err := ctx.Err(); err != nil {
+			return recovered, err
+		}
 		ids, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+			return recovered, cancelErr
+		}
 		if err != nil {
-			return visited, err
+			return recovered, err
 		}
 		if len(ids) == 0 {
-			return visited, errors.Join(failures...)
+			return recovered, nil
 		}
 		for _, id := range ids {
 			if err := ctx.Err(); err != nil {
-				return visited, err
+				return recovered, err
 			}
 			after = id
-			visited[id] = true
 			if err := p.backfillContentSession(ctx, store, id); err != nil {
-				failures = append(failures, err)
+				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+					return recovered, cancelErr
+				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
+				p.reportDiagnostic(DiagnosticEntry{
+					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s retained-content recovery", id),
+					Message:     err.Error() + "; the prior content and producer evidence were preserved; ordinary supported indexing remains eligible",
+					Remediation: "Restore the retained transcript or native source and retry harvest; inspect the recovery error before forcing replacement.",
+				})
+				continue
 			}
+			recovered[id] = true
 		}
 	}
 }
