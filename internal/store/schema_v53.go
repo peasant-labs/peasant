@@ -1,9 +1,9 @@
 package store
 
-// migrationV51 widens the two local harness CHECK mirrors to admit Pi. The
+// migrationV53 widens the two local harness CHECK mirrors to admit Pi. The
 // ordinary rebuild preserves the complete current session schema and indices;
 // disabling foreign keys during this transaction prevents cascading child loss.
-const migrationV51 = `
+const migrationV53 = `
 CREATE TABLE sessions_v50 AS SELECT * FROM sessions;
 DROP TABLE sessions;
 
@@ -32,7 +32,11 @@ CREATE TABLE sessions (
     session_origin TEXT NOT NULL DEFAULT 'unknown' CHECK (session_origin IN ('user','agent','unknown')),
     origin_version INTEGER NOT NULL DEFAULT 0,
     session_entries_hash TEXT CHECK (session_entries_hash IS NULL OR (length(session_entries_hash) = 64 AND session_entries_hash NOT GLOB '*[^0-9a-f]*')),
-    source_fingerprint BLOB
+    source_fingerprint BLOB,
+    session_cwd TEXT,
+    cwd_provenance_kind TEXT NOT NULL DEFAULT 'not_recovered' CHECK(cwd_provenance_kind IN ('source_exact','source_workspace','source_worktree','source_absent','not_recovered')),
+    publication_capture_revision INTEGER NOT NULL DEFAULT 0 CHECK(publication_capture_revision >= 0),
+    indexed_publication_capture_revision INTEGER NOT NULL DEFAULT 0 CHECK(indexed_publication_capture_revision >= 0)
 ) STRICT;
 
 INSERT INTO sessions SELECT * FROM sessions_v50;
@@ -43,6 +47,14 @@ CREATE INDEX idx_sessions_harness ON sessions(model_harness);
 CREATE INDEX idx_sessions_project ON sessions(project_hash);
 CREATE INDEX idx_sessions_host ON sessions(opaque_host_id);
 CREATE INDEX idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT NULL;
+
+CREATE TRIGGER sessions_publication_metadata_changed
+AFTER UPDATE OF parent_id,model_harness,model_id,opaque_host_id,project_hash,
+ start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,
+ git_branch,git_worktree,git_tracking,tool_version,session_origin ON sessions
+BEGIN
+ UPDATE sessions SET indexed_publication_capture_revision=0, cwd_provenance_kind='not_recovered' WHERE session_id=NEW.session_id;
+END;
 
 CREATE TABLE daily_summary_harness_v50 AS SELECT * FROM daily_summary_harness;
 DROP TABLE daily_summary_harness;

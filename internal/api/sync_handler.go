@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -20,9 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
-	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -71,9 +68,25 @@ type syncSessionResponse struct {
 }
 
 func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request) {
+	var reader syncSessionReader
+	if h.store != nil {
+		reader = h.store
+	}
+	serveSyncSessions(w, r, reader)
+}
+
+type syncSessionReader interface {
+	ingest.PublicationMetadataReader
+	AllPushableSessions(context.Context) ([]ingest.PushSessionRow, error)
+	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
+}
+
+var _ syncSessionReader = (*store.Store)(nil)
+
+func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionReader) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.store == nil {
+	if db == nil {
 		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
 		return
 	}
@@ -81,7 +94,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	// Get all pushable sessions (with pushed_at info).
-	sessions, err := h.store.AllPushableSessions(ctx)
+	sessions, err := db.AllPushableSessions(ctx)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"query sessions: %s"}`, err), http.StatusInternalServerError)
 		return
@@ -89,26 +102,22 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 
 	// Get held-back sessions (missing metrics).
 	heldMap := make(map[string]bool)
-	held, heldErr := h.store.SessionsWithoutMetrics(ctx)
+	held, heldErr := db.SessionsWithoutMetrics(ctx)
 	if heldErr == nil {
 		for _, session := range held {
 			heldMap[session.SessionID] = true
 		}
 	}
 
-	// Resolve output base path for metadata file checks.
-	outputBase := ""
-	if h.config != nil {
-		resolved, err := ingest.NewResolvedPath(h.config.Output.BasePath)
-		if err == nil {
-			outputBase = string(resolved)
-		}
-	}
-
 	// Map to response with sync status.
+	metadata, metadataErr := push.LoadPublicationMetadata(ctx, db, sessions)
 	result := make([]syncSessionResponse, 0, len(sessions))
 	for _, s := range sessions {
-		status := computeSyncStatus(s, heldMap, outputBase)
+		input := metadata[s.SessionID]
+		if metadataErr != nil || !push.PublicationMetadataReady(input) {
+			heldMap[s.SessionID] = true
+		}
+		status := computeSyncStatus(s, heldMap, input.Readiness)
 		result = append(result, syncSessionResponse{
 			ID:          s.SessionID,
 			Harness:     s.ModelHarness,
@@ -129,17 +138,13 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 }
 
 // computeSyncStatus determines the sync status for a session row.
-// Sessions without metadata files on disk are marked "held" since push would fail.
-func computeSyncStatus(s ingest.PushSessionRow, heldMap map[string]bool, outputBase string) string {
+// Sessions without a coherent database capture are held until normal ingest.
+func computeSyncStatus(s ingest.PushSessionRow, heldMap map[string]bool, readiness ingest.PublicationReadiness) string {
 	if heldMap[s.SessionID] {
 		return "held"
 	}
-	// Check that the metadata file actually exists on disk.
-	if outputBase != "" {
-		metaPath := filepath.Join(outputBase, s.HostSlug, s.SessionID, s.SessionID+"--metadata.json")
-		if _, err := os.Stat(metaPath); err != nil {
-			return "held"
-		}
+	if readiness != ingest.PublicationReady {
+		return "held"
 	}
 	if s.PushedAt == nil {
 		return "new"
@@ -261,8 +266,6 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
 		return
 	}
-
-	// Read transcript content.
 
 	// Create redactor at the requested level.
 	xdg := redact.XDGPaths{
@@ -448,76 +451,45 @@ func truncateLine(s string) string {
 	return s
 }
 
-// readTranscriptContent reads the transcript file for a session.
+// readTranscriptContent assembles scan input from the same capture as publication.
 func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr string) (string, error) {
 	return h.readReviewContent(ctx, sessionIDStr, nil)
 }
 
 func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
-	sid, sidErr := ingest.NewSessionID(sessionIDStr)
-	if sidErr != nil {
-		return "", fmt.Errorf("invalid session ID")
-	}
-	info, err := h.store.SessionSourceInfo(ctx, sessionIDStr)
+	input, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
 		return "", err
 	}
-	if info != nil && info.Harness == string(schema.HarnessPi) {
-		entries, err := h.store.ListEntries(ctx, sid)
-		if err != nil {
-			return "", err
-		}
-		entries, err = transcript.RecoverFullEntries(ctx, &ingest.OSFileSystem{}, schema.HarnessPi, ingest.ResolvedPath(info.SourcePath), sid, entries)
-		if err != nil {
-			return "", err
-		}
-		meta := &ingest.UnifiedMetadata{SessionID: sid, ModelHarness: schema.HarnessPi}
-		// Validate the exact redaction path before returning matches. A key
-		// collision is a failed scan, not a successful empty review.
-		redacted, err := push.RedactEntries(redactor, entries)
-		if err != nil {
-			return "", err
-		}
-		if _, err := push.BuildTranscriptContentValidated(meta, redacted, defaults.PublishSchemaVersion, config.PushFieldVisibility{}, sessionorigin.Unknown); err != nil {
-			return "", err
-		}
-		content, err := push.BuildTranscriptContentValidated(meta, entries, defaults.PublishSchemaVersion, config.PushFieldVisibility{}, sessionorigin.Unknown)
-		if err != nil {
-			return "", err
-		}
-		raw, err := json.Marshal(content)
-		if err != nil {
-			return "", err
-		}
-		if _, err := schema.DecodeTranscriptContentRaw(raw); err != nil {
-			return "", err
-		}
-		return string(raw), nil
+	if err := push.ValidatePublicationInput(input); err != nil {
+		return "", err
 	}
-
-	hostSlug, parentID, err := h.store.LookupSessionLocation(ctx, sid)
-	if err != nil || hostSlug == "" {
-		return "", fmt.Errorf("session not found")
+	var fields config.PushFieldVisibility
+	if h.config != nil {
+		fields = h.config.Push.Fields
 	}
-
-	dataDir := string(defaults.Data.DataDirPath)
-	var sessionDir string
-	if parentID != "" {
-		sessionDir = filepath.Join(dataDir, "peasant-sync", hostSlug, parentID, "subagents", sessionIDStr)
-	} else {
-		sessionDir = filepath.Join(dataDir, "peasant-sync", hostSlug, sessionIDStr)
+	// Validate the same recursive redaction used by publication before reporting
+	// a successful scan. A metadata key collision must remain a failed scan.
+	redacted, err := push.RedactEntries(redactor, input.Entries)
+	if err != nil {
+		return "", err
 	}
-
-	// Try JSONL first, then JSON.
-	for _, ext := range []string{string(ingest.SourceFormatJSONL), string(ingest.SourceFormatJSON)} {
-		candidate := filepath.Join(sessionDir, sessionIDStr+defaults.TranscriptPrefix+ext)
-		data, err := os.ReadFile(candidate)
-		if err == nil {
-			return string(data), nil
-		}
+	if _, err := push.BuildTranscriptContentValidated(&input.Metadata, redacted, defaults.PublishSchemaVersion, fields, input.SessionOrigin); err != nil {
+		return "", err
 	}
-
-	return "", fmt.Errorf("transcript file not found")
+	metadata, err := push.MapMetadata(push.MapOptions{Meta: &input.Metadata, Metrics: input.Quality, Entries: input.Entries, Associations: input.Associations, Fields: fields.Resolve()})
+	if err != nil {
+		return "", err
+	}
+	content, err := push.BuildTranscriptContentValidated(&input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(content)
+	if err != nil {
+		return "", err
+	}
+	return string(metadata) + "\n" + string(data), nil
 }
 
 // buildReplacementLookup builds a map from rule ID to replacement string.

@@ -20,7 +20,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	metricspkg "github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
@@ -60,11 +62,13 @@ const (
 	canonicalMutationTrailingDocument      canonicalSelectionMutationKind = "trailing_document"
 	canonicalMutationOrphanJSONSession     canonicalSelectionMutationKind = "orphan_json_session"
 	canonicalMutationDroppedPartWithoutRow canonicalSelectionMutationKind = "dropped_part_without_row"
+	canonicalMutationMissingCapture        canonicalSelectionMutationKind = "missing_capture"
+	canonicalMutationCertifyOmission       canonicalSelectionMutationKind = "certify_omission"
 )
 
 func (kind canonicalSelectionMutationKind) validate() error {
 	switch kind {
-	case canonicalMutationUnknownField, canonicalMutationWrongCount, canonicalMutationDuplicateName, canonicalMutationUnknownRepresentation, canonicalMutationTrailingDocument, canonicalMutationOrphanJSONSession, canonicalMutationDroppedPartWithoutRow:
+	case canonicalMutationUnknownField, canonicalMutationWrongCount, canonicalMutationDuplicateName, canonicalMutationUnknownRepresentation, canonicalMutationTrailingDocument, canonicalMutationOrphanJSONSession, canonicalMutationDroppedPartWithoutRow, canonicalMutationMissingCapture, canonicalMutationCertifyOmission:
 		return nil
 	default:
 		return fmt.Errorf("canonical OpenCode selection fixture has unknown loader mutation %q", kind)
@@ -72,16 +76,23 @@ func (kind canonicalSelectionMutationKind) validate() error {
 }
 
 type canonicalSelectionFixture struct {
-	RequiredCases           []string                           `yaml:"required_cases"`
-	SourceFixture           string                             `yaml:"source_fixture"`
-	JSONMTimeMS             int64                              `yaml:"json_mtime_ms"`
-	JSONSessions            []canonicalSelectionJSONSession    `yaml:"json_sessions"`
-	ParentLinks             []canonicalSelectionParentLink     `yaml:"parent_links"`
-	StrayOrphanParts        []canonicalSelectionStrayPart      `yaml:"stray_orphan_parts"`
-	Freshness               canonicalSelectionFreshness        `yaml:"freshness"`
-	Cases                   []canonicalSelectionCase           `yaml:"cases"`
-	LoaderMutations         []canonicalSelectionLoaderMutation `yaml:"loader_mutations"`
-	RequiredLoaderMutations []string                           `yaml:"required_loader_mutations"`
+	MountedCaptures         map[string]canonicalCaptureExpectation `yaml:"mounted_captures"`
+	RequiredCases           []string                               `yaml:"required_cases"`
+	SourceFixture           string                                 `yaml:"source_fixture"`
+	JSONMTimeMS             int64                                  `yaml:"json_mtime_ms"`
+	JSONSessions            []canonicalSelectionJSONSession        `yaml:"json_sessions"`
+	ParentLinks             []canonicalSelectionParentLink         `yaml:"parent_links"`
+	StrayOrphanParts        []canonicalSelectionStrayPart          `yaml:"stray_orphan_parts"`
+	Freshness               canonicalSelectionFreshness            `yaml:"freshness"`
+	Cases                   []canonicalSelectionCase               `yaml:"cases"`
+	LoaderMutations         []canonicalSelectionLoaderMutation     `yaml:"loader_mutations"`
+	RequiredLoaderMutations []string                               `yaml:"required_loader_mutations"`
+}
+
+type canonicalCaptureExpectation struct {
+	SessionID              string `yaml:"session_id"`
+	Eligible               *bool  `yaml:"eligible"`
+	SourceArtifactOmission bool   `yaml:"source_artifact_omission"`
 }
 
 type canonicalSelectionJSONSession struct {
@@ -181,6 +192,10 @@ func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, erro
 		strayIDs[part.ID] = true
 	}
 	for _, testCase := range fixture.Cases {
+		capture, ok := fixture.MountedCaptures[testCase.Name]
+		if !ok || capture.SessionID != testCase.SessionID || capture.Eligible == nil || *capture.Eligible == capture.SourceArtifactOmission {
+			return fixture, fmt.Errorf("canonical selection case %q lacks a consistent named capture expectation", testCase.Name)
+		}
 		if testCase.Name == "" || testCase.SessionID == "" || testCase.Marker == "" || testCase.ExpectedFreshnessMS <= 0 || seen[testCase.Name] || len(testCase.Representations) == 0 {
 			return fixture, fmt.Errorf("canonical OpenCode selection fixture contains an incomplete or duplicate case %+v", testCase)
 		}
@@ -211,6 +226,9 @@ func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, erro
 		if !seen[name] {
 			return fixture, fmt.Errorf("canonical OpenCode selection fixture is missing required case %q", name)
 		}
+	}
+	if len(fixture.MountedCaptures) != len(fixture.Cases) {
+		return fixture, errors.New("canonical capture expectations must match the named selection cases exactly")
 	}
 	for _, session := range fixture.JSONSessions {
 		testCase, known := cases[session.SessionID]
@@ -386,9 +404,13 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &testutil.StubSessionStore{}
-	metrics := testutil.NewStubMetricsStore()
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}, ingest.WithStore(store), ingest.WithMetricsStore(metrics), ingest.WithAnalyzer(metricspkg.NewEngine(metrics)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: indexer}))
+	databasePathStored := filepath.Join(t.TempDir(), "canonical.db")
+	database, err := store.Open(databasePathStored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithAnalyzer(metricspkg.NewEngine(database)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: indexer}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,8 +418,80 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Summary.New != len(fixture.Cases) || len(store.InsertedEntries) != len(fixture.Cases) || len(metrics.IndexedEntries) != len(fixture.Cases) {
-		t.Fatalf("mounted canonical ingest summary=%+v store=%d indexed=%d, want %d unique sessions", result.Summary, len(store.InsertedEntries), len(metrics.IndexedEntries), len(fixture.Cases))
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err = store.Open(databasePathStored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.AllSessions(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedIDs := make(map[string]bool)
+	for _, session := range stored {
+		if storedIDs[session.SessionID] {
+			t.Fatalf("duplicate stored identity %q", session.SessionID)
+		}
+		storedIDs[session.SessionID] = true
+	}
+	incomplete, err := database.ListContentCaptureIncompleteSessions(t.Context(), len(fixture.Cases)+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIncomplete := make(map[ingest.SessionID]bool)
+	eligible := 0
+	for name, expectation := range fixture.MountedCaptures {
+		if !storedIDs[expectation.SessionID] {
+			t.Fatalf("named canonical session %q was not persisted", name)
+		}
+		id, err := ingest.NewSessionID(expectation.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		capture, found, err := database.GetSessionContentCapture(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Publication uses this same full DB loader; omission must fail before
+		// any transcript can be converted or uploaded as complete.
+		entries, _, fullErr := transcript.LoadEntriesForDetail(t.Context(), database, id, transcript.DetailLoadOptions{})
+		if *expectation.Eligible {
+			eligible++
+			if !found || capture.Status != ingest.ContentCaptureComplete || fullErr != nil || len(entries) == 0 {
+				t.Fatalf("eligible session %q lacks durable full capture: found=%t status=%s error=%v", name, found, capture.Status, fullErr)
+			}
+			continue
+		}
+		wantIncomplete[id] = true
+		if fullErr == nil || !strings.Contains(fullErr.Error(), "session capture is incomplete") || len(entries) != 0 || found && capture.Status == ingest.ContentCaptureComplete {
+			t.Fatalf("omitted source %q was certified publishable: capture=%+v error=%v", name, capture, fullErr)
+		}
+		host, parent, err := database.LookupSessionLocation(t.Context(), id)
+		if err != nil || parent != "" {
+			t.Fatalf("locate omitted root artifact: parent=%q error=%v", parent, err)
+		}
+		artifact, err := os.ReadFile(filepath.Join(output.String(), host, id.String(), id.String()+"--transcript.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var provenance struct {
+			ContentOmitted bool `json:"content_omitted"`
+		}
+		if err := json.Unmarshal(artifact, &provenance); err != nil || provenance.ContentOmitted != expectation.SourceArtifactOmission {
+			t.Fatalf("omitted source %q lost persisted artifact provenance: omitted=%t error=%v", name, provenance.ContentOmitted, err)
+		}
+	}
+	gotIncomplete := make(map[ingest.SessionID]bool)
+	for _, id := range incomplete {
+		gotIncomplete[id] = true
+	}
+	if !reflect.DeepEqual(gotIncomplete, wantIncomplete) {
+		t.Fatalf("persisted incomplete identities=%v want=%v", gotIncomplete, wantIncomplete)
+	}
+	if result.Summary.New != len(fixture.Cases) || len(storedIDs) != len(fixture.Cases) || result.Summary.Indexed != eligible || result.Summary.Computed != eligible || result.Summary.Errors != 0 || result.Summary.StoreError != nil {
+		t.Fatalf("mounted canonical ingest summary=%+v stored=%d; want %d named sessions and %d eligible captures", result.Summary, len(storedIDs), len(fixture.Cases), eligible)
 	}
 }
 
@@ -695,6 +789,10 @@ func TestCanonicalOpenCodeSelectionFixtureRejectsMutations(t *testing.T) {
 			mutated = bytes.Replace(mutated, []byte("{session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, marker: JSON_ONLY}"), []byte("{session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, marker: JSON_ONLY}"), 1)
 		case canonicalMutationDroppedPartWithoutRow:
 			mutated = bytes.Replace(mutated, []byte("dropped_orphan_parts: [part_legacy_truncated, part_legacy_step_start]"), []byte("dropped_orphan_parts: [part_legacy_truncated, part_legacy_unknown]"), 1)
+		case canonicalMutationMissingCapture:
+			mutated = bytes.Replace(mutated, []byte("all-three-prefers-current: {session_id:"), []byte("unrecognized-capture: {session_id:"), 1)
+		case canonicalMutationCertifyOmission:
+			mutated = bytes.Replace(mutated, []byte("eligible: false, source_artifact_omission: true"), []byte("eligible: true, source_artifact_omission: true"), 1)
 		}
 		if _, err := loadCanonicalSelectionFixture(mutated); err == nil {
 			t.Errorf("loader mutation %q was accepted", mutation.Name)

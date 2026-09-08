@@ -1,0 +1,12 @@
+required_names: [byte-budget-splits, oversized-session-progress, cancellation-stops-flush]
+cases:
+  - name: byte-budget-splits
+    session_bytes: [20000000, 20000000, 10]
+    expected_batches: [1, 2]
+  - name: oversized-session-progress
+    session_bytes: [34000000, 10]
+    expected_batches: [1, 1]
+  - name: cancellation-stops-flush
+    session_bytes: [20000000, 20000000, 10]
+    expected_batches: [1]
+    cancel_after_batch: true

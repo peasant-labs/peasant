@@ -17,7 +17,7 @@ cases:
       - id: msg_03_system
         data: '{"id":"msg_03_system","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1100,"completed":1110},"content":"synthetic compacted context"}'
         parts:
-          - {id: part_01_compaction, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context","time":{"created":1100}}'}
+          - {id: part_01_compaction, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context\nsynthetic recent context","time":{"created":1100}}'}
       - id: msg_04_skill
         data: '{"id":"msg_04_skill","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1120,"completed":1125}}'
         parts:
@@ -37,6 +37,7 @@ cases:
     expected_parent_indexes: [-1, -1, 1, 1, -1, 4, -1, 6, -1, 8, -1, 10]
     expected_timestamps: [1000, 1020, 1030, 1021, 1100, 1100, 1120, 1121, 1130, 1130, 1140, 1140]
     expected_tool_call_id: call_semantic
+    expected_compaction_recent: synthetic recent context
     expected_model: synthetic-model
     expected_tokens_in: 7
     expected_tokens_out: 11

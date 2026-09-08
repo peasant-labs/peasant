@@ -241,6 +241,7 @@ func TestPipelineRedactionProfile(t *testing.T) {
 			} else if !fixture.Disabled {
 				ctx = perf.ContextWithRecorder(ctx, collector)
 			}
+			testutil.SeedPublicationInputs(store, fs, cfg.Output.BasePath)
 			pipeline, err := push.NewPipeline(store, pub, baseCreds(), cfg, fs, runCfg, redactor, &stderr)
 			if err != nil {
 				t.Fatal(err)

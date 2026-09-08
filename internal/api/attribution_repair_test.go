@@ -208,6 +208,8 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	writeSyncDoorCredentials(t, village.URL)
 	publish := func() pushResponse {
 		t.Helper()
+		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, id+".jsonl"), id, repo)
+		defer restoreSource()
 		response := httptest.NewRecorder()
 		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"],"visibility":"private"}`)))
 		var result pushResponse

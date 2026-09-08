@@ -6,12 +6,19 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/project-identity.yaml
 var projectIdentityYAML []byte
+
+func TestProjectIdentityFixture(t *testing.T) {
+	if _, err := loadProjectIdentityFixtures(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // projectIdentityDocument is the fixture for
 // TestPushProjectIdentityDefaultsRenderOnVillage: named session identifiers
@@ -27,6 +34,7 @@ type projectIdentityCase struct {
 	RemoteSubagentSessionID     string `yaml:"remoteSubagentSessionID"`
 	NoRemoteRootSessionID       string `yaml:"noRemoteRootSessionID"`
 	NoRemoteSubagentSessionID   string `yaml:"noRemoteSubagentSessionID"`
+	NoRemoteRecordedCWD         string `yaml:"noRemoteRecordedCWD"`
 	Remote                      string `yaml:"remote"`
 	ExpectedRemoteLabel         string `yaml:"expectedRemoteLabel"`
 	ExpectedNoRemoteDisplayName string `yaml:"expectedNoRemoteDisplayName"`
@@ -51,7 +59,7 @@ func loadProjectIdentityFixtures() (projectIdentityDocument, error) {
 	for index, c := range document.Cases {
 		fields := []string{
 			c.Name, c.RemoteRootSessionID, c.RemoteSubagentSessionID,
-			c.NoRemoteRootSessionID, c.NoRemoteSubagentSessionID,
+			c.NoRemoteRootSessionID, c.NoRemoteSubagentSessionID, c.NoRemoteRecordedCWD,
 			c.Remote, c.ExpectedRemoteLabel,
 			c.ExpectedNoRemoteDisplayName, c.ExpectedNoRemoteNameSource,
 		}
@@ -64,6 +72,9 @@ func loadProjectIdentityFixtures() (projectIdentityDocument, error) {
 			return document, fmt.Errorf("project identity corpus repeats case name %q", c.Name)
 		}
 		seen[c.Name] = true
+	}
+	if !seen["default-fields-render-label-or-canonical-path"] {
+		return document, fmt.Errorf("project identity corpus is missing required case default-fields-render-label-or-canonical-path; restore the label-versus-path regression fixture")
 	}
 	return document, nil
 }

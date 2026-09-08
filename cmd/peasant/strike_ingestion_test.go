@@ -288,13 +288,13 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 	}
 	defer db.Close()
 	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
-	rootSession, err := provider.SessionByID(context.Background(), strikeFixtureRootID)
-	if err != nil {
-		t.Fatalf("load filtered root session detail: %v", err)
+	_, err = provider.SessionByID(context.Background(), strikeFixtureRootID)
+	if err == nil || !strings.Contains(err.Error(), "harvest index --force") {
+		t.Fatalf("partial source must not serve as a complete session detail; want recovery error, got %v", err)
 	}
-	assistant := findStrikeTurn(t, api.SessionToDetail(rootSession), schema.RoleAssistant)
-	if strings.Contains(assistant.Content, oversizedSentinel) || !strings.Contains(assistant.Content, "inspect it now") {
-		t.Errorf("filtered session detail content = %q", assistant.Content)
+	_, err = executeHarvestCmd(t, testRoot, []string{"index", "--force", "--output", outputDir, "--json"})
+	if err == nil || !strings.Contains(err.Error(), "omitted oversized source records") {
+		t.Fatalf("retained filtered artifact must not backfill as complete: %v", err)
 	}
 }
 

@@ -1,0 +1,12 @@
+requiredNames:
+  - oversized-first-entry-multipage
+  - small-soft-pages
+cases:
+  - name: oversized-first-entry-multipage
+    bytes: 1100000
+    budget: 1048576
+    entries: 3
+  - name: small-soft-pages
+    bytes: 4100
+    budget: 5000
+    entries: 4

@@ -21,10 +21,11 @@ const (
 )
 
 type openCodeCurrentProjection struct {
-	Format    string                            `json:"format"`
-	Version   int                               `json:"version"`
-	SessionID string                            `json:"session_id"`
-	Messages  []openCodeLegacyProjectionMessage `json:"messages"`
+	ContentOmitted bool                              `json:"content_omitted,omitempty"`
+	Format         string                            `json:"format"`
+	Version        int                               `json:"version"`
+	SessionID      string                            `json:"session_id"`
+	Messages       []openCodeLegacyProjectionMessage `json:"messages"`
 }
 
 // The historical shapes follow upstream 4643e65ad6334de3e4e68dedc201d5fbb828c9fe.
@@ -480,6 +481,9 @@ rowLoop:
 			}
 			message, err := normalizeOpenCodeCurrentRow(row, &registry)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
+				// Compatibility may omit future vocabulary, but the retained
+				// projection must never certify those missing rows as complete.
+				projection.ContentOmitted = true
 				// A newer id-less control record: keep the session, drop the row,
 				// and count its type for one diagnostic per type.
 				unknownControlTypes[row.Type.String()]++

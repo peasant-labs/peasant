@@ -150,6 +150,7 @@ func TestPiPipelineCapabilityAndMultipartPreservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := &testutil.StubPushStore{Sessions: []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, string(schema.HarnessPi), nil)}, Entries: map[ingest.SessionID][]schema.SessionEntry{schema.SessionID(testutil.TestSessionUUID): entries}}
+			testutil.SeedPublicationInputs(store, fs, baseTestConfig().Output.BasePath)
 			publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: c.Advertise}}
 			var stderr bytes.Buffer
 			pipeline, err := push.NewPipeline(store, publisher, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{Concurrency: 1, DryRun: c.DryRun}, &testutil.NoopRedactor{}, &stderr)

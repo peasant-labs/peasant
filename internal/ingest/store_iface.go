@@ -19,9 +19,13 @@ type CurrentCommitAssociation struct {
 // for a session already in the database. Populated by BulkLookupSessionLocations
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
+	// Readiness is a bulk repair hint, not a substitute for the bundle read.
+	ProjectHash             schema.ProjectHash
+	OpaqueHostID            string
+	GitRemote               *string
+	PublicationReadiness    PublicationReadiness
+	CaptureRevision         int64
 	HostSlug                string
-	ProjectHash             string
-	GitRemote               string
 	ParentID                string // empty string if the session has no parent
 	IngestedMs              *int64 // nil if unknown; populated from DB ingested_ms column
 	SchemaVersion           int    // 0 if unknown; populated from DB schema_version column
@@ -84,10 +88,14 @@ type SessionStore interface {
 
 // StoreEntry pairs extracted metadata with its discovered session.
 type StoreEntry struct {
-	Metadata          *UnifiedMetadata
-	Session           DiscoveredSession
-	SourceFingerprint []byte
-	EventSeq          int64
+	// PublicationCapture explicitly opts into a source-inspected snapshot.
+	// Legacy callers leave it false and cannot accidentally establish readiness.
+	PublicationCapture bool
+	CWDProvenance      CWDProvenanceKind
+	Metadata           *UnifiedMetadata
+	Session            DiscoveredSession
+	SourceFingerprint  []byte
+	EventSeq           int64
 }
 
 // MetricsStore abstracts the analytics read/write path for session entries
@@ -135,10 +143,15 @@ type MetricsStore interface {
 // index state. Non-zero IndexVersion updates sessions.index_version and
 // sessions.indexed_at inside the same per-session atomic write.
 type SessionEntryWrite struct {
-	SessionID    SessionID
-	Entries      []schema.SessionEntry
-	IndexVersion int
-	IndexedAtMs  int64
+	// CaptureRevision binds this index write to the captured publication metadata.
+	CaptureRevision    int64
+	Mode               SessionEntryWriteMode
+	RequireFullContent bool
+	ContentCapture     SessionContentCaptureWrite
+	SessionID          SessionID
+	Entries            []schema.SessionEntry
+	IndexVersion       int
+	IndexedAtMs        int64
 }
 
 // SessionEntryWriteResult reports the outcome for one SessionEntryWrite.

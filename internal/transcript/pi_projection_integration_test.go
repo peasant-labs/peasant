@@ -120,7 +120,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			for i, e := range c.Entries {
 				entries[i] = piFixtureEntry(t, sid, i, e)
 			}
-			if err := db.IndexSessionEntries(ctx, sid, entries); err != nil {
+			if err := testutil.WriteFullEntries(ctx, db, sid, entries); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {

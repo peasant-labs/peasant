@@ -42,23 +42,15 @@ type StoreDataProvider struct {
 	// pathIdentityResolver resolves stored session worktrees into exact clone
 	// identities before user-facing discovery matching.
 	pathIdentityResolver ingest.PathIdentityResolver
-	// fs reads a session's ORIGINAL source transcript file so SessionByID can
-	// overlay full turn content over the DB's bounded content_preview (see
-	// transcript.BuildContentOverlay). Defaulted to the real OS filesystem by
-	// NewStoreDataProvider; NewStoreDataProviderWithFS lets tests inject a
-	// MemFS-backed source file.
-	fs ingest.FileSystem
 }
 
-// NewStoreDataProvider creates a StoreDataProvider backed by the given store,
-// reading source transcripts from the real OS filesystem.
+// NewStoreDataProvider creates a database-authoritative StoreDataProvider.
 func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver())
 }
 
-// NewStoreDataProviderWithFS is NewStoreDataProvider with an injectable
-// FileSystem, for tests that need SessionByID's content-overlay re-index to
-// read from a MemFS fixture instead of disk.
+// NewStoreDataProviderWithFS retains the filesystem argument for caller
+// compatibility. Full transcript detail never reads source files.
 func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver())
 }
@@ -80,7 +72,6 @@ func NewStoreDataProviderWithFSAndResolver(
 		codemap:              newCodemapService(s, visibility, resolver),
 		visibility:           visibility,
 		pathIdentityResolver: resolver,
-		fs:                   fs,
 	}
 }
 
@@ -354,20 +345,9 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		s.Metadata.Quality = &full
 	}
 
-	entries, err := p.store.ListEntries(ctx, sid)
+	entries, _, err := transcript.LoadEntriesForDetail(ctx, p.store, sid, transcript.DetailLoadOptions{})
 	if err != nil {
-		if s.Harness == schema.HarnessPi {
-			return nil, fmt.Errorf("store adapter: Pi indexed evidence could not be read before session-detail emission: %w; no partial detail was emitted; repair or re-index the session and retry", err)
-		}
-		// Non-fatal: return session without turns rather than failing entirely.
-		return &s, nil
-	}
-	if transcript.AnyContentTruncated(entries) {
-		if info, infoErr := p.store.SessionSourceInfo(ctx, id); infoErr == nil && info != nil {
-			if recovered, recoverErr := transcript.RecoverFullEntries(ctx, p.fs, s.Harness, ingest.ResolvedPath(info.SourcePath), sid, entries); recoverErr == nil {
-				entries = recovered
-			}
-		}
+		return nil, err
 	}
 	projection, validationErr := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: s.Harness})
 	if validationErr != nil {

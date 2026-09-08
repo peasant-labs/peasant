@@ -11,12 +11,10 @@ import (
 
 // BuildContentOverlay re-indexes a session's ORIGINAL source transcript file
 // with full (untruncated) content extraction and returns entryIndex → full
-// content. It exists because session_entries.content_preview is deliberately
-// bounded at defaults.ContentPreviewLimit to keep DB row size sane (see
-// truncateString in internal/ingest/utils.go) — this recovers the real turn
-// bodies for consumers that must show/export the full transcript rather than
-// a preview: the session_detail WS channel (StoreDataProvider.SessionByID)
-// and `peasant export sessions` (export.ExportSession) both call this.
+// content. This is a tolerant compatibility utility, not a complete-capture
+// reader: it cannot establish source attribution or stable index mapping.
+// Authoritative session detail, export, share preview and publication use
+// LoadEntriesForDetail instead and must never fall back to this overlay.
 //
 // Dispatch is keyed by the session's ACTUAL harness, not its SourceFormat.
 // This matters because more than one harness can share a SourceFormat (Codex
@@ -86,48 +84,6 @@ func fullContentEntries(ctx context.Context, fs ingest.FileSystem, harness defau
 	}
 
 	return sourceEntries, nil
-}
-
-// RecoverFullEntries is the common full-content path. Overlay before folding so
-// thinking and tool input/output recover alongside text. Stored evidence and
-// indices remain authoritative; changing source attribution is never an overlay.
-func RecoverFullEntries(ctx context.Context, fs ingest.FileSystem, harness schema.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID, entries []schema.SessionEntry) ([]schema.SessionEntry, error) {
-	if !AnyContentTruncated(entries) {
-		return entries, nil
-	}
-	full, err := fullContentEntries(ctx, fs, harness, sourcePath, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	byIndex := make(map[int]schema.SessionEntry, len(full))
-	for _, entry := range full {
-		byIndex[entry.EntryIndex] = entry
-	}
-	copy := append([]schema.SessionEntry(nil), entries...)
-	for i := range copy {
-		e := &copy[i]
-		source, ok := byIndex[e.EntryIndex]
-		if !ok {
-			continue
-		}
-		old, pi, err := ingest.DecodePiExtra(e.Extra)
-		if err != nil {
-			return nil, err
-		}
-		if pi {
-			fresh, isPi, err := ingest.DecodePiExtra(source.Extra)
-			if err != nil {
-				return nil, err
-			}
-			if !isPi || old.SourceRef != fresh.SourceRef || e.EntryType != source.EntryType {
-				return nil, projectionError("source changed since indexing; full-content overlay cannot reattribute rows")
-			}
-		}
-		e.ContentPreview = source.ContentPreview
-		e.ToolInput = source.ToolInput
-		e.ToolOutput = source.ToolOutput
-	}
-	return copy, nil
 }
 
 // contentOverlayFromEntries maps entry_index to the full content preview of

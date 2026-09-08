@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	_ "embed"
 	"encoding/json"
 	"io"
@@ -57,23 +56,18 @@ func TestPiShareReviewProductionRoute(t *testing.T) {
 	}
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			ctx := context.Background()
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			db := storetest.Open(t)
 			storetest.SeedSession(t, db, string(sid))
 			ingested := int64(3)
-			meta := &ingest.UnifiedMetadata{SessionID: sid, ModelHarness: schema.HarnessPi, Model: "fixture-model", HostSlug: "testslug", Project: schema.ProjectContext{Hash: "testprojhash0000000000000000000000000000000000000000000000000000", Name: "testproj", FilePath: "/fixture"}, Timestamp: schema.TimestampInfo{Start: 1, End: 2, Ingested: &ingested}, Source: schema.SourceInfo{FilePath: "/fixture.jsonl", Format: schema.SourceFormatJSONL}}
-			if err := db.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
-				t.Fatal(err)
-			}
+			meta := &ingest.UnifiedMetadata{SessionID: sid, ModelHarness: schema.HarnessPi, Model: "fixture-model", HostSlug: "testslug", Project: schema.ProjectContext{Hash: testutil.TestProjectHash, Name: "testproj", FilePath: "/fixture"}, Timestamp: schema.TimestampInfo{Start: 1, End: 2, Ingested: &ingested}, Source: schema.SourceInfo{FilePath: "/fixture.jsonl", Format: schema.SourceFormatJSONL}}
 			ref := ingest.PiPublicRef(string(sid), "entry", "custom")
+			meta.SchemaVersion = ingest.CurrentSchemaVersion
 			entry, err := ingest.NewPiCarrier(sid, 0, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: ref, SourceType: schema.NativeSourcePiCustom}, CustomType: "fixture", Data: json.RawMessage(c.Data)}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := db.IndexSessionEntries(ctx, sid, []schema.SessionEntry{entry}); err != nil {
-				t.Fatal(err)
-			}
+			testutil.SeedReadyPublication(t, db, meta, []schema.SessionEntry{entry})
 			handler := &syncHandler{store: db, config: config.BaseConfig()}
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/sync/redactions?session_id="+string(sid), nil)

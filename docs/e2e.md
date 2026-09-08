@@ -112,6 +112,12 @@ It drives the anchored validation set through the real CLI in two sandboxes:
 
 It runs as part of `make e2e` (same build tag, same prereqs).
 
+The historical association case constructs a V39 database, opens it through the
+current CLI to apply migrations, then runs normal ingest over the retained
+fixture source. Migration alone cannot recover a missing publication metadata
+snapshot. The test checks that ingest preserves the migrated association ID and
+its annotation before the ordinary, non-force publication replay.
+
 ## Warm-stack refresh (`TestHarnessRefreshE2E`)
 
 The refresh regression publishes into a non-empty harness-owned Postgres and
@@ -272,8 +278,12 @@ test process and inherited CLI environments. These are test budgets, not a claim
 that child allocations explain historical parent `e2e.test` RSS.
 
 Set `E2E_MEMORY_MAX` and `E2E_MEMORY_HIGH` in bytes to change the hard budget.
-`GOMEMLIMIT`, `PEASANT_INGEST_ARENA_BYTES`, `GOMAXPROCS` (default 2), and
+`GOMEMLIMIT`, `PEASANT_INGEST_ARENA_BYTES`, `GOMAXPROCS`, and
 `E2E_BUILD_PARALLELISM` (default 2, inherited by child Go builds) are configurable.
+Scheduler concurrency uses Go's CPU/container-aware default unless the caller
+sets `GOMAXPROCS`, for example `GOMAXPROCS=8 make e2e`. Memory limits are independent
+of this scheduler setting. Run `make check`, `make build`, and the full-stack gate
+sequentially. A memory-limit termination is a failed gate, not a passing test.
 Tests retain `-race` and use `-parallel=1`. For a focused run:
 
 ```bash

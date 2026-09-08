@@ -1,0 +1,10 @@
+required_names:
+  - large_tracked_file_tail
+  - excluded_sandbox_file
+cases:
+  - name: large_tracked_file_tail
+    bytes: 268435456
+    excluded: false
+  - name: excluded_sandbox_file
+    bytes: 268435456
+    excluded: true

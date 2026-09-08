@@ -112,7 +112,10 @@ func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.Sessio
 	defer func() {
 		err = errors.Join(err, stmts.Close())
 	}()
-	_, err = indexSessionEntriesOnConn(conn, sessionID, entries, stmts)
+	_, err = writeSessionContentOnConn(ctx, conn, ingest.SessionEntryWrite{SessionID: sessionID, Entries: entries}, stmts)
+	if err == nil {
+		err = stampPublicationIndex(conn, sessionID, 0)
+	}
 	return err
 }
 
@@ -152,7 +155,7 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		if results[i].Err != nil {
 			continue
 		}
-		outcome, err, fatal := indexSessionEntryWriteSavepoint(conn, writes[i], stmts)
+		outcome, err, fatal := indexSessionEntryWriteSavepoint(ctx, conn, writes[i], stmts)
 		results[i].Stats = outcome.stats
 		if err != nil {
 			results[i].Err = err
@@ -184,20 +187,41 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 	return results
 }
 
-func indexSessionEntryWriteSavepoint(conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error, bool) {
+func indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error, bool) {
 	const savepointName = "session_entry_batch_item"
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
+	// A forced retained-content repair replaces the projection, but still uses
+	// the same proven metadata/index revision as a content-only backfill. Resolve
+	// it inside this savepoint before replacement can invalidate the old proof.
+	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+		var err error
+		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+	}
 
-	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, write.Entries, stmts)
+	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	outcome, err := writeSessionContentOnConn(ctx, conn, write, stmts)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return outcome, rollbackErr, fatal
 	}
-	if write.IndexVersion > 0 {
+	if write.IndexVersion > 0 && write.Mode != ingest.SessionEntryWriteContentBackfill {
 		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexVersion, write.IndexedAtMs, outcome.sessionEntriesHash); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	}
+	if write.Mode != ingest.SessionEntryWriteContentBackfill {
+		if err := stampPublicationIndex(conn, write.SessionID, write.CaptureRevision); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
 	}
@@ -225,6 +249,9 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
 	for _, entry := range entries {
+		if entry.SessionID != sessionID {
+			return sessionEntryWriteOutcome{}, publicationRepairError("entry session identity differs from index request; existing entries were not changed")
+		}
 		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
 			return sessionEntryWriteOutcome{}, err
 		}

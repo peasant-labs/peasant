@@ -1,0 +1,64 @@
+cases:
+  - name: complete-coherent-pool-one
+    readiness: ready
+  - name: missing-full-capture
+    sql: DELETE FROM session_content_captures
+    readiness: needs_ingest
+  - name: incomplete-full-capture
+    sql: UPDATE session_content_captures SET status='incomplete'
+    readiness: needs_ingest
+  - name: failed-full-capture
+    sql: UPDATE session_content_captures SET status='failed'
+    readiness: needs_ingest
+  - name: unbound-full-capture
+    sql: UPDATE session_content_captures SET publication_capture_revision=0
+    readiness: needs_ingest
+  - name: stale-full-capture
+    sql: UPDATE session_content_captures SET publication_capture_revision=publication_capture_revision+1
+    readiness: needs_ingest
+  - name: stale-index
+    sql: UPDATE sessions SET indexed_publication_capture_revision=0
+    readiness: needs_ingest
+  - name: unsupported-metadata
+    sql: UPDATE session_publication_metadata SET schema_version=999
+    readiness: needs_ingest
+  - name: malformed-full-hash
+    sql: UPDATE session_content_captures SET full_capture_sha256=printf('%064d',0)||'z'
+    ignore_checks: true
+    proof_error: true
+  - name: nonhex-full-hash
+    sql: UPDATE session_content_captures SET full_capture_sha256=replace(printf('%064d',0),'0','z')
+    proof_error: true
+  - name: missing-complete-hash
+    sql: UPDATE session_content_captures SET full_capture_sha256=NULL
+    ignore_checks: true
+    proof_error: true
+  - name: unknown-status
+    sql: UPDATE session_content_captures SET status='unknown'
+    ignore_checks: true
+    proof_error: true
+  - name: later-corrupt-chunk
+    sql: UPDATE session_entry_full_content_chunks SET data=zeroblob(byte_length) WHERE entry_index=1 AND chunk_index=1
+    readiness: ready
+    body_error: true
+  - name: retained-backfill-binds-current-proof
+    sql: DELETE FROM session_content_captures
+    backfill: true
+    readiness: ready
+  - name: retained-backfill-keeps-unpaired-index-unready
+    sql: UPDATE sessions SET indexed_publication_capture_revision=0
+    backfill: true
+    readiness: needs_ingest
+  - name: retained-backfill-refuses-corrupt-proof
+    sql: UPDATE session_publication_metadata SET metadata_json='[]'
+    backfill: true
+    write_error: true
+    proof_error: true
+  - name: retained-backfill-refuses-shape-change
+    backfill: true
+    change_shape: true
+    write_error: true
+    readiness: ready
+  - name: explicit-full-revision-disagrees
+    disagree_revision: true
+    readiness: ready

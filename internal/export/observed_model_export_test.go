@@ -64,7 +64,7 @@ func TestExportSessionEmitsObservedModelEvidence(t *testing.T) {
 		extraString := string(extra)
 		entries[index] = schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: source.Index, Harness: ingest.HarnessClaudeCode, Role: schema.Role(source.Role), EntryType: schema.EntryTypeText, Depth: source.Depth, ContentPreview: &source.Content, Extra: &extraString}
 	}
-	if err := store.IndexSessionEntries(context.Background(), schema.SessionID(fixture.SessionID), entries); err != nil {
+	if err := testutil.WriteFullEntries(context.Background(), store, schema.SessionID(fixture.SessionID), entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 	payload, err := export.ExportSession(context.Background(), store, testutil.NewMemFS(), fixture.SessionID)

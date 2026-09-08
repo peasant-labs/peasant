@@ -28,6 +28,9 @@ import (
 //go:embed testdata/authoritative-receipt-mismatches.yaml
 var authoritativeReceiptMismatchYAML []byte
 
+var _ push.PipelineStore = (*testutil.StubPushStore)(nil)
+var _ push.PipelineStore = (*storepkg.Store)(nil)
+
 type authoritativeReceiptMismatchDocument struct {
 	ExpectedCaseCount int                                `yaml:"expectedCaseCount"`
 	Cases             []authoritativeReceiptMismatchCase `yaml:"cases"`
@@ -661,6 +664,7 @@ func newTestPipeline(
 	runCfg push.PipelineConfig,
 	stderr *bytes.Buffer,
 ) *push.Pipeline {
+	testutil.SeedPublicationInputs(store, fs, cfg.Output.BasePath)
 	p, err := push.NewPipeline(store, pub, baseCreds(), cfg, fs, runCfg, &testutil.NoopRedactor{}, stderr)
 	if err != nil {
 		panic(fmt.Sprintf("newTestPipeline: %v", err))
@@ -1126,8 +1130,8 @@ func TestPipeline_EmptyState_AllAlreadyPushed(t *testing.T) {
 	pub := &testutil.StubPublisher{}
 
 	var stderr bytes.Buffer
-	p := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr)
 	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+	p := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr)
 	first, err := p.Run(ctx)
 	if err != nil || first.New != 1 {
 		t.Fatalf("seed authoritative publication: result=%+v err=%v", first, err)
@@ -1294,9 +1298,11 @@ func runScopedEmptyState(t *testing.T, testCase scopedEmptyStateCase, quiet bool
 	}
 	var stderr bytes.Buffer
 	fs := testutil.NewMemFS()
-	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(), runCfg, &stderr)
 	if testCase.World == worldAllPublished {
 		seedMemFS(t, fs, inScope.HostSlug, inScope.SessionID, defaults.HarnessClaudeCode)
+	}
+	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(), runCfg, &stderr)
+	if testCase.World == worldAllPublished {
 		first, err := p.Run(context.Background())
 		if err != nil || first.New != 1 {
 			t.Fatalf("seed scoped authoritative publication: result=%+v err=%v", first, err)
@@ -1874,9 +1880,8 @@ func TestPipeline_MetricsAbsent_PushSucceedsWithoutQuality(t *testing.T) {
 	}
 }
 
-func TestPipeline_MetricsError_PushSucceedsWithoutQuality(t *testing.T) {
-	// When GetQualityMetrics returns an error, the pipeline should degrade
-	// gracefully: push the session without quality metrics (no abort).
+func TestPipeline_MetricsError_RefusesIncompleteBundle(t *testing.T) {
+	// A database error must not produce a partially read publication bundle.
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1899,20 +1904,8 @@ func TestPipeline_MetricsError_PushSucceedsWithoutQuality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if result.New != 1 {
-		t.Errorf("new: got %d, want 1", result.New)
-	}
-
-	// Should still have pushed (no quality key).
-	if len(pub.Calls) != 1 {
-		t.Fatalf("expected 1 HTTP call, got %d", len(pub.Calls))
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(pub.Calls[0].MetadataJSON, &payload); err != nil {
-		t.Fatalf("unmarshal published metadata: %v", err)
-	}
-	if _, exists := payload["quality"]; exists {
-		t.Error("quality key should be absent when GetQualityMetrics fails")
+	if result.Errors != 1 || result.New != 0 || len(pub.Calls) != 0 || len(store.Publications) != 0 {
+		t.Fatalf("partial database read published: result=%+v calls=%d receipts=%d", result, len(pub.Calls), len(store.Publications))
 	}
 }
 

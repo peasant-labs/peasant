@@ -24,7 +24,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -93,7 +92,7 @@ func outcomeForStatus(s PushStatus) perf.Outcome {
 //
 // It reads sessions from a PipelineStore, maps their metadata, reads transcript
 // files via the injected FileSystem, and uploads via the injected Publisher.
-// The Pipeline has no os import — all filesystem access is through p.fs.
+// Publication input comes from the store, never from source or sidecar files.
 type Pipeline struct {
 	store     PipelineStore
 	transport Transport
@@ -120,9 +119,9 @@ type PipelineStore interface {
 	CandidateStore
 	InsertPushLog(context.Context, ingest.PushLogEntry) error
 	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
-	GetQualityMetrics(context.Context, ingest.SessionID) (*schema.QualityMetrics, error)
+	ingest.PublicationInputReader
+	ingest.FullSessionEntryReader
 	ListEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error)
-	ListCurrentSessionCommitAssociations(context.Context, ingest.SessionID) ([]ingest.CurrentCommitAssociation, error)
 	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
@@ -281,7 +280,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 		}
 		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
-		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
+		if _, _, readErr := transcript.LoadEntriesForDetail(ctx, p.store, sessionID, transcript.DetailLoadOptions{}); readErr != nil {
 			load.End(perf.OutcomeFailed, nil)
 			rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
 			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
@@ -750,39 +749,6 @@ func (p *Pipeline) staleIdentityNote(all []ingest.PushSessionRow) string {
 	return ""
 }
 
-// redactedSlugRemedy explains the ONE cause of a missing metadata file that the
-// user cannot discover from the path, and names the command that repairs it.
-//
-// A version that redacted at the maximum level rewrote the host slug it recorded
-// in the database and in the metadata file, while the directory it had already
-// written kept the real slug. Push resolves the metadata path from the recorded
-// slug, so it looks for a directory that never existed: that session can never
-// publish again, and nothing about the failure says why. Peasant no longer
-// redacts at ingest time, but the rows written before that are still there, and
-// nothing heals them on its own — the host-slug insert ignores conflicts and an
-// unchanged session is skipped by re-ingest, so only a forced re-ingest of that
-// session re-derives it.
-//
-// It is gated on the placeholder actually being in the slug, because a missing
-// metadata file has other causes — a deleted output tree, a moved
-// output.basePath — for which a forced re-ingest is not the fix and saying so
-// would be confidently wrong advice.
-func (p *Pipeline) redactedSlugRemedy(sess ingest.PushSessionRow) string {
-	if !redactionPlaceholder.MatchString(sess.HostSlug) {
-		return ""
-	}
-	return fmt.Sprintf(
-		"What: the recorded host slug %q for session %s contains the redaction placeholder %s, so the metadata path above names a directory that was never written.\n"+
-			"Why: an earlier version redacted the slug it stored while the directory it had already created kept the real one, leaving the two permanently different.\n"+
-			"Where: under the configured output path %s.\n"+
-			"When: while reading this session's metadata, before any upload was attempted.\n"+
-			"Means: nothing was published for this session and nothing was recorded as published; every later push fails here in the same way until the slug is re-derived.\n"+
-			"Fix: re-derive this one session with '%s' - NOT the unscoped '%s', which re-ingests every project on this machine and clears every already-published marker, so the next push re-uploads all of them.",
-		sess.HostSlug, sess.SessionID, redactionPlaceholder.FindString(sess.HostSlug), p.cfg.Output.BasePath,
-		p.ingestCommand("--force --session "+shellQuote(sess.SessionID)),
-		p.ingestCommand("--force"))
-}
-
 // ingestCommand renders ingest in the same config/data/state context as push.
 func (p *Pipeline) ingestCommand(flags string) string {
 	prefix := githooks.CommandPrefix(p.runCfg.CommandBinding)
@@ -885,8 +851,7 @@ func (p *Pipeline) filterByWizardSelection(sessions []ingest.PushSessionRow) []i
 	return out
 }
 
-// pushSession reads metadata + transcript from the filesystem and uploads them.
-// All filesystem access uses p.fs.ReadFile — no os import.
+// pushSession publishes one coherent database capture without source file access.
 func (p *Pipeline) pushSession(
 	ctx context.Context,
 	sess ingest.PushSessionRow,
@@ -918,50 +883,21 @@ func (p *Pipeline) pushSession(
 
 	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
 	defer func() { stage.finish(sr.Error) }()
-	// 1. Read metadata.json via injected FileSystem. The path is resolved by the
-	// shared ingest helper so subagent sessions (which live under
-	// {parentID}/subagents/{id}) are read from the correct location rather than
-	// the top-level {slug}/{id} dir.
-	metadataPath := ingest.SessionMetadataPath(
-		p.cfg.Output.BasePath, sess.HostSlug, sess.SessionID, sess.ParentID,
-	)
-	metaBytes, err := p.fs.ReadFile(metadataPath)
+	input, err := LoadPublicationInput(ctx, p.store, sess.SessionID)
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+	if err == nil {
+		err = ValidatePublicationInput(input)
+	}
 	if err != nil {
-		failure := fmt.Errorf("read metadata %s: %w: %w", metadataPath, ErrMetadataMissing, err)
-		if remedy := p.redactedSlugRemedy(sess); remedy != "" {
-			failure = fmt.Errorf("%w\n%s", failure, remedy)
-		}
+		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session; retry normal ingest in this command context: %s", err, p.ingestCommand("--session "+shellQuote(sess.SessionID)))
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
-			Error:     failure,
+			Error:     err,
 		}
 	}
-
-	var meta ingest.UnifiedMetadata
-	if err := json.Unmarshal(metaBytes, &meta); err != nil {
-		parseErr := fmt.Errorf("parse metadata: %w", err)
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     parseErr,
-		}
-	}
-
-	// Refuse modelless sessions client-side, before any upload, so the village
-	// never sees a request that would 400. The root cause is in ingest; until
-	// then this is a clean client-side Error (not a Held type).
-	if meta.Model == "" {
-		modelErr := fmt.Errorf("session %s: %w", sess.SessionID, ErrNoModel)
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     modelErr,
-		}
-	}
+	meta := input.Metadata
 
 	// 1b. Safety-net redaction: re-redact metadata before upload.
 	// This catches sessions ingested before redaction was added or with minimal level.
@@ -971,36 +907,13 @@ func (p *Pipeline) pushSession(
 	// Coarse redaction stages share the recorder with combined redaction metrics.
 	stage.next(perf.StagePushSessionRedact)
 	redactStart := time.Now()
-	originalSourcePath := meta.Source.FilePath
 	redacted := p.redactor.RedactMetadata(&meta)
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
 	stage.next(perf.StagePushSessionLoad)
 
-	// 2. Fetch quality metrics from the store (non-fatal on error).
-	sessionID, _ := ingest.NewSessionID(sess.SessionID)
-	metrics, metricsErr := p.store.GetQualityMetrics(ctx, sessionID)
-	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-	if metricsErr != nil {
-		slog.Warn("failed to get quality metrics, continuing without",
-			"session_id", sess.SessionID,
-			"error", metricsErr,
-		)
-		// metrics stays nil — graceful degradation
-	}
-
-	// 3. Fetch session entries from the store. Transcript bytes and schema-owned
-	// evidence are indivisible publication input, so an unreadable entry set fails closed.
-	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
-	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-	if entriesErr != nil {
-		failure := entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
-		return failure
-	}
-	entries, entriesErr = transcript.RecoverFullEntries(ctx, p.fs, meta.ModelHarness, ingest.ResolvedPath(originalSourcePath), sessionID, entries)
-	if entriesErr != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: entriesErr}
-	}
+	metrics := input.Quality
+	entries := input.Entries
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
 	// The entries are the transcript's text: contentPreview, toolInput and
@@ -1012,7 +925,7 @@ func (p *Pipeline) pushSession(
 	// unrepeatable: a consumer added later cannot get the unredacted ones,
 	// because after this line they do not exist.
 	//
-	// Unlike the two reads above this is NOT graceful-degradation territory. A
+	// Like the coherent bundle read, redaction fails closed. A
 	// redaction that cannot be completed must stop the session, not publish what
 	// it failed to redact.
 	//
@@ -1040,7 +953,7 @@ func (p *Pipeline) pushSession(
 	// TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing, which
 	// re-runs on every change instead of aging in a comment.
 	stage.next(perf.StagePushSessionRedact)
-	entries, entriesErr = RedactEntries(p.redactor, entries)
+	entries, entriesErr := RedactEntries(p.redactor, entries)
 	if entriesErr != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
@@ -1050,36 +963,14 @@ func (p *Pipeline) pushSession(
 		}
 	}
 
-	// 4. Load the producer-owned durable associations. Unlike metrics and
-	// transcript entries this is not optional: omitting an authoritative current
-	// relationship would make a later association annotation unresolvable at the
-	// village and could silently sever rewrite history.
-	stage.next(perf.StagePushSessionLoad)
-	storedAssociations, associationErr := p.store.ListCurrentSessionCommitAssociations(ctx, sessionID)
-	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-	if associationErr != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("load durable commit associations: %w", associationErr),
-		}
-	}
 	stage.next(perf.StagePushPayloadBuild)
-	publishedAssociations := make([]schema.PublishedAssociation, 0, len(storedAssociations))
-	for _, association := range storedAssociations {
-		publishedAssociations = append(publishedAssociations, schema.PublishedAssociation{
-			ID:                 association.ID,
-			ObservedCommitHash: association.ObservedCommitHash,
-		})
-	}
 
 	// 5. Map metadata to publishRequest JSON.
 	publishJSON, err := MapMetadata(MapOptions{
 		Meta:          &meta,
 		Metrics:       metrics,
 		Entries:       entries,
-		Associations:  publishedAssociations,
+		Associations:  input.Associations,
 		License:       license,
 		Fields:        p.cfg.Push.Fields.Resolve(),
 		TitlePipeline: p.titles,
@@ -1116,9 +1007,8 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
-	// The session's stored origin travels as a push call option, read from the
-	// sessions row this run selected rather than from the metadata sidecar.
-	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, sessionorigin.Origin(sess.SessionOrigin))
+	// Stored origin belongs to the same database snapshot as metadata and entries.
+	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
 	}
@@ -1221,7 +1111,7 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("fingerprint authoritative publication operation: %w", err)}
 	}
-	projectHash, hashErr := schema.NewProjectHash(sess.ProjectHash)
+	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
 	if hashErr != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
 	}

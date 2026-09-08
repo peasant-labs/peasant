@@ -12,25 +12,11 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ExportSession reads a session's transcript from the store and source file,
-// using DB entries (session_entries) as the source of truth for turn structure
-// and indices, and the source transcript for full content extraction.
-//
-// Flow:
-//  1. Look up source_path and source_format from the store.
-//  2. Re-index the source transcript to build a contentMap (entryIndex → fullContent).
-//     contentMap keys come from a fresh re-index. If the source file has changed since
-//     ingest, keys may not match all DB entry indices. Fallback to ContentPreview ensures
-//     graceful degradation.
-//  3. Read DB entries via store.ListEntries — these carry the canonical entry_index values
-//     that annotations reference.
-//  4. Look up session metadata for the envelope.
-//  5. Convert to SessionDetailPayload via SessionToDetail (same path as the session viewer).
-//  6. TurnCount = len(payload.Turns) — always correct regardless of DB metadata.
-//  7. Return the SessionDetailPayload with full content overlaid from contentMap.
-//
-// Returns ErrSessionNotFound when the session ID does not exist in the store.
-// Returns an actionable error when the source file is missing or unreadable.
+// ExportSession hydrates verified full database content and uses the canonical
+// EntriesToTurns → SessionToDetail conversion, preserving stored entry anchors.
+// The filesystem argument remains for caller compatibility; no source is read.
+// Missing sessions return ErrSessionNotFound. Incomplete or corrupt captures
+// return an actionable error rather than exporting bounded previews.
 func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string) (*schema.SessionDetailPayload, error) {
 	// Step 1: Look up source info.
 	info, err := db.SessionSourceInfo(ctx, sessionID)
@@ -53,30 +39,10 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		)
 	}
 
-	// Step 2: List DB entries first — the standard ListEntries → EntriesToTurns
-	// → SessionToDetail path (same as the session viewer), AND the input to
-	// the truncation gate below.
-	sid := schema.SessionID(sessionID)
-	dbEntries, err := db.ListEntries(ctx, sid)
+	sid, err := ingest.NewSessionID(sessionID)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"export.ExportSession: list entries for session %q: %w\n"+
-				"What went wrong: database query for session entries failed.\n"+
-				"Where: export.ExportSession → store.ListEntries.\n"+
-				"Fix: verify the database is accessible and not corrupted.",
-			sessionID, err,
-		)
+		return nil, err
 	}
-
-	// Recover all content fields before folding using the same registry and
-	// truncation gate as the local viewer, share review and publication.
-	if transcript.AnyContentTruncated(dbEntries) {
-		dbEntries, err = transcript.RecoverFullEntries(ctx, fs, defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), sid, dbEntries)
-		if err != nil {
-			return nil, fmt.Errorf("export.ExportSession: %w", err)
-		}
-	}
-
 	detail, err := db.SessionDetailByID(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -112,15 +78,10 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		}
 		fullSession.PushedAt = detail.PushedAt
 	}
-	projection, err := transcript.EntriesToProjectionValidated(dbEntries, transcript.ProjectionOptions{Harness: fullSession.Harness})
-	if err != nil {
-		return nil, fmt.Errorf("export.ExportSession: validate indexed observed model evidence after storage read and before export: %w", err)
-	}
-
 	// Convert to the standardized detail payload — same as the session viewer.
-	payload, err := transcript.SessionToDetailValidatedWithProjection(fullSession, projection)
+	payload, err := transcript.LoadSessionDetail(ctx, db, fullSession, transcript.DetailLoadOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("export.ExportSession: validate observed model evidence before export: %w", err)
+		return nil, fmt.Errorf("export.ExportSession: load full transcript before export: %w", err)
 	}
 	payload.TurnCount = len(payload.Turns)
 

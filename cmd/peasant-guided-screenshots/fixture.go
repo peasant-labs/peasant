@@ -93,6 +93,9 @@ const (
 	selectionStateSourcePreview  selectionState = "harness-source-preview"
 	selectionStatePiPreview      selectionState = "pi-preview"
 	selectionStateDiscoveryNotes selectionState = "discovery-notes"
+	// selectionStateBudgetPreview shows a source transcript that exceeds the
+	// automatic body budget, including the actual loaded-prefix notice.
+	selectionStateBudgetPreview selectionState = "source-budget-preview"
 	// selectionStateOriginHidden is the mounted list with an agent-driven root
 	// hidden, its user-origin control visible, and a visible parent's child
 	// badge reading correctly.
@@ -103,7 +106,7 @@ func (s selectionState) valid() bool {
 	switch s {
 	case selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
-		selectionStateOriginHidden, selectionStatePiPreview, selectionStateDiscoveryNotes:
+		selectionStateBudgetPreview, selectionStateOriginHidden, selectionStatePiPreview, selectionStateDiscoveryNotes:
 		return true
 	default:
 		return false
@@ -113,7 +116,7 @@ func (s selectionState) valid() bool {
 func (s selectionState) requiresBothThemes() bool {
 	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
 		s == selectionStateSessionPreview || s == selectionStateSourcePreview ||
-		s == selectionStateOriginHidden || s == selectionStatePiPreview || s == selectionStateDiscoveryNotes
+		s == selectionStateBudgetPreview || s == selectionStateOriginHidden || s == selectionStatePiPreview || s == selectionStateDiscoveryNotes
 }
 
 // pushState is the closed set of push-wizard screens the harness captures: the
@@ -131,11 +134,12 @@ const (
 	pushStateSessionPreview pushState = "session-preview"
 	pushStateConsent        pushState = "consent"
 	pushStateReceipt        pushState = "receipt"
+	pushStateNeedsIngest    pushState = "needs-ingest"
 )
 
 func (s pushState) valid() bool {
 	switch s {
-	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt:
+	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest:
 		return true
 	default:
 		return false
@@ -190,12 +194,13 @@ type pushCaptureFixture struct {
 
 // pushSessionFixture is one candidate session the captured wizard offers.
 type pushSessionFixture struct {
-	SessionID string             `yaml:"sessionId"`
-	Harness   string             `yaml:"harness"`
-	Project   string             `yaml:"project"`
-	StartMs   int64              `yaml:"startMs"`
-	Redaction pushRedactionState `yaml:"redaction"`
-	Withheld  bool               `yaml:"withheld"`
+	SessionID   string             `yaml:"sessionId"`
+	Harness     string             `yaml:"harness"`
+	Project     string             `yaml:"project"`
+	StartMs     int64              `yaml:"startMs"`
+	Redaction   pushRedactionState `yaml:"redaction"`
+	Withheld    bool               `yaml:"withheld"`
+	NeedsIngest bool               `yaml:"needsIngest"`
 }
 
 // pushFixture is the candidate inventory the captured wizard mounts over.
@@ -268,7 +273,10 @@ type selectionFixture struct {
 	// workspace and points the listing at it, so the preview reads a real file
 	// through the production reader.
 	SourceTranscripts map[string][]string `yaml:"sourceTranscripts"`
-	Ingested          []string            `yaml:"ingested"`
+	// SourceTranscriptPadding generates scrubbed, line-oriented source turns
+	// without checking multi-megabyte repeated strings into the fixture.
+	SourceTranscriptPadding map[string]selectionSourcePaddingFixture `yaml:"sourceTranscriptPadding"`
+	Ingested                []string                                 `yaml:"ingested"`
 	// RequiredSessionNames, RequiredHarnessNames, and RequiredIngestedNames
 	// are deletion-protection manifests: every listed name must be present
 	// among Listings' session ids, Listings' harnesses, and Ingested
@@ -280,6 +288,11 @@ type selectionFixture struct {
 	// SubagentDiscovery. They are what makes the capture production-shaped, so
 	// deleting one must fail the fixture rather than quietly shrink a count.
 	RequiredSubagentDiscoveryNames []string `yaml:"requiredSubagentDiscoveryNames"`
+}
+
+type selectionSourcePaddingFixture struct {
+	LineCount    int `yaml:"lineCount"`
+	ContentBytes int `yaml:"contentBytes"`
 }
 
 // selectionSubagentFixture is one entry of the discovered subagent relation:
@@ -408,7 +421,7 @@ func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture
 		stateRows[state.Key] = state
 	}
 	for _, key := range []pushState{
-		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt,
+		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest,
 	} {
 		if stateRows[key].Key == "" {
 			return fmt.Errorf("screenshot fixture omits push state %q", key)
@@ -445,6 +458,7 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 	ids := make(map[string]bool, len(fixture.Sessions))
 	states := make(map[pushRedactionState]bool, len(fixture.Sessions))
 	withheld := 0
+	needsIngest := false
 	for _, session := range fixture.Sessions {
 		if strings.TrimSpace(session.SessionID) == "" || strings.TrimSpace(session.Harness) == "" ||
 			strings.TrimSpace(session.Project) == "" || session.StartMs <= 0 ||
@@ -452,6 +466,7 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 			return fmt.Errorf("screenshot fixture has an incomplete or duplicate push session: %#v", session)
 		}
 		ids[session.SessionID] = true
+		needsIngest = needsIngest || session.NeedsIngest
 		states[session.Redaction] = true
 		if session.Withheld {
 			withheld++
@@ -465,6 +480,9 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 	}
 	if withheld != 1 {
 		return fmt.Errorf("screenshot fixture push sessions hold %d withheld rows, want exactly 1", withheld)
+	}
+	if !needsIngest {
+		return fmt.Errorf("screenshot fixture needs a database-incomplete push session")
 	}
 	// The preview capture is only evidence if a session actually has a stored
 	// transcript to draw. Without this the sheet would show the empty-transcript
@@ -509,8 +527,8 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 9050},
-		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 10440},
+		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
@@ -586,7 +604,7 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	for _, state := range []selectionState{
 		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
-		selectionStateOriginHidden,
+		selectionStateBudgetPreview, selectionStateOriginHidden,
 		selectionStatePiPreview, selectionStateDiscoveryNotes,
 	} {
 		if stateRows[state].Key == "" {
@@ -770,6 +788,12 @@ func validateSelectionData(selection selectionFixture) error {
 		}
 		if listed.Source.Origin != ftue.SessionSourceOriginFile {
 			return fmt.Errorf("screenshot fixture session %q carries a harness transcript but declares origin %q", sessionID, listed.Source.Origin)
+		}
+	}
+	for sessionID, padding := range selection.SourceTranscriptPadding {
+		if !sessionIDs[sessionID] || len(selection.SourceTranscripts[sessionID]) == 0 ||
+			padding.LineCount <= 0 || padding.ContentBytes <= 0 {
+			return fmt.Errorf("screenshot fixture source padding %q is unknown, lacks a source transcript, or is not positive", sessionID)
 		}
 	}
 	seenIngested := make(map[string]bool, len(selection.Ingested))

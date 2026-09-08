@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -1421,7 +1422,7 @@ func TestHub_SessionDetail_ToolCallFields(t *testing.T) {
 			ParentIndex:  intPtr(0),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1539,6 +1540,9 @@ func TestHub_SessionDetail_Outcome(t *testing.T) {
 
 	// 2. Save quality metrics carrying an outcome via the production write path.
 	sid := ingest.SessionID(sessionID)
+	if err := testutil.WriteFullEntries(ctx, s, sid, nil); err != nil {
+		t.Fatal(err)
+	}
 	metrics := &ingest.SessionMetrics{
 		SessionID: sid,
 		QualityMetrics: schema.QualityMetrics{
@@ -1637,6 +1641,9 @@ func TestHub_SessionDetail_Scorecard(t *testing.T) {
 	}
 
 	// 2. Save quality metrics carrying the scorecard signals.
+	if err := testutil.WriteFullEntries(ctx, s, ingest.SessionID(sessionID), nil); err != nil {
+		t.Fatal(err)
+	}
 	metrics := &ingest.SessionMetrics{
 		SessionID: ingest.SessionID(sessionID),
 		QualityMetrics: schema.QualityMetrics{

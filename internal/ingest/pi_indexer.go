@@ -30,6 +30,37 @@ func NewPiIndexer(fs FileSystem, options ...PiIndexerOption) *PiIndexer {
 }
 
 var _ TranscriptIndexer = (*PiIndexer)(nil)
+var _ AuthoritativeTranscriptIndexer = (*PiIndexer)(nil)
+
+func (i *PiIndexer) IndexTranscriptForCapture(ctx context.Context, session DiscoveredSession) (TranscriptCaptureResult, error) {
+	data, err := readPiSource(ctx, i.fs, session.SourcePath.String())
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	return i.IndexTranscriptBytesForCapture(ctx, session, data)
+}
+
+func (i *PiIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
+	if session.ContentOmitted {
+		return TranscriptCaptureResult{}, captureFailure(session, 0, fmt.Errorf("retained transcript omitted source content"))
+	}
+	doc, err := parsePiDocument(ctx, data)
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	if doc.header.ID != session.SessionID.String() {
+		return TranscriptCaptureResult{}, piSourceError("index", 0, fmt.Errorf("header id changed since discovery"))
+	}
+	// Completeness covers every accepted canonical entry, not an unfinished
+	// physical EOF record. Preserve that diagnostic while retaining full text.
+	full := *i
+	full.fullContent = true
+	entries, err := full.project(doc, session.SessionID)
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	return TranscriptCaptureResult{Entries: entries, Diagnostics: doc.warnings}, nil
+}
 
 func (i *PiIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
 func (i *PiIndexer) IndexTranscript(ctx context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
