@@ -44,6 +44,7 @@ type publicationCaptureCase struct {
 	FailSidecar            bool              `yaml:"fail_sidecar"`
 	ChangeSource           bool              `yaml:"change_source"`
 	MutateIndexFile        string            `yaml:"mutate_index_file"`
+	ExpectedManualIndexed  *int              `yaml:"expected_manual_indexed"`
 }
 
 func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
@@ -74,6 +75,10 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		}
 		seen[c.Name] = true
 		delete(required, c.Name)
+		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract
+		if !unrecoverable && c.ExpectedManualIndexed == nil {
+			t.Fatalf("fixture %s has no expected manual indexing outcome", c.Name)
+		}
 	}
 	if len(required) != 0 {
 		t.Fatalf("missing required fixtures: %v", required)
@@ -320,8 +325,17 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			// their input is the exact persisted capture by guessing a revision.
 			cfg.Reindex = true
 			manualResult := run()
+			if manualResult.Summary.Errors != 0 || manualResult.Summary.StoreError != nil {
+				t.Fatalf("manual reindex failed: %+v", manualResult)
+			}
+			if manualResult.Summary.Indexed != *c.ExpectedManualIndexed {
+				t.Fatalf("manual indexed = %d want %d: %+v", manualResult.Summary.Indexed, *c.ExpectedManualIndexed, manualResult)
+			}
 			manual, err := database.LoadPublicationInput(ctx, id)
-			if err != nil || (manualResult.Summary.Indexed > 0 && manual.Readiness != ingest.PublicationNeedsIngest) {
+			if err != nil {
+				t.Fatalf("load after manual reindex: %v", err)
+			}
+			if *c.ExpectedManualIndexed > 0 && manual.Readiness != ingest.PublicationNeedsIngest {
 				t.Fatalf("manual reindex guessed readiness: %+v, %v", manual, err)
 			}
 		})
