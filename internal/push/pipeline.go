@@ -881,8 +881,11 @@ func (p *Pipeline) pushSession(
 
 	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
 	defer func() { stage.finish(sr.Error) }()
-	input, err := LoadReadyPublicationInput(ctx, p.store, sess.SessionID)
+	input, err := LoadPublicationInput(ctx, p.store, sess.SessionID)
 	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+	if err == nil {
+		err = ValidatePublicationInput(input)
+	}
 	if err != nil {
 		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session; retry normal ingest in this command context: %s", err, p.ingestCommand("--session "+shellQuote(sess.SessionID)))
 		return SessionPushResult{
@@ -893,19 +896,6 @@ func (p *Pipeline) pushSession(
 		}
 	}
 	meta := input.Metadata
-
-	// Refuse modelless sessions client-side, before any upload, so the village
-	// never sees a request that would 400. The root cause is in ingest; until
-	// then this is a clean client-side Error (not a Held type).
-	if meta.Model == "" {
-		modelErr := fmt.Errorf("session %s: %w", sess.SessionID, ErrNoModel)
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     modelErr,
-		}
-	}
 
 	// 1b. Safety-net redaction: re-redact metadata before upload.
 	// This catches sessions ingested before redaction was added or with minimal level.

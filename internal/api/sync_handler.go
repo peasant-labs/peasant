@@ -455,8 +455,11 @@ func truncateLine(s string) string {
 
 // readTranscriptContent assembles scan input from the same capture as publication.
 func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr string) (string, error) {
-	input, err := push.LoadReadyPublicationInput(ctx, h.store, sessionIDStr)
+	input, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
+		return "", err
+	}
+	if err := push.ValidatePublicationInput(input); err != nil {
 		return "", err
 	}
 	var fields config.PushFieldVisibility
