@@ -1314,6 +1314,9 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	if err := json.Unmarshal(sesData, &ses); err != nil {
 		return nil, fmt.Errorf("opencode: parse session %s: %w", session.SessionID, err)
 	}
+	if ses.ID != session.SessionID.String() {
+		return nil, fmt.Errorf("OpenCode metadata capture for %s: source session id changed after discovery; no capture was written; restore the matching source and rerun peasant ingest", session.SessionID)
+	}
 
 	// ── 2. Count messages (turns + tool calls) ────────────────────────────────
 	// The message directory lives at {root}/storage/message/ses_{id}/

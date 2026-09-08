@@ -420,7 +420,8 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 		gitInfo.Tracking = &trackingStr
 	}
 	meta.Git = gitInfo
-	meta.CWD = projectDir
+	// A decoded workspace identifies project scope, not an exact session CWD.
+	meta.CWD = ""
 
 	projectPath := worktreeStr
 	if projectPath == "" {

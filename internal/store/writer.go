@@ -93,7 +93,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     git_worktree = excluded.git_worktree,
     git_tracking = excluded.git_tracking,
     tool_version = excluded.tool_version,
-    session_origin = excluded.session_origin`
+    session_origin = sessions.session_origin`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 
