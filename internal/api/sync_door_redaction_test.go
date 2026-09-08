@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,10 +161,10 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = io.Copy(io.Discard, response.Body)
+	repeated, _ := io.ReadAll(response.Body)
 	response.Body.Close()
 	second, err := db.Publication(ctx, village.URL, "user-1", testutil.TestProjectHash, sessionID)
-	if err != nil || second == nil || publications.Load() != 2 {
+	if err != nil || !reflect.DeepEqual(second, first) || publications.Load() != 1 || !bytes.Contains(repeated, []byte(`"skipped":1`)) {
 		t.Fatalf("repeat publication failed: count=%d receipt=%+v err=%v", publications.Load(), second, err)
 	}
 	if second.Receipt.RequestOperationFingerprint != first.Receipt.RequestOperationFingerprint {

@@ -22,12 +22,16 @@ func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTar
 		return im
 	}
 	im.transcriptData = data
-	reader, ok := p.store.(PublicationInputReader)
+	reader, ok := p.store.(PublicationMetadataReader)
 	if !ok {
 		return im
 	}
-	bundle, err := reader.LoadPublicationInput(ctx, target.session.SessionID)
-	if err != nil || bundle.Readiness != PublicationReady || bundle.Metadata.ModelHarness != target.session.Harness || bundle.Metadata.Source.Format != target.session.SourceFormat || bundle.Metadata.ContentHash != schema.ComputeTranscriptHash(data) {
+	// Proof needs metadata and its paired revision, not the old transcript
+	// entries, quality metrics, or association ledger. Keep this projection
+	// lightweight even when publication loads full entry bodies.
+	snapshots, err := reader.LoadPublicationMetadata(ctx, []SessionID{target.session.SessionID})
+	snapshot := snapshots[target.session.SessionID]
+	if err != nil || snapshot.Error != nil || snapshot.Readiness != PublicationReady || snapshot.Metadata.ModelHarness != target.session.Harness || snapshot.Metadata.Source.Format != target.session.SourceFormat || snapshot.Metadata.ContentHash != schema.ComputeTranscriptHash(data) {
 		return im
 	}
 	indexer, ok := p.indexers[target.session.Harness]
@@ -46,7 +50,7 @@ func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTar
 		// projections are self-contained and use the verified-bytes path below.
 		return im
 	}
-	im.captureRevision = bundle.CaptureRevision
+	im.captureRevision = snapshot.CaptureRevision
 	return im
 }
 

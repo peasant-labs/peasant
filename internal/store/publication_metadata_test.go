@@ -43,7 +43,7 @@ func loadPublicationMetadataFixtures(t *testing.T) []publicationMetadataFixture 
 	}
 	required := strings.Fields(`exact-root-reopened exact-child-reopened confirmed-absent workspace-is-not-exact worktree-is-not-exact legacy-seed capture-before-index noop-stamps-new-capture stale-writer-refused stale-noop-refused manual-entry-reindex manual-index-state manual-hashed-index-state zero-revision-noop legacy-upsert-invalidates metrics-are-independent unsupported-snapshot malformed-snapshot corrupt-snapshot-digest conflicting-cwd-column conflicting-snapshot-identity unknown-capture-intent exact-without-literal workspace-with-fake-cwd repaired-project-capture model-absence-is-consumer-policy`)
 	seen := make(map[string]bool)
-	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped")...)
+	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture equivalent-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped")...)
 	for _, c := range cases {
 		if seen[c.Name] {
 			t.Fatalf("duplicate fixture %s", c.Name)
@@ -125,6 +125,10 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 			}
 			if tc.Action == "missing-model" {
 				e.Metadata.Model = ""
+			}
+			if tc.Action == "equivalent-remote" {
+				remote := "https://example.com/project.git"
+				e.Metadata.Git.Remote = &remote
 			}
 			e.Metadata.MetadataHash = schema.ComputeMetadataHash(e.Metadata)
 			if tc.Action == "capture-bad-hash" {
@@ -223,7 +227,7 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				m.MetadataHash = schema.ComputeMetadataHash(&m)
 				body, _ := json.Marshal(m)
 				publicationSQL(t, s, `UPDATE session_publication_metadata SET metadata_json=?,metadata_hash=? WHERE session_id=?`, string(body), m.MetadataHash, string(id))
-			case "changed-identity", "changed-parent", "changed-host", "changed-remote", "changed-source-id":
+			case "changed-identity", "changed-parent", "changed-host", "changed-remote", "changed-source-id", "equivalent-remote":
 				m := *e.Metadata
 				changed := e
 				changed.Metadata = &m
@@ -238,6 +242,9 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					m.HostSlug = "example-other-host"
 				case "changed-remote":
 					remote := "https://example.com/other.git"
+					m.Git.Remote = &remote
+				case "equivalent-remote":
+					remote := "https://example.com/project"
 					m.Git.Remote = &remote
 				case "changed-source-id":
 					changed.Session.SessionID = "33333333-3333-4333-8333-333333333333"

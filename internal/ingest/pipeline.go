@@ -1017,7 +1017,9 @@ func (p *Pipeline) drainLoop(
 			var storeBatch []StoreEntry
 			var batchMetas []indexedMeta
 			var committedIDs []SessionID
+			completeCommitCaptures := make(map[SessionID]bool)
 			for _, wr := range batch.Results {
+				completeCommitCaptures[wr.result.SessionID] = wr.commitCaptureComplete
 				sessionResults = append(sessionResults, wr.result)
 				if wr.result.Error == nil && wr.result.OutputPath != "" && wr.meta != nil {
 					batchMetas = append(batchMetas, indexedMeta{
@@ -1062,12 +1064,15 @@ func (p *Pipeline) drainLoop(
 					} else {
 						// Persist session commits (non-fatal): runs only after InsertSessions
 						// succeeds so the FK constraint on session_commits(session_id) is satisfied.
-						// Existing sessions retain historical bindings even when current
-						// Git inspection cannot reproduce every past observation.
+						// A complete observation replaces the current projection while
+						// the ledger retains historical association IDs. Missing or
+						// partial Git evidence cannot retire prior observations.
 						for _, entry := range storeBatch {
 							_, existing := p.locationCache[entry.Metadata.SessionID]
 							var commitErr error
-							if merger, ok := p.store.(SessionCommitMergeStore); ok {
+							if completeCommitCaptures[entry.Metadata.SessionID] {
+								commitErr = p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits)
+							} else if merger, ok := p.store.(SessionCommitMergeStore); ok {
 								commitErr = merger.MergeSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits)
 							} else if !existing && !p.config.Reindex {
 								commitErr = p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits)
@@ -2354,6 +2359,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	// Commit detection: populate GitContext.Commits before metadata serialization.
 	// Non-fatal: errors are recorded as diagnostic warnings so the audit trail
 	// reflects git failures without blocking session ingestion.
+	commitCaptureComplete := false
 	if p.gitAnalyzer != nil {
 		// Resolve repo path: prefer Worktree (linked-worktree repos), fall back to
 		// Project.FilePath (standard repos, which is the common case). Both point
@@ -2389,6 +2395,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 				transcriptPath = tmpTranscriptPath
 			}
 			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, transcriptPath)
+			commitCaptureComplete = len(diags) == 0
 			meta.Git.Commits = commits
 			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, diags...)
 		}
@@ -2498,15 +2505,16 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 
 	return workerResult{
-		result:               result,
-		capturedSource:       capturedSource,
-		cwdProvenance:        publicationCWDProvenance(meta, session),
-		eventSeq:             session.EventSeq,
-		meta:                 meta,
-		sourceFingerprint:    sourceFingerprint,
-		fileCaptureEvidence:  captureEvidence,
-		transcriptData:       transcriptData,
-		outputTranscriptPath: outputTranscriptPath,
+		commitCaptureComplete: commitCaptureComplete,
+		result:                result,
+		capturedSource:        capturedSource,
+		cwdProvenance:         publicationCWDProvenance(meta, session),
+		eventSeq:              session.EventSeq,
+		meta:                  meta,
+		sourceFingerprint:     sourceFingerprint,
+		fileCaptureEvidence:   captureEvidence,
+		transcriptData:        transcriptData,
+		outputTranscriptPath:  outputTranscriptPath,
 		// Carried from the DISCOVERED session, which is the only place it exists.
 		// The index step's session is rebuilt from this result and its source path
 		// is replaced with the written copy's, so a directory-based harness has no

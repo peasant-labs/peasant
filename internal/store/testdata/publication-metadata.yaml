@@ -111,6 +111,10 @@
   kind: source_absent
   action: changed-remote
   readiness: ready
+- name: equivalent-remote-capture
+  kind: source_absent
+  action: equivalent-remote
+  readiness: ready
 - name: incompatible-source-identity
   kind: source_absent
   action: changed-source-id

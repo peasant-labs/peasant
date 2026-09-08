@@ -521,19 +521,6 @@ func setSyntheticSourceModTime(t testing.TB, path string, modified time.Time) {
 	}
 }
 
-func setLocalIngestedTimestamp(t testing.TB, databasePath string, timestamp int64) {
-	t.Helper()
-	connection, err := sqlite.OpenConn(databasePath, sqlite.OpenReadWrite)
-	if err != nil {
-		t.Fatalf("open local update-classification control: %v", err)
-	}
-	updateErr := sqlitex.ExecuteTransient(connection, "UPDATE sessions SET ingested_ms = ?1", &sqlitex.ExecOptions{Args: []any{timestamp}})
-	closeErr := connection.Close()
-	if updateErr != nil || closeErr != nil {
-		t.Fatalf("prepare local update-classification control: %v", errors.Join(updateErr, closeErr))
-	}
-}
-
 func findManagedTranscript(t testing.TB, root, sessionID string) string {
 	t.Helper()
 	want := sessionID + "--transcript." + string(ingest.SourceFormatJSON)

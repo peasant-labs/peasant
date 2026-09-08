@@ -35,7 +35,7 @@ func publicationLocationSnapshotValid(stmt *sqlite.Stmt) bool {
 	if m.Git.Remote != nil {
 		remote = *m.Git.Remote
 	}
-	return string(m.SessionID) == stmt.ColumnText(0) && string(m.HostSlug) == stmt.ColumnText(1) && parent == stmt.ColumnText(2) && string(m.Project.Hash) == stmt.ColumnText(5) && remote == stmt.ColumnText(7) && m.MetadataHash == stmt.ColumnText(11) && m.ContentHash == stmt.ColumnText(12) && m.CWD == stmt.ColumnText(13)
+	return string(m.SessionID) == stmt.ColumnText(0) && string(m.HostSlug) == stmt.ColumnText(1) && parent == stmt.ColumnText(2) && string(m.Project.Hash) == stmt.ColumnText(5) && ingest.NormalizeRemoteForMatch(remote) == ingest.NormalizeRemoteForMatch(stmt.ColumnText(7)) && m.MetadataHash == stmt.ColumnText(11) && m.ContentHash == stmt.ColumnText(12) && m.CWD == stmt.ColumnText(13)
 }
 
 func validateCaptureMetadata(m *schema.UnifiedMetadata, kind ingest.CWDProvenanceKind) error {
@@ -81,6 +81,8 @@ func validatePublicationCapture(entry ingest.StoreEntry) error {
 
 // Validate the resulting relation inside the same transaction as the upsert,
 // before publishing its capture revision. Receipts are not changed by ingest.
+// The shared host dimension retains its first remote spelling; compare remote
+// identity like ingest does, without discarding the capture's source spelling.
 func validateStoredPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) error {
 	m := entry.Metadata
 	return sqlitex.ExecuteTransient(conn, `SELECT s.project_hash, COALESCE(s.parent_id,''), h.host_slug, COALESCE(h.git_remote,'')
@@ -93,7 +95,7 @@ FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.sessio
 			if m.Git.Remote != nil {
 				remote = *m.Git.Remote
 			}
-			if stmt.ColumnText(0) != string(m.Project.Hash) || stmt.ColumnText(1) != parent || stmt.ColumnText(2) != string(m.HostSlug) || stmt.ColumnText(3) != remote {
+			if stmt.ColumnText(0) != string(m.Project.Hash) || stmt.ColumnText(1) != parent || stmt.ColumnText(2) != string(m.HostSlug) || ingest.NormalizeRemoteForMatch(stmt.ColumnText(3)) != ingest.NormalizeRemoteForMatch(remote) {
 				return publicationRepairError("captured metadata disagrees with stored attribution")
 			}
 			return nil
@@ -256,7 +258,7 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 		if m.Git.Remote != nil {
 			remote = *m.Git.Remote
 		}
-		if m.SessionID != id || m.Project.Hash != bundle.ReceiptProjectHash || parent != stmt.ColumnText(6) || string(m.HostSlug) != stmt.ColumnText(7) || remote != stmt.ColumnText(8) || m.CWD != stmt.ColumnText(4) || m.MetadataHash != stmt.ColumnText(12) || m.ContentHash != stmt.ColumnText(13) {
+		if m.SessionID != id || m.Project.Hash != bundle.ReceiptProjectHash || parent != stmt.ColumnText(6) || string(m.HostSlug) != stmt.ColumnText(7) || ingest.NormalizeRemoteForMatch(remote) != ingest.NormalizeRemoteForMatch(stmt.ColumnText(8)) || m.CWD != stmt.ColumnText(4) || m.MetadataHash != stmt.ColumnText(12) || m.ContentHash != stmt.ColumnText(13) {
 			return publicationRepairError("snapshot identity, CWD or integrity columns disagree")
 		}
 		if bundle.CaptureRevision > 0 && bundle.CaptureRevision == stmt.ColumnInt64(3) && bundle.CaptureRevision == stmt.ColumnInt64(9) {

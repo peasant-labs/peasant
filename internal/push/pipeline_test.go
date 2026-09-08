@@ -1127,8 +1127,8 @@ func TestPipeline_EmptyState_AllAlreadyPushed(t *testing.T) {
 	pub := &testutil.StubPublisher{}
 
 	var stderr bytes.Buffer
-	p := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr)
 	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+	p := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr)
 	first, err := p.Run(ctx)
 	if err != nil || first.New != 1 {
 		t.Fatalf("seed authoritative publication: result=%+v err=%v", first, err)
@@ -1295,9 +1295,11 @@ func runScopedEmptyState(t *testing.T, testCase scopedEmptyStateCase, quiet bool
 	}
 	var stderr bytes.Buffer
 	fs := testutil.NewMemFS()
-	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(), runCfg, &stderr)
 	if testCase.World == worldAllPublished {
 		seedMemFS(t, fs, inScope.HostSlug, inScope.SessionID, defaults.HarnessClaudeCode)
+	}
+	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(), runCfg, &stderr)
+	if testCase.World == worldAllPublished {
 		first, err := p.Run(context.Background())
 		if err != nil || first.New != 1 {
 			t.Fatalf("seed scoped authoritative publication: result=%+v err=%v", first, err)

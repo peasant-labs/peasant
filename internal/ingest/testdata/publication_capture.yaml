@@ -137,6 +137,10 @@ cases:
     reindex_remove_source: true
     reindex_mutate_after_read: true
   - <<: *claude
+    name: reindex_unreadable_old_entries_ready
+    reindex_remove_source: true
+    reindex_unreadable_entries: true
+  - <<: *claude
     name: reindex_changed_fallback_held
     reindex_remove_source: true
     reindex_change_managed: true

@@ -697,7 +697,7 @@ selection:
             - main
 `, remote))
 
-	out, errs, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--config=" + cfgPath})
+	out, errs, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--verbose", "--config=" + cfgPath})
 	if err != nil {
 		t.Fatalf("expected exit 0, got error: %v\nstdout: %s\nstderr: %s", err, out, errs)
 	}

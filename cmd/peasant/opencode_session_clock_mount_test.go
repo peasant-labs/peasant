@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/store"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -83,16 +85,12 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 	return document.Cases, nil
 }
 
-// TestOpenCodeSessionClockFixturesMountedHarvest proves both clock fixtures flow
-// through the mounted harvest command and re-ingest when their freshness moves.
-// The absent-clock database re-ingests when its content mtime floor moves,
-// because it has no session clock. The clock-bearing database re-ingests when
-// its session clock moves past the recorded ingest time, because freshness is
-// clock-first for a session that has a clock and reads no row aggregate.
+// Captured source evidence, not the ingest audit clock, controls freshness.
+// Moving only the mtime floor is a no-op; moving source metadata recaptures the
+// session even when the source clock remains older than the ingest audit time.
 func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 	oldModTime := time.Unix(1_700_001_000, 0)
 	newerModTime := time.Unix(1_700_002_000, 0)
-	ingestedBetweenMS := int64(1_700_001_500_000)
 	newRowMS := int64(1_700_002_000_000)
 
 	cases, err := loadOpenCodeSessionClockMountCases(openCodeSessionClockMountData)
@@ -118,6 +116,24 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			}
 
 			storePath := defaults.ResolveDBFilePathWith(commandRoot).String()
+			id, err := ingest.NewSessionID(testCase.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capture := func() ingest.PublicationInputBundle {
+				t.Helper()
+				db, err := store.Open(storePath, store.WithPoolSize(1))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				bundle, err := db.LoadPublicationInput(t.Context(), id)
+				if err != nil || bundle.Readiness != ingest.PublicationReady {
+					t.Fatalf("mounted capture not ready: %+v, %v", bundle, err)
+				}
+				return bundle
+			}
+			before := capture()
 			switch testCase.Mutation {
 			case openCodeSessionClockMutationMTimeFloor:
 				setSyntheticSQLiteContentModTime(t, materialized.Path, newerModTime)
@@ -128,7 +144,6 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 				// session.
 				setSyntheticSQLiteContentModTime(t, materialized.Path, oldModTime)
 			}
-			setLocalIngestedTimestamp(t, storePath, ingestedBetweenMS)
 
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil {
@@ -140,6 +155,10 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			}
 			if !harvestSummaryHasCount(output, 1, status) {
 				t.Fatalf("captured source freshness did not report %s:\n%s", status, output)
+			}
+			after := capture()
+			if status == "unchanged" && after.CaptureRevision != before.CaptureRevision || status == "updated" && after.CaptureRevision <= before.CaptureRevision {
+				t.Fatalf("capture revision did not follow source evidence: %d -> %d", before.CaptureRevision, after.CaptureRevision)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -54,6 +55,7 @@ type publicationCaptureCase struct {
 	ReindexChangeTree        string            `yaml:"reindex_change_tree"`
 	ReindexConcurrentCapture bool              `yaml:"reindex_concurrent_capture"`
 	ReindexMutateAfterRead   bool              `yaml:"reindex_mutate_after_read"`
+	ReindexUnreadableEntries bool              `yaml:"reindex_unreadable_entries"`
 }
 
 func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
@@ -81,7 +83,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		"reindex_opencode_unverified_tree_held": true, "reindex_opencode_changed_tree_held": true,
 		"reindex_stale_source_capture_held": true, "reindex_stale_fallback_capture_held": true,
 		"reindex_opencode_current_projection_ready": true, "reindex_opencode_legacy_projection_ready": true,
-		"reindex_fallback_uses_verified_bytes": true,
+		"reindex_fallback_uses_verified_bytes": true, "reindex_unreadable_old_entries_ready": true,
 	}
 	seen := make(map[string]bool)
 	for _, c := range doc.Cases {
@@ -210,9 +212,9 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			git.Remote = "https://example.com/changed/current.git"
 			run := func() *ingest.PipelineResult {
-				writer := &publicationReindexStore{Store: database, recapture: cfg.Reindex && c.ReindexConcurrentCapture}
+				writer := &publicationReindexStore{Store: database, recapture: cfg.Reindex && c.ReindexConcurrentCapture, unreadableEntries: cfg.Reindex && c.ReindexUnreadableEntries}
 				pipeline, err := ingest.NewPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
-					ingest.WithSalt(installationSalt), ingest.WithStore(database), ingest.WithMetricsStore(writer),
+					ingest.WithSalt(installationSalt), ingest.WithStore(writer), ingest.WithMetricsStore(writer),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {
 					t.Fatal(err)
@@ -445,11 +447,20 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 // Both operations use the production SQLite transactions, including no-op writes.
 type publicationReindexStore struct {
 	*store.Store
-	recapture  bool
-	captureErr error
+	recapture         bool
+	captureErr        error
+	unreadableEntries bool
 }
 
 var _ ingest.SessionEntryBatchStore = (*publicationReindexStore)(nil)
+var _ ingest.PublicationInputReader = (*publicationReindexStore)(nil)
+
+func (s *publicationReindexStore) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (ingest.PublicationInputBundle, error) {
+	if s.unreadableEntries {
+		return ingest.PublicationInputBundle{}, errors.New("old transcript entries are unavailable during rebuild; recover from the verified captured input")
+	}
+	return s.Store.LoadPublicationInput(ctx, id)
+}
 
 func (s *publicationReindexStore) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
 	if s.recapture && len(writes) > 0 {
