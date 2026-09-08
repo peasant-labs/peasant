@@ -214,6 +214,46 @@ stderr-immune regardless of podman version, so on a 4.9.x box the focused
 `TestTranscriptBucketObjectCountMatchesKnownPuts` and the seeded baseline both stay
 green with the fix and (the baseline) RED without it.
 
+### Memory budget
+
+Local `make e2e` and `make demo` require Linux cgroup v2 and a working systemd
+user manager. The wrapper refuses to start tests if setup or limit read-back fails;
+it never falls back to an unbounded local run. A same-user runtime-directory lock
+rejects overlapping wrapper invocations across worktrees. Direct `go test` bypasses
+this hard protection: use Make or `bash scripts/e2e-budget.sh <command>` instead.
+
+Defaults are **8 GiB MemoryMax**, **6 GiB MemoryHigh**, **zero swap** for the
+runner, builds, CLI children, and Village process together. Limits are read back
+from the actual cgroup before the command starts. On normal exit (including test
+failure), the wrapper prints `memory.peak` and `memory.events`. A whole-scope kill
+can prevent that final report; inspect the systemd/kernel journal in that case.
+The Go target is **2 GiB per process**, not a hard RSS limit: race-detector/C
+allocations are not covered by GOMEMLIMIT. The staging arena is **64 MiB** in the
+test process and inherited CLI environments. These are test budgets, not a claim
+that child allocations explain historical parent `e2e.test` RSS.
+
+Set `E2E_MEMORY_MAX` and `E2E_MEMORY_HIGH` in bytes to change the hard budget.
+`GOMEMLIMIT`, `PEASANT_INGEST_ARENA_BYTES`, `GOMAXPROCS` (default 2), and
+`E2E_BUILD_PARALLELISM` (default 2, inherited by child Go builds) are configurable.
+Tests retain `-race` and use `-parallel=1`. For a focused run:
+
+```bash
+make e2e E2E_TEST_FLAGS='-v -run ^TestSkipGateE2E$'
+```
+
+Podman service scopes can escape the runner cgroup. Each harness-created Postgres
+and MinIO container therefore has a separate **1 GiB memory/no-swap** limit.
+Budget up to **10 GiB total** for one runner plus these two services, plus host
+overhead; pre-existing or externally supplied services are not changed. Smaller
+machines must lower the runner budget or use a suitably sized isolated runner.
+
+CI without a systemd user session and non-systemd platforms must explicitly use
+`E2E_MEMORY_MODE=external make e2e` **under an outer runner/container hard limit**.
+The CI workflow uses its isolated runner boundary. This mode keeps portable soft
+defaults and scheduling but does not install or verify an OS hard limit. Do not
+use it as a desktop fallback. Direct tagged test invocations still get the small
+arena and Go soft target from TestMain, but no cgroup or scheduling protection.
+
 ### Environment overrides
 
 | Variable | Default | Meaning |
