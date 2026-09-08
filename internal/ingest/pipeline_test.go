@@ -2345,9 +2345,8 @@ func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
 	}
 }
 
-// TestPipeline_RedactsTranscript_UnparseableJSONLLinePassThrough verifies that an
-// unparseable JSONL line passes through unchanged while the valid line is redacted.
-func TestPipeline_RedactsTranscript_UnparseableJSONLLinePassThrough(t *testing.T) {
+// A completed malformed record must fail acquisition before redaction or writes.
+func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2380,30 +2379,16 @@ func TestPipeline_RedactsTranscript_UnparseableJSONLLinePassThrough(t *testing.T
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.Summary.New != 1 {
-		t.Errorf("Summary.New = %d, want 1", result.Summary.New)
+	if len(result.Sessions) != 1 || result.Sessions[0].Error == nil {
+		t.Fatalf("malformed complete record accepted: %+v", result)
 	}
-
-	// RedactJSON called only for the parseable line.
-	if redactor.JSONCalled != 1 {
-		t.Errorf("markingRedactor.JSONCalled = %d, want 1", redactor.JSONCalled)
+	if redactor.JSONCalled != 0 {
+		t.Fatalf("redacted %d records before failed acquisition", redactor.JSONCalled)
 	}
-
 	base := expectedOutputBase(testOutputDir, testSessionID)
 	transcriptPath := fmt.Sprintf("%s/%s--transcript.%s", base, testSessionID, string(ingest.SourceFormatJSONL))
-	data, err := mfs.ReadFile(transcriptPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%q): %v", transcriptPath, err)
-	}
-	output := string(data)
-
-	// Valid line must be redacted.
-	if !strings.Contains(output, "REDACTED_hello") {
-		t.Errorf("on-disk transcript: valid line not redacted; got:\n%s", output)
-	}
-	// Unparseable line must pass through verbatim.
-	if !strings.Contains(output, "NOT VALID JSON {{{{") {
-		t.Errorf("on-disk transcript: unparseable line not preserved; got:\n%s", output)
+	if _, err := mfs.Stat(transcriptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed capture wrote transcript: %v", err)
 	}
 }
 

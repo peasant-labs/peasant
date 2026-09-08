@@ -164,6 +164,34 @@ table_column_mutations:
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
 allowed_query_statements:
+  - name: captured-session-v2-extended
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session_v2 where id = ?1'
+  - name: captured-session-v2-attribution
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session_v2 where id = ?1'
+  - name: captured-session-v2-record
+    statement: 'select id, parent_id, time_updated from session_v2 where id = ?1'
+  - name: captured-session-v2-parent
+    statement: 'select id, parent_id from session_v2 where id = ?1'
+  - name: captured-session-v2-clock
+    statement: 'select id, time_updated from session_v2 where id = ?1'
+  - name: captured-session-v2-id
+    statement: 'select id from session_v2 where id = ?1'
+  - name: captured-session-extended
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session where id = ?1'
+  - name: captured-session-attribution
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session where id = ?1'
+  - name: captured-session-record
+    statement: 'select id, parent_id, time_updated from session where id = ?1'
+  - name: captured-session-parent
+    statement: 'select id, parent_id from session where id = ?1'
+  - name: captured-session-clock
+    statement: 'select id, time_updated from session where id = ?1'
+  - name: captured-session-sequence
+    statement: 'select seq from event_sequence where aggregate_id = ?1'
+  - name: captured-project
+    statement: 'select id, worktree, vcs, name from project where id in (select project_id from project_directory where directory = ?1) order by id'
+  - name: captured-project-directory
+    statement: 'select project_id, directory, type from project_directory where directory = ?1 order by project_id, directory'
   - name: begin-captured-read
     statement: "begin"
   - name: commit-captured-read

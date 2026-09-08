@@ -67,7 +67,8 @@ VALUES (?, ?, ?, ?)`
 
 	// sqlInsertSession upserts a session row (V23+: opaque_host_id replaces host_slug FK).
 	// The conflict path updates only metadata fields owned by InsertSessions. It
-	// intentionally does not touch index fields such as session_entries_hash;
+	// marks the index stale when captured source evidence changes, but retains
+	// the prior session_entries_hash for the indexer's content comparison;
 	// IndexSessionEntryBatch is the authority for that hash, and the legacy
 	// UpdateIndexState path still clears it when it cannot prove hash/index
 	// atomicity.
@@ -94,6 +95,10 @@ ON CONFLICT(session_id) DO UPDATE SET
     git_tracking = excluded.git_tracking,
     tool_version = excluded.tool_version,
     session_origin = excluded.session_origin,
+    index_version = CASE
+      WHEN excluded.source_fingerprint IS NOT NULL
+       AND sessions.source_fingerprint IS NOT excluded.source_fingerprint THEN 0
+      ELSE sessions.index_version END,
     source_fingerprint = excluded.source_fingerprint`
 
 	sqlInsertSessionBeforeSourceFingerprint = `INSERT INTO sessions (

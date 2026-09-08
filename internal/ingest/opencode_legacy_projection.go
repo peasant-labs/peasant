@@ -164,7 +164,7 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 		if err != nil {
 			return MaterializedTranscript{}, err
 		}
-		return newMaterializedTranscript(metadata, data, session.EventSeq), nil
+		return newSQLiteMaterializedTranscript(metadata, data, session)
 	}
 	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
 		return MaterializedTranscript{}, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
@@ -194,60 +194,90 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	if err != nil {
 		return MaterializedTranscript{}, err
 	}
-	return newMaterializedTranscript(metadata, data, session.EventSeq), nil
+	return newSQLiteMaterializedTranscript(metadata, data, session)
 }
+
+type openCodeSelectedProjectReader interface {
+	ProjectAttributionForDirectory(context.Context, string) (OpenCodeProjectAttribution, error)
+}
+
+var _ openCodeSelectedProjectReader = (*zombiezenOpenCodeSQLiteSource)(nil)
 
 func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, session DiscoveredSession) (DiscoveredSession, error) {
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return session, err
 	}
-	var cursor *OpenCodeSessionRecordCursor
-	for {
-		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{PageSize: pageSize, After: cursor})
-		if readErr != nil {
-			return session, readErr
-		}
-		for _, record := range page.Records {
-			if record.SessionID.String() != string(session.SessionID) {
-				continue
-			}
-			session.Title, session.CWD, session.Agent = record.Title, record.Directory, record.Agent
-			session.Version, session.Slug, session.Cost = record.Version, record.Slug, record.Cost
-			session.TokensIn = int(record.TokensInput)
-			session.TokensOut = int(record.TokensOutput)
-			if record.TimeCreated > 0 {
-				session.CreatedAt = time.UnixMilli(record.TimeCreated)
-			}
-			if record.TimeUpdated > 0 {
-				session.ModTime = time.UnixMilli(record.TimeUpdated)
-			}
-		}
-		if page.Next == nil {
-			break
-		}
-		cursor = page.Next
-	}
-	sequence, err := source.EventSequenceBySession(ctx)
+	linkID, err := NewOpenCodeSessionLinkID(string(session.SessionID))
 	if err != nil {
 		return session, err
 	}
-	if sequence.Present {
-		if capturedSeq, ok := sequence.BySession[string(session.SessionID)]; ok {
-			session.EventSeq = capturedSeq
+	request := OpenCodeSessionRecordPageRequest{PageSize: pageSize, SessionID: &linkID}
+	page, err := source.SessionRecords(ctx, request)
+	if err != nil {
+		return session, err
+	}
+	if page.Table == OpenCodeSessionTableV2 && len(page.PresentSessionIDs) == 0 && len(page.Records) == 0 {
+		request.Selection = OpenCodeSessionRecordsLegacy
+		legacy, readErr := source.SessionRecords(ctx, request)
+		if readErr != nil {
+			return session, readErr
 		}
+		if len(legacy.Records) > 0 {
+			page = legacy
+		}
+	}
+	// Clear discovery-view source fields, including absent and zero values.
+	session.ParentUUID = nil
+	session.Title, session.CWD, session.Agent = "", "", ""
+	session.Version, session.Slug, session.Cost = "", "", 0
+	session.TokensIn, session.TokensOut, session.EventSeq = 0, 0, 0
+	session.CreatedAt, session.ModTime = time.Time{}, time.Time{}
+	session.ProjectWorktree, session.ProjectName = "", ""
+	found := false
+	for _, record := range page.Records {
+		if record.SessionID != linkID {
+			continue
+		}
+		found = true
+		session.Title, session.CWD, session.Agent = record.Title, record.Directory, record.Agent
+		session.Version, session.Slug, session.Cost = record.Version, record.Slug, record.Cost
+		session.TokensIn, session.TokensOut = int(record.TokensInput), int(record.TokensOutput)
+		if record.ParentID.String() != "" {
+			parent, parseErr := NewSessionID(record.ParentID.String())
+			if parseErr != nil {
+				return session, parseErr
+			}
+			session.ParentUUID = &parent
+		}
+		if record.TimeCreated != 0 {
+			session.CreatedAt = time.UnixMilli(record.TimeCreated)
+		}
+		if record.TimeUpdated != 0 {
+			session.ModTime = time.UnixMilli(record.TimeUpdated)
+		}
+	}
+	if !found && page.Supported && (page.HasClock || page.Table == OpenCodeSessionTableV2 || len(page.Skipped) > 0) {
+		return session, fmt.Errorf("capture OpenCode session %q: authoritative session row is missing or malformed; prior stored state retained; restore the source row or retry discovery", session.SessionID)
+	}
+	var attribution OpenCodeProjectAttribution
+	if selected, ok := source.(openCodeSelectedProjectReader); ok {
+		attribution, err = selected.ProjectAttributionForDirectory(ctx, session.CWD)
 	} else {
-		linkID, linkErr := NewOpenCodeSessionLinkID(string(session.SessionID))
-		if linkErr != nil {
-			return session, linkErr
-		}
-		latest, seqErr := source.MaxEventSeq(ctx, linkID)
-		if seqErr != nil {
-			return session, seqErr
-		}
-		if latest.Present {
-			session.EventSeq = latest.Seq
-		}
+		attribution, err = source.ProjectAttribution(ctx)
+	}
+	if err != nil {
+		return session, err
+	}
+	candidates := []openCodeSessionCandidate{{session: session}}
+	attributeOpenCodeProjects(candidates, attribution)
+	session = candidates[0].session
+	latest, err := source.MaxEventSeq(ctx, linkID)
+	if err != nil {
+		return session, err
+	}
+	if latest.Present {
+		session.EventSeq = latest.Seq
 	}
 	return session, nil
 }
