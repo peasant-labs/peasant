@@ -4,6 +4,12 @@ cases:
     fullPrefix: "preserved 世界 "
     fullRepetitions: 6000
     fullTail: MIGRATION-FULL-TAIL
+    publicationRevision: 1
+    fullParent: fixture-session
+    fullProject: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    fullHost: fixture-host
+    fullCwd: /fixture/project
+    triggerModel: migration-trigger-change
     seed:
       - "INSERT INTO projects (project_hash, canonical_cwd) VALUES ('fixture-project', '/fixture/project')"
       - "INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('fixture-host', 'fixture-host')"

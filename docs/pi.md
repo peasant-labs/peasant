@@ -2,11 +2,10 @@
 
 ## Delivery status
 
-Native ingestion, source preview, backend detail/export, and raw WebSocket validation
-are implemented. The published transcript UI dependency currently pinned by Peasant
-does not include Pi presentation. A Pi-capable upstream UI package must be published
-and pinned before the full web build and browser transcript experience can be verified.
-Do not treat a Go-only CLI build as proof of browser support.
+Native ingestion, source preview, backend detail/export, raw WebSocket validation, and
+browser transcript presentation are implemented with the published Schema 0.18 and
+Fairtrade 0.0.19 dependencies. Full-content transcript reads use the verified database
+capture as their authoritative source.
 
 ## Reading recordings
 
@@ -46,10 +45,11 @@ not supply an observation. Sessions with no recorded assistant model remain subj
 the ordinary publication no-model gate.
 
 Original recordings are read-only. Harvest writes ordinary managed copies. `harvest logs`
-copies files without creating an analytics database. `--dry-run` writes nothing. Reindexing
-uses the original when present and falls back to the managed transcript when it is missing.
-Local redaction changes the managed copy, not the original. A later source-present forced
-harvest can read the original again, as with other harnesses.
+copies files without creating an analytics database. `--dry-run` writes nothing. Normal
+source-present forced harvest reads the original again, as with other harnesses. Full-content
+repair first uses retained metadata and artifacts; it does not reconstruct omitted content
+from a bounded preview or fall back to an old source reader. Local redaction changes the
+managed copy, not the original.
 
 An incomplete final JSONL line can be ignored while Pi is writing. Interior corruption,
 duplicate keys or identifiers, unsupported versions, and inconsistent active paths reject
@@ -76,7 +76,7 @@ bare compatibility payload derived from the actual producer output. The fixture 
 complete and partial token accounting, exact zero, cost-only unknown usage, absent tool
 and summary usage, context and summary turns, image placeholders, and non-conversational
 metadata. This synthetic fixture does not establish that every real recording fits the
-metadata limits or that the browser UI is ready. See [the E2E guide](e2e.md).
+metadata limits. See [the E2E guide](e2e.md).
 
 Pi v1/v2 compatibility, first-class images, extension execution, and fork navigation are
 not supported. A separate native tool namespace remains distinct from the tool name through
