@@ -15,6 +15,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// artifactMirrorError distinguishes a failed database mirror from failed file
+// publication/recovery, so successful file ingestion retains its own outcome.
+type artifactMirrorError struct{ error }
+
+func (e *artifactMirrorError) Unwrap() error { return e.error }
+
 func currentArtifactFileHash(root ArtifactRoot, path string) (*string, error) {
 	info, err := root.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -263,15 +269,15 @@ func (p *ArtifactPublisher) reconcileArtifactIntent(ctx context.Context, root Ar
 		}
 	}
 	if intent.NeedsDatabase && p.mirror == nil {
-		return nil, fmt.Errorf("recover committed session %s: database reconciliation is pending; file-only mode did not open a database or discard the acquired source cursor; run a database-backed harvest to finish", intent.SessionID)
+		return nil, &artifactMirrorError{fmt.Errorf("recover committed session %s: database reconciliation is pending; file-only mode did not open a database or discard the acquired source cursor; run a database-backed harvest to finish", intent.SessionID)}
 	}
 	if p.mirror != nil {
 		results := p.mirror.MirrorArtifacts(ctx, []ArtifactMirrorRequest{{Artifact: artifact, EventSeq: intent.EventSeq, Origin: intent.Origin}})
 		if len(results) != 1 || results[0].SessionID != intent.SessionID {
-			return nil, fmt.Errorf("mirror committed session %s: store returned an invalid per-session outcome; files and recovery evidence were retained", intent.SessionID)
+			return nil, &artifactMirrorError{fmt.Errorf("mirror committed session %s: store returned an invalid per-session outcome; files and recovery evidence were retained", intent.SessionID)}
 		}
 		if results[0].Err != nil || !results[0].Mirrored {
-			return nil, fmt.Errorf("mirror committed session %s: %v; committed files were not rolled back; restore database compatibility/access and retry harvest", intent.SessionID, results[0].Err)
+			return nil, &artifactMirrorError{fmt.Errorf("mirror committed session %s: %v; committed files were not rolled back; restore database compatibility/access and retry harvest", intent.SessionID, results[0].Err)}
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(artifact.MetadataJSON, &fields); err != nil {

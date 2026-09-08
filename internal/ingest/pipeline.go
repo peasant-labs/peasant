@@ -116,6 +116,9 @@ type SessionResult struct {
 	Status     DiffStatus // Classified status from diff phase; does NOT change on processing error.
 	OutputPath string     // Final output directory (empty for dry-run, skipped, or error).
 	Error      error      // non-nil if processing failed; check Error before trusting Status.
+	// Prevent the same invocation's stale-index sweep from bypassing a failed
+	// reconciliation. This is execution state, not a serialized success marker.
+	mirrorPending bool
 }
 
 // PipelineConfig holds runtime configuration for the pipeline.
@@ -907,6 +910,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		for _, im := range indexSessions {
 			queued[im.session.SessionID] = true
 		}
+		for _, result := range drainResults {
+			if result.mirrorPending {
+				queued[result.SessionID] = true
+			}
+		}
 		for _, sid := range staleIDs {
 			if queued[sid] {
 				continue
@@ -1009,6 +1017,7 @@ func (p *Pipeline) drainLoop(
 			var committedIDs []SessionID
 			for index := range batch.Results {
 				wr := &batch.Results[index]
+				indexReady := wr.result.Error == nil
 				if wr.result.Error == nil && wr.artifact != nil {
 					publisher, err := p.artifactPublisher(writeLane)
 					if err == nil {
@@ -1023,14 +1032,21 @@ func (p *Pipeline) drainLoop(
 						}
 					}
 					if err != nil {
-						wr.result.Error = fmt.Errorf("reconcile committed session %s: %w; recovery state was retained for a later harvest", wr.result.SessionID, err)
-						p.reportDiagnostic(artifactRecoveryDiagnostic(string(wr.result.SessionID), wr.result.Error))
-						if p.store != nil {
-							errCh <- wr.result.Error
+						indexReady = false
+						wr.result.mirrorPending = true
+						failure := fmt.Errorf("reconcile committed session %s: %w; recovery state was retained for a later harvest", wr.result.SessionID, err)
+						p.reportDiagnostic(artifactRecoveryDiagnostic(string(wr.result.SessionID), failure))
+						var mirrorFailure *artifactMirrorError
+						if errors.As(err, &mirrorFailure) {
+							// Complete file publication still succeeded. Preserve its
+							// counts, but do not authorize indexing on a failed mirror.
+							errCh <- failure
+						} else {
+							wr.result.Error = failure
 						}
 					}
 				}
-				if wr.result.Error == nil && wr.result.OutputPath != "" && wr.meta != nil {
+				if indexReady && wr.result.OutputPath != "" && wr.meta != nil {
 					batchMetas = append(batchMetas, indexedMeta{
 						session:              sessionFromWorkerResult(*wr),
 						startMs:              wr.startMs,
@@ -1953,6 +1969,11 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if err != nil {
 		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
 	}
+	// These fields describe the layout and format selected by this pipeline,
+	// including the redaction path below. Keep metadata and published paths in
+	// agreement with the discovered session used for dependency ordering.
+	meta.ParentUUID = session.ParentUUID
+	meta.Source.Format = session.SourceFormat
 	adapterVersion := p.versionTargets()[session.Harness].AdapterVersion
 	meta.AdapterVersion = &adapterVersion
 	meta.DerivedAt = nil

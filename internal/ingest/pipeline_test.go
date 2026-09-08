@@ -1767,8 +1767,11 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 
 	// Store that always fails on InsertSessions.
 	store := &testutil.StubSessionStore{InsertErr: errors.New("db locked")}
+	metricsStore := testutil.NewStubMetricsStore()
+	metricsStore.StaleIndexSessions = []ingest.SessionID{session.SessionID}
+	indexer := &recordingIndexer{kind: ingest.TranscriptSourceFile}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1791,12 +1794,20 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 	if result.Summary.StoreError == nil {
 		t.Errorf("Summary.StoreError = nil, want non-nil (store returned error)")
 	}
+	if indexer.bytesCalls != 0 || indexer.fileCalls != 0 || result.Summary.Indexed != 0 {
+		t.Errorf("failed mirror authorized indexing through drain or stale sweep: bytes=%d files=%d indexed=%d", indexer.bytesCalls, indexer.fileCalls, result.Summary.Indexed)
+	}
 
 	// Verify filesystem output exists.
 	base := expectedOutputBase(testOutputDir, testSessionID)
 	metaPath := fmt.Sprintf("%s/%s--metadata.json", base, testSessionID)
 	if _, err := mfs.Stat(metaPath); err != nil {
 		t.Errorf("metadata file not found at %q: %v", metaPath, err)
+	}
+	data, err := mfs.ReadFile(metaPath)
+	var written ingest.UnifiedMetadata
+	if err != nil || json.Unmarshal(data, &written) != nil || written.DerivedAt != nil {
+		t.Errorf("failed mirror must retain committed metadata without DerivedAt: %v", err)
 	}
 }
 
