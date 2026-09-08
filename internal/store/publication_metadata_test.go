@@ -263,6 +263,14 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 			readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			bundle, err := s.LoadPublicationInput(readCtx, id)
+			projections, projectionErr := s.LoadPublicationMetadata(readCtx, []ingest.SessionID{id})
+			if projectionErr != nil {
+				t.Fatal(projectionErr)
+			}
+			projection := projections[id]
+			if (projection.Error != nil) != (err != nil) || projection.Readiness != bundle.Readiness || projection.CaptureRevision != bundle.CaptureRevision || !reflect.DeepEqual(projection.Metadata, bundle.Metadata) {
+				t.Fatalf("lightweight projection disagrees with coherent bundle: projection=%+v bundle=%+v error=%v", projection, bundle, err)
+			}
 			if tc.ReadError {
 				if err == nil {
 					t.Fatal("corrupt/conflicting snapshot accepted")

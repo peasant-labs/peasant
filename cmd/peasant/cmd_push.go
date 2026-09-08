@@ -1924,7 +1924,7 @@ func printErrorSummaryTable(w io.Writer, result *push.PushResult) {
 
 type publicationWizardStore interface {
 	push.CandidateStore
-	ingest.PublicationInputReader
+	ingest.PublicationMetadataReader
 }
 
 var _ publicationWizardStore = (*store.Store)(nil)
@@ -1951,10 +1951,15 @@ func buildPushWizardSessions(
 	}
 
 	wizSessions := push.WizardCandidates(sessions, selection)
+	metadataRows := make([]ingest.PushSessionRow, 0, len(wizSessions))
+	for _, session := range wizSessions {
+		metadataRows = append(metadataRows, session.Row)
+	}
+	metadata, metadataErr := push.LoadPublicationMetadata(ctx, db, metadataRows)
 	for i := range wizSessions {
 		sess := wizSessions[i].Row
-		input, readErr := push.LoadReadyPublicationInput(ctx, db, sess.SessionID)
-		if readErr != nil {
+		input := metadata[sess.SessionID]
+		if metadataErr != nil || !push.PublicationMetadataReady(input) {
 			wizSessions[i].NeedsIngest = true
 			continue
 		}
@@ -2155,7 +2160,7 @@ type redactionRecord struct {
 func buildRedactionRecord(
 	ctx context.Context,
 	sessions []ingest.PushSessionRow,
-	db ingest.PublicationInputReader,
+	db ingest.PublicationMetadataReader,
 	level redact.RedactionLevel,
 ) redactionRecord {
 	record := redactionRecord{
@@ -2163,9 +2168,9 @@ func buildRedactionRecord(
 		Level:          level,
 		RuleSetVersion: redact.RuleSetVersion,
 	}
+	metadata, err := push.LoadPublicationMetadata(ctx, db, sessions)
 	for _, sess := range sessions {
-		_, readErr := push.LoadReadyPublicationInput(ctx, db, sess.SessionID)
-		if readErr != nil {
+		if err != nil || !push.PublicationMetadataReady(metadata[sess.SessionID]) {
 			record.MissingMetadataCount++
 		}
 	}

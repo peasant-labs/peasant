@@ -26,3 +26,30 @@ func LoadReadyPublicationInput(ctx context.Context, reader ingest.PublicationInp
 	}
 	return input, nil
 }
+
+// LoadPublicationMetadata prepares list candidates for one lightweight store
+// read. Invalid IDs remain unavailable; they cannot broaden the requested set.
+func LoadPublicationMetadata(ctx context.Context, reader ingest.PublicationMetadataReader, rows []ingest.PushSessionRow) (map[string]ingest.PublicationMetadata, error) {
+	ids := make([]ingest.SessionID, 0, len(rows))
+	for _, row := range rows {
+		id, err := ingest.NewSessionID(row.SessionID)
+		if err == nil {
+			ids = append(ids, id)
+		}
+	}
+	projections, err := reader.LoadPublicationMetadata(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]ingest.PublicationMetadata, len(projections))
+	for id, projection := range projections {
+		result[id.String()] = projection
+	}
+	return result, nil
+}
+
+// PublicationMetadataReady adds the consumer's mandatory model check to the
+// store's capture-integrity verdict, just as LoadReadyPublicationInput does.
+func PublicationMetadataReady(value ingest.PublicationMetadata) bool {
+	return value.Error == nil && value.Readiness == ingest.PublicationReady && value.Metadata.Model != ""
+}
