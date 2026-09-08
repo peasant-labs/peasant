@@ -194,6 +194,17 @@ type SessionIndexState struct {
 	IndexedAt                  *int64
 	IndexedInputHash           *string
 	SessionEntriesHash         *string
+	// PublicationBound reports that the stored index write is bound to the
+	// current publication metadata capture. It is read in the same snapshot as
+	// the fields above, and it is the revision half of publication readiness:
+	// readiness ANDs a current metadata schema version on top of it, because
+	// binding and schema currency are different facts. The store owns the one
+	// predicate both sides use (store.publicationBindingSQL).
+	PublicationBound bool
+	// ContentStatus is the stored session_content_captures.status for this
+	// session. A session with no capture row reads as ContentCaptureIncomplete:
+	// absent content is never evidence of a complete capture.
+	ContentStatus ContentCaptureStatus
 }
 
 // StaleIndexWorkError means the captured SQL state changed before the index

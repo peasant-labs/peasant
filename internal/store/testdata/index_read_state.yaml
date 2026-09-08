@@ -1,0 +1,88 @@
+# Read-state cases for SessionIndexState.PublicationBound and ContentStatus.
+# One session per case. The store seeds the content capture through the
+# production writers, then the case sets the publication columns.
+#
+# publicationRevision is the captured metadata revision. sessionRevision and
+# indexedRevision are the two sessions columns the binding predicate compares
+# against it. A zero publicationRevision means the session has no captured
+# publication metadata row at all.
+metadataHash: 1111111111111111111111111111111111111111111111111111111111111111
+contentHash: 2222222222222222222222222222222222222222222222222222222222222222
+requiredNames:
+  - bound-with-complete-capture
+  - bound-with-preview-capture
+  - unbound-by-session-revision
+  - unbound-by-indexed-revision
+  - unbound-by-provenance
+  - unbound-without-metadata-row
+  - no-capture-row-reads-incomplete
+  - failed-capture-reads-failed
+cases:
+  - name: bound-with-complete-capture
+    capture: full
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: source_exact
+    wantBound: true
+    wantStatus: complete
+  - name: bound-with-preview-capture
+    capture: preview
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: source_workspace
+    wantBound: true
+    wantStatus: incomplete
+  - name: unbound-by-session-revision
+    capture: full
+    publicationRevision: 7
+    sessionRevision: 8
+    indexedRevision: 7
+    provenance: source_exact
+    wantBound: false
+    wantStatus: complete
+  # A realistic stale state: indexed at 6 while the metadata is now at 7. A
+  # zero here could not tell equality from a bare "is positive" test.
+  - name: unbound-by-indexed-revision
+    capture: full
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 6
+    provenance: source_exact
+    wantBound: false
+    wantStatus: complete
+  - name: unbound-by-provenance
+    capture: full
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: not_recovered
+    wantBound: false
+    wantStatus: complete
+  - name: unbound-without-metadata-row
+    capture: full
+    publicationRevision: 0
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: source_exact
+    wantBound: false
+    wantStatus: complete
+  - name: no-capture-row-reads-incomplete
+    capture: none
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: source_exact
+    wantBound: true
+    wantStatus: incomplete
+  # The third capture status must read back through the new column too.
+  - name: failed-capture-reads-failed
+    capture: preview
+    statusOverride: failed
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: source_exact
+    wantBound: true
+    wantStatus: failed

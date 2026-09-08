@@ -639,11 +639,12 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
+	// Readiness is the publication binding plus a current metadata schema
+	// version. The binding half is shared, so it cannot drift from the binding
+	// that captured index state reports.
 	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version,
 s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
-CASE WHEN p.capture_revision > 0 AND p.capture_revision=s.publication_capture_revision
- AND p.capture_revision=s.indexed_publication_capture_revision AND p.schema_version=?
- AND s.cwd_provenance_kind!='not_recovered' THEN 1 ELSE 0 END,
+CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
 p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
 c.status,c.full_capture_sha256,c.publication_capture_revision,s.adapter_version
 FROM sessions s

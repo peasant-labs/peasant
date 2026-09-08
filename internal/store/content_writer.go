@@ -66,6 +66,12 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	if err != nil {
 		return out, err
 	}
+	// This build refuses the conversion write rather than letting it fall
+	// through to the replacing writer, which would discard exactly the
+	// producing parser evidence a conversion has to preserve.
+	if mode == ingest.SessionEntryWriteFormatConversion {
+		return out, fmt.Errorf("store content write: session %s requested the format-conversion write mode, which this build declares but does not serve yet; the stored entries and producer evidence are unchanged; use replace_all for a parser run or content_backfill for authoritative full entries", w.SessionID)
+	}
 	if !w.RequireFullContent && mode == ingest.SessionEntryWriteContentBackfill {
 		return out, fmt.Errorf("store content backfill requires authoritative full entries; prior capture unchanged; enable RequireFullContent after strict parsing")
 	}

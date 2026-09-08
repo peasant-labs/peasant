@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -71,11 +72,19 @@ func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionI
 	return readCapture(conn, id)
 }
 func (s *Store) ListContentCaptureIncompleteSessions(ctx context.Context, limit int) ([]ingest.SessionID, error) {
-	return s.ListContentCaptureIncompleteSessionsAfter(ctx, "", limit)
+	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", limit)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]ingest.SessionID, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.SessionID)
+	}
+	return ids, nil
 }
 
 // After is an exclusive keyset cursor. Failed targets cannot starve later ones.
-func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int) ([]ingest.SessionID, error) {
+func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int) ([]ingest.ContentCaptureIncompleteSession, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -84,16 +93,24 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 		return nil, err
 	}
 	defer s.pool.Put(conn)
-	var ids []ingest.SessionID
-	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: []any{string(after), limit}, ResultFunc: func(st *sqlite.Stmt) error {
+	var targets []ingest.ContentCaptureIncompleteSession
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id,s.model_harness,s.start_ms FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: []any{string(after), limit}, ResultFunc: func(st *sqlite.Stmt) error {
 		id, e := ingest.NewSessionID(st.ColumnText(0))
 		if e != nil {
 			return e
 		}
-		ids = append(ids, id)
+		var harness schema.Harness
+		if e := harness.UnmarshalText([]byte(st.ColumnText(1))); e != nil || !harness.IsKnown() {
+			// One unreadable row must never starve the rest of the page: this
+			// listing promises that a failed target cannot block later ones.
+			slog.Warn("store: session records a harness this build does not recognize; it was left out of the content recovery targets and every other target still stands; upgrade Peasant or restore valid session metadata before harvesting it",
+				"session_id", id, "model_harness", st.ColumnText(1))
+			return nil
+		}
+		targets = append(targets, ingest.ContentCaptureIncompleteSession{SessionID: id, Harness: harness, StartMs: st.ColumnInt64(2)})
 		return nil
 	}})
-	return ids, err
+	return targets, err
 }
 
 type contentManifest struct {
@@ -217,6 +234,12 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 	mode, err := ingest.NewSessionEntryReadMode(string(opts.Mode))
 	if err != nil {
 		return page, err
+	}
+	// This build refuses the available-content read rather than serving a
+	// bounded preview page under a mode that promises full content whenever the
+	// capture is complete. A silent preview would look like the whole session.
+	if mode == ingest.SessionEntryReadAvailable {
+		return page, fmt.Errorf("store content page: session %s requested the available-content read mode, which this build declares but does not serve yet; no entries were read; use preview for bounded content or full_content for a verified complete capture", id)
 	}
 	if opts.FromIndex < 0 || opts.Limit < 0 || opts.SoftMaxBytes < 0 {
 		return page, fmt.Errorf("store content page: negative cursor or budget; no entries read; use nonnegative options")

@@ -88,6 +88,12 @@ type ArtifactPublication struct {
 	DebugFiles            map[string][]byte
 	EventSeq              *int64
 	Origin                *sessionorigin.Origin
+	// SourceEvidence is the file-only harvest freshness marker. It records what
+	// the harvest actually read from the retained files, so a later run can tell
+	// whether the source changed without opening a native provider database. It
+	// is written in the same intent as the metadata artifact it describes, so a
+	// marker never outlives its artifact. Empty means no marker was recorded.
+	SourceEvidence []byte
 }
 
 func artifactKey(sid SessionID) string { return schema.ComputeTranscriptHash([]byte(sid)) }

@@ -56,6 +56,8 @@ requiredNames:
   - hash-stamp-failure-keeps-input-proof
   - null-artifact-became-known
   - null-artifact-unproven-write
+  - content-status-changed
+  - publication-binding-changed
 cases:
   - {name: captured-current-state}
   - {name: captured-never-indexed-state, noIndex: true}
@@ -125,3 +127,16 @@ cases:
     mutationSQL: UPDATE sessions SET artifact_hash = printf('%064d', 1) WHERE session_id = ?
     stale: true
   - {name: null-artifact-unproven-write, noArtifact: true, noProof: true}
+  # The two fields the conditional write added. Each isolates its own field:
+  # the content case leaves every revision untouched, and the binding case
+  # keeps PublicationCaptureRevision at 1 before and after, so only
+  # PublicationBound flips.
+  - name: content-status-changed
+    mutationSQL: UPDATE session_content_captures SET status = 'failed' WHERE session_id = ?
+    stale: true
+  - name: publication-binding-changed
+    seedSQL:
+      - INSERT INTO session_publication_metadata (session_id,capture_revision,schema_version,metadata_json,metadata_hash,content_hash,captured_at) VALUES (?,1,1,'{}',printf('%064d',1),printf('%064d',2),1)
+      - UPDATE sessions SET publication_capture_revision = 1, cwd_provenance_kind = 'source_exact' WHERE session_id = ?
+    mutationSQL: UPDATE sessions SET indexed_publication_capture_revision = 1 WHERE session_id = ?
+    stale: true

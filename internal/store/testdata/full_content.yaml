@@ -47,3 +47,14 @@ shape_changes:
 capture_format_rejections:
   - name: unknown_capture_format
     format: not-a-capture-format
+# Modes this build declares but does not serve. Each must refuse and leave the
+# stored capture and its producer evidence untouched. read_mode and write_mode
+# are parsed through the ingest constructors, so a member that disappears from
+# a closed set fails the fixture before any store call.
+mode_refusals:
+  - name: available_read_refused
+    read_mode: available
+    want_error_contains: "does not serve yet"
+  - name: format_conversion_write_refused
+    write_mode: format_conversion
+    want_error_contains: "producer evidence are unchanged"

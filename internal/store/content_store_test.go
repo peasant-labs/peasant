@@ -39,11 +39,35 @@ type contentFormatCase struct {
 	Name   string
 	Format string
 }
+
+// contentModeRefusalCase names one declared-but-unserved content mode. Exactly
+// one of ReadMode and WriteMode is set; the empty one selects no operation.
+type contentModeRefusalCase struct {
+	Name              string                       `yaml:"name"`
+	ReadMode          ingest.SessionEntryReadMode  `yaml:"read_mode"`
+	WriteMode         ingest.SessionEntryWriteMode `yaml:"write_mode"`
+	WantErrorContains string                       `yaml:"want_error_contains"`
+}
+
 type contentFixtures struct {
 	Cases                   []contentCase
 	Corruptions             []contentSQLCase
-	ShapeChanges            []contentSQLCase    `yaml:"shape_changes"`
-	CaptureFormatRejections []contentFormatCase `yaml:"capture_format_rejections"`
+	ShapeChanges            []contentSQLCase         `yaml:"shape_changes"`
+	CaptureFormatRejections []contentFormatCase      `yaml:"capture_format_rejections"`
+	ModeRefusals            []contentModeRefusalCase `yaml:"mode_refusals"`
+}
+
+// contentCaseNamed selects an entry shape by NAME, so this fixture's order
+// never decides what another test seeds.
+func contentCaseNamed(t *testing.T, fixtures contentFixtures, name string) contentCase {
+	t.Helper()
+	for _, c := range fixtures.Cases {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("full content fixtures have no case %q; restore it or name an existing case", name)
+	return contentCase{}
 }
 
 func loadContentFixtures(t *testing.T) contentFixtures {
@@ -65,7 +89,26 @@ func loadContentFixtures(t *testing.T) contentFixtures {
 	for _, c := range f.CaptureFormatRejections {
 		names[c.Name] = true
 	}
-	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format"} {
+	for _, c := range f.ModeRefusals {
+		names[c.Name] = true
+		if (c.ReadMode == "") == (c.WriteMode == "") {
+			t.Fatalf("mode refusal %q must name exactly one of read_mode and write_mode", c.Name)
+		}
+		if c.ReadMode != "" {
+			if _, err := ingest.NewSessionEntryReadMode(string(c.ReadMode)); err != nil {
+				t.Fatalf("mode refusal %q: %v", c.Name, err)
+			}
+		}
+		if c.WriteMode != "" {
+			if _, err := ingest.NewSessionEntryWriteMode(string(c.WriteMode)); err != nil {
+				t.Fatalf("mode refusal %q: %v", c.Name, err)
+			}
+		}
+		if c.WantErrorContains == "" {
+			t.Fatalf("mode refusal %q must state the refusal it expects", c.Name)
+		}
+	}
+	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format", "available_read_refused", "format_conversion_write_refused"} {
 		if !names[name] {
 			t.Fatalf("required fixture %s missing", name)
 		}
@@ -271,9 +314,12 @@ func TestFullContentLegacyBackfillAndKeyset(t *testing.T) {
 	if err != nil || len(targets) != 1 || targets[0] != id {
 		t.Fatalf("first targets: %v %v", targets, err)
 	}
-	targets, err = s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
-	if err != nil || len(targets) != 1 || targets[0] != next {
-		t.Fatalf("later targets: %v %v", targets, err)
+	later, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
+	if err != nil || len(later) != 1 || later[0].SessionID != next {
+		t.Fatalf("later targets: %v %v", later, err)
+	}
+	if later[0].Harness != ingest.HarnessClaudeCode || later[0].StartMs != 1700000000000 {
+		t.Fatalf("later target lost its harness or start time: %+v", later[0])
 	}
 	hash := sessionEntriesHash(t, s, id)
 	writeFull(t, s, id, entries, ingest.SessionEntryWriteContentBackfill)
@@ -392,6 +438,54 @@ func TestFullContentWriteRefusesUnknownCaptureFormat(t *testing.T) {
 			}
 			if after := capture(t, s, id); !reflect.DeepEqual(after, before) {
 				t.Fatalf("refused write changed the stored capture: %+v want %+v", after, before)
+			}
+		})
+	}
+}
+
+// TestContentModeRefusalsPreserveStoredCapture proves that a mode this build
+// declares but does not serve refuses with an actionable error, serves no
+// entries, and leaves the stored capture and its producer evidence untouched.
+func TestContentModeRefusalsPreserveStoredCapture(t *testing.T) {
+	fixtures := loadContentFixtures(t)
+	for _, refusal := range fixtures.ModeRefusals {
+		t.Run(refusal.Name, func(t *testing.T) {
+			t.Parallel()
+			s := openTestStore(t)
+			ctx := context.Background()
+			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+			seedSession(t, s, string(id))
+			entries := contentEntries(id, contentCaseNamed(t, fixtures, "long_unicode"))
+			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			before, beforeHash := capture(t, s, id), sessionEntriesHash(t, s, id)
+
+			var err error
+			switch {
+			case refusal.ReadMode != "":
+				var page ingest.SessionEntryReadPage
+				page, err = s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: refusal.ReadMode})
+				if len(page.Entries) != 0 {
+					t.Fatalf("refused read served %d entries", len(page.Entries))
+				}
+			case refusal.WriteMode != "":
+				err = s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+					SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+					RequireFullContent: true, Mode: refusal.WriteMode,
+					IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
+					IndexedAtMs:    1700000009000,
+				}})[0].Err
+			}
+			if err == nil {
+				t.Fatalf("unserved mode was accepted")
+			}
+			if !strings.Contains(err.Error(), refusal.WantErrorContains) {
+				t.Fatalf("refusal %q does not tell the caller %q", err, refusal.WantErrorContains)
+			}
+			if after := capture(t, s, id); after != before {
+				t.Fatalf("refused mode changed the stored capture:\nbefore %+v\nafter  %+v", before, after)
+			}
+			if sessionEntriesHash(t, s, id) != beforeHash {
+				t.Fatal("refused mode changed the stored entry projection")
 			}
 		})
 	}
