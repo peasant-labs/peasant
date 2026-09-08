@@ -13,10 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/adapter_replay.yaml
-var adapterReplayYAML []byte
+//go:embed testdata/adapter_transcript.yaml
+var adapterTranscriptYAML []byte
 
-type adapterReplayFixtures struct {
+type adapterTranscriptFixtures struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	Cases         []struct {
 		Name          string         `yaml:"name"`
@@ -30,29 +30,29 @@ type adapterReplayFixtures struct {
 	} `yaml:"cases"`
 }
 
-func LoadAdapterReplayFixtures(t *testing.T) adapterReplayFixtures {
+func LoadAdapterTranscriptFixtures(t *testing.T) adapterTranscriptFixtures {
 	t.Helper()
-	var fixtures adapterReplayFixtures
-	if err := yaml.Unmarshal(adapterReplayYAML, &fixtures); err != nil {
+	var fixtures adapterTranscriptFixtures
+	if err := yaml.Unmarshal(adapterTranscriptYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)
 	for _, row := range fixtures.Cases {
 		if row.Name == "" || seen[row.Name] {
-			t.Fatalf("invalid replay fixture %q", row.Name)
+			t.Fatalf("invalid transcript extraction fixture %q", row.Name)
 		}
 		seen[row.Name] = true
 	}
 	for _, name := range fixtures.RequiredNames {
 		if !seen[name] {
-			t.Fatalf("missing replay fixture %q", name)
+			t.Fatalf("missing transcript extraction fixture %q", name)
 		}
 	}
 	return fixtures
 }
 
-func TestAdaptersReplayRetainedJSONL(t *testing.T) {
-	for _, row := range LoadAdapterReplayFixtures(t).Cases {
+func TestAdaptersExtractMetadataFromTranscriptJSONL(t *testing.T) {
+	for _, row := range LoadAdapterTranscriptFixtures(t).Cases {
 		t.Run(row.Name, func(t *testing.T) {
 			harness := row.Harness
 			if _, ok := ingest.DefaultAdapterRegistry[harness]; !ok {
@@ -72,14 +72,15 @@ func TestAdaptersReplayRetainedJSONL(t *testing.T) {
 			}
 			// Nil native dependencies make accidental filesystem/Git access fail.
 			adapter := ingest.DefaultAdapterRegistry[harness](nil, nil, salt.Salt{})
-			replayer, ok := adapter.(ingest.RetainedInputReplayer)
+			extractor, ok := adapter.(ingest.TranscriptMetadataExtractor)
 			if !ok {
-				t.Fatal("adapter has no retained replay capability")
+				t.Fatal("adapter has no transcript metadata extraction capability")
 			}
-			metadata, transcript, err := replayer.ReplayRetained(t.Context(), []byte(row.Transcript), original)
+			data := []byte(row.Transcript)
+			metadata, err := extractor.ExtractMetadataFromTranscript(t.Context(), data, original)
 			if row.Insufficient {
 				var insufficient *ingest.InsufficientRetainedInputError
-				if !errors.As(err, &insufficient) || metadata != nil || transcript != nil {
+				if !errors.As(err, &insufficient) || metadata != nil {
 					t.Fatalf("expected insufficient retained input, got %+v %v", metadata, err)
 				}
 				return
@@ -87,21 +88,21 @@ func TestAdaptersReplayRetainedJSONL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(transcript, []byte(row.Transcript)) {
-				t.Fatal("replay changed retained transcript bytes")
+			if !bytes.Equal(data, []byte(row.Transcript)) {
+				t.Fatal("metadata extraction changed retained transcript bytes")
 			}
 			if metadata.Stats.TurnCount != row.Turns || metadata.Stats.TokensIn != row.TokensIn || metadata.Stats.TokensOut != row.TokensOut {
-				t.Fatalf("replay did not parse represented statistics: %+v", metadata.Stats)
+				t.Fatalf("metadata extraction did not parse represented statistics: %+v", metadata.Stats)
 			}
 			if metadata.SessionID != original.SessionID || metadata.HostSlug != original.HostSlug || !reflect.DeepEqual(metadata.Project, original.Project) || !reflect.DeepEqual(metadata.Git, original.Git) || !reflect.DeepEqual(metadata.Source, original.Source) || metadata.Stats.SubagentCount != original.Stats.SubagentCount || metadata.Timestamp.Ingested == nil || *metadata.Timestamp.Ingested != ingested || metadata.AdapterVersion != nil {
-				t.Fatalf("replay replaced retained context or producer evidence: %+v", metadata)
+				t.Fatalf("metadata extraction replaced retained context or producer evidence: %+v", metadata)
 			}
 			if row.PreserveTimes && (metadata.Timestamp.Start != original.Timestamp.Start || metadata.Timestamp.End != original.Timestamp.End) {
-				t.Fatal("replay replaced retained fallback timestamps")
+				t.Fatal("metadata extraction replaced retained fallback timestamps")
 			}
 			after, err := json.Marshal(original)
 			if err != nil || !bytes.Equal(before, after) {
-				t.Fatal("replay mutated original metadata")
+				t.Fatal("metadata extraction mutated original metadata")
 			}
 		})
 	}

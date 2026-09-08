@@ -128,10 +128,10 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	metadata, metadataErr := p.metadataForRewrite(entry.Session)
 	metadataPath, pathErr := p.findMetadataPath(entry.Session)
 	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !(p.config.Force && !p.config.Reindex) && !p.nativeInputChanged(entry.Session, metadata) {
-		replayed := p.processRetainedSession(ctx, entry.Session, metadataPath)
+		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath)
 		var insufficient *InsufficientRetainedInputError
-		if replayed.result.Error == nil || !errors.As(replayed.result.Error, &insufficient) {
-			return replayed
+		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
+			return refreshed
 		}
 	}
 	var result workerResult

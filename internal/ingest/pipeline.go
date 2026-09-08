@@ -1812,8 +1812,8 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 		}
 		return DiffNew
 	}
-	// A retained replay preserves an unknown acquisition clock. Once its adapter
-	// revision is current, a discovered native file still needs acquisition: no
+	// Extraction from retained input preserves an unknown acquisition clock.
+	// Once its adapter revision is current, a discovered native file still needs acquisition: no
 	// previous ingest time proves that its content was already consumed.
 	if existing != nil && !session.ModTime.IsZero() && (existing.Timestamp.Ingested == nil || *existing.Timestamp.Ingested <= 0) {
 		if isActive {
@@ -1958,7 +1958,7 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) (string, error) {
 	return "", nil // not found
 }
 
-// processSession extracts metadata and atomically writes output for one session.
+// processNativeSession extracts metadata and atomically writes output for one session.
 // Returns a workerResult carrying the SessionResult, metadata, redacted transcript
 // bytes (for JSONL/JSON providers — nil for directory-based providers), the output
 // transcript path, and the session start timestamp.
@@ -3462,8 +3462,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		return result, nil
 	}
 
-	// Stage 4: compatible metadata needs only INDEX+COMPUTE. Older metadata keeps
-	// its native-refresh rule, with retained input as fallback when unavailable.
+	// Stage 4: current adapter metadata needs only INDEX+COMPUTE. Stale adapters
+	// extract from sufficient retained input; historical metadata keeps its native
+	// refresh rule and supported retained indexing when that input is unavailable.
 	var fallbackTargets []reindexTarget
 
 	// Build maps for parent-before-child ordering (same pattern as normal pipeline).

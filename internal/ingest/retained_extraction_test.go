@@ -11,16 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/adapter_replay.yaml
-var adapterReplayPublicationYAML []byte
+//go:embed testdata/adapter_transcript.yaml
+var retainedExtractionYAML []byte
 
-func TestRetainedReplayPublicationPreservesContext(t *testing.T) {
+func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	var fixture struct {
 		Metadata        string   `yaml:"publicationMetadata"`
 		Transcript      string   `yaml:"publicationTranscript"`
 		PreservedValues []string `yaml:"preservedValues"`
 	}
-	if err := yaml.Unmarshal(adapterReplayPublicationYAML, &fixture); err != nil {
+	if err := yaml.Unmarshal(retainedExtractionYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := NewManagedArtifact([]byte(fixture.Metadata), []byte(fixture.Transcript))
@@ -64,10 +64,10 @@ func TestRetainedReplayPublicationPreservesContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	if current.Metadata.AdapterVersion == nil || *current.Metadata.AdapterVersion != 2 || current.Metadata.Stats.TurnCount != 1 {
-		t.Fatalf("replay output was not committed: %+v", current.Metadata)
+		t.Fatalf("metadata extraction output was not committed: %+v", current.Metadata)
 	}
 	if current.Metadata.Timestamp.Ingested == nil || *current.Metadata.Timestamp.Ingested != *artifact.Metadata.Timestamp.Ingested || current.Metadata.Source != artifact.Metadata.Source || current.Metadata.DerivedAt != nil || !bytes.Equal(current.Transcript, artifact.Transcript) {
-		t.Fatal("replay changed native evidence or claimed database completion")
+		t.Fatal("metadata extraction changed native evidence or claimed database completion")
 	}
 	for _, marker := range fixture.PreservedValues {
 		if !bytes.Contains(current.MetadataJSON, []byte(marker)) {

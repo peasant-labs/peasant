@@ -15,6 +15,14 @@ unchanged. Explicit harness/session/since filters apply independently of saved
 discovery selection. Dry-run bypasses recovery/bootstrap, and file-only runs do
 not open a database. Reconciled IDs are candidates, never index success claims.
 
+Adapter refresh is independent of indexer eligibility. Claude, Codex and Cursor
+implement `ExtractMetadataFromTranscript` over captured JSONL and original
+metadata context; publication keeps those transcript bytes. New native input
+takes precedence. Strike and OpenCode require native input when retained context
+is insufficient. Failed native acquisition preserves the prior artifact and
+adapter stamp, reports a diagnostic and permits supported retained indexing.
+Retained extraction preserves the acquired ingest clock, cursor and origin.
+
 ```
 DISCOVER ─▶ DIFF ─▶ FILTER ─┬─▶ EXTRACT+WRITE (N workers) ─▶ StagingBuffer.Add()
                              │                                       │ lock-free CAS
@@ -43,7 +51,7 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 
 | # | Stage | Concurrency | Fatal? | Description |
 |---|-------|-------------|--------|-------------|
-| 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. All-fail is fatal; partial OK. |
+| 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. If all fail, usable retained sessions still receive maintenance; initial import without usable input fails. |
 | 2 | DIFF | Sequential | No | Classify: New / Updated / Unchanged / Active. |
 | 3 | FILTER | Sequential | No | Skip Unchanged + Active; resolve FK parent deps. |
 | 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, replace owned files under an OS lock; complete metadata commits last. |
@@ -54,7 +62,8 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 | 8 | REPORT | Sequential | No | Aggregate counts → `PipelineResult`. |
 | 9 | AUDIT | Sequential | Best-effort | Write `ingest_log` row. |
 
-**Best-effort** = cannot fail the pipeline. Logs warning, continues. Only total DISCOVER failure is fatal.
+**Best-effort** = cannot fail the pipeline. Logs warning, continues. Total DISCOVER
+failure is fatal only when no usable retained session can receive maintenance.
 
 ---
 
@@ -84,7 +93,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | C1 | Root-Owns-Subtree | One goroutine processes a root + its entire BFS subtree. Prevents directory races on `{hostSlug}/{parentID}/`. |
 | C2 | Parent-Before-Child DB | FK ordering via `StagingBuffer.Commit()`: children invisible to `Drain()` until parent committed. |
 | C3 | Atomic File Writes | Root-confined owned-file publication uses OS advisory locks, synced temporary intents and metadata-last commit. Never delete a session subtree; children and unrelated files are not owned. Acquire file ownership before entering the serial database writer lane. |
-| C4 | Metadata Compatibility | Versions below 9 require native refresh. Versions 9/10 remain readable without a version-only adapter call or metadata rewrite; absent adapter provenance stays unknown. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
+| C4 | Metadata Compatibility | Versions below 9 require native refresh. Reading metadata 9/10 alone causes no adapter call or metadata rewrite. An omitted adapter version uses baseline 1 for refresh eligibility but stays unknown in provenance until actual extraction succeeds. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
 | C5 | Arena Concurrent Drain | `Add()` uses bounded exponential backoff (1ms→16ms) when arena full. drainLoop goroutine runs concurrently with workers; arena only recycles via `AckBatch`. |
 | C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. |
 
@@ -114,7 +123,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 
 | Stage | Behavior |
 |-------|----------|
-| DISCOVER (all fail) | **Fatal** — pipeline returns error |
+| DISCOVER (all fail) | Continue maintenance of usable retained sessions; **fatal** when no usable retained input exists |
 | DISCOVER (partial) | Continue with available providers |
 | DIFF (corrupt) | Treat as `DiffNew` (re-ingest) |
 | EXTRACT+WRITE | Per-session error in `SessionResult.Error`; continues |
