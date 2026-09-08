@@ -1,0 +1,354 @@
+package store_test
+
+import (
+	"context"
+	_ "embed"
+	"errors"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
+)
+
+//go:embed testdata/full_content.yaml
+var fullContentYAML []byte
+
+type contentCase struct {
+	Name            string
+	Prefix          string
+	Repeats         int
+	Tail            string
+	ReplacementTail string `yaml:"replacement_tail"`
+	Entries         int
+	Budget          int64
+}
+type contentSQLCase struct {
+	Name string
+	SQL  string
+}
+type contentFixtures struct {
+	Cases        []contentCase
+	Corruptions  []contentSQLCase
+	ShapeChanges []contentSQLCase `yaml:"shape_changes"`
+}
+
+func loadContentFixtures(t *testing.T) contentFixtures {
+	t.Helper()
+	var f contentFixtures
+	if err := yaml.Unmarshal(fullContentYAML, &f); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, c := range f.Cases {
+		names[c.Name] = true
+	}
+	for _, c := range f.Corruptions {
+		names[c.Name] = true
+	}
+	for _, c := range f.ShapeChanges {
+		names[c.Name] = true
+	}
+	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output"} {
+		if !names[name] {
+			t.Fatalf("required fixture %s missing", name)
+		}
+	}
+	return f
+}
+func contentEntries(id ingest.SessionID, c contentCase) []schema.SessionEntry {
+	entries := batchTestEntries(id, "full", c.Entries)
+	for i := range entries {
+		entries[i].ContentPreview = strPtr(strings.Repeat(c.Prefix, c.Repeats) + c.Tail)
+		entries[i].ToolInput = strPtr(`{"path":"` + strings.Repeat("segment/", 400) + `file.go"}`)
+		entries[i].ToolOutput = strPtr(strings.Repeat("tool-output", 500))
+		entries[i].Extra = strPtr(`{"model_id":"synthetic","command_name":"inspect","command_args":"synthetic"}`)
+	}
+	return entries
+}
+func writeFull(t *testing.T, s *store.Store, id ingest.SessionID, entries []schema.SessionEntry, mode ingest.SessionEntryWriteMode) ingest.SessionEntryWriteResult {
+	t.Helper()
+	r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: id, Entries: entries, RequireFullContent: true, Mode: mode, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000005000}})[0]
+	if r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	return r
+}
+func capture(t *testing.T, s *store.Store, id ingest.SessionID) ingest.SessionContentCapture {
+	t.Helper()
+	c, ok, err := s.GetSessionContentCapture(context.Background(), id)
+	if err != nil || !ok {
+		t.Fatalf("capture missing: %v", err)
+	}
+	return c
+}
+func execContentSQL(t *testing.T, s *store.Store, query string) {
+	t.Helper()
+	c := takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(c)
+	if err := sqlitex.ExecuteScript(c, query, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFullContentDurabilityAndPaging(t *testing.T) {
+	for _, f := range loadContentFixtures(t).Cases {
+		t.Run(f.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "content.db")
+			s, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+			seedSession(t, s, string(id))
+			entries := contentEntries(id, f)
+			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err = store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			preview, err := s.ListEntries(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(*preview[0].ContentPreview) > 2000 || !utf8.ValidString(*preview[0].ContentPreview) {
+				t.Fatal("preview not UTF-8 bounded")
+			}
+			if *preview[0].ToolInput != *entries[0].ToolInput || *preview[0].ToolOutput != *entries[0].ToolOutput {
+				t.Fatal("semantic tool strings changed")
+			}
+			from, total := 0, 0
+			for calls := 0; ; calls++ {
+				if calls > len(entries) {
+					t.Fatal("pagination failed to progress")
+				}
+				p, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent, FromIndex: from, SoftMaxBytes: f.Budget})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, e := range p.Entries {
+					if !reflect.DeepEqual(e, entries[total]) {
+						t.Fatalf("entry %d changed", total)
+					}
+					total++
+				}
+				if p.BytesRead > f.Budget && len(p.Entries) != 1 {
+					t.Fatal("oversized page should contain one entry")
+				}
+				if p.NextIndex == nil {
+					break
+				}
+				if *p.NextIndex <= from {
+					t.Fatal("nonadvancing cursor")
+				}
+				from = *p.NextIndex
+			}
+			if total != len(entries) {
+				t.Fatal("missing entries")
+			}
+			old := capture(t, s, id)
+			previewHash := sessionEntriesHash(t, s, id)
+			if !writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll).Skipped {
+				t.Fatal("identical complete capture did not skip")
+			}
+			entries[0].ContentPreview = strPtr(strings.Repeat(f.Prefix, f.Repeats) + f.ReplacementTail)
+			if writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll).Skipped {
+				t.Fatal("different full tail incorrectly skipped")
+			}
+			if capture(t, s, id).FullCaptureSHA256 == old.FullCaptureSHA256 {
+				t.Fatal("tail omitted from hash")
+			}
+			if sessionEntriesHash(t, s, id) != previewHash {
+				t.Fatal("same prefix preview hash changed")
+			}
+			p, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent, Limit: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if *p.Entries[0].ContentPreview != *entries[0].ContentPreview {
+				t.Fatal("stale tail after rewrite")
+			}
+		})
+	}
+}
+func TestFullContentCorruptionRefusedAndRepaired(t *testing.T) {
+	f := loadContentFixtures(t)
+	for _, c := range f.Corruptions {
+		t.Run(c.Name, func(t *testing.T) {
+			s := openTestStore(t)
+			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+			seedSession(t, s, string(id))
+			entries := contentEntries(id, f.Cases[0])
+			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			execContentSQL(t, s, c.SQL)
+			if _, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err == nil {
+				t.Fatal("corrupt full capture accepted")
+			}
+			if writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll).Skipped {
+				t.Fatal("corrupt capture skipped")
+			}
+			if _, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+func TestFullContentBackfillShapeRollback(t *testing.T) {
+	f := loadContentFixtures(t)
+	for _, c := range f.ShapeChanges {
+		t.Run(c.Name, func(t *testing.T) {
+			s := openTestStore(t)
+			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+			seedSession(t, s, string(id))
+			entries := contentEntries(id, f.Cases[0])
+			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			execContentSQL(t, s, c.SQL)
+			old := capture(t, s, id)
+			hash := sessionEntriesHash(t, s, id)
+			before, err := s.ListEntries(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: id, Entries: entries, RequireFullContent: true, Mode: ingest.SessionEntryWriteContentBackfill}})[0]
+			if !errors.Is(r.Err, store.ContentBackfillShapeMismatch) {
+				t.Fatalf("want shape mismatch, got %v", r.Err)
+			}
+			after, err := s.ListEntries(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) || capture(t, s, id) != old || sessionEntriesHash(t, s, id) != hash {
+				t.Fatal("failed backfill changed stored state")
+			}
+		})
+	}
+}
+
+func TestFullContentLegacyBackfillAndKeyset(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+	next := ingest.SessionID("bbbbbbbb-1111-4111-8111-aaaaaaaaaaaa")
+	seedSession(t, s, string(id))
+	seedSession(t, s, string(next))
+	f := loadContentFixtures(t).Cases[0]
+	entries := contentEntries(id, f)
+	preview := append([]schema.SessionEntry(nil), entries...)
+	for i := range preview {
+		preview[i].ContentPreview = strPtr((*entries[i].ContentPreview)[:1998])
+	}
+	// 1998 ends after the next three-byte character, before its four-byte emoji.
+	if err := s.IndexSessionEntries(ctx, id, preview); err != nil {
+		t.Fatal(err)
+	}
+	if capture(t, s, id).Status != ingest.ContentCaptureIncomplete {
+		t.Fatal("legacy caller certified complete")
+	}
+	if _, err := s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err == nil {
+		t.Fatal("legacy full read succeeded")
+	}
+	targets, err := s.ListContentCaptureIncompleteSessions(ctx, 1)
+	if err != nil || len(targets) != 1 || targets[0] != id {
+		t.Fatalf("first targets: %v %v", targets, err)
+	}
+	targets, err = s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
+	if err != nil || len(targets) != 1 || targets[0] != next {
+		t.Fatalf("later targets: %v %v", targets, err)
+	}
+	hash := sessionEntriesHash(t, s, id)
+	writeFull(t, s, id, entries, ingest.SessionEntryWriteContentBackfill)
+	if sessionEntriesHash(t, s, id) != hash || capture(t, s, id).Status != ingest.ContentCaptureComplete {
+		t.Fatal("content-only backfill changed preview hash or remained incomplete")
+	}
+}
+
+func TestFullContentHotReadsAvoidPayloadTables(t *testing.T) {
+	s := openTestStore(t)
+	id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+	seedSession(t, s, string(id))
+	writeFull(t, s, id, contentEntries(id, loadContentFixtures(t).Cases[0]), ingest.SessionEntryWriteReplaceAll)
+	// Install the deny policy on every pool connection; even preparing a read of
+	// either payload table must fail, so a successful hot read proves separation.
+	a := takeConn(t, s.PoolForTest())
+	b := takeConn(t, s.PoolForTest())
+	auth := sqlite.AuthorizeFunc(func(action sqlite.Action) sqlite.AuthResult {
+		if strings.HasPrefix(action.Table(), "session_entry_full_content") {
+			return sqlite.AuthResultDeny
+		}
+		return sqlite.AuthResultOK
+	})
+	if err := a.SetAuthorizer(auth); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetAuthorizer(auth); err != nil {
+		t.Fatal(err)
+	}
+	s.PoolForTest().Put(a)
+	s.PoolForTest().Put(b)
+	if _, err := s.ListEntries(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListEntriesRange(context.Background(), id, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadPreview}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err == nil {
+		t.Fatal("deny policy did not reject full reads")
+	}
+}
+
+func TestFullContentBackfillFailurePreservesAnnotationsAndLaterWrites(t *testing.T) {
+	s := openTestStore(t)
+	seedReindexSession(t, s)
+	id := ingest.SessionID(reindexSessionID)
+	f := loadContentFixtures(t).Cases[0]
+	entries := contentEntries(id, f)
+	writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+	annotation := annotateReindexEntry(t, s, 0, 1)
+	old := capture(t, s, id)
+	hash := sessionEntriesHash(t, s, id)
+	entries[0].ContentPreview = strPtr(strings.Repeat(f.Prefix, f.Repeats) + f.ReplacementTail)
+	execContentSQL(t, s, `CREATE TRIGGER fail_content_chunk BEFORE INSERT ON session_entry_full_content_chunks WHEN NEW.session_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' AND NEW.chunk_index=1 BEGIN SELECT RAISE(ABORT,'synthetic chunk failure'); END;`)
+	later := ingest.SessionID("ffffffff-1111-4111-8111-aaaaaaaaaaaa")
+	seedSession(t, s, string(later))
+	r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{
+		{SessionID: id, Entries: entries, RequireFullContent: true, Mode: ingest.SessionEntryWriteContentBackfill, IndexVersion: 999, IndexedAtMs: 1},
+		{SessionID: later, Entries: contentEntries(later, f), RequireFullContent: true},
+	})
+	if r[0].Err == nil || r[0].Written || r[1].Err != nil || !r[1].Written {
+		t.Fatalf("savepoint outcomes: %+v", r)
+	}
+	if capture(t, s, id) != old || sessionEntriesHash(t, s, id) != hash {
+		t.Fatal("failed chunk replacement changed capture or index hash")
+	}
+	assertIndexState(t, s, id, ingest.CurrentIndexVersion, 1700000005000)
+	assertReindexTargetSpan(t, s, annotation, 0, 1)
+	p, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(*p.Entries[0].ContentPreview, f.Tail) {
+		t.Fatal("failed write replaced old content")
+	}
+	execContentSQL(t, s, `DROP TRIGGER fail_content_chunk;`)
+	writeFull(t, s, id, entries, ingest.SessionEntryWriteContentBackfill)
+	assertReindexTargetSpan(t, s, annotation, 0, 1)
+	assertIndexState(t, s, id, ingest.CurrentIndexVersion, 1700000005000)
+	// A canonical replacement also carries existing entry anchors.
+	entries[0].ToolOutput = strPtr("updated semantic tool output")
+	writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+	assertReindexTargetSpan(t, s, annotation, 0, 1)
+}

@@ -42,23 +42,15 @@ type StoreDataProvider struct {
 	// pathIdentityResolver resolves stored session worktrees into exact clone
 	// identities before user-facing discovery matching.
 	pathIdentityResolver ingest.PathIdentityResolver
-	// fs reads a session's ORIGINAL source transcript file so SessionByID can
-	// overlay full turn content over the DB's bounded content_preview (see
-	// transcript.BuildContentOverlay). Defaulted to the real OS filesystem by
-	// NewStoreDataProvider; NewStoreDataProviderWithFS lets tests inject a
-	// MemFS-backed source file.
-	fs ingest.FileSystem
 }
 
-// NewStoreDataProvider creates a StoreDataProvider backed by the given store,
-// reading source transcripts from the real OS filesystem.
+// NewStoreDataProvider creates a database-authoritative StoreDataProvider.
 func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver())
 }
 
-// NewStoreDataProviderWithFS is NewStoreDataProvider with an injectable
-// FileSystem, for tests that need SessionByID's content-overlay re-index to
-// read from a MemFS fixture instead of disk.
+// NewStoreDataProviderWithFS retains the filesystem argument for caller
+// compatibility. Full transcript detail never reads source files.
 func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver())
 }
@@ -80,7 +72,6 @@ func NewStoreDataProviderWithFSAndResolver(
 		codemap:              newCodemapService(s, visibility, resolver),
 		visibility:           visibility,
 		pathIdentityResolver: resolver,
-		fs:                   fs,
 	}
 }
 
@@ -354,45 +345,16 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		s.Metadata.Quality = &full
 	}
 
-	entries, err := p.store.ListEntries(ctx, sid)
+	entries, _, err := transcript.LoadEntriesForDetail(ctx, p.store, sid, transcript.DetailLoadOptions{})
 	if err != nil {
-		// Non-fatal: return session without turns rather than failing entirely.
-		return &s, nil
+		return nil, err
 	}
 	turns, validationErr := transcript.EntriesToTurnsValidated(entries)
 	if validationErr != nil {
-		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
+		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after full database hydration and before session-detail emission: %w", id, validationErr)
 	}
 	s.Turns = turns
 
-	// Overlay full turn content from the source transcript, re-indexed with
-	// truncation disabled (see transcript.BuildContentOverlay) — otherwise
-	// every turn's Content stops at the DB's bounded content_preview
-	// (defaults.ContentPreviewLimit), which is what the session_detail WS
-	// channel was silently doing before: main turn bodies
-	// cut off mid-word around 2000 chars).
-	//
-	// GATED on transcript.AnyContentTruncated: BuildContentOverlay does a
-	// full re-parse of the source transcript from disk, which is real cost
-	// this fix would otherwise pay on EVERY session view regardless of size.
-	// The common case — nothing in this session hit the preview limit — has
-	// nothing to recover, so it skips the re-parse entirely.
-	//
-	// Best-effort even when gated in: if source info can't be looked up, the
-	// file is missing, or the harness has no full-content indexer wired (see
-	// BuildContentOverlay's doc comment), turns simply keep their existing
-	// (possibly truncated) content rather than failing the whole session view.
-	if transcript.AnyContentTruncated(entries) {
-		if info, infoErr := p.store.SessionSourceInfo(ctx, id); infoErr == nil && info != nil {
-			if overlay, overlayErr := transcript.BuildContentOverlay(ctx, p.fs, defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), schema.SessionID(id)); overlayErr == nil {
-				for i := range s.Turns {
-					if content, ok := overlay[s.Turns[i].Index]; ok {
-						s.Turns[i].Content = content
-					}
-				}
-			}
-		}
-	}
 	return &s, nil
 }
 

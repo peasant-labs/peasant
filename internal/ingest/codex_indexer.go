@@ -31,9 +31,8 @@ type CodexIndexer struct {
 // CodexIndexerOption configures a CodexIndexer.
 type CodexIndexerOption func(*CodexIndexer)
 
-// WithCodexFullContent disables ContentPreview truncation so the full message /
-// tool input / tool output text is stored. Off by default — values are capped
-// at defaults.ContentPreviewLimit to keep DB rows bounded.
+// WithCodexFullContent disables ContentPreview truncation. Tool input and output
+// remain complete independently of preview mode.
 func WithCodexFullContent(enabled bool) CodexIndexerOption {
 	return func(idx *CodexIndexer) { idx.fullContent = enabled }
 }
@@ -120,6 +119,7 @@ type codexResponseItemPayload struct {
 	Type    string                `json:"type"`
 	Role    string                `json:"role,omitempty"`
 	Content []codexMessageContent `json:"content,omitempty"` // message variant
+	Summary []codexMessageContent `json:"summary,omitempty"`
 	Name    string                `json:"name,omitempty"`    // function_call / custom_tool_call
 	CallID  string                `json:"call_id,omitempty"` // function_call(_output) / custom_tool_call(_output)
 	// Arguments is a JSON string for function_call (e.g., `{"cmd":"pwd"}`),
@@ -192,6 +192,19 @@ func parseCodexResponseItem(sessionID SessionID, index int, env codexRolloutLine
 		entry.EntryType = EntryTypeThinking
 		entry.Role = RoleAssistant
 		entry.HasThinking = true
+		text := joinCodexContentText(p.Summary)
+		if body := joinCodexContentText(p.Content); body != "" {
+			if text != "" {
+				text += "\n"
+			}
+			text += body
+		}
+		if text != "" {
+			if !fullContent {
+				text = truncateString(text, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &text
+		}
 
 	case codexResponseFunctionCall, codexResponseCustomCall:
 		entry.EntryType = EntryTypeToolUse
@@ -228,14 +241,13 @@ func parseCodexResponseItem(sessionID SessionID, index int, env codexRolloutLine
 		if len(p.Output) > 0 {
 			out := codexRawJSONToString(p.Output)
 			if out != nil {
-				// Truncate to the preview limit so a single huge tool
-				// output can't bloat one DB row. Full output is preserved
-				// in ToolOutput when fullContent is set.
+				// Derive the compatibility preview without shortening the
+				// semantic tool output consumed by metrics and annotations.
 				preview := *out
 				if !fullContent {
 					preview = truncateString(preview, defaults.ContentPreviewLimit)
 				}
-				entry.ToolOutput = &preview
+				entry.ToolOutput = out
 				entry.ContentPreview = &preview
 			}
 		}

@@ -641,10 +641,12 @@ s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
 CASE WHEN p.capture_revision > 0 AND p.capture_revision=s.publication_capture_revision
  AND p.capture_revision=s.indexed_publication_capture_revision AND p.schema_version=?
  AND s.cwd_provenance_kind!='not_recovered' THEN 1 ELSE 0 END,
-p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint
+p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
+c.status,c.full_capture_sha256,c.publication_capture_revision
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
+LEFT JOIN session_content_captures c ON c.session_id=s.session_id
 WHERE s.session_id IN (` +
 		strings.Join(placeholders, ",") + ")"
 
@@ -661,7 +663,8 @@ WHERE s.session_id IN (` +
 				return parseErr
 			}
 			readiness := ingest.PublicationNeedsIngest
-			if stmt.ColumnInt(9) == 1 && publicationLocationSnapshotValid(stmt) {
+			eligible, captureErr := publicationContentEligible(stmt, 16, stmt.ColumnInt64(8))
+			if stmt.ColumnInt(9) == 1 && publicationLocationSnapshotValid(stmt) && captureErr == nil && eligible {
 				readiness = ingest.PublicationReady
 			}
 			ingestedMs := stmt.ColumnInt64(3)

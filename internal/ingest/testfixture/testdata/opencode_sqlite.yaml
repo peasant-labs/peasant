@@ -2,6 +2,7 @@
 # red by name; adding a new case need not appear here. The list, not a count,
 # is the deletion guard.
 required_cases:
+  - current-unknown-conversation-omission
   - empty-valid
   - legacy-message-part
   - current-session-message
@@ -45,6 +46,23 @@ required_cases:
   - native-v2-preferred
   - native-v2-rows
 cases:
+  - name: current-unknown-conversation-omission
+    logical_path: unknown-conversation/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 2, ignored_history: 0}
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_known, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: user, time_created: 1, time_updated: 1, seq: 1, data: '{"id":"msg_known","text":"synthetic known request","files":[],"agents":[],"time":{"created":1}}'}
+      - {id: msg_future, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: future-conversation, time_created: 2, time_updated: 2, seq: 2, data: '{"time":{"created":2},"text":"SYNTHETIC-LOST-TRACE"}'}
+    ignored_history: []
   # Captured from native session_message rows through a read-only connection.
   # Text, identities, model names, timestamps, and usage values are replaced
   # with synthetic values. Absent keys stay absent, including content text IDs.
@@ -823,7 +841,7 @@ cases:
       - {id: part_01_user, message_id: msg_01_user, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1001, time_updated: 1001, data: '{"id":"part_01_user","messageID":"msg_01_user","type":"text","text":"synthetic request","time":{"created":1001}}'}
       - {id: part_01_reasoning, message_id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1021, time_updated: 1021, data: '{"id":"part_01_reasoning","messageID":"msg_02_assistant","type":"reasoning","text":"synthetic reasoning","time":{"created":1021}}'}
       - {id: call_semantic, message_id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1030, time_updated: 1040, data: '{"id":"call_semantic","messageID":"msg_02_assistant","type":"tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":"synthetic output"},"time":{"created":1030,"completed":1040}}'}
-      - {id: part_01_compaction, message_id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1100, time_updated: 1100, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context","time":{"created":1100}}'}
+      - {id: part_01_compaction, message_id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1100, time_updated: 1100, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context\nsynthetic recent context","time":{"created":1100}}'}
       - {id: skill_call, message_id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1121, time_updated: 1122, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[{"type":"text","text":"fixture skill loaded"}],"structured":{},"result":"fixture skill loaded"},"time":{"created":1121,"completed":1122}}'}
       - {id: part_agent, message_id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1130, time_updated: 1130, data: '{"id":"part_agent","messageID":"msg_05_agent","type":"agent","name":"reviewer","text":"reviewer","time":{"created":1130}}'}
       - {id: part_subtask, message_id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1140, time_updated: 1140, data: '{"id":"part_subtask","messageID":"msg_06_model","type":"subtask","name":"next-model","text":"next-model","time":{"created":1140}}'}

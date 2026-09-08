@@ -35,10 +35,11 @@ const (
 )
 
 type openCodeLegacyProjection struct {
-	Format    string                            `json:"format"`
-	Version   int                               `json:"version"`
-	SessionID string                            `json:"session_id"`
-	Messages  []openCodeLegacyProjectionMessage `json:"messages"`
+	ContentOmitted bool                              `json:"content_omitted,omitempty"`
+	Format         string                            `json:"format"`
+	Version        int                               `json:"version"`
+	SessionID      string                            `json:"session_id"`
+	Messages       []openCodeLegacyProjectionMessage `json:"messages"`
 }
 
 type openCodeLegacyProjectionMessage struct {
@@ -287,6 +288,7 @@ func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, s
 // prefix reads share it, so both encode and attribute the projection the same
 // way; the prefix read simply hands it a projection bounded by the budget.
 func (a *OpenCodeAdapter) finishLegacyManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection, dropped []openCodeDroppedOrphanPart) (*UnifiedMetadata, []byte, error) {
+	projection.ContentOmitted = projection.ContentOmitted || len(dropped) > 0
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q from %q produced no messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
 	}
@@ -1003,11 +1005,16 @@ func managedOpenCodeFormatMarker(data []byte) string {
 }
 
 func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expectedVersion int, sessionID SessionID) (openCodeLegacyProjection, error) {
-	fields, err := decodeOpenCodeProjectionObject(data, "managed envelope", []string{"format", "version", "session_id", "messages"})
+	fields, err := decodeOpenCodeProjectionObject(data, "managed envelope", []string{"format", "version", "session_id", "messages"}, "content_omitted")
 	if err != nil {
 		return openCodeLegacyProjection{}, err
 	}
 	var projection openCodeLegacyProjection
+	if raw, ok := fields["content_omitted"]; ok {
+		if err := json.Unmarshal(raw, &projection.ContentOmitted); err != nil {
+			return projection, fmt.Errorf("decode managed envelope content_omitted: %w", err)
+		}
+	}
 	if err := json.Unmarshal(fields["format"], &projection.Format); err != nil {
 		return projection, fmt.Errorf("decode managed envelope format: %w", err)
 	}

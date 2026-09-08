@@ -61,7 +61,7 @@ cases:
       00000000-0000-4000-8000-000000000020.jsonl: |
         {"type":"model.selected","time":"2024-01-02T03:12:00Z","data":{"provider":"openai","model":"gpt-5"}}
         {"type":"user.message","time":"2024-01-02T03:12:01Z","data":{"sessionId":"00000000-0000-4000-8000-000000000020","turnId":"turn-fixture","text":"synthetic request"}}
-        {"type":"assistant.message","time":"2024-01-02T03:12:02Z","data":{"turnId":"turn-fixture","text":"synthetic response"}}
+        {"type":"assistant.text","time":"2024-01-02T03:12:02Z","data":{"turnId":"turn-fixture","text":"synthetic response"}}
   - &opencode_json
     name: opencode_json_literal_cwd
     harness: opencode

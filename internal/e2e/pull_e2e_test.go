@@ -139,6 +139,10 @@ func TestPullRoundTripE2E(t *testing.T) {
 	// the already-pushed session eligible before adding the target annotation.
 	associationID := assertMigratedAssociationReplay(t, user1DB, associationFixture, 0)
 	createAssociationRoundTripAnnotation(t, user1DB, associationID, associationFixture)
+	// This deliberately reconstructed pre-content database has only previews.
+	// Recover authoritative content from the retained harvest through the real
+	// upgrade command before publication; migration alone cannot invent text.
+	runPeasant(t, peasantBin, user1XDG, "harvest", "index", "--force")
 
 	// Schema upgrades do not invent the metadata snapshot absent from V39.
 	// Recover through normal source ingest, preserving the migrated association

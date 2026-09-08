@@ -26,6 +26,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
 
@@ -119,6 +120,7 @@ type PipelineStore interface {
 	InsertPushLog(context.Context, ingest.PushLogEntry) error
 	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
 	ingest.PublicationInputReader
+	ingest.FullSessionEntryReader
 	ListEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error)
 	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
@@ -278,7 +280,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 		}
 		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
-		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
+		if _, _, readErr := transcript.LoadEntriesForDetail(ctx, p.store, sessionID, transcript.DetailLoadOptions{}); readErr != nil {
 			load.End(perf.OutcomeFailed, nil)
 			rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
 			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)

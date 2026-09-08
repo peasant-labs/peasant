@@ -55,7 +55,7 @@ func addOpenCodePart(t *testing.T, fs *testutil.MemFS, msgID, partID string) {
 	t.Helper()
 	root := "/opencode-store"
 	partPath := fmt.Sprintf("%s/storage/part/%s/%s.json", root, msgID, partID)
-	partJSON := fmt.Sprintf(`{"id":%q,"type":"tool_use","name":"Read"}`, partID)
+	partJSON := fmt.Sprintf(`{"id":%q,"type":"tool_use","name":"Read","input":{}}`, partID)
 	if err := fs.WriteFile(partPath, []byte(partJSON), 0644); err != nil {
 		t.Fatalf("write part: %v", err)
 	}

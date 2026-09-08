@@ -11,12 +11,10 @@ import (
 
 // BuildContentOverlay re-indexes a session's ORIGINAL source transcript file
 // with full (untruncated) content extraction and returns entryIndex → full
-// content. It exists because session_entries.content_preview is deliberately
-// bounded at defaults.ContentPreviewLimit to keep DB row size sane (see
-// truncateString in internal/ingest/utils.go) — this recovers the real turn
-// bodies for consumers that must show/export the full transcript rather than
-// a preview: the session_detail WS channel (StoreDataProvider.SessionByID)
-// and `peasant export sessions` (export.ExportSession) both call this.
+// content. This is a tolerant compatibility utility, not a complete-capture
+// reader: it cannot establish source attribution or stable index mapping.
+// Authoritative session detail, export, share preview and publication use
+// LoadEntriesForDetail instead and must never fall back to this overlay.
 //
 // Dispatch is keyed by the session's ACTUAL harness, not its SourceFormat.
 // This matters because more than one harness can share a SourceFormat (Codex

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/peasant-labs/peasant/internal/testutil"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"gopkg.in/yaml.v3"
 )
@@ -366,6 +366,11 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 	}
 	for _, entry := range entries {
 		testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
+	}
+	for _, entry := range entries {
+		if err := testutil.WriteFullEntries(t.Context(), db, entry.Metadata.SessionID, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close mounted selection store after seeding: %v", err)

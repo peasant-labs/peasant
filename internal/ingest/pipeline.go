@@ -907,6 +907,10 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// a DiscoveredSession, then append to indexSessions (skips EXTRACT+WRITE,
 	// goes straight to INDEX+COMPUTE).
 	if p.metricsStore != nil {
+		backfilled, backfillErr := p.backfillIncompleteContent(ctx)
+		if backfillErr != nil {
+			slog.Warn("pipeline: incomplete content recovery", "error", backfillErr)
+		}
 		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, CurrentIndexVersion)
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
@@ -922,6 +926,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			queued[im.session.SessionID] = true
 		}
 		for _, sid := range staleIDs {
+			if backfilled[sid] {
+				continue
+			}
 			if queued[sid] {
 				continue
 			}
@@ -1297,21 +1304,31 @@ func (p *Pipeline) indexLoop(
 			break
 		}
 		pending = append(pending, result)
+		pendingBytes := fullEntryWriteBytes(result.entries)
 		parsedClosed := false
 	drainParsed:
-		for len(pending) < indexWriteBatchLimit {
+		for len(pending) < indexWriteBatchLimit && pendingBytes < defaults.FullContentWriteBatchBytes {
 			select {
 			case next, ok := <-parsedCh:
 				if !ok {
 					parsedClosed = true
 					break drainParsed
 				}
+				nextBytes := fullEntryWriteBytes(next.entries)
+				if pendingBytes+nextBytes > defaults.FullContentWriteBatchBytes {
+					flushPending(pending)
+					clear(pending)
+					pending = pending[:0]
+					pendingBytes = 0
+				}
 				pending = append(pending, next)
+				pendingBytes += nextBytes
 			default:
 				break drainParsed
 			}
 		}
 		flushPending(pending)
+		clear(pending)
 		pending = pending[:0]
 		if parsedClosed {
 			break
@@ -1325,6 +1342,7 @@ func (p *Pipeline) indexLoop(
 }
 
 type indexParseResult struct {
+	fullContent   bool
 	im            indexedMeta
 	entries       []schema.SessionEntry
 	startedAt     int64
@@ -1354,25 +1372,19 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		return p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
 	}
 
-	workers := parallelWorkers(p.config)
-	var parsed []indexParseResult
-	if workers > 1 && len(metas) > 1 {
-		parsed = runParallel(func() error { return nil }, metas, workers, parseOne)
-	} else {
-		parsed = make([]indexParseResult, 0, len(metas))
-		for _, im := range metas {
-			parsed = append(parsed, parseOne(im))
+	workers := max(1, parallelWorkers(p.config))
+	// Retain at most one bounded parser wave, not every full session in a
+	// reindex invocation. The writer further splits each wave by full bytes.
+	waveSize := min(workers, indexWriteBatchLimit)
+	profileSessions := make([]IndexProfileSession, 0, len(metas))
+	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(metas), WorkItems: len(metas)}
+	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
+	var pendingBytes int64
+	flushPending := func() {
+		if len(pending) == 0 {
+			return
 		}
-	}
-
-	profileSessions := make([]IndexProfileSession, 0, len(parsed))
-	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(parsed), WorkItems: len(parsed), MaxParseWorkers: int(maxActiveParses.Load())}
-	for start := 0; start < len(parsed); start += indexWriteBatchLimit {
-		end := start + indexWriteBatchLimit
-		if end > len(parsed) {
-			end = len(parsed)
-		}
-		flush := p.flushIndexParseResults(ctx, parsed[start:end], outcome, logPrefix, nil)
+		flush := p.flushIndexParseResults(ctx, pending, outcome, logPrefix, nil)
 		indexed = append(indexed, flush.indexed...)
 		logs = append(logs, flush.logEntries...)
 		for _, profileSession := range flush.profileSessions {
@@ -1386,7 +1398,29 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		profileBatch.WriteSavepoints += flush.writeSavepoints
 		profileBatch.WriteSkipped += flush.writeSkipped
 		profileBatch.WriteStats.Add(flush.writeStats)
+		clear(pending)
+		pending = pending[:0]
+		pendingBytes = 0
 	}
+	for start := 0; start < len(metas); start += waveSize {
+		end := min(start+waveSize, len(metas))
+		var parsed []indexParseResult
+		if workers > 1 && end-start > 1 {
+			parsed = runParallel(func() error { return nil }, metas[start:end], workers, parseOne)
+		} else {
+			parsed = []indexParseResult{parseOne(metas[start])}
+		}
+		for _, result := range parsed {
+			size := fullEntryWriteBytes(result.entries)
+			if len(pending) >= indexWriteBatchLimit || (len(pending) > 0 && pendingBytes+size > defaults.FullContentWriteBatchBytes) {
+				flushPending()
+			}
+			pending = append(pending, result)
+			pendingBytes += size
+		}
+	}
+	flushPending()
+	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	return indexed, logs
 }
@@ -1421,6 +1455,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	recordIndexProfileMax(maxActiveParses, active)
 	parseStart := time.Now()
 	entries, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
+	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
+	result.fullContent = authoritative && err == nil
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err != nil {
@@ -1492,12 +1528,18 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
 			continue
 		}
+		capture := SessionContentCaptureWrite{}
+		if result.fullContent {
+			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: ContentSourceNewIngest, TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureRevision: ContentCaptureRevision, CapturedAtMs: nowMs}
+		}
 		writes = append(writes, SessionEntryWrite{
-			CaptureRevision: result.im.captureRevision,
-			SessionID:       result.im.session.SessionID,
-			Entries:         result.entries,
-			IndexVersion:    CurrentIndexVersion,
-			IndexedAtMs:     nowMs,
+			CaptureRevision:    result.im.captureRevision,
+			RequireFullContent: result.fullContent,
+			ContentCapture:     capture,
+			SessionID:          result.im.session.SessionID,
+			Entries:            result.entries,
+			IndexVersion:       CurrentIndexVersion,
+			IndexedAtMs:        nowMs,
 		})
 		writePositions = append(writePositions, i)
 	}
@@ -1506,12 +1548,31 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	writeDuration := time.Duration(0)
 	if len(writes) > 0 {
 		writeStart := time.Now()
-		p.runStoreWrite(writeLane, func() {
-			writeResults = batchStore.IndexSessionEntryBatch(ctx, writes)
-		})
+		writeResults = nil
+		for first := 0; first < len(writes); {
+			if err := ctx.Err(); err != nil {
+				for _, write := range writes[first:] {
+					writeResults = append(writeResults, SessionEntryWriteResult{SessionID: write.SessionID, Err: err})
+				}
+				break
+			}
+			last, size := first, int64(0)
+			for last < len(writes) {
+				next := fullEntryWriteBytes(writes[last].Entries)
+				if last > first && size+next > defaults.FullContentWriteBatchBytes {
+					break
+				}
+				size += next
+				last++
+			}
+			p.runStoreWrite(writeLane, func() {
+				writeResults = append(writeResults, batchStore.IndexSessionEntryBatch(ctx, writes[first:last])...)
+			})
+			flush.writeTxs++
+			first = last
+		}
 		writeDuration = time.Since(writeStart)
 		flush.writeDuration = writeDuration
-		flush.writeTxs = 1
 		flush.writeSavepoints = len(writes)
 	}
 	perSessionWriteDuration := time.Duration(0)
@@ -2648,8 +2709,22 @@ func indexWithSourceKind(
 					"Fix: enable %s in your configuration (sources.%s.enabled: true) and re-run, so discovery resolves its storage root. If you are pointing at sessions with --source-provider and --source-path, name %s and give the path to its storage directory rather than to a single file.",
 				session.SessionID, session.Harness, session.Harness, session.Harness, session.Harness, session.Harness)
 		}
+		if strict, ok := indexer.(AuthoritativeTranscriptIndexer); ok {
+			capture, err := strict.IndexTranscriptForCapture(ctx, session)
+			return capture.Entries, err
+		}
 		return indexer.IndexTranscript(ctx, session)
 	case TranscriptSourceFile:
+		if strict, ok := indexer.(AuthoritativeTranscriptIndexer); ok {
+			var capture TranscriptCaptureResult
+			var err error
+			if transcriptData != nil {
+				capture, err = strict.IndexTranscriptBytesForCapture(ctx, session, transcriptData)
+			} else {
+				capture, err = strict.IndexTranscriptForCapture(ctx, session)
+			}
+			return capture.Entries, err
+		}
 		if transcriptData != nil {
 			return indexer.IndexTranscriptBytes(ctx, session, transcriptData)
 		}
@@ -2701,12 +2776,13 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		}
 	}
 	return DiscoveredSession{
-		SessionID:    wr.result.SessionID,
-		EventSeq:     wr.eventSeq,
-		Harness:      wr.result.Harness,
-		ParentUUID:   parentUUID,
-		SourceFormat: sourceFormat,
-		SourcePath:   sourcePath,
+		ContentOmitted: captureContentOmitted(wr.meta),
+		EventSeq:       wr.eventSeq,
+		SessionID:      wr.result.SessionID,
+		Harness:        wr.result.Harness,
+		ParentUUID:     parentUUID,
+		SourceFormat:   sourceFormat,
+		SourcePath:     sourcePath,
 		// Without this a directory-based harness indexes nothing on the drain-loop
 		// pass: the caller replaces SourcePath with the written copy's path, and a
 		// root derived from that points into the output tree. The stale-index sweep
@@ -3368,11 +3444,12 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 	}
 
 	ds := DiscoveredSession{
-		SessionID:    sid,
-		Harness:      Harness(meta.ModelHarness),
-		SourcePath:   ResolvedPath(transcriptPath),
-		SourceFormat: sourceFormat,
-		OriginalRoot: originalRoot,
+		ContentOmitted: captureContentOmitted(&meta),
+		SessionID:      sid,
+		Harness:        Harness(meta.ModelHarness),
+		SourcePath:     ResolvedPath(transcriptPath),
+		SourceFormat:   sourceFormat,
+		OriginalRoot:   originalRoot,
 	}
 	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON {
 		if transcriptData, readErr := p.fs.ReadFile(transcriptPath); readErr == nil {
@@ -3557,11 +3634,22 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 //  4. Write index_log entries, populate PipelineResult.IndexLog
 func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineResult, error) {
 	prog := p.config.Progress
+	backfilled, err := p.backfillIncompleteContent(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reindex content recovery: %w", err)
+	}
 
 	// Stage 1: DISCOVER — scan peasant-sync output.
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	scanned := p.scanPeasantSyncSessions()
+	remaining := scanned[:0]
+	for _, target := range scanned {
+		if !backfilled[target.session.SessionID] {
+			remaining = append(remaining, target)
+		}
+	}
+	scanned = remaining
 	if err := ctx.Err(); err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)

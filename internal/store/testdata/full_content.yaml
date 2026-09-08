@@ -1,0 +1,46 @@
+cases:
+  - name: long_unicode
+    prefix: "語🙂"
+    repeats: 30000
+    tail: "SAFE-TAIL-ONE"
+    replacement_tail: "SAFE-TAIL-TWO"
+    entries: 3
+    budget: 250000
+  - name: oversized_progress
+    prefix: "x"
+    repeats: 1100000
+    tail: "SAFE-OVERSIZED-TAIL"
+    replacement_tail: "SAFE-UPDATED-TAIL"
+    entries: 2
+    budget: 1048576
+  - name: unicode_preview_boundary
+    prefix: "語"
+    repeats: 1000
+    tail: "SAFE-UNICODE-TAIL"
+    replacement_tail: "SAFE-UNICODE-UPDATE"
+    entries: 3
+    budget: 4000
+corruptions:
+  - name: missing_chunk
+    sql: "DELETE FROM session_entry_full_content_chunks WHERE chunk_index=0"
+  - name: damaged_chunk
+    sql: "UPDATE session_entry_full_content_chunks SET data=x'00' WHERE chunk_index=0"
+  - name: wrong_capture_hash
+    sql: "UPDATE session_content_captures SET full_capture_sha256=printf('%064d',0)"
+  - name: wrong_tool_input
+    sql: "UPDATE session_entries SET tool_input='changed' WHERE entry_index=0"
+  - name: wrong_manifest_hash
+    sql: "UPDATE session_entry_full_content SET full_sha256=printf('%064d',0) WHERE entry_index=0"
+shape_changes:
+  - name: extra
+    sql: "UPDATE session_entries SET extra='{}' WHERE entry_index=0"
+  - name: parent_id
+    sql: "UPDATE session_entries SET parent_entry_id='changed' WHERE entry_index=0"
+  - name: derived_ext
+    sql: "DELETE FROM session_entries_ext"
+  - name: derived_command
+    sql: "DELETE FROM session_commands"
+  - name: timestamp
+    sql: "UPDATE session_entries SET timestamp_ms=1 WHERE entry_index=0"
+  - name: tool_output
+    sql: "UPDATE session_entries SET tool_output='changed' WHERE entry_index=0"

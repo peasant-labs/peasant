@@ -279,6 +279,7 @@ func renderSelectionCapture(
 		// is what makes the capture evidence that a person sees the badge,
 		// rather than evidence that the renderer can draw one.
 	)
+	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:  th,
 		Draft:  draft,
@@ -289,7 +290,8 @@ func renderSelectionCapture(
 			// The store first, then the transcript the harness wrote. This is
 			// the order the mounted command wires, so a session with no store
 			// row previews from its own source file.
-			storedThenHarnessTurns(selection.Transcripts, kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)),
+			storedThenHarnessTurns(selection.Transcripts, sourceTurns),
+			kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
 			kickstart.WithListingPreviewContextSource(source),
 		),
 	})
@@ -309,7 +311,7 @@ func renderSelectionCapture(
 	if state.Key == selectionStateBranchPreview {
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview {
+	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview || state.Key == selectionStateBudgetPreview {
 		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil
@@ -379,6 +381,14 @@ func listingsWithHarnessTranscripts(workingDirectory string, index int, selectio
 		lines, ok := selection.SourceTranscripts[listings[i].SessionID]
 		if !ok {
 			continue
+		}
+		if padding, padded := selection.SourceTranscriptPadding[listings[i].SessionID]; padded {
+			payload := strings.Repeat("x", padding.ContentBytes)
+			for line := 0; line < padding.LineCount; line++ {
+				lines = append(lines, fmt.Sprintf(
+					`{"type":"assistant","uuid":"padding-%d","message":{"role":"assistant","content":[{"type":"text","text":%q}]}}`,
+					line, payload))
+			}
 		}
 		path := filepath.Join(dir, listings[i].SessionID+".jsonl")
 		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {

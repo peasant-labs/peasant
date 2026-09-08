@@ -76,7 +76,7 @@ func SeedReadyPublication(t testing.TB, db *store.Store, meta *schema.UnifiedMet
 	if err != nil {
 		t.Fatal(err)
 	}
-	results := db.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: meta.SessionID, Entries: entries, CaptureRevision: revisions[meta.SessionID], IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: meta.Timestamp.Start}})
+	results := db.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: meta.SessionID, Entries: entries, RequireFullContent: true, CaptureRevision: revisions[meta.SessionID], IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: meta.Timestamp.Start}})
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("index captured publication: %+v", results)
 	}

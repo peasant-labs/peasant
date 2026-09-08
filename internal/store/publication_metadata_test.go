@@ -80,7 +80,7 @@ func capturePublication(t *testing.T, s *store.Store, e ingest.StoreEntry) int64
 
 func indexPublication(t *testing.T, s *store.Store, e ingest.StoreEntry, revision int64, entries []schema.SessionEntry) ingest.SessionEntryWriteResult {
 	t.Helper()
-	results := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: e.Metadata.SessionID, Entries: entries, CaptureRevision: revision, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000000001}})
+	results := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: e.Metadata.SessionID, Entries: entries, RequireFullContent: true, CaptureRevision: revision, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000000001}})
 	if len(results) != 1 {
 		t.Fatalf("index results: %v", results)
 	}
@@ -188,8 +188,8 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					t.Fatal("unproven manual index remained ready")
 				}
 				result := indexPublication(t, s, e, revision, entries)
-				if result.Err != nil || !result.Skipped {
-					t.Fatalf("checked manual noop failed to restamp: %+v", result)
+				if result.Err != nil || result.Skipped || capture(t, s, id).Status != ingest.ContentCaptureComplete {
+					t.Fatalf("checked manual index failed to restore full capture: %+v", result)
 				}
 			case "manual-state":
 				err = s.UpdateIndexState(ctx, id, ingest.CurrentIndexVersion, 1700000000002)
@@ -314,8 +314,17 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if bundle.SessionOrigin != sessionorigin.User || bundle.ReceiptProjectHash != e.Metadata.Project.Hash {
 					t.Fatal("stored attribution lost")
 				}
-				if tc.Action != "skip-index" && !reflect.DeepEqual(bundle.Entries, entries) {
+				if bundle.Readiness == ingest.PublicationReady && !reflect.DeepEqual(bundle.Entries, entries) {
 					t.Fatal("indexed entries and extension fields did not round trip")
+				}
+				if bundle.Readiness == ingest.PublicationNeedsIngest && len(bundle.Entries) != 0 {
+					t.Fatal("unready bundle hydrated indexed entries")
+				}
+				if tc.Action != "skip-index" {
+					stored, readErr := s.ListEntries(readCtx, id)
+					if readErr != nil || !reflect.DeepEqual(stored, entries) {
+						t.Fatal("unready state changed indexed entries or extension fields")
+					}
 				}
 				if tc.Action == "metrics" && (bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 777 || bundle.Metadata.Stats.TurnCount == 777) {
 					t.Fatal("current metrics conflated with extracted stats")
@@ -443,7 +452,7 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 			}
 			newEntries := append([]schema.SessionEntry(nil), entries...)
 			newEntries[0].ContentPreview = &m.Version
-			results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: m.SessionID, Entries: newEntries, CaptureRevision: revisions[m.SessionID]}})
+			results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: m.SessionID, Entries: newEntries, RequireFullContent: true, CaptureRevision: revisions[m.SessionID]}})
 			if results[0].Err != nil {
 				done <- results[0].Err
 				return
