@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -650,13 +651,7 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			if len(store.InsertedEntries) != 0 || len(metrics.IndexedEntries) != 0 || len(metrics.SavedMetrics) != 0 {
 				t.Fatalf("mounted failure left partial state: store=%d entries=%d metrics=%d", len(store.InsertedEntries), len(metrics.IndexedEntries), len(metrics.SavedMetrics))
 			}
-			entries, readErr := os.ReadDir(output.String())
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			if len(entries) != 0 {
-				t.Fatalf("mounted failure left temporary or final artifact %q", entries[0].Name())
-			}
+			assertCurrentFailureHasOnlyCoordination(t, output.String(), base.SessionID)
 			// The same source, opener, adapter, and pipeline must remain reusable
 			// after a malformed or canceled read; the fault controller permits the
 			// second bounded attempt through unchanged production wiring.
@@ -684,6 +679,43 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			expectedSnapshot := captureMountedCurrentSnapshot(t, expectedOutput, expectedStore, expectedMetrics, mustMountedSessionID(t, base.SessionID), expectedStore.InsertedEntries[0].Metadata)
 			assertMountedCurrentSnapshotEqual(t, "bounded retry after "+negative.Kind, expectedSnapshot, reusedSnapshot)
 		})
+	}
+}
+
+// A failed native read may leave its empty coordination lock, but no session
+// payload, publication intent, or other session's state is allowed.
+func assertCurrentFailureHasOnlyCoordination(t testing.TB, output, sessionID string) {
+	t.Helper()
+	lockDirectory := filepath.Join(".peasant-state", "locks")
+	lockPath := filepath.Join(lockDirectory, schema.ComputeTranscriptHash([]byte(sessionID))+".lock")
+	err := filepath.WalkDir(output, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(output, path)
+		if err != nil {
+			return err
+		}
+		switch relative {
+		case ".", ".peasant-state", lockDirectory:
+			if !entry.IsDir() {
+				return fmt.Errorf("coordination directory %q is not a directory", relative)
+			}
+		case lockPath:
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() || info.Size() != 0 {
+				return fmt.Errorf("coordination lock %q is not an empty regular file", relative)
+			}
+		default:
+			return fmt.Errorf("mounted failure left temporary or final artifact %q", relative)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
