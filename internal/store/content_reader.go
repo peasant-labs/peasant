@@ -32,7 +32,7 @@ func contentIntegrityError() error {
 
 func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionContentCapture, found bool, err error) {
 	c.SessionID = id
-	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_revision,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
 		var e error
 		c.Status, e = ingest.NewContentCaptureStatus(st.ColumnText(0))
@@ -47,7 +47,10 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 		if e != nil {
 			return e
 		}
-		c.CaptureRevision = st.ColumnText(3)
+		c.CaptureFormat, e = ingest.NewContentCaptureFormat(st.ColumnText(3))
+		if e != nil {
+			return e
+		}
 		c.EntryCount = st.ColumnInt(4)
 		c.ContentRowCount = st.ColumnInt(5)
 		c.FullCaptureSHA256 = st.ColumnText(6)

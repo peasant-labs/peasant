@@ -1593,7 +1593,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		capture := SessionContentCaptureWrite{}
 		if result.fullContent {
-			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: ContentSourceNewIngest, TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureRevision: ContentCaptureRevision, CapturedAtMs: nowMs}
+			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: ContentSourceNewIngest, TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,

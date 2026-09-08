@@ -66,6 +66,34 @@ func NewContentSourceAuthority(s string) (ContentSourceAuthority, error) {
 	return "", fmt.Errorf("content capture: unknown source authority %q; select an attributable source before storing capture", s)
 }
 
+// ContentCaptureFormat names the shape of a stored transcript capture. The
+// closed set mirrors the CHECK constraint on session_content_captures.
+type ContentCaptureFormat string
+
+const (
+	ContentCaptureFormatFull          ContentCaptureFormat = "full"
+	ContentCaptureFormatPreviewOnly   ContentCaptureFormat = "preview_only"
+	ContentCaptureFormatLegacyPreview ContentCaptureFormat = "legacy_preview_only"
+)
+
+// AllContentCaptureFormats returns the canonical closed set in declared order.
+func AllContentCaptureFormats() []ContentCaptureFormat {
+	return []ContentCaptureFormat{ContentCaptureFormatFull, ContentCaptureFormatPreviewOnly, ContentCaptureFormatLegacyPreview}
+}
+
+func (f ContentCaptureFormat) String() string { return string(f) }
+
+// NewContentCaptureFormat validates a raw capture-format string at a trust
+// boundary. Unknown text fails closed instead of becoming a silent cast.
+func NewContentCaptureFormat(raw string) (ContentCaptureFormat, error) {
+	for _, f := range AllContentCaptureFormats() {
+		if raw == string(f) {
+			return f, nil
+		}
+	}
+	return "", fmt.Errorf("content capture: unknown capture format %q read at the store boundary in ingest.NewContentCaptureFormat; the value is outside the closed set %v, so the capture cannot be trusted or rewritten; store one of those formats, or run harvest index --force to recapture the session", raw, AllContentCaptureFormats())
+}
+
 type SessionEntryWriteMode string
 
 const (
@@ -88,7 +116,7 @@ type SessionContentCaptureWrite struct {
 	Status                     ContentCaptureStatus
 	SourceAuthority            ContentSourceAuthority
 	TranscriptOrigin           TranscriptOrigin
-	CaptureRevision            string
+	CaptureFormat              ContentCaptureFormat
 	CapturedAtMs               int64
 	FailureCode                string
 	FailureMessage             string
@@ -99,7 +127,7 @@ type SessionContentCapture struct {
 	Status                     ContentCaptureStatus
 	SourceAuthority            ContentSourceAuthority
 	TranscriptOrigin           TranscriptOrigin
-	CaptureRevision            string
+	CaptureFormat              ContentCaptureFormat
 	EntryCount                 int
 	ContentRowCount            int
 	FullCaptureSHA256          string

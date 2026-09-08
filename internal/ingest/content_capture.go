@@ -36,8 +36,6 @@ type AuthoritativeTranscriptIndexer interface {
 	IndexTranscriptBytesForCapture(context.Context, DiscoveredSession, []byte) (TranscriptCaptureResult, error)
 }
 
-const ContentCaptureRevision = "full-source-v1"
-
 func validateCaptureRole(role string) error {
 	switch role {
 	case "user", "assistant", "system", "tool":

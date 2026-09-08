@@ -1,0 +1,3 @@
+requiredNames:
+  - maps_every_shipped_capture_value
+  - unmapped_capture_value_fails_migration

@@ -19,7 +19,7 @@ func WriteFullEntries(ctx context.Context, db FullContentWriter, id ingest.Sessi
 	results := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, RequireFullContent: true,
 		ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureComplete,
-			SourceAuthority: ingest.ContentSourceNewIngest, CaptureRevision: "synthetic-complete-source"},
+			SourceAuthority: ingest.ContentSourceNewIngest, CaptureFormat: ingest.ContentCaptureFormatFull},
 	}})
 	if len(results) != 1 {
 		return fmt.Errorf("seed full content: expected one atomic write result")

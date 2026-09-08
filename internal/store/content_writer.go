@@ -93,8 +93,8 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		if c.SourceAuthority == "" {
 			c.SourceAuthority = ingest.ContentSourceNone
 		}
-		if c.CaptureRevision == "" {
-			c.CaptureRevision = "preview-only-v50"
+		if c.CaptureFormat == "" {
+			c.CaptureFormat = ingest.ContentCaptureFormatPreviewOnly
 		}
 		return out, writeCapture(conn, w.SessionID, c, len(entries), 0, "")
 	}
@@ -118,8 +118,8 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	if c.SourceAuthority == "" {
 		c.SourceAuthority = ingest.ContentSourceNewIngest
 	}
-	if c.CaptureRevision == "" {
-		c.CaptureRevision = "full-content-v1"
+	if c.CaptureFormat == "" {
+		c.CaptureFormat = ingest.ContentCaptureFormatFull
 	}
 	if c.Status != ingest.ContentCaptureComplete || c.SourceAuthority == ingest.ContentSourceNone || c.FailureCode != "" || c.FailureMessage != "" {
 		return out, fmt.Errorf("store full content write: capture is not complete and attributable; prior data unchanged; resolve strict parser failures before retrying")
@@ -175,7 +175,7 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 			return out, err
 		}
 	}
-	if integrityMatch && out.skipped && old.SourceAuthority == c.SourceAuthority && old.TranscriptOrigin == c.TranscriptOrigin && old.CaptureRevision == c.CaptureRevision {
+	if integrityMatch && out.skipped && old.SourceAuthority == c.SourceAuthority && old.TranscriptOrigin == c.TranscriptOrigin && old.CaptureFormat == c.CaptureFormat {
 		// Identical content need not be rewritten, but a new metadata capture
 		// must be bound even when the bounded index took its hash-skip path.
 		if old.PublicationCaptureRevision == c.PublicationCaptureRevision {
@@ -234,7 +234,10 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 	if _, err := ingest.NewContentSourceAuthority(string(c.SourceAuthority)); err != nil {
 		return err
 	}
-	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_revision,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_revision=excluded.capture_revision,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), c.CaptureRevision, entries, rows, nullString(hash), c.CapturedAtMs, nullString(c.FailureCode), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
+	if _, err := ingest.NewContentCaptureFormat(string(c.CaptureFormat)); err != nil {
+		return err
+	}
+	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(c.FailureCode), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
 }
 
 func contentBackfillPublicationRevision(conn *sqlite.Conn, id ingest.SessionID) (revision int64, err error) {

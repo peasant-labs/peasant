@@ -126,7 +126,7 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	}
 	now := time.Now().UnixMilli()
 	write := SessionEntryWrite{SessionID: id, Result: indexformat.V1{Entries: capture.Entries}, IndexVersion: 1, Mode: SessionEntryWriteContentBackfill, RequireFullContent: true,
-		ContentCapture: SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: authority, TranscriptOrigin: session.TranscriptOrigin, CaptureRevision: ContentCaptureRevision, CapturedAtMs: now}}
+		ContentCapture: SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: authority, TranscriptOrigin: session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: now}}
 	results := store.IndexSessionEntryBatch(ctx, []SessionEntryWrite{write})
 	if len(results) != 1 {
 		return fmt.Errorf("content backfill %s: store returned no atomic result; retry after checking database", id)
