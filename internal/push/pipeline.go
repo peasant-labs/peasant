@@ -789,7 +789,10 @@ func (p *Pipeline) pushSession(
 	meta := snapshot.Artifact.Metadata
 	sess.HostSlug, sess.ProjectHash = snapshot.Detail.HostSlug, snapshot.Detail.ProjectHash
 	sess.SessionOrigin, sess.PushedAt = snapshot.Detail.SessionOrigin, snapshot.Detail.PushedAt
-	metrics := &snapshot.Metrics.QualityMetrics
+	var metrics *schema.QualityMetrics
+	if snapshot.Metrics != nil {
+		metrics = &snapshot.Metrics.QualityMetrics
+	}
 	entries := snapshot.Entries
 
 	// Refuse modelless sessions client-side, before any upload, so the village

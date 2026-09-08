@@ -35,8 +35,8 @@ func (p *Pipeline) readContent(ctx context.Context, candidate ingest.PushSession
 		}
 		return nil, failure
 	}
-	if snapshot.Artifact == nil || snapshot.Metrics == nil {
-		return nil, fmt.Errorf("capture session %s for publication: retained artifact or metrics are unavailable; no content was prepared; complete harvest before retrying", candidate.SessionID)
+	if snapshot.Artifact == nil {
+		return nil, fmt.Errorf("capture session %s for publication: retained artifact is unavailable; no content was prepared; complete harvest before retrying", candidate.SessionID)
 	}
 	detail := snapshot.Detail
 	if detail.SessionID != candidate.SessionID || detail.ProjectHash != candidate.ProjectHash || detail.ModelHarness != candidate.ModelHarness ||
