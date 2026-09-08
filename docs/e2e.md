@@ -148,6 +148,14 @@ DO run in `make check` — see [`TESTING.md` → Committed fixture meta-tests](.
 
 ### Crash cleanup and CI concurrency
 
+The joined-hook isolation guard hashes developer state before and after the run.
+It streams file contents through a 32 KiB buffer, including large local databases;
+it does not load each complete file into memory. The guard still checks file
+contents and metadata and excludes only the harness's own sandbox subtree.
+The `TestPathFingerprintBoundedMemory` regression runs in `make check` without
+containers. It uses a synthetic sparse file to verify bounded allocation and
+detects content-only changes even when file size and modification time match.
+
 > **Counter regression note.** An earlier version of this
 > doc claimed "per-run **uniqueness** — not the reaper — is the flake fix." That
 > was **wrong**. The actual failure was a **counter bug**: the seeded-baseline

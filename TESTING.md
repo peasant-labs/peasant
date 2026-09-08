@@ -107,6 +107,15 @@ func TestMetricsCompute_EmptyStore(t *testing.T) {
 
 ## Test memory: the staging-arena trap (and the `-race` OOM)
 
+The full-stack E2E harness has a separate memory-sensitive path: the joined-hook
+developer-state isolation guard fingerprints local files. It streams these files
+through a 32 KiB buffer. Loading a multi-gigabyte local database with `os.ReadFile`
+previously made the E2E test process grow with the database size; the race detector
+amplified that allocation. `TestPathFingerprintBoundedMemory` checks this exact
+shared helper with a 64 MiB sparse file and a 1 MiB allocation ceiling, including
+content-only mutation and sandbox-exclusion cases. It runs without the `e2e` tag,
+so the ordinary quality gate protects the full-stack harness from this regression.
+
 Separately from time, the suite's **peak memory** was profiled after CI flakily
 **OOM-SIGTERM'd** `go test -race ./...` (exit 143) on the small 2-core/7 GB
 GitHub runner. The cause was a *single allocation*, and the lesson generalizes:
@@ -122,7 +131,9 @@ production **2 GiB** arena (`DefaultArenaSizeBytes`). With `t.Parallel` at
 **Regression coverage.** A tiny test arena, via an env override that mirrors
 `PEASANT_DB_POOL_SIZE`: `ingest.EnvArenaSizeBytes` (`PEASANT_INGEST_ARENA_BYTES`)
 + `resolveArenaSizeBytes`, set to **64 MiB** in the `cmd/peasant` and
-`internal/ingest` `TestMain`s. Result: `cmd/peasant -race` 2173–6267 MB →
+`internal/ingest` `TestMain`s. The API test binary applies the same override for
+its mounted ingest paths, and E2E TestMain supplies it to the harness and CLI
+children. Result: `cmd/peasant -race` 2173–6267 MB →
 **240 MB**, `ingest` 6185 → **274 MB**; full `make check -race` runs ~26s and
 fits a **2-vcpu** runner (so the per-PR job stays a plain `make check`, no split).
 
@@ -162,8 +173,9 @@ test non-parallel).
 | `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB (`64*1024*1024`) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
 
 Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
-`internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`), and
-`internal/ingest/main_test.go` (arena). The resolvers (`store.resolvePoolSize`,
+`internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`),
+`internal/ingest/main_test.go` and `internal/api/main_test.go` (arena), and
+`internal/e2e/main_test.go` (arena default). The resolvers (`store.resolvePoolSize`,
 `ingest.resolveArenaSizeBytes`) take the env override only when it parses as a
 positive integer, else the default.
 
