@@ -1,5 +1,5 @@
 # Fixture for TestPushProjectIdentityDefaultsRenderOnVillage: two disposable
-# repositories pushed with default field visibility (no push.fields block in
+# projects pushed with default field visibility (no push.fields block in
 # config.yaml, so gitRemote/projectPath/projectName all resolve on, D8), one
 # with a recognizable git remote and one without. Session identifiers are
 # fixed so the test can look up each pushed row by local ID.
@@ -9,6 +9,9 @@ cases:
     remoteSubagentSessionID: agent-e2e-identity-remote
     noRemoteRootSessionID: 2d4e6f80-1b3c-4d5e-9f70-8a9b0c1d2e3f
     noRemoteSubagentSessionID: agent-e2e-identity-no-remote
+    # Recorded historical location only: never create this directory. The test
+    # refuses it if present so ingest cannot inspect an unrelated repository.
+    noRemoteRecordedCWD: /home/peasant-e2e-identity/projects/identity-no-remote
     # A well-formed, never-fetched remote: peasant reads it from local git
     # config (git remote get-url), it is never dereferenced over the network.
     remote: git@github.com:acme/e2e-identity-repo.git
@@ -17,10 +20,10 @@ cases:
     # project-identity resolver (backend/internal/projectname/Resolver.Resolve,
     # precedence override > consented > remote > path > privacy) falls to the
     # path tier: the redacted local path the publishing client already
-    # recorded, displayed verbatim. Peasant's canonical form replaces every
-    # path segment before the project folder with the literal <PATH>
+    # recorded, displayed verbatim. For this home-rooted recorded path,
+    # Peasant replaces the private prefix with the literal <PATH>
     # placeholder and keeps the folder name, so for the "identity-no-remote"
-    # disposable repository below the expected served string is exactly
+    # synthetic recorded project below the expected served string is exactly
     # "/<PATH>/identity-no-remote" - symmetric with expectedRemoteLabel above.
     expectedNoRemoteDisplayName: "/<PATH>/identity-no-remote"
     expectedNoRemoteNameSource: path
