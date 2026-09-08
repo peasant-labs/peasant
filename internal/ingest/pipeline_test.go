@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -1131,108 +1130,6 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 	if sr.Harness != ingest.HarnessClaudeCode {
 		t.Errorf("SessionResult.Harness = %v, want %v", sr.Harness, ingest.HarnessClaudeCode)
-	}
-}
-
-// failTranscriptRenameFS injects failure at the production owned-file swap.
-type failTranscriptRenameFS struct {
-	*testutil.MemFS
-	reached bool
-}
-
-type failTranscriptRenameRoot struct {
-	ingest.ArtifactRoot
-	filesystem *failTranscriptRenameFS
-}
-
-func (f *failTranscriptRenameFS) OpenArtifactRoot(path string) (ingest.ArtifactRoot, error) {
-	root, err := f.MemFS.OpenArtifactRoot(path)
-	if err != nil {
-		return nil, err
-	}
-	return &failTranscriptRenameRoot{ArtifactRoot: root, filesystem: f}, nil
-}
-
-func (f *failTranscriptRenameFS) CreateArtifactRoot(path string) (ingest.ArtifactRoot, error) {
-	root, err := f.MemFS.CreateArtifactRoot(path)
-	if err != nil {
-		return nil, err
-	}
-	return &failTranscriptRenameRoot{ArtifactRoot: root, filesystem: f}, nil
-}
-
-func (r *failTranscriptRenameRoot) Rename(from, to string) error {
-	if strings.HasSuffix(to, "--transcript.jsonl") {
-		r.filesystem.reached = true
-		return errors.New("injected transcript publication rename failure")
-	}
-	return r.ArtifactRoot.Rename(from, to)
-}
-
-func TestPipeline_PublicationRenameFailureLeavesNoPartialArtifact(t *testing.T) {
-	innerFS := testutil.NewMemFS()
-	mfs := &failTranscriptRenameFS{MemFS: innerFS}
-	git := testutil.DefaultGitResolver()
-
-	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
-	setupSourceFile(t, innerFS, sourcePath)
-	before, err := innerFS.ReadFile(sourcePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
-	meta := makeMinimalMeta(t, testSessionID)
-
-	adapters := map[ingest.Harness]ingest.AdapterFactory{
-		ingest.HarnessClaudeCode: makeStubAdapter(
-			[]ingest.DiscoveredSession{session},
-			map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta},
-		),
-	}
-
-	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
-	if err != nil {
-		t.Fatalf("NewPipeline: %v", err)
-	}
-	result, err := pipeline.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if !mfs.reached {
-		t.Fatal("owned transcript rename fault was not reached")
-	}
-	// The session must report the actual publication failure.
-	if len(result.Sessions) != 1 {
-		t.Fatalf("Sessions len = %d, want 1", len(result.Sessions))
-	}
-	if result.Sessions[0].Error == nil {
-		t.Errorf("Sessions[0].Error = nil, want non-nil (owned transcript rename failed)")
-	}
-	if result.Summary.Errors != 1 {
-		t.Errorf("Summary.Errors = %d, want 1", result.Summary.Errors)
-	}
-
-	// Empty directory scaffolding is safe to retain. Neither owned artifact file
-	// may remain, and deleting the session subtree is not a cleanup strategy.
-	base := expectedOutputBase(testOutputDir, testSessionID)
-	if _, err := innerFS.Stat(fmt.Sprintf("%s/%s--metadata.json", base, testSessionID)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("metadata survived failed precommit publication: %v", err)
-	}
-	if _, err := innerFS.Stat(fmt.Sprintf("%s/%s--transcript.jsonl", base, testSessionID)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("transcript survived failed precommit publication: %v", err)
-	}
-	if after, err := innerFS.ReadFile(sourcePath); err != nil || string(after) != string(before) {
-		t.Errorf("source changed during failed publication: %v", err)
-	}
-	publisher, err := ingest.NewArtifactPublisher(innerFS, testOutputDir, ingest.ArtifactPublisherOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pending, err := publisher.PendingSessions(); err != nil || len(pending) != 0 {
-		t.Errorf("successful precommit rollback left pending publication: %v %v", pending, err)
 	}
 }
 

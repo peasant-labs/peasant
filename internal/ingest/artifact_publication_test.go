@@ -25,6 +25,9 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
+// The owned-file fault corpus covers rollback/no-partial-file guarantees at the
+// actual publication boundary, replacing the retired directory-copy injection.
+//
 //go:embed testdata/artifact_publication.yaml
 var artifactPublicationYAML []byte
 
