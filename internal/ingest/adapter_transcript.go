@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
@@ -32,6 +33,31 @@ func (e *InsufficientRetainedInputError) Error() string {
 var _ TranscriptMetadataExtractor = (*ClaudeAdapter)(nil)
 var _ TranscriptMetadataExtractor = (*CodexAdapter)(nil)
 var _ TranscriptMetadataExtractor = (*CursorAdapter)(nil)
+var _ TranscriptMetadataExtractor = (*PiAdapter)(nil)
+
+func (a *PiAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
+	metadata, err := metadataForTranscriptExtraction(ctx, HarnessPi, data, original)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := parsePiDocument(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+	if doc.header.ID != original.SessionID.String() {
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessPi, Reason: "retained header identifies another session"}
+	}
+	parsed, err := piTranscriptMetadata(doc, DiscoveredSession{SessionID: original.SessionID, CreatedAt: time.UnixMilli(original.Timestamp.Start), ModTime: time.UnixMilli(original.Timestamp.End)})
+	if err != nil {
+		return nil, err
+	}
+	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
+	parsed.Stats.SubagentCount = metadata.Stats.SubagentCount
+	metadata.Stats = parsed.Stats
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
+	return metadata, nil
+}
 
 func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
 	if err := ctx.Err(); err != nil {
@@ -93,7 +119,12 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
-	if first := parseClaudeTranscriptMetadata(data, &parsed); first == nil || first.Type == "" {
+	parsed.ParentUUID = original.ParentUUID
+	first, parseErr := parseClaudeTranscriptMetadata(data, &parsed)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if first == nil || first.Type == "" {
 		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "retained input has no identifiable Claude record"}
 	}
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {

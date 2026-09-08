@@ -607,6 +607,7 @@ type SourcesConfig struct {
 	Codex      SourceProviderConfig `yaml:"codex"`
 	Cursor     SourceProviderConfig `yaml:"cursor"`
 	Strike     SourceProviderConfig `yaml:"strike"`
+	Pi         SourceProviderConfig `yaml:"pi"`
 
 	// deprecatedClaude captures the legacy "claude:" key for error reporting.
 	// Parsing errors out if this is set; the field exists only so the YAML
@@ -629,6 +630,8 @@ func (s *SourcesConfig) Provider(harness defaults.Harness) (*SourceProviderConfi
 		return &s.Cursor, true
 	case defaults.HarnessStrike:
 		return &s.Strike, true
+	case defaults.HarnessPi:
+		return &s.Pi, true
 	default:
 		return nil, false
 	}
@@ -675,6 +678,7 @@ func BaseConfig() *Config {
 		Version:   defaults.ConfigVersion,
 		Redaction: RedactionConfig{Level: redact.Standard},
 		Sources: SourcesConfig{
+			Pi: SourceProviderConfig{Enabled: true, Paths: []string{defaults.DefaultPiPath.String()}},
 			ClaudeCode: SourceProviderConfig{
 				Enabled: true,
 				Paths:   []string{defaults.DefaultClaudePath.String()},
@@ -887,6 +891,9 @@ func validate(cfg *Config) error {
 
 	if cfg.Sources.Strike.Enabled && len(cfg.Sources.Strike.Paths) == 0 {
 		return fmt.Errorf("config: enabled source %q must have at least one path", defaults.HarnessStrike)
+	}
+	if cfg.Sources.Pi.Enabled && len(cfg.Sources.Pi.Paths) == 0 {
+		return fmt.Errorf("config: enabled source %q must have at least one path", defaults.HarnessPi)
 	}
 
 	// Validate mock section values when mock is enabled.

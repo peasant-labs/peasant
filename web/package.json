@@ -34,8 +34,8 @@
     "shell:gate": "pnpm boot:shell && pnpm sxs:shell"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.18",
-    "@peasant-labs/schema": "0.1.3",
+    "@peasant-labs/fairtrade": "0.0.19",
+    "@peasant-labs/schema": "0.18.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",

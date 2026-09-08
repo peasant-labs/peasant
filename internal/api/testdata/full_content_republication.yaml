@@ -1,0 +1,16 @@
+requiredNames:
+  - repair-preserves-current-public-access-and-license
+  - ordinary-push-honors-private-and-license-change
+cases:
+  - name: repair-preserves-current-public-access-and-license
+    currentVisibility: public
+    currentLicense: CC-BY-4.0
+    requestedVisibility: public
+    requestedLicense: CC-BY-4.0
+    expectedOwnerUpdates: 0
+  - name: ordinary-push-honors-private-and-license-change
+    currentVisibility: public
+    currentLicense: CC-BY-4.0
+    requestedVisibility: private
+    requestedLicense: CC-BY-SA-4.0
+    expectedOwnerUpdates: 1

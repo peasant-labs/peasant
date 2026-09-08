@@ -92,6 +92,29 @@ also records profile-only timing rows for **PREPARE**, **INDEX LOG**, and
 **AUDIT**. Those rows explain where time went, but they are not shown as normal
 progress stages.
 
+### Commit observations and rewritten branches
+
+Commit detection uses the existing history query with a three-day lookback and
+lookahead around the session, filters by the configured author email when
+available, and checks readable transcripts for Git activity. The transcript
+check is coarse: one recognized Git command admits all remaining candidates;
+it does not prove a relationship between each commit and the session. Missing
+email or unavailable transcript evidence uses the existing diagnostic fallback.
+
+The ingest-time branch reachability filter has been reverted. Current refs do
+not establish session-era branch membership: after a squash or rebase, original
+commits may remain discoverable through another checked-out ref even though the
+recorded branch no longer contains them. Those candidates can reach storage
+under the restored heuristics. Re-ingestion replaces `session_commits` but
+retains existing observations and their stable IDs in
+`session_commit_associations`.
+
+This restores the risk of attributing nearby same-author commits to the wrong
+session. Stored observations are not definitive proof of PR relevance. Ingest
+does not recover hashes absent from the initial history query or infer a
+successor after a rewrite; historical capture and supported successor mapping
+remain distinct concerns.
+
 ## Write Flow
 
 The ingest implementation follows this sequence:

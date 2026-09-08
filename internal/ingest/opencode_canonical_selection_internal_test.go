@@ -402,7 +402,8 @@ func assertCanonicalMountedWinner(t testing.TB, adapter *OpenCodeAdapter, discov
 	if len(discovered) != 1 || string(discovered[0].SessionID) != sessionID || filepath.Clean(discovered[0].SourcePath.String()) != expectedPath {
 		t.Fatalf("mounted equal-rank discovery selected %+v, want one session %q from path %q", discovered, sessionID, expectedPath)
 	}
-	_, transcript, err := adapter.MaterializeTranscript(t.Context(), discovered[0])
+	captured, err := adapter.MaterializeTranscript(t.Context(), discovered[0])
+	transcript := captured.Data
 	if err != nil {
 		t.Fatal(err)
 	}

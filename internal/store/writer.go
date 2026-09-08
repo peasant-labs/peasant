@@ -67,8 +67,12 @@ ON CONFLICT(project_hash) DO UPDATE SET
 VALUES (?, ?, ?, ?)`
 
 	// sqlInsertSession upserts a session row (V23+: opaque_host_id replaces host_slug FK).
+	// Project attribution follows the source adapter's current tracked identity.
+	// The publication invalidation trigger also covers legacy callers
+	// that update mutable metadata without supplying a source-proven snapshot.
 	// The conflict path updates only metadata fields owned by InsertSessions. It
-	// intentionally does not touch index fields such as session_entries_hash;
+	// marks the index stale when captured source evidence changes, but retains
+	// the prior session_entries_hash for the indexer's content comparison;
 	// IndexSessionEntryBatch is the authority for that hash, and the legacy
 	// UpdateIndexState path still clears it when it cannot prove hash/index
 	// atomicity.
@@ -79,14 +83,14 @@ VALUES (?, ?, ?, ?)`
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
-    adapter_version, metric_seed_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    adapter_version, metric_seed_json, source_fingerprint, artifact_hash
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = excluded.parent_id,
-    model_harness = excluded.model_harness,
-    model_id = excluded.model_id,
     opaque_host_id = excluded.opaque_host_id,
     project_hash = excluded.project_hash,
+    model_harness = excluded.model_harness,
+    model_id = excluded.model_id,
     start_ms = excluded.start_ms,
     end_ms = excluded.end_ms,
     ingested_ms = excluded.ingested_ms,
@@ -97,10 +101,26 @@ ON CONFLICT(session_id) DO UPDATE SET
     git_worktree = excluded.git_worktree,
     git_tracking = excluded.git_tracking,
     tool_version = excluded.tool_version,
-    session_origin = excluded.session_origin,
+    session_origin = sessions.session_origin,
     adapter_version = excluded.adapter_version,
     metric_seed_json = excluded.metric_seed_json,
-    artifact_hash = NULL`
+    artifact_hash = excluded.artifact_hash,
+    source_fingerprint = COALESCE(excluded.source_fingerprint,sessions.source_fingerprint)`
+
+	sqlInsertSessionBeforeSourceFingerprint = `INSERT INTO sessions (
+    session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
+    start_ms, end_ms, ingested_ms, source_path, source_format,
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+    parent_id=excluded.parent_id, model_harness=excluded.model_harness,
+    model_id=excluded.model_id, opaque_host_id=excluded.opaque_host_id,
+    project_hash=excluded.project_hash, start_ms=excluded.start_ms,
+    end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,
+    source_path=excluded.source_path, source_format=excluded.source_format,
+    schema_version=excluded.schema_version, git_branch=excluded.git_branch,
+    git_worktree=excluded.git_worktree, git_tracking=excluded.git_tracking,
+    tool_version=excluded.tool_version, session_origin=excluded.session_origin`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 
@@ -203,6 +223,21 @@ GROUP BY date_utc, s.project_hash`
 // Entries with nil Metadata are silently skipped — this occurs when extraction
 // fails for a session but the pipeline continues with partial results.
 func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry) (err error) {
+	_, err = s.InsertSessionsWithRevisions(ctx, entries)
+	return err
+}
+
+// InsertSessionsWithRevisions commits sessions, seed metrics and source-proven
+// metadata together. No revision escapes a failed transaction.
+func (s *Store) InsertSessionsWithRevisions(ctx context.Context, entries []ingest.StoreEntry) (map[ingest.SessionID]int64, error) {
+	revisions := make(map[ingest.SessionID]int64)
+	if err := s.insertSessions(ctx, entries, revisions); err != nil {
+		return nil, err
+	}
+	return revisions, nil
+}
+
+func (s *Store) insertSessions(ctx context.Context, entries []ingest.StoreEntry, revisions map[ingest.SessionID]int64) (err error) {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -215,10 +250,18 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
-	return s.insertSessionsOnConn(conn, entries, true)
+	return s.insertSessionsOnConn(conn, entries, true, revisions)
 }
 
-func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEntry, retainStats bool) (err error) {
+func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEntry, retainStats bool, revisionMaps ...map[ingest.SessionID]int64) (err error) {
+	revisions := make(map[ingest.SessionID]int64)
+	if len(revisionMaps) != 0 && revisionMaps[0] != nil {
+		revisions = revisionMaps[0]
+	}
+	hasSourceFingerprint := false
+	if err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM pragma_table_info('sessions') WHERE name='source_fingerprint'`, &sqlitex.ExecOptions{ResultFunc: func(*sqlite.Stmt) error { hasSourceFingerprint = true; return nil }}); err != nil {
+		return fmt.Errorf("store: inspect sessions source evidence column: %w", err)
+	}
 	// Topological sort: parents before children to satisfy the FK constraint
 	// sessions.parent_id REFERENCES sessions(session_id). When processing
 	// thousands of sessions in one transaction, a child may appear before its
@@ -261,6 +304,11 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		var adapterVersion any
 		if m.AdapterVersion != nil {
 			adapterVersion = *m.AdapterVersion
+		}
+		if sorted[i].PublicationCapture {
+			if err = validatePublicationCapture(sorted[i]); err != nil {
+				return err
+			}
 		}
 
 		// 1. Insert project dimension.
@@ -333,28 +381,22 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		}
 
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertSession, &sqlitex.ExecOptions{
-			Args: []any{
-				string(m.SessionID),
-				derefSessionID(m.ParentUUID),
-				m.ModelHarness.String(),
-				string(m.Model),
-				opaqueHostID, // opaque_host_id (FK → host_slugs.opaque_id)
-				string(m.Project.Hash),
-				m.Timestamp.Start,
-				m.Timestamp.End,
-				derefInt64(m.Timestamp.Ingested),
-				m.Source.FilePath,
-				string(m.Source.Format),
-				m.SchemaVersion,
-				derefString(m.Git.Branch),
-				derefString(m.Git.Worktree),
-				derefString(m.Git.Tracking),
-				m.Version,
-				sessionOrigin.String(),
-				adapterVersion,
-				seedJSON,
-			},
+		sessionSQL := sqlInsertSession
+		sessionArgs := []any{
+			string(m.SessionID), derefSessionID(m.ParentUUID), m.ModelHarness.String(),
+			string(m.Model), opaqueHostID, string(m.Project.Hash), m.Timestamp.Start,
+			m.Timestamp.End, derefInt64(m.Timestamp.Ingested), m.Source.FilePath,
+			string(m.Source.Format), m.SchemaVersion, derefString(m.Git.Branch),
+			derefString(m.Git.Worktree), derefString(m.Git.Tracking), m.Version,
+			sessionOrigin.String(),
+		}
+		if hasSourceFingerprint {
+			sessionArgs = append(sessionArgs, adapterVersion, seedJSON, sorted[i].SourceFingerprint, derefString(sorted[i].ArtifactHash))
+		} else {
+			sessionSQL = sqlInsertSessionBeforeSourceFingerprint
+		}
+		if err = sqlitex.ExecuteTransient(conn, sessionSQL, &sqlitex.ExecOptions{
+			Args: sessionArgs,
 		}); err != nil {
 			return fmt.Errorf("store: insert session %s: %w", m.SessionID, err)
 		}
@@ -375,6 +417,24 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			Args: metricArgs,
 		}); err != nil {
 			return fmt.Errorf("store: insert session_metrics %s: %w", m.SessionID, err)
+		}
+		if sorted[i].PublicationCapture {
+			if err = validateStoredPublicationCapture(conn, sorted[i]); err != nil {
+				return err
+			}
+			if err = upsertSessionCommitsOnConn(conn, m.SessionID, m.Git.Commits, !sorted[i].CommitCaptureComplete); err != nil {
+				return err
+			}
+			revision, captureErr := persistPublicationCapture(conn, sorted[i])
+			if captureErr != nil {
+				return captureErr
+			}
+			revisions[m.SessionID] = revision
+		}
+		if sorted[i].Session.Harness == ingest.HarnessOpenCode && sorted[i].SourceFingerprint != nil {
+			if err = upsertOpenCodeSeqCursorOnConn(conn, m.SessionID, sorted[i].EventSeq); err != nil {
+				return err
+			}
 		}
 
 	}

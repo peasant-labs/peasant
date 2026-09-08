@@ -65,6 +65,15 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 **Best-effort** = cannot fail the pipeline. Logs warning, continues. Total DISCOVER
 failure is fatal only when no usable retained session can receive maintenance.
 
+For supported append-only and SQLite sources, each bounded root worker makes the authoritative
+freshness decision from captured metadata and bytes, then processes that same capture and
+persists its fingerprint/cursor; it does not reacquire the source. Batch maps hold no payloads.
+No-op results still pass through staging for parent commit, progress, and release, without
+store writes or indexing. Store-free logs retain a private source/identity digest bound to
+the successful metadata and managed transcript, not a wire metadata extension. Matching content does
+not suppress project-identity repair. Completion time remains audit data. Legacy mutable
+multi-file readers retain their existing consistency limitations.
+
 ---
 
 ## Lock-Free Primitives (Summary)

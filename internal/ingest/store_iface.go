@@ -21,11 +21,19 @@ type CurrentCommitAssociation struct {
 // for a session already in the database. Populated by BulkLookupSessionLocations
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
-	HostSlug       string
-	ParentID       string // empty string if the session has no parent
-	IngestedMs     *int64 // nil if unknown; populated from DB ingested_ms column
-	SchemaVersion  int    // 0 if unknown; populated from DB schema_version column
-	AdapterVersion *int   // nil means the producing adapter revision is unknown.
+	// Readiness is a bulk repair hint, not a substitute for the bundle read.
+	ProjectHash             schema.ProjectHash
+	OpaqueHostID            string
+	GitRemote               *string
+	PublicationReadiness    PublicationReadiness
+	CaptureRevision         int64
+	AdapterVersion          *int
+	HostSlug                string
+	ParentID                string // empty string if the session has no parent
+	IngestedMs              *int64 // nil if unknown; populated from DB ingested_ms column
+	SchemaVersion           int    // 0 if unknown; populated from DB schema_version column
+	SourceFingerprint       []byte // nil for rows created before captured-source evidence
+	SourceEvidenceSupported bool   // true when the backing schema carries source_fingerprint
 }
 
 // MetricSeedStore reads retained adapter statistics independently of computed
@@ -96,8 +104,16 @@ type SessionStore interface {
 
 // StoreEntry pairs extracted metadata with its discovered session.
 type StoreEntry struct {
-	Metadata *UnifiedMetadata
-	Session  DiscoveredSession
+	CommitCaptureComplete bool
+	ArtifactHash          *string
+	// PublicationCapture explicitly opts into a source-inspected snapshot.
+	// Legacy callers leave it false and cannot accidentally establish readiness.
+	PublicationCapture bool
+	CWDProvenance      CWDProvenanceKind
+	Metadata           *UnifiedMetadata
+	Session            DiscoveredSession
+	SourceFingerprint  []byte
+	EventSeq           int64
 }
 
 // MetricsStore abstracts the analytics read/write path for session entries
@@ -147,11 +163,16 @@ type MetricsStore interface {
 // still recording the representation actually written. A non-zero revision
 // commits the producer and timestamp in the same atomic write.
 type SessionEntryWrite struct {
-	SessionID      SessionID
-	Result         indexformat.Result
-	IndexVersion   int
-	IndexerVersion int
-	IndexedAtMs    int64
+	// CaptureRevision binds this index write to the captured publication metadata.
+	CaptureRevision    int64
+	Mode               SessionEntryWriteMode
+	RequireFullContent bool
+	ContentCapture     SessionContentCaptureWrite
+	SessionID          SessionID
+	Result             indexformat.Result
+	IndexVersion       int
+	IndexerVersion     int
+	IndexedAtMs        int64
 	// ExpectedState is the SQL snapshot captured before parsing. A nil value
 	// selects an unproven legacy write, which cannot retain an input proof.
 	ExpectedState *SessionIndexState
@@ -164,14 +185,15 @@ type SessionEntryWrite struct {
 // replacement. Nil fields mean SQL NULL, never an empty string or a target value.
 // IndexerVersion maps to the historical sessions.index_version column.
 type SessionIndexState struct {
-	SessionID          SessionID
-	Harness            Harness
-	ArtifactHash       *string
-	IndexerVersion     int
-	IndexVersion       *int
-	IndexedAt          *int64
-	IndexedInputHash   *string
-	SessionEntriesHash *string
+	PublicationCaptureRevision int64
+	SessionID                  SessionID
+	Harness                    Harness
+	ArtifactHash               *string
+	IndexerVersion             int
+	IndexVersion               *int
+	IndexedAt                  *int64
+	IndexedInputHash           *string
+	SessionEntriesHash         *string
 }
 
 // StaleIndexWorkError means the captured SQL state changed before the index

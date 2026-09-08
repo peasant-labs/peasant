@@ -272,7 +272,7 @@ func (p *ArtifactPublisher) reconcileArtifactIntent(ctx context.Context, root Ar
 		return nil, &artifactMirrorError{fmt.Errorf("recover committed session %s: database reconciliation is pending; file-only mode did not open a database or discard the acquired source cursor; run a database-backed harvest to finish", intent.SessionID)}
 	}
 	if p.mirror != nil {
-		results := p.mirror.MirrorArtifacts(ctx, []ArtifactMirrorRequest{{Artifact: artifact, EventSeq: intent.EventSeq, Origin: intent.Origin}})
+		results := p.mirror.MirrorArtifacts(ctx, []ArtifactMirrorRequest{{Artifact: artifact, EventSeq: intent.EventSeq, Origin: intent.Origin, CWDProvenance: intent.CWDProvenance, SourceFingerprint: intent.SourceFingerprint, CommitCaptureComplete: intent.CommitCaptureComplete}})
 		if len(results) != 1 || results[0].SessionID != intent.SessionID {
 			return nil, &artifactMirrorError{fmt.Errorf("mirror committed session %s: store returned an invalid per-session outcome; files and recovery evidence were retained", intent.SessionID)}
 		}

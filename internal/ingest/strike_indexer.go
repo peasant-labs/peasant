@@ -215,7 +215,7 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 			a.beginTool(event, timestamp, len(trimmed))
 
 		case strikeEventToolOutput:
-			a.appendCallOutput(event.CallID, strikeOutputText(event))
+			a.appendCallOutput(event.CallID, a.outputText(event))
 
 		case strikeEventProcessStarted:
 			if event.ProcessID != "" && event.CallID != "" {
@@ -227,7 +227,7 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 			if callID == "" {
 				callID = a.processCalls[event.ProcessID]
 			}
-			a.appendCallOutput(callID, strikeOutputText(event))
+			a.appendCallOutput(callID, a.outputText(event))
 
 		case strikeEventProcessExited:
 			callID := event.CallID
@@ -493,7 +493,7 @@ func (a *strikeAssembly) endTool(event strikeEventData, timestamp *int64, rawLen
 		a.calls[callID] = call
 	}
 
-	if terminal := strikeOutputText(event); terminal != "" {
+	if terminal := a.outputText(event); terminal != "" {
 		call.outputs = append(call.outputs, terminal)
 	}
 	if event.IsError {
@@ -519,7 +519,7 @@ func (a *strikeAssembly) endTool(event strikeEventData, timestamp *int64, rawLen
 		ToolCallID:     &callID,
 		Depth:          1,
 		ParentIndex:    &parentIndex,
-		ToolOutput:     &preview,
+		ToolOutput:     &output,
 		RawByteLength:  intPointer(rawLength),
 		PartType:       &partType,
 	})
@@ -555,6 +555,23 @@ func strikeReasoningText(event strikeEventData) string {
 		return event.Reasoning
 	}
 	return strikeEventText(event)
+}
+
+func (a *strikeAssembly) outputText(event strikeEventData) string {
+	if !a.fullContent {
+		return strikeOutputText(event)
+	}
+	if event.StreamData != "" {
+		return event.StreamData
+	}
+	for _, raw := range []json.RawMessage{event.Output, event.Result} {
+		// Tool values are semantic JSON. Only a real JSON string can be
+		// unwrapped without losing object siblings or nested structure.
+		if value := strikeToolInput(raw); value != nil {
+			return *value
+		}
+	}
+	return ""
 }
 
 func strikeOutputText(event strikeEventData) string {

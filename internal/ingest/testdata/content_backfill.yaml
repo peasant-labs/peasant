@@ -1,0 +1,27 @@
+required_names: [retained-root, retained-child, corrupt-snapshot-rollback, force-shape-replacement, reject-shape-mismatch, failing-first-target-page-progress, cursor-query-shape-requires-force, cursor-query-force-remaps-anchor, invalid-project-proof-rollback]
+cases:
+  - name: invalid-project-proof-rollback
+    invalid_project: true
+    expect_error: true
+  - name: cursor-query-shape-requires-force
+    cursor: true
+    expect_error: true
+  - name: cursor-query-force-remaps-anchor
+    cursor: true
+    force: true
+  - name: retained-root
+  - name: retained-child
+    child: true
+  - name: corrupt-snapshot-rollback
+    corrupt: true
+    expect_error: true
+  - name: force-shape-replacement
+    mismatch: true
+    force: true
+  - name: reject-shape-mismatch
+    mismatch: true
+    expect_error: true
+  - name: failing-first-target-page-progress
+    count: 102
+    corrupt: true
+    expect_error: true

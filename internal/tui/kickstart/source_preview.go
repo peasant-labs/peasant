@@ -217,9 +217,9 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 		git:       &ingest.ExecGitResolver{},
 		byID:      byID,
 		limit:     DefaultSourceTurnsCacheSize,
-		budget:    defaults.OpenCodePreviewMaterializeMaxBytes,
-		firstPage: defaults.OpenCodePreviewFirstPageMaxBytes,
-		slice:     defaults.OpenCodePreviewSliceMaxBytes,
+		budget:    defaults.TranscriptContinuationReadBytes,
+		firstPage: defaults.TranscriptInitialReadBytes,
+		slice:     defaults.TranscriptContinuationReadBytes,
 		cached:    make(map[string]sourcePreview),
 	}
 	for _, opt := range opts {
@@ -637,11 +637,11 @@ func (s *SourceTurns) materializeBytes(sessionID string, listing ftue.SessionLis
 			"preview the SQLite transcript of session %q from its harness source: harness %q cannot materialize a managed transcript",
 			sessionID, listing.Harness)
 	}
-	_, data, err := materializer.MaterializeTranscript(context.Background(), session)
+	captured, err := materializer.MaterializeTranscript(context.Background(), session)
 	if err != nil {
 		return nil, ingest.MaterializeTruncation{}, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
 	}
-	return data, ingest.MaterializeTruncation{}, nil
+	return captured.Data, ingest.MaterializeTruncation{}, nil
 }
 
 // previewSliceNotice writes the sentence the pane shows above the turns of a

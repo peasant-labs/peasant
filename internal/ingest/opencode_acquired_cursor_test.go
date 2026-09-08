@@ -127,7 +127,8 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			if selected == nil {
 				t.Fatalf("cursor fixture session %s was not discovered", fixture.SessionID)
 			}
-			legacyMeta, legacyTranscript, err := adapter.MaterializeTranscript(t.Context(), *selected)
+			legacyCapture, err := adapter.MaterializeTranscript(t.Context(), *selected)
+			legacyMeta, legacyTranscript := legacyCapture.Metadata, legacyCapture.Data
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -26,6 +26,8 @@ type openCodeBoundaryCase struct {
 	ExpectedSessions              int    `yaml:"expected_sessions"`
 	ExpectedDiscoveryMessageReads int64  `yaml:"expected_discovery_message_reads"`
 	ExpectedDiscoveryPartReads    int64  `yaml:"expected_discovery_part_reads"`
+	ExpectedCaptureMessageReads   int64  `yaml:"expected_capture_message_reads"`
+	ExpectedCapturePartReads      int64  `yaml:"expected_capture_part_reads"`
 	CommitHash                    string `yaml:"commit_hash"`
 	CommitEmail                   string `yaml:"commit_email"`
 	CommitMessage                 string `yaml:"commit_message"`
@@ -162,7 +164,9 @@ func TestOpenCodeDiscoveryAndFilteredPipelineDoNotReadLegacyPayloads(t *testing.
 	if _, err := unchangedPipeline.Run(t.Context()); err != nil {
 		t.Fatalf("run unchanged-session pipeline: %v", err)
 	}
-	assertLegacyPayloadReads(t, counter, "unchanged pipeline", testCase.ExpectedDiscoveryMessageReads, testCase.ExpectedDiscoveryPartReads)
+	// A selected source is captured before an authoritative no-op. Discovery
+	// clocks cannot establish which source bytes were consumed.
+	assertLegacyPayloadReads(t, counter, "unchanged pipeline", testCase.ExpectedCaptureMessageReads, testCase.ExpectedCapturePartReads)
 
 	commitReader := &rejectingCommitTranscriptReader{}
 	commit := ingest.CommitInfo{Hash: testCase.CommitHash, AuthorEmail: testCase.CommitEmail, Message: testCase.CommitMessage}

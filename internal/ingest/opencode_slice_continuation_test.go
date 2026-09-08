@@ -199,7 +199,8 @@ func assertSameIdentifiers(t *testing.T, kind string, whole []string, sliced map
 
 func wholeSessionProjection(t *testing.T, adapter *ingest.OpenCodeAdapter, session ingest.DiscoveredSession) []byte {
 	t.Helper()
-	_, data, err := adapter.MaterializeTranscript(t.Context(), session)
+	captured, err := adapter.MaterializeTranscript(t.Context(), session)
+	data := captured.Data
 	if err != nil {
 		t.Fatalf("read session %q whole: %v", session.SessionID, err)
 	}

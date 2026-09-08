@@ -6,6 +6,7 @@ package push
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +24,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
 	"github.com/peasant-labs/schema"
@@ -56,11 +56,42 @@ func persistenceContext(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(context.WithoutCancel(ctx), localPersistenceBudget)
 }
 
+// recorder resolves the profile recorder for this run: the injected
+// PipelineConfig.Recorder when set, otherwise the recorder threaded through
+// the run context (Nop when profiling is off, so instrumentation calls stay
+// cheap and the disabled path is byte-identical). It never returns nil.
+func (p *Pipeline) recorder(ctx context.Context) perf.Recorder {
+	if p.runCfg.Recorder != nil {
+		return p.runCfg.Recorder
+	}
+	return perf.RecorderFromContext(ctx)
+}
+
+// safeSubjectID never carries raw caller-controlled identifiers into a profile.
+// Hashing preserves stable grouping without exposing path-like session IDs.
+func safeSubjectID(sessionID string) string {
+	return fmt.Sprintf("session:%x", sha256.Sum256([]byte(sessionID)))
+}
+
+// outcomeForStatus maps a per-session push status to the profile outcome
+// vocabulary: new/updated uploads are ok, explicit skips are skipped, and
+// errors are failed. Profiling never changes the status itself.
+func outcomeForStatus(s PushStatus) perf.Outcome {
+	switch s {
+	case PushStatusNew, PushStatusUpdated:
+		return perf.OutcomeOK
+	case PushStatusSkipped, PushStatusHeld:
+		return perf.OutcomeSkipped
+	default:
+		return perf.OutcomeFailed
+	}
+}
+
 // Pipeline orchestrates pushing local sessions to the Peasant village.
 //
 // It reads sessions from a PipelineStore, maps their metadata, reads transcript
 // files via the injected FileSystem, and uploads via the injected Publisher.
-// The Pipeline has no os import — all filesystem access is through p.fs.
+// Publication input comes from the store, never from source or sidecar files.
 type Pipeline struct {
 	store     PipelineStore
 	transport Transport
@@ -82,15 +113,15 @@ type Publisher interface {
 }
 
 // PipelineStore is the complete local persistence surface required by the push
-// pipeline. Publication also requires transcript.ContentStore at the read
-// boundary; candidate-only callers need not implement that capability.
+// pipeline.
 type PipelineStore interface {
 	CandidateStore
 	InsertPushLog(context.Context, ingest.PushLogEntry) error
 	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
-	GetQualityMetrics(context.Context, ingest.SessionID) (*schema.QualityMetrics, error)
+	ingest.PublicationInputReader
+	ingest.FullSessionEntryReader
 	ListEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error)
-	ListCurrentSessionCommitAssociations(context.Context, ingest.SessionID) ([]ingest.CurrentCommitAssociation, error)
+	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
 }
@@ -113,6 +144,11 @@ type PipelineStore interface {
 // single production constructor, so refusing a nil redactor here — rather
 // than letting the pipeline silently skip re-redaction — is the one place
 // that can guarantee every caller gets it.
+//
+// When profiling, cfg.Redaction.CustomPatterns must describe the injected
+// engine's configured custom patterns. Production callers construct the engine
+// from this same config. Aggregate reports combine rules with the same ID;
+// profiling withholds counts when their configured categories conflict.
 func NewPipeline(
 	store PipelineStore,
 	transport Transport,
@@ -162,8 +198,28 @@ func NewPipeline(
 //   - 3 consecutive connection errors abort the pipeline.
 //   - Receipt persistence failures become per-session errors; InsertPushLog
 //     failures are logged to stderr rather than returned.
-func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
+func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	startedAt := time.Now().UnixMilli()
+
+	// Profile recorder for this run: the injected PipelineConfig.Recorder when
+	// set, otherwise the context recorder (Nop when profiling is off). The
+	// resolved recorder is threaded back into ctx so every downstream helper
+	// (candidate query, negotiate, per-session work, annotations when driven
+	// through the same context) records against one collector without
+	// signature changes. Recording against Nop is cheap and changes no
+	// behavior, so the disabled path stays byte-identical.
+	rec := p.recorder(ctx)
+	ctx = perf.ContextWithRecorder(ctx, rec)
+	p, finishRedactionProfile := profileRedactionRun(ctx, p)
+	defer finishRedactionProfile()
+	// The CLI owns push.run around both transcript and annotation stages.
+	// Pipeline instrumentation must not add a second run duration.
+	var tracker ConcurrencyTracker
+	var selected int
+	defer func() {
+		p.countRunTotals(rec, result, selected)
+		rec.Count(perf.CounterPushConcurrencyHighWater, int64(tracker.HighWater()), perf.UnitCount, nil)
+	}()
 
 	// 1. Resolve effective visibility + content license (both uniform for the run).
 	visibility := p.resolveVisibility()
@@ -171,18 +227,22 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 
 	// 2. Guard: individual mode is not yet implemented.
 	if p.cfg.Push.Method == config.PushMethodIndividual && p.runCfg.SourceProvider == "" {
+		rec.Error(perf.StagePushRun, fmt.Errorf("individual push method needs a session picker"), nil)
 		return nil, fmt.Errorf(
 			"push.method is set to %q in your config, which requires an interactive session "+
 				"picker (not yet implemented). To push now, either run 'peasant kickstart' to "+
-				"change your push method, or use --source-harness to filter by harness",
+				"change your push method, or use --source-harness to filter by provider",
 			config.PushMethodIndividual)
 	}
 
 	// 3. Query sessions from store.
-	sessions, baseCount, err := p.getTargetSessions(ctx)
+	sessions, baseCount, err := p.getTargetSessions(ctx, perf.ParentSpanFromContext(ctx))
 	if err != nil {
+		rec.Error(perf.StagePushDiscovery, fmt.Errorf("candidate database query failed; check local storage before retrying"), nil)
 		return nil, fmt.Errorf("get target sessions: %w", err)
 	}
+	rec.Count(perf.CounterPushSessionsSelected, int64(len(sessions)), perf.UnitCount, nil)
+	selected = len(sessions)
 
 	// 4. Warn about held-back sessions (missing metrics), for this push's scope
 	// only. A hook fires on every commit in ONE repository; listing another
@@ -194,7 +254,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 		return &PushResult{BaseCandidateCount: baseCount, EmptyReason: p.emptyReason(ctx, baseCount)}, nil
 	}
 
-	result := &PushResult{BaseCandidateCount: baseCount}
+	result = &PushResult{BaseCandidateCount: baseCount}
 
 	// 6. Dry-run: sequential scan exercising the SAME pushSession pre-flight as the
 	// real path (read → guards → map → client-side validate), diverging only at the
@@ -203,21 +263,35 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// contract version; no audit log.
 	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
 		for _, sess := range sessions {
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil)
+			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil, perf.ParentSpanFromContext(ctx))
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
 		return result, nil // no audit log for dry-run
 	}
-	// Require full retained-input proof before contacting Village. Each upload
-	// captures again so its metadata, entries and associations share one view.
+	// Validate a coherent database capture before the first remote negotiation.
+	// Each session captures again immediately before constructing its publication.
 	for _, sess := range sessions {
-		if _, readErr := p.readContent(ctx, sess); readErr != nil {
+		var attrs perf.Attributes
+		if rec.Enabled() {
+			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
+		}
+		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
+		input, readErr := p.readPublicationInput(ctx, sess)
+		if readErr == nil {
+			readErr = ValidatePublicationInput(input)
+		}
+		if readErr != nil {
+			load.End(perf.OutcomeFailed, nil)
+			rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
+			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 			sr := entryReadFailure(sess, readErr, entryReadPreflight)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 			return result, nil
 		}
+		load.End(perf.OutcomeOK, nil)
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	}
 
 	// 6b. Version-negotiation preflight: query the village's accepted
@@ -256,7 +330,13 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 			}
 			mu.Unlock()
 
-			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities)
+			if rec.Enabled() {
+				tracker.Enter()
+			}
+			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities, perf.ParentSpanFromContext(gctx))
+			if rec.Enabled() {
+				tracker.Exit()
+			}
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -281,7 +361,15 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	_ = g.Wait()
 
 	if abortErr != nil {
+		rec.Error(perf.StagePushRun, fmt.Errorf("push stopped after repeated connection failures; check network access before retrying"), nil)
 		return result, abortErr
+	}
+	if result.Skipped > 0 && result.New == 0 && result.Updated == 0 && result.Errors == 0 && result.Held == 0 {
+		if p.runCfg.Repository != nil {
+			result.EmptyReason = p.emptyReason(ctx, baseCount)
+		} else {
+			result.EmptyReason = "All selected sessions already pushed with unchanged content and publication settings."
+		}
 	}
 
 	// 8. Write audit log entry. Like receipt persistence this records work that
@@ -307,6 +395,27 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	}
 
 	return result, nil
+}
+
+// countRunTotals records the run-level session outcome counters once per run
+// from the aggregate PushResult: published (new + updated), failed, and
+// skipped. Per-session outcomes already ride on their push.session spans; the
+// counters give the reduced profile its deterministic totals. Counts run
+// against the (possibly Nop) recorder, so the disabled path is unchanged.
+func (p *Pipeline) countRunTotals(rec perf.Recorder, result *PushResult, selected int) {
+	if result == nil {
+		return
+	}
+	published := result.New + result.Updated
+	if p.runCfg.DryRun {
+		published = 0 // Forecasts are not remote publications.
+	}
+	rec.Count(perf.CounterPushSessionsPublished, int64(published), perf.UnitCount, nil)
+	rec.Count(perf.CounterPushSessionsFailed, int64(result.Errors), perf.UnitCount, nil)
+	// Selected sessions not reached after a fail-closed preflight or connection
+	// abort were skipped, not published. Do not alter the historical PushResult.
+	skipped := result.Skipped + max(0, selected-len(result.Sessions))
+	rec.Count(perf.CounterPushSessionsSkipped, int64(skipped), perf.UnitCount, nil)
 }
 
 // resolveVisibility returns the visibility this run will actually publish at.
@@ -341,7 +450,9 @@ func (p *Pipeline) resolveLicense() schema.License {
 // The returned baseCount is the number of candidates from QueryPushCandidates
 // BEFORE any selection filtering — surfaced so callers can tell "selection
 // excluded everything" from "nothing to push" without a second query.
-func (p *Pipeline) getTargetSessions(ctx context.Context) (kept []ingest.PushSessionRow, baseCount int, err error) {
+func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (kept []ingest.PushSessionRow, baseCount int, err error) {
+	rec := p.recorder(ctx)
+	discoverySpan := rec.StartChildSpan(perf.StagePushDiscovery, parentSpanID, nil)
 	base, err := QueryPushCandidates(ctx, p.store, PushCandidateQuery{
 		Force:          p.runCfg.Force,
 		SourceProvider: p.runCfg.SourceProvider,
@@ -349,10 +460,13 @@ func (p *Pipeline) getTargetSessions(ctx context.Context) (kept []ingest.PushSes
 		Sources:        p.cfg.Push.Sources,
 	})
 	if err != nil {
+		discoverySpan.End(perf.OutcomeFailed, nil)
 		return nil, 0, err
 	}
+	discoverySpan.End(perf.OutcomeOK, nil)
 	baseCount = len(base)
 
+	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
 	base = p.filterByWizardSelection(base)
 	kept, withheld := ApplySelection(base, p.runCfg.Selection)
 	kept = ApplyRepositoryScope(kept, p.runCfg.Repository)
@@ -360,6 +474,7 @@ func (p *Pipeline) getTargetSessions(ctx context.Context) (kept []ingest.PushSes
 	// hook firing in one repository must not report branch conflicts belonging
 	// to another one on every commit.
 	p.noticeWithheld(ApplyRepositoryScope(withheld, p.runCfg.Repository))
+	selectionSpan.End(perf.OutcomeOK, nil)
 	return kept, baseCount, nil
 }
 
@@ -466,6 +581,7 @@ func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) string {
 // failure once rather than silently treating it as an empty store.
 func (p *Pipeline) allPushable(ctx context.Context) ([]ingest.PushSessionRow, error) {
 	all, err := p.store.AllPushableSessions(ctx)
+	p.recorder(ctx).Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if err != nil {
 		fmt.Fprintf(p.stderr, "warning: check total sessions: %v\n", err)
 	}
@@ -634,39 +750,6 @@ func (p *Pipeline) staleIdentityNote(all []ingest.PushSessionRow) string {
 	return ""
 }
 
-// redactedSlugRemedy explains the ONE cause of a missing metadata file that the
-// user cannot discover from the path, and names the command that repairs it.
-//
-// A version that redacted at the maximum level rewrote the host slug it recorded
-// in the database and in the metadata file, while the directory it had already
-// written kept the real slug. Push resolves the metadata path from the recorded
-// slug, so it looks for a directory that never existed: that session can never
-// publish again, and nothing about the failure says why. Peasant no longer
-// redacts at ingest time, but the rows written before that are still there, and
-// nothing heals them on its own — the host-slug insert ignores conflicts and an
-// unchanged session is skipped by re-ingest, so only a forced re-ingest of that
-// session re-derives it.
-//
-// It is gated on the placeholder actually being in the slug, because a missing
-// metadata file has other causes — a deleted output tree, a moved
-// output.basePath — for which a forced re-ingest is not the fix and saying so
-// would be confidently wrong advice.
-func (p *Pipeline) redactedSlugRemedy(sess ingest.PushSessionRow) string {
-	if !redactionPlaceholder.MatchString(sess.HostSlug) {
-		return ""
-	}
-	return fmt.Sprintf(
-		"What: the recorded host slug %q for session %s contains the redaction placeholder %s, so the metadata path above names a directory that was never written.\n"+
-			"Why: an earlier version redacted the slug it stored while the directory it had already created kept the real one, leaving the two permanently different.\n"+
-			"Where: under the configured output path %s.\n"+
-			"When: while reading this session's metadata, before any upload was attempted.\n"+
-			"Means: nothing was published for this session and nothing was recorded as published; every later push fails here in the same way until the slug is re-derived.\n"+
-			"Fix: re-derive this one session with '%s' - NOT the unscoped '%s', which re-ingests every project on this machine and clears every already-published marker, so the next push re-uploads all of them.",
-		sess.HostSlug, sess.SessionID, redactionPlaceholder.FindString(sess.HostSlug), p.cfg.Output.BasePath,
-		p.ingestCommand("--force --session "+shellQuote(sess.SessionID)),
-		p.ingestCommand("--force"))
-}
-
 // ingestCommand renders ingest in the same config/data/state context as push.
 func (p *Pipeline) ingestCommand(flags string) string {
 	prefix := githooks.CommandPrefix(p.runCfg.CommandBinding)
@@ -710,6 +793,7 @@ func priorCandidateNote(baseCount int) string {
 // was already moved behind the same narrowing.
 func (p *Pipeline) noticeHeld(ctx context.Context) {
 	held, heldErr := p.store.SessionsWithoutMetrics(ctx)
+	p.recorder(ctx).Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if heldErr != nil {
 		fmt.Fprintf(p.stderr, "warning: check held sessions: %v\n", heldErr)
 	}
@@ -768,7 +852,7 @@ func (p *Pipeline) filterByWizardSelection(sessions []ingest.PushSessionRow) []i
 	return out
 }
 
-// pushSession captures coherent full content before redaction and publication.
+// pushSession publishes one coherent database capture without source file access.
 func (p *Pipeline) pushSession(
 	ctx context.Context,
 	sess ingest.PushSessionRow,
@@ -776,49 +860,61 @@ func (p *Pipeline) pushSession(
 	license schema.License,
 	emit schema.PushContractVersion,
 	contentCapabilities []schema.ContentCapability,
-) SessionPushResult {
-	// File ownership and the SQL read are released before redaction/network I/O.
-	snapshot, err := p.readContent(ctx, sess)
-	if err != nil {
-		stage := entryReadPostNegotiation
-		if p.runCfg.DryRun {
-			stage = entryReadPreflight
-		}
-		return entryReadFailure(sess, err, stage)
+	parentSpanID string,
+) (sr SessionPushResult) {
+	// Profile spans for this session. The session span is the parent for every
+	// per-session stage; its safe subject is the sanitized session token (never
+	// raw paths, remotes, or transcript text). The deferred End maps the
+	// returned status to the profile outcome vocabulary, so profiling can never
+	// mark a failed push successful: Error always ends failed.
+	rec := p.recorder(ctx)
+	var subjectAttrs perf.Attributes
+	if rec.Enabled() {
+		subjectAttrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 	}
-	meta := snapshot.Artifact.Metadata
-	sess.HostSlug, sess.ProjectHash = snapshot.Detail.HostSlug, snapshot.Detail.ProjectHash
-	sess.SessionOrigin, sess.PushedAt = snapshot.Detail.SessionOrigin, snapshot.Detail.PushedAt
-	var metrics *schema.QualityMetrics
-	if snapshot.Metrics != nil {
-		metrics = &snapshot.Metrics.QualityMetrics
+	sessionSpan := rec.StartChildSpan(perf.StagePushSession, parentSpanID, subjectAttrs)
+	if rec.Enabled() {
+		ctx = perf.ContextWithRecorder(ctx, sessionRecorder{Recorder: rec, subject: subjectAttrs[perf.AttrSafeSubjectID]})
+		ctx = perf.ContextWithParentSpan(ctx, sessionSpan.ID())
+		p = profileRedactionSession(ctx, p)
 	}
-	entries := snapshot.Entries
+	defer func() {
+		sessionSpan.End(outcomeForStatus(sr.Status), nil)
+	}()
 
-	// Refuse modelless sessions client-side, before any upload, so the village
-	// never sees a request that would 400. The root cause is in ingest; until
-	// then this is a clean client-side Error (not a Held type).
-	if meta.Model == "" {
+	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
+	defer func() { stage.finish(sr.Error) }()
+	input, err := p.readPublicationInput(ctx, sess)
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+	if err == nil {
+		err = ValidatePublicationInput(input)
+	}
+	if err != nil {
+		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session; retry normal ingest in this command context: %s", err, p.ingestCommand("--session "+shellQuote(sess.SessionID)))
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
-			Error:     fmt.Errorf("session %s: %w", sess.SessionID, ErrNoModel),
+			Error:     err,
 		}
 	}
-
-	// Per-session timing recorder (Nop unless --timing threaded one onto ctx).
-	rec := perf.RecorderFromContext(ctx)
+	meta := input.Metadata
 
 	// 1b. Safety-net redaction: re-redact metadata before upload.
 	// This catches sessions ingested before redaction was added or with minimal level.
 	// p.redactor is guaranteed non-nil: NewPipeline refuses to construct a
 	// Pipeline without one.
+	//
+	// Coarse redaction stages share the recorder with combined redaction metrics.
+	stage.next(perf.StagePushSessionRedact)
 	redactStart := time.Now()
 	redacted := p.redactor.RedactMetadata(&meta)
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
+	stage.next(perf.StagePushSessionLoad)
 
+	metrics := input.Quality
+	entries := input.Entries
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
 	// The entries are the transcript's text: contentPreview, toolInput and
@@ -830,8 +926,9 @@ func (p *Pipeline) pushSession(
 	// unrepeatable: a consumer added later cannot get the unredacted ones,
 	// because after this line they do not exist.
 	//
-	// A redaction that cannot be completed must stop the session, not publish
-	// what it failed to redact.
+	// Like the coherent bundle read, redaction fails closed. A
+	// redaction that cannot be completed must stop the session, not publish what
+	// it failed to redact.
 	//
 	// WHY THIS STAYS, even though both published parts now redact themselves as
 	// assembled documents and so cover the entries twice over.
@@ -856,6 +953,7 @@ func (p *Pipeline) pushSession(
 	// where it now lives: suppressing this call fails
 	// TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing, which
 	// re-runs on every change instead of aging in a comment.
+	stage.next(perf.StagePushSessionRedact)
 	entries, entriesErr := RedactEntries(p.redactor, entries)
 	if entriesErr != nil {
 		return SessionPushResult{
@@ -866,22 +964,14 @@ func (p *Pipeline) pushSession(
 		}
 	}
 
-	// Associations belong to the same SQL snapshot as this artifact and index.
-	storedAssociations := snapshot.Associations
-	publishedAssociations := make([]schema.PublishedAssociation, 0, len(storedAssociations))
-	for _, association := range storedAssociations {
-		publishedAssociations = append(publishedAssociations, schema.PublishedAssociation{
-			ID:                 association.ID,
-			ObservedCommitHash: association.ObservedCommitHash,
-		})
-	}
+	stage.next(perf.StagePushPayloadBuild)
 
 	// 5. Map metadata to publishRequest JSON.
 	publishJSON, err := MapMetadata(MapOptions{
 		Meta:          &meta,
 		Metrics:       metrics,
 		Entries:       entries,
-		Associations:  publishedAssociations,
+		Associations:  input.Associations,
 		License:       license,
 		Fields:        p.cfg.Push.Fields.Resolve(),
 		TitlePipeline: p.titles,
@@ -910,14 +1000,6 @@ func (p *Pipeline) pushSession(
 	// (Single current contract version; the multi-version compatibility matrix is
 	// contract.) This is part of the shared pre-flight both real-push and --dry-run
 	// run, so a dry-run surfaces the same rejection.
-	if err := schema.ValidatePublishRequest(publishJSON); err != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("session %s: %w: %w", sess.SessionID, ErrInvalidPublishBody, err),
-		}
-	}
 
 	// Build human-readable title for this session (needed by both the dry-run
 	// forecast and the real result).
@@ -926,12 +1008,20 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
-	// Origin comes from the captured SQL view, independently of metadata.
-	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, sessionorigin.Origin(sess.SessionOrigin))
+	// Stored origin belongs to the same database snapshot as metadata and entries.
+	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
+	}
+	requiredCapabilities := schema.RequiredContentCapabilities(*content.SessionDetail)
+	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
 	}
-	requiredCapabilities := schema.RequiredContentCapabilities(*content.SessionDetail)
+	request, err := buildAuthoritativeRequest(publishJSON, transcriptBytes)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("session %s: %w: %w", sess.SessionID, ErrInvalidPublishBody, err)}
+	}
 
 	// 5. DRY-RUN DIVERGENCE. Everything above — read metadata, the metadata/model
 	// guards, redaction, mapping, and the client-side schema validation — is the
@@ -958,8 +1048,8 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
 			Error: fmt.Errorf(
-				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise the exact %q capability token\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
-				sess.SessionID, schema.ContentCapabilityObservedModelV1,
+				"enriched transcript push refused\n  what: session %s carries capability-bearing source evidence\n  why: the target Village did not advertise the exact %q capability tokens\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would lose recorded attribution\n  fix: use a Village target that advertises these capabilities after its preservation proof passes, then retry",
+				sess.SessionID, missingCapabilities,
 			),
 		}
 	}
@@ -997,15 +1087,6 @@ func (p *Pipeline) pushSession(
 	// remain, and are no longer the only things protecting a publish.
 	// Raw project, path, branch, and remote fields are consent-gated before this
 	// document is assembled; redaction is defense in depth, not a consent gate.
-	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
-	if err != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("build structured content: %w", err),
-		}
-	}
 
 	// 7. Upload via Publisher interface. The uploaded body is the structured
 	// TranscriptContent envelope (JSON), named "--content.json" to distinguish
@@ -1023,25 +1104,6 @@ func (p *Pipeline) pushSession(
 	transcriptFilename := sess.SessionID + "--content.json"
 	client := p.transport
 	ledger := p.store
-	var request schema.AuthoritativePublishRequest
-	var requestDocument map[string]json.RawMessage
-	if err := json.Unmarshal(publishJSON, &requestDocument); err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("build authoritative publication request from mapped metadata: %w", err)}
-	}
-	contentHash := schema.ComputeTranscriptContentHash(transcriptBytes)
-	if err := promoteAuthoritativePublishFields(requestDocument); err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("promote mapped metadata to the authoritative publication contract: %w", err)}
-	}
-	requestDocument["contentHash"], _ = json.Marshal(contentHash)
-	requestDocument["visibilityIntent"], _ = json.Marshal(schema.VisibilityIntentPrivate)
-	authoritativeJSON, err := json.Marshal(requestDocument)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("encode authoritative publication request: %w", err)}
-	}
-	request, err = schema.DecodeAuthoritativePublishRequest(authoritativeJSON)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("validate authoritative publication request: %w", err)}
-	}
 	operation, err := schema.CanonicalizePublishRequest(request)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("canonicalize authoritative publication operation: %w", err)}
@@ -1050,10 +1112,21 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("fingerprint authoritative publication operation: %w", err)}
 	}
-	projectHash, hashErr := schema.NewProjectHash(sess.ProjectHash)
+	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
 	if hashErr != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
 	}
+	previous, err := ledger.Publication(ctx, p.creds.VillageURL, p.creds.UserID, projectHash, sess.SessionID)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
+	}
+	if !p.runCfg.Force && sess.PushedAt != nil && previous != nil && previous.Receipt.Validate() == nil &&
+		previous.Receipt.ContentHash == request.ContentHash &&
+		previous.Receipt.RequestOperationFingerprint == expectedFingerprint &&
+		schema.Visibility(previous.Receipt.Visibility) == visibility {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusSkipped}
+	}
+	stage.next(perf.StagePushPublish)
 	receipt, statusCode, err := client.PublishAuthoritative(uploadCtx, request, bytes.NewReader(transcriptBytes), transcriptFilename)
 	if trace != nil {
 		rec.RecordUpload(trace.Sample(sess.SessionID))
@@ -1078,6 +1151,7 @@ func (p *Pipeline) pushSession(
 			Error:     fmt.Errorf("upload: %w: %w", sentinel, err),
 		}
 	}
+	stage.next(perf.StagePushReceiptPersist)
 	if receipt.ContentHash != request.ContentHash || receipt.RequestOperationFingerprint != expectedFingerprint {
 		err = fmt.Errorf("authoritative receipt mismatch: Village returned content hash %s and operation fingerprint %s, expected %s and %s from the exact request; local applied state was not changed", receipt.ContentHash, receipt.RequestOperationFingerprint, request.ContentHash, expectedFingerprint)
 		diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
@@ -1088,6 +1162,7 @@ func (p *Pipeline) pushSession(
 	if visibility == schema.VisibilityPrivate || visibility == schema.VisibilityPublic {
 		desired := schema.TranscriptUpdateVisibility(visibility)
 		if schema.Visibility(receipt.Visibility) != visibility {
+			stage.next(perf.StagePushVisibilityUpdate)
 			updated, _, updateErr := client.UpdateOwner(uploadCtx, receipt.TranscriptID, schema.OwnerTranscriptUpdateRequest{Visibility: &desired})
 			if updateErr != nil {
 				primary := fmt.Errorf("publication content succeeded but visibility convergence failed; the remote resource remains at its authoritative access state and no local terminal receipt was advanced; retry this session to apply the current configuration: %w", updateErr)
@@ -1106,6 +1181,7 @@ func (p *Pipeline) pushSession(
 			receipt.Visibility = visibility
 			receipt.Applied.NormalizedValues.Visibility = visibility
 			receipt.UpdatedAt = updated.UpdatedAt
+			stage.next(perf.StagePushReceiptPersist)
 		}
 	}
 
@@ -1153,7 +1229,7 @@ func entryReadFailure(sess ingest.PushSessionRow, err error, stage entryReadStag
 		meaning = "no transcript bytes or metadata were uploaded, and no publication receipt or attempt was persisted; the ordinary local run audit still records this failed session"
 	}
 	return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
-		"transcript entry read failed\n  what: session %s retained input and stored content could not be captured coherently\n  why: %w\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: %s\n  fix: verify the local database and retained files are readable, complete harvest for this session, and retry the push", sess.SessionID, err, when, meaning)}
+		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: %s\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err, when, meaning)}
 }
 
 func promoteAuthoritativePublishFields(document map[string]json.RawMessage) error {

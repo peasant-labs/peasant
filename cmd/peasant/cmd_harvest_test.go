@@ -31,6 +31,8 @@ sources:
     enabled: false
   cursor:
     enabled: false
+  pi:
+    enabled: false
 output:
   basePath: ""
 `
@@ -104,7 +106,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 	boolFlags := []flagCheck{
 		{"dry-run", "false"},
 		{"force", "false"},
-		{"include-active", "false"},
+		{"include-active", "true"},
 		{"verbose", "false"},
 		{"debug", "false"},
 		{defaults.JSONFlagName, "false"},

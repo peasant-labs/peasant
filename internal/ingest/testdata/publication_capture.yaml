@@ -1,0 +1,172 @@
+cases:
+  - &claude
+    name: claude_literal_cwd_and_tracked_identity_repair
+    harness: claude-code
+    id: 00000000-0000-4000-8000-000000000020
+    cwd: /synthetic/project/../literal/subdir
+    provenance: source_exact
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+    files:
+      project/00000000-0000-4000-8000-000000000020.jsonl: |
+        {"type":"user","sessionId":"00000000-0000-4000-8000-000000000020","cwd":"/synthetic/project/../literal/subdir","timestamp":"2024-01-02T03:12:00Z","message":{"role":"user","content":"synthetic request"}}
+        {"type":"assistant","sessionId":"00000000-0000-4000-8000-000000000020","timestamp":"2024-01-02T03:12:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"synthetic response"}]}}
+  - <<: *claude
+    name: claude_source_absent
+    cwd: ""
+    provenance: source_absent
+    files:
+      project/00000000-0000-4000-8000-000000000020.jsonl: |
+        {"type":"user","timestamp":"2024-01-02T03:12:00Z","message":{"role":"user","content":"synthetic request"}}
+        {"type":"assistant","timestamp":"2024-01-02T03:12:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"synthetic response"}]}}
+  - &codex
+    name: codex_literal_cwd
+    harness: codex
+    id: 00000000-0000-4000-8000-000000000020
+    cwd: /synthetic/project/../literal/subdir
+    provenance: source_exact
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+    files:
+      2024/01/02/rollout-2024-01-02T03-12-00-00000000-0000-4000-8000-000000000020.jsonl: |
+        {"type":"session_meta","timestamp":"2024-01-02T03:12:00Z","payload":{"id":"00000000-0000-4000-8000-000000000020","cwd":"/synthetic/project/../literal/subdir","timestamp":"2024-01-02T03:12:00Z"}}
+        {"type":"turn_context","timestamp":"2024-01-02T03:12:00Z","payload":{"model":"gpt-5"}}
+        {"type":"response_item","timestamp":"2024-01-02T03:12:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"synthetic request"}]}}
+        {"type":"response_item","timestamp":"2024-01-02T03:12:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic response"}]}}
+  - <<: *codex
+    name: codex_directory_fallback_not_exact
+    strip_cwd: true
+    cwd: ""
+    provenance: source_absent
+  - name: cursor_workspace_not_exact
+    harness: cursor
+    id: 00000000-0000-4000-8000-000000000020
+    cwd: ""
+    provenance: source_workspace
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+    files:
+      synthetic-project/agent-transcripts/00000000-0000-4000-8000-000000000020/00000000-0000-4000-8000-000000000020.jsonl: |
+        {"role":"user","timestamp":"2024-01-02T03:12:00Z","message":{"content":[{"type":"text","text":"synthetic request"}]}}
+        {"role":"assistant","timestamp":"2024-01-02T03:12:01Z","message":{"model":"cursor-agent","content":[{"type":"text","text":"synthetic response"}]}}
+  - name: strike_worktree_not_exact
+    harness: strike
+    id: 00000000-0000-4000-8000-000000000020
+    cwd: ""
+    provenance: source_worktree
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+    files:
+      00000000-0000-4000-8000-000000000020.meta.json: '{"sessionId":"00000000-0000-4000-8000-000000000020","worktree":"/synthetic/worktree","createdAt":"2024-01-02T03:12:00Z"}'
+      00000000-0000-4000-8000-000000000020.jsonl: |
+        {"type":"model.selected","time":"2024-01-02T03:12:00Z","data":{"provider":"openai","model":"gpt-5"}}
+        {"type":"user.message","time":"2024-01-02T03:12:01Z","data":{"sessionId":"00000000-0000-4000-8000-000000000020","turnId":"turn-fixture","text":"synthetic request"}}
+        {"type":"assistant.text","time":"2024-01-02T03:12:02Z","data":{"turnId":"turn-fixture","text":"synthetic response"}}
+  - &opencode_json
+    name: opencode_json_literal_cwd
+    harness: opencode
+    id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    cwd: /synthetic/project/../literal/subdir
+    provenance: source_exact
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+    files:
+      storage/session/project/ses_3cd91f52effeXd3QAJ54jOyzv5.json: '{"id":"ses_3cd91f52effeXd3QAJ54jOyzv5","projectID":"project","directory":"/synthetic/project/../literal/subdir","time":{"created":1000,"updated":2000}}'
+      storage/message/ses_3cd91f52effeXd3QAJ54jOyzv5/msg_user.json: '{"id":"msg_user","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"user","time":{"created":1000},"content":"synthetic request"}'
+      storage/message/ses_3cd91f52effeXd3QAJ54jOyzv5/msg_assistant.json: '{"id":"msg_assistant","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","time":{"created":2000},"content":"synthetic response"}'
+  - &opencode_legacy
+    name: opencode_legacy_sqlite_capture
+    harness: opencode
+    id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    database_fixture: semantic-parity-legacy
+    cwd: /synthetic/parity
+    provenance: source_exact
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+  - &opencode_current
+    name: opencode_current_sqlite_capture
+    harness: opencode
+    id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    database_fixture: semantic-parity-current
+    cwd: /synthetic/parity
+    provenance: source_exact
+    expected_manual_indexed: 1
+    expected_manual_readiness: ready
+  - <<: *claude
+    name: missing_source_stays_unrecovered
+    remove_source: true
+  - <<: *claude
+    name: mismatched_internal_identity_refuses
+    mismatch_identity: true
+  - <<: *codex
+    name: codex_mismatched_internal_identity_refuses
+    mismatch_identity: true
+  - <<: *claude
+    name: disappeared_source_during_extraction
+    disappear_during_extract: true
+  - <<: *claude
+    name: optional_metadata_write_failure_still_ready
+    fail_sidecar: true
+    expected_manual_indexed: 0
+    expected_manual_readiness: ready
+  - <<: *claude
+    name: changed_source_updates_metadata_and_entries
+    change_source: true
+    expected_manual_indexed: 0
+    expected_manual_readiness: ready
+  - <<: *opencode_json
+    name: opencode_json_index_uses_captured_tree
+    mutate_index_file: storage/message/ses_3cd91f52effeXd3QAJ54jOyzv5/msg_assistant.json
+  - <<: *claude
+    name: absent_model_is_not_fabricated
+    strip_model: true
+  - <<: *opencode_legacy
+    name: reindex_opencode_legacy_projection_ready
+    reindex_remove_source: true
+  - <<: *opencode_current
+    name: reindex_opencode_current_projection_ready
+    reindex_remove_source: true
+  - <<: *claude
+    name: reindex_fresh_source_ready
+    reindex_change_source: true
+  - <<: *claude
+    name: reindex_verified_fallback_ready
+    reindex_remove_source: true
+  - <<: *claude
+    name: reindex_fallback_uses_verified_bytes
+    reindex_remove_source: true
+    reindex_mutate_after_read: true
+  - <<: *claude
+    name: reindex_unreadable_old_entries_ready
+    reindex_remove_source: true
+    reindex_unreadable_entries: true
+  - <<: *claude
+    name: reindex_changed_fallback_held
+    reindex_remove_source: true
+    reindex_change_managed: true
+    expected_manual_readiness: needs_ingest
+  - <<: *claude
+    name: reindex_stale_source_capture_held
+    reindex_concurrent_capture: true
+    expected_manual_indexed: 0
+    expected_manual_readiness: needs_ingest
+  - <<: *claude
+    name: reindex_stale_fallback_capture_held
+    reindex_remove_source: true
+    reindex_concurrent_capture: true
+    expected_manual_indexed: 0
+    expected_manual_readiness: needs_ingest
+  - <<: *claude
+    name: reindex_legacy_fallback_held
+    reindex_remove_source: true
+    reindex_remove_proof: true
+    expected_manual_readiness: needs_ingest
+  - <<: *opencode_json
+    name: reindex_opencode_unverified_tree_held
+    reindex_remove_source: true
+    expected_manual_readiness: needs_ingest
+  - <<: *opencode_json
+    name: reindex_opencode_changed_tree_held
+    reindex_remove_source: true
+    reindex_change_tree: storage/message/ses_3cd91f52effeXd3QAJ54jOyzv5/msg_assistant.json
+    expected_manual_readiness: needs_ingest

@@ -158,7 +158,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	//   its normalized annotation target table. V43 adds the publication receipt
 	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
 	//   cache. V45 adds the OpenCode change cursor. V48 adds annotation_run_state.
-	//   V49 adds annotation_target_anchors.
+	//   V49 adds annotation_target_anchors. V51 adds publication metadata.
+	//   V52 adds three full-content tables.
 	var tableCount int
 	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -169,8 +170,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 54 {
-		t.Errorf("expected 54 tables including annotation_target_anchors, got %d", tableCount)
+	if tableCount != 58 {
+		t.Errorf("expected 58 tables including publication metadata and full content storage, got %d", tableCount)
 	}
 
 	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
@@ -188,8 +189,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count indexes: %v", err)
 	}
-	if indexCount != 47 {
-		t.Errorf("expected 47 indexes including annotation target anchor state lookup, got %d", indexCount)
+	if indexCount != 48 {
+		t.Errorf("expected 48 indexes including content capture status lookup, got %d", indexCount)
 	}
 
 	// Verify STRICT mode by inserting TEXT into an INTEGER column on a table
@@ -518,17 +519,28 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 
 	hash := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	entry := makeStoreEntry(t, "44444444-4444-4444-4444-444444444444", hash, "github.com-user-repo", defaults.HarnessClaudeCode, 1700000000000, 1000, 500)
+	entry.SourceFingerprint = []byte("first captured source")
 
 	// Insert once.
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("first InsertSessions: %v", err)
 	}
+	if err := s.UpdateIndexState(ctx, entry.Metadata.SessionID, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000000001); err != nil {
+		t.Fatal(err)
+	}
 
 	// Modify retained token seeds and re-insert without duplicating session rows.
 	entry.Metadata.Stats.TokensIn = 2000
 	entry.Metadata.Stats.TokensOut = 900
+	entry.SourceFingerprint = []byte("later captured source")
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("second InsertSessions: %v", err)
+	}
+	// Metadata persistence must leave indexing retryable until the separate
+	// streamed index transaction acknowledges this source's entries.
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
+	if err != nil || len(stale) != 1 || stale[0] != entry.Metadata.SessionID {
+		t.Fatalf("changed captured source did not invalidate old index: %v, %v", stale, err)
 	}
 
 	conn := takeConn(t, s.PoolForTest())

@@ -34,10 +34,10 @@ var (
 			"fields are required); peasant rejects it before upload to avoid a doomed round-trip " +
 			"that the village would answer with HTTP 422 — re-ingest the session so model.harness " +
 			"and model.model are captured, or exclude it from your push selection")
-	// ErrMetadataMissing marks a session whose metadata.json could not be read.
+	// ErrMetadataMissing marks a session without a verified database capture.
 	// One cause is not discoverable from the path and has a specific repair, so
 	// it is diagnosed separately: see redactionPlaceholder.
-	ErrMetadataMissing = errors.New("metadata file missing or unreadable")
+	ErrMetadataMissing = errors.New("database publication metadata needs ingest")
 	// ErrVillageRejected marks an upload the village answered with a non-2xx status.
 	ErrVillageRejected = errors.New("village rejected upload")
 	// ErrNetwork marks a transport-level failure reaching the village.
@@ -61,7 +61,7 @@ const (
 	// CategoryInvalidBody: mapped publish body failed client-side schema
 	// validation (ErrInvalidPublishBody) — e.g. missing model.harness/model.
 	CategoryInvalidBody PushErrorCategory = "invalid-body"
-	// CategoryMetadataMissing: metadata.json could not be read (ErrMetadataMissing).
+	// CategoryMetadataMissing: database capture needs ingest (ErrMetadataMissing).
 	CategoryMetadataMissing PushErrorCategory = "metadata-missing"
 	// CategoryVillageRejected: village returned a non-2xx status (ErrVillageRejected).
 	CategoryVillageRejected PushErrorCategory = "village-rejected"

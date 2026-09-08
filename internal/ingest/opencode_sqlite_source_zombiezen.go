@@ -91,13 +91,14 @@ type zombiezenOpenCodeSQLiteSource struct {
 	conn    *sqlite.Conn
 	permit  chan struct{}
 
-	stateMu      sync.Mutex
-	closing      bool
-	connClosed   bool
-	activeCancel context.CancelFunc
-	denied       string
+	stateMu          sync.Mutex
+	closing          bool
+	connClosed       bool
+	activeCancel     context.CancelFunc
+	denied           string
+	allowTransaction bool
 
-	// Cache the selected metadata authority and column support for this source's
+	// Cache the preferred metadata table and column support for this source's
 	// lifetime. An upstream schema change fails its read without switching tables.
 	sessionColumnsChecked bool
 	sessionColumns        openCodeSessionColumnSupport
@@ -148,6 +149,48 @@ func (s openCodeSessionColumnSupport) extendedAttribution() bool {
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
+
+func (s *zombiezenOpenCodeSQLiteSource) withReadTransaction(ctx context.Context, fn func() error) (err error) {
+	select {
+	case <-s.permit:
+	case <-ctx.Done():
+		return fmt.Errorf("begin OpenCode SQLite snapshot for %q: %w", s.path, ctx.Err())
+	}
+	if err = s.beginReadTransactionLocked(ctx); err != nil {
+		s.permit <- struct{}{}
+		return fmt.Errorf("begin OpenCode SQLite snapshot for %q: %w", s.path, err)
+	}
+	s.permit <- struct{}{}
+	defer s.endReadTransaction(ctx, &err)
+	err = fn()
+	return err
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) beginReadTransactionLocked(ctx context.Context) error {
+	s.allowTransaction = true
+	defer func() { s.allowTransaction = false }()
+	return s.executeRowsLocked(ctx, "BEGIN", nil, nil)
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) endReadTransaction(ctx context.Context, operationErr *error) {
+	select {
+	case <-s.permit:
+	case <-ctx.Done():
+		return
+	}
+	defer func() { s.permit <- struct{}{} }()
+	s.allowTransaction = true
+	var endErr error
+	if *operationErr != nil {
+		endErr = s.executeRowsLocked(ctx, "ROLLBACK", nil, nil)
+	} else {
+		endErr = s.executeRowsLocked(ctx, "COMMIT", nil, nil)
+	}
+	s.allowTransaction = false
+	if endErr != nil {
+		*operationErr = errors.Join(*operationErr, endErr)
+	}
+}
 
 // OpenOpenCodeSQLiteSource opens one private zombiezen SQLite connection in
 // read-only URI mode, enables query_only, installs a deny-by-default statement
@@ -238,6 +281,10 @@ func (s *zombiezenOpenCodeSQLiteSource) authorizeRead(action sqlite.Action) sqli
 	switch action.Type() {
 	case sqlite.OpSelect, sqlite.OpRead, sqlite.OpFunction, sqlite.OpRecursive:
 		return sqlite.AuthResultOK
+	case sqlite.OpTransaction:
+		if s.allowTransaction {
+			return sqlite.AuthResultOK
+		}
 	case sqlite.OpPragma:
 		if strings.EqualFold(action.Pragma(), "query_only") && action.PragmaArg() == "" {
 			return sqlite.AuthResultOK
@@ -502,9 +549,9 @@ func validateLegacySessionPartPageRequest(request OpenCodeLegacySessionPartPageR
 	return nil
 }
 
-// SessionRecords pages one schema-selected metadata authority. Supported v2
-// always wins, including an empty table. An unavailable or structurally unusable
-// v2 table permits legacy selection; a failed selected-table read never does.
+// SessionRecords pages one supported metadata table. By default V2 wins,
+// including an empty table; an explicit legacy request lets discovery retain
+// live V1-only identities without changing shared IDs' V2 metadata preference.
 func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
 	var cursor *string
 	if request.After != nil {
@@ -519,6 +566,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	}
 	defer lease.release()
 	support, err := s.sessionColumnSupportLocked(lease.ctx)
+	if request.Selection == OpenCodeSessionRecordsLegacy {
+		var columns []OpenCodeColumnEvidence
+		columns, err = s.columnsLocked(lease.ctx, string(OpenCodeSessionTableLegacy))
+		support = openCodeSessionColumns(OpenCodeSessionTableLegacy, columns)
+	} else if request.Selection != OpenCodeSessionRecordsPreferred {
+		return OpenCodeSessionRecordPage{}, fmt.Errorf("read bounded session records: unsupported selection %d; no records read; use preferred or legacy session records", request.Selection)
+	}
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session_v2/session)", "supported OpenCode session metadata")
 	}
@@ -562,7 +616,38 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// The statements stay compile-time constants at each call site so the
 	// read-only source-statement guard resolves the fixed statement set.
 	projection := ""
-	if support.table == OpenCodeSessionTableV2 {
+	if request.SessionID != nil {
+		args := []any{request.SessionID.value}
+		if support.table == OpenCodeSessionTableV2 {
+			switch {
+			case readExtended:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session_v2 WHERE id = ?1", args, decode)
+			case readAttribution:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created FROM session_v2 WHERE id = ?1", args, decode)
+			case hasParent && hasClock:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated FROM session_v2 WHERE id = ?1", args, decode)
+			case hasParent:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id FROM session_v2 WHERE id = ?1", args, decode)
+			case hasClock:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, time_updated FROM session_v2 WHERE id = ?1", args, decode)
+			default:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id FROM session_v2 WHERE id = ?1", args, decode)
+			}
+		} else {
+			switch {
+			case readExtended:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id = ?1", args, decode)
+			case readAttribution:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE id = ?1", args, decode)
+			case hasParent && hasClock:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated FROM session WHERE id = ?1", args, decode)
+			case hasParent:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id FROM session WHERE id = ?1", args, decode)
+			default:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, time_updated FROM session WHERE id = ?1", args, decode)
+			}
+		}
+	} else if support.table == OpenCodeSessionTableV2 {
 		projection = "session_v2(id, parent_id, time_updated)"
 		switch {
 		case readExtended:
@@ -782,6 +867,14 @@ func projectColumnsPresent(columns []OpenCodeColumnEvidence, required ...string)
 // discovery keeps its git resolution for an older layout. Only the allowlisted
 // columns are projected; the read never touches the event stream.
 func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) (OpenCodeProjectAttribution, error) {
+	return s.projectAttribution(ctx, nil)
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) ProjectAttributionForDirectory(ctx context.Context, directory string) (OpenCodeProjectAttribution, error) {
+	return s.projectAttribution(ctx, &directory)
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) projectAttribution(ctx context.Context, directory *string) (OpenCodeProjectAttribution, error) {
 	lease, err := s.beginSourceRead(ctx, "read project attribution")
 	if err != nil {
 		return OpenCodeProjectAttribution{}, err
@@ -793,6 +886,15 @@ func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) 
 	}
 	limit := pageSize.value
 	var attribution OpenCodeProjectAttribution
+	if directory != nil {
+		columns, err := s.columnsLocked(lease.ctx, "project_directory")
+		if err != nil {
+			return attribution, err
+		}
+		if !projectColumnsPresent(columns, "project_id", "directory", "type") {
+			return attribution, nil
+		}
+	}
 
 	projectColumns, err := s.columnsLocked(lease.ctx, "project")
 	if err != nil {
@@ -821,7 +923,9 @@ func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) 
 				})
 				return nil
 			}
-			if cursor == nil {
+			if directory != nil {
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, worktree, vcs, name FROM project WHERE id IN (SELECT project_id FROM project_directory WHERE directory = ?1) ORDER BY id", []any{*directory}, decode)
+			} else if cursor == nil {
 				err = s.executeRowsLocked(lease.ctx, openCodeProjectFirstStatement, []any{limit}, decode)
 			} else {
 				err = s.executeRowsLocked(lease.ctx, openCodeProjectAfterStatement, []any{*cursor, limit}, decode)
@@ -829,7 +933,7 @@ func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) 
 			if err != nil || lease.ctx.Err() != nil {
 				return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read bounded project page", err, "project(id, worktree, vcs, name)", "supported OpenCode project")
 			}
-			if batch < limit {
+			if directory != nil || batch < limit {
 				break
 			}
 			next := lastID
@@ -864,7 +968,9 @@ func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) 
 				})
 				return nil
 			}
-			if cursorProject == nil {
+			if directory != nil {
+				err = s.executeRowsLocked(lease.ctx, "SELECT project_id, directory, type FROM project_directory WHERE directory = ?1 ORDER BY project_id, directory", []any{*directory}, decode)
+			} else if cursorProject == nil {
 				err = s.executeRowsLocked(lease.ctx, openCodeProjectDirectoryFirstStatement, []any{limit}, decode)
 			} else {
 				err = s.executeRowsLocked(lease.ctx, openCodeProjectDirectoryAfterStatement, []any{*cursorProject, *cursorDirectory, limit}, decode)
@@ -872,7 +978,7 @@ func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) 
 			if err != nil || lease.ctx.Err() != nil {
 				return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read bounded project_directory page", err, "project_directory(project_id, directory, type)", "supported OpenCode project_directory")
 			}
-			if batch < limit {
+			if directory != nil || batch < limit {
 				break
 			}
 			nextProject, nextDirectory := lastProject, lastDirectory
@@ -933,11 +1039,9 @@ func (s *zombiezenOpenCodeSQLiteSource) EventSequenceBySession(ctx context.Conte
 	return result, nil
 }
 
-// MaxEventSeq reads one session's newest event sequence directly from the event
-// table with the payload-free indexed MAX(seq) aggregate. It projects no payload
-// column. Present is false when the session has no event rows, so the caller
-// keeps the clock-only signal for it. This is the fallback for a database with no
-// event_sequence table.
+// MaxEventSeq reads one session's event_sequence row, falling back to the
+// payload-free indexed MAX(seq) aggregate when that table is unsupported.
+// Present is false when the selected session has no sequence in this read view.
 func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
 	lease, err := s.beginSourceRead(ctx, "read max event sequence for session")
 	if err != nil {
@@ -948,6 +1052,21 @@ func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, session
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) maxEventSeqLocked(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
+	sequenceColumns, err := s.columnsLocked(ctx, "event_sequence")
+	if err != nil {
+		return OpenCodeSessionSeq{}, err
+	}
+	if projectColumnsPresent(sequenceColumns, "aggregate_id", "seq") {
+		result := OpenCodeSessionSeq{}
+		err = s.executeRowsLocked(ctx, "SELECT seq FROM event_sequence WHERE aggregate_id = ?1", []any{sessionID.value}, func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) == sqlite.TypeInteger {
+				result.Present = true
+				result.Seq = stmt.ColumnInt64(0)
+			}
+			return nil
+		})
+		return result, err
+	}
 	columns, err := s.columnsLocked(ctx, "event")
 	if err != nil {
 		return OpenCodeSessionSeq{}, s.sourceReadError(ctx, "read event columns", err, "pragma_table_info(event)", "supported OpenCode event")

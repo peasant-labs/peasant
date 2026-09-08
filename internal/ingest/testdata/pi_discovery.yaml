@@ -1,0 +1,13 @@
+requiredNames: [sessions-root, project-root, direct-file, symlink-project, valid-older-beats-invalid-newer, size-tiebreak, canonical-path-tiebreak, missing-root, file-limit, line-limit, line-count-limit]
+cases:
+  - {name: file-limit, mode: file-limit, reject: 64 MiB}
+  - {name: line-limit, mode: line-limit, reject: 8 MiB}
+  - {name: line-count-limit, mode: line-count-limit, reject: 200000 physical lines}
+  - {name: sessions-root, mode: root}
+  - {name: project-root, mode: project}
+  - {name: direct-file, mode: file}
+  - {name: symlink-project, mode: symlink}
+  - {name: valid-older-beats-invalid-newer, mode: duplicate-invalid}
+  - {name: size-tiebreak, mode: duplicate-size}
+  - {name: canonical-path-tiebreak, mode: duplicate-path}
+  - {name: missing-root, mode: missing}

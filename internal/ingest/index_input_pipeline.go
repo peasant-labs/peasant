@@ -140,6 +140,14 @@ func (input *CapturedIndexInput) Hash() string { return input.inputHash }
 // and legacy nonempty-result completion rules.
 func (input *CapturedIndexInput) Parse(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
 	if input.kind == TranscriptSourceDirectory {
+		if native, ok := indexer.(*OpenCodeIndexer); ok {
+			messages, err := parseOpenCodeJSONInput(input.tree, &indexCompletion{ctx: ctx, session: input.session})
+			if err != nil {
+				return nil, err
+			}
+			capture, err := native.captureSemanticMessages(ctx, input.session, messages)
+			return indexformat.V1{Entries: capture.Entries}, err
+		}
 		return indexer.(openCodeInputIndexer).indexJSONInput(ctx, input.session, input.tree)
 	}
 	// Artifact capture, including zero bytes, establishes presence. Never reopen

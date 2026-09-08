@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -191,10 +192,34 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 		}
 	}
 	entry := ingest.StoreEntry{Metadata: &meta, Session: ingest.DiscoveredSession{SessionID: meta.SessionID, Harness: meta.ModelHarness, Origin: origin}}
+	entry.ArtifactHash = &request.Artifact.ArtifactHash
+	entry.CWDProvenance = request.CWDProvenance
+	entry.SourceFingerprint = request.SourceFingerprint
+	entry.CommitCaptureComplete = request.CommitCaptureComplete
+	if entry.CWDProvenance == "" {
+		// Retained extraction can preserve source facts already proven by a
+		// database capture. A historical file alone does not establish them.
+		err := sqlitex.ExecuteTransient(conn, `SELECT p.metadata_json,s.cwd_provenance_kind FROM session_publication_metadata p JOIN sessions s USING(session_id) WHERE s.session_id=? AND p.capture_revision=s.publication_capture_revision`, &sqlitex.ExecOptions{
+			Args: []any{string(meta.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+				var prior ingest.UnifiedMetadata
+				kind, kindErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(1))
+				if kindErr == nil && json.Unmarshal([]byte(stmt.ColumnText(0)), &prior) == nil && validateCaptureMetadata(&prior, kind) == nil &&
+					prior.CWD == meta.CWD && prior.ModelHarness == meta.ModelHarness && prior.Source == meta.Source {
+					entry.CWDProvenance = kind
+				}
+				return nil
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	entry.PublicationCapture = entry.CWDProvenance != "" && entry.CWDProvenance != ingest.CWDNotRecovered
+
 	if err := s.insertSessionsOnConn(conn, []ingest.StoreEntry{entry}, request.Artifact.MetricSeed() != nil); err != nil {
 		return err
 	}
-	if err := upsertSessionCommitsOnConn(conn, meta.SessionID, meta.Git.Commits); err != nil {
+	if err := upsertSessionCommitsOnConn(conn, meta.SessionID, meta.Git.Commits, true); err != nil {
 		return err
 	}
 	if request.EventSeq != nil {

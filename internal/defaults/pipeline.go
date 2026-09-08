@@ -41,8 +41,12 @@ const (
 	OpenCodeSessionPrefix = "ses_"
 )
 
-// ContentPreviewLimit is the maximum character length for ContentPreview fields.
+// ContentPreviewLimit is the maximum UTF-8 byte length for ContentPreview fields.
 const ContentPreviewLimit = 2000
+
+// FullContentWriteBatchBytes is a soft full-string budget for ingest flushes.
+// A single oversized session may occupy a batch without truncation.
+const FullContentWriteBatchBytes int64 = 32 << 20
 
 // OpenCodeManagedProjectionMaxBytes bounds the Peasant-managed OpenCode SQLite
 // projection file the indexer reads from disk. The projection holds one

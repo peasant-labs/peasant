@@ -143,6 +143,13 @@ func TestStrikeAdapterRetainsTranscriptWithMalformedSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shared Strike fixture: %v", err)
 	}
+	// The shared command corpus is valid authoritative input. Add the named
+	// malformed record only for this tolerant discovery/diagnostics regression.
+	for _, invalid := range loadCaptureFixtures(t) {
+		if invalid.Name == "strike-malformed-json" {
+			fixture = append(fixture, []byte(invalid.Source+"\n")...)
+		}
+	}
 
 	sourceDir := t.TempDir()
 	transcriptPath := filepath.Join(sourceDir, filepath.Base(fixturePath))

@@ -2,6 +2,7 @@ requiredPushSessionNames:
   - push-current-0001
   - push-stale-0002
   - push-raw-0003
+  - push-incomplete-0004
 
 sheets:
   - name: guided-dark
@@ -18,17 +19,17 @@ sheets:
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 6750}
+    viewport: {width: 1800, height: 10440}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
     theme: dark
-    viewport: {width: 1800, height: 6000}
+    viewport: {width: 1800, height: 7200}
   - name: ingest-progress
     kind: ingest-progress
-    title: "mounted kickstart local import progress after save"
+    title: "shared local import progress: kickstart and inline harvest"
     theme: dark
-    viewport: {width: 1800, height: 1200}
+    viewport: {width: 1800, height: 4590}
   - name: ingest-completion
     kind: ingest-completion
     title: "mounted kickstart completion: warning details, scrolling, and successful control"
@@ -92,6 +93,15 @@ guidedSections:
     wantContains: [how long claude code keeps its transcripts, 30 days]
 
 selectionStates:
+  - key: discovery-notes
+    query: pi fixture
+    discoveryInventory:
+      pi:
+        detail: "1 source(s) could not be fully read: /fixtures/corrupt.jsonl (Pi source skipped during discovery)"
+    wantContains: [discovery notes, corrupt.jsonl, repair]
+  - key: pi-preview
+    query: pi fixture
+    wantContains: ["harness: pi", "pi-context-body", "Pi keeps full"]
   - key: default
     query: ""
     wantContains: ["search:", harness, claude code, cursor]
@@ -113,6 +123,12 @@ selectionStates:
   - key: harness-source-preview
     query: ""
     wantContains: ["harness: claude code", scrubbed-source-body, read in place]
+  - key: source-budget-preview
+    query: ""
+    # The 8 MiB budget stops at the last complete JSONL line. With 128 KiB
+    # content plus JSON envelopes this prefix is just below 8 MiB; the notice
+    # deliberately reports whole MiB loaded, not the requested budget.
+    wantContains: ["inspect the bounded", "showing the first 7 MiB", "bottom to load more"]
   - key: origin-hidden
     query: ""
     # Every marker here is a PREFIX, because the narrower capture splits its
@@ -133,13 +149,28 @@ selectionStates:
 
 ingestProgressStates:
   - key: running
-    wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", ctrl+c to quit]
+    wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
+  - key: harvest-inline
+    wantContains: [local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
+  - key: harvest-canceling
+    wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
+  - key: harvest-canceled
+    wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 12s", "estimate: 6s", harvest canceled]
 
 selection:
   repositories:
     - {clonePath: /fixtures/worktrees/pasture-a, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-a}
     - {clonePath: /fixtures/worktrees/pasture-b, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-b}
   listings:
+    - harness: pi
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: pi fixture session
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: 11111111-2222-4333-8444-555555555555
+      source:
+        origin: file
     - harness: claude-code
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
@@ -175,6 +206,15 @@ selection:
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
       branch: main
+      title: long source preview
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: ses_sourceBudgetVisible
+      source:
+        origin: file
+    - harness: claude-code
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
       title: agent driven session
       workingDir: /fixtures/worktrees/pasture-a
       sessionId: origin-agent-hidden
@@ -195,12 +235,14 @@ selection:
   # cohort that holds no child at all - so the capture proves what a person
   # will actually see, not merely that the renderer can draw a count.
   subagentDiscovery:
+    - {sessionId: 11111111-2222-4333-8444-555555555555}
     - {sessionId: cc-parent, subagentIds: [cc-child]}
     - {sessionId: cc-child, subagentIds: [cc-grandchild]}
     - {sessionId: cc-grandchild}
     - {sessionId: cc-imported}
     - {sessionId: 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47}
     - {sessionId: cur-1}
+    - {sessionId: ses_sourceBudgetVisible}
     - {sessionId: origin-agent-hidden}
     - {sessionId: origin-user-visible}
   transcripts:
@@ -208,18 +250,29 @@ selection:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
       - {role: assistant, entryType: text, content: "the fixture transcript is loaded through the normal preview boundary"}
   sourceTranscripts:
+    11111111-2222-4333-8444-555555555555:
+      - '{"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/fixtures/worktrees/pasture-a","timestamp":"2026-01-01T00:00:00Z"}'
+      - '{"type":"custom_message","id":"context","parentId":null,"customType":"context","display":false,"content":"pi-context-body: visible Pi context read in place"}'
+      - '{"type":"message","id":"assistant","parentId":"context","message":{"role":"assistant","content":[{"type":"text","text":"Pi keeps full active history"}]}}'
     5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47:
       - '{"type":"user","uuid":"h1","message":{"role":"user","content":"scrubbed-source-body: peasant read in place from the harness file"}}'
       - '{"type":"assistant","uuid":"h2","parentUuid":"h1","message":{"role":"assistant","content":[{"type":"text","text":"peasant copies nothing and imports nothing to show this preview"}]}}'
+    ses_sourceBudgetVisible:
+      - '{"type":"user","uuid":"budget-start","message":{"role":"user","content":"inspect the bounded synthetic source preview"}}'
+  sourceTranscriptPadding:
+    ses_sourceBudgetVisible: {lineCount: 70, contentBytes: 131072}
   ingested: [cc-imported]
   requiredSessionNames:
+    - 11111111-2222-4333-8444-555555555555
     - cc-parent
     - cc-imported
     - 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
     - cur-1
     - origin-agent-hidden
     - origin-user-visible
+    - ses_sourceBudgetVisible
   requiredHarnessNames:
+    - pi
     - claude-code
     - cursor
   requiredIngestedNames:
@@ -258,6 +311,14 @@ guidedCaptures:
   - {name: retention-light-120x40, section: retention, theme: light, width: 120, height: 40}
 
 selectionCaptures:
+  - {name: selection-discovery-notes-dark-80x24, state: discovery-notes, theme: dark, width: 80, height: 24}
+  - {name: selection-discovery-notes-dark-120x40, state: discovery-notes, theme: dark, width: 120, height: 40}
+  - {name: selection-discovery-notes-light-80x24, state: discovery-notes, theme: light, width: 80, height: 24}
+  - {name: selection-discovery-notes-light-120x40, state: discovery-notes, theme: light, width: 120, height: 40}
+  - {name: selection-pi-preview-dark-80x24, state: pi-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-pi-preview-dark-120x40, state: pi-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-pi-preview-light-80x24, state: pi-preview, theme: light, width: 80, height: 24}
+  - {name: selection-pi-preview-light-120x40, state: pi-preview, theme: light, width: 120, height: 40}
   - {name: selection-default-dark-80x24, state: default, theme: dark, width: 80, height: 24}
   - {name: selection-default-dark-120x40, state: default, theme: dark, width: 120, height: 40}
   - {name: selection-search-dark-80x24, state: search, theme: dark, width: 80, height: 24}
@@ -278,16 +339,22 @@ selectionCaptures:
   - {name: selection-harness-source-preview-dark-120x40, state: harness-source-preview, theme: dark, width: 120, height: 40}
   - {name: selection-harness-source-preview-light-80x24, state: harness-source-preview, theme: light, width: 80, height: 24}
   - {name: selection-harness-source-preview-light-120x40, state: harness-source-preview, theme: light, width: 120, height: 40}
+  - {name: selection-source-budget-preview-dark-80x24, state: source-budget-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-source-budget-preview-dark-120x40, state: source-budget-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-source-budget-preview-light-80x24, state: source-budget-preview, theme: light, width: 80, height: 24}
+  - {name: selection-source-budget-preview-light-120x40, state: source-budget-preview, theme: light, width: 120, height: 40}
   - {name: selection-origin-hidden-dark-80x24, state: origin-hidden, theme: dark, width: 80, height: 24}
   - {name: selection-origin-hidden-dark-120x40, state: origin-hidden, theme: dark, width: 120, height: 40}
   - {name: selection-origin-hidden-light-80x24, state: origin-hidden, theme: light, width: 80, height: 24}
   - {name: selection-origin-hidden-light-120x40, state: origin-hidden, theme: light, width: 120, height: 40}
 
 pushStates:
+  - key: needs-ingest
+    wantContains: ["push-incomplete-0004", "needs ingest", "run peasant ingest", "not selected:"]
   - key: start
     wantContains: ["push to village", "session(s) are ready to push", "yes"]
   - key: selection
-    wantContains: ["selected", "withheld by a branch conflict", "tab", "project: peasant", "sessions: 1"]
+    wantContains: ["selected", "withheld by a branch conflict", "needs ingest", "tab", "project: peasant", "sessions: 2"]
   - key: session-preview
     wantContains: ["push-current-0001", "<ANTHROPIC_KEY>", "peasant publishes the redacted form"]
   - key: consent
@@ -313,6 +380,12 @@ push:
       startMs: 1700002000000
       redaction: raw
       withheld: true
+    - sessionId: push-incomplete-0004
+      harness: claude-code
+      project: peasant
+      startMs: 1700003000000
+      redaction: raw
+      needsIngest: true
   transcripts:
     push-current-0001:
       - {role: user, entryType: text, content: "ship the release with sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}
@@ -321,6 +394,10 @@ push:
       - {role: user, entryType: text, content: "check the village accepted the last publish"}
 
 pushCaptures:
+  - {name: push-needs-ingest-dark-80x24, state: needs-ingest, theme: dark, width: 80, height: 24}
+  - {name: push-needs-ingest-dark-120x40, state: needs-ingest, theme: dark, width: 120, height: 40}
+  - {name: push-needs-ingest-light-80x24, state: needs-ingest, theme: light, width: 80, height: 24}
+  - {name: push-needs-ingest-light-120x40, state: needs-ingest, theme: light, width: 120, height: 40}
   - {name: push-start-dark-80x24, state: start, theme: dark, width: 80, height: 24}
   - {name: push-start-dark-120x40, state: start, theme: dark, width: 120, height: 40}
   - {name: push-start-light-80x24, state: start, theme: light, width: 80, height: 24}
@@ -347,3 +424,15 @@ ingestProgressCaptures:
   - {name: ingest-progress-running-dark-120x40, state: running, theme: dark, width: 120, height: 40}
   - {name: ingest-progress-running-light-80x24, state: running, theme: light, width: 80, height: 24}
   - {name: ingest-progress-running-light-120x40, state: running, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-harvest-inline-dark-80x24, state: harvest-inline, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-harvest-inline-dark-120x40, state: harvest-inline, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-harvest-inline-light-80x24, state: harvest-inline, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-harvest-inline-light-120x40, state: harvest-inline, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceling-dark-80x24, state: harvest-canceling, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceling-dark-120x40, state: harvest-canceling, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceling-light-80x24, state: harvest-canceling, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceling-light-120x40, state: harvest-canceling, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceled-dark-80x24, state: harvest-canceled, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceled-dark-120x40, state: harvest-canceled, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceled-light-80x24, state: harvest-canceled, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceled-light-120x40, state: harvest-canceled, theme: light, width: 120, height: 40}

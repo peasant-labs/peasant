@@ -85,13 +85,19 @@ func TestOpenCodeNativeCLI(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "peasant")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	build := exec.CommandContext(ctx, "go", "build", "-race", "-mod=readonly", "-o", bin, "./cmd/peasant")
+	// Match the enclosing suite: feature CI uses a non-race cache, while local
+	// and release race runs must also instrument the child. Forcing -race here
+	// rebuilds the dependency graph in feature CI and breaks CGO_ENABLED=0 runs.
+	build := exec.CommandContext(ctx, "go", "build", nativeCLIRaceFlag, "-mod=readonly", "-o", bin, "./cmd/peasant")
 	build.Dir = filepath.Join("..", "..")
 	// The enclosing Go test has already resolved the module graph. A missing
 	// build-only dependency is an actionable setup failure, never a network fetch.
 	build.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
 	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build race-instrumented Peasant before native CLI regression: %v\nResolve the repository's build dependencies in the development shell and rerun.\n%s", err, output)
+		if ctx.Err() != nil {
+			t.Fatalf("build Peasant (%s) before native CLI regression exceeded its three-minute deadline: %v\nCheck build-cache availability and runner load, then rerun.\n%s", nativeCLIRaceFlag, ctx.Err(), output)
+		}
+		t.Fatalf("build Peasant (%s) before native CLI regression: %v\nResolve the repository's build dependencies in the development shell and rerun.\n%s", nativeCLIRaceFlag, err, output)
 	}
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -170,7 +176,7 @@ func (run nativeCLIRun) harvest(t *testing.T, source testfixture.MaterializedSou
 	defer testfixture.AssertUnchanged(t, source, before)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, run.bin, "--config", run.configPath, "--data-dir", run.dataDir, "--state-dir", filepath.Join(run.root, "state"), "harvest", "--source-harness", string(defaults.HarnessOpenCode), "--source-path", filepath.Dir(source.Path), "--output", run.outputDir, "--json")
+	cmd := exec.CommandContext(ctx, run.bin, "--config", run.configPath, "--data-dir", run.dataDir, "--state-dir", filepath.Join(run.root, "state"), "harvest", "--source-provider", string(defaults.HarnessOpenCode), "--source-path", filepath.Dir(source.Path), "--output", run.outputDir, "--json")
 	cmd.Dir, cmd.Env = run.root, run.env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

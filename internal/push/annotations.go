@@ -307,7 +307,21 @@ func PushAnnotationsSelected(
 	selection AnnotationSelection,
 	dryRun bool,
 	concurrency int,
-) (*AnnotationPushSummary, error) {
+) (result *AnnotationPushSummary, resultErr error) {
+	rec := perf.RecorderFromContext(ctx)
+	span := rec.StartChildSpan(perf.StagePushAnnotationsPublish, perf.ParentSpanFromContext(ctx), nil)
+	ctx = perf.ContextWithParentSpan(ctx, span.ID())
+	defer func() {
+		outcome := perf.OutcomeOK
+		if resultErr != nil || (result != nil && (result.Errors > 0 || len(result.Unpublishable) > 0)) {
+			outcome = perf.OutcomeFailed
+			rec.Error(perf.StagePushAnnotationsPublish, fmt.Errorf("annotation publication was incomplete; inspect command diagnostics and repair failed annotations before retrying"), nil)
+		} else if dryRun || (result != nil && (result.SkipReason != "" || result.Created+result.Updated+result.Retracted == 0)) {
+			outcome = perf.OutcomeSkipped
+		}
+		span.End(outcome, nil)
+	}()
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	snapshot, err := store.ReadAnnotationPushSnapshot(ctx, selection, !dryRun)
 	if err != nil {
 		return nil, fmt.Errorf("read selected annotation snapshot: %w", err)

@@ -177,7 +177,7 @@ func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetada
 			return nil, &AdapterVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: *loc.AdapterVersion, Target: target}
 		}
 	}
-	path, err := p.findMetadataPath(session)
+	path, err := p.findMetadataPath(context.Background(), session)
 	if err != nil {
 		return nil, err
 	}

@@ -126,7 +126,7 @@ func (e *adapterAcquisitionError) Unwrap() error { return e.cause }
 // Only failed native acquisition permits the last-good retained index fallback.
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
 	metadata, metadataErr := p.metadataForRewrite(entry.Session)
-	metadataPath, pathErr := p.findMetadataPath(entry.Session)
+	metadataPath, pathErr := p.findMetadataPath(ctx, entry.Session)
 	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !(p.config.Force && !p.config.Reindex) && !p.nativeInputChanged(entry.Session, metadata) {
 		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath)
 		var insufficient *InsufficientRetainedInputError

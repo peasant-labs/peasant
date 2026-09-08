@@ -39,6 +39,9 @@ func (a *CursorAdapter) Harness() Harness {
 }
 
 type cursorJSONLLine struct {
+	Type       string          `json:"type"`
+	Status     string          `json:"status"`
+	Error      *string         `json:"error"`
 	Role       string          `json:"role"`
 	UUID       string          `json:"uuid"`
 	ParentUUID string          `json:"parentUuid"`
@@ -397,7 +400,13 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 		return
 	}
 
-	remoteURL, remoteErr := a.git.RemoteURL(ctx, projectDir)
+	branchStr, branchErr := a.git.Branch(ctx, projectDir)
+	branch := session.Branch
+	if branch == "" && branchErr == nil {
+		branch = branchStr
+	}
+	remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, projectDir, branch, "")
+	remoteErr := error(nil)
 	// Walk up parent directories if direct remote lookup fails — handles cases where
 	// projectDir decoded to a subdirectory of the actual repo root.
 	if remoteErr != nil || remoteURL == "" {
@@ -406,13 +415,11 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 			remoteErr = nil
 		}
 	}
-	branchStr, branchErr := a.git.Branch(ctx, projectDir)
 	worktreeStr, worktreeErr := a.git.Worktree(ctx, projectDir)
-	trackingStr, trackingErr := a.git.TrackingBranch(ctx, projectDir)
 
 	gitInfo := GitContext{}
-	if branchErr == nil && branchStr != "" {
-		gitInfo.Branch = &branchStr
+	if branch != "" {
+		gitInfo.Branch = &branch
 	}
 	if remoteErr == nil && remoteURL != "" {
 		gitInfo.Remote = &remoteURL
@@ -420,11 +427,12 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 	if worktreeErr == nil && worktreeStr != "" {
 		gitInfo.Worktree = &worktreeStr
 	}
-	if trackingErr == nil && trackingStr != "" {
+	if trackingStr != "" {
 		gitInfo.Tracking = &trackingStr
 	}
 	meta.Git = gitInfo
-	meta.CWD = projectDir
+	// A decoded workspace identifies project scope, not an exact session CWD.
+	meta.CWD = ""
 
 	projectPath := worktreeStr
 	if projectPath == "" {
@@ -514,8 +522,14 @@ func (a *CursorAdapter) dirExists(path string) bool {
 
 // CursorIndexer parses Cursor JSONL transcripts into SessionEntry slices.
 type CursorIndexer struct {
-	fs        FileSystem
-	fullDepth bool
+	fs          FileSystem
+	fullDepth   bool
+	fullContent bool
+}
+
+// WithCursorFullContent retains source prose before store preview normalization.
+func WithCursorFullContent(enabled bool) CursorIndexerOption {
+	return func(idx *CursorIndexer) { idx.fullContent = enabled }
 }
 
 var _ TranscriptIndexer = (*CursorIndexer)(nil)
@@ -611,7 +625,7 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			}
 			completion.recognized++
 		}
-		entry, ok := cursorLineEntry(sessionID, entryIndex, raw, line, decodeErr)
+		entry, ok := cursorLineEntry(sessionID, entryIndex, raw, line, decodeErr, idx.fullContent)
 		if !ok {
 			entryIndex++
 			continue
@@ -620,7 +634,7 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		entries = append(entries, entry)
 		entryIndex++
 		if idx.fullDepth {
-			childEntries := decomposeCursorContentBlocks(sessionID, &entryIndex, parentIndex, raw)
+			childEntries := decomposeCursorContentBlocks(sessionID, &entryIndex, parentIndex, raw, idx.fullContent)
 			if entry.Role == RoleSystem {
 				for i := range childEntries {
 					childEntries[i].Role = RoleSystem
@@ -636,7 +650,7 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 	return entries, nil
 }
 
-func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSONLLine, decodeErr error) (schema.SessionEntry, bool) {
+func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSONLLine, decodeErr error, fullContent bool) (schema.SessionEntry, bool) {
 	if decodeErr != nil {
 		return schema.SessionEntry{}, false
 	}
@@ -659,14 +673,29 @@ func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSON
 	if line.ParentUUID != "" {
 		entry.ParentEntryID = &line.ParentUUID
 	}
+	if line.Type == "turn_ended" && line.Status == "aborted" && line.Error != nil {
+		entry.Role, entry.EntryType, entry.IsError = RoleSystem, EntryTypeError, true
+		text := *line.Error
+		if !fullContent {
+			text = truncateString(text, defaults.ContentPreviewLimit)
+		}
+		entry.ContentPreview = &text
+		return entry, true
+	}
 
 	blocks := parseCursorContentBlocks(line.content())
 	plainText := extractCursorPlainText(line.content())
+	if fullContent {
+		var rawText string
+		if json.Unmarshal(line.content(), &rawText) == nil {
+			plainText = rawText
+		}
+	}
 	var toolNames []string
 	var preview strings.Builder
 	var thinkingFallback string
 	if plainText != "" {
-		preview.WriteString(stripCursorQueryTag(plainText))
+		preview.WriteString(cursorCapturedText(plainText, fullContent))
 	}
 	for _, block := range blocks {
 		switch block.Type {
@@ -682,7 +711,7 @@ func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSON
 			}
 		case "text":
 			if preview.Len() == 0 && block.Text != "" {
-				preview.WriteString(stripCursorQueryTag(block.Text))
+				preview.WriteString(cursorCapturedText(block.Text, fullContent))
 			}
 		case "tool_result":
 			if block.IsError {
@@ -724,7 +753,7 @@ func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSON
 		entry.EntryType = EntryTypeToolResult
 	}
 	if preview.Len() > 0 {
-		p := truncateString(preview.String(), defaults.ContentPreviewLimit)
+		p := cursorContentPreview(preview.String(), fullContent)
 		entry.ContentPreview = &p
 	}
 	if line.Message.Usage != nil {
@@ -746,7 +775,7 @@ func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSON
 	return entry, true
 }
 
-func decomposeCursorContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, raw []byte) []schema.SessionEntry {
+func decomposeCursorContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, raw []byte, fullContent bool) []schema.SessionEntry {
 	var line cursorJSONLLine
 	if err := json.Unmarshal(raw, &line); err != nil {
 		return nil
@@ -772,8 +801,8 @@ func decomposeCursorContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 		case "text":
 			entry.EntryType = EntryTypeText
 			if block.Text != "" {
-				cleaned := stripCursorQueryTag(block.Text)
-				p := truncateString(cleaned, defaults.ContentPreviewLimit)
+				cleaned := cursorCapturedText(block.Text, fullContent)
+				p := cursorContentPreview(cleaned, fullContent)
 				entry.ContentPreview = &p
 				if isSystemInjectedContent(block.Text) {
 					entry.Role = RoleSystem
@@ -810,7 +839,7 @@ func decomposeCursorContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 			entry.HasThinking = true
 			text := firstNonEmpty(block.Thinking, block.Text)
 			if text != "" {
-				p := truncateString(text, defaults.ContentPreviewLimit)
+				p := cursorContentPreview(text, fullContent)
 				entry.ContentPreview = &p
 			}
 			thinkLen := len(text)

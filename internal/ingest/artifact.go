@@ -136,9 +136,12 @@ func artifactSemanticJSON(data []byte, contentHash string) ([]byte, error) {
 // ArtifactMirrorRequest carries only native evidence actually acquired for this
 // artifact. Nil cursor/origin preserves the stored value; zero is valid evidence.
 type ArtifactMirrorRequest struct {
-	Artifact *ManagedArtifact
-	EventSeq *int64
-	Origin   *sessionorigin.Origin
+	CWDProvenance         CWDProvenanceKind
+	SourceFingerprint     []byte
+	CommitCaptureComplete bool
+	Artifact              *ManagedArtifact
+	EventSeq              *int64
+	Origin                *sessionorigin.Origin
 }
 
 // ArtifactMirrorResult reports committed success for one session, including

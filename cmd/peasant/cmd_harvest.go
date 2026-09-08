@@ -9,11 +9,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/animation"
@@ -22,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -96,7 +99,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Use:     "harvest",
 		Aliases: []string{"ingest"},
 		Short:   "Harvest AI coding agent transcripts",
-		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, and Strike.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
+		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, Strike, and Pi.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHarvest(cmd, harvestAll, &flags)
 		},
@@ -161,12 +164,12 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
 	if mode == harvestIndexOnly {
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike; cleared by --all)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)")
 	} else {
 		// Native source overrides are relevant only for logs and all modes.
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike, pi)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
-		cmd.Flags().BoolVar(&flags.includeActive, "include-active", false, "Also process sessions still being written")
+		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
 
 	// Detect-commits flag (relevant for index and all modes).
@@ -246,7 +249,14 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
-	ctx := cmd.Context()
+	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancelOperation := context.WithCancel(signalCtx)
+	defer cancelOperation()
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
 	// resolveConfigPath, not the raw flag: reading --config directly returns its
 	// default when unset, so --config-dir was ignored and this command read a
 	// DIFFERENT configuration than the one the user pointed at - including its
@@ -269,6 +279,10 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if levelErr := checkIngestRedactionLevel(cfg, configPath, "peasant "+cmd.Name()); levelErr != nil {
 		cmd.SilenceUsage = true
 		return levelErr
+	}
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
 	}
 
 	// Notify the user when no config file exists.
@@ -346,16 +360,6 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 
 	progState := ingest.NewProgressState()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renderer := newProgressRenderer(os.Stderr, progState, animation.IngestAnimation())
-	go renderer.Run(ctx)
-
-	if renderer.IsTTY() {
-		orig := slog.Default().Handler()
-		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-		defer slog.SetDefault(slog.New(orig))
-	}
 
 	// For index-only mode, use the existing Reindex code path.
 	reindex := mode == harvestIndexOnly
@@ -448,19 +452,74 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 
 	// 9. Create and run pipeline.
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
 	pipeline, err := ingest.NewPipeline(fs, git, adapters, pipelineCfg, pipelineOpts...)
 	if err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
 	}
-	result, err := pipeline.Run(ctx)
-	cancel()
-	renderer.Wait()
-	renderer.Clear()
-	if err != nil {
-		return fmt.Errorf("pipeline failed: %w", err)
+	renderer := newProgressProgram(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
+	renderer.theme = theme.New(themeModeFor(cfg))
+	if flags.jsonOutput {
+		renderer.isTTY = false
+		renderer.input = nil
 	}
-	if selectionConflicts != nil {
-		selectionConflicts.notice(cmd.ErrOrStderr(), configPath)
+	var restoreLogger func()
+	if renderer.IsTTY() {
+		orig := slog.Default().Handler()
+		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
+	}
+	stopProgress := func() {
+		renderer.Clear()
+		if restoreLogger != nil {
+			restoreLogger()
+			restoreLogger = nil
+		}
+	}
+	defer stopProgress()
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
+	execution := executeHarvest(ctx, pipeline, progState, renderer)
+	stopProgress()
+	return outputHarvest(cmd, execution, harvestOutputOptions{
+		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
+		sources: sources, customPatternCount: customPatternCount,
+		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
+	})
+}
+
+type harvestOutputOptions struct {
+	flags              *harvestFlags
+	outputDir          string
+	configPath         string
+	sources            map[defaults.Harness]ingest.SourceConfig
+	customPatternCount int
+	selectionConflicts *selectionConflictRecorder
+	indexProfiler      *ingest.IndexProfiler
+}
+
+// outputHarvest consumes only the committed execution, after terminal and logger
+// cleanup. In particular, cancellation during that cleanup cannot change output.
+func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harvestOutputOptions) error {
+	if execution.uiErr != nil {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("harvest progress failed: %w; rerun 'peasant harvest' to continue", execution.uiErr)
+	}
+	if execution.kind == harvestCompletionCanceled {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(execution.ctxErr)
+	}
+	if execution.kind == harvestCompletionFailed {
+		return fmt.Errorf("pipeline failed: %w", execution.runErr)
+	}
+	result := execution.result
+	if options.selectionConflicts != nil {
+		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
 	}
 
 	// 10. Output results.
@@ -473,19 +532,23 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	for _, diagnostic := range result.DiscoveryDiagnostics {
 		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary)
 	}
-	if indexProfiler != nil {
-		printIndexProfile(os.Stderr, indexProfiler.Snapshot())
+	if options.indexProfiler != nil {
+		printIndexProfile(os.Stderr, options.indexProfiler.Snapshot())
 	}
-	if flags.jsonOutput {
+	if options.flags.jsonOutput {
 		return printJSON(cmd.OutOrStdout(), result)
 	}
-	printSummary(cmd.OutOrStdout(), result, flags.verbose, flags.includeActive, string(resolvedOutput), configPath, sources, customPatternCount)
+	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
 	if result.Summary.Errors > 0 {
 		return fmt.Errorf("%d session(s) failed", result.Summary.Errors)
 	}
 	return nil
+}
+
+func harvestCancellationError(err error) error {
+	return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", err)
 }
 
 func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
@@ -1012,6 +1075,7 @@ func isolateSourceHarness(cfg *config.Config, provider defaults.Harness) {
 	cfg.Sources.Codex.Enabled = provider == defaults.HarnessCodex
 	cfg.Sources.Cursor.Enabled = provider == defaults.HarnessCursor
 	cfg.Sources.Strike.Enabled = provider == defaults.HarnessStrike
+	cfg.Sources.Pi.Enabled = provider == defaults.HarnessPi
 }
 
 // applySourceOverride replaces the config paths for a single provider.
@@ -1034,6 +1098,9 @@ func applySourceOverride(cfg *config.Config, provider defaults.Harness, path ing
 	case defaults.HarnessStrike:
 		cfg.Sources.Strike.Enabled = true
 		cfg.Sources.Strike.Paths = []string{string(path)}
+	case defaults.HarnessPi:
+		cfg.Sources.Pi.Enabled = true
+		cfg.Sources.Pi.Paths = []string{string(path)}
 	}
 }
 

@@ -1,0 +1,45 @@
+requiredNames:
+  - valid
+  - trailing-document
+  - trailing-empty-document
+  - duplicate-case
+  - empty-case
+  - duplicate-required
+  - empty-required
+  - missing-required
+  - unknown-field
+cases:
+  - name: valid
+    document: '{requiredNames: [a], cases: [{name: a}]}'
+  - name: trailing-document
+    reject: true
+    document: |
+      requiredNames: [a]
+      cases: [{name: a}]
+      ---
+      requiredNames: [b]
+      cases: [{name: b}]
+  - name: trailing-empty-document
+    reject: true
+    document: |
+      requiredNames: [a]
+      cases: [{name: a}]
+      ---
+  - name: duplicate-case
+    reject: true
+    document: '{requiredNames: [a], cases: [{name: a}, {name: a}]}'
+  - name: empty-case
+    reject: true
+    document: '{requiredNames: [a], cases: [{name: ""}]}'
+  - name: duplicate-required
+    reject: true
+    document: '{requiredNames: [a, a], cases: [{name: a}]}'
+  - name: empty-required
+    reject: true
+    document: '{requiredNames: [""], cases: [{name: a}]}'
+  - name: missing-required
+    reject: true
+    document: '{requiredNames: [b], cases: [{name: a}]}'
+  - name: unknown-field
+    reject: true
+    document: '{requiredNames: [a], cases: [{name: a, typo: true}]}'

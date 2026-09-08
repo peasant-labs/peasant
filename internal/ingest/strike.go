@@ -74,6 +74,7 @@ type strikeUsage struct {
 }
 
 type strikeEventData struct {
+	SessionID         string          `json:"sessionId"`
 	ProviderRequestID string          `json:"providerRequestId"`
 	TurnID            string          `json:"turnId"`
 	CallID            string          `json:"callId"`
@@ -562,6 +563,7 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	var firstTime, lastTime int64
 	turnStarts := 0
 	userMessages := 0
+	identityMismatch := false
 	callIDs := make(map[string]bool)
 	tokensIn, tokensOut := 0, 0
 	forEachStrikeRecord(data, func(line int, raw []byte) {
@@ -601,6 +603,9 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			}
 			lastTime = *timestamp
 		}
+		if event.SessionID != "" && event.SessionID != session.SessionID.String() {
+			identityMismatch = true
+		}
 		switch env.Type {
 		case strikeEventTurnStarted:
 			turnStarts++
@@ -619,6 +624,9 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		}
 	})
 
+	if identityMismatch {
+		return nil, fmt.Errorf("Strike metadata capture for %s: transcript event sessionId disagrees with the discovered filename; no capture was written; restore the matching transcript and rerun peasant ingest", session.SessionID)
+	}
 	created := sidecar.createdTime()
 	if firstTime == 0 && !created.IsZero() {
 		firstTime = created.UnixMilli()
@@ -655,7 +663,8 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if worktree == "" {
 		worktree = filepath.Dir(session.SourcePath.String())
 	}
-	meta.CWD = worktree
+	// The sidecar records a worktree, not the session's exact working directory.
+	meta.CWD = ""
 	branch := sidecar.branchName()
 	if branch == "" {
 		branch = session.Branch
@@ -666,12 +675,15 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if worktree != "" {
 		meta.Git.Worktree = &worktree
 	}
-	remote := sidecar.remoteURL()
+	remote, tracking := ResolveGitRemote(ctx, a.git, worktree, branch, sidecar.remoteURL())
 	if remote != "" {
 		meta.Git.Remote = &remote
 	}
+	if tracking != "" {
+		meta.Git.Tracking = &tracking
+	}
 
-	projectHash, hostSlug, identityErr := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remote, worktree)
+	projectHash, hostSlug, identityErr := DeriveProjectIdentifiers(a.salt, remote, worktree)
 	if identityErr != nil {
 		return nil, fmt.Errorf("strike metadata: derive project identity for session %s from worktree %q: %w", session.SessionID, worktree, identityErr)
 	}

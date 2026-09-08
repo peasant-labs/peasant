@@ -886,7 +886,10 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		Format:   SourceFormatJSONL,
 	}
 
-	firstLine := parseClaudeTranscriptMetadata(data, &meta)
+	firstLine, parseErr := parseClaudeTranscriptMetadata(data, &meta)
+	if parseErr != nil {
+		return nil, parseErr
+	}
 	if firstLine != nil {
 		// Resolve git metadata using the cwd from the first line.
 		cwd := firstLine.CWD
@@ -900,11 +903,12 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			cwd = decoded
 		}
 
-		remoteURL, remoteErr := a.git.RemoteURL(ctx, cwd)
+		remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, cwd, firstLine.GitBranch, "")
+		remoteErr := error(nil)
 		// If direct remote check fails, walk up parent directories to find one.
 		// This ensures sessions from decoded slug paths (which may point to a
 		// subdirectory) still resolve the correct git remote for project grouping.
-		if (remoteErr != nil || remoteURL == "") && a.git != nil {
+		if (remoteErr != nil || remoteURL == "") && a.git != nil && firstLine.GitBranch == "" {
 			if walkedRemote, _, walkErr := a.git.WalkUpRemoteURL(ctx, cwd); walkErr == nil && walkedRemote != "" {
 				remoteURL = walkedRemote
 				remoteErr = nil
@@ -912,7 +916,6 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		}
 		branchStr, branchErr := a.git.Branch(ctx, cwd)
 		worktreeStr, worktreeErr := a.git.Worktree(ctx, cwd)
-		trackingStr, trackingErr := a.git.TrackingBranch(ctx, cwd)
 
 		// Build GitContext — all fields are nullable.
 		gitInfo := GitContext{}
@@ -937,7 +940,7 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			gitInfo.Worktree = &w
 		}
 
-		if trackingErr == nil && trackingStr != "" {
+		if trackingStr != "" {
 			tr := trackingStr
 			gitInfo.Tracking = &tr
 		}
@@ -945,7 +948,6 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		meta.Git = gitInfo
 
 		// Store the real working directory for context-aware slug redaction.
-		meta.CWD = cwd
 
 		// ProjectInfo.
 		projectPath := worktreeStr
@@ -953,7 +955,7 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			projectPath = cwd
 		}
 
-		projectHash, hostSlug, err := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remoteURL, projectPath)
+		projectHash, hostSlug, err := DeriveProjectIdentifiers(a.salt, remoteURL, projectPath)
 		if err != nil {
 			// DeriveProjectIdentifiersWithGit should not fail for valid paths,
 			// but fall back to zero-value hash if it does.
@@ -1002,9 +1004,10 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	return &meta, nil
 }
 
-func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) *claudeJSONLLine {
+func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJSONLLine, error) {
 	var (
 		firstLine      claudeJSONLLine
+		literalCWD     string
 		hasFirst       bool
 		firstTimestamp string // earliest non-empty timestamp across all lines
 		lastTimestamp  string // latest non-empty timestamp across all lines
@@ -1041,6 +1044,13 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) *claudeJS
 			continue
 		}
 
+		if line.SessionID != "" && line.SessionID != meta.SessionID.String() &&
+			(meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()) {
+			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", meta.SessionID)
+		}
+		if literalCWD == "" {
+			literalCWD = line.CWD
+		}
 		if !hasFirst {
 			firstLine = line
 			hasFirst = true
@@ -1124,15 +1134,16 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) *claudeJS
 
 	}
 
+	meta.CWD = literalCWD
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
 	meta.Stats.TokensIn = tokensIn
 	meta.Stats.TokensOut = tokensOut
 
 	if hasFirst {
-		return &firstLine
+		return &firstLine, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // claudeProjectsDirSegment is the path segment that identifies a directory as a

@@ -111,7 +111,9 @@ func (e *UnsupportedIndexFormatError) Error() string {
 func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*ingest.SessionIndexState, error) {
 	var state *ingest.SessionIndexState
 	err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version, indexed_at, model_harness,
-artifact_hash, indexed_input_hash, session_entries_hash FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+artifact_hash, indexed_input_hash, session_entries_hash,
+CASE WHEN cwd_provenance_kind != 'not_recovered' THEN publication_capture_revision ELSE 0 END
+FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			var harness schema.Harness
@@ -119,6 +121,7 @@ artifact_hash, indexed_input_hash, session_entries_hash FROM sessions WHERE sess
 				return fmt.Errorf("stored harness %q is not recognized; restore valid session metadata before indexing", stmt.ColumnText(3))
 			}
 			state = &ingest.SessionIndexState{SessionID: sessionID, IndexerVersion: stmt.ColumnInt(0), Harness: harness}
+			state.PublicationCaptureRevision = stmt.ColumnInt64(7)
 			if stmt.ColumnType(1) != sqlite.TypeNull {
 				version := stmt.ColumnInt(1)
 				state.IndexVersion = &version

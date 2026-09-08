@@ -174,6 +174,11 @@ func seedStore(t *testing.T, s *store.Store, entries []ingest.StoreEntry) *api.S
 		t.Fatalf("InsertSessions: %v", err)
 	}
 	api.MarkStoredSessionsIndexed(t, s)
+	for _, e := range entries {
+		if err := testutil.WriteFullEntries(ctx, s, e.Session.SessionID, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Compute daily summaries (decoupled from InsertSessions).
 	daySet := make(map[string]bool)
 	for _, e := range entries {
@@ -192,10 +197,8 @@ func seedStore(t *testing.T, s *store.Store, entries []ingest.StoreEntry) *api.S
 	return api.NewStoreDataProvider(s, sessionvisibility.All())
 }
 
-// seedStoreWithFS is seedStore but wires the given FileSystem into the
-// provider (via NewStoreDataProviderWithFS) instead of the real OS
-// filesystem, so SessionByID's content overlay re-index reads from a MemFS
-// fixture in tests.
+// seedStoreWithFS retains the injectable filesystem boundary. Detail content
+// comes from complete database captures, never from this filesystem.
 func seedStoreWithFS(t *testing.T, s *store.Store, entries []ingest.StoreEntry, fs ingest.FileSystem) *api.StoreDataProvider {
 	t.Helper()
 	ctx := context.Background()
@@ -203,6 +206,11 @@ func seedStoreWithFS(t *testing.T, s *store.Store, entries []ingest.StoreEntry, 
 		t.Fatalf("InsertSessions: %v", err)
 	}
 	api.MarkStoredSessionsIndexed(t, s)
+	for _, e := range entries {
+		if err := testutil.WriteFullEntries(ctx, s, e.Session.SessionID, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	daySet := make(map[string]bool)
 	for _, e := range entries {
 		if e.Metadata != nil && e.Metadata.Timestamp.Start > 0 {
@@ -968,7 +976,7 @@ func TestStoreDataProvider_SessionByID_WithEntries(t *testing.T) {
 			HasToolUse:     false,
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1214,7 +1222,7 @@ func TestStoreDataProvider_SessionByID_DepthAndParentIndex(t *testing.T) {
 			ParentIndex:    intPtr(0),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1322,7 +1330,7 @@ func TestStoreDataProvider_SessionByID_ToolKindAndStopReason(t *testing.T) {
 			ParentIndex:  intPtr(0),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1437,7 +1445,7 @@ func TestStoreDataProvider_SessionByID_EmptyEntrySuppression(t *testing.T) {
 			HasToolUse:     false,
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1511,7 +1519,7 @@ func TestStoreDataProvider_SessionByID_ConsecutiveDedup(t *testing.T) {
 			HasToolUse:     false,
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1610,7 +1618,7 @@ func TestStoreDataProvider_SessionByID_PartType(t *testing.T) {
 			PartType:       strPtr("text"),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1719,7 +1727,7 @@ func TestStoreDataProvider_SessionByID_ToolCallDuration(t *testing.T) {
 			ToolOutput:   strPtr("file contents"),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1830,7 +1838,7 @@ func TestStoreDataProvider_SessionByID_ToolCallFilePath(t *testing.T) {
 			ToolInput:    strPtr(`not json`),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -1932,7 +1940,7 @@ func TestStoreDataProvider_SessionByID_ToolCallExitCode(t *testing.T) {
 			ToolOutput:   strPtr("Exit code 127\ncommand not found"),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -2170,9 +2178,10 @@ func TestStoreDataProvider_SessionByID_ContentOverlay(t *testing.T) {
 			SourceFormat: ingest.SourceFormatJSONL,
 		},
 	}
-	provider := api.NewStoreDataProviderWithFS(s, sessionvisibility.All(), fs, "/managed")
+	provider := seedStoreWithFS(t, s, []ingest.StoreEntry{entry}, fs)
 
-	// Index the TRUNCATED entry (2000 chars) — what a real ingest run stores.
+	// Establish the legacy bounded preview, then seed complete source content
+	// through the authoritative writer before exercising the full consumer.
 	codexIndexer := ingest.NewCodexIndexer(fs)
 	dsEntries, err := codexIndexer.IndexTranscript(ctx, entry.Session)
 	if err != nil {
@@ -2184,7 +2193,14 @@ func TestStoreDataProvider_SessionByID_ContentOverlay(t *testing.T) {
 	if dsEntries[0].ContentPreview == nil || len(*dsEntries[0].ContentPreview) != 2000 {
 		t.Fatalf("indexed preview: expected exactly 2000 chars (truncated), got %v", dsEntries[0].ContentPreview)
 	}
-	storetest.SeedManagedInput(t, s, fs, "/managed", *entry.Metadata, []byte(codexLine+"\n"))
+	fullIndexer := ingest.NewCodexIndexer(fs, ingest.WithCodexFullContent(true))
+	fullEntries, err := fullIndexer.IndexTranscript(ctx, entry.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteFullEntries(ctx, s, sid, fullEntries); err != nil {
+		t.Fatalf("IndexSessionEntries: %v", err)
+	}
 
 	sess, err := provider.SessionByID(ctx, sidStr)
 	if err != nil {
@@ -2203,23 +2219,15 @@ func TestStoreDataProvider_SessionByID_ContentOverlay(t *testing.T) {
 	}
 }
 
-// TestStoreDataProvider_SessionByID_ContentOverlay_MissingSourceDegradesGracefully
-// verifies that when the source file used for the content overlay is missing
-// (a real, common case — e.g. the source transcript was moved/deleted since
-// ingest, or NewStoreDataProvider's default real-OS filesystem simply has
-// nothing at the recorded path in a test), SessionByID still returns the
-// session with its EXISTING (DB-preview) content rather than failing the
-// whole request. The overlay is strictly best-effort.
-func TestStoreDataProvider_SessionByID_ContentOverlay_MissingSourceDegradesGracefully(t *testing.T) {
+// Complete short content stays available without a provider or retained source.
+func TestStoreDataProvider_SessionByID_CompleteContentWithoutSource(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	ctx := context.Background()
 
 	entry := makeStoreEntry(t, "ffffffff-0000-1111-2222-333344445555", hash1, "github.com-test",
 		defaults.HarnessClaudeCode, day1Ms, 1000, 500, "project-missing-source", 1, 0, 60000)
-	// makeStoreEntry's SourcePath ("/test/path/session.jsonl") is never written
-	// to any filesystem — the default real-OS-backed provider from seedStore
-	// will fail to read it, exercising the graceful-degradation path.
+	// The synthetic source path is never written; only DB content is available.
 	provider := seedStore(t, s, []ingest.StoreEntry{entry})
 
 	sid := ingest.SessionID("ffffffff-0000-1111-2222-333344445555")
@@ -2234,28 +2242,30 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_MissingSourceDegradesGrace
 			ContentPreview: strPtr("some preview content"),
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, sid, dbEntries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, sid, dbEntries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
 	sess, err := provider.SessionByID(ctx, "ffffffff-0000-1111-2222-333344445555")
 	if err != nil {
-		t.Fatalf("SessionByID: expected no error even when the overlay source file is missing, got: %v", err)
+		t.Fatalf("SessionByID: complete content must not require a source file: %v", err)
 	}
 	if len(sess.Turns) != 1 {
 		t.Fatalf("Turns length: got %d, want 1", len(sess.Turns))
 	}
 	if sess.Turns[0].Content != "some preview content" {
-		t.Errorf("Turns[0].Content: expected the DB preview to survive a missing overlay source, got %q", sess.Turns[0].Content)
+		t.Errorf("Turns[0].Content: expected complete stored short text, got %q", sess.Turns[0].Content)
 	}
 }
 
-// readFileSpyFS detects forbidden native reads or managed-artifact acquisition
-// when the coherent SQL preview already contains ordinary short content.
+// readFileSpyFS wraps a *testutil.MemFS and counts ReadFile calls, so a test
+// can assert the content-overlay re-index was never attempted (the perf
+// gate, transcript.AnyContentTruncated) rather than merely attempted and
+// harmlessly failing/no-opping — those two outcomes are otherwise
+// indistinguishable from the returned Content alone.
 type readFileSpyFS struct {
 	*testutil.MemFS
 	readFileCalled bool
-	artifactOpened bool
 }
 
 func (s *readFileSpyFS) ReadFile(path string) ([]byte, error) {
@@ -2263,15 +2273,15 @@ func (s *readFileSpyFS) ReadFile(path string) ([]byte, error) {
 	return s.MemFS.ReadFile(path)
 }
 
-func (s *readFileSpyFS) OpenArtifactRoot(path string) (ingest.ArtifactRoot, error) {
-	s.artifactOpened = true
-	return s.MemFS.OpenArtifactRoot(path)
-}
-
 // TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTruncated
 // is the perf-gate regression test:
-// A valid published, indexed artifact must not be captured or reparsed when
-// the coherent stored entries contain only ordinary short content.
+// BuildContentOverlay does a full re-parse of the source transcript from
+// disk, which SessionByID must NOT pay on every session view — only when at
+// least one turn's content_preview actually hit defaults.ContentPreviewLimit.
+// Proven with a ReadFile-counting spy FileSystem: the source file is present
+// and perfectly readable (so a missing/degraded-gracefully result can't mask
+// a gate failure the way it did in the sibling test above), but every DB
+// entry is short, so the spy must see ZERO ReadFile calls.
 func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTruncated(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
@@ -2312,10 +2322,22 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTru
 			SourceFormat: ingest.SourceFormatJSONL,
 		},
 	}
-	provider := api.NewStoreDataProviderWithFS(s, sessionvisibility.All(), spy, "/managed")
+	provider := seedStoreWithFS(t, s, []ingest.StoreEntry{entry}, spy)
 
 	shortContent := "a perfectly ordinary, short turn"
-	storetest.SeedManagedInput(t, s, spy.MemFS, "/managed", *entry.Metadata, []byte(shortLine+"\n"))
+	dbEntries := []schema.SessionEntry{
+		{
+			SessionID:      sid,
+			EntryIndex:     0,
+			Harness:        defaults.HarnessClaudeCode,
+			EntryType:      ingest.EntryTypeText,
+			Role:           ingest.RoleUser,
+			ContentPreview: &shortContent,
+		},
+	}
+	if err := testutil.WriteFullEntries(ctx, s, sid, dbEntries); err != nil {
+		t.Fatalf("IndexSessionEntries: %v", err)
+	}
 
 	sess, err := provider.SessionByID(ctx, sidStr)
 	if err != nil {
@@ -2324,8 +2346,8 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTru
 	if len(sess.Turns) != 1 || sess.Turns[0].Content != shortContent {
 		t.Fatalf("Turns[0].Content: got %+v, want the DB preview %q verbatim", sess.Turns, shortContent)
 	}
-	if spy.readFileCalled || spy.artifactOpened {
-		t.Error("short viewer content acquired or read transcript input instead of using its SQL snapshot")
+	if spy.readFileCalled {
+		t.Error("ReadFile was called; database-authoritative detail must not re-read source content")
 	}
 }
 
@@ -2657,7 +2679,7 @@ func TestEntriesToTurns_CanonicalRoles_DBRoundTrip(t *testing.T) {
 			t.Fatal("indexer must reclassify depth-0 pure tool_result wrapper to role=tool (R2)")
 		}
 
-		if err := s.IndexSessionEntries(ctx, sid, indexedEntries); err != nil {
+		if err := testutil.WriteFullEntries(ctx, s, sid, indexedEntries); err != nil {
 			t.Fatalf("IndexSessionEntries: %v", err)
 		}
 
@@ -2752,7 +2774,7 @@ func TestEntriesToTurns_CanonicalRoles_DBRoundTrip(t *testing.T) {
 			t.Fatalf("IndexTranscript: %v", err)
 		}
 
-		if err := s.IndexSessionEntries(ctx, sid, indexedEntries); err != nil {
+		if err := testutil.WriteFullEntries(ctx, s, sid, indexedEntries); err != nil {
 			t.Fatalf("IndexSessionEntries: %v", err)
 		}
 

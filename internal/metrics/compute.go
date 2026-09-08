@@ -616,6 +616,12 @@ func makeContextUtilizationFunc(syncer ingest.ModelsSyncer) MetricFunc {
 // Cost = price_per_mtok * tokens / 1,000,000 for each token type.
 func makeCostFunc(syncer ingest.ModelsSyncer) MetricFunc {
 	return func(ctx context.Context, _ ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
+		// Pi carries recorded estimates in detailed usage; never reprice them.
+		for _, entry := range entries {
+			if _, pi, err := ingest.DecodePiExtra(entry.Extra); pi || err != nil {
+				return nil
+			}
+		}
 		if syncer == nil {
 			return nil
 		}

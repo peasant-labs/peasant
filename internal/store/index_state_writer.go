@@ -12,9 +12,9 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL, indexed_input_hash = NULL WHERE session_id = ?`
+const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL, indexed_input_hash = NULL, indexed_publication_capture_revision = 0 WHERE session_id = ?`
 
-const sqlUpdateIndexStateWithSessionEntriesHash = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = ?, indexed_input_hash = ? WHERE session_id = ?`
+const sqlUpdateIndexStateWithSessionEntriesHash = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = ?, indexed_input_hash = ?, indexed_publication_capture_revision = 0 WHERE session_id = ?`
 
 // validateIndexerRevisionOnConn runs under the same transaction as entry writes.
 // A force or source refresh must not replace output produced by a newer parser.

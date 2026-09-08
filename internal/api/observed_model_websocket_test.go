@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -97,7 +98,7 @@ func TestHubSessionDetailRejectsPersistedNonAssistantEvidence(t *testing.T) {
 	extraBytes, _ := json.Marshal(map[string]string{"model_id": rejection.ObservedModel})
 	extra, content := string(extraBytes), "invalid attribution"
 	entry := schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: 1, Role: schema.Role(rejection.Role), Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &content, Extra: &extra}
-	if err := db.IndexSessionEntries(context.Background(), ingest.SessionID(fixture.SessionID), []schema.SessionEntry{entry}); err != nil {
+	if err := testutil.WriteFullEntries(context.Background(), db, ingest.SessionID(fixture.SessionID), []schema.SessionEntry{entry}); err != nil {
 		t.Fatal(err)
 	}
 	hub := api.NewHub(api.NewStoreDataProvider(db, sessionvisibility.All()))
@@ -156,7 +157,7 @@ func TestHubSessionDetailEmitsObservedModelEvidence(t *testing.T) {
 		content := source.Content
 		entries = append(entries, schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: source.Index, Role: schema.Role(source.Role), Depth: source.Depth, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &content, Extra: &extra})
 	}
-	if err := db.IndexSessionEntries(context.Background(), ingest.SessionID(fixture.SessionID), entries); err != nil {
+	if err := testutil.WriteFullEntries(context.Background(), db, ingest.SessionID(fixture.SessionID), entries); err != nil {
 		t.Fatalf("persist entries: %v", err)
 	}
 	provider := api.NewStoreDataProvider(db, sessionvisibility.All())

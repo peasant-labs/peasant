@@ -137,8 +137,20 @@ func TestPullRoundTripE2E(t *testing.T) {
 	// The first annotation command above is the current CLI's first open of this
 	// database. Assert its ordinary V40/V41 upgrade created the anchor and made
 	// the already-pushed session eligible before adding the target annotation.
-	associationID := assertMigratedAssociationReplay(t, user1DB, associationFixture)
+	associationID := assertMigratedAssociationReplay(t, user1DB, associationFixture, 0)
 	createAssociationRoundTripAnnotation(t, user1DB, associationID, associationFixture)
+	// This deliberately reconstructed pre-content database has only previews.
+	// Recover authoritative content from the retained harvest through the real
+	// upgrade command before publication; migration alone cannot invent text.
+	runPeasant(t, peasantBin, user1XDG, "harvest", "index", "--force")
+
+	// Schema upgrades do not invent the metadata snapshot absent from V39.
+	// Recover through normal source ingest, preserving the migrated association
+	// and its already-created annotation before the ordinary replay push.
+	runPeasant(t, peasantBin, user1XDG, "ingest", "--include-active")
+	if recoveredID := assertMigratedAssociationReplay(t, user1DB, associationFixture, 1); recoveredID != associationID {
+		t.Fatalf("normal ingest changed the migrated association identity: %s -> %s", associationID, recoveredID)
+	}
 
 	// This is an ordinary, non-force CLI push. The local target annotation exists
 	// before the call, so Village can accept it only after the replayed transcript
@@ -440,7 +452,7 @@ WHERE session_id = ?`, &sqlitex.ExecOptions{
 	}
 }
 
-func assertMigratedAssociationReplay(t *testing.T, dbPath string, fixture fixtureAssociationRoundTrip) schema.AssociationID {
+func assertMigratedAssociationReplay(t *testing.T, dbPath string, fixture fixtureAssociationRoundTrip, wantTargetAnnotations int) schema.AssociationID {
 	t.Helper()
 	conn := openSandboxDB(t, dbPath)
 	defer conn.Close()
@@ -546,8 +558,8 @@ WHERE session_id = ?`, &sqlitex.ExecOptions{
 	}); err != nil {
 		t.Fatalf("count association-target annotations before target creation: %v", err)
 	}
-	if targetAnnotations != 0 {
-		t.Fatalf("association-target annotations before explicit creation = %d, want 0", targetAnnotations)
+	if targetAnnotations != wantTargetAnnotations {
+		t.Fatalf("association-target annotations = %d, want %d", targetAnnotations, wantTargetAnnotations)
 	}
 	return associationID
 }
@@ -627,8 +639,8 @@ func assertQuietAssociationPush(t *testing.T, result pushJSON, expectedAnnotatio
 	if expectedAnnotationSkips <= 0 {
 		t.Fatal("first association push produced no annotations to exercise the ordinary skip gate")
 	}
-	if result.New != 0 || result.Updated != 0 || result.Skipped != 0 || result.Errors != 0 || result.Held != 0 || len(result.Sessions) != 0 || strings.TrimSpace(result.EmptyReason) == "" {
-		t.Fatalf("second ordinary association push transcript result = %+v, want no transcript outcomes and an empty-candidate reason", result)
+	if result.New != 0 || result.Updated != 0 || result.Skipped == 0 || result.Errors != 0 || result.Held != 0 || len(result.Sessions) != result.Skipped || strings.TrimSpace(result.EmptyReason) == "" {
+		t.Fatalf("second ordinary association push transcript result = %+v, want unchanged transcript skips and an explanatory reason", result)
 	}
 	if result.Annotations.Total != expectedAnnotationSkips || result.Annotations.Created != 0 || result.Annotations.Updated != 0 || result.Annotations.Skipped != expectedAnnotationSkips || result.Annotations.Retracted != 0 || result.Annotations.Errors != 0 || result.Annotations.Error != "" || result.Annotations.SkipReason != "" {
 		t.Fatalf("second ordinary association push annotation result = %+v, want only %d skipped annotations", result.Annotations, expectedAnnotationSkips)

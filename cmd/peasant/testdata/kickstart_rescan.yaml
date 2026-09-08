@@ -63,7 +63,7 @@ cases:
     want_branch: "resolved-by-git"
     want_title: ""
 
-  - name: recorded session still being written keeps its record
+  - name: recorded active session is refreshed
     session_id: "33333333-3333-3333-3333-333333333333"
     session_cwd: "/peasant-rescan/active"
     record: complete
@@ -72,10 +72,10 @@ cases:
     recorded_title: "recorded active title"
     recorded_schema_version: current
     source_age: active
-    want_resolution: reused
-    want_remote: "git@github.com:acme/recorded-active.git"
-    want_branch: "recorded-active"
-    want_title: "recorded active title"
+    want_resolution: resolved
+    want_remote: "git@github.com:acme/resolved-by-git.git"
+    want_branch: "resolved-by-git"
+    want_title: ""
 
   - name: session recorded under an older metadata version is resolved again
     session_id: "44444444-4444-4444-4444-444444444444"

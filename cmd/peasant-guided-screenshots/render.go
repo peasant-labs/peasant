@@ -19,7 +19,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -148,6 +151,9 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 }
 
 func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
+	if capture.State != ingestProgressStateRunning {
+		return renderHarvestInlineCapture(capture)
+	}
 	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("ingest-progress-%02d", index), true)
 	if err != nil {
 		return "", err
@@ -160,7 +166,7 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 		Draft:             draft,
 		Source:            scannerfix.NewFixtureTreeSource("standard"),
 		AlreadyConnected:  true,
-		Clock:             clock,
+		Clock:             &clock,
 		Progress:          progress,
 		ProgressAnimation: animation.IngestAnimation(),
 		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
@@ -178,9 +184,41 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 		return "", fmt.Errorf("render ingest progress capture %q: phase=%s command=%t tick=%t, want active ingest", capture.Name, program.Phase(), command != nil, tick != nil)
 	}
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	program, _ = program.Update(tick(clock.Now()))
+	clock.now = clock.now.Add(2 * time.Second)
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
-	program, _ = program.Update(tick(clock.Now().Add(time.Second)))
+	program, _ = program.Update(tick(clock.Now()))
 	return program.View(), nil
+}
+
+func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, error) {
+	started := timeDateForCapture()
+	progress := ingest.NewProgressState()
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
+	model = updated.(harvestprogress.Model)
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
+	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
+		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 2, Total: 4, Err: context.Canceled})
+		updated, _ = updated.Update(harvestprogress.TickMsg(started.Add(9 * time.Second)))
+	}
+	if capture.State == ingestProgressStateHarvestCanceled {
+		updated, _ = updated.Update(ingestprogress.FinalMsg{At: started.Add(12 * time.Second), Snapshot: progress.Snapshot(), Outcome: ingestprogress.FinalCanceled})
+	}
+	view := updated.(harvestprogress.Model).View().Content
+	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {
+		return "", fmt.Errorf("inline harvest overflows the capture terminal")
+	}
+	// The inline program intentionally occupies only its content rows. The
+	// capture canvas represents the remaining terminal viewport, without
+	// changing the production view or concealing overflow.
+	canvas := kit.NewPanel(captureThemeValue(capture.Theme))
+	canvas.SetSize(capture.Width, capture.Height)
+	canvas.Rendered(view)
+	return canvas.View(), nil
 }
 
 func renderGuidedCapture(workingDirectory string, index int, capture guidedCaptureFixture) (string, error) {
@@ -243,6 +281,7 @@ func renderSelectionCapture(
 		// is what makes the capture evidence that a person sees the badge,
 		// rather than evidence that the renderer can draw one.
 	)
+	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:  th,
 		Draft:  draft,
@@ -253,8 +292,10 @@ func renderSelectionCapture(
 			// The store first, then the transcript the harness wrote. This is
 			// the order the mounted command wires, so a session with no store
 			// row previews from its own source file.
-			storedThenHarnessTurns(selection.Transcripts, kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)),
+			storedThenHarnessTurns(selection.Transcripts, sourceTurns),
+			kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
 			kickstart.WithListingPreviewContextSource(source),
+			kickstart.WithDiscoveryInventory(state.DiscoveryInventory),
 		),
 	})
 	program.SetSize(capture.Width, capture.Height)
@@ -273,7 +314,7 @@ func renderSelectionCapture(
 	if state.Key == selectionStateBranchPreview {
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview {
+	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview || state.Key == selectionStateBudgetPreview || state.Key == selectionStatePiPreview {
 		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil
@@ -344,6 +385,14 @@ func listingsWithHarnessTranscripts(workingDirectory string, index int, selectio
 		if !ok {
 			continue
 		}
+		if padding, padded := selection.SourceTranscriptPadding[listings[i].SessionID]; padded {
+			payload := strings.Repeat("x", padding.ContentBytes)
+			for line := 0; line < padding.LineCount; line++ {
+				lines = append(lines, fmt.Sprintf(
+					`{"type":"assistant","uuid":"padding-%d","message":{"role":"assistant","content":[{"type":"text","text":%q}]}}`,
+					line, payload))
+			}
+		}
 		path := filepath.Join(dir, listings[i].SessionID+".jsonl")
 		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 			return nil, fmt.Errorf("write harness transcript %q: %w", path, err)
@@ -386,6 +435,9 @@ func renderPushCapture(fixture pushFixture, capture pushCaptureFixture) (string,
 		// One row down from the opening project row is its session, which is
 		// what makes the pane draw a transcript.
 		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyDown})
+	case pushStateNeedsIngest:
+		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyDown})
+		current = sendPushMessage(current, tea.KeyPressMsg{Code: tea.KeyDown})
 	case pushStateConsent:
 		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyEnter})
 	case pushStateReceipt:
@@ -450,6 +502,11 @@ func pushWizardSessions(fixture pushFixture) []push.PushWizardSession {
 		if row.Withheld {
 			candidate.Action = push.PushExclude
 			candidate.Locked = true
+		}
+		if row.NeedsIngest {
+			candidate.Action = push.PushExclude
+			candidate.NeedsIngest = true
+			candidate.Meta = nil
 		}
 		sessions = append(sessions, candidate)
 	}

@@ -1,0 +1,18 @@
+required_cases:
+  - canceled entry
+  - discovery partial success
+  - filter preparation partial success
+  - bulk lookup partial success
+  - bulk lookup canceled error
+cases:
+  - name: canceled entry
+    boundary: entry
+  - name: discovery partial success
+    boundary: discovery
+  - name: filter preparation partial success
+    boundary: prepare
+  - name: bulk lookup partial success
+    boundary: bulk
+  - name: bulk lookup canceled error
+    boundary: bulk
+    return_error: true

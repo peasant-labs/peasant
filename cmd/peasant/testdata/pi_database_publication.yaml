@@ -1,0 +1,17 @@
+requiredNames: [native-complete-after-source-removal, native-valid-prefix-after-source-removal, corrupt-native-chunk-refuses-cli-upload]
+sessionID: 11111111-2222-4333-8444-555555555555
+prefix: "native 世界 prose "
+repetitions: 4200
+tail: SAFE-NATIVE-DATABASE-TAIL
+secret: sk-ant-api03-CLIDOORKEY000000000000x
+pii: synthetic@example.test
+source: |
+  {"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/synthetic/project","timestamp":"2026-01-01T00:00:00Z"}
+  {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":TEXT}}
+  {"type":"message","id":"a","parentId":"u","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"thinking","thinking":"native thinking once"},{"type":"text","text":"native answer"},{"type":"toolCall","id":"call","namespace":"Synthetic.世界","name":"custom_tool","arguments":{"nested":{"payload":TEXT}}}],"usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0}}}
+  {"type":"message","id":"r","parentId":"a","message":{"role":"toolResult","toolCallId":"call","toolName":"custom_tool","isError":true,"content":[{"type":"text","text":TEXT}],"details":{"state":true}}}
+  {"type":"custom_message","id":"c","parentId":"r","customType":"context","display":false,"content":"searchable Pi context","details":{"state":true}}
+cases:
+  - {name: native-complete-after-source-removal}
+  - {name: native-valid-prefix-after-source-removal, incompleteTail: true}
+  - {name: corrupt-native-chunk-refuses-cli-upload, corruptChunk: true}

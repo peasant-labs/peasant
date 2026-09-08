@@ -957,7 +957,7 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		// A text part that repeats its message's own preview would render the
 		// same prose twice: once on the message turn and once on the part turn.
 		// The message turn already carries it, so drop the part.
-		if parentContent != nil && *parentContent != "" && part.Data.Text == *parentContent {
+		if parentContent != nil && *parentContent != "" && part.Data.Text == truncateString(*parentContent, defaults.ContentPreviewLimit) {
 			return schema.SessionEntry{}, false
 		}
 		if part.Data.Text != "" {
@@ -972,8 +972,11 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		if partType == "reasoning" {
 			entry.EntryType, entry.HasThinking = EntryTypeThinking, true
 		}
-		if part.Data.Text != "" {
+		if part.Data.Text != "" || idx.fullContent && partType == "compaction" && len(part.Data.Content) > 0 {
 			text := part.Data.Text
+			if idx.fullContent && partType == "compaction" && len(part.Data.Content) > 0 {
+				text += "\n" + rawMessagePreview(part.Data.Content)
+			}
 			if !idx.fullContent {
 				text = truncateString(text, defaults.ContentPreviewLimit)
 			}

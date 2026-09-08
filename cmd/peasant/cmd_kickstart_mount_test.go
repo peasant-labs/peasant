@@ -74,6 +74,9 @@ func TestKickstartPreview_ImportedEmptySessionShowsRawSource(t *testing.T) {
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("insert empty-turn session: %v", err)
 	}
+	if err := testutil.WriteFullEntries(t.Context(), db, ingest.SessionID(mountEmptySessionID), nil); err != nil {
+		t.Fatalf("capture empty-turn session: %v", err)
+	}
 
 	sessions := []ftue.SessionListing{{Harness: string(defaults.HarnessClaudeCode), SessionID: mountEmptySessionID, ProjectName: "acme/tool"}}
 	body, err := kickstartPreview(mountTestCmd(t, dataHome), db, theme.New(theme.ModeDark), sessions).Body(mountEmptySessionID)
@@ -304,7 +307,7 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 	}
 
 	recordedID := ingest.SessionID(mountImportedSessionID)
-	if err := db.IndexSessionEntries(t.Context(), recordedID, sessionEntries(t, recordedID, recorded, now)); err != nil {
+	if err := testutil.WriteFullEntries(t.Context(), db, recordedID, sessionEntries(t, recordedID, recorded, now)); err != nil {
 		t.Fatalf("index recorded session entries: %v", err)
 	}
 
@@ -404,6 +407,7 @@ func sessionEntries(t *testing.T, sessionID ingest.SessionID, rows []testutil.Tu
 // previewCase is one highlighted row and the lines the mounted pane must and
 // must not carry for it.
 type previewCase struct {
+	WantError    string   `yaml:"wantError"`
 	Name         string   `yaml:"name"`
 	Highlight    string   `yaml:"highlight"`
 	WantContains []string `yaml:"wantContains"`
@@ -459,7 +463,7 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 		if c.Highlight == "" {
 			t.Fatalf("preview case %q highlights nothing; the zero id previews whatever it resolves to", c.Name)
 		}
-		if len(c.WantContains)+len(c.WantMissing) == 0 {
+		if len(c.WantContains)+len(c.WantMissing) == 0 && c.WantError == "" {
 			t.Fatalf("preview case %q asserts nothing; an empty want list is a guaranteed pass", c.Name)
 		}
 		for _, want := range append(append([]string{}, c.WantContains...), c.WantMissing...) {
@@ -515,6 +519,12 @@ func TestKickstartPreview_ReadsTheLocalStore(t *testing.T) {
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			body, err := source.Body(c.Highlight)
+			if c.WantError != "" {
+				if err == nil || !strings.Contains(err.Error(), c.WantError) {
+					t.Fatalf("preview-only capture must request recovery: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("preview body for %q: %v", c.Highlight, err)
 			}

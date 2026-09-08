@@ -12,23 +12,15 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ExportSession returns full content only when captured retained input and the
-// stored coordinates have matching artifact, input and parser evidence.
-// managedRoot is the configured ingest output root, never the export destination.
+// ExportSession reads verified full database content and context in one snapshot.
+// Filesystem and managed-root arguments remain for caller compatibility only.
 func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, managedRoots ...string) (*schema.SessionDetailPayload, error) {
-	managedRoot := ""
-	if len(managedRoots) > 0 {
-		managedRoot = managedRoots[0]
-	}
-	snapshot, err := transcript.ReadSessionContent(ctx, db, fs, managedRoot, sessionID)
+	snapshot, err := db.ReadSessionContent(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("export session %s: %w", sessionID, err)
 	}
 	if snapshot == nil {
 		return nil, fmt.Errorf("export session %s: %w", sessionID, ErrSessionNotFound)
-	}
-	if snapshot.FullContentError != nil {
-		return nil, snapshot.FullContentError
 	}
 	detail, dbEntries := snapshot.Detail, snapshot.Entries
 	sid := schema.SessionID(sessionID)
@@ -56,15 +48,14 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		}
 		fullSession.PushedAt = detail.PushedAt
 	}
-	fullSession.Turns, err = transcript.EntriesToTurnsValidated(dbEntries)
-	if err != nil {
-		return nil, fmt.Errorf("export.ExportSession: validate indexed observed model evidence after storage read and before export: %w", err)
-	}
-
 	// Convert to the standardized detail payload — same as the session viewer.
-	payload, err := transcript.SessionToDetailValidated(fullSession)
+	projection, err := transcript.EntriesToProjectionValidated(dbEntries, transcript.ProjectionOptions{Harness: fullSession.Harness})
 	if err != nil {
-		return nil, fmt.Errorf("export.ExportSession: validate observed model evidence before export: %w", err)
+		return nil, fmt.Errorf("export session %s: validate captured entries: %w", sessionID, err)
+	}
+	payload, err := transcript.SessionToDetailValidatedWithProjection(fullSession, projection)
+	if err != nil {
+		return nil, fmt.Errorf("export.ExportSession: load full transcript before export: %w", err)
 	}
 	payload.TurnCount = len(payload.Turns)
 

@@ -411,10 +411,21 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 			}
 		}
 	}
+	meta.CWD = cwd
 	if cwd == "" {
 		cwd = filepath.Dir(string(session.SourcePath))
 	}
-	meta.CWD = cwd
+	var recordedBranch string
+	if meta.Git.Branch != nil {
+		recordedBranch = *meta.Git.Branch
+	}
+	remoteURL, tracking := ResolveGitRemote(ctx, a.git, cwd, recordedBranch, remoteURL)
+	if remoteURL != "" {
+		meta.Git.Remote = &remoteURL
+	}
+	if tracking != "" {
+		meta.Git.Tracking = &tracking
+	}
 
 	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
 	if derErr != nil {
@@ -481,6 +492,9 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 		case codexTypeSessionMeta:
 			var sm codexSessionMeta
 			if err := json.Unmarshal(env.Payload, &sm); err == nil {
+				if sm.ID != "" && sm.ID != meta.SessionID.String() {
+					return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", meta.SessionID)
+				}
 				sessionMeta = &sm
 				gotSessionMeta = true
 			} else {

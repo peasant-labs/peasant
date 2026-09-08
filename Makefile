@@ -103,7 +103,7 @@ check-harvester-versions:
 # Deliberately OUT of `check` — it needs containers + a cross-repo build and
 # t.Skips when those are absent. See docs/e2e.md.
 e2e:
-	go test -race -tags=e2e -count=1 ./internal/e2e/...
+	bash scripts/e2e-budget.sh go test -race -parallel=1 -tags=e2e -count=1 $(E2E_TEST_FLAGS) ./internal/e2e/...
 
 # Cross-repo E2E must exercise matching schema-module contracts. CI passes the
 # exact village checkout selected by VILLAGE_REF; this gate prevents a stale
@@ -154,7 +154,7 @@ e2e-schema-parity:
 # Unasserted live demo of the same harness (run1 sends N, run2 sends 0,
 # retraction drops one) with verbose output. See docs/e2e.md.
 demo:
-	go test -race -tags=e2e -count=1 -v -run TestSkipGateDemo ./internal/e2e/...
+	bash scripts/e2e-budget.sh go test -race -parallel=1 -tags=e2e -count=1 -v -run TestSkipGateDemo ./internal/e2e/...
 
 # Manual visual evidence for the mounted guided TUI. The build tag keeps the
 # harness and its tests out of default Go builds and tests.

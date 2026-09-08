@@ -82,13 +82,13 @@ function looksLikeProviderPolicy(content) {
 }
 
 const canonicalHarnesses = Object.freeze(Object.values(Harness))
-if (canonicalHarnesses.length !== 7 || !canonicalHarnesses.includes(Harness.Strike)) {
+if (canonicalHarnesses.length !== 8 || !canonicalHarnesses.includes(Harness.Strike) || !canonicalHarnesses.includes(Harness.Pi)) {
   fail(
-    `installed @peasant-labs/schema exposes ${JSON.stringify(canonicalHarnesses)} instead of the seven-harness final contract`,
+    `installed @peasant-labs/schema exposes ${JSON.stringify(canonicalHarnesses)} instead of the eight-harness final contract`,
     'the build dependency tree is not the contract this Peasant source targets',
     'provider-build-provenance.mjs schema inventory',
     'a provider-policy result would be ambiguous',
-    'install the exact @peasant-labs/schema@0.1.0 final contract and rebuild',
+    'install the exact @peasant-labs/schema@0.18.0 contract and rebuild',
   )
 }
 
@@ -125,7 +125,7 @@ for (const [route, htmlPath] of ROUTES) {
     if (missingHarnesses.length > 0 || missingMarkers.length > 0) {
       fail(
         `${route} policy chunk ${chunk.source} is incomplete (missing harnesses ${JSON.stringify(missingHarnesses)}, markers ${JSON.stringify(missingMarkers)})`,
-        'a route-referenced provider policy must be seven-provider, fail-closed, and carry the official Strike identity atomically',
+        'a route-referenced provider policy must be eight-provider, fail-closed, and carry the official Strike identity atomically',
         chunk.path,
         `${route} could ship a mixed old/new provider boundary`,
         'remove stale generated output, install only immutable packed upstream artifacts, and rebuild',
@@ -158,4 +158,4 @@ if (missingBinaryMarkers.length > 0) {
 
 const binarySHA256 = createHash('sha256').update(binary).digest('hex')
 console.log(`provider build provenance: ${routeEvidence.map(({ route, chunks }) => `${route}=[${chunks.join(',')}]`).join(' ')}`)
-console.log(`provider build provenance: seven harnesses, official Strike SVG/policy, and fail-closed validation found in web/out and bin/peasant (${binarySHA256})`)
+console.log(`provider build provenance: eight harnesses, official Strike SVG/policy, and fail-closed validation found in web/out and bin/peasant (${binarySHA256})`)

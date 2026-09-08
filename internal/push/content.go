@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/redact"
@@ -44,13 +45,11 @@ func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.Sessi
 // alias to the external contract module and is not Peasant's to extend.
 func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility, origin sessionorigin.Origin) (schema.TranscriptContent, error) {
 	session := metadataToSession(meta, fields)
-	turns, err := transcript.EntriesToTurnsValidated(entries)
+	projection, err := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: meta.ModelHarness})
 	if err != nil {
 		return schema.TranscriptContent{}, err
 	}
-	session.Turns = turns
-
-	payload, err := transcript.SessionToDetailValidated(session)
+	payload, err := transcript.SessionToDetailValidatedWithProjection(session, projection)
 	if err != nil {
 		return schema.TranscriptContent{}, err
 	}
@@ -101,8 +100,67 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 //
 // A nil redactor leaves the entries as recorded, the same explicit-choice
 // convention marshalTranscriptContent uses; every production push builds one.
-func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) ([]schema.SessionEntry, error) {
-	if redactor == nil || len(entries) == 0 {
+func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) (_ []schema.SessionEntry, err error) {
+	if len(entries) == 0 {
+		return entries, nil
+	}
+	if profiled, ok := redactor.(*profiledRedactor); ok {
+		profiled.rec.Count(perf.CounterRedactionEntriesScanned, int64(len(entries)), perf.UnitCount, nil)
+	}
+	defer observeRedactionDocument(redactor, &err, redactionEntriesValidation)
+	entries = append([]schema.SessionEntry(nil), entries...)
+	protected := make(map[int]*string)
+	for i := range entries {
+		extra, pi, err := ingest.DecodePiEntryExtra(entries[i])
+		if err != nil {
+			return nil, err
+		}
+		if !pi {
+			continue
+		}
+		rewrite := func(value string) (string, error) {
+			if redactor == nil {
+				return value, nil
+			}
+			result, ok := redactor.RedactJSON(value).(string)
+			if !ok {
+				return "", transcriptShapeRedactionError("metadata string changed shape")
+			}
+			return result, nil
+		}
+		for j := range extra.Metadata {
+			m := &extra.Metadata[j]
+			m.Data, err = ingest.SanitizePiMetadataData(m.Data, rewrite)
+			if err != nil {
+				return nil, err
+			}
+			if m.CustomType != "" {
+				m.CustomType, err = rewrite(m.CustomType)
+				if err != nil {
+					return nil, err
+				}
+				if m.CustomType == "" {
+					return nil, transcriptShapeRedactionError("customType became empty")
+				}
+			}
+		}
+		if extra.Namespace != nil {
+			redactedNamespace, rewriteErr := rewrite(*extra.Namespace)
+			if rewriteErr != nil {
+				return nil, rewriteErr
+			}
+			extra.Namespace = &redactedNamespace
+		}
+		protected[i], err = ingest.EncodePiExtra(extra)
+		if err != nil {
+			return nil, err
+		}
+		entries[i].Extra = nil
+	}
+	if redactor == nil {
+		for i, extra := range protected {
+			entries[i].Extra = extra
+		}
 		return entries, nil
 	}
 	raw, err := json.Marshal(entries)
@@ -134,6 +192,10 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 		return nil, fmt.Errorf("redact transcript entries for publication: entry count changed from %d to %d during redaction; schema-owned evidence cannot be matched safely, so nothing was uploaded; fix the custom redaction rule so it rewrites values without reshaping the entry list, then retry", len(entries), len(redactedEntries))
 	}
 	for index := range entries {
+		if extra, ok := protected[index]; ok {
+			redactedEntries[index].Extra = extra
+			continue
+		}
 		modelID, present, err := observedModelFromExtra(entries[index].Extra)
 		if err != nil {
 			return nil, err
@@ -204,6 +266,9 @@ func restoreObservedModelExtra(extra *string, value string) (*string, error) {
 // another - which is what had happened, with this comment claiming two seams
 // while the third and largest one called the fail-open primitive directly.
 func redactJSONDocument(redactor redact.JSONRedactor, document []byte, what string) ([]byte, error) {
+	if err := schema.ScanRawJSONDocument(document, schema.RawJSONPathPolicy{MaxDocumentBytes: 64 << 20, MaxDocumentDepth: 64}); err != nil {
+		return nil, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(document))
 	decoder.UseNumber()
 	var decoded any
@@ -264,14 +329,18 @@ func marshalTranscriptContent(
 	return marshalBuiltTranscriptContent(content, redactor)
 }
 
-func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) ([]byte, error) {
+func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) (_ []byte, err error) {
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)
 	}
+	if _, err := schema.DecodeTranscriptContentRaw(b); err != nil {
+		return nil, err
+	}
 	if redactor == nil {
 		return b, nil
 	}
+	defer observeRedactionDocument(redactor, &err, redactionTranscriptValidation)
 	// Through the SAME fail-closed round trip as the other two seams. This one
 	// called redact.RedactJSONDocBytes directly and returned its value, so a
 	// re-marshal failure published the assembled document exactly as built, with
@@ -294,6 +363,9 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	// Nothing leaks in that case, which is why it is a shape check and not a
 	// second redaction; a body the village stores as a transcript should still be
 	// one.
+	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
+		return nil, err
+	}
 	var check schema.TranscriptContent
 	if err := json.Unmarshal(redacted, &check); err != nil || check.Kind != content.Kind {
 		return nil, fmt.Errorf(
@@ -312,7 +384,14 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 			return nil, err
 		}
 	}
-	return json.Marshal(check)
+	final, err := json.Marshal(check)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := schema.DecodeTranscriptContentRaw(final); err != nil {
+		return nil, err
+	}
+	return final, nil
 }
 
 func restoreObservedModels(source, destination []schema.TurnDetail) error {

@@ -179,6 +179,17 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
+	// A forced retained-content repair replaces the projection, but still uses
+	// the same proven metadata/index revision as a content-only backfill. Resolve
+	// it inside this savepoint before replacement can invalidate the old proof.
+	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+		var err error
+		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+	}
 	format, state, err := s.validateIndexWriteOnConn(conn, write, conversion)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
@@ -203,25 +214,38 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
-	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, entries, stmts)
+
+	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	outcome, err := writeSessionContentOnConn(ctx, conn, write, entries, stmts)
 	outcome.entriesCount = len(entries)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return outcome, rollbackErr, fatal
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
-		return outcome, rollbackErr, fatal
+	if write.Mode != ingest.SessionEntryWriteContentBackfill {
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
 	}
-	if write.IndexerVersion > 0 {
+	if write.IndexerVersion > 0 && write.Mode != ingest.SessionEntryWriteContentBackfill {
 		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexerVersion, write.IndexedAtMs, outcome.sessionEntriesHash, write.IndexedInputHash); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
-	} else if conversion == nil {
+	} else if conversion == nil && write.Mode != ingest.SessionEntryWriteContentBackfill {
 		// An entry-only replacement keeps historical parser stamps but cannot
 		// certify the input, even when the canonical rows happen to match.
 		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	}
+	if write.Mode != ingest.SessionEntryWriteContentBackfill {
+		if err := stampPublicationIndex(conn, write.SessionID, write.CaptureRevision); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
@@ -249,6 +273,20 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 }
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
+	for _, entry := range entries {
+		if entry.SessionID != sessionID {
+			return sessionEntryWriteOutcome{}, publicationRepairError("entry session identity differs from index request; existing entries were not changed")
+		}
+		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+			return sessionEntryWriteOutcome{}, err
+		}
+		if !ingest.IsPiCarrier(entry) {
+			continue
+		}
+		if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil || !pi || entry.Role != schema.RoleSystem || entry.EntryType != schema.EntryTypeSystem || entry.ContentPreview != nil || entry.ToolInput != nil || entry.ToolOutput != nil || entry.TokensIn != nil || entry.TokensOut != nil {
+			return sessionEntryWriteOutcome{}, fmt.Errorf("store carrier validation failed during index replacement: private Pi rows must have system role/type and no searchable content or token counts (decode: %v); existing entries were not replaced; repair the Pi indexer and re-index", err)
+		}
+	}
 	outcome := sessionEntryWriteOutcome{}
 	sessionEntriesHash, err := computeSessionEntriesHash(entries)
 	if err != nil {

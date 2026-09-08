@@ -1,0 +1,135 @@
+requiredNames:
+  - native-pi-full-content-source-denied
+  - native-pi-incomplete-eof-full-prefix-source-denied
+  - native-pi-retained-prefix-backfill
+  - native-pi-corrupt-chunk-refuses-consumers
+  - native-pi-corrupt-hash-refuses-consumers
+  - native-pi-force-backfill-preserves-annotations-and-commits
+  - native-opencode-omission-refuses-publication
+  - normal-strike-structured-output-siblings
+  - full-user-assistant-unicode-late-secret
+  - incomplete-refuses-all-consumers
+  - corrupt-chunk-refuses-all-consumers
+  - corrupt-projection-refuses-all-consumers
+  - normal-claude-source-denied-publication
+  - normal-cursor-source-denied-publication
+  - normal-codex-source-denied-publication
+  - normal-strike-source-denied-publication
+  - normal-opencode-source-denied-publication
+  - normal-long-tool-semantic-evidence
+cases:
+  - &pi
+    name: native-pi-full-content-source-denied
+    harness: pi
+    roles: [user, assistant]
+    damage: none
+    prefix: "safe prose 世界 "
+    repetitions: 6000
+    tail: SAFE-DURABLE-TAIL
+    secret: sk-ant-api03-SYNCDOORKEY00000000000x
+    pii: synthetic.person@example.test
+    annotation: retained human annotation
+    commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    source: |
+      {"type":"session","version":3,"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/home/test/myapp"}
+      {"type":"message","id":"u","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":TEXT}}
+      {"type":"message","id":"a","parentId":"u","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":TEXT},{"type":"toolCall","id":"call","name":"custom_tool","namespace":"","arguments":{"nested":{"text":TEXT}}}]}}
+      {"type":"message","id":"r","parentId":"a","timestamp":"2026-01-01T00:00:03Z","message":{"role":"toolResult","toolCallId":"call","toolName":"custom_tool","isError":true,"content":[{"type":"text","text":TEXT}],"details":{"safe":"structured metadata"}}}
+  - <<: *pi
+    name: native-pi-incomplete-eof-full-prefix-source-denied
+    incompletetail: true
+  - <<: *pi
+    name: native-pi-retained-prefix-backfill
+    incompletetail: true
+    backfill: true
+  - <<: *pi
+    name: native-pi-corrupt-chunk-refuses-consumers
+    damage: chunk
+  - <<: *pi
+    name: native-pi-corrupt-hash-refuses-consumers
+    damage: hash
+  - <<: *pi
+    name: native-pi-force-backfill-preserves-annotations-and-commits
+    backfill: true
+    mismatch: true
+  - &full
+    name: full-user-assistant-unicode-late-secret
+    roles: [user, assistant]
+    damage: none
+    prefix: "safe prose 世界 "
+    repetitions: 300
+    tail: SAFE-DURABLE-TAIL
+    secret: sk-ant-api03-SYNCDOORKEY00000000000x
+    pii: synthetic.person@example.test
+  - <<: *full
+    name: native-opencode-omission-refuses-publication
+    damage: source-omitted
+    harness: opencode
+    sessionid: ses_3cd91f52effeXd3QAJ54jCtrl1
+    nativesource: current-unknown-conversation-omission
+    source: '{}'
+  - <<: *full
+    name: normal-strike-structured-output-siblings
+    roles: []
+    harness: strike
+    structuredoutput: true
+    source: |
+      {"type":"tool.begin","data":{"callId":"c","name":"read","input":{"content":TEXT}}}
+      {"type":"tool.end","data":{"callId":"c","output":{"text":"visible","details":TEXT}}}
+  - <<: *full
+    name: normal-long-tool-semantic-evidence
+    harness: claude-code
+    toolfile: /home/test/myapp/internal/widget.go
+    backfill: true
+    source: |
+      {"type":"user","message":{"role":"user","content":TEXT}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":TEXT},{"type":"tool_use","id":"call_full","name":"Write","input":{"content":TEXT,"file_path":"/home/test/myapp/internal/widget.go"}}]}}
+      {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_full","content":TEXT}]}}
+  - <<: *full
+    name: normal-claude-source-denied-publication
+    harness: claude-code
+    source: |
+      {"type":"user","message":{"role":"user","content":TEXT}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":TEXT}]}}
+  - <<: *full
+    name: normal-cursor-source-denied-publication
+    harness: cursor
+    source: |
+      {"role":"user","content":[{"type":"text","text":TEXT}]}
+      {"role":"assistant","content":[{"type":"text","text":TEXT}]}
+  - <<: *full
+    name: normal-codex-source-denied-publication
+    harness: codex
+    source: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":TEXT}]}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":TEXT}]}}
+  - <<: *full
+    name: normal-strike-source-denied-publication
+    roles: [assistant]
+    harness: strike
+    source: |
+      {"type":"assistant.text","data":{"text":TEXT}}
+  - <<: *full
+    name: normal-opencode-source-denied-publication
+    roles: [assistant]
+    harness: opencode
+    source: |
+      {"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"SESSION_ID","messages":[{"id":"msg_full","session_id":"SESSION_ID","time_created":1,"time_updated":1,"data":{"id":"msg_full","role":"assistant","time":{"created":1}},"parts":[{"id":"part_full","message_id":"msg_full","session_id":"SESSION_ID","time_created":1,"time_updated":1,"data":{"id":"part_full","type":"text","text":TEXT}}]}]}
+  - name: incomplete-refuses-all-consumers
+    damage: incomplete
+    prefix: "short original "
+    repetitions: 1
+    tail: SAFE-DURABLE-TAIL
+    secret: sk-ant-api03-SYNCDOORKEY00000000000x
+  - name: corrupt-chunk-refuses-all-consumers
+    damage: chunk
+    prefix: "safe prose "
+    repetitions: 300
+    tail: SAFE-DURABLE-TAIL
+    secret: sk-ant-api03-SYNCDOORKEY00000000000x
+  - name: corrupt-projection-refuses-all-consumers
+    damage: projection
+    prefix: "safe prose "
+    repetitions: 300
+    tail: SAFE-DURABLE-TAIL
+    secret: sk-ant-api03-SYNCDOORKEY00000000000x

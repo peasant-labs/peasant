@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -314,7 +315,7 @@ func seedDiscoveryHTTPSessions(t *testing.T, db *store.Store, sessions []discove
 	for i, row := range sessions {
 		ms := int64(1700000000000 + (offset+i)*1000)
 		preview := row.SearchText
-		if err := db.IndexSessionEntries(t.Context(), schema.SessionID(row.ID), []schema.SessionEntry{{SessionID: schema.SessionID(row.ID), EntryIndex: 0, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleUser, TimestampMs: &ms, ContentPreview: &preview}}); err != nil {
+		if err := testutil.WriteFullEntries(t.Context(), db, schema.SessionID(row.ID), []schema.SessionEntry{{SessionID: schema.SessionID(row.ID), EntryIndex: 0, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleUser, TimestampMs: &ms, ContentPreview: &preview}}); err != nil {
 			t.Fatalf("index mounted search row %s: %v", row.ID, err)
 		}
 	}

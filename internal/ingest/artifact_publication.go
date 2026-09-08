@@ -80,11 +80,14 @@ type ArtifactObservation struct {
 // ArtifactPublication combines validated candidate output and the native
 // evidence actually acquired while producing it. Nil evidence stays unknown.
 type ArtifactPublication struct {
-	Artifact    *ManagedArtifact
-	Observation *ArtifactObservation
-	DebugFiles  map[string][]byte
-	EventSeq    *int64
-	Origin      *sessionorigin.Origin
+	CWDProvenance         CWDProvenanceKind
+	SourceFingerprint     []byte
+	CommitCaptureComplete bool
+	Artifact              *ManagedArtifact
+	Observation           *ArtifactObservation
+	DebugFiles            map[string][]byte
+	EventSeq              *int64
+	Origin                *sessionorigin.Origin
 }
 
 func artifactKey(sid SessionID) string { return schema.ComputeTranscriptHash([]byte(sid)) }

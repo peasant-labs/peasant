@@ -21,7 +21,7 @@ commands:
       - { name: dry-run, type: bool, default: "false" }
       - { name: force, type: bool, default: "false" }
       - { name: all, type: bool, default: "false" }
-      - { name: include-active, type: bool, default: "false" }
+      - { name: include-active, type: bool, default: "true" }
       - { name: verbose, type: bool, default: "false" }
       - { name: debug, type: bool, default: "false", hidden: true }
       - { name: json, type: bool, default: "false" }
@@ -43,7 +43,7 @@ commands:
           - { name: source-harness, type: string, default: "" }
           - { name: source-path, type: string, default: "" }
           - { name: output, type: string, default: "" }
-          - { name: include-active, type: bool, default: "false" }
+          - { name: include-active, type: bool, default: "true" }
       - use: index
         flags:
           - { name: dry-run, type: bool, default: "false" }
@@ -101,6 +101,8 @@ commands:
       - { name: annotation-id, type: stringArray, default: "[]" }
       - { name: annotation-hash, type: stringArray, default: "[]" }
       - { name: timing, type: bool, default: "false" }
+      - { name: profile-output, type: string, default: "" }
+      - { name: profile-trace, type: string, default: "" }
       - { name: concurrency, type: int, default: "0" }
       - { name: repository, type: string, default: "" }
       - { name: timeout, type: duration, default: "0s" }

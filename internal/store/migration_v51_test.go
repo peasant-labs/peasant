@@ -1,122 +1,129 @@
 package store
 
 import (
-	"bytes"
+	"context"
 	_ "embed"
-	"io"
 	"path/filepath"
-	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitemigration"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-//go:embed testdata/migrations/v51_artifact_inputs.yaml
-var artifactInputMigrationYAML []byte
+//go:embed testdata/publication-migration.yaml
+var publicationMigrationYAML []byte
 
-func TestMigrationV51DoesNotInventRetainedEvidence(t *testing.T) {
+type publicationMigrationFixture struct {
+	AcceptedKinds []string `yaml:"accepted_kinds"`
+	LegacySeed    string   `yaml:"legacy_seed"`
+	Constraints   []struct {
+		Name string `yaml:"name"`
+		SQL  string `yaml:"sql"`
+	} `yaml:"constraints"`
+}
+
+func TestMigrationV51UpgradesLegacyWithoutInventingMetadata(t *testing.T) {
 	t.Parallel()
-	var fixture struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
-			Name           string `yaml:"name"`
-			SessionID      string `yaml:"sessionID"`
-			ComputeVersion int    `yaml:"computeVersion"`
-			ComputedAt     *int64 `yaml:"computedAt"`
-			InputTokens    int    `yaml:"inputTokens"`
-		} `yaml:"cases"`
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(artifactInputMigrationYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	var fixture publicationMigrationFixture
+	if err := yaml.Unmarshal(publicationMigrationYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("artifact migration fixture requires one YAML document")
-	}
-	required := []string{"computed-history", "uncomputed-history"}
-	if !reflect.DeepEqual(fixture.RequiredNames, required) {
-		t.Fatal("artifact migration required-name manifest changed")
 	}
 	seen := make(map[string]bool)
-	path := filepath.Join(t.TempDir(), "legacy.db")
-	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	frozen := sqlitemigration.Schema{Migrations: dbSchema.Migrations[:50], MigrationOptions: dbSchema.MigrationOptions[:50]}
-	if err := sqlitemigration.Migrate(t.Context(), conn, frozen); err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlitex.ExecuteScript(conn, `INSERT INTO projects (project_hash) VALUES ('artifact-project');
-INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('artifact-host', 'fixture-host');`, nil); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range fixture.Cases {
-		if row.Name == "" || seen[row.Name] {
-			t.Fatalf("invalid migration fixture %q", row.Name)
+	for _, tc := range fixture.Constraints {
+		if seen[tc.Name] {
+			t.Fatalf("duplicate fixture %s", tc.Name)
 		}
-		seen[row.Name] = true
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions
-(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, index_version, indexed_at)
-VALUES (?, 'claude-code', 'fixture-model', 'artifact-host', 'artifact-project', 1, 2, 3, '/fixture/source.jsonl', 'jsonl', 15, 4)`, &sqlitex.ExecOptions{Args: []any{row.SessionID}}); err != nil {
-			t.Fatal(err)
-		}
-		var computedAt any
-		if row.ComputedAt != nil {
-			computedAt = *row.ComputedAt
-		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_metrics (session_id, compute_version, computed_at, input_tokens) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{row.SessionID, row.ComputeVersion, computedAt, row.InputTokens}}); err != nil {
-			t.Fatal(err)
-		}
+		seen[tc.Name] = true
 	}
-	for _, name := range required {
+	for _, name := range strings.Fields("unknown-cwd-kind negative-capture negative-indexed-capture malformed-json uppercase-digest zero-capture zero-schema zero-capture-time missing-session") {
 		if !seen[name] {
-			t.Fatalf("missing migration fixture %q", name)
+			t.Fatalf("missing fixture %s", name)
 		}
 	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db, err := Open(path, WithPoolSize(1))
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	conn, err := sqlite.OpenConn(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	conn, err = db.Pool().Take(t.Context())
+	if err = preparePragmas(conn); err != nil {
+		t.Fatal(err)
+	}
+	frozen := sqlitemigration.Schema{Migrations: dbSchema.Migrations[:50], MigrationOptions: dbSchema.MigrationOptions[:50]}
+	if err = sqlitemigration.Migrate(ctx, conn, frozen); err != nil {
+		t.Fatal(err)
+	}
+	if err = sqlitex.ExecuteScript(conn, fixture.LegacySeed, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET source_fingerprint=x'010203'`, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Pool().Put(conn)
-	for _, row := range fixture.Cases {
-		t.Run(row.Name, func(t *testing.T) {
-			found := false
-			if err := sqlitex.ExecuteTransient(conn, `SELECT s.adapter_version, s.artifact_hash, s.metric_seed_json, s.index_version, m.compute_version, m.computed_at, m.input_tokens
-FROM sessions s JOIN session_metrics m USING(session_id) WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{row.SessionID}, ResultFunc: func(stmt *sqlite.Stmt) error {
-				found = true
-				if stmt.ColumnType(0) != sqlite.TypeNull || stmt.ColumnType(1) != sqlite.TypeNull || stmt.ColumnType(2) != sqlite.TypeNull {
-					t.Error("migration invented retained artifact/adapter/seed evidence")
-				}
-				var computedAt *int64
-				if stmt.ColumnType(5) != sqlite.TypeNull {
-					value := stmt.ColumnInt64(5)
-					computedAt = &value
-				}
-				if stmt.ColumnInt(3) != 15 || stmt.ColumnInt(4) != row.ComputeVersion || !reflect.DeepEqual(computedAt, row.ComputedAt) || stmt.ColumnInt(6) != row.InputTokens {
-					t.Error("migration changed historical producer/metrics state")
-				}
-				return nil
-			}}); err != nil {
-				t.Fatal(err)
-			}
-			if !found {
-				t.Fatal("migration lost session")
+	defer s.Close()
+	id, err := ingest.NewSessionID("11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := s.LoadPublicationInput(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Readiness != ingest.PublicationNeedsIngest || bundle.CaptureRevision != 0 || bundle.Metadata.SessionID != "" {
+		t.Fatalf("legacy capture invented: %+v", bundle)
+	}
+	conn, err = s.pool.Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	if got := upgradeUserVersion(t, conn); got != CurrentSchemaVersion() {
+		t.Fatalf("schema version %d", got)
+	}
+	if err = sqlitex.ExecuteTransient(conn, `SELECT hex(source_fingerprint) FROM sessions`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnText(0) != "010203" {
+			t.Fatal("publication migration changed consumed source evidence")
+		}
+		return nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range fixture.Constraints {
+		t.Run(tc.Name, func(t *testing.T) {
+			if err := sqlitex.ExecuteTransient(conn, tc.SQL, nil); err == nil {
+				t.Fatal("invalid publication metadata accepted")
 			}
 		})
+	}
+	// Accept exactly the public provenance menu; its complete membership must
+	// remain aligned with the migration's CHECK (not merely the menu's size).
+	wantKinds := map[ingest.CWDProvenanceKind]bool{ingest.CWDSourceExact: false, ingest.CWDSourceAbsent: false, ingest.CWDSourceWorkspace: false, ingest.CWDSourceWorktree: false, ingest.CWDNotRecovered: false}
+	for _, kind := range fixture.AcceptedKinds {
+		if _, err := ingest.NewCWDProvenanceKind(kind); err != nil {
+			t.Fatal(err)
+		}
+		parsed, _ := ingest.NewCWDProvenanceKind(kind)
+		if seen, ok := wantKinds[parsed]; !ok || seen {
+			t.Fatalf("unexpected/duplicate provenance %s", kind)
+		}
+		wantKinds[parsed] = true
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET cwd_provenance_kind=?`, &sqlitex.ExecOptions{Args: []any{kind}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for kind, seen := range wantKinds {
+		if !seen {
+			t.Fatalf("missing accepted provenance %s", kind)
+		}
 	}
 }

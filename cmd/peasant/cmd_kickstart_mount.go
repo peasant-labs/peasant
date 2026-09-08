@@ -138,11 +138,12 @@ func runKickstartFlow(
 	}
 
 	programDeps := kickstart.ProgramDeps{
-		Theme:                 th,
-		Draft:                 draft,
-		Source:                source,
-		CommitGate:            settings.NewCommitGateEvaluator(commitGateCandidates),
-		Preview:               kickstartPreviewWithRoot(cmd, db, th, sessions, loaded.Output.BasePath, source),
+		Theme:      th,
+		Draft:      draft,
+		Source:     source,
+		CommitGate: settings.NewCommitGateEvaluator(commitGateCandidates),
+		Preview: kickstartPreview(cmd, db, th, sessions,
+			kickstart.WithListingPreviewContextSource(source), kickstart.WithDiscoveryInventory(inventory)),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
 		Ingest:                ingestRun,
@@ -339,8 +340,7 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // The turns come from api.StoreDataProvider.SessionByID - the SAME read the
 // session_detail channel and the transcript viewer use - rather than a second
 // hand-rolled query. That is what gets the preview the full turn bodies:
-// SessionByID captures matching retained input and indexed coordinates before
-// recovering full content. Unproven or stale input keeps the stored preview.
+// SessionByID reads verified complete content and context from one SQL snapshot.
 //
 // Visibility is deliberately sessionvisibility.All: kickstart is where a
 // selection is being CHOSEN, so scoping the preview by a selection the user has
@@ -352,9 +352,9 @@ func kickstartPreview(
 	db *store.Store,
 	th theme.Theme,
 	sessions []ftue.SessionListing,
-	contexts ...kickstart.ListingPreviewContextSource,
+	options ...kickstart.ListingPreviewOption,
 ) kit.BodySource {
-	return kickstartPreviewWithRoot(cmd, db, th, sessions, "", contexts...)
+	return kickstartPreviewWithRoot(cmd, db, th, sessions, "", options...)
 }
 
 func kickstartPreviewWithRoot(
@@ -363,7 +363,7 @@ func kickstartPreviewWithRoot(
 	th theme.Theme,
 	sessions []ftue.SessionListing,
 	managedRoot string,
-	contexts ...kickstart.ListingPreviewContextSource,
+	options ...kickstart.ListingPreviewOption,
 ) kit.BodySource {
 	ctx := cmd.Context()
 	// storedTurns reports the turns AND whether the store holds the session at
@@ -445,9 +445,7 @@ func kickstartPreviewWithRoot(
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
 	}
-	if len(contexts) > 0 && contexts[0] != nil {
-		opts = append(opts, kickstart.WithListingPreviewContextSource(contexts[0]))
-	}
+	opts = append(opts, options...)
 	return kickstart.NewListingPreview(th, sessions, turns, opts...)
 }
 

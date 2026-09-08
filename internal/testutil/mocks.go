@@ -509,6 +509,19 @@ type StubGitResolver struct {
 }
 
 var _ ingest.GitResolver = (*StubGitResolver)(nil)
+var _ ingest.RecordedBranchRemoteResolver = (*StubGitResolver)(nil)
+
+func (s *StubGitResolver) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
+	return s.RemoteURL(ctx, dir)
+}
+
+func (s *StubGitResolver) RemoteURLForBranch(ctx context.Context, dir, branch string) (string, string, error) {
+	if branch != s.BranchName || s.TrackingBranchName == "" || s.TrackingBranchErr != nil {
+		return "", "", nil
+	}
+	remote, err := s.RemoteURL(ctx, dir)
+	return remote, s.TrackingBranchName, err
+}
 
 // DefaultGitResolver returns a StubGitResolver with sensible test defaults.
 func DefaultGitResolver() *StubGitResolver {
@@ -1170,7 +1183,11 @@ type StubPushStore struct {
 	// Metrics holds pre-mapped QualityMetrics keyed by SessionID.
 	Metrics map[ingest.SessionID]*schema.QualityMetrics
 	// Entries holds session entries keyed by SessionID, returned by ListEntries.
-	Entries map[ingest.SessionID][]schema.SessionEntry
+	Entries                  map[ingest.SessionID][]schema.SessionEntry
+	PublicationInputs        map[ingest.SessionID]ingest.PublicationInputBundle
+	PublicationInputErr      error
+	PublicationInputCalls    int
+	PublicationMetadataCalls int
 	// Associations holds durable current commit associations keyed by session ID.
 	Associations        map[ingest.SessionID][]ingest.CurrentCommitAssociation
 	Publications        map[string]store.PublicationRecord
@@ -1251,6 +1268,9 @@ func (s *StubPushStore) UnpushedSessionsByProvider(_ context.Context, provider s
 func (s *StubPushStore) AllPushableSessions(_ context.Context) ([]ingest.PushSessionRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.AllSessions == nil {
+		return s.Sessions, s.UnpushedErr
+	}
 	return s.AllSessions, s.UnpushedErr
 }
 
@@ -1280,6 +1300,22 @@ func (s *StubPushStore) GetQualityMetrics(_ context.Context, sessionID ingest.Se
 		return nil, nil
 	}
 	return s.Metrics[sessionID], nil
+}
+
+var _ ingest.FullSessionEntryReader = (*StubPushStore)(nil)
+
+// LoadFullSessionEntries models an authoritative snapshot for synthetic fixtures.
+func (s *StubPushStore) LoadFullSessionEntries(ctx context.Context, sessionID ingest.SessionID, _ int64) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
+	entries, err := s.ListEntries(ctx, sessionID)
+	return entries, ingest.SessionContentCapture{SessionID: sessionID, Status: ingest.ContentCaptureComplete, EntryCount: len(entries), FullCaptureSHA256: "synthetic-capture"}, err
+}
+
+// ReadSessionEntries models an authoritative read for synthetic push fixtures.
+func (s *StubPushStore) ReadSessionEntries(ctx context.Context, sessionID ingest.SessionID, opts ingest.SessionEntryReadOptions) (ingest.SessionEntryReadPage, error) {
+	entries, err := s.ListEntries(ctx, sessionID)
+	return ingest.SessionEntryReadPage{Entries: entries, Capture: ingest.SessionContentCapture{
+		SessionID: sessionID, Status: ingest.ContentCaptureComplete, EntryCount: len(entries), FullCaptureSHA256: "synthetic-capture",
+	}}, err
 }
 
 func (s *StubPushStore) ListEntries(_ context.Context, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {

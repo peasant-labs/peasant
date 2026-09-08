@@ -480,6 +480,7 @@ func (ca *ClassifierAnnotator) annotate(ctx context.Context, sessionID ingest.Se
 }
 
 func (ca *ClassifierAnnotator) runClassifiers(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry, metrics *ingest.SessionMetrics, withProfile bool) ([]*ClassifierResult, map[*ClassifierResult]time.Duration) {
+	entries = ingest.ConversationalEntries(entries)
 	if !withProfile {
 		return ca.engine.Run(ctx, sessionID, entries, metrics), nil
 	}

@@ -30,7 +30,7 @@ func (s *changedCandidateOriginStore) AllPushableSessions(ctx context.Context) (
 
 var _ push.PipelineStore = (*changedCandidateOriginStore)(nil)
 
-func TestPushRequiresCoherentRetainedInput(t *testing.T) {
+func TestPushRequiresCoherentDatabaseInput(t *testing.T) {
 	db := storetest.Open(t)
 	fs := testutil.NewMemFS()
 	sid := ingest.SessionID(testutil.TestSessionUUID)
@@ -50,6 +50,12 @@ func TestPushRequiresCoherentRetainedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	storetest.SeedManagedInput(t, db, fs, "/sync", meta, data)
+	fullIndexer := ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullContent(true))
+	fullEntries, err := fullIndexer.IndexTranscriptBytes(t.Context(), ingest.DiscoveredSession{SessionID: sid, Harness: meta.ModelHarness}, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.SeedReadyPublication(t, db, &meta, fullEntries)
 	if err := db.UpdateOriginState(t.Context(), sid, sessionorigin.User.String(), 1); err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +88,8 @@ func TestPushRequiresCoherentRetainedInput(t *testing.T) {
 	if err != nil || before == nil {
 		t.Fatalf("coherent publication receipt missing: %v", err)
 	}
-	// A file-only publication advances retained content without advancing its
-	// SQL mirror/index. Both real preflight and dry-run must refuse that pair.
+	// A file-only publication does not replace the authoritative database
+	// capture. It must not prevent a forecast of the stored content.
 	publisher, err := ingest.NewArtifactPublisher(fs, "/sync", ingest.ArtifactPublisherOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -105,12 +111,19 @@ func TestPushRequiresCoherentRetainedInput(t *testing.T) {
 	if _, err := publisher.Publish(t.Context(), ingest.ArtifactPublication{Artifact: replacement, Observation: observation}); err != nil {
 		t.Fatal(err)
 	}
+	if result := run(true); result.Errors != 0 || result.Updated == 0 {
+		t.Fatalf("sidecar-only change blocked authoritative database forecast: %+v", result)
+	}
+	// An uncertified database replacement, however, invalidates completeness.
+	if err := db.IndexSessionEntries(t.Context(), sid, fullEntries); err != nil {
+		t.Fatal(err)
+	}
 	negotiations, uploads := transport.SchemaVersionCalls, len(transport.Calls)
 	if result := run(false); result.Errors != 1 || result.New != 0 || result.Updated != 0 {
-		t.Fatalf("unmirrored input passed real preflight: %+v", result)
+		t.Fatalf("uncertified database input passed real preflight: %+v", result)
 	}
 	if result := run(true); result.Errors != 1 || result.New != 0 || result.Updated != 0 {
-		t.Fatalf("unmirrored input received a successful forecast: %+v", result)
+		t.Fatalf("uncertified database input received a successful forecast: %+v", result)
 	}
 	after, err := db.Publication(t.Context(), baseCreds().VillageURL, baseCreds().UserID, schema.ProjectHash(meta.Project.Hash), string(sid))
 	if err != nil || !reflect.DeepEqual(before, after) || transport.SchemaVersionCalls != negotiations || len(transport.Calls) != uploads {

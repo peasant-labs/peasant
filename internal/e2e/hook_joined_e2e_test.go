@@ -4,11 +4,8 @@ package e2e
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -493,45 +490,27 @@ func resolveDeveloperGlobalGitConfig(t *testing.T) string {
 	return filepath.Join(home, ".gitconfig")
 }
 
-type pathFingerprint struct {
-	paths  []string
-	digest string
-}
-
-// fingerprintPaths hashes every root, skipping anything inside excludedSubtree.
-func fingerprintPaths(t *testing.T, paths []string, excludedSubtree string) pathFingerprint {
-	t.Helper()
-	h := sha256.New()
-	for _, root := range paths {
-		_, _ = h.Write([]byte(root))
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			if err != nil {
-				_, _ = h.Write([]byte(err.Error()))
-				return nil
-			}
-			if path == excludedSubtree || strings.HasPrefix(path, excludedSubtree+string(os.PathSeparator)) {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			info, infoErr := d.Info()
-			if infoErr != nil {
-				return nil
-			}
-			_, _ = h.Write([]byte(path + info.Mode().String() + fmt.Sprint(info.Size(), info.ModTime().UnixNano())))
-			if !d.IsDir() {
-				if b, readErr := os.ReadFile(path); readErr == nil {
-					_, _ = h.Write(b)
-				}
-			}
-			return nil
-		})
+func TestDeveloperStateFingerprintDetectsContentChange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "database")
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	return pathFingerprint{paths: paths, digest: hex.EncodeToString(h.Sum(nil))}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprintPaths(t, []string{root}, filepath.Join(root, "excluded"))
+	if err := os.WriteFile(path, []byte("after!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after := fingerprintPaths(t, []string{root}, filepath.Join(root, "excluded"))
+	if before.digest == after.digest {
+		t.Fatal("streamed isolation fingerprint missed a same-size, same-mtime content change")
+	}
 }
 
 func TestDeveloperStateLocations_RejectEveryEmptyRoot(t *testing.T) {

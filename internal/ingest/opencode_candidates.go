@@ -352,8 +352,9 @@ const (
 // candidate. Candidate failures do not prevent later candidates from probing.
 type OpenCodeProbeResult struct {
 	V2Layout OpenCodeSessionV2Layout
-	// SessionTable is the authority actually read during discovery, including a
+	// SessionTable is the preferred metadata table read during discovery, including a
 	// read that failed after selection. Zero means none was selected.
+	// Legacy-only IDs can also obtain metadata from session when V2 is preferred.
 	SessionTable OpenCodeSessionTable
 	Candidate    OpenCodeCandidate
 	Capability   OpenCodeSchemaCapability

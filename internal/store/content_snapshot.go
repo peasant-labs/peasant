@@ -9,8 +9,8 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// SessionContentSnapshot is one committed SQL view, not proof that retained
-// files still match it. Resources are released before returning owned rows.
+// SessionContentSnapshot is one committed SQL view of verified full content
+// and its context. Resources are released before returning owned rows.
 type SessionContentSnapshot struct {
 	Detail       *SessionDetailRow
 	IndexState   *ingest.SessionIndexState
@@ -20,7 +20,7 @@ type SessionContentSnapshot struct {
 }
 
 // ReadSessionContent reads the session and all content context on one connection.
-// Managed-file callers acquire file ownership before entering this method.
+// Full content is database-authoritative; no managed files are consulted.
 func (s *Store) ReadSessionContent(ctx context.Context, sessionID string) (_ *SessionContentSnapshot, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -39,7 +39,10 @@ func (s *Store) ReadSessionContent(ctx context.Context, sessionID string) (_ *Se
 	if err != nil {
 		return nil, err
 	}
-	snapshot.Entries, err = s.listEntriesOnConn(conn, sid)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sid}); err != nil {
+		return nil, err
+	}
+	snapshot.Entries, _, err = loadFullSessionEntriesOnConn(ctx, conn, sid, 0)
 	if err != nil {
 		return nil, err
 	}

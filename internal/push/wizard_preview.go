@@ -20,8 +20,8 @@ import (
 // lets the preview show the transcript the push will send rather than a second
 // approximation of it.
 //
-// It returns no entries (not an error) for a session the store holds no
-// transcript for, and an error only when the read itself failed.
+// It returns no entries for a verified empty capture. Missing, incomplete, or
+// corrupt captures return errors; a bounded preview is not publication input.
 type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
 
 // PublishedTurnsFunc returns one session's turns AS THEY WILL BE PUBLISHED:
@@ -63,7 +63,7 @@ func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) 
 		if err != nil {
 			return nil, err
 		}
-		return transcript.EntriesToTurns(redacted), nil
+		return transcript.EntriesToTurnsValidated(redacted)
 	}
 }
 
@@ -117,6 +117,10 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 			continue
 		}
 		body := previewBody{th: p.th, header: sessionHeaderLines(s)}
+		if s.NeedsIngest {
+			body.note = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
+			return body, nil
+		}
 		if p.turns == nil {
 			body.note = previewNoTranscript
 			return body, nil
@@ -143,7 +147,7 @@ func (p wizardPreview) projectLines(project string) []string {
 			continue
 		}
 		total++
-		if !s.Locked && s.Action == PushWithRedaction {
+		if !s.Locked && !s.NeedsIngest && s.Action == PushWithRedaction {
 			selected++
 		}
 	}
@@ -174,6 +178,8 @@ func sessionHeaderLines(s PushWizardSession) []string {
 // session.
 func sessionStateNote(s PushWizardSession) string {
 	switch {
+	case s.NeedsIngest:
+		return previewUnselectedNote
 	case s.Locked:
 		return previewWithheldNote
 	case s.Action == PushWithRedaction:

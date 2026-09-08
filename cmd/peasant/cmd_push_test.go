@@ -162,8 +162,8 @@ func seedCrossBranchSessions(t *testing.T, dir string) (selectedID, otherID, rem
 		makeCmdStoreEntry(t, selectedID, "github.com-user-repo", remote, "main", 1700000000000, projectPath),
 		makeCmdStoreEntry(t, otherID, "github.com-user-repo", remote, "feature", 1700000060000, projectPath),
 	}
-	if err := s.InsertSessions(context.Background(), entries); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
+	for _, entry := range entries {
+		testutil.SeedReadyPublication(t, s, entry.Metadata, nil)
 	}
 	return selectedID, otherID, remote
 }
@@ -242,8 +242,8 @@ func seedMultiProjectConflict(t *testing.T, dir string) (selectedID, excludedID,
 		makeCmdStoreEntry(t, excludedID, "github.com-user-repo-one", remoteSelected, "feature", 1700000060000, selectedPath),
 		makeCmdStoreEntry(t, conflictID, "github.com-user-repo-two", remoteConflict, "main", 1700000120000, conflictPath),
 	}
-	if err := s.InsertSessions(context.Background(), entries); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
+	for _, entry := range entries {
+		testutil.SeedReadyPublication(t, s, entry.Metadata, nil)
 	}
 	return selectedID, excludedID, conflictID, remoteSelected, remoteConflict
 }
@@ -349,7 +349,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceHarnes
 		}
 	}
 
-	wiz, err := buildPushWizardSessions(context.Background(), db, &ingest.OSFileSystem{}, cfg.Output.BasePath, q, sel)
+	wiz, err := buildPushWizardSessions(context.Background(), db, q, sel)
 	if err != nil {
 		t.Fatalf("buildPushWizardSessions: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestBuildPushWizardSessions_SelectionAware(t *testing.T) {
 	}
 
 	q := push.PushCandidateQuery{Method: cfg.Push.Method, Sources: cfg.Push.Sources}
-	wiz, err := buildPushWizardSessions(context.Background(), db, &ingest.OSFileSystem{}, cfg.Output.BasePath, q, selection)
+	wiz, err := buildPushWizardSessions(context.Background(), db, q, selection)
 	if err != nil {
 		t.Fatalf("buildPushWizardSessions: %v", err)
 	}
@@ -662,10 +662,8 @@ selection:
 	}
 }
 
-// TestPushCmd_AllAlreadyPushed_SelectionActive_NoSelectionNote verifies the third
-// empty-state case: when every candidate is already pushed (base unpushed set is
-// empty), an active selection must NOT trigger the selection-specific note — the
-// generic "all already pushed" path applies. Exit 0.
+// Legacy timestamps without receipts must not exclude selected candidates from
+// the dry-run forecast or falsely report that no sessions match the selection.
 func TestPushCmd_AllAlreadyPushed_SelectionActive_NoSelectionNote(t *testing.T) {
 	// PARALLEL: credential gate reads via --config-dir; store opens from `dir`.
 	t.Parallel()
@@ -674,8 +672,7 @@ func TestPushCmd_AllAlreadyPushed_SelectionActive_NoSelectionNote(t *testing.T) 
 
 	selectedID, otherID, remote := seedCrossBranchSessions(t, dir)
 
-	// Seed legacy cursors so the unpushed base query returns empty. Production
-	// cursor updates are available only through receipt-validated SavePublication.
+	// Seed legacy cursors without authoritative receipts.
 	var sids []ingest.SessionID
 	for _, raw := range []string{selectedID, otherID} {
 		sid, sErr := ingest.NewSessionID(raw)
@@ -700,15 +697,15 @@ selection:
             - main
 `, remote))
 
-	out, errs, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--config=" + cfgPath})
+	out, errs, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--verbose", "--config=" + cfgPath})
 	if err != nil {
 		t.Fatalf("expected exit 0, got error: %v\nstdout: %s\nstderr: %s", err, out, errs)
 	}
 	if strings.Contains(errs, "no sessions match the configured selection") {
 		t.Errorf("selection note must NOT fire when all sessions are already pushed; stderr: %s", errs)
 	}
-	if !strings.Contains(out, "All sessions already pushed") {
-		t.Errorf("generic 'all already pushed' message should appear on STDOUT; stdout: %s", out)
+	if strings.Contains(out, "All sessions already pushed") || !strings.Contains(out, selectedID) || strings.Contains(out, otherID) {
+		t.Errorf("forecast must reconsider only the selected legacy session; stdout: %s", out)
 	}
 }
 
@@ -831,9 +828,8 @@ func TestPushCmd_QuietVerboseMutualExclusion(t *testing.T) {
 // renders in the default/verbose non-JSON branch, is suppressed under --quiet,
 // and never pollutes --json stdout. It exercises ≥2 typed categories (no-model +
 // metadata-missing) so the deterministic ordering renders through the REAL CLI:
-// one session has on-disk metadata with an empty model (→ no-model), the other
-// has no metadata file at all (→ metadata-missing). Driven via --dry-run (no
-// network), which now reads metadata for parity with the real push path.
+// one session has captured metadata with an empty model (→ no-model), the other
+// has unproven indexed entries (→ metadata-missing). Both use database-only dry-run.
 func TestPushCmd_ErrorSummaryTable(t *testing.T) {
 	// PARALLEL: credential gate reads via --config-dir; store opens from `dir`;
 	// output.basePath is an explicit config path (syncBase).
@@ -845,8 +841,7 @@ func TestPushCmd_ErrorSummaryTable(t *testing.T) {
 	// Two unpushed sessions in the DB (same host slug).
 	emptyModelID, missingMetaID, _ := seedCrossBranchSessions(t, dir)
 
-	// Point output.basePath at an isolated tempdir and write on-disk metadata
-	// with an EMPTY model for ONE session; the other has no metadata file.
+	// The output directory has no sidecars; the database supplies both failures.
 	cfgPath := writeCfg(t, dir, "errtable.yaml", fmt.Sprintf(`version: 1
 push:
   method: all
@@ -854,8 +849,22 @@ push:
 output:
   basePath: %s
 `, syncBase))
-	writeEmptyModelMetadata(t, syncBase, "github.com-user-repo", emptyModelID)
-	_ = missingMetaID // its metadata is intentionally absent → metadata-missing
+	db, openErr := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	input, readErr := db.LoadPublicationInput(t.Context(), ingest.SessionID(emptyModelID))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	input.Metadata.Model = ""
+	testutil.SeedReadyPublication(t, db, &input.Metadata, input.Entries)
+	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(missingMetaID), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	cfgArg := "--config=" + cfgPath
 
@@ -902,34 +911,6 @@ output:
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(jsonOut[jsonStart:]), &parsed); err != nil {
 		t.Errorf("--json stdout should be valid JSON: %v\njson: %s", err, jsonOut[jsonStart:])
-	}
-}
-
-// writeEmptyModelMetadata writes a {sessionID}--metadata.json with an empty model
-// field to the root-session path under base, so the push/dry-run path classifies
-// the session as the no-model error category.
-func writeEmptyModelMetadata(t *testing.T, base, hostSlug, sessionID string) {
-	t.Helper()
-	meta := ingest.NewUnifiedMetadata()
-	meta.SessionID = ingest.SessionID(sessionID)
-	meta.ModelHarness = defaults.HarnessClaudeCode
-	meta.Model = "" // the defect under test → no-model category
-	meta.HostSlug = ingest.HostSlug(hostSlug)
-	ingested := int64(1700000120000)
-	meta.Timestamp = ingest.TimestampInfo{Start: 1700000000000, End: 1700000060000, Ingested: &ingested}
-	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp"}
-	meta.Source = ingest.SourceInfo{Format: ingest.SourceFormatJSONL, FilePath: "/source/file.jsonl"}
-
-	metaJSON, err := json.Marshal(meta)
-	if err != nil {
-		t.Fatalf("marshal empty-model metadata: %v", err)
-	}
-	path := ingest.SessionMetadataPath(base, hostSlug, sessionID, "")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir for metadata: %v", err)
-	}
-	if err := os.WriteFile(path, metaJSON, 0o644); err != nil {
-		t.Fatalf("write empty-model metadata: %v", err)
 	}
 }
 

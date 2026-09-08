@@ -26,18 +26,21 @@ type artifactIntentFile struct {
 }
 
 type artifactIntent struct {
-	Version           int                   `json:"version"`
-	Phase             artifactIntentPhase   `json:"phase"`
-	SessionID         SessionID             `json:"sessionId"`
-	Harness           Harness               `json:"harness"`
-	Directory         string                `json:"directory"`
-	PreviousDirectory string                `json:"previousDirectory,omitempty"`
-	ArtifactHash      string                `json:"artifactHash"`
-	MetadataIdentity  string                `json:"metadataIdentity"`
-	NeedsDatabase     bool                  `json:"needsDatabase"`
-	EventSeq          *int64                `json:"eventSeq,omitempty"`
-	Origin            *sessionorigin.Origin `json:"origin,omitempty"`
-	Files             []artifactIntentFile  `json:"files"`
+	CWDProvenance         CWDProvenanceKind     `json:"cwdProvenance,omitempty"`
+	SourceFingerprint     []byte                `json:"sourceFingerprint,omitempty"`
+	CommitCaptureComplete bool                  `json:"commitCaptureComplete,omitempty"`
+	Version               int                   `json:"version"`
+	Phase                 artifactIntentPhase   `json:"phase"`
+	SessionID             SessionID             `json:"sessionId"`
+	Harness               Harness               `json:"harness"`
+	Directory             string                `json:"directory"`
+	PreviousDirectory     string                `json:"previousDirectory,omitempty"`
+	ArtifactHash          string                `json:"artifactHash"`
+	MetadataIdentity      string                `json:"metadataIdentity"`
+	NeedsDatabase         bool                  `json:"needsDatabase"`
+	EventSeq              *int64                `json:"eventSeq,omitempty"`
+	Origin                *sessionorigin.Origin `json:"origin,omitempty"`
+	Files                 []artifactIntentFile  `json:"files"`
 }
 
 type artifactIntentPhase string
@@ -294,6 +297,9 @@ func (p *ArtifactPublisher) buildArtifactIntent(root ArtifactRoot, request Artif
 	intent := &artifactIntent{Version: artifactTransactionVersion, Phase: artifactPrepared, SessionID: meta.SessionID, Harness: meta.ModelHarness, Directory: directory, PreviousDirectory: request.Observation.directory, ArtifactHash: candidate.ArtifactHash, MetadataIdentity: identity, NeedsDatabase: p.mirror != nil}
 	if p.mirror != nil {
 		intent.EventSeq, intent.Origin = request.EventSeq, request.Origin
+		intent.CWDProvenance = request.CWDProvenance
+		intent.SourceFingerprint = request.SourceFingerprint
+		intent.CommitCaptureComplete = request.CommitCaptureComplete
 	}
 	paths := make([]string, 0, len(files))
 	for path := range files {

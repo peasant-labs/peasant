@@ -183,6 +183,10 @@ func ingestOneSessionAtMaximum(t *testing.T, slug string, redactor ingest.TextRe
 		t.Fatalf("open the analytics store: %v", err)
 	}
 	defer database.Close()
+	meta.Project.Hash, _, err = ingest.DeriveProjectIdentifiers(database.InstallationSalt(), "", "/synthetic/ledger")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(

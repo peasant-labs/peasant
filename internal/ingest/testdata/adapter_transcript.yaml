@@ -32,7 +32,7 @@ cases:
   - name: codex-retained-context
     harness: codex
     transcript: |
-      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"retained-session","timestamp":"2026-01-01T00:00:00Z","cli_version":"native-version","cwd":"/retained/project"}}
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","cli_version":"native-version","cwd":"/retained/project"}}
       {"type":"turn_context","payload":{"model":"gpt-5"}}
       {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"user"}}
       {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":3,"output_tokens":2}}}}

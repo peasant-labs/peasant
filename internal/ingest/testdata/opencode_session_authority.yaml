@@ -1,9 +1,14 @@
 required_cases:
+  - mixed-clockless-legacy-cannot-prove-absence
+  - mixed-malformed-legacy-keeps-presence
+  - mixed-live-records-with-orphans
+  - mixed-legacy-read-failure-keeps-candidates
+  - mixed-malformed-v2-does-not-use-legacy-metadata
   - v2-catalog-boundary-supported
   - v2-catalog-overflow-fails-closed
   - v2-only-session-records
   - hybrid-v2-metadata-wins
-  - empty-v2-is-authoritative
+  - empty-v2-keeps-live-legacy
   - v2-optional-columns-missing
   - unusable-v2-falls-back-to-legacy
   - v2-missing-id-falls-back
@@ -13,6 +18,69 @@ required_cases:
   - v2-read-failure-never-falls-back
   - v2-read-failure-keeps-discovery
 cases:
+  - name: mixed-clockless-legacy-cannot-prove-absence
+    fixture: native-current-rows
+    setup: |
+      DROP TABLE session;
+      CREATE TABLE session (id TEXT PRIMARY KEY);
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+    table: session_v2
+    v2_layout: supported
+    record_ids: []
+    present_ids: []
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+  - name: mixed-malformed-legacy-keeps-presence
+    fixture: native-current-rows
+    setup: |
+      UPDATE session SET time_updated='malformed';
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+    table: session_v2
+    v2_layout: supported
+    diagnostic_contains: session metadata row(s) were dropped
+    record_ids: []
+    present_ids: []
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+  - name: mixed-live-records-with-orphans
+    fixture: hybrid-deleted-sessions-skipped
+    setup: |
+      UPDATE session_message SET type='user', data='{"text":"current side of both","time":{"created":2100}}' WHERE id='sm_del_both';
+      ALTER TABLE session ADD COLUMN directory TEXT;
+      ALTER TABLE session ADD COLUMN title TEXT;
+      UPDATE session SET directory='/fixtures/legacy', title='legacy child', time_created=1000, time_updated=8000, parent_id='ses_3cd91f52effeXd3QAJ54jOyzG2' WHERE id='ses_3cd91f52effeXd3QAJ54jOyzG1';
+      UPDATE session SET directory='/fixtures/stale', title='stale shared', time_created=2000, time_updated=99000 WHERE id='ses_3cd91f52effeXd3QAJ54jOyzG2';
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, time_updated INTEGER, directory TEXT, title TEXT, time_created INTEGER);
+      INSERT INTO session_v2 VALUES ('ses_3cd91f52effeXd3QAJ54jOyzG2', NULL, 9000, '/fixtures/current', 'current parent', 3000);
+    table: session_v2
+    v2_layout: supported
+    diagnostic_contains: no live record
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzG2]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzG2]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzG1, ses_3cd91f52effeXd3QAJ54jOyzG2]
+    sessions:
+      ses_3cd91f52effeXd3QAJ54jOyzG1: {title: legacy child, cwd: /fixtures/legacy, parent: ses_3cd91f52effeXd3QAJ54jOyzG2, created: 1000, updated: 8000, origin: legacy, transcript: DEL_LEGACY_ONLY}
+      ses_3cd91f52effeXd3QAJ54jOyzG2: {title: current parent, cwd: /fixtures/current, parent: '', created: 3000, updated: 9000, origin: current, transcript: current side of both}
+  - name: mixed-legacy-read-failure-keeps-candidates
+    fixture: hybrid-deleted-sessions-skipped
+    setup: CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+    table: session_v2
+    v2_layout: supported
+    fail_legacy: true
+    diagnostic_contains: could not be read
+    record_ids: []
+    present_ids: []
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzG1, ses_3cd91f52effeXd3QAJ54jOyzG2, ses_3cd91f52effeXd3QAJ54jOyzG3, ses_3cd91f52effeXd3QAJ54jOyzG4]
+  - name: mixed-malformed-v2-does-not-use-legacy-metadata
+    fixture: native-current-rows
+    setup: |
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY, time_updated INTEGER);
+      INSERT INTO session_v2 SELECT id, 'malformed' FROM session;
+    table: session_v2
+    v2_layout: supported
+    diagnostic_contains: metadata row(s) were dropped
+    record_ids: []
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    skipped: true
   - name: v2-catalog-boundary-supported
     fixture: native-v2-only
     setup: |
@@ -105,15 +173,15 @@ cases:
     present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
     discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
     title: native session title
-  - name: empty-v2-is-authoritative
+  - name: empty-v2-keeps-live-legacy
     v2_layout: supported
-    diagnostic_contains: authoritative session_v2
     fixture: native-current-rows
     setup: CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
     table: session_v2
     record_ids: []
     present_ids: []
-    discovered_ids: []
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
   - name: v2-optional-columns-missing
     v2_layout: supported
     diagnostic_contains: session_v2 carries neither
@@ -147,7 +215,7 @@ cases:
     title: native session title
   - name: v2-malformed-record-keeps-presence
     v2_layout: supported
-    diagnostic_contains: session_v2 metadata row(s) were dropped
+    diagnostic_contains: session metadata row(s) were dropped
     fixture: native-v2-only
     setup: UPDATE session_v2 SET time_updated = 'malformed';
     table: session_v2

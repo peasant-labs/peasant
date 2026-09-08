@@ -21,10 +21,11 @@ const (
 )
 
 type openCodeCurrentProjection struct {
-	Format    string                            `json:"format"`
-	Version   int                               `json:"version"`
-	SessionID string                            `json:"session_id"`
-	Messages  []openCodeLegacyProjectionMessage `json:"messages"`
+	ContentOmitted bool                              `json:"content_omitted,omitempty"`
+	Format         string                            `json:"format"`
+	Version        int                               `json:"version"`
+	SessionID      string                            `json:"session_id"`
+	Messages       []openCodeLegacyProjectionMessage `json:"messages"`
 }
 
 // The historical shapes follow upstream 4643e65ad6334de3e4e68dedc201d5fbb828c9fe.
@@ -309,35 +310,6 @@ func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source
 	return controlOnly
 }
 
-func (a *OpenCodeAdapter) materializeCurrentTranscriptInput(ctx context.Context, session DiscoveredSession, captureCursor bool) (MaterializedTranscript, error) {
-	var result MaterializedTranscript
-	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
-	if err != nil {
-		return result, err
-	}
-	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
-	if err != nil {
-		return result, err
-	}
-	var projection openCodeCurrentProjection
-	var unknownControlTypes map[string]int
-	if err := a.withOpenCodeMaterializationSource(ctx, session.SourcePath.String(), captureCursor, func(source OpenCodeSQLiteSource) error {
-		var readErr error
-		projection, unknownControlTypes, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
-		if readErr == nil && captureCursor {
-			result.EventSeq, result.Diagnostics, readErr = acquireOpenCodeMaterializationCursor(ctx, source, session)
-		}
-		return readErr
-	}); err != nil {
-		return MaterializedTranscript{}, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
-	}
-	result.Metadata, result.Transcript, err = a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
-	if err != nil {
-		return MaterializedTranscript{}, err
-	}
-	return result, nil
-}
-
 // finishCurrentManagedProjection encodes a read current projection into the
 // managed JSON bytes and derives its metadata. The full-session and preview
 // prefix reads share it.
@@ -488,6 +460,9 @@ rowLoop:
 			}
 			message, err := normalizeOpenCodeCurrentRow(row, &registry)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
+				// Compatibility may omit future vocabulary, but the retained
+				// projection must never certify those missing rows as complete.
+				projection.ContentOmitted = true
 				// A newer id-less control record: keep the session, drop the row,
 				// and count its type for one diagnostic per type.
 				unknownControlTypes[row.Type.String()]++

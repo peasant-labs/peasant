@@ -9,10 +9,18 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// BuildContentOverlay is the legacy source-only text helper. It has no stored
-// coordinate or input proof. Managed viewer/export consumers use ReadSessionContent
-// instead; this helper must not establish a coherent full-content snapshot.
+// BuildContentOverlay is a legacy source-only compatibility helper. It cannot
+// establish capture completeness or stable stored entry coordinates. Full
+// detail, export and publication use verified database content instead.
 func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) (map[int]string, error) {
+	entries, err := fullContentEntries(ctx, fs, harness, sourcePath, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return contentOverlayFromEntries(entries), nil
+}
+
+func fullContentEntries(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) ([]schema.SessionEntry, error) {
 	indexer, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[ingest.Harness(harness)]
 	if !ok {
 		return nil, nil
@@ -47,7 +55,7 @@ func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defa
 		)
 	}
 
-	return contentOverlayFromEntries(sourceEntries), nil
+	return sourceEntries, nil
 }
 
 // contentOverlayFromEntries maps entry_index to the full content preview of
@@ -83,16 +91,15 @@ func contentOverlayFromEntries(sourceEntries []schema.SessionEntry) map[int]stri
 	return overlay
 }
 
-// AnyContentTruncated conservatively detects bounded text or tool output.
-// At the limit, an exact-size value and a cut value are indistinguishable;
-// full readers cannot claim complete Cursor content in either case.
+// AnyContentTruncated conservatively detects potentially bounded legacy text.
+// At the limit, an exact-size value and a cut value are indistinguishable.
+// Database full readers use capture integrity, not this heuristic.
 func AnyContentTruncated(entries []schema.SessionEntry) bool {
 	for i := range entries {
-		if p := entries[i].ContentPreview; p != nil && len(*p) >= defaults.ContentPreviewLimit {
-			return true
-		}
-		if p := entries[i].ToolOutput; p != nil && len(*p) >= defaults.ContentPreviewLimit {
-			return true
+		for _, p := range []*string{entries[i].ContentPreview, entries[i].ToolInput, entries[i].ToolOutput} {
+			if p != nil && len(*p) >= defaults.ContentPreviewLimit {
+				return true
+			}
 		}
 	}
 	return false

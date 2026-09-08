@@ -429,20 +429,20 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 				t.Fatalf("discover for independent materialization: sessions=%d error=%v", len(discovered), err)
 			}
 			materializer := forcedAdapter.(ingest.TranscriptMaterializer)
-			firstMetadata, firstManaged, err := materializer.MaterializeTranscript(t.Context(), discovered[0])
+			first, err := materializer.MaterializeTranscript(t.Context(), discovered[0])
 			if err != nil {
 				t.Fatal(err)
 			}
-			secondMetadata, secondManaged, err := materializer.MaterializeTranscript(t.Context(), discovered[0])
+			second, err := materializer.MaterializeTranscript(t.Context(), discovered[0])
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(firstManaged, secondManaged) || !reflect.DeepEqual(firstMetadata, secondMetadata) {
-				t.Fatalf("independent materializations diverged\nfirst=%s\nsecond=%s", firstManaged, secondManaged)
+			if !bytes.Equal(first.Data, second.Data) || !reflect.DeepEqual(first.Metadata, second.Metadata) {
+				t.Fatalf("independent materializations diverged\nfirst=%s\nsecond=%s", first.Data, second.Data)
 			}
 			sessionID := mustMountedSessionID(t, testCase.SessionID)
-			firstProjection := snapshotIndependentlyMaterializedCurrentProjection(t, firstMetadata, sessionID, firstManaged)
-			secondProjection := snapshotIndependentlyMaterializedCurrentProjection(t, secondMetadata, sessionID, secondManaged)
+			firstProjection := snapshotIndependentlyMaterializedCurrentProjection(t, first.Metadata, sessionID, first.Data)
+			secondProjection := snapshotIndependentlyMaterializedCurrentProjection(t, second.Metadata, sessionID, second.Data)
 			assertMountedCurrentSnapshotEqual(t, "independent materialization", firstProjection, secondProjection)
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}
 			store := &testutil.StubSessionStore{}

@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -26,12 +28,47 @@ type SourceAdapter interface {
 // legacy OpenCode SQLite, where copying database bytes would not produce a
 // transcript.
 type TranscriptMaterializer interface {
-	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
+	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (MaterializedTranscript, error)
 }
 
-// MaterializedTranscript carries optional native progress actually acquired
-// with the materialized input. Diagnostics are runtime warnings, not metadata.
+// MaterializedTranscript is one captured source view used for metadata,
+// transcript persistence, and durable freshness evidence.
 type MaterializedTranscript struct {
+	capturedSource    *captureFileSystem
+	Metadata          *UnifiedMetadata
+	Data              []byte
+	SourceFingerprint []byte
+	EventSeq          int64
+	Session           *DiscoveredSession
+}
+
+func newMaterializedTranscript(metadata *UnifiedMetadata, data []byte, eventSeq int64) MaterializedTranscript {
+	fingerprint := sha256.Sum256(data)
+	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: fingerprint[:], EventSeq: eventSeq}
+}
+
+func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, session DiscoveredSession) (MaterializedTranscript, error) {
+	// Only source-owned attributes participate, never discovery file/WAL clocks
+	// or decision-time Git configuration. The latter has its own identity trigger.
+	attrs := DiscoveredSession{ParentUUID: session.ParentUUID, CWD: session.CWD,
+		Title: session.Title, Agent: session.Agent, Version: session.Version,
+		Slug: session.Slug, Cost: session.Cost, TokensIn: session.TokensIn,
+		TokensOut: session.TokensOut, CreatedAt: session.CreatedAt, ModTime: session.ModTime,
+		ProjectWorktree: session.ProjectWorktree, ProjectName: session.ProjectName, EventSeq: session.EventSeq}
+	encoded, err := json.Marshal(attrs)
+	if err != nil {
+		return MaterializedTranscript{}, fmt.Errorf("fingerprint captured OpenCode attributes: %w; no state written; repair source attributes and retry", err)
+	}
+	hash := sha256.New()
+	hash.Write(encoded)
+	hash.Write([]byte{'\n'})
+	hash.Write(data)
+	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: hash.Sum(nil), EventSeq: session.EventSeq, Session: &session}, nil
+}
+
+// CursorMaterializedTranscript carries optional native progress actually acquired
+// with the materialized input. Diagnostics are runtime warnings, not metadata.
+type CursorMaterializedTranscript struct {
 	Metadata    *UnifiedMetadata
 	Transcript  []byte
 	EventSeq    *int64
@@ -41,7 +78,7 @@ type MaterializedTranscript struct {
 // CursorTranscriptMaterializer is optional; callers without it preserve prior
 // cursor evidence instead of treating discovery's earlier observation as read.
 type CursorTranscriptMaterializer interface {
-	MaterializeTranscriptWithCursor(context.Context, DiscoveredSession) (MaterializedTranscript, error)
+	MaterializeTranscriptWithCursor(context.Context, DiscoveredSession) (CursorMaterializedTranscript, error)
 }
 
 // DiscoveryStatistics is an optional capability. An adapter that can report
@@ -176,17 +213,20 @@ type SourceConfig struct {
 
 // DiscoveredSession represents a session found during discovery.
 type DiscoveredSession struct {
-	SessionID     SessionID
-	Harness       Harness
-	SourcePath    ResolvedPath   // Path to the main transcript file
-	SourceFormat  SourceFormat   // "jsonl" for Claude, "json" for OpenCode
-	OriginalRoot  ResolvedPath   // Harness root for multi-directory access (e.g. OpenCode message/part)
-	ParentUUID    *SessionID     // nil for root sessions
-	SubagentPaths []ResolvedPath // Child session transcript paths
-	DebugPaths    []ResolvedPath // Debug artifact paths
-	ModTime       time.Time      // Changed time of the source: when its content last changed
-	ActiveModTime time.Time      // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
-	ProjectName   string         // Human-readable project name (optional, populated during discovery when cheap to extract)
+	// ContentOmitted is carried from retained metadata when ingestion removed
+	// source records. A filtered artifact cannot certify a complete capture.
+	ContentOmitted bool
+	SessionID      SessionID
+	Harness        Harness
+	SourcePath     ResolvedPath   // Path to the main transcript file
+	SourceFormat   SourceFormat   // "jsonl" for Claude, "json" for OpenCode
+	OriginalRoot   ResolvedPath   // Harness root for multi-directory access (e.g. OpenCode message/part)
+	ParentUUID     *SessionID     // nil for root sessions
+	SubagentPaths  []ResolvedPath // Child session transcript paths
+	DebugPaths     []ResolvedPath // Debug artifact paths
+	ModTime        time.Time      // Changed time of the source: when its content last changed
+	ActiveModTime  time.Time      // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
+	ProjectName    string         // Human-readable project name (optional, populated during discovery when cheap to extract)
 	// ProjectWorktree is the project's canonical root path, resolved from the
 	// OpenCode project tables when present. It refines project naming and worktree
 	// grouping without changing CWD, which stays the session's own directory. It
@@ -265,6 +305,7 @@ type DiscoveryDiagnosticReporter interface {
 
 // DefaultAdapterRegistry maps providers to their adapter factories.
 var DefaultAdapterRegistry = map[Harness]AdapterFactory{
+	HarnessPi: func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter { return NewPiAdapter(fs, git, s) },
 	HarnessClaudeCode: func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter {
 		return NewClaudeAdapter(fs, git, s)
 	},

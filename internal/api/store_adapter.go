@@ -47,15 +47,14 @@ type StoreDataProvider struct {
 }
 
 // NewStoreDataProvider creates a StoreDataProvider backed by the given store,
-// reading captured managed transcripts from the real OS filesystem. Production
-// callers supply the configured managed root; omitted roots permit previews only.
+// reading complete captured content from SQLite. Filesystem/root arguments are
+// retained for compatibility and never gate stored content reads.
 func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy, managedRoots ...string) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
 
-// NewStoreDataProviderWithFS is NewStoreDataProvider with an injectable
-// FileSystem, for tests that need SessionByID's content-overlay re-index to
-// read from a MemFS fixture instead of disk.
+// NewStoreDataProviderWithFS retains injectable filesystem arguments for caller
+// compatibility. SessionByID reads complete content only from SQLite.
 func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem, managedRoots ...string) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
@@ -327,14 +326,6 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 	if snapshot == nil {
 		return nil, fmt.Errorf("session not found: %s", id)
 	}
-	// Ordinary short previews need no file capture or parser run. A successful
-	// full read replaces the whole snapshot, never just text from a newer view.
-	if transcript.AnyContentTruncated(snapshot.Entries) {
-		full, fullErr := transcript.ReadSessionContent(ctx, p.store, p.fs, p.managedRoot, id)
-		if fullErr == nil && full != nil && full.FullContentError == nil {
-			snapshot = full.SessionContentSnapshot
-		}
-	}
 	detailRow := snapshot.Detail
 	s := sessionRowToSession(&detailRow.SessionRow)
 
@@ -354,13 +345,13 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-	// Full text was applied to matched entries before tool output is folded
-	// into turns. Unavailable full content leaves this same SQL preview intact.
-	turns, validationErr := transcript.EntriesToTurnsValidated(snapshot.Entries)
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness})
 	if validationErr != nil {
 		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
-	s.Turns = turns
+	s.Turns = projection.Turns
+	s.NativeMetadata = projection.NativeMetadata
+
 	return &s, nil
 }
 

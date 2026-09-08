@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 )
 
@@ -198,6 +199,9 @@ func seedPushableSession(t *testing.T, dir string) {
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatal(err)
 	}
+	if err := testutil.WriteFullEntries(t.Context(), db, entry.Metadata.SessionID, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // seedUploadableSession seeds a session that survives the whole pre-flight and
@@ -207,7 +211,7 @@ func seedPushableSession(t *testing.T, dir string) {
 //
 // It returns the session id and a config whose output base path is this test's
 // own directory, so parallel tests never share transcripts.
-func seedUploadableSession(t *testing.T, dir, sessionID string) string {
+func seedUploadableSession(t *testing.T, dir, sessionID string, projectPaths ...string) string {
 	t.Helper()
 	const hostSlug = "github.com-user-repo"
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
@@ -219,23 +223,10 @@ func seedUploadableSession(t *testing.T, dir, sessionID string) string {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000)
-	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
-		t.Fatal(err)
-	}
+	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000, projectPaths...)
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 
 	basePath := filepath.Join(dir, "peasant-sync")
-	sessionDir := filepath.Join(basePath, hostSlug, sessionID)
-	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(entry.Metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, sessionID+"--metadata.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	return writeCfg(t, dir, "uploadable.yaml", "version: 1\noutput:\n  basePath: "+basePath+
 		"\npush:\n  method: all\n  visibility: private\n")
 }
