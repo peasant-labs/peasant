@@ -636,24 +636,46 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version
+	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version,
+s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
+CASE WHEN p.capture_revision > 0 AND p.capture_revision=s.publication_capture_revision
+ AND p.capture_revision=s.indexed_publication_capture_revision AND p.schema_version=?
+ AND s.cwd_provenance_kind!='not_recovered' THEN 1 ELSE 0 END,
+p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
 WHERE s.session_id IN (` +
 		strings.Join(placeholders, ",") + ")"
 
 	result := make(map[ingest.SessionID]ingest.SessionLocation, len(sessionIDs))
 	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: args,
+		Args: append([]any{ingest.CurrentSchemaVersion}, args...),
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			id := schema.SessionID(stmt.ColumnText(0))
+			id, parseErr := schema.NewSessionID(stmt.ColumnText(0))
+			if parseErr != nil {
+				return parseErr
+			}
+			projectHash, parseErr := schema.NewProjectHash(stmt.ColumnText(5))
+			if parseErr != nil {
+				return parseErr
+			}
+			readiness := ingest.PublicationNeedsIngest
+			if stmt.ColumnInt(9) == 1 && publicationLocationSnapshotValid(stmt) {
+				readiness = ingest.PublicationReady
+			}
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
 			result[id] = ingest.SessionLocation{
-				HostSlug:      stmt.ColumnText(1),
-				ParentID:      stmt.ColumnText(2),
-				IngestedMs:    &ingestedMs,
-				SchemaVersion: schemaVersion,
+				ProjectHash:          projectHash,
+				OpaqueHostID:         stmt.ColumnText(6),
+				GitRemote:            nullableColumnText(stmt, 7),
+				CaptureRevision:      stmt.ColumnInt64(8),
+				PublicationReadiness: readiness,
+				HostSlug:             stmt.ColumnText(1),
+				ParentID:             stmt.ColumnText(2),
+				IngestedMs:           &ingestedMs,
+				SchemaVersion:        schemaVersion,
 			}
 			return nil
 		},

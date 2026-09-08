@@ -169,8 +169,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 54 {
-		t.Errorf("expected 54 tables including annotation_target_anchors, got %d", tableCount)
+	if tableCount != 55 {
+		t.Errorf("expected 55 tables including session_publication_metadata, got %d", tableCount)
 	}
 
 	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
