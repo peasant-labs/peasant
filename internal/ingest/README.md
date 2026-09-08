@@ -77,6 +77,15 @@ verified success permits a `DerivedAt` refresh and downstream index work. A
 database failure leaves committed files and recovery evidence intact. File
 ownership must always precede database-lane acquisition to avoid lock inversion.
 
+Persistent startup performs recovery and retained-artifact reconciliation before
+either native discovery or retained index selection. Its bounded locator walk
+visits parents before children. A validated file pair with missing/different
+database artifact identity is mirrored using the same temporary intent protocol,
+with metadata-only recovery state and no second transcript copy. An equal
+identity does not rewrite metadata or advance `DerivedAt`. Native cursor and
+adapter evidence are preserved, not inferred during replay. Dry-run does not
+enter this mutating boundary, and logs-only recovery opens no database.
+
 ---
 
 ## Stage Reference

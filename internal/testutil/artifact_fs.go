@@ -68,6 +68,42 @@ func (r *memoryArtifactRoot) ReadDir(path string) ([]fs.DirEntry, error) {
 	}
 	return r.fs.ReadDir(path)
 }
+
+func (r *memoryArtifactRoot) OpenDirectory(path string) (fs.ReadDirFile, error) {
+	entries, err := r.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := r.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	return &memoryArtifactDirectory{info: info, entries: entries}, nil
+}
+
+type memoryArtifactDirectory struct {
+	info    fs.FileInfo
+	entries []fs.DirEntry
+	closed  bool
+}
+
+func (d *memoryArtifactDirectory) Stat() (fs.FileInfo, error) { return d.info, nil }
+func (d *memoryArtifactDirectory) Close() error               { d.closed = true; return nil }
+func (d *memoryArtifactDirectory) Read([]byte) (int, error)   { return 0, fs.ErrInvalid }
+func (d *memoryArtifactDirectory) ReadDir(n int) ([]fs.DirEntry, error) {
+	if d.closed {
+		return nil, fs.ErrClosed
+	}
+	if n > 0 && len(d.entries) == 0 {
+		return nil, io.EOF
+	}
+	if n <= 0 || n > len(d.entries) {
+		n = len(d.entries)
+	}
+	page := d.entries[:n]
+	d.entries = d.entries[n:]
+	return page, nil
+}
 func (r *memoryArtifactRoot) Lstat(path string) (fs.FileInfo, error) {
 	path, err := r.path(path)
 	if err != nil {

@@ -25,6 +25,7 @@ type ArtifactRoot interface {
 	Mkdir(path string, perm fs.FileMode) error
 	Lstat(path string) (fs.FileInfo, error)
 	ReadDir(path string) ([]fs.DirEntry, error)
+	OpenDirectory(path string) (fs.ReadDirFile, error)
 	Rename(oldPath, newPath string) error
 	Remove(path string) error
 	SyncFile(path string) error
