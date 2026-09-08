@@ -637,11 +637,11 @@ func (s *SourceTurns) materializeBytes(sessionID string, listing ftue.SessionLis
 			"preview the SQLite transcript of session %q from its harness source: harness %q cannot materialize a managed transcript",
 			sessionID, listing.Harness)
 	}
-	_, data, err := materializer.MaterializeTranscript(context.Background(), session)
+	captured, err := materializer.MaterializeTranscript(context.Background(), session)
 	if err != nil {
 		return nil, ingest.MaterializeTruncation{}, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
 	}
-	return data, ingest.MaterializeTruncation{}, nil
+	return captured.Data, ingest.MaterializeTruncation{}, nil
 }
 
 // previewSliceNotice writes the sentence the pane shows above the turns of a

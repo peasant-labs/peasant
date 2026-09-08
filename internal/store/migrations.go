@@ -259,6 +259,8 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV49 creates annotation_target_anchors for durable entry annotation
 // target repair state. See schema_v49.go.
 
+// migrationV50 adds nullable captured-source evidence. See schema_v50.go.
+
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
 	Migrations: []string{
@@ -311,6 +313,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV47,
 		migrationV48,
 		migrationV49,
+		migrationV50,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.

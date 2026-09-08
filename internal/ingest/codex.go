@@ -537,6 +537,17 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		cwd = filepath.Dir(string(session.SourcePath))
 	}
 	meta.CWD = cwd
+	var recordedBranch string
+	if meta.Git.Branch != nil {
+		recordedBranch = *meta.Git.Branch
+	}
+	remoteURL, tracking := ResolveGitRemote(ctx, a.git, cwd, recordedBranch, remoteURL)
+	if remoteURL != "" {
+		meta.Git.Remote = &remoteURL
+	}
+	if tracking != "" {
+		meta.Git.Tracking = &tracking
+	}
 
 	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
 	if derErr != nil {

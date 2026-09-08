@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -137,5 +138,48 @@ func TestOpenCodeProjectTablesGroupSessionUnderProjectRoot(t *testing.T) {
 	}
 	if metadata.CWD != worktreeDir {
 		t.Fatalf("metadata CWD = %q, want the unchanged worktree directory %q", metadata.CWD, worktreeDir)
+	}
+	// Materialization, not discovery, owns the consumed attrs and cursor. Mutate
+	// only those source rows; the transcript projection must remain byte-identical.
+	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := sqlitex.ExecuteScript(conn, `CREATE TABLE event_sequence (aggregate_id TEXT PRIMARY KEY, seq INTEGER);
+INSERT INTO event_sequence SELECT id, 7 FROM session;
+UPDATE session SET parent_id = 'ses_3cd91f52effeXd3QAJ54jOyzP2';`, nil); err != nil {
+		t.Fatal(err)
+	}
+	first, err := adapter.MaterializeTranscript(t.Context(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.EventSeq != 7 || first.Metadata.ParentUUID == nil {
+		t.Fatal("capture did not reacquire source parent and sequence")
+	}
+	if err := sqlitex.ExecuteScript(conn, `UPDATE session SET parent_id = NULL, title = NULL, time_created = 0, time_updated = 0;
+UPDATE project SET name = 'renamed-project';
+DELETE FROM event_sequence;`, nil); err != nil {
+		t.Fatal(err)
+	}
+	second, err := adapter.MaterializeTranscript(t.Context(), *first.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.EventSeq != 0 || second.Metadata.ParentUUID != nil || second.Session.Title != "" || !second.Session.CreatedAt.IsZero() || !second.Session.ModTime.IsZero() {
+		t.Fatalf("capture retained stale source attrs: %+v", second.Session)
+	}
+	if second.Metadata.Project.Name != "renamed-project" {
+		t.Fatalf("captured project metadata: %+v", second.Metadata.Project)
+	}
+	if !bytes.Equal(first.Data, second.Data) || bytes.Equal(first.SourceFingerprint, second.SourceFingerprint) {
+		t.Fatal("attrs-only update must change evidence without changing transcript projection")
+	}
+	if err := sqlitex.ExecuteScript(conn, "DELETE FROM session;", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.MaterializeTranscript(t.Context(), *second.Session); err == nil {
+		t.Fatal("missing authoritative row reused stale discovery metadata")
 	}
 }

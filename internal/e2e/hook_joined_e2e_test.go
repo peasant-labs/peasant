@@ -490,6 +490,29 @@ func resolveDeveloperGlobalGitConfig(t *testing.T) string {
 	return filepath.Join(home, ".gitconfig")
 }
 
+func TestDeveloperStateFingerprintDetectsContentChange(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "database")
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprintPaths(t, []string{root}, filepath.Join(root, "excluded"))
+	if err := os.WriteFile(path, []byte("after!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after := fingerprintPaths(t, []string{root}, filepath.Join(root, "excluded"))
+	if before.digest == after.digest {
+		t.Fatal("streamed isolation fingerprint missed a same-size, same-mtime content change")
+	}
+}
+
 func TestDeveloperStateLocations_RejectEveryEmptyRoot(t *testing.T) {
 	t.Parallel()
 	complete := developerStateLocations{
