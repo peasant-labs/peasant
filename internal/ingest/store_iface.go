@@ -34,6 +34,13 @@ type MetricSeedStore interface {
 	GetMetricSeed(ctx context.Context, sessionID SessionID) (*StatsInfo, error)
 }
 
+// StoredMetadataReader recovers only recorded metadata from one SQL snapshot.
+// Sparse JSON preserves absent historical fields, especially adapter statistics;
+// computed metrics are not a substitute for missing extraction evidence.
+type StoredMetadataReader interface {
+	ReadStoredMetadata(ctx context.Context, sessionID SessionID) ([]byte, error)
+}
+
 // SessionLocationLookup is satisfied by anything that can answer where a
 // session id already lives in the store: its host slug and parent id, or
 // that it is not stored yet. It names exactly the one method SessionStore

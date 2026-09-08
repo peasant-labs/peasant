@@ -49,21 +49,11 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 	if _, err := NewHostSlug(string(original.HostSlug)); err != nil {
 		return nil, insufficient("the original managed project locator is missing or invalid")
 	}
-	// Validate the captured records before accepting the adapters' historically
-	// tolerant metadata scans as a successful refresh.
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
+	if err := validateRetainedJSONL(ctx, data); err != nil {
+		if ctx.Err() != nil {
 			return nil, err
 		}
-		raw := bytes.TrimSpace(scanner.Bytes())
-		if len(raw) != 0 && (!json.Valid(raw) || raw[0] != '{') {
-			return nil, insufficient("a retained JSONL record is malformed or is not an object")
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, insufficient("retained JSONL could not be completely scanned: " + err.Error())
+		return nil, insufficient(err.Error())
 	}
 	encoded, err := json.Marshal(original)
 	if err != nil {
@@ -74,6 +64,26 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 		return nil, insufficient("original metadata could not be decoded: " + err.Error())
 	}
 	return &metadata, nil
+}
+
+// validateRetainedJSONL checks complete object records before metadata recovery
+// or the adapters' historically tolerant metadata extraction scans.
+func validateRetainedJSONL(ctx context.Context, data []byte) error {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		raw := bytes.TrimSpace(scanner.Bytes())
+		if len(raw) != 0 && (!json.Valid(raw) || raw[0] != '{') {
+			return fmt.Errorf("a retained JSONL record is malformed or is not an object")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("retained JSONL could not be completely scanned: %w", err)
+	}
+	return ctx.Err()
 }
 
 func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
