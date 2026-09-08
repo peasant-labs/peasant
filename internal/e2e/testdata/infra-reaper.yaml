@@ -1,0 +1,73 @@
+requiredNames:
+  - stale-exited-container
+  - unrelated-container
+  - recent-exited-container
+  - malformed-prefix
+  - malformed-static-name
+  - malformed-partial-name
+  - stale-running-dead-owner
+  - stale-created-container
+  - running-live-owner
+  - running-reused-live-pid
+  - recent-running-dead-owner
+  - recent-created-container
+cases:
+  - name: stale-exited-container
+    kind: pg
+    pid: 101
+    age: 48h
+    status: Exited (0) 25 hours ago
+    selected: true
+  - name: unrelated-container
+    rawName: unrelated
+    status: Exited (0) 25 hours ago
+  - name: recent-exited-container
+    kind: minio
+    pid: 303
+    age: 12h
+    status: Exited (0) 10 minutes ago
+    surroundWithWhitespace: true
+  - name: malformed-prefix
+    rawName: x-peasant-e2e-village
+    status: Exited (0) 25 hours ago
+  - name: malformed-static-name
+    rawName: peasant-e2e-transcripts-static
+    status: Exited (0) 25 hours ago
+  - name: malformed-partial-name
+    rawName: peasant-e2e-release-ubuntu-22-04-202
+    status: Exited (0) 25 hours ago
+  - name: stale-running-dead-owner
+    kind: village
+    pid: 404
+    age: 48h
+    status: Up 25 hours
+    selected: true
+  - name: stale-created-container
+    kind: release-ubuntu-22-04
+    pid: 202
+    age: 48h
+    status: Created
+    selected: true
+  - name: running-live-owner
+    kind: postgres
+    pid: 505
+    age: 48h
+    status: Running 25 hours
+    alive: true
+  - name: running-reused-live-pid
+    kind: minio
+    pid: 606
+    age: 48h
+    status: Up 25 hours
+    alive: true
+  - name: recent-running-dead-owner
+    kind: village
+    pid: 707
+    age: 1h
+    status: Running 1 hour
+    selected: true
+  - name: recent-created-container
+    kind: postgres
+    pid: 808
+    age: 1h
+    status: Configured

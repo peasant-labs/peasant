@@ -266,35 +266,9 @@ func TestTranscriptBucketSeams(t *testing.T) {
 	}
 }
 
-func TestInfraReaperTargetsOnlyStalePeasantE2EContainers(t *testing.T) {
-	now := time.Unix(10_000_000, 0)
-	old := now.Add(-2 * staleE2ETTL)
-	recent := now.Add(-staleE2ETTL / 2)
-	oldPG := uniqueNameAt("pg", 101, old)
-	oldRelease := uniqueNameAt("release-ubuntu-22-04", 202, old)
-	recentMinIO := uniqueNameAt("minio", 303, recent)
-	oldRunningVillage := uniqueNameAt("village", 404, old)
-	names := reapableE2EInfraNames(strings.Join([]string{
-		oldPG + "\tExited (0) 25 hours ago",
-		"unrelated\tExited (0) 25 hours ago",
-		" " + recentMinIO + " \tExited (0) 10 minutes ago",
-		"x-peasant-e2e-village",
-		"peasant-e2e-transcripts-static",
-		oldRunningVillage + "\tUp 25 hours",
-		oldRelease + "\tCreated",
-	}, "\n"), now, staleE2ETTL, func(pid int) bool { return pid != 404 })
-	wantNames := []string{oldPG, oldRunningVillage, oldRelease}
-	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
-		t.Fatalf("stale infra names = %v, want %v", names, wantNames)
-	}
-
-	args := podmanReapE2EInfraArgs(names)
-	wantArgs := []string{"rm", "-fv", oldPG, oldRunningVillage, oldRelease}
-	if strings.Join(args, "\x00") != strings.Join(wantArgs, "\x00") {
-		t.Fatalf("reap args = %v, want %v", args, wantArgs)
-	}
-	if args := podmanReapE2EInfraArgs(nil); args != nil {
-		t.Fatalf("empty reap args = %v, want nil", args)
+func TestProcessAliveRecognizesCurrentProcess(t *testing.T) {
+	if !processAlive(os.Getpid()) {
+		t.Fatalf("current process PID %d reported dead", os.Getpid())
 	}
 }
 
