@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -1133,33 +1132,22 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 }
 
-// failAfterNCopyFS wraps MemFS and makes CopyFile fail after the first N successes.
-// This is used to simulate a mid-walk failure inside renameDir.
-type failAfterNCopyFS struct {
+// failedInstallFS refuses atomic installation without changing either file.
+type failedInstallFS struct {
 	*testutil.MemFS
-	allowedCopies int
-	copyCount     int
 }
 
-func (f *failAfterNCopyFS) CopyFile(src, dst string, perm os.FileMode) error {
-	if f.copyCount >= f.allowedCopies {
-		return fmt.Errorf("injected CopyFile failure after %d copies (src=%s)", f.allowedCopies, src)
-	}
-	f.copyCount++
-	return f.MemFS.CopyFile(src, dst, perm)
+var _ ingest.FileSystem = (*failedInstallFS)(nil)
+
+func (f *failedInstallFS) Rename(src, dst string) error {
+	return fmt.Errorf("injected Rename failure (%s -> %s)", src, dst)
 }
 
-func TestPipeline_RenameDirCleansDstOnFailure(t *testing.T) {
-	// Arrange: a MemFS that fails the first CopyFile call inside renameDir.
-	// processSession writes only transcript to tmpDir (metadata.json is written
-	// by drainLoop after DB INSERT). renameDir uses CopyFile to move the tmpDir
-	// contents to sessionDir. Failing on the first renameDir CopyFile must trigger
-	// cleanup of the partial sessionDir destination.
+func TestPipeline_FailedInstallDoesNotExposePartialTranscript(t *testing.T) {
+	// Staging is disposable, but the canonical directory is never recursively
+	// removed on failure: it may contain unchanged child output.
 	innerFS := testutil.NewMemFS()
-	mfs := &failAfterNCopyFS{
-		MemFS:         innerFS,
-		allowedCopies: 0, // first CopyFile (inside renameDir, transcript) fails immediately
-	}
+	mfs := &failedInstallFS{MemFS: innerFS}
 	git := testutil.DefaultGitResolver()
 
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
@@ -1185,28 +1173,22 @@ func TestPipeline_RenameDirCleansDstOnFailure(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The session must report an error (renameDir failed).
+	// The session must report installation failure.
 	if len(result.Sessions) != 1 {
 		t.Fatalf("Sessions len = %d, want 1", len(result.Sessions))
 	}
 	if result.Sessions[0].Error == nil {
-		t.Errorf("Sessions[0].Error = nil, want non-nil (renameDir should have failed)")
+		t.Errorf("Sessions[0].Error = nil, want non-nil (installation should have failed)")
 	}
 	if result.Summary.Errors != 1 {
 		t.Errorf("Summary.Errors = %d, want 1", result.Summary.Errors)
 	}
 
-	// The destination sessionDir must NOT exist — renameDir cleanup must have removed it.
+	// No partial transcript or success metadata may be exposed.
 	base := expectedOutputBase(testOutputDir, testSessionID)
-	if innerFS.Dirs[base] {
-		t.Errorf("sessionDir %q still exists after renameDir failure; partial dst was not cleaned up", base)
-	}
-	// Also verify no files leaked into sessionDir.
-	entries, _ := innerFS.ReadDir(testOutputDir + "/" + testutil.TestHostSlug)
-	for _, e := range entries {
-		if e.Name() == testSessionID {
-			t.Errorf("sessionDir entry %q found under host slug dir; partial dst was not cleaned up", e.Name())
-		}
+	entries, err := innerFS.ReadDir(base)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed installation exposed output: %v, %v", entries, err)
 	}
 }
 

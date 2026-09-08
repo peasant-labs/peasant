@@ -2379,11 +2379,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	// A root session owns the files directly in sessionDir, but child sessions own
 	// the nested subagents tree. FILTER does not send unchanged children through
 	// processSession, so replacing the whole parent directory would otherwise erase
-	// their current managed output. Stage the old directory, move that child-owned
-	// tree into the replacement, and retain enough state to restore the old output
-	// if installation fails.
-	backupDir := fmt.Sprintf("%s/%sbackup-%s-%s", outputDir, defaults.TempDirPrefix, session.SessionID, tmpSuffix)
-	if err := p.replaceSessionDir(tmpDir, sessionDir, backupDir); err != nil {
+	// their current managed output. Leave the child-owned tree at its canonical
+	// path, even during failed or interrupted installation.
+	if err := p.replaceSessionDir(tmpDir, sessionDir); err != nil {
 		result.Error = errors.Join(
 			fmt.Errorf("replace output dir for %s: %w", session.SessionID, err),
 			p.fs.RemoveAll(tmpDir),
@@ -2425,36 +2423,68 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 }
 
 // replaceSessionDir replaces parent-owned output while preserving the child-owned
-// subagents subtree. Root-owns-subtree scheduling guarantees no child writer can
-// race this operation.
-func (p *Pipeline) replaceSessionDir(src, dst, backup string) error {
-	if _, err := p.fs.Stat(dst); err != nil {
-		return p.renameDir(src, dst)
-	}
-	if err := p.renameDir(dst, backup); err != nil {
-		return fmt.Errorf("stage existing output %s: %w", dst, err)
+// subagents subtree. Files are installed with same-filesystem atomic Rename, not
+// a copy/delete move. There is intentionally no directory swap or rollback: an
+// interruption can leave a mixture of complete old/new parent files for normal
+// ingest to refresh, but never displaces children into disposable staging. The
+// caller may always discard src. Root-owns-subtree scheduling excludes writers.
+func (p *Pipeline) replaceSessionDir(src, dst string) error {
+	wanted := make(map[string]bool)
+	err := p.fs.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == defaults.DirSubagents.String() {
+			return fmt.Errorf("staged parent output unexpectedly contains child directory %s", path)
+		}
+		wanted[rel] = true
+		target := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return p.fs.MkdirAll(target, defaults.PrivateDirPerm)
+		}
+		return p.fs.Rename(path, target)
+	})
+	if err != nil {
+		return fmt.Errorf("install parent files at %s: %w; existing child output remains in place; fix filesystem access or free disk space and rerun ingest", dst, err)
 	}
 
-	backupChildren := fmt.Sprintf("%s/%s", backup, defaults.DirSubagents.String())
-	srcChildren := fmt.Sprintf("%s/%s", src, defaults.DirSubagents.String())
-	childrenPreserved := false
-	if _, err := p.fs.Stat(backupChildren); err == nil {
-		if err := p.renameDir(backupChildren, srcChildren); err != nil {
-			restoreErr := p.renameDir(backup, dst)
-			return errors.Join(fmt.Errorf("preserve child output from %s: %w", backupChildren, err), restoreErr)
+	// Only prune obsolete parent-owned files after every new file is installed.
+	// Skip the entire child-owned tree, including children excluded by FILTER.
+	var stale []string
+	err = p.fs.WalkDir(dst, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		childrenPreserved = true
-	}
-
-	if err := p.renameDir(src, dst); err != nil {
-		var restoreChildrenErr error
-		if childrenPreserved {
-			restoreChildrenErr = p.renameDir(srcChildren, backupChildren)
+		rel, err := filepath.Rel(dst, path)
+		if err != nil {
+			return err
 		}
-		restoreErr := p.renameDir(backup, dst)
-		return errors.Join(fmt.Errorf("install replacement output %s: %w", dst, err), restoreChildrenErr, restoreErr)
+		if rel == defaults.DirSubagents.String() {
+			return fs.SkipDir
+		}
+		if !wanted[rel] {
+			stale = append(stale, path)
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		for _, path := range stale {
+			if err = p.fs.RemoveAll(path); err != nil {
+				break
+			}
+		}
 	}
-	return p.fs.RemoveAll(backup)
+	if err != nil {
+		return fmt.Errorf("prune obsolete parent files at %s: %w; installed files and child output remain in place; fix filesystem access and rerun ingest", dst, err)
+	}
+	return p.fs.RemoveAll(src)
 }
 
 // indexTargetSession is the session handed to an indexer at the INDEX stage.
@@ -2575,48 +2605,6 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		OriginalRoot:     wr.originalRoot,
 		TranscriptOrigin: wr.transcriptOrigin,
 	}
-}
-
-// renameDir moves a directory tree from src to dst using the FileSystem interface.
-// This is necessary because MemFS.Rename only handles the directory node itself,
-// not its contents. For production (OSFileSystem), os.Rename handles everything.
-// We implement a portable recursive move: create dst dir, move files, remove src dir.
-func (p *Pipeline) renameDir(src, dst string) error {
-	// First, ensure dst parent exists.
-	if err := p.fs.MkdirAll(dst, defaults.PrivateDirPerm); err != nil {
-		return fmt.Errorf("renameDir: mkdir %s: %w", dst, err)
-	}
-
-	// Walk src and copy all files to dst, then remove src.
-	walkErr := p.fs.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == src {
-			return nil // skip root itself
-		}
-
-		// Compute relative path within src.
-		rel := strings.TrimPrefix(path, src+"/")
-		dstPath := fmt.Sprintf("%s/%s", dst, rel)
-
-		if d.IsDir() {
-			return p.fs.MkdirAll(dstPath, defaults.PrivateDirPerm)
-		}
-
-		// Move file: copy then remove original.
-		if err := p.fs.CopyFile(path, dstPath, defaults.PrivateFilePerm); err != nil {
-			return fmt.Errorf("renameDir copy %s -> %s: %w", path, dstPath, err)
-		}
-		return nil
-	})
-
-	if walkErr != nil {
-		return errors.Join(walkErr, p.fs.RemoveAll(dst))
-	}
-
-	// Remove src directory tree.
-	return p.fs.RemoveAll(src)
 }
 
 // cleanOrphans removes .tmp-* directories from the output dir root.
