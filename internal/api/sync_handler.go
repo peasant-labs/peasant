@@ -68,9 +68,25 @@ type syncSessionResponse struct {
 }
 
 func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request) {
+	var reader syncSessionReader
+	if h.store != nil {
+		reader = h.store
+	}
+	serveSyncSessions(w, r, reader)
+}
+
+type syncSessionReader interface {
+	ingest.PublicationMetadataReader
+	AllPushableSessions(context.Context) ([]ingest.PushSessionRow, error)
+	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
+}
+
+var _ syncSessionReader = (*store.Store)(nil)
+
+func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionReader) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.store == nil {
+	if db == nil {
 		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
 		return
 	}
@@ -78,7 +94,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	// Get all pushable sessions (with pushed_at info).
-	sessions, err := h.store.AllPushableSessions(ctx)
+	sessions, err := db.AllPushableSessions(ctx)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"query sessions: %s"}`, err), http.StatusInternalServerError)
 		return
@@ -86,7 +102,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 
 	// Get held-back sessions (missing metrics).
 	heldMap := make(map[string]bool)
-	held, heldErr := h.store.SessionsWithoutMetrics(ctx)
+	held, heldErr := db.SessionsWithoutMetrics(ctx)
 	if heldErr == nil {
 		for _, session := range held {
 			heldMap[session.SessionID] = true
@@ -94,10 +110,11 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Map to response with sync status.
+	metadata, metadataErr := push.LoadPublicationMetadata(ctx, db, sessions)
 	result := make([]syncSessionResponse, 0, len(sessions))
 	for _, s := range sessions {
-		input, inputErr := push.LoadReadyPublicationInput(ctx, h.store, s.SessionID)
-		if inputErr != nil {
+		input := metadata[s.SessionID]
+		if metadataErr != nil || !push.PublicationMetadataReady(input) {
 			heldMap[s.SessionID] = true
 		}
 		status := computeSyncStatus(s, heldMap, input.Readiness)

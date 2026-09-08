@@ -164,55 +164,12 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 	end := sqlitex.Transaction(conn)
 	defer end(&err)
 	found := false
-	err = sqlitex.ExecuteTransient(conn, `SELECT s.project_hash,s.session_origin,s.publication_capture_revision,
- s.indexed_publication_capture_revision,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,
- COALESCE(s.parent_id,''),h.host_slug,COALESCE(h.git_remote,''),
- p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash
- FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id
- LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id WHERE s.session_id=?`, &sqlitex.ExecOptions{
+	err = sqlitex.ExecuteTransient(conn, publicationMetadataSelect+` WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
-			var parseErr error
-			bundle.ReceiptProjectHash, parseErr = schema.NewProjectHash(stmt.ColumnText(0))
-			if parseErr != nil {
-				return publicationRepairError("invalid stored project identity")
-			}
-			bundle.SessionOrigin, parseErr = sessionorigin.Parse(stmt.ColumnText(1))
-			if parseErr != nil {
-				return parseErr
-			}
-			bundle.CaptureRevision = stmt.ColumnInt64(2)
-			if stmt.ColumnType(9) == sqlite.TypeNull || stmt.ColumnInt(10) != ingest.CurrentSchemaVersion {
-				return nil
-			}
-			kind, parseErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(5))
-			if parseErr != nil {
-				return parseErr
-			}
-			if kind == ingest.CWDNotRecovered {
-				return nil
-			}
-			if json.Unmarshal([]byte(stmt.ColumnText(11)), &bundle.Metadata) != nil {
-				return publicationRepairError("malformed metadata snapshot")
-			}
-			m := &bundle.Metadata
-			if parseErr = validateCaptureMetadata(m, kind); parseErr != nil {
-				return parseErr
-			}
-			parent, remote := "", ""
-			if m.ParentUUID != nil {
-				parent = string(*m.ParentUUID)
-			}
-			if m.Git.Remote != nil {
-				remote = *m.Git.Remote
-			}
-			if m.SessionID != id || m.Project.Hash != bundle.ReceiptProjectHash || parent != stmt.ColumnText(6) || string(m.HostSlug) != stmt.ColumnText(7) || remote != stmt.ColumnText(8) || m.CWD != stmt.ColumnText(4) || m.MetadataHash != stmt.ColumnText(12) || m.ContentHash != stmt.ColumnText(13) {
-				return publicationRepairError("snapshot identity, CWD or integrity columns disagree")
-			}
-			if bundle.CaptureRevision > 0 && bundle.CaptureRevision == stmt.ColumnInt64(3) && bundle.CaptureRevision == stmt.ColumnInt64(9) {
-				bundle.Readiness = ingest.PublicationReady
-			}
-			return nil
+			var scanErr error
+			bundle, scanErr = scanPublicationMetadata(stmt, id)
+			return scanErr
 		},
 	})
 	if err != nil {
@@ -245,4 +202,103 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 		},
 	})
 	return bundle, err
+}
+
+const publicationMetadataSelect = `SELECT s.project_hash,s.session_origin,s.publication_capture_revision,
+ s.indexed_publication_capture_revision,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,
+ COALESCE(s.parent_id,''),h.host_slug,COALESCE(h.git_remote,''),
+ p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash,s.session_id
+ FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id
+ LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id`
+
+// Both the full bundle and list projection validate exactly the same evidence.
+func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+	bundle.Readiness = ingest.PublicationNeedsIngest
+	err = func() error {
+		var parseErr error
+		bundle.ReceiptProjectHash, parseErr = schema.NewProjectHash(stmt.ColumnText(0))
+		if parseErr != nil {
+			return publicationRepairError("invalid stored project identity")
+		}
+		bundle.SessionOrigin, parseErr = sessionorigin.Parse(stmt.ColumnText(1))
+		if parseErr != nil {
+			return parseErr
+		}
+		bundle.CaptureRevision = stmt.ColumnInt64(2)
+		if stmt.ColumnType(9) == sqlite.TypeNull || stmt.ColumnInt(10) != ingest.CurrentSchemaVersion {
+			return nil
+		}
+		kind, parseErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(5))
+		if parseErr != nil {
+			return parseErr
+		}
+		if kind == ingest.CWDNotRecovered {
+			return nil
+		}
+		if json.Unmarshal([]byte(stmt.ColumnText(11)), &bundle.Metadata) != nil {
+			return publicationRepairError("malformed metadata snapshot")
+		}
+		m := &bundle.Metadata
+		if parseErr = validateCaptureMetadata(m, kind); parseErr != nil {
+			return parseErr
+		}
+		parent, remote := "", ""
+		if m.ParentUUID != nil {
+			parent = string(*m.ParentUUID)
+		}
+		if m.Git.Remote != nil {
+			remote = *m.Git.Remote
+		}
+		if m.SessionID != id || m.Project.Hash != bundle.ReceiptProjectHash || parent != stmt.ColumnText(6) || string(m.HostSlug) != stmt.ColumnText(7) || remote != stmt.ColumnText(8) || m.CWD != stmt.ColumnText(4) || m.MetadataHash != stmt.ColumnText(12) || m.ContentHash != stmt.ColumnText(13) {
+			return publicationRepairError("snapshot identity, CWD or integrity columns disagree")
+		}
+		if bundle.CaptureRevision > 0 && bundle.CaptureRevision == stmt.ColumnInt64(3) && bundle.CaptureRevision == stmt.ColumnInt64(9) {
+			bundle.Readiness = ingest.PublicationReady
+		}
+		return nil
+	}()
+	return bundle, err
+}
+
+var _ ingest.PublicationMetadataReader = (*Store)(nil)
+
+// LoadPublicationMetadata reads only requested capture rows in one SQLite read
+// transaction. Transcript entries, quality and association ledgers are not read.
+func (s *Store) LoadPublicationMetadata(ctx context.Context, ids []ingest.SessionID) (result map[ingest.SessionID]ingest.PublicationMetadata, err error) {
+	result = make(map[ingest.SessionID]ingest.PublicationMetadata, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	missing := publicationRepairError("session is missing from database")
+	for _, id := range ids {
+		result[id] = ingest.PublicationMetadata{Readiness: ingest.PublicationNeedsIngest, Error: missing}
+	}
+	requested, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.pool.Put(conn)
+	end := sqlitex.Transaction(conn)
+	defer func() {
+		end(&err)
+		if err != nil {
+			result = nil
+		}
+	}()
+	err = sqlitex.ExecuteTransient(conn, publicationMetadataSelect+` WHERE s.session_id IN (SELECT value FROM json_each(?))`, &sqlitex.ExecOptions{
+		Args: []any{string(requested)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			id, parseErr := ingest.NewSessionID(stmt.ColumnText(14))
+			if parseErr != nil {
+				return parseErr
+			}
+			bundle, scanErr := scanPublicationMetadata(stmt, id)
+			result[id] = ingest.PublicationMetadata{Metadata: bundle.Metadata, Readiness: bundle.Readiness, CaptureRevision: bundle.CaptureRevision, Error: scanErr}
+			return nil
+		},
+	})
+	return result, err
 }

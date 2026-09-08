@@ -14,6 +14,9 @@ import (
 var _ ingest.PublicationInputReader = (*StubPushStore)(nil)
 
 func (s *StubPushStore) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (ingest.PublicationInputBundle, error) {
+	s.mu.Lock()
+	s.PublicationInputCalls++
+	s.mu.Unlock()
 	entries, err := s.ListEntries(ctx, id)
 	if err != nil {
 		return ingest.PublicationInputBundle{}, err
@@ -36,6 +39,23 @@ func (s *StubPushStore) LoadPublicationInput(ctx context.Context, id ingest.Sess
 		input.Associations = append(input.Associations, schema.PublishedAssociation{ID: association.ID, ObservedCommitHash: association.ObservedCommitHash})
 	}
 	return input, nil
+}
+
+var _ ingest.PublicationMetadataReader = (*StubPushStore)(nil)
+
+func (s *StubPushStore) LoadPublicationMetadata(_ context.Context, ids []ingest.SessionID) (map[ingest.SessionID]ingest.PublicationMetadata, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.PublicationMetadataCalls++
+	if s.PublicationInputErr != nil {
+		return nil, s.PublicationInputErr
+	}
+	result := make(map[ingest.SessionID]ingest.PublicationMetadata, len(ids))
+	for _, id := range ids {
+		input := s.PublicationInputs[id]
+		result[id] = ingest.PublicationMetadata{Metadata: input.Metadata, Readiness: input.Readiness, CaptureRevision: input.CaptureRevision}
+	}
+	return result, nil
 }
 
 // SeedReadyPublication persists a synthetic source capture and indexes its exact
