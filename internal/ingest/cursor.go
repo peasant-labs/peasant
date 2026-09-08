@@ -260,6 +260,47 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		Format:   SourceFormatJSONL,
 	}
 
+	startMs, endMs := parseCursorTranscriptMetadata(data, &meta)
+	if startMs == 0 {
+		if !session.CreatedAt.IsZero() {
+			startMs = session.CreatedAt.UnixMilli()
+		} else if !session.ModTime.IsZero() {
+			startMs = session.ModTime.UnixMilli()
+		}
+	}
+	if endMs == 0 && !session.ModTime.IsZero() {
+		endMs = session.ModTime.UnixMilli()
+	}
+	if endMs < startMs {
+		endMs = startMs
+	}
+	ingested := time.Now().UnixMilli()
+	meta.Timestamp = TimestampInfo{
+		Start:    startMs,
+		End:      endMs,
+		Ingested: &ingested,
+	}
+	if startMs > 0 && endMs >= startMs {
+		meta.Stats.DurationMs = endMs - startMs
+	}
+	meta.Stats.SubagentCount = len(session.SubagentPaths)
+	for _, sp := range session.SubagentPaths {
+		subIDStr := strings.TrimSuffix(filepath.Base(string(sp)), defaults.ExtJSONL.String())
+		subSID, err := NewSessionID(subIDStr)
+		if err != nil {
+			continue
+		}
+		meta.Subagents = append(meta.Subagents, SubagentRef{
+			SessionID:  subSID,
+			ParentUUID: session.SessionID,
+		})
+	}
+
+	a.enrichCursorProject(ctx, &meta, session, session.CWD)
+	return &meta, nil
+}
+
+func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, int64) {
 	var (
 		lineNum        int
 		firstTimestamp json.RawMessage
@@ -325,55 +366,17 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if meta.Model == "" {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "missing_model",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
+			Location:    fmt.Sprintf("session %s", meta.SessionID),
 			Message:     "Cursor transcript omitted message.model; peasant will hold this session from village push because the village requires a recorded model.",
 			Remediation: "Keep the transcript ingested for local analysis, but do not publish it until Cursor records model metadata or the source transcript is corrected.",
 		})
 	}
 
-	startMs := cursorTimestampMillis(firstTimestamp)
-	endMs := cursorTimestampMillis(lastTimestamp)
-	if startMs == 0 {
-		if !session.CreatedAt.IsZero() {
-			startMs = session.CreatedAt.UnixMilli()
-		} else if !session.ModTime.IsZero() {
-			startMs = session.ModTime.UnixMilli()
-		}
-	}
-	if endMs == 0 && !session.ModTime.IsZero() {
-		endMs = session.ModTime.UnixMilli()
-	}
-	if endMs < startMs {
-		endMs = startMs
-	}
-	ingested := time.Now().UnixMilli()
-	meta.Timestamp = TimestampInfo{
-		Start:    startMs,
-		End:      endMs,
-		Ingested: &ingested,
-	}
-	if startMs > 0 && endMs >= startMs {
-		meta.Stats.DurationMs = endMs - startMs
-	}
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
-	meta.Stats.SubagentCount = len(session.SubagentPaths)
 	meta.Stats.TokensIn = tokensIn
 	meta.Stats.TokensOut = tokensOut
-	for _, sp := range session.SubagentPaths {
-		subIDStr := strings.TrimSuffix(filepath.Base(string(sp)), defaults.ExtJSONL.String())
-		subSID, err := NewSessionID(subIDStr)
-		if err != nil {
-			continue
-		}
-		meta.Subagents = append(meta.Subagents, SubagentRef{
-			SessionID:  subSID,
-			ParentUUID: session.SessionID,
-		})
-	}
-
-	a.enrichCursorProject(ctx, &meta, session, session.CWD)
-	return &meta, nil
+	return cursorTimestampMillis(firstTimestamp), cursorTimestampMillis(lastTimestamp)
 }
 
 func cursorTimestampMillis(raw json.RawMessage) int64 {
