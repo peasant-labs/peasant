@@ -67,6 +67,16 @@ classifiers always see current metrics.
 Profile-only timings include `PREPARE`, `INDEX LOG`, and `AUDIT`. They appear in
 index profile output, but they are not normal progress-renderer stages.
 
+`processSession` commits a validated metadata/transcript pair under a root-confined
+OS advisory lock. Its temporary intent retains only this session's owned file
+backups; child sessions and unrelated files are never removed. The complete
+metadata is the last file commit. The drain loop then takes the same file lock,
+enters the serial database lane, and mirrors metadata, retained statistics,
+associations and actually acquired source evidence in one transaction. Only
+verified success permits a `DerivedAt` refresh and downstream index work. A
+database failure leaves committed files and recovery evidence intact. File
+ownership must always precede database-lane acquisition to avoid lock inversion.
+
 ---
 
 ## Stage Reference

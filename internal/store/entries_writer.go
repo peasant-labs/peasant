@@ -214,8 +214,15 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		return outcome, rollbackErr, fatal
 	}
 	if write.IndexerVersion > 0 {
-		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexerVersion, write.IndexedAtMs, outcome.sessionEntriesHash); err != nil {
+		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexerVersion, write.IndexedAtMs, outcome.sessionEntriesHash, write.IndexedInputHash); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	} else if conversion == nil {
+		// An entry-only replacement keeps historical parser stamps but cannot
+		// certify the input, even when the canonical rows happen to match.
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
 	}

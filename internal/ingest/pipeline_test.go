@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -109,6 +108,7 @@ func makeMinimalMeta(t *testing.T, sessionIDStr string) *ingest.UnifiedMetadata 
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID = sid
 	meta.ModelHarness = ingest.HarnessClaudeCode
+	meta.Source.Format = ingest.SourceFormatJSONL
 	ingested := time.Now().UnixMilli()
 	meta.Timestamp = ingest.TimestampInfo{
 		Start:    1708300800000, // 2024-02-19T00:00:00Z
@@ -1133,83 +1133,6 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 }
 
-// failAfterNCopyFS wraps MemFS and makes CopyFile fail after the first N successes.
-// This is used to simulate a mid-walk failure inside renameDir.
-type failAfterNCopyFS struct {
-	*testutil.MemFS
-	allowedCopies int
-	copyCount     int
-}
-
-func (f *failAfterNCopyFS) CopyFile(src, dst string, perm os.FileMode) error {
-	if f.copyCount >= f.allowedCopies {
-		return fmt.Errorf("injected CopyFile failure after %d copies (src=%s)", f.allowedCopies, src)
-	}
-	f.copyCount++
-	return f.MemFS.CopyFile(src, dst, perm)
-}
-
-func TestPipeline_RenameDirCleansDstOnFailure(t *testing.T) {
-	// Arrange: a MemFS that fails the first CopyFile call inside renameDir.
-	// processSession writes only transcript to tmpDir (metadata.json is written
-	// by drainLoop after DB INSERT). renameDir uses CopyFile to move the tmpDir
-	// contents to sessionDir. Failing on the first renameDir CopyFile must trigger
-	// cleanup of the partial sessionDir destination.
-	innerFS := testutil.NewMemFS()
-	mfs := &failAfterNCopyFS{
-		MemFS:         innerFS,
-		allowedCopies: 0, // first CopyFile (inside renameDir, transcript) fails immediately
-	}
-	git := testutil.DefaultGitResolver()
-
-	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
-	setupSourceFile(t, innerFS, sourcePath)
-
-	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
-	meta := makeMinimalMeta(t, testSessionID)
-
-	adapters := map[ingest.Harness]ingest.AdapterFactory{
-		ingest.HarnessClaudeCode: makeStubAdapter(
-			[]ingest.DiscoveredSession{session},
-			map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta},
-		),
-	}
-
-	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
-	if err != nil {
-		t.Fatalf("NewPipeline: %v", err)
-	}
-	result, err := pipeline.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// The session must report an error (renameDir failed).
-	if len(result.Sessions) != 1 {
-		t.Fatalf("Sessions len = %d, want 1", len(result.Sessions))
-	}
-	if result.Sessions[0].Error == nil {
-		t.Errorf("Sessions[0].Error = nil, want non-nil (renameDir should have failed)")
-	}
-	if result.Summary.Errors != 1 {
-		t.Errorf("Summary.Errors = %d, want 1", result.Summary.Errors)
-	}
-
-	// The destination sessionDir must NOT exist — renameDir cleanup must have removed it.
-	base := expectedOutputBase(testOutputDir, testSessionID)
-	if innerFS.Dirs[base] {
-		t.Errorf("sessionDir %q still exists after renameDir failure; partial dst was not cleaned up", base)
-	}
-	// Also verify no files leaked into sessionDir.
-	entries, _ := innerFS.ReadDir(testOutputDir + "/" + testutil.TestHostSlug)
-	for _, e := range entries {
-		if e.Name() == testSessionID {
-			t.Errorf("sessionDir entry %q found under host slug dir; partial dst was not cleaned up", e.Name())
-		}
-	}
-}
-
 func TestPipeline_HostSlugFallback(t *testing.T) {
 	// When remote is empty, DeriveHostSlug uses the worktree path as fallback.
 	mfs := testutil.NewMemFS()
@@ -1766,8 +1689,11 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 
 	// Store that always fails on InsertSessions.
 	store := &testutil.StubSessionStore{InsertErr: errors.New("db locked")}
+	metricsStore := testutil.NewStubMetricsStore()
+	metricsStore.StaleIndexSessions = []ingest.SessionID{session.SessionID}
+	indexer := &recordingIndexer{kind: ingest.TranscriptSourceFile}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1790,12 +1716,20 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 	if result.Summary.StoreError == nil {
 		t.Errorf("Summary.StoreError = nil, want non-nil (store returned error)")
 	}
+	if indexer.bytesCalls != 0 || indexer.fileCalls != 0 || result.Summary.Indexed != 0 {
+		t.Errorf("failed mirror authorized indexing through drain or stale sweep: bytes=%d files=%d indexed=%d", indexer.bytesCalls, indexer.fileCalls, result.Summary.Indexed)
+	}
 
 	// Verify filesystem output exists.
 	base := expectedOutputBase(testOutputDir, testSessionID)
 	metaPath := fmt.Sprintf("%s/%s--metadata.json", base, testSessionID)
 	if _, err := mfs.Stat(metaPath); err != nil {
 		t.Errorf("metadata file not found at %q: %v", metaPath, err)
+	}
+	data, err := mfs.ReadFile(metaPath)
+	var written ingest.UnifiedMetadata
+	if err != nil || json.Unmarshal(data, &written) != nil || written.DerivedAt != nil {
+		t.Errorf("failed mirror must retain committed metadata without DerivedAt: %v", err)
 	}
 }
 
@@ -6215,9 +6149,8 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 // successful pipeline run. DerivedAt marks metadata.json as a derived artifact;
 // the DB INSERT records the session in the store.
 //
-// Note: write-order enforcement (DB INSERT before metadata.json) is a future
-// enhancement requiring pipeline restructuring. This test verifies the observable
-// outcomes without asserting on ordering.
+// The complete file pair commits before its database mirror; DerivedAt is added
+// only after that mirror succeeds.
 func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6239,6 +6172,16 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	store := &testutil.StubSessionStore{
 		OnInsert: func(_ []ingest.StoreEntry) {
 			dbInsertCalled = true
+			path := fmt.Sprintf("%s/%s--metadata.json", expectedOutputBase(testOutputDir, testSessionID), testSessionID)
+			data, readErr := mfs.ReadFile(path)
+			if readErr != nil {
+				t.Errorf("database mirror started before complete metadata commit: %v", readErr)
+				return
+			}
+			var committed ingest.UnifiedMetadata
+			if err := json.Unmarshal(data, &committed); err != nil || committed.DerivedAt != nil {
+				t.Errorf("unmirrored file metadata must be readable without DerivedAt: %v", err)
+			}
 		},
 	}
 	cfg := makePipelineConfig(testOutputDir)

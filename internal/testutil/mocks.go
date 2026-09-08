@@ -139,10 +139,11 @@ var (
 // MemFS is an in-memory filesystem for testing.
 // All methods are safe for concurrent use (protected by mu).
 type MemFS struct {
-	mu       sync.RWMutex
-	Files    map[string][]byte
-	Dirs     map[string]bool
-	ModTimes map[string]time.Time
+	mu            sync.RWMutex
+	artifactLocks map[string]chan struct{}
+	Files         map[string][]byte
+	Dirs          map[string]bool
+	ModTimes      map[string]time.Time
 }
 
 var _ ingest.FileSystem = (*MemFS)(nil)
@@ -150,9 +151,10 @@ var _ ingest.FileSystem = (*MemFS)(nil)
 // NewMemFS creates an empty MemFS with root "/" pre-created.
 func NewMemFS() *MemFS {
 	m := &MemFS{
-		Files:    make(map[string][]byte),
-		Dirs:     make(map[string]bool),
-		ModTimes: make(map[string]time.Time),
+		Files:         make(map[string][]byte),
+		Dirs:          make(map[string]bool),
+		ModTimes:      make(map[string]time.Time),
+		artifactLocks: make(map[string]chan struct{}),
 	}
 	m.Dirs["/"] = true
 	return m

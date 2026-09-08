@@ -12,9 +12,9 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL WHERE session_id = ?`
+const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL, indexed_input_hash = NULL WHERE session_id = ?`
 
-const sqlUpdateIndexStateWithSessionEntriesHash = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = ? WHERE session_id = ?`
+const sqlUpdateIndexStateWithSessionEntriesHash = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = ?, indexed_input_hash = ? WHERE session_id = ?`
 
 // validateIndexerRevisionOnConn runs under the same transaction as entry writes.
 // A force or source refresh must not replace output produced by a newer parser.
@@ -38,14 +38,18 @@ func validateIndexerRevisionOnConn(conn *sqlite.Conn, sessionID ingest.SessionID
 	return nil
 }
 
-// UpdateIndexState sets the index_version and indexed_at for a session after
-// successful indexing.
-func (s *Store) UpdateIndexState(ctx context.Context, sessionID ingest.SessionID, version int, indexedAtMs int64) error {
+// UpdateIndexState is a legacy stamp-only write. It sets the producer and time
+// but clears output/input proofs that it cannot bind to an atomic entry write.
+func (s *Store) UpdateIndexState(ctx context.Context, sessionID ingest.SessionID, version int, indexedAtMs int64) (err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	defer sqlitex.Transaction(conn)(&err)
+	if err := validateIndexerRevisionOnConn(conn, sessionID, version); err != nil {
+		return err
+	}
 
 	if err := sqlitex.ExecuteTransient(conn, sqlUpdateIndexState, &sqlitex.ExecOptions{
 		Args: []any{version, indexedAtMs, string(sessionID)},
@@ -55,25 +59,33 @@ func (s *Store) UpdateIndexState(ctx context.Context, sessionID ingest.SessionID
 	return nil
 }
 
-// UpdateIndexStateWithSessionEntriesHash sets the index state and the parsed
-// entries digest together. Use it only after the same transaction has stored the
-// matching session_entries rows.
-func (s *Store) UpdateIndexStateWithSessionEntriesHash(ctx context.Context, sessionID ingest.SessionID, version int, indexedAtMs int64, sessionEntriesHash string) error {
+// UpdateIndexStateWithSessionEntriesHash is a legacy stamp-only write. It records
+// the supplied producer and output digest but clears the indexed input proof;
+// only IndexSessionEntryBatch binds captured input to the matching entry write.
+func (s *Store) UpdateIndexStateWithSessionEntriesHash(ctx context.Context, sessionID ingest.SessionID, version int, indexedAtMs int64, sessionEntriesHash string) (err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	defer sqlitex.Transaction(conn)(&err)
+	if err := validateIndexerRevisionOnConn(conn, sessionID, version); err != nil {
+		return err
+	}
 
-	if err := updateIndexStateWithSessionEntriesHashOnConn(conn, sessionID, version, indexedAtMs, sessionEntriesHash); err != nil {
+	if err := updateIndexStateWithSessionEntriesHashOnConn(conn, sessionID, version, indexedAtMs, sessionEntriesHash, nil); err != nil {
 		return err
 	}
 	return nil
 }
 
-func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, version int, indexedAtMs int64, sessionEntriesHash string) error {
+func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, version int, indexedAtMs int64, sessionEntriesHash string, indexedInputHash *string) error {
+	var inputHash any
+	if indexedInputHash != nil {
+		inputHash = *indexedInputHash
+	}
 	if err := sqlitex.ExecuteTransient(conn, sqlUpdateIndexStateWithSessionEntriesHash, &sqlitex.ExecOptions{
-		Args: []any{version, indexedAtMs, sessionEntriesHash, string(sessionID)},
+		Args: []any{version, indexedAtMs, sessionEntriesHash, inputHash, string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: update index state and session_entries_hash for %s: %w", sessionID, err)
 	}

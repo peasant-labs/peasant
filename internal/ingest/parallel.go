@@ -130,8 +130,9 @@ func drainHeap(h *sessionSizeHeap) []sessionSize {
 
 // workerResult is the output of a single processSession call.
 type workerResult struct {
-	result SessionResult
-	meta   *UnifiedMetadata
+	result   SessionResult
+	meta     *UnifiedMetadata
+	artifact *ManagedArtifact
 	// transcriptData holds the already-read bytes for the in-memory index path.
 	// Nil on error or skip.
 	//
@@ -584,6 +585,11 @@ func (b *StagingBuffer) Add(r workerResult) bool {
 	if aLen > 0 {
 		physStart := aStart % int64(len(b.arena))
 		r.transcriptData = b.arena[physStart : physStart+aLen]
+		if r.artifact != nil {
+			// Publication evidence shares the same bounded payload lifetime as
+			// indexing. Do not retain one extra heap transcript in every run slot.
+			r.artifact.Transcript = r.transcriptData
+		}
 	}
 
 	// CAS loop: claim exactly one slot index. Each index is claimed by at most

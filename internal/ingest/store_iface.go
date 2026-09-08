@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -144,6 +145,44 @@ type SessionEntryWrite struct {
 	IndexVersion   int
 	IndexerVersion int
 	IndexedAtMs    int64
+	// ExpectedState is the SQL snapshot captured before parsing. A nil value
+	// selects an unproven legacy write, which cannot retain an input proof.
+	ExpectedState *SessionIndexState
+	// IndexedInputHash identifies the input actually consumed by this parser run.
+	// Supplying it requires an expected state with a known artifact identity.
+	IndexedInputHash *string
+}
+
+// SessionIndexState is the complete stored state used to condition an index
+// replacement. Nil fields mean SQL NULL, never an empty string or a target value.
+// IndexerVersion maps to the historical sessions.index_version column.
+type SessionIndexState struct {
+	SessionID          SessionID
+	Harness            Harness
+	ArtifactHash       *string
+	IndexerVersion     int
+	IndexVersion       *int
+	IndexedAt          *int64
+	IndexedInputHash   *string
+	SessionEntriesHash *string
+}
+
+// StaleIndexWorkError means the captured SQL state changed before the index
+// replacement. The caller must capture current input and plan a new parser run.
+type StaleIndexWorkError struct {
+	SessionID SessionID
+}
+
+var _ error = (*StaleIndexWorkError)(nil)
+
+func (e *StaleIndexWorkError) Error() string {
+	return fmt.Sprintf("store: captured index state for session %s changed before replacement; this parser result was refused and current entries and producer evidence were preserved; capture current input and retry indexing", e.SessionID)
+}
+
+// SessionIndexStateReader captures SQL evidence only. The indexing caller must
+// separately bind this snapshot to the captured files before claiming coherence.
+type SessionIndexStateReader interface {
+	ReadIndexState(context.Context, SessionID) (*SessionIndexState, error)
 }
 
 // SessionEntryWriteResult reports the outcome for one SessionEntryWrite.
