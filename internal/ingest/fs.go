@@ -44,14 +44,11 @@ func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
 	return f.FileSystem.ReadFile(path)
 }
 
-func completeJSONLPrefix(data []byte, tolerateMalformedFinalRecord bool) ([]byte, error) {
+func completeJSONLPrefix(data []byte) ([]byte, error) {
 	lastComplete := bytes.LastIndexByte(data, '\n')
 	records := bytes.Split(data[:lastComplete+1], []byte{'\n'})
 	for i, record := range records {
 		if len(bytes.TrimSpace(record)) > 0 && !json.Valid(record) {
-			if tolerateMalformedFinalRecord && i == len(records)-2 {
-				return data[:bytes.LastIndex(data[:lastComplete], []byte{'\n'})+1], nil
-			}
 			return nil, fmt.Errorf("capture JSONL record %d: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest", i+1)
 		}
 	}

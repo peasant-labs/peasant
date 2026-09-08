@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -83,11 +84,13 @@ type piEntry struct {
 }
 
 type piDocument struct {
-	header   piEntry
-	active   []piEntry
-	title    string
-	hasTitle bool
-	warnings []DiagnosticEntry
+	// consumedBytes excludes only a recoverable incomplete physical final line.
+	consumedBytes int
+	header        piEntry
+	active        []piEntry
+	title         string
+	hasTitle      bool
+	warnings      []DiagnosticEntry
 }
 
 func piSourceError(step string, line int, cause error) error {
@@ -128,7 +131,7 @@ func readPiSource(ctx context.Context, fs FileSystem, path string) ([]byte, erro
 }
 
 func parsePiDocument(ctx context.Context, data []byte) (piDocument, error) {
-	var doc piDocument
+	doc := piDocument{consumedBytes: len(data)}
 	if len(data) > piMaxFile {
 		return doc, piSourceError("parse", 0, fmt.Errorf("file exceeds 64 MiB"))
 	}
@@ -141,7 +144,10 @@ func parsePiDocument(ctx context.Context, data []byte) (piDocument, error) {
 	}
 	entries := make(map[string]piEntry)
 	var order []string
+	offset := 0
 	for line, raw := range lines {
+		lineStart := offset
+		offset += len(raw) + 1
 		if err := ctx.Err(); err != nil {
 			return doc, err
 		}
@@ -153,9 +159,8 @@ func parsePiDocument(ctx context.Context, data []byte) (piDocument, error) {
 			continue
 		}
 		if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: piMaxLine, MaxDocumentDepth: 128}); err != nil {
-			var probe json.RawMessage
-			syntax := json.Unmarshal(raw, &probe)
-			if line == len(lines)-1 && syntax != nil && syntax.Error() == "unexpected end of JSON input" && !strings.Contains(err.Error(), "duplicate") {
+			if line == len(lines)-1 && piIncompleteTail(raw, err) {
+				doc.consumedBytes = lineStart
 				doc.warnings = append(doc.warnings, piWarning("incomplete_tail", line+1, "Incomplete final JSONL line was ignored; the complete prefix was imported."))
 				break
 			}
@@ -248,6 +253,18 @@ func parsePiDocument(ctx context.Context, data []byte) (piDocument, error) {
 		}
 	}
 	return doc, nil
+}
+
+// A syntactic EOF cannot override an earlier raw-scanner safety failure (such
+// as duplicate keys, invalid Unicode, or excessive depth).
+func piIncompleteTail(raw []byte, scanErr error) bool {
+	if !errors.Is(scanErr, io.EOF) && !errors.Is(scanErr, io.ErrUnexpectedEOF) {
+		return false
+	}
+	var probe json.RawMessage
+	var syntax *json.SyntaxError
+	err := json.Unmarshal(raw, &probe)
+	return errors.As(err, &syntax) && syntax.Error() == "unexpected end of JSON input"
 }
 
 func piWarning(code string, line int, message string) DiagnosticEntry {

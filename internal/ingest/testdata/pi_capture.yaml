@@ -1,0 +1,62 @@
+session_id: 11111111-2222-4333-8444-555555555555
+other_session_id: 66666666-2222-4333-8444-555555555555
+initial: |
+  {"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+  {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"initial visible text","timestamp":1767312001000}}
+valid_append: |
+  {"type":"message","id":"u2","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","message":{"role":"user","content":"acquired visible text","timestamp":1767312002000}}
+cases:
+  - name: malformed-final-newline
+    tail: "{\"type\":!}\n"
+    reject: true
+  - name: malformed-final-no-newline
+    tail: '{"type":!]}'
+    reject: true
+  - name: malformed-before-incomplete-tail
+    tail: "{\"type\":!}\n{\"type\":"
+    reject: true
+  - name: incomplete-before-blank-final
+    tail: "{\"type\":\n\n"
+    reject: true
+  - name: incomplete-before-whitespace-final
+    tail: "{\"type\":\n  "
+    reject: true
+  - name: duplicate-complete
+    tail: '{"type":"message","type":"custom"}'
+    reject: true
+  - name: duplicate-incomplete
+    tail: '{"type":"message","type":'
+    reject: true
+  - name: null-complete
+    tail: 'null'
+    reject: true
+  - name: unknown-type
+    tail: '{"type":"future","id":"x","parentId":"u2"}'
+    reject: true
+  - name: dangling-parent
+    tail: '{"type":"message","id":"x","parentId":"missing","message":{"role":"user","content":"bad ref"}}'
+    reject: true
+  - name: duplicate-entry-id
+    tail: '{"type":"message","id":"u1","parentId":null,"message":{"role":"user","content":"duplicate"}}'
+    reject: true
+  - name: invalid-utf8
+    tail: '{"type":"session_info","id":"x","parentId":"u2","name":"INVALID_UTF8"}'
+    invalid_utf8: true
+    reject: true
+  - name: incomplete-final
+    tail: '{"type":'
+    incomplete: true
+  - name: invalid-utf8-incomplete
+    tail: '{"name":"INVALID_UTF8","type":'
+    invalid_utf8: true
+    reject: true
+  - name: invalid-surrogate-incomplete
+    tail: '{"name":"\ud800","type":'
+    reject: true
+  - name: incomplete-final-newline
+    tail: "{\"type\":\n"
+    incomplete: true
+  - name: valid-append
+    tail: ''
+  - name: valid-blank-lines
+    tail: "\n  \n"
