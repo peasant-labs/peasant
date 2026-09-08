@@ -552,7 +552,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 			Role:           t.Role,
 			Content:        t.Content,
 			ToolCalls:      toolCalls,
-			Timestamp:      t.Timestamp,
+			Timestamp:      t.Timestamp.UTC(),
 			Depth:          t.Depth,
 			ParentIndex:    t.ParentIndex,
 			EntryType:      t.EntryType,

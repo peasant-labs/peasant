@@ -323,4 +323,9 @@ func assertFullPiWebSocket(t *testing.T, provider *StoreDataProvider, expected *
 	if !reflect.DeepEqual(detail.Turns, expected.Turns) || !reflect.DeepEqual(detail.NativeMetadata, expected.NativeMetadata) || !detail.StartTime.Equal(expected.StartTime) || !detail.EndTime.Equal(expected.EndTime) {
 		t.Fatal("full native WebSocket/export projection diverged after source removal")
 	}
+	for _, turn := range detail.Turns {
+		if turn.Timestamp.Location() != time.UTC {
+			t.Fatal("native WebSocket turn timestamp is not canonical UTC")
+		}
+	}
 }
