@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,10 +63,8 @@ type DiffResult struct {
 
 // DiffEntry associates a DiscoveredSession with its computed DiffStatus.
 type DiffEntry struct {
-	Session      DiscoveredSession
-	Status       DiffStatus
-	captured     *MaterializedTranscript
-	captureError error
+	Session DiscoveredSession
+	Status  DiffStatus
 }
 
 // PipelineResult summarizes a pipeline run.
@@ -652,17 +651,24 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			}
 		}
 
-		// Selection scopes source acquisition too. The earlier diff is only a
-		// discovery hint: accepted source evidence decides the authoritative no-op.
-		if supportsSessionCapture(entry.Session) {
-			entry.captured, entry.captureError = p.captureSession(ctx, entry.Session)
-			if entry.captured != nil && entry.captured.Session != nil {
-				entry.Session = *entry.captured.Session
-			}
-			if entry.captureError != nil {
+		// Selected supported sources are decided inside the bounded root worker,
+		// never captured into the whole-batch discovery maps.
+		if supportsSessionCapture(entry.Session) && !p.config.DryRun {
+			toProcessEntries = append(toProcessEntries, entry)
+			advanceFilter()
+			continue
+		}
+		if supportsSessionCapture(entry.Session) && p.config.DryRun {
+			// Dry-run has no workers or staging. Compare one temporary capture
+			// at a time, retaining only the classification in its report.
+			captured, captureErr := p.captureSession(ctx, entry.Session)
+			if captureErr != nil {
 				entry.Status = DiffUpdated
 			} else {
-				status, err := p.classifyCapturedSession(ctx, entry.Session, entry.captured)
+				if captured.Session != nil {
+					entry.Session = *captured.Session
+				}
+				status, err := p.classifyCapturedSession(ctx, entry.Session, captured)
 				if err != nil {
 					return nil, err
 				}
@@ -817,6 +823,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			done := int(extractDoneAtomic.Add(1))
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: toProcess})
 			staging.Add(wr)
+			// The root's heap payload must not outlive transfer to the arena,
+			// including while this worker walks a large descendant subtree.
+			wr.transcriptData = nil
 			// BFS over subtree: process all descendants inline (same goroutine →
 			// no directory races on the parent's {hostSlug}/{parentID}/ tree).
 			queue := childrenOf[entry.Session.SessionID]
@@ -1087,6 +1096,17 @@ func (p *Pipeline) drainLoop(
 						"session_id", wr.result.SessionID,
 						"path", metaPath,
 						"error", err)
+					continue
+				}
+				if p.store == nil && len(wr.fileCaptureEvidence) > 0 {
+					digest := sha256.Sum256(metaJSON)
+					evidence := append(wr.fileCaptureEvidence, digest[:]...)
+					path := fileCaptureEvidencePath(metaPath)
+					if err := p.fs.WriteFile(path+".tmp", evidence, defaults.PrivateFilePerm); err != nil {
+						slog.Warn("pipeline: save captured source evidence; retry harvest logs to refresh the managed snapshot", "session_id", wr.result.SessionID, "error", err)
+					} else if err := p.fs.Rename(path+".tmp", path); err != nil {
+						slog.Warn("pipeline: commit captured source evidence; retry harvest logs to refresh the managed snapshot", "session_id", wr.result.SessionID, "error", err)
+					}
 				}
 			}
 
@@ -1828,7 +1848,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 					return DiffUpdated, nil
 				}
 			} else if factory, ok := p.adapters[session.Harness]; ok && p.git != nil && !supportsSessionCapture(session) {
-				// Supported sources defer identity to FILTER's accepted capture;
+				// Supported sources defer identity to the root worker's capture;
 				// preliminary discovery must not read their payloads again.
 				meta, err := factory(p.fs, p.git, p.salt).ExtractMetadata(ctx, session)
 				if err != nil {
@@ -1892,6 +1912,20 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			return DiffActive, nil
 		}
 		return DiffNew, nil
+	}
+	if captured != nil {
+		// Private evidence is bound to the exact successful metadata file, whose
+		// content hash also verifies the managed transcript. Legacy/missing or
+		// interrupted evidence refreshes once; ingest audit time is not freshness.
+		evidence, readErr := p.fs.ReadFile(fileCaptureEvidencePath(metaPath))
+		digest := sha256.Sum256(data)
+		want := append(fileCaptureEvidence(captured), digest[:]...)
+		transcriptPath := filepath.Join(filepath.Dir(metaPath), fmt.Sprintf("%s--transcript.%s", session.SessionID, session.SourceFormat))
+		transcript, transcriptErr := p.fs.ReadFile(transcriptPath)
+		if readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want) && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript) {
+			return DiffUnchanged, nil
+		}
+		return DiffUpdated, nil
 	}
 
 	// Source modified more recently than ingest time: re-ingest.
@@ -2029,6 +2063,21 @@ func (p *Pipeline) findMetadataPath(ctx context.Context, session DiscoveredSessi
 	return "", nil // not found
 }
 
+// fileCaptureEvidence is private local evidence, not part of wire metadata.
+// Include pre-redaction identity so redacted logs also detect upstream repair.
+func fileCaptureEvidence(captured *MaterializedTranscript) []byte {
+	remote := ""
+	if captured.Metadata.Git.Remote != nil {
+		remote = NormalizeRemoteForMatch(*captured.Metadata.Git.Remote)
+	}
+	identity := sha256.Sum256([]byte(fmt.Sprintf("%q/%q/%q", captured.Metadata.HostSlug, captured.Metadata.Project.Hash, remote)))
+	return append(append([]byte(nil), captured.SourceFingerprint...), identity[:]...)
+}
+
+func fileCaptureEvidencePath(metaPath string) string {
+	return strings.TrimSuffix(metaPath, defaults.MetadataSuffix) + "--source-capture"
+}
+
 // captureSession detaches source bytes and metadata before any managed writes.
 // Legacy mutable multi-file formats retain their existing reader limitations.
 func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession) (*MaterializedTranscript, error) {
@@ -2092,24 +2141,31 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		result.Error = err
 		return workerResult{result: result}
 	}
-	if entry.captureError != nil {
-		return fail(entry.captureError)
-	}
-	captured := entry.captured
-	if captured == nil {
-		var err error
-		captured, err = p.captureSession(ctx, session)
-		if err != nil {
-			return fail(err)
-		}
+	captured, err := p.captureSession(ctx, session)
+	if err != nil {
+		return fail(err)
 	}
 	if captured.Session != nil {
 		session = *captured.Session
 		result.ParentUUID = session.ParentUUID
 	}
+	if supportsSessionCapture(session) && !p.config.Reindex {
+		result.Status, err = p.classifyCapturedSession(ctx, session, captured)
+		if err != nil {
+			return fail(err)
+		}
+		if result.Status == DiffUnchanged {
+			// Drain commits the parent and acknowledges the empty arena slot,
+			// without inserting, rewriting metadata, or scheduling indexing.
+			return workerResult{result: result}
+		}
+	}
 	rawData, meta := captured.Data, captured.Metadata
+	var captureEvidence []byte
+	if p.store == nil && supportsSessionCapture(session) {
+		captureEvidence = fileCaptureEvidence(captured)
+	}
 	session.EventSeq = captured.EventSeq
-	var err error
 
 	// Set ingested timestamp.
 	ingested := time.Now().UnixMilli()
@@ -2343,8 +2399,12 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		)
 		return workerResult{result: result}
 	}
-	if loc, ok := p.locationCache[session.SessionID]; ok && loc.HostSlug != "" && loc.HostSlug != string(hostSlug) {
-		oldDir := SessionDir(outputDir, loc.HostSlug, session.SessionID.String(), loc.ParentID)
+	oldMetaPath, lookupErr := p.findMetadataPath(ctx, session)
+	if lookupErr != nil {
+		return fail(errors.Join(lookupErr, p.fs.RemoveAll(tmpDir)))
+	}
+	if oldMetaPath != "" && filepath.Dir(oldMetaPath) != sessionDir {
+		oldDir := filepath.Dir(oldMetaPath)
 		if _, oldErr := p.fs.Stat(oldDir); oldErr == nil {
 			if err := p.moveSessionFiles(oldDir, sessionDir, session.SessionID.String()); err != nil {
 				result.Error = errors.Join(
@@ -2380,6 +2440,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		result:               result,
 		meta:                 meta,
 		sourceFingerprint:    sourceFingerprint,
+		fileCaptureEvidence:  captureEvidence,
 		eventSeq:             session.EventSeq,
 		transcriptData:       transcriptData,
 		outputTranscriptPath: outputTranscriptPath,

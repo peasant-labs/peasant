@@ -37,8 +37,8 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 |---|-------|-------------|--------|-------------|
 | 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. All-fail is fatal; partial OK. |
 | 2 | DIFF | Sequential | No | Preliminary New / Updated / Unchanged / Active hints. |
-| 3 | FILTER | Sequential | No | Apply selection, capture supported sources, compare consumed evidence and captured identity; skip unchanged; resolve FK parent deps. Active sessions are eligible. |
-| 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, atomic write (tmp + rename). |
+| 3 | FILTER | Sequential | No | Apply selection and resolve FK parent deps; enqueue supported source candidates without payloads. Active sessions are eligible. |
+| 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Capture source and compare consumed evidence/identity; no-op or extract metadata, redact, atomic write (tmp + rename). |
 | 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Best-effort | Drain StagingBuffer → upsert SQLite → stream indexable sessions. Pipelined with INDEX. |
 | 5 | INDEX | **Concurrent** (parser workers + serial writer) | Best-effort | Parse transcripts in bounded workers → serial `session_entries` writes. Receives streamed work from drainLoop. |
 | 6 | COMPUTE | Sequential | Best-effort | 16 metric functions + daily insights. |
@@ -48,9 +48,12 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 
 **Best-effort** = cannot fail the pipeline. Logs warning, continues. Only total DISCOVER failure is fatal.
 
-For supported append-only and SQLite sources, FILTER makes the authoritative freshness
-decision from captured metadata and bytes. EXTRACT+WRITE reuses that same capture and
-persists its fingerprint/cursor; it does not reacquire the source. Matching content does
+For supported append-only and SQLite sources, each bounded root worker makes the authoritative
+freshness decision from captured metadata and bytes, then processes that same capture and
+persists its fingerprint/cursor; it does not reacquire the source. Batch maps hold no payloads.
+No-op results still pass through staging for parent commit, progress, and release, without
+store writes or indexing. Store-free logs retain a private source/identity digest bound to
+the successful metadata and managed transcript, not a wire metadata extension. Matching content does
 not suppress project-identity repair. Completion time remains audit data. Legacy mutable
 multi-file readers retain their existing consistency limitations.
 
