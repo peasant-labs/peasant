@@ -71,14 +71,20 @@ func NewContentSourceAuthority(s string) (ContentSourceAuthority, error) {
 type ContentCaptureFormat string
 
 const (
-	ContentCaptureFormatFull          ContentCaptureFormat = "full"
-	ContentCaptureFormatPreviewOnly   ContentCaptureFormat = "preview_only"
-	ContentCaptureFormatLegacyPreview ContentCaptureFormat = "legacy_preview_only"
+	// ContentCaptureFormatFull: every entry of the session is stored, so the
+	// row is eligible for full_content reads.
+	ContentCaptureFormatFull ContentCaptureFormat = "full"
+	// ContentCaptureFormatPreviewOnly: only the bounded preview projection is
+	// stored, so a full_content read of the row fails closed.
+	ContentCaptureFormatPreviewOnly ContentCaptureFormat = "preview_only"
+	// ContentCaptureFormatLegacyPreviewOnly: preview_only as inferred for rows
+	// that predate full content capture. New ingest never writes it.
+	ContentCaptureFormatLegacyPreviewOnly ContentCaptureFormat = "legacy_preview_only"
 )
 
 // AllContentCaptureFormats returns the canonical closed set in declared order.
 func AllContentCaptureFormats() []ContentCaptureFormat {
-	return []ContentCaptureFormat{ContentCaptureFormatFull, ContentCaptureFormatPreviewOnly, ContentCaptureFormatLegacyPreview}
+	return []ContentCaptureFormat{ContentCaptureFormatFull, ContentCaptureFormatPreviewOnly, ContentCaptureFormatLegacyPreviewOnly}
 }
 
 func (f ContentCaptureFormat) String() string { return string(f) }

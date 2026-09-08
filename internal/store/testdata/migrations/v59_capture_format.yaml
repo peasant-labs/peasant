@@ -41,6 +41,20 @@ cases:
 
   - name: unmapped_capture_value_fails_migration
     migrationFails: true
+    # The refusal must roll back completely: the user repairs the offending row
+    # from the predecessor schema, so that row, that column and that index must
+    # all survive, and the rebuild scratch table must not be left behind.
+    failedAssertions:
+      - {query: "SELECT capture_revision FROM session_content_captures WHERE session_id='66666666-6666-4666-8666-666666666666'", want: unrecognised-capture-tag}
+      - {query: "SELECT status || ':' || source_authority || ':' || entry_count || ':' || captured_at_ms FROM session_content_captures WHERE session_id='66666666-6666-4666-8666-666666666666'", want: 'incomplete:none:0:46'}
+      - {query: "SELECT COUNT(*) FROM pragma_table_info('session_content_captures') WHERE name='capture_format'", want: '0'}
+      - {query: "SELECT COUNT(*) FROM sqlite_master WHERE name='session_content_captures_v58'", want: '0'}
+      - {query: "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_session_content_captures_status'", want: '1'}
+    # The refusal must be answerable: which row, which value, what to do next.
+    failedOpenMessage:
+      - "66666666-6666-4666-8666-666666666666"
+      - "unrecognised-capture-tag"
+      - "peasant harvest index --force"
     seed:
       - "INSERT INTO projects (project_hash, canonical_cwd) VALUES ('fixture-project', '/fixture/project')"
       - "INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('fixture-host', 'fixture-host')"

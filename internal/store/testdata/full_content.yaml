@@ -44,3 +44,6 @@ shape_changes:
     sql: "UPDATE session_entries SET timestamp_ms=1 WHERE entry_index=0"
   - name: tool_output
     sql: "UPDATE session_entries SET tool_output='changed' WHERE entry_index=0"
+capture_format_rejections:
+  - name: unknown_capture_format
+    format: not-a-capture-format

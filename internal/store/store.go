@@ -359,6 +359,11 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			_ = pool.Close()
 			return nil, fmt.Errorf("store: take connection for migration: %w", err)
 		}
+		if err := refuseUnmappableCaptureFormats(conn); err != nil {
+			pool.Put(conn)
+			_ = pool.Close()
+			return nil, err
+		}
 		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 			pool.Put(conn)
 			_ = pool.Close()

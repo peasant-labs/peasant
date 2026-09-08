@@ -35,10 +35,15 @@ type contentSQLCase struct {
 	Name string
 	SQL  string
 }
+type contentFormatCase struct {
+	Name   string
+	Format string
+}
 type contentFixtures struct {
-	Cases        []contentCase
-	Corruptions  []contentSQLCase
-	ShapeChanges []contentSQLCase `yaml:"shape_changes"`
+	Cases                   []contentCase
+	Corruptions             []contentSQLCase
+	ShapeChanges            []contentSQLCase    `yaml:"shape_changes"`
+	CaptureFormatRejections []contentFormatCase `yaml:"capture_format_rejections"`
 }
 
 func loadContentFixtures(t *testing.T) contentFixtures {
@@ -57,7 +62,10 @@ func loadContentFixtures(t *testing.T) contentFixtures {
 	for _, c := range f.ShapeChanges {
 		names[c.Name] = true
 	}
-	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output"} {
+	for _, c := range f.CaptureFormatRejections {
+		names[c.Name] = true
+	}
+	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format"} {
 		if !names[name] {
 			t.Fatalf("required fixture %s missing", name)
 		}
@@ -352,4 +360,39 @@ func TestFullContentBackfillFailurePreservesAnnotationsAndLaterWrites(t *testing
 	entries[0].ToolOutput = strPtr("updated semantic tool output")
 	writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
 	assertReindexTargetSpan(t, s, annotation, 0, 1)
+}
+
+// A caller-supplied capture format outside the canonical set is refused at the
+// Go boundary with an answerable message, and the stored capture is untouched.
+func TestFullContentWriteRefusesUnknownCaptureFormat(t *testing.T) {
+	for _, rejection := range loadContentFixtures(t).CaptureFormatRejections {
+		t.Run(rejection.Name, func(t *testing.T) {
+			s := openTestStore(t)
+			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+			seedSession(t, s, string(id))
+			entries := contentEntries(id, loadContentFixtures(t).Cases[0])
+			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			before := capture(t, s, id)
+			if before.CaptureFormat != ingest.ContentCaptureFormatFull {
+				t.Fatalf("seeded capture is not full: %s", before.CaptureFormat)
+			}
+			r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{
+				SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, RequireFullContent: true,
+				IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000006000,
+				ContentCapture: ingest.SessionContentCaptureWrite{
+					Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
+					CaptureFormat: ingest.ContentCaptureFormat(rejection.Format),
+				},
+			}})[0]
+			if r.Err == nil {
+				t.Fatal("an unknown capture format was stored instead of refused")
+			}
+			if !strings.Contains(r.Err.Error(), "outside the closed set") {
+				t.Fatalf("refusal does not name the closed set: %v", r.Err)
+			}
+			if after := capture(t, s, id); !reflect.DeepEqual(after, before) {
+				t.Fatalf("refused write changed the stored capture: %+v want %+v", after, before)
+			}
+		})
+	}
 }

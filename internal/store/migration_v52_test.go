@@ -33,7 +33,7 @@ func TestMigrationV52LegacyCaptureIncomplete(t *testing.T) {
 	}
 	defer s.Close()
 	c := capture(t, s, id)
-	if c.Status != ingest.ContentCaptureIncomplete || c.SourceAuthority != ingest.ContentSourceNone || c.CaptureFormat != ingest.ContentCaptureFormatLegacyPreview || c.FailureCode != "legacy_preview_only" || c.FullCaptureSHA256 != "" || c.PublicationCaptureRevision != 0 {
+	if c.Status != ingest.ContentCaptureIncomplete || c.SourceAuthority != ingest.ContentSourceNone || c.CaptureFormat != ingest.ContentCaptureFormatLegacyPreviewOnly || c.FailureCode != "legacy_preview_only" || c.FullCaptureSHA256 != "" || c.PublicationCaptureRevision != 0 {
 		t.Fatalf("legacy capture incorrectly inferred: %+v", c)
 	}
 	if _, err := s.ReadSessionEntries(context.Background(), id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err == nil {
