@@ -36,8 +36,8 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 | # | Stage | Concurrency | Fatal? | Description |
 |---|-------|-------------|--------|-------------|
 | 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. All-fail is fatal; partial OK. |
-| 2 | DIFF | Sequential | No | Classify: New / Updated / Unchanged / Active. |
-| 3 | FILTER | Sequential | No | Skip Unchanged + Active; resolve FK parent deps. |
+| 2 | DIFF | Sequential | No | Preliminary New / Updated / Unchanged / Active hints. |
+| 3 | FILTER | Sequential | No | Apply selection, capture supported sources, compare consumed evidence and captured identity; skip unchanged; resolve FK parent deps. Active sessions are eligible. |
 | 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, atomic write (tmp + rename). |
 | 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Best-effort | Drain StagingBuffer → upsert SQLite → stream indexable sessions. Pipelined with INDEX. |
 | 5 | INDEX | **Concurrent** (parser workers + serial writer) | Best-effort | Parse transcripts in bounded workers → serial `session_entries` writes. Receives streamed work from drainLoop. |
@@ -47,6 +47,12 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 | 9 | AUDIT | Sequential | Best-effort | Write `ingest_log` row. |
 
 **Best-effort** = cannot fail the pipeline. Logs warning, continues. Only total DISCOVER failure is fatal.
+
+For supported append-only and SQLite sources, FILTER makes the authoritative freshness
+decision from captured metadata and bytes. EXTRACT+WRITE reuses that same capture and
+persists its fingerprint/cursor; it does not reacquire the source. Matching content does
+not suppress project-identity repair. Completion time remains audit data. Legacy mutable
+multi-file readers retain their existing consistency limitations.
 
 ---
 

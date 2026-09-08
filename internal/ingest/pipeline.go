@@ -654,7 +654,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 
 		// Selection scopes source acquisition too. The earlier diff is only a
 		// discovery hint: accepted source evidence decides the authoritative no-op.
-		if entry.Session.TranscriptOrigin != TranscriptOriginFile || (entry.Session.SourceFormat == SourceFormatJSONL && entry.Session.Harness != HarnessStrike) {
+		if supportsSessionCapture(entry.Session) {
 			entry.captured, entry.captureError = p.captureSession(ctx, entry.Session)
 			if entry.captured != nil && entry.captured.Session != nil {
 				entry.Session = *entry.captured.Session
@@ -1787,6 +1787,10 @@ func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSessio
 	return p.classifyCapturedSession(ctx, session, nil)
 }
 
+func supportsSessionCapture(session DiscoveredSession) bool {
+	return session.TranscriptOrigin != TranscriptOriginFile || (session.SourceFormat == SourceFormatJSONL && session.Harness != HarnessStrike)
+}
+
 func (p *Pipeline) classifyCapturedSession(ctx context.Context, session DiscoveredSession, captured *MaterializedTranscript) (DiffStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return DiffNew, err
@@ -1818,8 +1822,14 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			}
 			return DiffUpdated, nil
 		}
-		if status == DiffUnchanged && p.git != nil && loc.ProjectHash != "" {
-			if factory, ok := p.adapters[session.Harness]; ok {
+		if status == DiffUnchanged && loc.ProjectHash != "" {
+			if captured != nil {
+				if !identityMatchesLocation(captured.Metadata, loc) {
+					return DiffUpdated, nil
+				}
+			} else if factory, ok := p.adapters[session.Harness]; ok && p.git != nil && !supportsSessionCapture(session) {
+				// Supported sources defer identity to FILTER's accepted capture;
+				// preliminary discovery must not read their payloads again.
 				meta, err := factory(p.fs, p.git, p.salt).ExtractMetadata(ctx, session)
 				if err != nil {
 					return DiffUnchanged, err
