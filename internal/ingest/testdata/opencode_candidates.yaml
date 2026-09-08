@@ -355,7 +355,7 @@ entry_path_mutations:
   - {name: reject-prepare-not-bound-to-statement-parameter, kind: executor_prepare_argument, error_contains: exact bounded executor SQL argument}
   - {name: reject-execute-not-bound-to-statement-parameter, kind: executor_execute_argument, error_contains: exact bounded executor SQL argument}
   - {name: reject-approved-local-executor-callable-escape, kind: executor_callable_escape, error_contains: first-class SQLite callable}
-  - {name: reject-extra-initializer-execute, kind: initializer_extra_execute, error_contains: exact source initializer}
+  - {name: reject-extra-initializer-execute, kind: initializer_extra_execute, error_contains: source initializer contains unapproved setup statement}
   - {name: reject-package-level-callable-value, kind: package_callable_value, error_contains: package-level SQLite callable}
   - {name: reject-interface-transfer-of-approved-local-executor, kind: executor_interface, error_contains: interface-compatible bounded executor}
   - {name: reject-current-messages-history-open-blob, kind: current_messages_open_blob, error_contains: direct-data entry path}
