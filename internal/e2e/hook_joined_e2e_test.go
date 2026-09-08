@@ -4,11 +4,8 @@ package e2e
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -491,47 +488,6 @@ func resolveDeveloperGlobalGitConfig(t *testing.T) string {
 		t.Fatalf("resolve the developer's home directory for the isolation guard: %v", err)
 	}
 	return filepath.Join(home, ".gitconfig")
-}
-
-type pathFingerprint struct {
-	paths  []string
-	digest string
-}
-
-// fingerprintPaths hashes every root, skipping anything inside excludedSubtree.
-func fingerprintPaths(t *testing.T, paths []string, excludedSubtree string) pathFingerprint {
-	t.Helper()
-	h := sha256.New()
-	for _, root := range paths {
-		_, _ = h.Write([]byte(root))
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			if err != nil {
-				_, _ = h.Write([]byte(err.Error()))
-				return nil
-			}
-			if path == excludedSubtree || strings.HasPrefix(path, excludedSubtree+string(os.PathSeparator)) {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			info, infoErr := d.Info()
-			if infoErr != nil {
-				return nil
-			}
-			_, _ = h.Write([]byte(path + info.Mode().String() + fmt.Sprint(info.Size(), info.ModTime().UnixNano())))
-			if !d.IsDir() {
-				if b, readErr := os.ReadFile(path); readErr == nil {
-					_, _ = h.Write(b)
-				}
-			}
-			return nil
-		})
-	}
-	return pathFingerprint{paths: paths, digest: hex.EncodeToString(h.Sum(nil))}
 }
 
 func TestDeveloperStateLocations_RejectEveryEmptyRoot(t *testing.T) {

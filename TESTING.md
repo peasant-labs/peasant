@@ -107,6 +107,15 @@ func TestMetricsCompute_EmptyStore(t *testing.T) {
 
 ## Test memory: the staging-arena trap (and the `-race` OOM)
 
+The full-stack E2E harness has a separate memory-sensitive path: the joined-hook
+developer-state isolation guard fingerprints local files. It streams these files
+through a 32 KiB buffer. Loading a multi-gigabyte local database with `os.ReadFile`
+previously made the E2E test process grow with the database size; the race detector
+amplified that allocation. `TestPathFingerprintBoundedMemory` checks this exact
+shared helper with a 64 MiB sparse file and a 1 MiB allocation ceiling, including
+content-only mutation and sandbox-exclusion cases. It runs without the `e2e` tag,
+so the ordinary quality gate protects the full-stack harness from this regression.
+
 Separately from time, the suite's **peak memory** was profiled after CI flakily
 **OOM-SIGTERM'd** `go test -race ./...` (exit 143) on the small 2-core/7 GB
 GitHub runner. The cause was a *single allocation*, and the lesson generalizes:
