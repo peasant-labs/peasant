@@ -4,12 +4,8 @@ package e2e
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -492,51 +488,6 @@ func resolveDeveloperGlobalGitConfig(t *testing.T) string {
 		t.Fatalf("resolve the developer's home directory for the isolation guard: %v", err)
 	}
 	return filepath.Join(home, ".gitconfig")
-}
-
-type pathFingerprint struct {
-	paths  []string
-	digest string
-}
-
-// fingerprintPaths hashes every root, skipping anything inside excludedSubtree.
-func fingerprintPaths(t *testing.T, paths []string, excludedSubtree string) pathFingerprint {
-	t.Helper()
-	h := sha256.New()
-	for _, root := range paths {
-		_, _ = h.Write([]byte(root))
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			if err != nil {
-				_, _ = h.Write([]byte(err.Error()))
-				return nil
-			}
-			if path == excludedSubtree || strings.HasPrefix(path, excludedSubtree+string(os.PathSeparator)) {
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			info, infoErr := d.Info()
-			if infoErr != nil {
-				return nil
-			}
-			_, _ = h.Write([]byte(path + info.Mode().String() + fmt.Sprint(info.Size(), info.ModTime().UnixNano())))
-			if !d.IsDir() {
-				if file, openErr := os.Open(path); openErr == nil {
-					// Developer databases can be much larger than the fixtures.
-					// Hash incrementally rather than retaining the entire file in
-					// e2e.test's heap (and the race detector's shadow memory).
-					_, _ = io.Copy(h, file)
-					_ = file.Close()
-				}
-			}
-			return nil
-		})
-	}
-	return pathFingerprint{paths: paths, digest: hex.EncodeToString(h.Sum(nil))}
 }
 
 func TestDeveloperStateFingerprintDetectsContentChange(t *testing.T) {

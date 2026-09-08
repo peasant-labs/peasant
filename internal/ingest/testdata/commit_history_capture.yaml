@@ -1,0 +1,20 @@
+# A/B modify an existing file during the session. integration retains them;
+# feature is squashed to C before the first ingest. The retained history also
+# has a same-author modification outside the window and another author's work.
+required_case_names:
+  - rewritten_branch_preserves_discoverable_observations
+  - no_git_activity_keeps_the_command_gate
+  - outside_session_window_keeps_the_time_gate
+cases:
+  - name: rewritten_branch_preserves_discoverable_observations
+    session_start: 2024-02-19T12:00:00Z
+    transcript: '{"type":"user","message":{"role":"user","content":"git commit -am work"}}'
+    want_messages: ["session A", "session B"]
+  - name: no_git_activity_keeps_the_command_gate
+    session_start: 2024-02-19T12:00:00Z
+    transcript: '{"type":"user","message":{"role":"user","content":"explain this function"}}'
+    want_messages: []
+  - name: outside_session_window_keeps_the_time_gate
+    session_start: 2024-03-19T12:00:00Z
+    transcript: '{"type":"user","message":{"role":"user","content":"git commit -am work"}}'
+    want_messages: []
