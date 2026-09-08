@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -181,8 +182,11 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 			for _, session := range sessions {
 				after := readHarvestIndexSnapshot(t, db, session.ID)
 				if slices.Contains(fixture.Indexed, session.Name) {
-					if after.IndexerVersion != ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion || reflect.DeepEqual(after.Entries, before[session.ID].Entries) {
+					if after.IndexerVersion != ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion || after.IndexedAt == before[session.ID].IndexedAt {
 						t.Errorf("selected session %s not refreshed: %+v", session.Name, after)
+					}
+					if session.VersionDelta < 0 && reflect.DeepEqual(after.Entries, before[session.ID].Entries) {
+						t.Errorf("selected stale session %s retained its old output", session.Name)
 					}
 				} else if !reflect.DeepEqual(after, before[session.ID]) {
 					t.Errorf("unselected/refused session %s changed: before=%+v after=%+v", session.Name, before[session.ID], after)
@@ -207,9 +211,31 @@ func assertHarvestIndexLogScope(t testing.TB, db *store.Store, sessions []harves
 	}
 	defer db.Pool().Put(conn)
 	var got, want []string
-	err = sqlitex.ExecuteTransient(conn, "SELECT DISTINCT session_id FROM index_log ORDER BY session_id", &sqlitex.ExecOptions{
+	wantedOutcomes := make(map[string]ingest.IndexOutcome)
+	for _, session := range sessions {
+		if slices.Contains(fixture.Indexed, session.Name) {
+			wantedOutcomes[string(session.ID)] = ingest.IndexOutcomeReindexed
+		}
+		if slices.Contains(fixture.Refused, session.Name) {
+			wantedOutcomes[string(session.ID)] = ingest.IndexOutcomeError
+		}
+	}
+	seen := make(map[string]bool)
+	err = sqlitex.ExecuteTransient(conn, "SELECT session_id, outcome, error_message FROM index_log ORDER BY session_id", &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			got = append(got, stmt.ColumnText(0))
+			sid := stmt.ColumnText(0)
+			if !seen[sid] {
+				got = append(got, sid)
+				seen[sid] = true
+			}
+			if outcome, ok := wantedOutcomes[sid]; ok {
+				if stmt.ColumnText(1) != string(outcome) {
+					t.Errorf("session %s index outcome=%q, want %s", sid, stmt.ColumnText(1), outcome)
+				}
+				if outcome == ingest.IndexOutcomeError && !strings.Contains(stmt.ColumnText(2), "no parser ran or entries changed") {
+					t.Errorf("future session %s did not preserve its refusal before parsing: %s", sid, stmt.ColumnText(2))
+				}
+			}
 			return nil
 		},
 	})
@@ -264,7 +290,7 @@ func readHarvestIndexSnapshot(t testing.TB, db *store.Store, id ingest.SessionID
 	return snapshot
 }
 
-func seedHarvestIndexSession(t testing.TB, db *store.Store, output string, fixture harvestIndexSessionFixture, files map[string][]byte) {
+func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixture harvestIndexSessionFixture, files map[string][]byte) {
 	t.Helper()
 	age, err := time.ParseDuration(fixture.Age)
 	if err != nil {
@@ -290,7 +316,18 @@ func seedHarvestIndexSession(t testing.TB, db *store.Store, output string, fixtu
 	}
 	metaPath := filepath.Join(directory, string(fixture.ID)+defaults.MetadataSuffix)
 	transcriptPath := filepath.Join(directory, string(fixture.ID)+"--transcript.jsonl")
-	files[metaPath], files[transcriptPath] = metaData, []byte(fixture.Transcript)
+	if fixture.VersionDelta == 0 {
+		// A current peer has actually consumed these bytes. A force run may
+		// successfully parse identical output without replacing entry rows.
+		storetest.SeedManagedInput(t, db, &ingest.OSFileSystem{}, output, meta, []byte(fixture.Transcript))
+		for _, path := range []string{metaPath, transcriptPath} {
+			files[path], err = os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		return
+	}
 	if err := os.WriteFile(metaPath, metaData, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -305,5 +342,22 @@ func seedHarvestIndexSession(t testing.TB, db *store.Store, output string, fixtu
 	results := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: fixture.ID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[fixture.Harness].IndexerVersion + fixture.VersionDelta, IndexedAtMs: 1700000001000}})
 	if len(results) != 1 || !results[0].Written {
 		t.Fatalf("seed index: %+v", results)
+	}
+	reconcileHarvestIndexMetadata(t, db, output, fixture.ID, metaPath, files)
+	files[transcriptPath] = []byte(fixture.Transcript)
+}
+
+func reconcileHarvestIndexMetadata(t *testing.T, db *store.Store, output string, sid ingest.SessionID, path string, files map[string][]byte) {
+	t.Helper()
+	publisher, err := ingest.NewArtifactPublisher(&ingest.OSFileSystem{}, output, ingest.ArtifactPublisherOptions{Mirror: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := publisher.ReconcileStored(t.Context(), sid, path, nil); err != nil {
+		t.Fatal(err)
+	}
+	files[path], err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -66,18 +66,29 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			if err := filesystem.WriteFile(childTranscript, []byte(fixtures.Transcript), 0600); err != nil {
 				t.Fatal(err)
 			}
+			if err := database.InsertSessions(ctx, []ingest.StoreEntry{
+				{Metadata: parent, Session: ingest.DiscoveredSession{SessionID: fixtures.ParentID, Harness: ingest.HarnessClaudeCode}},
+				{Metadata: child, Session: ingest.DiscoveredSession{SessionID: fixtures.ChildID, Harness: ingest.HarnessClaudeCode, ParentUUID: &fixtures.ParentID}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if fixture.ChildSchema <= ingest.CurrentSchemaVersion {
+				publisher, err := ingest.NewArtifactPublisher(filesystem, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: database})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Reconcile the readable child independently of its refused
+				// parent's metadata before recording the preservation baseline.
+				if _, _, err := publisher.ReconcileStored(ctx, fixtures.ChildID, childPath, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
 			beforeFiles := make(map[string][]byte)
 			for _, path := range []string{parentPath, childPath, parentTranscript, childTranscript} {
 				beforeFiles[path], err = filesystem.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
 				}
-			}
-			if err := database.InsertSessions(ctx, []ingest.StoreEntry{
-				{Metadata: parent, Session: ingest.DiscoveredSession{SessionID: fixtures.ParentID, Harness: ingest.HarnessClaudeCode}},
-				{Metadata: child, Session: ingest.DiscoveredSession{SessionID: fixtures.ChildID, Harness: ingest.HarnessClaudeCode, ParentUUID: &fixtures.ParentID}},
-			}); err != nil {
-				t.Fatal(err)
 			}
 			beforeEntries := make(map[ingest.SessionID][]schema.SessionEntry)
 			beforeState := make(map[ingest.SessionID]metadataPolicyIndexState)
