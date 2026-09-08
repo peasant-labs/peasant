@@ -24,6 +24,7 @@ func TestResolveGitRemoteAttribution(t *testing.T) {
 			WantTracking    string `yaml:"wantTracking"`
 			TrackedCheckout bool   `yaml:"trackedCheckout"`
 			RemoveOrigin    bool   `yaml:"removeOrigin"`
+			LocalUpstream   bool   `yaml:"localUpstream"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(gitRemoteAttributionData, &fixtures); err != nil {
@@ -54,6 +55,9 @@ func TestResolveGitRemoteAttribution(t *testing.T) {
 			run("branch", "untracked")
 			run("config", "branch.recorded.remote", "canonical")
 			run("config", "branch.recorded.merge", "refs/heads/develop")
+			if c.LocalUpstream {
+				run("remote", "set-url", "canonical", repo+"/mirror.git")
+			}
 			if c.TrackedCheckout {
 				run("config", "branch.main.remote", "canonical")
 				run("config", "branch.main.merge", "refs/heads/main")
