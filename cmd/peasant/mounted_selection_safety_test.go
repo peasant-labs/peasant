@@ -367,11 +367,6 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 	for _, entry := range entries {
 		testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 	}
-	for _, entry := range entries {
-		if err := testutil.WriteFullEntries(t.Context(), db, entry.Metadata.SessionID, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close mounted selection store after seeding: %v", err)
 	}
