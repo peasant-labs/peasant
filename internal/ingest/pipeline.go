@@ -471,6 +471,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	start := time.Now()
 	if !p.config.DryRun {
 		p.reconcileManagedArtifacts(ctx)
+	} else {
+		p.inspectDryRunArtifacts(ctx)
 	}
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
@@ -1675,7 +1677,7 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		adapter := factory(p.fs, p.git, p.salt)
 		// The local store doubles as the discovery evidence cache, so an
 		// unchanged transcript is never read and parsed again.
-		if cache, ok := p.store.(ClaudeEvidenceCache); ok {
+		if cache, ok := p.store.(ClaudeEvidenceCache); ok && !p.config.DryRun {
 			AttachClaudeEvidenceCache(adapter, cache)
 		}
 		// The local store also answers where a session id already lives, so
@@ -1717,6 +1719,9 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 // fail-safe value and is listed again on the next run. Losing a verdict is not
 // possible here; only delaying one is.
 func (p *Pipeline) resolveStoredOrigins(ctx context.Context) (ResolveReport, error) {
+	if p.config.DryRun {
+		return ResolveReport{}, nil
+	}
 	backing, ok := p.store.(OriginResolverStore)
 	if !ok {
 		return ResolveReport{}, nil
@@ -3178,7 +3183,7 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 		SourceFormat: sourceFormat,
 		OriginalRoot: originalRoot,
 	}
-	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON {
+	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON && !p.config.DryRun {
 		transcriptData, readErr := p.fs.ReadFile(transcriptPath)
 		if readErr != nil {
 			if errors.Is(readErr, fs.ErrNotExist) {
@@ -3449,30 +3454,10 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			}
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
 		}
-	} else if p.config.Force {
-		// Explicit harness scope applies to force as well as stale maintenance.
-		for _, target := range scanned {
-			if p.config.Harness == nil || target.session.Harness == *p.config.Harness {
-				targeted = append(targeted, target)
-			}
-		}
-		for index := range scanned {
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
-		}
 	} else {
-		// --reindex only: target sessions with stale index_version.
-		staleSet := make(map[SessionID]bool)
-		if p.metricsStore != nil {
-			staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
-			if err != nil {
-				slog.Warn("reindex: list stale index sessions", "error", err)
-			}
-			for _, sid := range staleIDs {
-				staleSet[sid] = true
-			}
-		}
+		// Plan from recorded SQL evidence without reading full transcripts.
 		for index, t := range scanned {
-			if staleSet[t.session.SessionID] || p.adapterTargetNeedsWork(ctx, t) {
+			if p.dryRunIndexNeedsWork(ctx, t) || p.adapterTargetNeedsWork(ctx, t) {
 				targeted = append(targeted, t)
 			}
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
