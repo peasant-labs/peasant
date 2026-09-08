@@ -142,7 +142,7 @@ func runKickstartFlow(
 		Draft:                 draft,
 		Source:                source,
 		CommitGate:            settings.NewCommitGateEvaluator(commitGateCandidates),
-		Preview:               kickstartPreview(cmd, db, th, sessions, source),
+		Preview:               kickstartPreviewWithRoot(cmd, db, th, sessions, loaded.Output.BasePath, source),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
 		Ingest:                ingestRun,
@@ -339,10 +339,8 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // The turns come from api.StoreDataProvider.SessionByID - the SAME read the
 // session_detail channel and the transcript viewer use - rather than a second
 // hand-rolled query. That is what gets the preview the full turn bodies:
-// SessionByID folds session_entries into turns and, when anything in the
-// session hit the DB's content-preview limit, overlays the untruncated bodies
-// from the source transcript. A preview built on the stored previews alone
-// would cut turns off mid-word, which is a bug that path already fixed once.
+// SessionByID captures matching retained input and indexed coordinates before
+// recovering full content. Unproven or stale input keeps the stored preview.
 //
 // Visibility is deliberately sessionvisibility.All: kickstart is where a
 // selection is being CHOSEN, so scoping the preview by a selection the user has
@@ -356,6 +354,17 @@ func kickstartPreview(
 	sessions []ftue.SessionListing,
 	contexts ...kickstart.ListingPreviewContextSource,
 ) kit.BodySource {
+	return kickstartPreviewWithRoot(cmd, db, th, sessions, "", contexts...)
+}
+
+func kickstartPreviewWithRoot(
+	cmd *cobra.Command,
+	db *store.Store,
+	th theme.Theme,
+	sessions []ftue.SessionListing,
+	managedRoot string,
+	contexts ...kickstart.ListingPreviewContextSource,
+) kit.BodySource {
 	ctx := cmd.Context()
 	// storedTurns reports the turns AND whether the store holds the session at
 	// all, so the two outcomes stay distinguishable: a session the store never
@@ -364,7 +373,7 @@ func kickstartPreview(
 	// "no turns" would report a broken database as an empty session.
 	var storedTurns func(sessionID string) ([]ingest.Turn, bool, error)
 	if db != nil {
-		provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+		provider := api.NewStoreDataProvider(db, sessionvisibility.All(), managedRoot)
 		storedTurns = func(sessionID string) ([]ingest.Turn, bool, error) {
 			row, err := db.SessionDetailByID(ctx, sessionID)
 			if err != nil {

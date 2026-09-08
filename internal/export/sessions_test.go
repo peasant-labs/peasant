@@ -9,55 +9,46 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
 
-// seedEntries indexes transcript bytes into the DB so ListEntries returns them.
-// Returns the indexed entries for use in assertions.
-func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
-	IndexSessionEntries(context.Context, ingest.SessionID, []schema.SessionEntry) error
-}, fs ingest.FileSystem, sessionID string, data []byte) []schema.SessionEntry {
+// seedExportInput publishes retained bytes and indexes the captured input with
+// the canonical bounded parser, rather than stamping proof onto hand-built rows.
+func seedExportInput(t *testing.T, db *store.Store, fs ingest.FileSystem, sessionID string, harness ingest.Harness, sourcePath string, data []byte) []schema.SessionEntry {
 	t.Helper()
-	session := ingest.DiscoveredSession{
-		SessionID:    schema.SessionID(sessionID),
-		SourcePath:   ingest.ResolvedPath("/f"),
-		SourceFormat: ingest.SourceFormatJSONL,
-		Harness:      ingest.HarnessClaudeCode,
-	}
-	indexer := ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullContent(true), ingest.WithClaudeFullDepth(true))
-	entries, err := indexer.IndexTranscriptBytes(ctx, session, data)
+	detail, err := db.SessionDetailByID(t.Context(), sessionID)
 	if err != nil {
-		t.Fatalf("seedEntries: IndexTranscriptBytes: %v", err)
+		t.Fatal(err)
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), entries); err != nil {
-		t.Fatalf("seedEntries: IndexSessionEntries: %v", err)
+	format := ingest.SourceFormatJSONL
+	if harness == ingest.HarnessOpenCode {
+		format = ingest.SourceFormatJSON
 	}
-	return entries
+	ingested := detail.EndMs + 1
+	meta := ingest.UnifiedMetadata{
+		SessionID: schema.SessionID(sessionID), ModelHarness: harness,
+		Model: schema.ModelID(detail.ModelID), HostSlug: schema.HostSlug(detail.HostSlug),
+		Project:   ingest.ProjectInfo{Hash: schema.ProjectHash(detail.ProjectHash), Name: detail.ProjectName},
+		Timestamp: ingest.TimestampInfo{Start: detail.StartMs, End: detail.EndMs, Ingested: &ingested},
+		Source:    ingest.SourceInfo{FilePath: sourcePath, Format: format},
+	}
+	return storetest.SeedManagedInput(t, db, fs, "/managed", meta, data)
 }
 
-// seedEntriesFromOpenCode indexes an OpenCode session directory into the DB.
-// Returns the indexed entries for use in assertions.
-func seedEntriesFromOpenCode(t *testing.T, ctx context.Context, s interface {
-	IndexSessionEntries(context.Context, ingest.SessionID, []schema.SessionEntry) error
-}, fs ingest.FileSystem, sessionID string, sourcePath string) []schema.SessionEntry {
+func seedEntriesFromJSONL(t *testing.T, _ context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, data []byte) []schema.SessionEntry {
+	return seedExportInput(t, db, fs, sessionID, ingest.HarnessClaudeCode, "/f", data)
+}
+
+func seedEntriesFromOpenCode(t *testing.T, _ context.Context, db *store.Store, fs ingest.FileSystem, sessionID, sourcePath string) []schema.SessionEntry {
 	t.Helper()
-	session := ingest.DiscoveredSession{
-		SessionID:    schema.SessionID(sessionID),
-		SourcePath:   ingest.ResolvedPath(sourcePath),
-		SourceFormat: ingest.SourceFormatJSON,
-		Harness:      ingest.HarnessOpenCode,
-	}
-	indexer := ingest.NewOpenCodeIndexer(fs, ingest.WithOpenCodeFullContent(true), ingest.WithOpenCodeFullDepth(true))
-	entries, err := indexer.IndexTranscript(ctx, session)
+	data, err := fs.ReadFile(sourcePath)
 	if err != nil {
-		t.Fatalf("seedEntriesFromOpenCode: IndexTranscript: %v", err)
+		t.Fatal(err)
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), entries); err != nil {
-		t.Fatalf("seedEntriesFromOpenCode: IndexSessionEntries: %v", err)
-	}
-	return entries
+	return seedExportInput(t, db, fs, sessionID, ingest.HarnessOpenCode, sourcePath, data)
 }
 
 // countConversationalTurns counts depth-0 user+assistant entries (matches computeTurns semantics).
@@ -119,7 +110,7 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 	}
 
 	// 4. Export.
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession: %v", err)
 	}
@@ -170,7 +161,7 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 			t.Fatalf("long seeded entry count: got %d, want 1", len(longSeededEntries))
 		}
 
-		exportedLong, err := export.ExportSession(ctx, s2, fs2, sessionID)
+		exportedLong, err := export.ExportSession(ctx, s2, fs2, sessionID, "/managed")
 		if err != nil {
 			t.Fatalf("ExportSession (long): %v", err)
 		}
@@ -198,7 +189,7 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 			t.Fatalf("token seeded entry count: got %d, want 3", len(tokenSeededEntries))
 		}
 
-		exportedTokens, err := export.ExportSession(ctx, s3, fs3, sessionID)
+		exportedTokens, err := export.ExportSession(ctx, s3, fs3, sessionID, "/managed")
 		if err != nil {
 			t.Fatalf("ExportSession (tokens): %v", err)
 		}
@@ -279,7 +270,7 @@ func TestExportSession_OpenCodeJSON(t *testing.T) {
 	seededEntries := seedEntriesFromOpenCode(t, ctx, s, fs, sessionID, sesPath)
 
 	// 4. Export.
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession: %v", err)
 	}
@@ -404,7 +395,7 @@ func TestExportSession_OpenCodeJSON_WithParts(t *testing.T) {
 	}
 
 	// 4. Export.
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession: %v", err)
 	}
@@ -544,7 +535,7 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 	}
 
 	// 4. Export.
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession: %v", err)
 	}
@@ -592,17 +583,10 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// contentMap miss fallback
+// Retained input remains authoritative after native source changes.
 // ---------------------------------------------------------------------------
 
-// TestExportSession_ContentMapMiss verifies the fallback path in ExportSession
-// where the source re-index produces fewer entries than are stored in the DB.
-// When contentMap has no entry for a given DB entry_index, ExportSession must
-// fall back to ContentPreview from the DB row (not error or return empty content).
-//
-// Setup: seed two DB entries for session, then overwrite the source transcript
-// with content that produces only one entry on re-index. The second DB entry
-// has no contentMap hit, so the turn must fall back to the DB ContentPreview.
+// Native truncation must not splice new text into the retained index snapshot.
 func TestExportSession_ContentMapMiss(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -631,15 +615,14 @@ func TestExportSession_ContentMapMiss(t *testing.T) {
 	fallbackPreview := *seededEntries[1].ContentPreview
 
 	// 2. Overwrite the source file with a shorter transcript (only one entry).
-	// The re-index in ExportSession will produce only one entry in contentMap.
-	// DB entry at index 1 will miss contentMap → fallback to ContentPreview.
+	// Full export still consumes the original managed bytes, not this file.
 	shortTranscript := line1 + "\n"
 	if err := fs.WriteFile("/f", []byte(shortTranscript), 0644); err != nil {
 		t.Fatalf("write short transcript: %v", err)
 	}
 
 	// 3. Export. The DB still has 2 entries; the source only has 1 now.
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession (contentMap miss): %v", err)
 	}
@@ -649,13 +632,12 @@ func TestExportSession_ContentMapMiss(t *testing.T) {
 		t.Fatalf("Turns length: got %d, want %d (all DB entries)", len(exported.Turns), len(seededEntries))
 	}
 
-	// 5. Turn 0 should have full content from contentMap (source re-index hit).
+	// Both turns still come from the matching retained input.
 	if exported.Turns[0].Content == "" {
 		t.Errorf("Turn[0].Content: expected non-empty (contentMap hit)")
 	}
 
-	// 6. Turn 1 should fall back to ContentPreview (contentMap miss for this index).
-	// The content must not be empty — it must equal the DB ContentPreview value.
+	// The second retained turn must not disappear with the native truncation.
 	if exported.Turns[1].Content == "" {
 		t.Errorf("Turn[1].Content: expected non-empty (contentMap miss → ContentPreview fallback)")
 	}
@@ -734,13 +716,11 @@ func TestExportSession_CodexJSONL_LongContent(t *testing.T) {
 	if seededEntries[0].ContentPreview == nil || len(*seededEntries[0].ContentPreview) != 2000 {
 		t.Fatalf("seeded preview: expected exactly 2000 chars (truncated), got %v", seededEntries[0].ContentPreview)
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), seededEntries); err != nil {
-		t.Fatalf("IndexSessionEntries: %v", err)
-	}
+	seedExportInput(t, s, fs, sessionID, ingest.HarnessCodex, "/f", []byte(codexTranscript))
 
 	// Export must recover the FULL 2500-char content via the codex-specific
 	// full-content re-index, not the truncated 2000-char DB preview.
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession: %v", err)
 	}
@@ -813,13 +793,13 @@ func TestExportSession_MissingSourceFile(t *testing.T) {
 	// Do NOT write "/f" to MemFS — the file is missing.
 	fs := testutil.NewMemFS()
 
-	_, err := export.ExportSession(ctx, s, fs, sessionID)
+	_, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
 	if err == nil {
 		t.Fatal("ExportSession: expected error for missing source file, got nil")
 	}
 	// The error should mention the source path for actionability.
-	if !strings.Contains(err.Error(), "/f") {
-		t.Errorf("ExportSession error should mention source path '/f', got: %v", err)
+	if !strings.Contains(err.Error(), "retained inputs") {
+		t.Errorf("ExportSession error should explain the retained-input recovery, got: %v", err)
 	}
 	// It should NOT be ErrSessionNotFound (the session exists, the file does not).
 	if errors.Is(err, export.ErrSessionNotFound) {
@@ -832,15 +812,7 @@ func TestExportSession_MissingSourceFile(t *testing.T) {
 // (gate the full re-index on actual truncation)
 // ---------------------------------------------------------------------------
 
-// TestExportSession_MissingSourceFile_NothingTruncated is the mirror of
-// TestExportSession_MissingSourceFile: the source file is ALSO missing here,
-// but every DB entry's content is well under defaults.ContentPreviewLimit —
-// nothing needs recovering. ExportSession must NOT attempt to read the
-// (missing) source file at all in this case; it must succeed, returning the
-// DB's content_preview verbatim. This is the observable proof of the
-// transcript.AnyContentTruncated gate: without it, this test would fail with
-// the same "file not found" error as TestExportSession_MissingSourceFile,
-// even though nothing here actually needs the source file.
+// A short stored preview is not proof that full retained input is current.
 func TestExportSession_MissingSourceFile_NothingTruncated(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -869,11 +841,12 @@ func TestExportSession_MissingSourceFile_NothingTruncated(t *testing.T) {
 	// TestExportSession_MissingSourceFile does.
 	fs := testutil.NewMemFS()
 
-	exported, err := export.ExportSession(ctx, s, fs, sessionID)
-	if err != nil {
-		t.Fatalf("ExportSession: expected no error when nothing is truncated (gate should skip the missing source file entirely), got: %v", err)
+	exported, err := export.ExportSession(ctx, s, fs, sessionID, "/managed")
+	if err == nil || exported != nil {
+		t.Fatal("unproven short content was reported as a full export")
 	}
-	if len(exported.Turns) != 1 || exported.Turns[0].Content != shortContent {
-		t.Errorf("Turns[0].Content: got %+v, want the DB preview %q verbatim", exported.Turns, shortContent)
+	entries, readErr := s.ListEntries(ctx, schema.SessionID(sessionID))
+	if readErr != nil || len(entries) == 0 || entries[0].ContentPreview == nil || *entries[0].ContentPreview != shortContent {
+		t.Fatalf("refusal changed stored previews: %+v %v", entries, readErr)
 	}
 }

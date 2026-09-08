@@ -595,8 +595,8 @@ func buildExportSessionsCommand() *cobra.Command {
 		Short: "Export session transcripts as JSON",
 		Long: `Export session transcripts as JSON files with full turn content.
 
-Each session is re-indexed from its original source file with full content
-extraction (no truncation), producing a JSON envelope with metadata and turns.
+Each session uses a coherent snapshot of retained input and indexed coordinates,
+producing a JSON envelope with full content. Stale or unproven inputs are refused.
 
 Requires either --session for a single session or --session-from-file for a batch.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -620,12 +620,16 @@ Requires either --session for a single session or --session-from-file for a batc
 			}
 			defer cleanup()
 
+			cfg, err := loadConfig(resolveConfigPath(cmd))
+			if err != nil {
+				return err
+			}
 			ctx := cmd.Context()
 			fs := &ingest.OSFileSystem{}
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := export.ExportSession(ctx, db, fs, sid)
+				exported, exportErr := export.ExportSession(ctx, db, fs, sid, cfg.Output.BasePath)
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++

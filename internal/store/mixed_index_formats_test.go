@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -361,8 +362,14 @@ func assertMixedReads(t *testing.T, db *store.Store, document mixedFormatDocumen
 	if !maps.Equal(got, want) {
 		t.Fatalf("mixed FTS coordinates=%v, want %v", got, want)
 	}
-	if _, err := export.ExportSession(ctx, db, testutil.NewMemFS(), string(document.TargetSession)); err != nil {
-		t.Fatal(err)
+	// A supported projection remains viewable, but this synthetic format has
+	// no matching retained input/full parser proof and cannot claim full export.
+	view, err := api.NewStoreDataProvider(db, sessionvisibility.All()).SessionByID(ctx, string(document.TargetSession))
+	if err != nil || view == nil || len(view.Turns) == 0 {
+		t.Fatalf("supported projection lost preview access: %+v %v", view, err)
+	}
+	if payload, err := export.ExportSession(ctx, db, testutil.NewMemFS(), string(document.TargetSession)); err == nil || payload != nil {
+		t.Fatal("unproven synthetic format was reported as full exported content")
 	}
 }
 

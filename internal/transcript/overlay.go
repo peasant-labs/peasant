@@ -9,39 +9,9 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// BuildContentOverlay re-indexes a session's ORIGINAL source transcript file
-// with full (untruncated) content extraction and returns entryIndex → full
-// content. It exists because session_entries.content_preview is deliberately
-// bounded at defaults.ContentPreviewLimit to keep DB row size sane (see
-// truncateString in internal/ingest/utils.go) — this recovers the real turn
-// bodies for consumers that must show/export the full transcript rather than
-// a preview: the session_detail WS channel (StoreDataProvider.SessionByID)
-// and `peasant export sessions` (export.ExportSession) both call this.
-//
-// Dispatch is keyed by the session's ACTUAL harness, not its SourceFormat.
-// This matters because more than one harness can share a SourceFormat (Codex
-// and Claude Code both write "jsonl") but need their own format-aware parser
-// — using the wrong harness's indexer either produces zero matching entries
-// (silently falling back to the truncated preview, the bug this function
-// fixes) or misparses the file outright. The harness→indexer map comes from
-// ingest.NewIndexerRegistry — the SAME constructor the real ingest pipeline
-// wiring (cmd_harvest.go / cmd_kickstart.go) uses, so this can never drift
-// into its own hand-copy again.
-//
-// This is a real cost: a FULL re-parse of the source transcript from disk.
-// Callers MUST gate on whether anything actually needs recovering (e.g.
-// AnyContentTruncated over the already-fetched DB entries) before calling
-// this — BuildContentOverlay itself has no visibility into the DB entries to
-// gate on, and unconditionally re-indexing on every session view would be
-// the "traded one bug for a worse one" mistake (see AnyContentTruncated).
-//
-// Returns a nil map (not an error) for harnesses with no full-content
-// indexer wired here. Currently: Cursor, whose indexer
-// (internal/ingest/cursor.go) has no full-content toggle at all and always
-// truncates at defaults.ContentPreviewLimit — recovering its full content
-// would need a Cursor indexer change, tracked as a separate follow-up, not
-// folded in here. Callers must treat a nil map as "keep existing preview
-// content", not as a failure.
+// BuildContentOverlay is the legacy source-only text helper. It has no stored
+// coordinate or input proof. Managed viewer/export consumers use ReadSessionContent
+// instead; this helper must not establish a coherent full-content snapshot.
 func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) (map[int]string, error) {
 	indexer, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[ingest.Harness(harness)]
 	if !ok {
@@ -112,23 +82,15 @@ func contentOverlayFromEntries(sourceEntries []schema.SessionEntry) map[int]stri
 	}
 	return overlay
 }
-
-// AnyContentTruncated reports whether ANY entry's ContentPreview was cut by
-// defaults.ContentPreviewLimit — the gate callers must check before calling
-// BuildContentOverlay. BuildContentOverlay does a full re-parse of the
-// source transcript from disk; the common case (a normal-sized session,
-// nothing hit the limit) has nothing to recover, so it must skip that
-// re-parse entirely rather than pay it on every session view. A preview
-// whose length is strictly less than the limit was never truncated
-// (truncateString only ever produces a preview of EXACTLY maxLen when it
-// cuts); reaching exactly the limit is treated as truncated too, since a
-// preview that happens to be precisely ContentPreviewLimit chars long
-// un-truncated is indistinguishable from one that was cut there, and the
-// re-index is cheap insurance in that one-entry-long edge case relative to
-// the common all-short-turns case this gate exists to skip.
+// AnyContentTruncated conservatively detects bounded text or tool output.
+// At the limit, an exact-size value and a cut value are indistinguishable;
+// full readers cannot claim complete Cursor content in either case.
 func AnyContentTruncated(entries []schema.SessionEntry) bool {
 	for i := range entries {
 		if p := entries[i].ContentPreview; p != nil && len(*p) >= defaults.ContentPreviewLimit {
+			return true
+		}
+		if p := entries[i].ToolOutput; p != nil && len(*p) >= defaults.ContentPreviewLimit {
 			return true
 		}
 	}

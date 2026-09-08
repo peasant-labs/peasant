@@ -11,7 +11,7 @@ func (p *Pipeline) includesIndexTarget(target reindexTarget) bool {
 		(p.config.Since == nil || !time.UnixMilli(target.startMs).Before(*p.config.Since))
 }
 
-func (p *Pipeline) capturedInputNeedsWork(input *capturedIndexInput) bool {
+func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 	target := p.versionTargets()[input.session.Harness]
 	return p.config.Force || input.expected.IndexerVersion < target.IndexerVersion ||
 		input.expected.IndexedInputHash == nil || *input.expected.IndexedInputHash != input.inputHash

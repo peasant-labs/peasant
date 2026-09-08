@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -43,25 +42,22 @@ type StoreDataProvider struct {
 	// pathIdentityResolver resolves stored session worktrees into exact clone
 	// identities before user-facing discovery matching.
 	pathIdentityResolver ingest.PathIdentityResolver
-	// fs reads a session's ORIGINAL source transcript file so SessionByID can
-	// overlay full turn content over the DB's bounded content_preview (see
-	// transcript.BuildContentOverlay). Defaulted to the real OS filesystem by
-	// NewStoreDataProvider; NewStoreDataProviderWithFS lets tests inject a
-	// MemFS-backed source file.
-	fs ingest.FileSystem
+	fs                   ingest.FileSystem
+	managedRoot          string
 }
 
 // NewStoreDataProvider creates a StoreDataProvider backed by the given store,
-// reading source transcripts from the real OS filesystem.
-func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy) *StoreDataProvider {
-	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver())
+// reading captured managed transcripts from the real OS filesystem. Production
+// callers supply the configured managed root; omitted roots permit previews only.
+func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy, managedRoots ...string) *StoreDataProvider {
+	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
 
 // NewStoreDataProviderWithFS is NewStoreDataProvider with an injectable
 // FileSystem, for tests that need SessionByID's content-overlay re-index to
 // read from a MemFS fixture instead of disk.
-func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem) *StoreDataProvider {
-	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver())
+func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem, managedRoots ...string) *StoreDataProvider {
+	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
 
 // NewStoreDataProviderWithFSAndResolver is NewStoreDataProvider with injectable
@@ -72,9 +68,14 @@ func NewStoreDataProviderWithFSAndResolver(
 	visibility sessionvisibility.Policy,
 	fs ingest.FileSystem,
 	resolver ingest.PathIdentityResolver,
+	managedRoots ...string,
 ) *StoreDataProvider {
 	if resolver == nil {
 		resolver = ingest.NewPhysicalPathResolver()
+	}
+	managedRoot := ""
+	if len(managedRoots) > 0 {
+		managedRoot = managedRoots[0]
 	}
 	return &StoreDataProvider{
 		store:                s,
@@ -82,6 +83,7 @@ func NewStoreDataProviderWithFSAndResolver(
 		visibility:           visibility,
 		pathIdentityResolver: resolver,
 		fs:                   fs,
+		managedRoot:          managedRoot,
 	}
 }
 
@@ -316,15 +318,24 @@ func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.Ses
 
 // SessionByID returns a single session by ID, or an error if not found.
 // Populates Turns from session_entries for the trajectory view.
-// Uses SessionDetailByID to include extra fields (git_remote, pushed_at, project_path).
+// Uses one content snapshot, including git_remote, pushed_at and project_path.
 func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
-	detailRow, err := p.store.SessionDetailByID(ctx, id)
+	snapshot, err := p.store.ReadSessionContent(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}
-	if detailRow == nil {
+	if snapshot == nil {
 		return nil, fmt.Errorf("session not found: %s", id)
 	}
+	// Ordinary short previews need no file capture or parser run. A successful
+	// full read replaces the whole snapshot, never just text from a newer view.
+	if transcript.AnyContentTruncated(snapshot.Entries) {
+		full, fullErr := transcript.ReadSessionContent(ctx, p.store, p.fs, p.managedRoot, id)
+		if fullErr == nil && full != nil && full.FullContentError == nil {
+			snapshot = full.SessionContentSnapshot
+		}
+	}
+	detailRow := snapshot.Detail
 	s := sessionRowToSession(&detailRow.SessionRow)
 
 	// Populate detail-specific fields from the extended row.
@@ -339,65 +350,17 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 	s.ProjectPath = detailRow.ProjectPath
 	s.PushedAt = detailRow.PushedAt
 
-	// Populate turns from session_entries.
-	sid, sidErr := ingest.NewSessionID(id)
-	if sidErr != nil {
-		// Invalid session ID format; return session without turns.
-		return &s, nil
-	}
-
-	// Enrich quality metrics with the full session_metrics row. The detail row
-	// only carries the v1 quality columns; the M-series and cost signals needed
-	// by the Highlights scorecard live only in session_metrics. Non-fatal: if
-	// the lookup fails we keep the v1 metrics derived from the detail row.
-	if metrics, mErr := p.store.GetMetrics(ctx, sid); mErr == nil && metrics != nil {
-		full := metrics.QualityMetrics
+	if snapshot.Metrics != nil {
+		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-
-	entries, err := p.store.ListEntries(ctx, sid)
-	if err != nil {
-		var unsupported *store.UnsupportedIndexFormatError
-		if errors.As(err, &unsupported) {
-			return nil, fmt.Errorf("store adapter: session %s index is not readable: %w", sid, err)
-		}
-		// Non-fatal: return session without turns rather than failing entirely.
-		return &s, nil
-	}
-	turns, validationErr := transcript.EntriesToTurnsValidated(entries)
+	// Full text was applied to matched entries before tool output is folded
+	// into turns. Unavailable full content leaves this same SQL preview intact.
+	turns, validationErr := transcript.EntriesToTurnsValidated(snapshot.Entries)
 	if validationErr != nil {
-		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
+		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
 	s.Turns = turns
-
-	// Overlay full turn content from the source transcript, re-indexed with
-	// truncation disabled (see transcript.BuildContentOverlay) — otherwise
-	// every turn's Content stops at the DB's bounded content_preview
-	// (defaults.ContentPreviewLimit), which is what the session_detail WS
-	// channel was silently doing before: main turn bodies
-	// cut off mid-word around 2000 chars).
-	//
-	// GATED on transcript.AnyContentTruncated: BuildContentOverlay does a
-	// full re-parse of the source transcript from disk, which is real cost
-	// this fix would otherwise pay on EVERY session view regardless of size.
-	// The common case — nothing in this session hit the preview limit — has
-	// nothing to recover, so it skips the re-parse entirely.
-	//
-	// Best-effort even when gated in: if source info can't be looked up, the
-	// file is missing, or the harness has no full-content indexer wired (see
-	// BuildContentOverlay's doc comment), turns simply keep their existing
-	// (possibly truncated) content rather than failing the whole session view.
-	if transcript.AnyContentTruncated(entries) {
-		if info, infoErr := p.store.SessionSourceInfo(ctx, id); infoErr == nil && info != nil {
-			if overlay, overlayErr := transcript.BuildContentOverlay(ctx, p.fs, defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), schema.SessionID(id)); overlayErr == nil {
-				for i := range s.Turns {
-					if content, ok := overlay[s.Turns[i].Index]; ok {
-						s.Turns[i].Content = content
-					}
-				}
-			}
-		}
-	}
 	return &s, nil
 }
 

@@ -425,9 +425,12 @@ func (s *Store) SessionDetailByID(ctx context.Context, sessionID string) (*Sessi
 		return nil, fmt.Errorf("store: session detail by id take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return sessionDetailByIDOnConn(conn, sessionID)
+}
 
+func sessionDetailByIDOnConn(conn *sqlite.Conn, sessionID string) (*SessionDetailRow, error) {
 	var row *SessionDetailRow
-	err = sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			r := scanSessionDetailRow(stmt)

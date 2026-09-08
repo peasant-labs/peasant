@@ -4,6 +4,14 @@
 # top-level turn, and the overlay must not adopt it as a child of the entry it
 # points at.
 cases:
+  - name: depth_zero_tool_result_without_timestamp_keeps_output_and_error
+    entries:
+      - {index: 0, role: assistant, depth: 0, entryType: tool_use, toolCallId: call-untimed}
+      - {index: 1, role: tool, depth: 0, entryType: tool_result, toolCallId: call-untimed, toolOutput: "permission denied", isError: true}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}
+    expectedToolOutput: {call-untimed: "permission denied"}
+    expectedToolErrors: {call-untimed: true}
   - name: depth_zero_parent_link_keeps_its_own_turn
     entries:
       - {index: 0, role: user, depth: 0, content: "ship the release"}
