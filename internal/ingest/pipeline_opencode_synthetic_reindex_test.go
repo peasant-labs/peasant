@@ -78,6 +78,10 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 		t.Fatalf("open the analytics store: %v", err)
 	}
 	defer database.Close()
+	meta.Project.Hash, _, err = ingest.DeriveProjectIdentifiers(database.InstallationSalt(), testutil.TestGitRemote, testutil.TestDefaultWorktreeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	sources := map[ingest.Harness]ingest.SourceConfig{
 		defaults.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{session.OriginalRoot}},

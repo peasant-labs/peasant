@@ -198,6 +198,8 @@ type OrphanCleaner interface {
 // replaces asserted the reverse as settled fact, and that assertion - repeated
 // one layer downstream - is what got the outward safety-net re-redaction deleted.
 type indexedMeta struct {
+	captureRevision      int64
+	capturedSource       *captureFileSystem
 	session              DiscoveredSession
 	startMs              int64
 	outputTranscriptPath string // final on-disk path: {sessionDir}/{sessionId}--transcript.{ext}
@@ -1018,11 +1020,14 @@ func (p *Pipeline) drainLoop(
 						startMs:              wr.startMs,
 						outputTranscriptPath: wr.outputTranscriptPath,
 						transcriptData:       wr.transcriptData,
+						capturedSource:       wr.capturedSource,
 					})
 					if p.store != nil {
 						storeBatch = append(storeBatch, StoreEntry{
-							Metadata: wr.meta,
-							Session:  sessionFromWorkerResult(wr),
+							Metadata:           wr.meta,
+							Session:            sessionFromWorkerResult(wr),
+							PublicationCapture: !p.config.Reindex,
+							CWDProvenance:      wr.cwdProvenance,
 						})
 					}
 				}
@@ -1033,19 +1038,38 @@ func (p *Pipeline) drainLoop(
 			if p.store != nil && len(storeBatch) > 0 {
 				var insertErr error
 				p.runStoreWrite(writeLane, func() {
-					if err := p.store.InsertSessions(ctx, storeBatch); err != nil {
+					var err error
+					if captureStore, ok := p.store.(PublicationCaptureStore); ok {
+						var revisions map[SessionID]int64
+						revisions, err = captureStore.InsertSessionsWithRevisions(ctx, storeBatch)
+						if err == nil {
+							for i := range batchMetas {
+								batchMetas[i].captureRevision = revisions[batchMetas[i].session.SessionID]
+							}
+						}
+					} else {
+						err = p.store.InsertSessions(ctx, storeBatch)
+					}
+					if err != nil {
 						insertErr = fmt.Errorf("store insert (%d sessions): %w", len(storeBatch), err)
 					} else {
 						// Persist session commits (non-fatal): runs only after InsertSessions
 						// succeeds so the FK constraint on session_commits(session_id) is satisfied.
-						// Called unconditionally (including empty slice) so that a --force re-ingest
-						// that finds 0 commits deletes stale DB rows, keeping JSON and DB in sync.
+						// Existing sessions retain historical bindings even when current
+						// Git inspection cannot reproduce every past observation.
 						cursorStore, cursorStoreOK := p.store.(OpenCodeSeqCursorStore)
 						for _, entry := range storeBatch {
-							if err := p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits); err != nil {
+							_, existing := p.locationCache[entry.Metadata.SessionID]
+							var commitErr error
+							if merger, ok := p.store.(SessionCommitMergeStore); ok {
+								commitErr = merger.MergeSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits)
+							} else if !existing && !p.config.Reindex {
+								commitErr = p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits)
+							}
+							if commitErr != nil {
 								slog.Warn("pipeline: upsert session_commits",
 									"session_id", entry.Metadata.SessionID,
-									"error", err)
+									"error", commitErr)
 							}
 							// Record the OpenCode change cursor for a session just ingested,
 							// so a later in-place rewrite that bumps the sequence without
@@ -1356,6 +1380,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	result = indexParseResult{im: im, startedAt: time.Now().UnixMilli(), bytes: p.indexProfileBytes(im)}
 	defer func() {
 		result.im.transcriptData = nil
+		if im.capturedSource != nil {
+			// Staging slots outlive parsing. Drop the detached source tree now,
+			// not at the end of a potentially large ingest run.
+			im.capturedSource.release()
+			result.im.capturedSource = nil
+		}
 	}()
 	if p.indexers == nil || p.metricsStore == nil {
 		return result
@@ -1368,6 +1398,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	}
 
 	active := activeParses.Add(1)
+	if sourceIndexer, ok := indexer.(*OpenCodeIndexer); ok && im.capturedSource != nil {
+		capturedIndexer := *sourceIndexer
+		capturedIndexer.fs = im.capturedSource
+		indexer = &capturedIndexer
+	}
 	recordIndexProfileMax(maxActiveParses, active)
 	parseStart := time.Now()
 	entries, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
@@ -1443,10 +1478,11 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		writes = append(writes, SessionEntryWrite{
-			SessionID:    result.im.session.SessionID,
-			Entries:      result.entries,
-			IndexVersion: CurrentIndexVersion,
-			IndexedAtMs:  nowMs,
+			CaptureRevision: result.im.captureRevision,
+			SessionID:       result.im.session.SessionID,
+			Entries:         result.entries,
+			IndexVersion:    CurrentIndexVersion,
+			IndexedAtMs:     nowMs,
 		})
 		writePositions = append(writePositions, i)
 	}
@@ -1788,6 +1824,9 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 	if isActive {
 		return DiffActive
 	}
+	if loc.PublicationReadiness == PublicationNeedsIngest {
+		return DiffUpdated
+	}
 	return DiffUnchanged
 }
 
@@ -2043,7 +2082,18 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if !ok {
 		return fail(fmt.Errorf("no adapter for provider %s", session.Harness))
 	}
-	adapter := factory(p.fs, p.git, p.salt)
+	capturedSource := newCaptureFileSystem(p.fs)
+	var adapter SourceAdapter
+	if session.Harness == HarnessOpenCode {
+		// Construct with the real filesystem so the factory retains its real
+		// SQLite opener; only JSON reads need the extraction-local read cache.
+		adapter = factory(p.fs, p.git, p.salt)
+		if openCode, ok := adapter.(*OpenCodeAdapter); ok {
+			openCode.fs = capturedSource
+		}
+	} else {
+		adapter = factory(capturedSource, p.git, p.salt)
+	}
 
 	if err := session.TranscriptOrigin.Validate(); err != nil {
 		return fail(fmt.Errorf("prepare transcript for session %s failed before source access: %w; the session was not written or stored; update the discovering adapter to return a supported typed origin", session.SessionID, err))
@@ -2062,6 +2112,21 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	if err != nil {
 		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
+	}
+	if meta.SessionID != session.SessionID {
+		return fail(fmt.Errorf("capture session %s: source metadata identifies a different session; nothing was captured; restore the matching source and run peasant ingest", session.SessionID))
+	}
+	for _, diagnostic := range meta.Diagnostics.Warnings {
+		if diagnostic.ErrorType == "sidecar_session_mismatch" {
+			return fail(fmt.Errorf("capture session %s: Strike source sidecar identifies a different session; nothing was captured; correct the source identity and rerun peasant ingest", session.SessionID))
+		}
+	}
+	if loc, exists := p.locationCache[session.SessionID]; exists {
+		if err := normalizePublicationAttribution(meta, loc); err != nil {
+			return fail(err)
+		}
+		session.ParentUUID = meta.ParentUUID
+		result.ParentUUID = meta.ParentUUID
 	}
 
 	// Set ingested timestamp.
@@ -2118,7 +2183,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	var transcriptData []byte
 
 	if session.TranscriptOrigin == TranscriptOriginFile {
-		rawData, err = p.fs.ReadFile(string(session.SourcePath))
+		rawData, err = capturedSource.ReadFile(string(session.SourcePath))
 		if err != nil {
 			result.Error = errors.Join(
 				fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
@@ -2270,6 +2335,11 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 
 	// Compute ContentHash from the final transcript bytes (post-redaction if redacted).
+	if loc, exists := p.locationCache[session.SessionID]; exists {
+		if err := normalizePublicationAttribution(meta, loc); err != nil {
+			return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
+		}
+	}
 	meta.ContentHash = schema.ComputeTranscriptHash(writeData)
 
 	// Set RedactionInfo based on whether the redactor ran on transcript bytes.
@@ -2328,9 +2398,17 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		startMs = meta.Timestamp.Start
 	}
 	outputTranscriptPath := fmt.Sprintf("%s/%s--transcript.%s", sessionDir, session.SessionID, ext)
+	if session.Harness != HarnessOpenCode || session.TranscriptOrigin != TranscriptOriginFile {
+		// File indexers already receive the exact managed bytes via the arena.
+		// Only OpenCode's directory indexer needs the detached extraction tree.
+		capturedSource = nil
+	}
 
 	return workerResult{
 		result:               result,
+		capturedSource:       capturedSource,
+		cwdProvenance:        publicationCWDProvenance(meta, session),
+		eventSeq:             session.EventSeq,
 		meta:                 meta,
 		transcriptData:       transcriptData,
 		outputTranscriptPath: outputTranscriptPath,
@@ -2483,6 +2561,7 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 	}
 	return DiscoveredSession{
 		SessionID:    wr.result.SessionID,
+		EventSeq:     wr.eventSeq,
 		Harness:      wr.result.Harness,
 		ParentUUID:   parentUUID,
 		SourceFormat: sourceFormat,
@@ -3417,6 +3496,17 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	}
 
 	// Stage 4: EXTRACT+WRITE — separate into extractable (source exists) vs fallback (source missing).
+	if p.store != nil {
+		ids := make([]SessionID, 0, len(targeted))
+		for _, target := range targeted {
+			ids = append(ids, target.session.SessionID)
+		}
+		locations, err := p.store.BulkLookupSessionLocations(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("reindex: load historical attribution before extraction: %w; no sessions were rewritten; repair database access and retry", err)
+		}
+		p.locationCache = locations
+	}
 	var fallbackTargets []reindexTarget // sessions where source is missing → INDEX+COMPUTE only
 
 	// Build maps for parent-before-child ordering (same pattern as normal pipeline).

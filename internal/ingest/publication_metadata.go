@@ -60,3 +60,9 @@ type PublicationInputReader interface {
 type PublicationCaptureStore interface {
 	InsertSessionsWithRevisions(context.Context, []StoreEntry) (map[SessionID]int64, error)
 }
+
+// SessionCommitMergeStore retains prior bindings when source recovery observes
+// only a subset of historical Git evidence (or Git is no longer available).
+type SessionCommitMergeStore interface {
+	MergeSessionCommits(context.Context, SessionID, []CommitInfo) error
+}

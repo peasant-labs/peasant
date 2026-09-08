@@ -888,6 +888,7 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 
 	var (
 		firstLine      claudeJSONLLine
+		literalCWD     string
 		hasFirst       bool
 		firstTimestamp string // earliest non-empty timestamp across all lines
 		lastTimestamp  string // latest non-empty timestamp across all lines
@@ -924,6 +925,13 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			continue
 		}
 
+		if line.SessionID != "" && line.SessionID != session.SessionID.String() &&
+			(session.ParentUUID == nil || line.SessionID != session.ParentUUID.String()) {
+			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", session.SessionID)
+		}
+		if literalCWD == "" {
+			literalCWD = line.CWD
+		}
 		if !hasFirst {
 			firstLine = line
 			hasFirst = true
@@ -1062,7 +1070,7 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		meta.Git = gitInfo
 
 		// Store the real working directory for context-aware slug redaction.
-		meta.CWD = cwd
+		meta.CWD = literalCWD
 
 		// ProjectInfo.
 		projectPath := worktreeStr
