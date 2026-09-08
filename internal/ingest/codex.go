@@ -386,6 +386,58 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		Format:   SourceFormatJSONL,
 	}
 
+	sessionMeta, err := parseCodexTranscriptMetadata(ctx, data, &meta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Git context — Codex captures it once in session_meta. When present, we
+	// skip the GitResolver subprocess and derive identifiers directly from the
+	// recorded remote. cwd from session_meta is the real project path (no slug
+	// decoding needed, unlike Claude).
+	cwd := ""
+	var remoteURL string
+	if sessionMeta != nil {
+		cwd = sessionMeta.CWD
+		if sessionMeta.Git != nil {
+			remoteURL = sessionMeta.Git.RepositoryURL
+			if sessionMeta.Git.Branch != "" {
+				b := sessionMeta.Git.Branch
+				meta.Git.Branch = &b
+			}
+			if remoteURL != "" {
+				r := remoteURL
+				meta.Git.Remote = &r
+			}
+		}
+	}
+	if cwd == "" {
+		cwd = filepath.Dir(string(session.SourcePath))
+	}
+	meta.CWD = cwd
+
+	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
+	if derErr != nil {
+		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+			ErrorType:   "derive_identity_error",
+			Location:    fmt.Sprintf("session %s", session.SessionID),
+			Message:     fmt.Sprintf("failed to derive project identifiers: %v", derErr),
+			Remediation: "Check the recorded git remote URL or working directory path.",
+		})
+	} else {
+		meta.HostSlug = hostSlug
+	}
+
+	meta.Project = ProjectInfo{
+		Hash:     projectHash,
+		FilePath: cwd,
+		Name:     filepath.Base(cwd),
+	}
+
+	return &meta, nil
+}
+
+func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *UnifiedMetadata) (*codexSessionMeta, error) {
 	var (
 		sessionMeta    *codexSessionMeta
 		lastTimestamp  string
@@ -485,7 +537,7 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 	if !gotSessionMeta {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "missing_session_meta",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
+			Location:    fmt.Sprintf("session %s", meta.SessionID),
 			Message:     "rollout did not begin with a session_meta line",
 			Remediation: "Rollout may be truncated or from an incompatible Codex CLI version.",
 		})
@@ -513,49 +565,6 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		meta.Stats.DurationMs = endMs - startMs
 	}
 
-	// Git context — Codex captures it once in session_meta. When present, we
-	// skip the GitResolver subprocess and derive identifiers directly from the
-	// recorded remote. cwd from session_meta is the real project path (no slug
-	// decoding needed, unlike Claude).
-	cwd := ""
-	var remoteURL string
-	if sessionMeta != nil {
-		cwd = sessionMeta.CWD
-		if sessionMeta.Git != nil {
-			remoteURL = sessionMeta.Git.RepositoryURL
-			if sessionMeta.Git.Branch != "" {
-				b := sessionMeta.Git.Branch
-				meta.Git.Branch = &b
-			}
-			if remoteURL != "" {
-				r := remoteURL
-				meta.Git.Remote = &r
-			}
-		}
-	}
-	if cwd == "" {
-		cwd = filepath.Dir(string(session.SourcePath))
-	}
-	meta.CWD = cwd
-
-	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
-	if derErr != nil {
-		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-			ErrorType:   "derive_identity_error",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
-			Message:     fmt.Sprintf("failed to derive project identifiers: %v", derErr),
-			Remediation: "Check the recorded git remote URL or working directory path.",
-		})
-	} else {
-		meta.HostSlug = hostSlug
-	}
-
-	meta.Project = ProjectInfo{
-		Hash:     projectHash,
-		FilePath: cwd,
-		Name:     filepath.Base(cwd),
-	}
-
 	// Stats.
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
@@ -572,5 +581,5 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		}
 	}
 
-	return &meta, nil
+	return sessionMeta, nil
 }
