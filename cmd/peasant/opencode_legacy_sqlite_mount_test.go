@@ -312,9 +312,11 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				t.Fatal("repeat harvest changed deterministic managed projection bytes")
 			}
 
-			mutateLegacySQLiteMessageVersion(t, materialized.Path)
+			// Advance source evidence instead of editing the captured local row:
+			// an unproven local metadata UPDATE correctly invalidates publication.
+			changedAt := time.Now().Add(time.Second)
+			mutateLegacySQLiteMessageVersion(t, materialized.Path, changedAt.UnixMilli())
 			setSyntheticSQLiteContentModTime(t, materialized.Path, time.Unix(1_700_002_000, 0))
-			setLocalIngestedTimestamp(t, databasePath, 1_700_001_500_000)
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil {
 				t.Fatalf("harvest changed synthetic source: %v\n%s", err, output)
@@ -426,7 +428,7 @@ func mutateLegacySQLiteMessageJSON(t testing.TB, path string) {
 	}
 }
 
-func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
+func mutateLegacySQLiteMessageVersion(t testing.TB, path string, changedAt int64) {
 	t.Helper()
 	connection, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 	if err != nil {
@@ -438,7 +440,7 @@ func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
 		// content edit, and freshness is clock-first for a session that has a
 		// clock. Move the clock so the edited session re-ingests while its
 		// sibling session, whose clock is untouched, stays unchanged.
-		updateErr = sqlitex.ExecuteTransient(connection, `UPDATE session SET time_updated = 1700002000010 WHERE id = (SELECT session_id FROM message WHERE id = 'msg_equal_a')`, nil)
+		updateErr = sqlitex.ExecuteTransient(connection, `UPDATE session SET time_updated = ? WHERE id = (SELECT session_id FROM message WHERE id = 'msg_equal_a')`, &sqlitex.ExecOptions{Args: []any{changedAt}})
 	}
 	closeErr := connection.Close()
 	if updateErr != nil || closeErr != nil {

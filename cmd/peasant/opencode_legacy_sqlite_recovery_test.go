@@ -265,10 +265,10 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	if err != nil {
 		t.Fatalf("stat live WAL before committed update: %v", err)
 	}
-	if err := appendMountedLegacyWALRows(writer, testCase); err != nil {
+	advancedWALTime := time.UnixMilli(1_700_000_003_000)
+	if err := appendMountedLegacyWALRows(writer, testCase, time.Now().Add(time.Second).UnixMilli()); err != nil {
 		t.Fatalf("commit synthetic mounted WAL-only rows: %v", err)
 	}
-	advancedWALTime := time.UnixMilli(1_700_000_003_000)
 	if err := os.Chtimes(materialized.Path+"-wal", advancedWALTime, advancedWALTime); err != nil {
 		t.Fatalf("advance synthetic committed WAL timestamp: %v", err)
 	}
@@ -283,7 +283,6 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	if err != nil || !bytes.Equal(mustReadFile(t, materialized.Path), mainBefore) || !mainInfoAfterCommit.ModTime().Equal(mainInfoBefore.ModTime()) {
 		t.Fatalf("WAL-only commit changed main database content or timestamp: error=%v before=%s after=%s", err, mainInfoBefore.ModTime(), mainInfoAfterCommit.ModTime())
 	}
-	setLocalIngestedTimestamp(t, databasePath, time.UnixMilli(1_700_000_002_000).UnixMilli())
 	walBeforeRerun := mustReadFile(t, materialized.Path+"-wal")
 
 	output, err := executeHarvestCmd(t, commandRoot, args)
@@ -510,7 +509,7 @@ func ensureMountedWALFile(t testing.TB, writer *sqlite.Conn) {
 	}
 }
 
-func appendMountedLegacyWALRows(writer *sqlite.Conn, testCase legacySQLiteFreshnessCase) (err error) {
+func appendMountedLegacyWALRows(writer *sqlite.Conn, testCase legacySQLiteFreshnessCase, changedAt int64) (err error) {
 	endTransaction, err := sqlitex.ImmediateTransaction(writer)
 	if err != nil {
 		return err
@@ -526,7 +525,7 @@ func appendMountedLegacyWALRows(writer *sqlite.Conn, testCase legacySQLiteFreshn
 	// content. Freshness is clock-first for a session that has a clock, so the
 	// committed WAL update moves the target session's clock to the new content
 	// time and re-ingests it.
-	return sqlitex.ExecuteTransient(writer, "UPDATE session SET time_updated = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{testCase.MessageTimeUpdated, testCase.TargetSession}})
+	return sqlitex.ExecuteTransient(writer, "UPDATE session SET time_updated = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{changedAt, testCase.TargetSession}})
 }
 
 func copySyntheticDatabase(t testing.TB, source, destination string) {
