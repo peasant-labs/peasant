@@ -24,10 +24,7 @@ func TestStrikeIngestCommandPersistsSessionDetail(t *testing.T) {
 	t.Parallel()
 
 	testRoot := t.TempDir()
-	fixtureDir, err := filepath.Abs(filepath.Join("testdata", "strike"))
-	if err != nil {
-		t.Fatalf("resolve Strike fixture directory: %v", err)
-	}
+	sourceDir := completeStrikeFixtureDir(t, testRoot)
 	outputDir := filepath.Join(testRoot, "sync")
 
 	before, err := executeHarvestCmd(t, testRoot, []string{"--output", outputDir, "--json"})
@@ -40,7 +37,7 @@ func TestStrikeIngestCommandPersistsSessionDetail(t *testing.T) {
 
 	result, err := executeHarvestCmd(t, testRoot, []string{
 		"--source-harness", schema.HarnessStrike.String(),
-		"--source-path", fixtureDir,
+		"--source-path", sourceDir,
 		"--output", outputDir,
 		"--include-active",
 		"--json",
@@ -193,30 +190,7 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 	t.Parallel()
 
 	testRoot := t.TempDir()
-	sourceDir := filepath.Join(testRoot, "strike-source")
-	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
-		t.Fatalf("create isolated Strike source: %v", err)
-	}
-	fixtureDir, err := filepath.Abs(filepath.Join("testdata", "strike"))
-	if err != nil {
-		t.Fatalf("resolve Strike fixture directory: %v", err)
-	}
-	fixtureFiles, err := os.ReadDir(fixtureDir)
-	if err != nil {
-		t.Fatalf("read Strike fixtures: %v", err)
-	}
-	for _, fixture := range fixtureFiles {
-		if fixture.IsDir() {
-			continue
-		}
-		data, readErr := os.ReadFile(filepath.Join(fixtureDir, fixture.Name()))
-		if readErr != nil {
-			t.Fatalf("read Strike fixture %q: %v", fixture.Name(), readErr)
-		}
-		if writeErr := os.WriteFile(filepath.Join(sourceDir, fixture.Name()), data, 0o600); writeErr != nil {
-			t.Fatalf("copy Strike fixture %q: %v", fixture.Name(), writeErr)
-		}
-	}
+	sourceDir := completeStrikeFixtureDir(t, testRoot)
 
 	rootTranscript := filepath.Join(sourceDir, strikeFixtureRootID+".jsonl")
 	transcript, err := os.ReadFile(rootTranscript)
@@ -296,6 +270,27 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 	if strings.Contains(assistant.Content, oversizedSentinel) || !strings.Contains(assistant.Content, "inspect it now") {
 		t.Errorf("filtered session detail content = %q", assistant.Content)
 	}
+}
+
+// Successful persistent indexing needs complete recognized records. Keep the
+// deliberately malformed shared fixture for adapter/legacy tolerance tests;
+// these positive mounted cases use its complete variant and the same sidecars.
+func completeStrikeFixtureDir(t *testing.T, testRoot string) string {
+	t.Helper()
+	sourceDir := filepath.Join(testRoot, "strike-source")
+	if err := os.MkdirAll(sourceDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	copyStrikeFixtureFiles(t, filepath.Join("testdata", "strike"), sourceDir,
+		strikeFixtureRootID+".meta.json", strikeFixtureChildID+".jsonl", strikeFixtureChildID+".meta.json")
+	transcript, err := os.ReadFile(filepath.Join("testdata", "strike_complete.jsonl"))
+	if err != nil {
+		t.Fatalf("read complete Strike fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, strikeFixtureRootID+".jsonl"), transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return sourceDir
 }
 
 func findStrikeArtifact(t *testing.T, root, name string) string {
