@@ -92,6 +92,29 @@ also records profile-only timing rows for **PREPARE**, **INDEX LOG**, and
 **AUDIT**. Those rows explain where time went, but they are not shown as normal
 progress stages.
 
+### Commit observations and rewritten branches
+
+Commit detection uses the existing history query with a three-day lookback and
+lookahead around the session, filters by the configured author email when
+available, and checks readable transcripts for Git activity. The transcript
+check is coarse: one recognized Git command admits all remaining candidates;
+it does not prove a relationship between each commit and the session. Missing
+email or unavailable transcript evidence uses the existing diagnostic fallback.
+
+The ingest-time branch reachability filter has been reverted. Current refs do
+not establish session-era branch membership: after a squash or rebase, original
+commits may remain discoverable through another checked-out ref even though the
+recorded branch no longer contains them. Those candidates can reach storage
+under the restored heuristics. Re-ingestion replaces `session_commits` but
+retains existing observations and their stable IDs in
+`session_commit_associations`.
+
+This restores the risk of attributing nearby same-author commits to the wrong
+session. Stored observations are not definitive proof of PR relevance. Ingest
+does not recover hashes absent from the initial history query or infer a
+successor after a rewrite; historical capture and supported successor mapping
+remain distinct concerns.
+
 ## Write Flow
 
 The ingest implementation follows this sequence:
@@ -227,22 +250,6 @@ chooses a safe publish boundary over a direct write into the final directory.
 
 The same pattern exists on the pull path, where docs explicitly call out the
 staging/publish boundary and the copy-plus-remove implementation.
-
-## Commit Candidate Selection
-
-Commit detection proposes candidates in steps, and each step only narrows the
-one before it. `git log` lists the commits from three days before the session
-started to three days after it ended. When a git user email is configured, the
-author email must match it; without one, every author is kept and a
-`missing_user_email` warning says so. When the session recorded a branch, each
-candidate must be reachable from `refs/heads/<branch>`, asked with `git merge-base
---is-ancestor`; a session that recorded no branch, or ran on a detached `HEAD`,
-keeps the whole window. Last, for file-backed transcripts, the transcript must
-mention a git command at all. The branch step is all-or-nothing per session:
-when a reachability question cannot be answered, because the branch was deleted
-after it merged or git timed out, the unfiltered window is kept and a
-`branch_reachability_unavailable` warning records why. That fallback never
-drops a real association; it returns to the window behaviour and says so.
 
 ## Commit Association Ledger
 
