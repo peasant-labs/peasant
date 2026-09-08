@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -93,19 +92,31 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 		return nil, err
 	}
 	defer s.pool.Put(conn)
+	// Ineligible rows are excluded by the QUERY, not after it: a row this build
+	// cannot harness-parse must not consume a LIMIT slot, or a page made only of
+	// such rows would come back empty and read as the end of the table, ending
+	// the recovery walk before the sessions behind it are ever visited.
+	placeholders := make([]string, 0, len(ingest.AllHarnesses))
+	args := make([]any, 0, len(ingest.AllHarnesses)+2)
+	args = append(args, string(after))
+	for _, known := range ingest.AllHarnesses {
+		placeholders = append(placeholders, "?")
+		args = append(args, string(known))
+	}
+	args = append(args, limit)
 	var targets []ingest.ContentCaptureIncompleteSession
-	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id,s.model_harness,s.start_ms FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: []any{string(after), limit}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id,s.model_harness,s.start_ms FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND s.model_harness IN (`+strings.Join(placeholders, ",")+`) AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: args, ResultFunc: func(st *sqlite.Stmt) error {
 		id, e := ingest.NewSessionID(st.ColumnText(0))
 		if e != nil {
 			return e
 		}
 		var harness schema.Harness
 		if e := harness.UnmarshalText([]byte(st.ColumnText(1))); e != nil || !harness.IsKnown() {
-			// One unreadable row must never starve the rest of the page: this
-			// listing promises that a failed target cannot block later ones.
-			slog.Warn("store: session records a harness this build does not recognize; it was left out of the content recovery targets and every other target still stands; upgrade Peasant or restore valid session metadata before harvesting it",
-				"session_id", id, "model_harness", st.ColumnText(1))
-			return nil
+			// The WHERE clause binds the same canonical harness list this parser
+			// accepts, so a selected row cannot carry an unrecognised harness.
+			// Reaching this means the two disagree inside one build, which no
+			// stored data can express and which silently skipping would hide.
+			return fmt.Errorf("store content recovery targets: session %s passed the bound known-harness filter but its harness %q cannot be parsed; the bound harness list and the harness parser disagree inside this build, so no target list can be trusted; upgrade Peasant to a build whose harness list and parser agree", id, st.ColumnText(1))
 		}
 		targets = append(targets, ingest.ContentCaptureIncompleteSession{SessionID: id, Harness: harness, StartMs: st.ColumnInt64(2)})
 		return nil

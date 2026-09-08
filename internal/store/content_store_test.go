@@ -328,6 +328,67 @@ func TestFullContentLegacyBackfillAndKeyset(t *testing.T) {
 	}
 }
 
+// A page of sessions this build cannot harness-parse must not come back empty.
+// The listing filters them in SQL, so they never consume a LIMIT slot; if they
+// were dropped in Go afterwards, a full page of them would look like the end of
+// the table and every recoverable session behind it would never be visited.
+func TestContentRecoveryTargetsSkipUnknownHarnessWithoutEndingTheWalk(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	unknownFirst := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
+	unknownSecond := ingest.SessionID("bbbbbbbb-1111-4111-8111-aaaaaaaaaaaa")
+	recoverable := ingest.SessionID("cccccccc-1111-4111-8111-aaaaaaaaaaaa")
+	for _, id := range []ingest.SessionID{unknownFirst, unknownSecond, recoverable} {
+		seedSession(t, s, string(id))
+	}
+	// Only a database written by a build whose harness set is wider than this
+	// one can hold these rows, so the CHECK mirror is suspended to write them.
+	execContentSQL(t, s, `PRAGMA ignore_check_constraints=ON;
+UPDATE sessions SET model_harness='harness-from-a-later-build' WHERE session_id IN ('`+string(unknownFirst)+`','`+string(unknownSecond)+`');
+PRAGMA ignore_check_constraints=OFF;`)
+	if got := storedHarness(t, s, unknownFirst); got != "harness-from-a-later-build" {
+		t.Fatalf("the unrecognised harness was not stored: %q", got)
+	}
+
+	// One eligible row is behind two ineligible ones, so a page of one proves
+	// the LIMIT counted only eligible rows.
+	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 1)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(targets) != 1 || targets[0].SessionID != recoverable {
+		t.Fatalf("a page of one did not reach the recoverable session behind the unrecognised rows: %+v", targets)
+	}
+	if targets[0].Harness != ingest.HarnessClaudeCode {
+		t.Fatalf("recoverable target lost its harness: %+v", targets[0])
+	}
+	ids, err := s.ListContentCaptureIncompleteSessions(ctx, 3)
+	if err != nil {
+		t.Fatalf("full page: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != recoverable {
+		t.Fatalf("unrecognised sessions were offered as recovery targets: %v", ids)
+	}
+	after, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, recoverable, 1)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("the walk did not end after the last eligible session: %v %v", after, err)
+	}
+}
+
+func storedHarness(t *testing.T, s *store.Store, id ingest.SessionID) string {
+	t.Helper()
+	c := takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(c)
+	got := ""
+	if err := sqlitex.ExecuteTransient(c, `SELECT model_harness FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+		got = st.ColumnText(0)
+		return nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func TestFullContentHotReadsAvoidPayloadTables(t *testing.T) {
 	s := openTestStore(t)
 	id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
@@ -411,12 +472,13 @@ func TestFullContentBackfillFailurePreservesAnnotationsAndLaterWrites(t *testing
 // A caller-supplied capture format outside the canonical set is refused at the
 // Go boundary with an answerable message, and the stored capture is untouched.
 func TestFullContentWriteRefusesUnknownCaptureFormat(t *testing.T) {
-	for _, rejection := range loadContentFixtures(t).CaptureFormatRejections {
+	fixtures := loadContentFixtures(t)
+	for _, rejection := range fixtures.CaptureFormatRejections {
 		t.Run(rejection.Name, func(t *testing.T) {
 			s := openTestStore(t)
 			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
 			seedSession(t, s, string(id))
-			entries := contentEntries(id, loadContentFixtures(t).Cases[0])
+			entries := contentEntries(id, contentCaseNamed(t, fixtures, "long_unicode"))
 			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
 			before := capture(t, s, id)
 			if before.CaptureFormat != ingest.ContentCaptureFormatFull {

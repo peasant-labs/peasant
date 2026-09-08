@@ -57,9 +57,12 @@ CREATE INDEX idx_session_content_captures_status ON session_content_captures(sta
 // the capture-format rebuild runs.
 const captureFormatPredecessorSchemaVersion = 58
 
-// captureFormatUpgradeMapping is one arm of the migration's CASE, restated so
-// the pre-migration guard and the migration cannot disagree about which stored
-// tags are recognised. TestMigrationV59 asserts every arm is present in the SQL.
+// captureFormatUpgradeMapping is one arm of the migration's CASE, restated for
+// the pre-migration guard. The migration text stays byte-frozen once shipped,
+// so this list is NOT generated from it and the two CAN drift in the source;
+// TestCaptureFormatUpgradeMappingsMatchTheMigration is what holds them equal,
+// asserting the arms parsed out of migrationV59 and this list are the same set
+// in both directions.
 type captureFormatUpgradeMapping struct {
 	StoredTag string
 	Format    ingest.ContentCaptureFormat
@@ -80,16 +83,30 @@ func captureFormatUpgradeMappings() []captureFormatUpgradeMapping {
 // fails closed on them, but SQLite can only say that a NOT NULL constraint
 // failed, which names neither the blocking row nor a way forward. Running the
 // same predicate first turns that into an answerable refusal.
+//
+// The gate is the SHAPE of the table, not one schema version: the unconstrained
+// capture_revision column exists from the schema that created the table, so a
+// database left at any version between that one and the rebuild's predecessor
+// carries the same unmappable rows and must get the same answerable refusal
+// rather than the bare constraint text after the intervening migrations run.
 func refuseUnmappableCaptureFormats(conn *sqlite.Conn) error {
+	unconstrained := 0
+	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM pragma_table_info('session_content_captures') WHERE name='capture_revision'`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
+		unconstrained = st.ColumnInt(0)
+		return nil
+	}}); err != nil {
+		return fmt.Errorf("store capture-format upgrade: cannot read the shape of the session_content_captures table before migrating; the database may be unreadable or held by another process; close other peasant processes and retry: %w", err)
+	}
+	// A database with no such column is either new or already rebuilt.
+	if unconstrained == 0 {
+		return nil
+	}
 	version := -1
 	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
 		version = st.ColumnInt(0)
 		return nil
 	}}); err != nil {
 		return fmt.Errorf("store capture-format upgrade: cannot read the database schema version before migrating; the database may be unreadable or held by another process; close other peasant processes and retry: %w", err)
-	}
-	if version != captureFormatPredecessorSchemaVersion {
-		return nil
 	}
 	placeholders := make([]string, 0, len(captureFormatUpgradeMappings()))
 	args := make([]any, 0, len(captureFormatUpgradeMappings()))
@@ -108,7 +125,7 @@ func refuseUnmappableCaptureFormats(conn *sqlite.Conn) error {
 		return nil
 	}
 	return fmt.Errorf("store capture-format upgrade: the schema upgrade to a closed capture-format set stopped at schema %d because %d stored capture row(s) carry a tag no shipped peasant build wrote, so their contents cannot be attributed to a known capture shape and were left untouched (%s); recognised tags are %v; delete those rows from session_content_captures and run peasant harvest index --force to recapture those sessions, then reopen the database",
-		captureFormatPredecessorSchemaVersion, len(blocking), strings.Join(blocking, "; "), captureFormatUpgradeStoredTags())
+		version, len(blocking), strings.Join(blocking, "; "), captureFormatUpgradeStoredTags())
 }
 
 // captureFormatUpgradeStoredTags names the recognised tags for an error message.

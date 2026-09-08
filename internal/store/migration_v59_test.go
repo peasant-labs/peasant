@@ -6,6 +6,8 @@ import (
 	_ "embed"
 	"io"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,12 +30,16 @@ type migrationCaptureFormatQuery struct {
 }
 
 type migrationCaptureFormatCase struct {
-	Name             string                        `yaml:"name"`
-	MigrationFails   bool                          `yaml:"migrationFails"`
-	Seed             []string                      `yaml:"seed"`
-	Assertions       []migrationCaptureFormatQuery `yaml:"assertions"`
-	FailedAssertions []migrationCaptureFormatQuery `yaml:"failedAssertions"`
-	Rejects          []string                      `yaml:"rejects"`
+	Name string `yaml:"name"`
+	// PredecessorVersion is the schema the user's last build left behind, which
+	// is not always the rebuild's immediate predecessor: the unconstrained
+	// column exists from schema 52 on. Zero means the immediate predecessor.
+	PredecessorVersion int                           `yaml:"predecessorVersion"`
+	MigrationFails     bool                          `yaml:"migrationFails"`
+	Seed               []string                      `yaml:"seed"`
+	Assertions         []migrationCaptureFormatQuery `yaml:"assertions"`
+	FailedAssertions   []migrationCaptureFormatQuery `yaml:"failedAssertions"`
+	Rejects            []string                      `yaml:"rejects"`
 	// FailedOpenMessage are the substrings a refusing upgrade must show the
 	// user when the production store opens the unupgradable database.
 	FailedOpenMessage []string `yaml:"failedOpenMessage"`
@@ -91,8 +97,12 @@ func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer pool.Put(conn)
-			if err := sqlitemigration.Migrate(ctx, conn, frozenSchema(captureFormatPredecessorSchemaVersion)); err != nil {
-				t.Fatalf("freeze predecessor schema: %v", err)
+			predecessor := c.PredecessorVersion
+			if predecessor == 0 {
+				predecessor = captureFormatPredecessorSchemaVersion
+			}
+			if err := sqlitemigration.Migrate(ctx, conn, frozenSchema(predecessor)); err != nil {
+				t.Fatalf("freeze predecessor schema %d: %v", predecessor, err)
 			}
 			if got := scalarText(t, conn, `SELECT COUNT(*) FROM pragma_table_info('session_content_captures') WHERE name='capture_revision'`); got != "1" {
 				t.Fatalf("predecessor schema does not carry the unconstrained capture_revision column: %q", got)
@@ -101,6 +111,35 @@ func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
 				if err := sqlitex.ExecuteTransient(conn, query, nil); err != nil {
 					t.Fatalf("seed %s: %v", query, err)
 				}
+			}
+
+			if c.MigrationFails {
+				// The production entry point must refuse the database as the
+				// user actually holds it — at whatever schema their last build
+				// left — naming the blocking row and how to clear it, before any
+				// migration runs and reduces the report to a constraint failure.
+				refused, openErr := Open(dbPath, WithPoolSize(1))
+				if openErr == nil {
+					_ = refused.Close()
+					t.Fatal("the production store opened a database the capture-format upgrade cannot map")
+				}
+				if len(c.FailedOpenMessage) == 0 {
+					t.Fatal("a refusing migration case must state what the user is told")
+				}
+				for _, want := range c.FailedOpenMessage {
+					if !strings.Contains(openErr.Error(), want) {
+						t.Fatalf("upgrade refusal does not mention %q: %v", want, openErr)
+					}
+				}
+				if got := scalarText(t, conn, `PRAGMA user_version`); got != strconv.Itoa(predecessor) {
+					t.Fatalf("the refused open migrated the database anyway: user_version=%q", got)
+				}
+			} else if err := refuseUnmappableCaptureFormats(conn); err != nil {
+				// The guard must also LET THROUGH a database that holds only
+				// tags shipped builds wrote; a guard that over-selects (binding
+				// the mapped format instead of the stored tag, or losing its
+				// WHERE clause) would brick every real upgrade at store open.
+				t.Fatalf("upgrade guard refused a database that holds only shipped capture tags: %v", err)
 			}
 
 			// The migration under test is the frozen successor of the frozen
@@ -120,21 +159,6 @@ func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
 				for _, a := range c.FailedAssertions {
 					if got := scalarText(t, conn, a.Query); got != a.Want {
 						t.Fatalf("rollback query %s = %q want %q", a.Query, got, a.Want)
-					}
-				}
-				// The production entry point must say which row blocks the
-				// upgrade and how to clear it, not just that a constraint failed.
-				refused, openErr := Open(dbPath, WithPoolSize(1))
-				if openErr == nil {
-					_ = refused.Close()
-					t.Fatal("the production store opened a database the capture-format upgrade cannot map")
-				}
-				if len(c.FailedOpenMessage) == 0 {
-					t.Fatal("a refusing migration case must state what the user is told")
-				}
-				for _, want := range c.FailedOpenMessage {
-					if !strings.Contains(openErr.Error(), want) {
-						t.Fatalf("upgrade refusal does not mention %q: %v", want, openErr)
 					}
 				}
 				return
@@ -174,16 +198,34 @@ func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
 	}
 }
 
-// The pre-migration guard and the migration must recognise the same tags, or a
-// database would pass the guard and then fail inside the rebuild.
+// The pre-migration guard and the migration must recognise EXACTLY the same
+// tags. A tag the guard knows and the SQL does not fails inside the rebuild
+// with the bare constraint text; a tag the SQL knows and the guard does not
+// makes the guard refuse a database the migration would have upgraded, telling
+// the user to delete rows that were mappable all along. Both directions are
+// asserted as set equality, never as a count.
 func TestCaptureFormatUpgradeMappingsMatchTheMigration(t *testing.T) {
-	for _, m := range captureFormatUpgradeMappings() {
-		arm := "WHEN '" + m.StoredTag + "' THEN '" + m.Format.String() + "'"
-		if !strings.Contains(migrationV59, arm) {
-			t.Fatalf("capture-format migration has no arm %s", arm)
+	arms := map[string]string{}
+	for _, arm := range regexp.MustCompile(`WHEN '([^']+)' THEN '([^']+)'`).FindAllStringSubmatch(migrationV59, -1) {
+		if _, duplicate := arms[arm[1]]; duplicate {
+			t.Fatalf("capture-format migration maps the stored tag %q more than once", arm[1])
 		}
+		arms[arm[1]] = arm[2]
+	}
+	if len(arms) == 0 {
+		t.Fatal("no capture-format mapping arms were parsed out of the migration; the arm shape changed and this test no longer proves anything")
+	}
+	guarded := map[string]string{}
+	for _, m := range captureFormatUpgradeMappings() {
+		if _, duplicate := guarded[m.StoredTag]; duplicate {
+			t.Fatalf("the upgrade guard lists the stored tag %q more than once", m.StoredTag)
+		}
+		guarded[m.StoredTag] = m.Format.String()
 		if _, err := ingest.NewContentCaptureFormat(m.Format.String()); err != nil {
 			t.Fatalf("capture-format mapping targets a format outside the canonical set: %v", err)
 		}
+	}
+	if !reflect.DeepEqual(guarded, arms) {
+		t.Fatalf("the upgrade guard and the migration recognise different stored capture tags: guard %v, migration SQL %v", guarded, arms)
 	}
 }

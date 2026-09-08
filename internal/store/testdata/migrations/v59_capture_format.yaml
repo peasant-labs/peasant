@@ -60,3 +60,24 @@ cases:
       - "INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('fixture-host', 'fixture-host')"
       - "INSERT INTO sessions (session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format) VALUES ('66666666-6666-4666-8666-666666666666','claude-code','fixture-model','fixture-host','fixture-project',1,2,3,'/fixture/e.jsonl','jsonl')"
       - "INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_revision,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES ('66666666-6666-4666-8666-666666666666','incomplete','none',0,'unrecognised-capture-tag',0,0,NULL,46,NULL,NULL,0)"
+
+  # A build older than the rebuild's immediate predecessor left this database
+  # behind. The same unmappable row must produce the same answerable refusal,
+  # not the bare constraint text after the intervening migrations run.
+  - name: unmapped_capture_value_below_the_predecessor_schema_is_refused
+    predecessorVersion: 55
+    migrationFails: true
+    failedAssertions:
+      - {query: "SELECT capture_revision FROM session_content_captures WHERE session_id='77777777-7777-4777-8777-777777777777'", want: unrecognised-capture-tag}
+      - {query: "SELECT status || ':' || source_authority || ':' || entry_count || ':' || captured_at_ms FROM session_content_captures WHERE session_id='77777777-7777-4777-8777-777777777777'", want: 'incomplete:none:0:47'}
+      - {query: "SELECT COUNT(*) FROM pragma_table_info('session_content_captures') WHERE name='capture_format'", want: '0'}
+      - {query: "SELECT COUNT(*) FROM sqlite_master WHERE name='session_content_captures_v58'", want: '0'}
+    failedOpenMessage:
+      - "77777777-7777-4777-8777-777777777777"
+      - "unrecognised-capture-tag"
+      - "peasant harvest index --force"
+    seed:
+      - "INSERT INTO projects (project_hash, canonical_cwd) VALUES ('fixture-project', '/fixture/project')"
+      - "INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('fixture-host', 'fixture-host')"
+      - "INSERT INTO sessions (session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format) VALUES ('77777777-7777-4777-8777-777777777777','claude-code','fixture-model','fixture-host','fixture-project',1,2,3,'/fixture/f.jsonl','jsonl')"
+      - "INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_revision,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES ('77777777-7777-4777-8777-777777777777','incomplete','none',0,'unrecognised-capture-tag',0,0,NULL,47,NULL,NULL,0)"
