@@ -2,6 +2,8 @@ transcript: '{"type":"user","message":{"role":"user","content":"captured input"}
 replacement: '{"type":"user","message":{"role":"user","content":"newer publication"}}'
 previousPreview: last-good preview
 expectedPreview: captured input
+malformed: malformed current input
+eligibilityModes: [normal, index]
 requiredNames: [commits-captured-input, commits-captured-empty, refuses-newer-artifact, refuses-newer-sql-state]
 cases:
   - {name: commits-captured-input}
