@@ -22,10 +22,19 @@ type ContentSnapshot struct {
 	FullContentError error
 }
 
+// ContentStore supplies the existing coherent SQL read and its locator hint.
+// Callers may wrap Store without introducing another content snapshot boundary.
+type ContentStore interface {
+	LookupSessionLocation(context.Context, ingest.SessionID) (string, string, error)
+	ReadSessionContent(context.Context, string) (*store.SessionContentSnapshot, error)
+}
+
+var _ ContentStore = (*store.Store)(nil)
+
 // ReadSessionContent takes file ownership before the content SQL snapshot, then
 // releases both before parsing. A locator lookup is only a hint: the captured
 // artifact and SQL identity must agree. This never creates or repairs artifacts.
-func ReadSessionContent(ctx context.Context, db *store.Store, fs ingest.FileSystem, managedRoot, sessionID string) (*ContentSnapshot, error) {
+func ReadSessionContent(ctx context.Context, db ContentStore, fs ingest.FileSystem, managedRoot, sessionID string) (*ContentSnapshot, error) {
 	sid := ingest.SessionID(sessionID)
 	host, parent, err := db.LookupSessionLocation(ctx, sid)
 	if err != nil {

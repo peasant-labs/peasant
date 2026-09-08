@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
-	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -259,7 +258,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	git := &ingest.ExecGitResolver{}
 
 	// 2. Load config.
-	cfg, err := loadConfig(configPath)
+	cfg, err := loadRunConfig(configPath, flags.dryRun)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -422,48 +421,24 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	skipDB := mode == harvestLogsOnly
 
 	if !skipDB {
-		needsDB := !flags.dryRun || reindex
-		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-		dbExists := func() bool { _, err := os.Stat(dbPath); return err == nil }
-		if needsDB || dbExists() {
-			dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
-			if !flags.dryRun {
-				if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-					return fmt.Errorf("create data directory: %w", err)
-				}
-			}
-			db, err := store.Open(dbPath)
-			if err != nil {
-				if !flags.dryRun {
-					return fmt.Errorf("open analytics store: %w", err)
-				}
-			} else {
-				defer db.Close()
-
-				pipelineOpts = append(pipelineOpts,
-					ingest.WithStore(db),
-					ingest.WithMetricsStore(db),
-				)
-
-				installSalt, _, saltErr := salt.Load(db.Pool())
-				if saltErr != nil {
-					slog.Warn("salt.Load failed; using zero salt for project hashes (non-fatal)",
-						"err", saltErr,
-					)
-				} else {
-					pipelineOpts = append(pipelineOpts, ingest.WithSalt(installSalt))
-				}
-
-				if !flags.dryRun {
-					pipelineOpts = append(pipelineOpts,
-						ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
-						ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
-						ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
-						ingest.WithLogger(db),
-						ingest.WithIndexLogger(db),
-					)
-				}
-			}
+		db, err := openRunStore(cmd, flags.dryRun)
+		if err != nil {
+			return fmt.Errorf("open analytics store: %w", err)
+		}
+		defer db.Close()
+		pipelineOpts = append(pipelineOpts,
+			ingest.WithStore(db),
+			ingest.WithMetricsStore(db),
+			ingest.WithSalt(db.InstallationSalt()),
+			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		)
+		if !flags.dryRun {
+			pipelineOpts = append(pipelineOpts,
+				ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
+				ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
+				ingest.WithLogger(db),
+				ingest.WithIndexLogger(db),
+			)
 		}
 	}
 

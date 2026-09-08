@@ -163,7 +163,7 @@ func BuildPushCommand() *cobra.Command {
 					return fmt.Errorf("village URL is not set — run 'peasant village login' to re-link your account")
 				}
 
-				cfg, err := loadConfig(cfgPath)
+				cfg, err := loadRunConfig(cfgPath, dryRun)
 				if err != nil {
 					return fmt.Errorf("load config: %w", err)
 				}
@@ -222,12 +222,7 @@ func BuildPushCommand() *cobra.Command {
 						noteCfgPath, noteCfgPath)
 				}
 
-				dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
-				dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-				if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-					return fmt.Errorf("create data directory: %w", err)
-				}
-				db, err := store.Open(dbPath)
+				db, err := openRunStore(cmd, dryRun)
 				if err != nil {
 					return fmt.Errorf("open analytics store: %w", err)
 				}
@@ -536,10 +531,12 @@ func BuildPushCommand() *cobra.Command {
 					if rollupErr := perf.WriteRollup(cmd.ErrOrStderr(), timingCollector.Rollup()); rollupErr != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing rollup: %v\n", rollupErr)
 					}
-					if logPath, logErr := writeTimingLog(timingCollector, stateDirOverride(cmd)); logErr != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing log: %v\n", logErr)
-					} else if logPath != "" {
-						fmt.Fprintf(cmd.ErrOrStderr(), "timing log written to %s\n", logPath)
+					if !dryRun {
+						if logPath, logErr := writeTimingLog(timingCollector, stateDirOverride(cmd)); logErr != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing log: %v\n", logErr)
+						} else if logPath != "" {
+							fmt.Fprintf(cmd.ErrOrStderr(), "timing log written to %s\n", logPath)
+						}
 					}
 				}
 

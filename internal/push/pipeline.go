@@ -82,8 +82,8 @@ type Publisher interface {
 }
 
 // PipelineStore is the complete local persistence surface required by the push
-// pipeline. Receipt reads remain available on store.Store but are not needed to
-// publish or persist authoritative results.
+// pipeline. Publication also requires transcript.ContentStore at the read
+// boundary; candidate-only callers need not implement that capability.
 type PipelineStore interface {
 	CandidateStore
 	InsertPushLog(context.Context, ingest.PushLogEntry) error
@@ -209,12 +209,10 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 		}
 		return result, nil // no audit log for dry-run
 	}
-	// Fail local transcript reads before the first remote negotiation. pushSession
-	// reads again under its per-session operation so concurrent store changes also
-	// fail closed rather than publishing stale preflight bytes.
+	// Require full retained-input proof before contacting Village. Each upload
+	// captures again so its metadata, entries and associations share one view.
 	for _, sess := range sessions {
-		sessionID, _ := ingest.NewSessionID(sess.SessionID)
-		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
+		if _, readErr := p.readContent(ctx, sess); readErr != nil {
 			sr := entryReadFailure(sess, readErr, entryReadPreflight)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
@@ -770,8 +768,7 @@ func (p *Pipeline) filterByWizardSelection(sessions []ingest.PushSessionRow) []i
 	return out
 }
 
-// pushSession reads metadata + transcript from the filesystem and uploads them.
-// All filesystem access uses p.fs.ReadFile — no os import.
+// pushSession captures coherent full content before redaction and publication.
 func (p *Pipeline) pushSession(
 	ctx context.Context,
 	sess ingest.PushSessionRow,
@@ -780,36 +777,23 @@ func (p *Pipeline) pushSession(
 	emit schema.PushContractVersion,
 	contentCapabilities []schema.ContentCapability,
 ) SessionPushResult {
-	// 1. Read metadata.json via injected FileSystem. The path is resolved by the
-	// shared ingest helper so subagent sessions (which live under
-	// {parentID}/subagents/{id}) are read from the correct location rather than
-	// the top-level {slug}/{id} dir.
-	metadataPath := ingest.SessionMetadataPath(
-		p.cfg.Output.BasePath, sess.HostSlug, sess.SessionID, sess.ParentID,
-	)
-	metaBytes, err := p.fs.ReadFile(metadataPath)
+	// File ownership and the SQL read are released before redaction/network I/O.
+	snapshot, err := p.readContent(ctx, sess)
 	if err != nil {
-		failure := fmt.Errorf("read metadata %s: %w: %w", metadataPath, ErrMetadataMissing, err)
-		if remedy := p.redactedSlugRemedy(sess); remedy != "" {
-			failure = fmt.Errorf("%w\n%s", failure, remedy)
+		stage := entryReadPostNegotiation
+		if p.runCfg.DryRun {
+			stage = entryReadPreflight
 		}
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     failure,
-		}
+		return entryReadFailure(sess, err, stage)
 	}
-
-	var meta ingest.UnifiedMetadata
-	if err := json.Unmarshal(metaBytes, &meta); err != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("parse metadata: %w", err),
-		}
+	meta := snapshot.Artifact.Metadata
+	sess.HostSlug, sess.ProjectHash = snapshot.Detail.HostSlug, snapshot.Detail.ProjectHash
+	sess.SessionOrigin, sess.PushedAt = snapshot.Detail.SessionOrigin, snapshot.Detail.PushedAt
+	var metrics *schema.QualityMetrics
+	if snapshot.Metrics != nil {
+		metrics = &snapshot.Metrics.QualityMetrics
 	}
+	entries := snapshot.Entries
 
 	// Refuse modelless sessions client-side, before any upload, so the village
 	// never sees a request that would 400. The root cause is in ingest; until
@@ -835,23 +819,6 @@ func (p *Pipeline) pushSession(
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
 
-	// 2. Fetch quality metrics from the store (non-fatal on error).
-	sessionID, _ := ingest.NewSessionID(sess.SessionID)
-	metrics, metricsErr := p.store.GetQualityMetrics(ctx, sessionID)
-	if metricsErr != nil {
-		slog.Warn("failed to get quality metrics, continuing without",
-			"session_id", sess.SessionID,
-			"error", metricsErr,
-		)
-		// metrics stays nil — graceful degradation
-	}
-
-	// 3. Fetch session entries from the store. Transcript bytes and schema-owned
-	// evidence are indivisible publication input, so an unreadable entry set fails closed.
-	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
-	if entriesErr != nil {
-		return entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
-	}
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
 	// The entries are the transcript's text: contentPreview, toolInput and
@@ -863,9 +830,8 @@ func (p *Pipeline) pushSession(
 	// unrepeatable: a consumer added later cannot get the unredacted ones,
 	// because after this line they do not exist.
 	//
-	// Unlike the two reads above this is NOT graceful-degradation territory. A
-	// redaction that cannot be completed must stop the session, not publish what
-	// it failed to redact.
+	// A redaction that cannot be completed must stop the session, not publish
+	// what it failed to redact.
 	//
 	// WHY THIS STAYS, even though both published parts now redact themselves as
 	// assembled documents and so cover the entries twice over.
@@ -890,7 +856,7 @@ func (p *Pipeline) pushSession(
 	// where it now lives: suppressing this call fails
 	// TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing, which
 	// re-runs on every change instead of aging in a comment.
-	entries, entriesErr = RedactEntries(p.redactor, entries)
+	entries, entriesErr := RedactEntries(p.redactor, entries)
 	if entriesErr != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
@@ -900,19 +866,8 @@ func (p *Pipeline) pushSession(
 		}
 	}
 
-	// 4. Load the producer-owned durable associations. Unlike metrics and
-	// transcript entries this is not optional: omitting an authoritative current
-	// relationship would make a later association annotation unresolvable at the
-	// village and could silently sever rewrite history.
-	storedAssociations, associationErr := p.store.ListCurrentSessionCommitAssociations(ctx, sessionID)
-	if associationErr != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("load durable commit associations: %w", associationErr),
-		}
-	}
+	// Associations belong to the same SQL snapshot as this artifact and index.
+	storedAssociations := snapshot.Associations
 	publishedAssociations := make([]schema.PublishedAssociation, 0, len(storedAssociations))
 	for _, association := range storedAssociations {
 		publishedAssociations = append(publishedAssociations, schema.PublishedAssociation{
@@ -971,8 +926,7 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
-	// The session's stored origin travels as a push call option, read from the
-	// sessions row this run selected rather than from the metadata sidecar.
+	// Origin comes from the captured SQL view, independently of metadata.
 	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, sessionorigin.Origin(sess.SessionOrigin))
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
@@ -1199,7 +1153,7 @@ func entryReadFailure(sess ingest.PushSessionRow, err error, stage entryReadStag
 		meaning = "no transcript bytes or metadata were uploaded, and no publication receipt or attempt was persisted; the ordinary local run audit still records this failed session"
 	}
 	return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
-		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: %s\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err, when, meaning)}
+		"transcript entry read failed\n  what: session %s retained input and stored content could not be captured coherently\n  why: %w\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: %s\n  fix: verify the local database and retained files are readable, complete harvest for this session, and retry the push", sess.SessionID, err, when, meaning)}
 }
 
 func promoteAuthoritativePublishFields(document map[string]json.RawMessage) error {
