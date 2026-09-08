@@ -4,7 +4,8 @@ requiredNames:
   - recent-exited-container
   - malformed-prefix
   - malformed-static-name
-  - malformed-partial-name
+  - hyphenated-release-kind-name
+  - malformed-nonnumeric-suffix
   - stale-running-dead-owner
   - stale-created-container
   - running-live-owner
@@ -33,8 +34,12 @@ cases:
   - name: malformed-static-name
     rawName: peasant-e2e-transcripts-static
     status: Exited (0) 25 hours ago
-  - name: malformed-partial-name
+  - name: hyphenated-release-kind-name
     rawName: peasant-e2e-release-ubuntu-22-04-202
+    status: Exited (0) 25 hours ago
+    selected: true
+  - name: malformed-nonnumeric-suffix
+    rawName: peasant-e2e-pg-x
     status: Exited (0) 25 hours ago
   - name: stale-running-dead-owner
     kind: village
