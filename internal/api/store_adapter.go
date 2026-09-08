@@ -320,12 +320,20 @@ func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.Ses
 // Populates Turns from session_entries for the trajectory view.
 // Uses one content snapshot, including git_remote, pushed_at and project_path.
 func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
-	snapshot, err := transcript.ReadSessionContent(ctx, p.store, p.fs, p.managedRoot, id)
+	snapshot, err := p.store.ReadSessionContent(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}
 	if snapshot == nil {
 		return nil, fmt.Errorf("session not found: %s", id)
+	}
+	// Ordinary short previews need no file capture or parser run. A successful
+	// full read replaces the whole snapshot, never just text from a newer view.
+	if transcript.AnyContentTruncated(snapshot.Entries) {
+		full, fullErr := transcript.ReadSessionContent(ctx, p.store, p.fs, p.managedRoot, id)
+		if fullErr == nil && full != nil && full.FullContentError == nil {
+			snapshot = full.SessionContentSnapshot
+		}
 	}
 	detailRow := snapshot.Detail
 	s := sessionRowToSession(&detailRow.SessionRow)

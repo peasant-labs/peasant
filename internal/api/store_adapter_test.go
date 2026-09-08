@@ -2250,30 +2250,28 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_MissingSourceDegradesGrace
 	}
 }
 
-// readFileSpyFS wraps a *testutil.MemFS and counts ReadFile calls, so a test
-// can assert the content-overlay re-index was never attempted (the perf
-// gate, transcript.AnyContentTruncated) rather than merely attempted and
-// harmlessly failing/no-opping — those two outcomes are otherwise
-// indistinguishable from the returned Content alone.
+// readFileSpyFS detects forbidden native reads or managed-artifact acquisition
+// when the coherent SQL preview already contains ordinary short content.
 type readFileSpyFS struct {
 	*testutil.MemFS
-	readFileCalls int
+	readFileCalled bool
+	artifactOpened bool
 }
 
 func (s *readFileSpyFS) ReadFile(path string) ([]byte, error) {
-	s.readFileCalls++
+	s.readFileCalled = true
 	return s.MemFS.ReadFile(path)
+}
+
+func (s *readFileSpyFS) OpenArtifactRoot(path string) (ingest.ArtifactRoot, error) {
+	s.artifactOpened = true
+	return s.MemFS.OpenArtifactRoot(path)
 }
 
 // TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTruncated
 // is the perf-gate regression test:
-// BuildContentOverlay does a full re-parse of the source transcript from
-// disk, which SessionByID must NOT pay on every session view — only when at
-// least one turn's content_preview actually hit defaults.ContentPreviewLimit.
-// Proven with a ReadFile-counting spy FileSystem: the source file is present
-// and perfectly readable (so a missing/degraded-gracefully result can't mask
-// a gate failure the way it did in the sibling test above), but every DB
-// entry is short, so the spy must see ZERO ReadFile calls.
+// A valid published, indexed artifact must not be captured or reparsed when
+// the coherent stored entries contain only ordinary short content.
 func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTruncated(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
@@ -2314,22 +2312,10 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTru
 			SourceFormat: ingest.SourceFormatJSONL,
 		},
 	}
-	provider := seedStoreWithFS(t, s, []ingest.StoreEntry{entry}, spy)
+	provider := api.NewStoreDataProviderWithFS(s, sessionvisibility.All(), spy, "/managed")
 
 	shortContent := "a perfectly ordinary, short turn"
-	dbEntries := []schema.SessionEntry{
-		{
-			SessionID:      sid,
-			EntryIndex:     0,
-			Harness:        defaults.HarnessClaudeCode,
-			EntryType:      ingest.EntryTypeText,
-			Role:           ingest.RoleUser,
-			ContentPreview: &shortContent,
-		},
-	}
-	if err := s.IndexSessionEntries(ctx, sid, dbEntries); err != nil {
-		t.Fatalf("IndexSessionEntries: %v", err)
-	}
+	storetest.SeedManagedInput(t, s, spy.MemFS, "/managed", *entry.Metadata, []byte(shortLine+"\n"))
 
 	sess, err := provider.SessionByID(ctx, sidStr)
 	if err != nil {
@@ -2338,8 +2324,8 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTru
 	if len(sess.Turns) != 1 || sess.Turns[0].Content != shortContent {
 		t.Fatalf("Turns[0].Content: got %+v, want the DB preview %q verbatim", sess.Turns, shortContent)
 	}
-	if spy.readFileCalls != 0 {
-		t.Errorf("ReadFile call count: got %d, want 0 — the perf gate should have skipped the content-overlay re-index entirely because nothing in this session was truncated", spy.readFileCalls)
+	if spy.readFileCalled || spy.artifactOpened {
+		t.Error("short viewer content acquired or read transcript input instead of using its SQL snapshot")
 	}
 }
 
