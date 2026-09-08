@@ -145,8 +145,8 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	}
 
 	// Pass 1: Collect tool_result data keyed by ToolCallID for joining.
-	// Also collects depth=0 entries with ToolOutput for backward compat
-	// (old-style entries where both tool_use and tool_result are at depth=0).
+	// Inline ToolOutput remains a fallback at any depth, including tool_use
+	// children whose harness stores the completed result on the call itself.
 	resultMap := make(map[string]toolResultData)
 	for _, e := range entries {
 		if e.ToolCallID == nil {
@@ -164,9 +164,9 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			resultMap[*e.ToolCallID] = rd
 			continue
 		}
-		// Flat harnesses keep results at depth=0. Their output/error does not
-		// require timing evidence; timestamps only contribute optional duration.
-		if e.Depth == 0 && (e.ToolOutput != nil || e.EntryType == schema.EntryTypeToolResult) {
+		// Preserve inline output as well as untimed flat result/error records.
+		// Explicit depth-1 results above take precedence in either entry order.
+		if e.ToolOutput != nil || (e.Depth == 0 && e.EntryType == schema.EntryTypeToolResult) {
 			if _, exists := resultMap[*e.ToolCallID]; !exists {
 				rd := toolResultData{IsError: e.IsError}
 				if e.ToolOutput != nil {
