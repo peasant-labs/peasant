@@ -7,11 +7,40 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-08
+
+### Added
+- Kickstart local import shows progress bars, stage timings, and live estimates,
+  and lets the user cancel with `q` or Ctrl+C (#303).
+- Push profiling reports stage timings, resource usage, and privacy-safe
+  redaction match counters in JSON or JSONL (#315).
+
 ### Changed
 - Commit detection keeps only the commits reachable from the branch a session
   recorded. Sessions without a recorded branch keep the existing three-day
   window, and a branch that can no longer be resolved falls back to that window
   with a diagnostic (#324).
+- Active sessions are captured by default with source snapshots and tracked
+  upstream project attribution. Repeated ingest can use those snapshots without
+  opening the store, and explicit publications update through their existing
+  receipts (#331).
+
+### Fixed
+- OpenCode v2 and beta storage layouts ingest authoritative session metadata,
+  normalize message identities, preserve tool output, and recover live legacy
+  sessions from mixed stores (#310).
+- Harvest cancellation now stops in-flight ingest and diff work while harvest
+  and kickstart share consistent progress and completion behavior (#316).
+- Ingest preserves sessions while repairing upstream attribution and remains
+  idempotent when captured source state has not changed (#331).
+
+### Database
+- Store migration V50 records captured-source fingerprints for durable change
+  detection (#331).
+
+### Tests
+- Local end-to-end runs enforce a memory cap, and developer-state fingerprinting
+  streams hashes instead of retaining full inputs in memory (#331).
 
 ## [0.5.0] - 2026-09-01
 
@@ -267,6 +296,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.5.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.1
 [0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0
 [0.5.0-rc3]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc3
 [0.5.0-rc2]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc2
