@@ -404,14 +404,6 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 				// discovery and indexing, which is what the directory arm refuses.
 				session.OriginalRoot = ""
 			}
-			if testCase.Bytes == absent {
-				// The pipeline keeps in-memory bytes only for the single-file source
-				// formats; anything else reaches the indexer with none, which is the
-				// state the reindex path is always in.
-				meta.Source.Format = ""
-				session.SourceFormat = ""
-			}
-
 			indexer := &recordingIndexer{
 				kind:    fixtureSourceKinds[testCase.SourceKind],
 				entries: []schema.SessionEntry{{SessionID: sid, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText}},
@@ -421,13 +413,28 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
 				defaults.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{providerRoot}},
 			}
+			adapters := map[ingest.Harness]ingest.AdapterFactory{
+				defaults.HarnessOpenCode: makeStubAdapter(
+					[]ingest.DiscoveredSession{session},
+					map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta},
+				),
+			}
+			if testCase.Bytes == absent {
+				// Retained reindex naturally has no extraction bytes in hand.
+				// First publish a valid artifact through the real file-only path;
+				// an invalid blank source format is not an indexing fixture.
+				seed, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				seeded, err := seed.Run(t.Context())
+				if err != nil || seeded.Summary.New != 1 || seeded.Summary.Errors != 0 {
+					t.Fatalf("publish retained dispatch input: %+v %v", seeded, err)
+				}
+				cfg.Reindex, cfg.Force = true, true
+			}
 			pipeline, err := ingest.NewPipeline(mfs, git,
-				map[ingest.Harness]ingest.AdapterFactory{
-					defaults.HarnessOpenCode: makeStubAdapter(
-						[]ingest.DiscoveredSession{session},
-						map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta},
-					),
-				},
+				adapters,
 				cfg,
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 					defaults.HarnessOpenCode: indexer,
@@ -441,8 +448,8 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			if result.Summary.New == 0 {
-				t.Fatalf("nothing was imported, so this case cannot say anything about the dispatch; summary=%+v", result.Summary)
+			if result.Summary.New+result.Summary.Updated == 0 {
+				t.Fatalf("nothing was imported or reindexed, so this case cannot say anything about the dispatch; summary=%+v", result.Summary)
 			}
 
 			assertDispatchEntryPoint(t, testCase, indexer)
@@ -524,9 +531,13 @@ func assertDispatchOutcome(
 	}
 	switch testCase.IndexOutcome {
 	case outcomeIndexed:
-		if logged.Outcome != ingest.IndexOutcomeIndexed {
+		wantOutcome := ingest.IndexOutcomeIndexed
+		if testCase.Bytes == absent {
+			wantOutcome = ingest.IndexOutcomeReindexed
+		}
+		if logged.Outcome != wantOutcome {
 			t.Errorf("the run recorded the outcome %q, want %q; error=%v reason=%v",
-				logged.Outcome, ingest.IndexOutcomeIndexed, derefOrEmpty(logged.ErrorMessage), derefOrEmpty(logged.Reason))
+				logged.Outcome, wantOutcome, derefOrEmpty(logged.ErrorMessage), derefOrEmpty(logged.Reason))
 		}
 		if len(entries) == 0 {
 			t.Errorf("no entries were stored for a case the corpus says indexes successfully")

@@ -1134,37 +1134,52 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 }
 
-// failAfterNCopyFS wraps MemFS and makes CopyFile fail after the first N successes.
-// This is used to simulate a mid-walk failure inside renameDir.
-type failAfterNCopyFS struct {
+// failTranscriptRenameFS injects failure at the production owned-file swap.
+type failTranscriptRenameFS struct {
 	*testutil.MemFS
-	allowedCopies int
-	copyCount     int
+	reached bool
 }
 
-func (f *failAfterNCopyFS) CopyFile(src, dst string, perm os.FileMode) error {
-	if f.copyCount >= f.allowedCopies {
-		return fmt.Errorf("injected CopyFile failure after %d copies (src=%s)", f.allowedCopies, src)
+type failTranscriptRenameRoot struct {
+	ingest.ArtifactRoot
+	filesystem *failTranscriptRenameFS
+}
+
+func (f *failTranscriptRenameFS) OpenArtifactRoot(path string) (ingest.ArtifactRoot, error) {
+	root, err := f.MemFS.OpenArtifactRoot(path)
+	if err != nil {
+		return nil, err
 	}
-	f.copyCount++
-	return f.MemFS.CopyFile(src, dst, perm)
+	return &failTranscriptRenameRoot{ArtifactRoot: root, filesystem: f}, nil
 }
 
-func TestPipeline_RenameDirCleansDstOnFailure(t *testing.T) {
-	// Arrange: a MemFS that fails the first CopyFile call inside renameDir.
-	// processSession writes only transcript to tmpDir (metadata.json is written
-	// by drainLoop after DB INSERT). renameDir uses CopyFile to move the tmpDir
-	// contents to sessionDir. Failing on the first renameDir CopyFile must trigger
-	// cleanup of the partial sessionDir destination.
+func (f *failTranscriptRenameFS) CreateArtifactRoot(path string) (ingest.ArtifactRoot, error) {
+	root, err := f.MemFS.CreateArtifactRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	return &failTranscriptRenameRoot{ArtifactRoot: root, filesystem: f}, nil
+}
+
+func (r *failTranscriptRenameRoot) Rename(from, to string) error {
+	if strings.HasSuffix(to, "--transcript.jsonl") {
+		r.filesystem.reached = true
+		return errors.New("injected transcript publication rename failure")
+	}
+	return r.ArtifactRoot.Rename(from, to)
+}
+
+func TestPipeline_PublicationRenameFailureLeavesNoPartialArtifact(t *testing.T) {
 	innerFS := testutil.NewMemFS()
-	mfs := &failAfterNCopyFS{
-		MemFS:         innerFS,
-		allowedCopies: 0, // first CopyFile (inside renameDir, transcript) fails immediately
-	}
+	mfs := &failTranscriptRenameFS{MemFS: innerFS}
 	git := testutil.DefaultGitResolver()
 
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	setupSourceFile(t, innerFS, sourcePath)
+	before, err := innerFS.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
 	meta := makeMinimalMeta(t, testSessionID)
@@ -1186,28 +1201,38 @@ func TestPipeline_RenameDirCleansDstOnFailure(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The session must report an error (renameDir failed).
+	if !mfs.reached {
+		t.Fatal("owned transcript rename fault was not reached")
+	}
+	// The session must report the actual publication failure.
 	if len(result.Sessions) != 1 {
 		t.Fatalf("Sessions len = %d, want 1", len(result.Sessions))
 	}
 	if result.Sessions[0].Error == nil {
-		t.Errorf("Sessions[0].Error = nil, want non-nil (renameDir should have failed)")
+		t.Errorf("Sessions[0].Error = nil, want non-nil (owned transcript rename failed)")
 	}
 	if result.Summary.Errors != 1 {
 		t.Errorf("Summary.Errors = %d, want 1", result.Summary.Errors)
 	}
 
-	// The destination sessionDir must NOT exist — renameDir cleanup must have removed it.
+	// Empty directory scaffolding is safe to retain. Neither owned artifact file
+	// may remain, and deleting the session subtree is not a cleanup strategy.
 	base := expectedOutputBase(testOutputDir, testSessionID)
-	if innerFS.Dirs[base] {
-		t.Errorf("sessionDir %q still exists after renameDir failure; partial dst was not cleaned up", base)
+	if _, err := innerFS.Stat(fmt.Sprintf("%s/%s--metadata.json", base, testSessionID)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("metadata survived failed precommit publication: %v", err)
 	}
-	// Also verify no files leaked into sessionDir.
-	entries, _ := innerFS.ReadDir(testOutputDir + "/" + testutil.TestHostSlug)
-	for _, e := range entries {
-		if e.Name() == testSessionID {
-			t.Errorf("sessionDir entry %q found under host slug dir; partial dst was not cleaned up", e.Name())
-		}
+	if _, err := innerFS.Stat(fmt.Sprintf("%s/%s--transcript.jsonl", base, testSessionID)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("transcript survived failed precommit publication: %v", err)
+	}
+	if after, err := innerFS.ReadFile(sourcePath); err != nil || string(after) != string(before) {
+		t.Errorf("source changed during failed publication: %v", err)
+	}
+	publisher, err := ingest.NewArtifactPublisher(innerFS, testOutputDir, ingest.ArtifactPublisherOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := publisher.PendingSessions(); err != nil || len(pending) != 0 {
+		t.Errorf("successful precommit rollback left pending publication: %v %v", pending, err)
 	}
 }
 
