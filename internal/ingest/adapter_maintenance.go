@@ -197,5 +197,26 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 			return true
 		}
 	}
+	if p.config.DryRun || p.metricsStore == nil {
+		return false
+	}
+	// Missing/corrupt metadata is absent from the file inventory. Give the
+	// same stored candidates used by normal maintenance their guarded recovery
+	// before declaring native discovery failure fatal.
+	staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
+	if err != nil {
+		p.reportMetadataRefusal("retained discovery recovery", fmt.Errorf("read stored recovery candidates after native discovery failed: %w; no recovery was attempted; restore database access and retry harvest", err))
+		return false
+	}
+	for _, sid := range staleIDs {
+		session, _, transcriptPath := p.reconstructFromSourceInfo(ctx, sid)
+		if session == nil {
+			continue
+		}
+		path := adapterTargetMetadataPath(reindexTarget{session: *session, transcriptPath: transcriptPath})
+		if _, err := publisher.Capture(ctx, sid, path); err == nil {
+			return true
+		}
+	}
 	return false
 }

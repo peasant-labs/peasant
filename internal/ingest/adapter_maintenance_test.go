@@ -32,6 +32,7 @@ type adapterMaintenanceFixtures struct {
 		Appended           bool   `yaml:"appended"`
 		FailRead           bool   `yaml:"failRead"`
 		DiscoveryFailure   bool   `yaml:"discoveryFailure"`
+		MissingMetadata    bool   `yaml:"missingMetadata"`
 		NoSeed             bool   `yaml:"noSeed"`
 		RetainedExtraction bool   `yaml:"retainedExtraction"`
 		Warning            bool   `yaml:"warning"`
@@ -185,6 +186,12 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 			versions := maps.Clone(ingest.HarvesterVersionRegistry)
 			target := versions[ingest.HarnessClaudeCode]
 			target.AdapterVersion = row.Target
+			if row.MissingMetadata {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				target.IndexerVersion++
+			}
 			versions[ingest.HarnessClaudeCode] = target
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return adapter }}
 			config := makePipelineConfig(output)
@@ -247,6 +254,12 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 			entries, err := database.ListEntries(t.Context(), sid)
 			if err != nil || len(entries) == 0 {
 				t.Fatalf("usable index was lost: %v", err)
+			}
+			if row.MissingMetadata {
+				state, err := database.ReadIndexState(t.Context(), sid)
+				if err != nil || state == nil || state.IndexerVersion != target.IndexerVersion || state.IndexedInputHash == nil {
+					t.Fatalf("recovered input did not complete indexing: %+v %v", state, err)
+				}
 			}
 			if row.UnknownClock {
 				if err := os.WriteFile(native, []byte(fixture.Transcript+"\n"+fixture.Append+"\n"), 0600); err != nil {

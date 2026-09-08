@@ -3,13 +3,14 @@ publicationMetadata: |
 publicationTranscript: '{"type":"user","message":{"role":"user","content":"retained capture fixture"}}'
 preservedValues: [retained-clock, retained-stat, retained evidence]
 nativeAppend: '{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"model":"fixture-model","content":"new native response"}}'
-pipelineRequiredNames: [retained-normal, retained-index-only, native-append-wins, failed-native-read, all-discovery-fail, initial-all-discovery-fail, omitted-baseline-current, refresh-without-clock-then-native-append]
+pipelineRequiredNames: [retained-normal, retained-index-only, native-append-wins, failed-native-read, all-discovery-fail, all-discovery-fail-recovers-metadata, initial-all-discovery-fail, omitted-baseline-current, refresh-without-clock-then-native-append]
 pipelineCases:
   - {name: retained-normal, target: 2, retainedExtraction: true}
   - {name: retained-index-only, target: 2, reindex: true, retainedExtraction: true}
   - {name: native-append-wins, target: 2, native: true, appended: true}
   - {name: failed-native-read, target: 2, native: true, appended: true, failRead: true, warning: true}
   - {name: all-discovery-fail, target: 2, discoveryFailure: true, retainedExtraction: true, warning: true}
+  - {name: all-discovery-fail-recovers-metadata, target: 2, discoveryFailure: true, missingMetadata: true, retainedExtraction: true, warning: true}
   - {name: initial-all-discovery-fail, target: 2, discoveryFailure: true, noSeed: true, fatal: true}
   - {name: omitted-baseline-current, target: 1}
   - {name: refresh-without-clock-then-native-append, target: 2, retainedExtraction: true, unknownClock: true}
