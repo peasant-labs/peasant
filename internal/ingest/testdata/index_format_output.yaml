@@ -114,7 +114,7 @@ cases:
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new content that must not replace old data"}]}}
       malformed
     wantLogError: could not verify complete input
-  - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantLogError: could not verify complete input}
+  - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantLogError: read message directory}
   - {name: parse-error-preserves-last-good, declaredFormat: 1, payload: parse-error, wantLogError: synthetic parser failure}
   - {name: absent-versioned-result-refused, declaredFormat: 1, versioned: true, payload: absent, wantLogError: no concrete result}
   - {name: typed-nil-versioned-result-refused, declaredFormat: 1, versioned: true, payload: nil-v1, wantLogError: no concrete result}

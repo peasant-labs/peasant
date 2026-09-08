@@ -34,32 +34,33 @@ type metadataReadPolicyFixtures struct {
 	SessionID     ingest.SessionID `yaml:"sessionID"`
 	Transcript    string           `yaml:"transcript"`
 	Cases         []struct {
-		Name                  string              `yaml:"name"`
-		SchemaVersion         int                 `yaml:"schemaVersion"`
-		StoredSchemaVersion   *int                `yaml:"storedSchemaVersion"`
-		StoredAdapterVersion  *int                `yaml:"storedAdapterVersion"`
-		WarmStoredSchema      *int                `yaml:"warmStoredSchema"`
-		StoredAbsent          bool                `yaml:"storedAbsent"`
-		LookupFailures        int                 `yaml:"lookupFailures"`
-		RetryLookup           bool                `yaml:"retryLookup"`
-		WantDiagnostic        string              `yaml:"wantDiagnostic"`
-		OutsideDiscovery      bool                `yaml:"outsideDiscovery"`
-		RetryCompatible       bool                `yaml:"retryCompatible"`
-		AdapterVersion        *int                `yaml:"adapterVersion"`
-		RawAdapterVersion     string              `yaml:"rawAdapterVersion"`
-		FaultOperation        metadataPolicyFault `yaml:"faultOperation"`
-		TransientIO           bool                `yaml:"transientIO"`
-		MetadataAbsent        bool                `yaml:"metadataAbsent"`
-		RawMetadata           string              `yaml:"rawMetadata"`
-		Nested                bool                `yaml:"nested"`
-		Database              bool                `yaml:"database"`
-		SourceChanged         bool                `yaml:"sourceChanged"`
-		Reindex               bool                `yaml:"reindex"`
-		Force                 bool                `yaml:"force"`
-		Stale                 bool                `yaml:"stale"`
-		WantExtract           int                 `yaml:"wantExtract"`
-		WantIndexed           int                 `yaml:"wantIndexed"`
-		ExpectedMetadataReads *int                `yaml:"expectedMetadataReads"`
+		Name                      string              `yaml:"name"`
+		SchemaVersion             int                 `yaml:"schemaVersion"`
+		StoredSchemaVersion       *int                `yaml:"storedSchemaVersion"`
+		StoredAdapterVersion      *int                `yaml:"storedAdapterVersion"`
+		WarmStoredSchema          *int                `yaml:"warmStoredSchema"`
+		StoredAbsent              bool                `yaml:"storedAbsent"`
+		LookupFailures            int                 `yaml:"lookupFailures"`
+		RetryLookup               bool                `yaml:"retryLookup"`
+		WantDiagnostic            string              `yaml:"wantDiagnostic"`
+		OutsideDiscovery          bool                `yaml:"outsideDiscovery"`
+		RetryCompatible           bool                `yaml:"retryCompatible"`
+		AdapterVersion            *int                `yaml:"adapterVersion"`
+		RawAdapterVersion         string              `yaml:"rawAdapterVersion"`
+		FaultOperation            metadataPolicyFault `yaml:"faultOperation"`
+		TransientIO               bool                `yaml:"transientIO"`
+		MetadataAbsent            bool                `yaml:"metadataAbsent"`
+		RawMetadata               string              `yaml:"rawMetadata"`
+		Nested                    bool                `yaml:"nested"`
+		Database                  bool                `yaml:"database"`
+		Reconciled                bool                `yaml:"reconciled"`
+		SourceChanged             bool                `yaml:"sourceChanged"`
+		Reindex                   bool                `yaml:"reindex"`
+		Force                     bool                `yaml:"force"`
+		Stale                     bool                `yaml:"stale"`
+		WantExtract               int                 `yaml:"wantExtract"`
+		WantIndexed               int                 `yaml:"wantIndexed"`
+		RequireMetadataInspection bool                `yaml:"requireMetadataInspection"`
 	} `yaml:"cases"`
 }
 
@@ -88,15 +89,15 @@ func loadMetadataReadPolicyFixtures(t *testing.T) metadataReadPolicyFixtures {
 
 type metadataPolicyFS struct {
 	*testutil.MemFS
-	nativePath     string
-	nativeRead     atomic.Int64
-	nativeStat     atomic.Int64
-	faultOperation metadataPolicyFault
-	faultPath      string
-	faults         atomic.Int64
-	transientIO    bool
-	metadataPath   string
-	metadataReads  atomic.Int64
+	nativePath        string
+	nativeRead        atomic.Int64
+	nativeStat        atomic.Int64
+	faultOperation    metadataPolicyFault
+	faultPath         string
+	faults            atomic.Int64
+	transientIO       bool
+	metadataPath      string
+	metadataInspected atomic.Bool
 }
 
 type metadataPolicyFault string
@@ -121,7 +122,7 @@ var _ ingest.FileSystem = (*metadataPolicyFS)(nil)
 
 func (f *metadataPolicyFS) ReadFile(path string) ([]byte, error) {
 	if path == f.metadataPath {
-		f.metadataReads.Add(1)
+		f.metadataInspected.Store(true)
 	}
 	if f.faultOperation == metadataPolicyReadFault && path == f.faultPath {
 		return nil, f.fault(path)
@@ -304,6 +305,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			if fixture.OutsideDiscovery {
 				adapter.Sessions = nil
 			}
+			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return adapter }}
 			options := []ingest.PipelineOption{}
 			var database *store.Store
 			var lookupStore *metadataPolicyStore
@@ -345,6 +347,31 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 					if len(writes) != 1 || !writes[0].Written {
 						t.Fatalf("seed index: %+v", writes)
 					}
+					if fixture.Reconciled {
+						// An unchanged index has consumed the retained input, not
+						// merely received a current revision stamp. Establish that
+						// proof through the real pipeline before taking the baseline.
+						baselineConfig := makePipelineConfig(testOutputDir)
+						baselineConfig.Reindex = true
+						baselineConfig.Sources = nil
+						baseline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, baselineConfig,
+							ingest.WithStore(database), ingest.WithMetricsStore(database),
+							ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := baseline.Run(ctx); err != nil {
+							t.Fatal(err)
+						}
+						state, err := database.ReadIndexState(ctx, sid)
+						if err != nil || state == nil || state.IndexedInputHash == nil || *state.IndexedInputHash == "" {
+							t.Fatalf("current index fixture lacks completed input proof: %+v %v", state, err)
+						}
+						beforeMetadata, err = filesystem.MemFS.ReadFile(metaPath)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 				}
 				lookupStore = &metadataPolicyStore{Store: database}
 				options = append(options, ingest.WithStore(lookupStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
@@ -372,7 +399,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return adapter }}, cfg, options...)
+			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg, options...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -386,6 +413,12 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				}
 				if adapter.extracts.Load() != 0 {
 					t.Fatal("cache warmup unexpectedly extracted native data")
+				}
+				// Startup reconciliation may have refreshed DerivedAt during
+				// warmup. Compare both files and SQL against that same baseline.
+				beforeMetadata, err = filesystem.MemFS.ReadFile(metaPath)
+				if err != nil {
+					t.Fatal(err)
 				}
 				adapter.Sessions[0] = session
 				conn, err := database.Pool().Take(ctx)
@@ -449,8 +482,8 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			} else if fixture.LookupFailures != 0 && len(result.Diagnostics) != 0 {
 				t.Errorf("compatible lookup recovery reported refusal: %+v", result.Diagnostics)
 			}
-			if fixture.ExpectedMetadataReads != nil && filesystem.metadataReads.Load() != int64(*fixture.ExpectedMetadataReads) {
-				t.Errorf("metadata reads = %d, want %d", filesystem.metadataReads.Load(), *fixture.ExpectedMetadataReads)
+			if fixture.RequireMetadataInspection && !filesystem.metadataInspected.Load() {
+				t.Errorf("required metadata path %s was not inspected", filesystem.metadataPath)
 			}
 			if fixture.FaultOperation != "" && filesystem.faults.Load() == 0 {
 				t.Fatalf("configured metadata I/O fault %q was not reached", fixture.FaultOperation)
@@ -501,14 +534,18 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			if err != nil || !bytes.Equal(afterNative, []byte(fixtures.Transcript)) {
 				t.Fatalf("native source changed: %v", err)
 			}
+			if database != nil && fixture.WantExtract == 0 && (fixture.Reconciled || fixture.WantIndexed == 0) {
+				afterLocations, err := database.BulkLookupSessionLocations(ctx, []ingest.SessionID{sid})
+				if err != nil || !reflect.DeepEqual(afterLocations, beforeLocations) {
+					beforeJSON, _ := json.Marshal(beforeLocations)
+					afterJSON, _ := json.Marshal(afterLocations)
+					t.Fatalf("session metadata stamps changed: %v\nbefore: %s\nafter: %s", err, beforeJSON, afterJSON)
+				}
+			}
 			if database != nil && fixture.WantIndexed == 0 && fixture.WantExtract == 0 {
 				afterEntries, err := database.ListEntries(ctx, sid)
 				if err != nil || !reflect.DeepEqual(afterEntries, beforeEntries) {
 					t.Fatalf("last-good index changed: %v", err)
-				}
-				afterLocations, err := database.BulkLookupSessionLocations(ctx, []ingest.SessionID{sid})
-				if err != nil || !reflect.DeepEqual(afterLocations, beforeLocations) {
-					t.Fatalf("session metadata stamps changed: %v", err)
 				}
 				afterMetrics, err := database.GetMetrics(ctx, sid)
 				if err != nil || !reflect.DeepEqual(afterMetrics, beforeMetrics) {

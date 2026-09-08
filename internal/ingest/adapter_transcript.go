@@ -10,11 +10,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
-// RetainedInputReplayer rebuilds the adapter-owned fields represented in retained
+// TranscriptMetadataExtractor extracts the adapter-owned fields represented in
 // transcript bytes, preserving the original metadata's native-only context.
 // Implementations refuse input that cannot support their current behavior.
-type RetainedInputReplayer interface {
-	ReplayRetained(context.Context, []byte, *UnifiedMetadata) (*UnifiedMetadata, []byte, error)
+type TranscriptMetadataExtractor interface {
+	ExtractMetadataFromTranscript(context.Context, []byte, *UnifiedMetadata) (*UnifiedMetadata, error)
 }
 
 // InsufficientRetainedInputError means adapter refresh requires native input.
@@ -26,14 +26,14 @@ type InsufficientRetainedInputError struct {
 }
 
 func (e *InsufficientRetainedInputError) Error() string {
-	return fmt.Sprintf("replay retained %s session %s during adapter refresh: %s; previous artifacts and adapter provenance were preserved; restore the native source and retry harvest", e.Harness, e.SessionID, e.Reason)
+	return fmt.Sprintf("extract metadata from retained %s session %s during adapter refresh: %s; previous artifacts and adapter provenance were preserved; restore the native source and retry harvest", e.Harness, e.SessionID, e.Reason)
 }
 
-var _ RetainedInputReplayer = (*ClaudeAdapter)(nil)
-var _ RetainedInputReplayer = (*CodexAdapter)(nil)
-var _ RetainedInputReplayer = (*CursorAdapter)(nil)
+var _ TranscriptMetadataExtractor = (*ClaudeAdapter)(nil)
+var _ TranscriptMetadataExtractor = (*CodexAdapter)(nil)
+var _ TranscriptMetadataExtractor = (*CursorAdapter)(nil)
 
-func retainedReplayMetadata(ctx context.Context, harness Harness, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
+func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func retainedReplayMetadata(ctx context.Context, harness Harness, data []byte, o
 		return &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: harness, Reason: reason}
 	}
 	if original.ModelHarness != harness || original.Source.Format != SourceFormatJSONL || metadataNeedsNativeRefresh(original.SchemaVersion) || original.SchemaVersion > CurrentSchemaVersion {
-		return nil, insufficient("the retained harness, format or metadata schema does not support JSONL replay")
+		return nil, insufficient("the retained harness, format or metadata schema does not support JSONL metadata extraction")
 	}
 	if _, err := NewHostSlug(string(original.HostSlug)); err != nil {
 		return nil, insufficient("the original managed project locator is missing or invalid")
@@ -76,15 +76,18 @@ func retainedReplayMetadata(ctx context.Context, harness Harness, data []byte, o
 	return &metadata, nil
 }
 
-func (a *ClaudeAdapter) ReplayRetained(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, []byte, error) {
-	metadata, err := retainedReplayMetadata(ctx, HarnessClaudeCode, data, original)
+func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
+	metadata, err := metadataForTranscriptExtraction(ctx, HarnessClaudeCode, data, original)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	if first := parseClaudeTranscriptMetadata(data, &parsed); first == nil || first.Type == "" {
-		return nil, nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "retained input has no identifiable Claude record"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "retained input has no identifiable Claude record"}
+	}
+	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
+		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
@@ -92,22 +95,25 @@ func (a *ClaudeAdapter) ReplayRetained(ctx context.Context, data []byte, origina
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
 	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
-	return metadata, bytes.Clone(data), nil
+	return metadata, nil
 }
 
-func (a *CodexAdapter) ReplayRetained(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, []byte, error) {
-	metadata, err := retainedReplayMetadata(ctx, HarnessCodex, data, original)
+func (a *CodexAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
+	metadata, err := metadataForTranscriptExtraction(ctx, HarnessCodex, data, original)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	sessionMeta, err := parseCodexTranscriptMetadata(ctx, data, &parsed)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if sessionMeta == nil {
-		return nil, nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "retained input has no usable session_meta record"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "retained input has no usable session_meta record"}
+	}
+	if err := transcriptMetadataParsingError(HarnessCodex, &parsed); err != nil {
+		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
@@ -116,17 +122,20 @@ func (a *CodexAdapter) ReplayRetained(ctx context.Context, data []byte, original
 	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
 	metadata.Stats.CachedReadTokens, metadata.Stats.ThoughtTokens = parsed.Stats.CachedReadTokens, parsed.Stats.ThoughtTokens
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
-	return metadata, bytes.Clone(data), nil
+	return metadata, nil
 }
 
-func (a *CursorAdapter) ReplayRetained(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, []byte, error) {
-	metadata, err := retainedReplayMetadata(ctx, HarnessCursor, data, original)
+func (a *CursorAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []byte, original *UnifiedMetadata) (*UnifiedMetadata, error) {
+	metadata, err := metadataForTranscriptExtraction(ctx, HarnessCursor, data, original)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	start, end := parseCursorTranscriptMetadata(data, &parsed)
+	if err := transcriptMetadataParsingError(HarnessCursor, &parsed); err != nil {
+		return nil, err
+	}
 	if start == 0 {
 		start = original.Timestamp.Start
 	}
@@ -142,5 +151,14 @@ func (a *CursorAdapter) ReplayRetained(ctx context.Context, data []byte, origina
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
 	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
-	return metadata, bytes.Clone(data), nil
+	return metadata, nil
+}
+
+func transcriptMetadataParsingError(harness Harness, parsed *UnifiedMetadata) error {
+	for _, warning := range parsed.Diagnostics.Warnings {
+		if warning.ErrorType == "parse_error" || warning.ErrorType == "read_error" {
+			return &InsufficientRetainedInputError{SessionID: parsed.SessionID, Harness: harness, Reason: warning.Message}
+		}
+	}
+	return nil
 }

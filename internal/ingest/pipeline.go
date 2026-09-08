@@ -64,8 +64,9 @@ type DiffResult struct {
 
 // DiffEntry associates a DiscoveredSession with its computed DiffStatus.
 type DiffEntry struct {
-	Session DiscoveredSession
-	Status  DiffStatus
+	Session      DiscoveredSession
+	Status       DiffStatus
+	retainedOnly bool // No current native discovery context accompanies this stored session.
 }
 
 // PipelineResult summarizes a pipeline run.
@@ -487,7 +488,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	if err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
-		return nil, fmt.Errorf("pipeline discover: %w", err)
+		if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
+			return nil, fmt.Errorf("pipeline discover: %w", err)
+		}
+		p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable retained sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(allSessions), Total: len(allSessions)})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(allSessions), len(allSessions))
@@ -696,6 +700,29 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			toProcessEntries = append(toProcessEntries, entry)
 		}
 		advanceFilter()
+	}
+	priorEntries := len(toProcessEntries)
+	toProcessEntries = p.appendStoredAdapterWork(ctx, toProcessEntries, allSessions)
+	adapterQueued := make(map[SessionID]bool, len(toProcessEntries)-priorEntries)
+	for _, entry := range toProcessEntries[priorEntries:] {
+		adapterQueued[entry.Session.SessionID] = true
+	}
+	keptResults := sessionResults[:0]
+	for _, result := range sessionResults {
+		if !adapterQueued[result.SessionID] {
+			keptResults = append(keptResults, result)
+		}
+	}
+	sessionResults = keptResults
+	keptDryRun := dryRunSessions[:0]
+	for _, result := range dryRunSessions {
+		if !adapterQueued[result.SessionID] {
+			keptDryRun = append(keptDryRun, result)
+		}
+	}
+	dryRunSessions = keptDryRun
+	for _, entry := range toProcessEntries[priorEntries:] {
+		recordDryRun(entry, entry.Status)
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
@@ -1361,9 +1388,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	parseStart := time.Now()
 	input, err := p.captureIndexInput(ctx, im, indexer)
 	var output indexformat.Result
+	parsed := false
 	if err == nil {
 		result.input = input
 		if p.capturedInputNeedsWork(input) {
+			parsed = true
 			output, err = parseCapturedIndexInput(ctx, indexer, input)
 		} else {
 			reason := "stored index already matches captured input and current producer"
@@ -1373,7 +1402,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	}
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
-	if err == nil && output != nil {
+	if err == nil && parsed {
 		var version int
 		version, err = indexformat.VersionOf(output)
 		if err == nil && version != p.versionTargets()[im.session.Harness].IndexVersion {
@@ -1817,6 +1846,15 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 		}
 		return DiffNew
 	}
+	// Extraction from retained input preserves an unknown acquisition clock.
+	// Once its adapter revision is current, a discovered native file still needs acquisition: no
+	// previous ingest time proves that its content was already consumed.
+	if existing != nil && !session.ModTime.IsZero() && (existing.Timestamp.Ingested == nil || *existing.Timestamp.Ingested <= 0) {
+		if isActive {
+			return DiffActive
+		}
+		return DiffUpdated
+	}
 
 	// DB-first freshness (v8+): use recorded clocks/schema when available. The
 	// compatibility check above still inspects any existing metadata artifact so
@@ -1954,7 +1992,7 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) (string, error) {
 	return "", nil // not found
 }
 
-// processSession extracts metadata and atomically writes output for one session.
+// processNativeSession extracts metadata and atomically writes output for one session.
 // Returns a workerResult carrying the SessionResult, metadata, redacted transcript
 // bytes (for JSONL/JSON providers — nil for directory-based providers), the output
 // transcript path, and the session start timestamp.
@@ -1963,7 +2001,7 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) (string, error) {
 // transcript as recorded - no level a user can choose redacts content here.
 // Callers may store them in a StagingBuffer arena to avoid re-reading from disk
 // during the INDEX stage.
-func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
+func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) workerResult {
 	session := entry.Session
 	result := SessionResult{
 		SessionID:  session.SessionID,
@@ -2033,7 +2071,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		meta, err = adapter.ExtractMetadata(ctx, session)
 	}
 	if err != nil {
-		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
+		return fail(&adapterAcquisitionError{cause: fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err)})
 	}
 	// These fields describe the layout and format selected by this pipeline,
 	// including the redaction path below. Keep metadata and published paths in
@@ -2101,7 +2139,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		rawData, err = p.fs.ReadFile(string(session.SourcePath))
 		if err != nil {
 			result.Error = errors.Join(
-				fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
+				&adapterAcquisitionError{cause: fmt.Errorf("read transcript for %s: %w", session.SessionID, err)},
 				p.fs.RemoveAll(tmpDir),
 			)
 			return workerResult{result: result}
@@ -3392,7 +3430,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var targeted []reindexTarget
 	if !p.config.DryRun {
 		for index, target := range scanned {
-			if p.indexTargetNeedsWork(ctx, target) {
+			if p.adapterTargetNeedsWork(ctx, target) || p.indexTargetNeedsWork(ctx, target) {
 				targeted = append(targeted, target)
 			}
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
@@ -3420,7 +3458,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			}
 		}
 		for index, t := range scanned {
-			if staleSet[t.session.SessionID] {
+			if staleSet[t.session.SessionID] || p.adapterTargetNeedsWork(ctx, t) {
 				targeted = append(targeted, t)
 			}
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
@@ -3475,8 +3513,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		return result, nil
 	}
 
-	// Stage 4: compatible metadata needs only INDEX+COMPUTE. Older metadata keeps
-	// its native-refresh rule, with retained input as fallback when unavailable.
+	// Stage 4: current adapter metadata needs only INDEX+COMPUTE. Stale adapters
+	// extract from sufficient retained input; historical metadata keeps its native
+	// refresh rule and supported retained indexing when that input is unavailable.
 	var fallbackTargets []reindexTarget
 
 	// Build maps for parent-before-child ordering (same pattern as normal pipeline).
@@ -3485,29 +3524,26 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	inBatch := make(map[SessionID]bool, len(targeted))
 
 	for _, t := range targeted {
-		if !t.refreshMetadata {
+		if !t.refreshMetadata && !p.adapterTargetNeedsWork(ctx, t) {
 			fallbackTargets = append(fallbackTargets, t)
 			continue
 		}
-		sourceExists := false
-		if t.originalSourcePath != "" {
-			if _, err := p.fs.Stat(t.originalSourcePath); err == nil {
-				sourceExists = true
+		// Preserve the existing historical-schema fallback report when native
+		// refresh is required and its source is already known to be unavailable.
+		if t.refreshMetadata {
+			sourceExists := false
+			if t.originalSourcePath != "" {
+				_, err := p.fs.Stat(t.originalSourcePath)
+				sourceExists = err == nil
+			}
+			if !sourceExists {
+				fallbackTargets = append(fallbackTargets, t)
+				continue
 			}
 		}
-
-		if sourceExists {
-			sourceSession := t.session
-			sourceSession.SourcePath = ResolvedPath(t.originalSourcePath)
-			entry := DiffEntry{
-				Session: sourceSession,
-				Status:  DiffUpdated,
-			}
-			entryByID[sourceSession.SessionID] = entry
-			inBatch[sourceSession.SessionID] = true
-		} else {
-			fallbackTargets = append(fallbackTargets, t)
-		}
+		sourceSession := p.nativeSessionForTarget(t, p.adapterTargetMetadata(ctx, t))
+		entryByID[sourceSession.SessionID] = DiffEntry{Session: sourceSession, Status: DiffUpdated, retainedOnly: true}
+		inBatch[sourceSession.SessionID] = true
 	}
 
 	// Identify root vs child entries for the extract batch.

@@ -86,9 +86,8 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 		}
 		switch input.kind {
 		case TranscriptSourceFile:
-			if _, ok := indexer.(VersionedTranscriptIndexer); !ok {
-				return fmt.Errorf("capture index input for session %s: parser cannot verify completion of captured bytes; no entries changed; use a strict Result indexer", im.session.SessionID)
-			}
+			// Both parser APIs consume these captured bytes. The orchestration
+			// boundary wraps legacy format1 output and refuses unverified empty.
 		case TranscriptSourceDirectory:
 			native, ok := indexer.(openCodeInputIndexer)
 			if !ok || input.session.Harness != HarnessOpenCode {

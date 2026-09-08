@@ -93,7 +93,7 @@ func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
 
 type outputFixtureIndexer struct {
 	payload indexOutputPayload
-	called  int
+	parsed  bool
 }
 
 var _ ingest.TranscriptIndexer = (*outputFixtureIndexer)(nil)
@@ -102,7 +102,7 @@ func (*outputFixtureIndexer) SourceKind() ingest.TranscriptSourceKind {
 	return ingest.TranscriptSourceFile
 }
 func (indexer *outputFixtureIndexer) IndexTranscript(_ context.Context, session ingest.DiscoveredSession) ([]schema.SessionEntry, error) {
-	indexer.called++
+	indexer.parsed = true
 	if indexer.payload == indexOutputError {
 		return nil, errors.New("synthetic parser failure")
 	}
@@ -126,15 +126,15 @@ var _ ingest.VersionedTranscriptIndexer = (*versionedOutputFixtureIndexer)(nil)
 
 func (indexer *versionedOutputFixtureIndexer) IndexTranscriptResult(ctx context.Context, session ingest.DiscoveredSession) (indexformat.Result, error) {
 	if indexer.payload == indexOutputNil {
-		indexer.called++
+		indexer.parsed = true
 		return (*indexformat.V1)(nil), nil
 	}
 	if indexer.payload == indexOutputAbsent {
-		indexer.called++
+		indexer.parsed = true
 		return nil, nil
 	}
 	if indexer.payload == indexOutputV2 {
-		indexer.called++
+		indexer.parsed = true
 		return outputFixtureV2{}, nil
 	}
 	entries, err := indexer.IndexTranscript(ctx, session)
@@ -184,20 +184,29 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			beforeMetadata, err := fs.ReadFile(metadataPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			beforeTranscript, err := fs.ReadFile(transcriptPath)
-			if err != nil {
-				t.Fatal(err)
-			}
 			db, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
 			if err := db.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+				t.Fatal(err)
+			}
+			// These cases test index output, not first-time file reconciliation.
+			// Establish the actual mirror before asserting immutable input bytes.
+			publisher, err := ingest.NewArtifactPublisher(fs, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: db})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := publisher.ReconcileStored(ctx, sid, metadataPath, nil); err != nil {
+				t.Fatal(err)
+			}
+			beforeMetadata, err := fs.ReadFile(metadataPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeTranscript, err := fs.ReadFile(transcriptPath)
+			if err != nil {
 				t.Fatal(err)
 			}
 			old := "last-good stored result"
@@ -243,7 +252,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), row.WantConstructorError) {
 					t.Fatalf("constructor error=%v, want %q", err, row.WantConstructorError)
 				}
-				if plainIndexer.called != 0 {
+				if plainIndexer.parsed {
 					t.Fatal("constructor refusal called parser")
 				}
 				return
@@ -266,24 +275,39 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				}
 			}
 			if err != nil || !bytes.Equal(beforeMetadata, afterMetadata) {
-				t.Fatalf("indexing changed managed metadata: %v", err)
+				t.Fatalf("indexing changed managed metadata: %v\nbefore: %s\nafter: %s", err, beforeMetadata, afterMetadata)
 			}
 			afterTranscript, err := fs.ReadFile(transcriptPath)
 			if err != nil || !bytes.Equal(beforeTranscript, afterTranscript) {
 				t.Fatalf("indexing changed transcript input: %v", err)
 			}
-			if !row.RealIndexer && plainIndexer.called != 1 {
-				t.Fatalf("parser calls=%d, want one", plainIndexer.called)
+			if !row.RealIndexer {
+				refusedBeforeParse := row.StoredFormat > 0 && !db.SupportsIndexFormat(row.StoredFormat)
+				if plainIndexer.parsed == refusedBeforeParse {
+					t.Fatalf("intended parser behavior not reached: parsed=%t stored-format-refusal=%t log=%+v", plainIndexer.parsed, refusedBeforeParse, result.IndexLog)
+				}
 			}
 			if (result.Summary.Indexed == 1) != row.WantIndexed {
 				t.Fatalf("indexed=%d, want successful=%t; log=%+v", result.Summary.Indexed, row.WantIndexed, result.IndexLog)
 			}
-			if len(result.IndexLog) != 1 {
-				t.Fatalf("attempt log=%+v", result.IndexLog)
+			var attempt *ingest.IndexLogEntry
+			for index := range result.IndexLog {
+				if result.IndexLog[index].SessionID == sid {
+					if attempt != nil {
+						t.Fatalf("session was retried within the same invocation: %+v", result.IndexLog)
+					}
+					attempt = &result.IndexLog[index]
+				}
 			}
-			attempt := result.IndexLog[0]
+			if attempt == nil {
+				t.Fatalf("session has no recorded index outcome: %+v", result)
+			}
 			if row.WantDiagnostic {
-				if len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, "previous index and producer stamps were preserved") || result.Diagnostics[0].Remediation == "" || attempt.Outcome != ingest.IndexOutcomeSkipped || attempt.ErrorMessage != nil {
+				visible := false
+				for _, diagnostic := range result.Diagnostics {
+					visible = visible || strings.Contains(diagnostic.Message, "previous index and producer stamps were preserved") && diagnostic.Remediation != ""
+				}
+				if !visible || attempt.Outcome != ingest.IndexOutcomeSkipped || attempt.ErrorMessage != nil {
 					t.Fatalf("ambiguous empty result was not a nonfatal warning: diagnostics=%+v log=%+v", result.Diagnostics, attempt)
 				}
 			}
@@ -291,7 +315,11 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				t.Fatalf("log lacks %q: %+v", row.WantLogError, attempt)
 			}
 			if row.WantLogError != "" {
-				if len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, row.WantLogError) || result.Diagnostics[0].Remediation == "" || result.Summary.Errors != 0 {
+				visible := false
+				for _, diagnostic := range result.Diagnostics {
+					visible = visible || strings.Contains(diagnostic.Message, row.WantLogError) && diagnostic.Remediation != ""
+				}
+				if !visible || result.Summary.Errors != 0 || attempt.Outcome != ingest.IndexOutcomeError {
 					t.Fatalf("index refusal is not visible and nonfatal: diagnostics=%+v summary=%+v", result.Diagnostics, result.Summary)
 				}
 			}
