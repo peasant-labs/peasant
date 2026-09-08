@@ -760,8 +760,8 @@ func validateOpenCodeBuildTopologyCase(fixtureCase openCodeBuildTopologyCase) er
 		}
 		seenTags[tag] = true
 	}
-	if fixtureCase.ExpectedConfigurations < 0 || fixtureCase.ExpectedConfigurations > 1<<len(fixtureCase.ExpectedCustomTags) || fixtureCase.ExpectedConfigurations > 256 {
-		return fmt.Errorf("OpenCode build-topology case %q configuration count %d exceeds its %d-tag/256-configuration bound", fixtureCase.Name, fixtureCase.ExpectedConfigurations, len(fixtureCase.ExpectedCustomTags))
+	if fixtureCase.ExpectedConfigurations < 0 || fixtureCase.ExpectedConfigurations > 1+(1<<len(fixtureCase.ExpectedCustomTags)) || fixtureCase.ExpectedConfigurations > 257 {
+		return fmt.Errorf("OpenCode build-topology case %q configuration count %d exceeds its %d-tag bound plus one alternate-platform assignment (257 maximum)", fixtureCase.Name, fixtureCase.ExpectedConfigurations, len(fixtureCase.ExpectedCustomTags))
 	}
 	if fixtureCase.ExpectedForbiddenConfigurations < 0 || fixtureCase.ExpectedForbiddenConfigurations > fixtureCase.ExpectedConfigurations {
 		return fmt.Errorf("OpenCode build-topology case %q forbidden configuration count %d is outside 0..%d", fixtureCase.Name, fixtureCase.ExpectedForbiddenConfigurations, fixtureCase.ExpectedConfigurations)
@@ -1099,10 +1099,10 @@ func TestOpenCodePrivateExecutionStatementsMatchFixtureAllowlist(t *testing.T) {
 	for _, configuration := range configurations {
 		statements, extractErr := extractOpenCodePrivateExecutionStatements(configuration.files, configuration.files)
 		if extractErr != nil {
-			t.Fatalf("resolve private OpenCode SQLite execution statements for build tags %v: %v", configuration.tags, extractErr)
+			t.Fatalf("resolve private OpenCode SQLite execution statements for GOOS %s and build tags %v: %v", configuration.goos, configuration.tags, extractErr)
 		}
 		if validationErr := validateOpenCodePrivateExecutionStatements(statements, fixture); validationErr != nil {
-			t.Fatalf("validate private OpenCode SQLite execution statements for build tags %v: %v", configuration.tags, validationErr)
+			t.Fatalf("validate private OpenCode SQLite execution statements for GOOS %s and build tags %v: %v", configuration.goos, configuration.tags, validationErr)
 		}
 
 		for _, mutation := range fixture.QueryGuardMutations {
@@ -1468,6 +1468,7 @@ func ingestProductionFiles(directory string) ([]string, error) {
 }
 
 type openCodePackageConfiguration struct {
+	goos  string
 	tags  []string
 	files []string
 }
@@ -1494,7 +1495,7 @@ func openCodePackageProductionConfigurations(directory string) ([]openCodePackag
 				enabled = append(enabled, tag)
 			}
 		}
-		files, listErr := openCodeGoListProductionFiles(directory, enabled)
+		files, listErr := openCodeGoListProductionFiles(directory, enabled, runtime.GOOS)
 		if listErr != nil {
 			return nil, listErr
 		}
@@ -1506,8 +1507,22 @@ func openCodePackageProductionConfigurations(directory string) ([]openCodePackag
 		for _, filename := range files {
 			coveredFiles[filepath.Clean(filename)] = true
 		}
-		configurations = append(configurations, openCodePackageConfiguration{tags: enabled, files: files})
+		configurations = append(configurations, openCodePackageConfiguration{goos: runtime.GOOS, tags: enabled, files: files})
 	}
+	// One complementary OS assignment covers the advisory-lock fallback without
+	// multiplying the custom-tag matrix across every supported Go platform.
+	alternateGOOS := "windows"
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		alternateGOOS = "linux"
+	}
+	files, listErr := openCodeGoListProductionFiles(directory, nil, alternateGOOS)
+	if listErr != nil {
+		return nil, listErr
+	}
+	for _, filename := range files {
+		coveredFiles[filepath.Clean(filename)] = true
+	}
+	configurations = append(configurations, openCodePackageConfiguration{goos: alternateGOOS, files: files})
 	for _, filename := range production {
 		if !coveredFiles[filepath.Clean(filename)] {
 			return nil, fmt.Errorf("discover ingest build configurations never activated production source %q; its SQLite callable identity cannot be trusted; use satisfiable package build constraints or extend the bounded configuration policy", filename)
@@ -1519,7 +1534,7 @@ func openCodePackageProductionConfigurations(directory string) ([]openCodePackag
 	return configurations, nil
 }
 
-func openCodeGoListProductionFiles(directory string, tags []string) ([]string, error) {
+func openCodeGoListProductionFiles(directory string, tags []string, goos string) ([]string, error) {
 	arguments := []string{"list", "-json"}
 	if len(tags) != 0 {
 		arguments = append(arguments, "-tags="+strings.Join(tags, ","))
@@ -1527,9 +1542,10 @@ func openCodeGoListProductionFiles(directory string, tags []string) ([]string, e
 	arguments = append(arguments, ".")
 	command := exec.Command("go", arguments...)
 	command.Dir = directory
+	command.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+runtime.GOARCH)
 	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("resolve non-test ingest package files with go list for build tags %v: %w", tags, err)
+		return nil, fmt.Errorf("resolve non-test ingest package files with go list for GOOS %s and build tags %v: %w", goos, tags, err)
 	}
 	var listed struct {
 		GoFiles  []string
