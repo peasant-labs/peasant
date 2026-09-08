@@ -505,6 +505,19 @@ type StubGitResolver struct {
 }
 
 var _ ingest.GitResolver = (*StubGitResolver)(nil)
+var _ ingest.RecordedBranchRemoteResolver = (*StubGitResolver)(nil)
+
+func (s *StubGitResolver) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
+	return s.RemoteURL(ctx, dir)
+}
+
+func (s *StubGitResolver) RemoteURLForBranch(ctx context.Context, dir, branch string) (string, string, error) {
+	if branch != s.BranchName || s.TrackingBranchName == "" || s.TrackingBranchErr != nil {
+		return "", "", nil
+	}
+	remote, err := s.RemoteURL(ctx, dir)
+	return remote, s.TrackingBranchName, err
+}
 
 // DefaultGitResolver returns a StubGitResolver with sensible test defaults.
 func DefaultGitResolver() *StubGitResolver {
@@ -1216,6 +1229,9 @@ func (s *StubPushStore) UnpushedSessionsByProvider(_ context.Context, provider s
 func (s *StubPushStore) AllPushableSessions(_ context.Context) ([]ingest.PushSessionRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.AllSessions == nil {
+		return s.Sessions, s.UnpushedErr
+	}
 	return s.AllSessions, s.UnpushedErr
 }
 
@@ -1397,7 +1413,6 @@ func (s *StubPublisher) UpdateOwner(_ context.Context, id schema.TranscriptID, r
 // Configure FileContents to return specific file contents for (file, commit) pairs.
 // Configure Commits to return commits for GetSessionCommits.
 // Configure CommitInfos to return full metadata for GetSessionCommitsWithMetadata.
-// Configure Ancestry to answer IsAncestor for "commit@ref" keys, and IsAncestorErr to make it fail.
 type StubGitDiffAnalyzer struct {
 	// FileContents maps "file@commit" to file contents.
 	FileContents map[string][]byte
@@ -1405,20 +1420,10 @@ type StubGitDiffAnalyzer struct {
 	Commits []string
 	// CommitInfos to return from GetSessionCommitsWithMetadata.
 	CommitInfos []ingest.CommitInfo
-	// Ancestry answers IsAncestor, keyed by "commit@ref". A missing key answers false.
-	Ancestry map[string]bool
 	// Errors per method.
 	GetFileErr            error
 	GetCommitsErr         error
 	GetCommitsWithMetaErr error
-	// IsAncestorErr, when set, is returned by every IsAncestor call.
-	IsAncestorErr error
-	// IsAncestorErrOnQuery makes IsAncestorErr fire only on the Nth call
-	// (1-based). Zero, the default, fires it on every call.
-	IsAncestorErrOnQuery int
-
-	mu              sync.Mutex
-	ancestorQueries int
 }
 
 var _ ingest.GitDiffAnalyzer = (*StubGitDiffAnalyzer)(nil)
@@ -1450,26 +1455,6 @@ func (s *StubGitDiffAnalyzer) GetSessionCommitsWithMetadata(_ context.Context, _
 		return []ingest.CommitInfo{}, nil
 	}
 	return s.CommitInfos, nil
-}
-
-// IsAncestor answers from Ancestry, or fails with IsAncestorErr. Every call is
-// counted so tests can assert that a branchless session never asks.
-func (s *StubGitDiffAnalyzer) IsAncestor(_ context.Context, _ string, commit, ref string) (bool, error) {
-	s.mu.Lock()
-	s.ancestorQueries++
-	query := s.ancestorQueries
-	s.mu.Unlock()
-	if s.IsAncestorErr != nil && (s.IsAncestorErrOnQuery == 0 || s.IsAncestorErrOnQuery == query) {
-		return false, s.IsAncestorErr
-	}
-	return s.Ancestry[commit+"@"+ref], nil
-}
-
-// AncestorQueries reports how many times IsAncestor was called.
-func (s *StubGitDiffAnalyzer) AncestorQueries() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ancestorQueries
 }
 
 // ---------------------------------------------------------------------------

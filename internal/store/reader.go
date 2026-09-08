@@ -636,7 +636,7 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version
+	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version, s.source_fingerprint, COALESCE(h.git_remote, ''), s.project_hash
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 WHERE s.session_id IN (` +
@@ -649,11 +649,20 @@ WHERE s.session_id IN (` +
 			id := schema.SessionID(stmt.ColumnText(0))
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
+			var sourceFingerprint []byte
+			if stmt.ColumnType(5) != sqlite.TypeNull {
+				sourceFingerprint = make([]byte, stmt.ColumnLen(5))
+				stmt.ColumnBytes(5, sourceFingerprint)
+			}
 			result[id] = ingest.SessionLocation{
-				HostSlug:      stmt.ColumnText(1),
-				ParentID:      stmt.ColumnText(2),
-				IngestedMs:    &ingestedMs,
-				SchemaVersion: schemaVersion,
+				HostSlug:                stmt.ColumnText(1),
+				GitRemote:               stmt.ColumnText(6),
+				ProjectHash:             stmt.ColumnText(7),
+				ParentID:                stmt.ColumnText(2),
+				IngestedMs:              &ingestedMs,
+				SchemaVersion:           schemaVersion,
+				SourceFingerprint:       sourceFingerprint,
+				SourceEvidenceSupported: true,
 			}
 			return nil
 		},

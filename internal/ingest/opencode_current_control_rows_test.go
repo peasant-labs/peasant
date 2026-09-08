@@ -119,7 +119,8 @@ func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {
 		t.Fatalf("session %q origin = %v, want current SQLite", testCase.SessionID, session.TranscriptOrigin)
 	}
 
-	metadata, data, err := adapter.MaterializeTranscript(context.Background(), session)
+	captured, err := adapter.MaterializeTranscript(context.Background(), session)
+	metadata, data := captured.Metadata, captured.Data
 	if err != nil {
 		t.Fatalf("materialize current session with control rows: %v", err)
 	}

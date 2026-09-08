@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,6 +23,61 @@ type FileSystem interface {
 	Remove(path string) error
 	RemoveAll(path string) error
 	CopyFile(src, dst string, perm os.FileMode) error
+}
+
+type capturedSourceFileSystem struct {
+	FileSystem
+	path string
+	data []byte
+}
+
+type sourcePrefixReader interface {
+	ReadSourcePrefix(string) ([]byte, error)
+}
+
+var _ sourcePrefixReader = (*OSFileSystem)(nil)
+
+func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
+	if path == f.path {
+		return append([]byte(nil), f.data...), nil
+	}
+	return f.FileSystem.ReadFile(path)
+}
+
+func completeJSONLPrefix(data []byte, tolerateMalformedFinalRecord bool) ([]byte, error) {
+	lastComplete := bytes.LastIndexByte(data, '\n')
+	records := bytes.Split(data[:lastComplete+1], []byte{'\n'})
+	for i, record := range records {
+		if len(bytes.TrimSpace(record)) > 0 && !json.Valid(record) {
+			if tolerateMalformedFinalRecord && i == len(records)-2 {
+				return data[:bytes.LastIndex(data[:lastComplete], []byte{'\n'})+1], nil
+			}
+			return nil, fmt.Errorf("capture JSONL record %d: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest", i+1)
+		}
+	}
+	if len(bytes.TrimSpace(data[lastComplete+1:])) == 0 || json.Valid(data[lastComplete+1:]) {
+		return data, nil
+	}
+	return data[:lastComplete+1], nil
+}
+
+// ReadSourcePrefix fixes the acquisition boundary at the opened descriptor size.
+// Appends after Stat belong to a later ingest, even when the writer stays busy.
+func (f *OSFileSystem) ReadSourcePrefix(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, info.Size()))
+	if err == nil && int64(len(data)) != info.Size() {
+		err = io.ErrUnexpectedEOF
+	}
+	return data, err
 }
 
 // OSFileSystem is the production implementation wrapping os.* calls.

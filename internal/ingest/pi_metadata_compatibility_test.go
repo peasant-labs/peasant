@@ -97,6 +97,16 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 			if result.Summary.Updated != c.Updated || result.Summary.New != 0 {
 				t.Fatalf("sidecar diff changed: %+v", result.Summary)
 			}
+			// Upstream captured-source evidence deliberately refreshes legacy
+			// sidecars once. The compatibility guarantee is that this never
+			// becomes a repeated refresh merely because Schema added Pi.
+			result, err = pipeline.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Summary.Updated != 0 || result.Summary.Unchanged != 1 {
+				t.Fatalf("captured sidecar did not settle to unchanged: %+v", result.Summary)
+			}
 			ingested := time.Now().UnixMilli()
 			status := ingest.ClassifyAgainstStore(session, ingest.SessionLocation{SchemaVersion: c.Version, IngestedMs: &ingested}, 0)
 			if status.String() != c.Status {

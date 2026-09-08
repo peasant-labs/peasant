@@ -130,7 +130,7 @@ jobs:
           VILLAGE_REPO: ${{ github.workspace }}/_village
         run: |
           set -o pipefail
-          go test -race -tags=e2e -count=1 -v ./internal/e2e/... 2>&1 | tee /tmp/e2e.log
+          E2E_MEMORY_MODE=external make e2e E2E_TEST_FLAGS=-v 2>&1 | tee /tmp/e2e.log
 
       # The harness t.Skip()s (podman/village/image-pull issues) rather than
       # failing — which would pass the job with NO real coverage. Fail loudly

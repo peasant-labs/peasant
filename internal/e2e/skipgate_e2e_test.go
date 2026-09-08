@@ -391,6 +391,7 @@ func startEphemeralPostgres(t *testing.T) (dsn string, db *sql.DB) {
 	name := uniqueName("pg")
 	t.Cleanup(func() { _ = exec.Command("podman", "rm", "-fv", name).Run() })
 	args := []string{"run", "-d", "--name", name,
+		"--memory", "1g", "--memory-swap", "1g",
 		"-e", "POSTGRES_USER=" + pgUser, "-e", "POSTGRES_PASSWORD=" + pgPassword,
 		"-e", "POSTGRES_DB=" + pgDatabase, "-p", "127.0.0.1::5432", postgresImage}
 	if out, err := exec.Command("podman", args...).CombinedOutput(); err != nil {
@@ -437,6 +438,7 @@ func startEphemeralMinIO(t *testing.T, bucket string) string {
 	name := uniqueName("minio")
 	t.Cleanup(func() { _ = exec.Command("podman", "rm", "-fv", name).Run() })
 	args := []string{"run", "-d", "--name", name,
+		"--memory", "1g", "--memory-swap", "1g",
 		"-e", "MINIO_ROOT_USER=" + minioUser, "-e", "MINIO_ROOT_PASSWORD=" + minioPassword,
 		"-p", "127.0.0.1::9000", minioImage, "server", "/data"}
 	if out, err := exec.Command("podman", args...).CombinedOutput(); err != nil {
