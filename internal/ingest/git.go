@@ -381,7 +381,11 @@ func (g *ExecGitResolver) RemoteURL(ctx context.Context, dir string) (string, er
 
 // OriginRemoteURL resolves only origin, without consulting checkout tracking.
 func (g *ExecGitResolver) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
-	return runGit(ctx, "git", "-C", dir, "remote", "get-url", "origin")
+	remote, err := runGit(ctx, "git", "-C", dir, "remote", "get-url", "origin")
+	if err != nil || !isUsableRemoteURL(remote) {
+		return "", err
+	}
+	return remote, nil
 }
 
 // RemoteURLForBranch returns the current configured upstream for branch. A
@@ -400,10 +404,15 @@ func (g *ExecGitResolver) RemoteURLForBranch(ctx context.Context, dir, branch st
 		return "", "", nil
 	}
 	remote, err := runGit(ctx, "git", "-C", dir, "remote", "get-url", parts[0])
-	if err != nil || remote == "" {
+	if err != nil || !isUsableRemoteURL(remote) {
 		return "", "", err
 	}
 	return remote, parts[1], nil
+}
+
+func isUsableRemoteURL(remote string) bool {
+	_, err := NormalizeRemoteURL(remote)
+	return err == nil
 }
 
 // ResolveGitRemote applies the attribution policy shared by adapters and

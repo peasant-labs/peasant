@@ -4,6 +4,7 @@ requiredNames:
   - provider remote remains authoritative
   - recorded untracked branch ignores checkout upstream
   - recorded untracked branch falls back to path
+  - local recorded upstream falls back to origin
 cases:
   - name: recorded branch tracks non-origin
     recordedBranch: recorded
@@ -24,3 +25,7 @@ cases:
     trackedCheckout: true
     removeOrigin: true
     wantRemote: ""
+  - name: local recorded upstream falls back to origin
+    recordedBranch: recorded
+    localUpstream: true
+    wantRemote: git@github.com:testuser/testrepo.git
