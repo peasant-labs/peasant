@@ -35,6 +35,7 @@ type indexReadStateCase struct {
 	StatusOverride      ingest.ContentCaptureStatus `yaml:"statusOverride"`
 	WantBound           bool                        `yaml:"wantBound"`
 	WantStatus          ingest.ContentCaptureStatus `yaml:"wantStatus"`
+	WantFormat          ingest.ContentCaptureFormat `yaml:"wantFormat"`
 }
 
 type indexReadStateDocument struct {
@@ -68,6 +69,14 @@ func loadIndexReadStateFixtures(t *testing.T) indexReadStateDocument {
 		}
 		if _, err := ingest.NewContentCaptureStatus(string(row.WantStatus)); err != nil {
 			t.Fatalf("case %q expects an unknown capture status: %v", row.Name, err)
+		}
+		if (row.Capture == indexReadCaptureNone) != (row.WantFormat == "") {
+			t.Fatalf("case %q must state the stored capture format exactly when it seeds a capture row", row.Name)
+		}
+		if row.WantFormat != "" {
+			if _, err := ingest.NewContentCaptureFormat(string(row.WantFormat)); err != nil {
+				t.Fatalf("case %q expects an unknown capture format: %v", row.Name, err)
+			}
 		}
 		if _, err := ingest.NewCWDProvenanceKind(string(row.Provenance)); err != nil {
 			t.Fatalf("case %q names an unknown provenance kind %q: %v", row.Name, row.Provenance, err)
@@ -142,10 +151,20 @@ func TestIndexReadStateReportsPublicationBindingAndContentStatus(t *testing.T) {
 			if state.ContentStatus != row.WantStatus {
 				t.Fatalf("content status=%q, want %q", state.ContentStatus, row.WantStatus)
 			}
-			if row.Capture == indexReadCaptureNone {
-				if _, found, err := db.GetSessionContentCapture(t.Context(), ingest.SessionID(sid)); err != nil || found {
-					t.Fatalf("case seeds no capture row, but one exists: found=%v err=%v", found, err)
-				}
+			stored, found, err := db.GetSessionContentCapture(t.Context(), ingest.SessionID(sid))
+			if err != nil {
+				t.Fatalf("stored capture unreadable: %v", err)
+			}
+			if found != (row.Capture != indexReadCaptureNone) {
+				t.Fatalf("stored capture row present=%v, but the case seeds capture %q", found, row.Capture)
+			}
+			// No caller in this test supplies a capture format, so this pins
+			// the WRITER's own default for each kind of write. Swapping those
+			// defaults would file a bounded preview under a format that claims
+			// whole-session content, and every read that trusts the format
+			// would then be reading a promise the row cannot keep.
+			if found && stored.CaptureFormat != row.WantFormat {
+				t.Fatalf("stored capture format=%q, want %q", stored.CaptureFormat, row.WantFormat)
 			}
 		})
 	}
