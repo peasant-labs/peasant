@@ -615,8 +615,17 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 			preflightReached.Store(true)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/annotations/manifest":
 			// The annotation stage can check its empty manifest after preflight.
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/transcripts/publish":
+			// The seeded session is publishable, which is what carries the run
+			// past the preflight this test needs reached. The village refuses the
+			// upload so nothing is published: this is a test of what the command
+			// DISCLOSES, and a stored receipt would add a second subject.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{}`))
+			return
 		default:
-			t.Errorf("unexpected Village request %s %s: the store-only disclosure seed must not publish", r.Method, r.URL.Path)
+			t.Errorf("unexpected Village request %s %s: this disclosure scenario publishes nothing", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}

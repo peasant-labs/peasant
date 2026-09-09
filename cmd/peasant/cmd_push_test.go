@@ -56,6 +56,7 @@ func TestPushCmd_SourceHarnessHelpDerived(t *testing.T) {
 // --state-dir=dir.
 func executePushCmd(t *testing.T, dir string, args []string) (string, error) {
 	t.Helper()
+	seedClosedStoreForForecast(t, dir, args)
 	return executeWithDataDir(t, BuildPushCommand(), dir, args)
 }
 
@@ -191,6 +192,7 @@ func seedPublicationCursorsForTest(t *testing.T, dbPath string, sessionIDs []ing
 // (Summary / EmptyReason) lands on STDOUT.
 func executePushCmdSeparate(t *testing.T, dir string, args []string) (stdout, stderr string, err error) {
 	t.Helper()
+	seedClosedStoreForForecast(t, dir, args)
 	root := newTestRoot()
 	cmd := BuildPushCommand()
 	root.AddCommand(cmd)

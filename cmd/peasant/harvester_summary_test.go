@@ -76,6 +76,9 @@ func TestHarvestHarvesterSummary(t *testing.T) {
 			args := []string{fixture.Command, "--source-harness=claude-code", "--source-path=" + source, "--output=" + output, "--include-active", "--json"}
 			if fixture.DryRun {
 				args = append(args, "--dry-run")
+				// A forecast inspects an existing checkpointed database and
+				// creates none, so the state it reads exists before the run.
+				seedClosedStore(t, dir)
 			}
 			out, err := executeHarvestCmd(t, dir, args)
 			if err != nil {

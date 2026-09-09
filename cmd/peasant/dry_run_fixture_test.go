@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -48,4 +51,57 @@ func seedClosedStoreAt(t testing.TB, path string) string {
 		}
 	}
 	return path
+}
+
+// databaseDigest fingerprints the database file and its sidecars, so a test can
+// prove a dry run changed nothing rather than only that it created nothing.
+//
+// The sidecars are part of the fingerprint because a write-ahead log that appears
+// during an inspection is a mutation even when the main file is byte-identical.
+func databaseDigest(t testing.TB, path string) string {
+	t.Helper()
+	digest := sha256.New()
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		data, err := os.ReadFile(path + suffix)
+		switch {
+		case err == nil:
+			digest.Write([]byte(filepath.Base(path + suffix)))
+			digest.Write(data)
+		case os.IsNotExist(err):
+			// An absent sidecar is part of the state being fingerprinted.
+		default:
+			t.Fatalf("fingerprint %s: %v", path+suffix, err)
+		}
+	}
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
+// assertDatabaseUnchanged reports a dry run that wrote to the database it was
+// asked only to read, including one that merely opened a journal.
+func assertDatabaseUnchanged(t testing.TB, path, before string) {
+	t.Helper()
+	if after := databaseDigest(t, path); after != before {
+		t.Fatalf("the forecast changed the database it was asked to inspect: %s is no longer byte-identical, or a journal appeared beside it", filepath.Base(path))
+	}
+}
+
+// seedClosedStoreForForecast prepares the state a --dry-run in these arguments
+// will inspect, and does nothing when the test already arranged its own database
+// or is not running a forecast at all.
+//
+// It lives in the command harness because nearly every CLI forecast test needs
+// it, and a forecast that has nothing to inspect measures the prerequisite
+// refusal rather than the behaviour under test. The refusals themselves are
+// proven where they belong: the missing-database refusal in
+// TestHarvestCmd_DryRun_DoesNotCreateDB and TestPushCmd_DryRunRefusesAMissingDatabase,
+// and the live-write-ahead-log refusal in TestDryRunCommandsPreserveExistingFiles.
+func seedClosedStoreForForecast(t testing.TB, dir string, args []string) {
+	t.Helper()
+	if !slices.Contains(args, "--dry-run") {
+		return
+	}
+	if _, err := os.Stat(string(defaults.ResolveDBFilePathWith(dir))); err == nil {
+		return // the test arranged its own database
+	}
+	seedClosedStore(t, dir)
 }

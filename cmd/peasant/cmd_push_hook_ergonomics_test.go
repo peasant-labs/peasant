@@ -183,6 +183,16 @@ func writeTestCredentialsFor(t *testing.T, dir, villageURL string) {
 
 // seedPushableSession puts one eligible session in the store at dir, so a push
 // reaches the network instead of returning early with nothing to send.
+// seedPushableSession seeds a session the push actually SELECTS and carries as
+// far as the village: a store row plus a verified full capture, written through
+// the production transactions.
+//
+// It used to stop at the store row, on the older contract where a session reached
+// the network first and failed later at a metadata read. Publication is now
+// decided from the database capture BEFORE the first request, so a store-row-only
+// seed is refused before anything is sent — which silently turned every test
+// built on it into a test of the refusal, including the upload-budget test that
+// then measured a run making no request at all.
 func seedPushableSession(t *testing.T, dir string) {
 	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
@@ -196,12 +206,7 @@ func seedPushableSession(t *testing.T, dir string) {
 	defer db.Close()
 	entry := makeCmdStoreEntry(t, "cccc3333-cccc-4ccc-8ccc-cccccccccccc", "github.com-user-repo",
 		"git@github.com:user/repo.git", "main", 1700000000000)
-	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
-		t.Fatal(err)
-	}
-	if err := testutil.WriteFullEntries(t.Context(), db, entry.Metadata.SessionID, nil); err != nil {
-		t.Fatal(err)
-	}
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 }
 
 // seedUploadableSession seeds a session that survives the whole pre-flight and
