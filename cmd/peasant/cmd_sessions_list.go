@@ -16,18 +16,20 @@ import (
 
 // sessionListEntry is the JSON-serializable representation of a session for the list command.
 type sessionListEntry struct {
-	ID      string `json:"id"`
-	Date    string `json:"date"`
-	Project string `json:"project"`
-	Turns   int    `json:"turns"`
-	Tokens  int    `json:"tokens"`
-	Preview string `json:"preview"`
+	ID          string `json:"id"`
+	Date        string `json:"date"`
+	Project     string `json:"project"`
+	ProjectHash string `json:"projectHash"`
+	Turns       int    `json:"turns"`
+	Tokens      int    `json:"tokens"`
+	Preview     string `json:"preview"`
 }
 
 // buildSessionsListCommand constructs the `peasant sessions list` subcommand.
 func buildSessionsListCommand() *cobra.Command {
 	var (
 		project string
+		session string
 		since   string
 		until   string
 		harness string
@@ -49,7 +51,7 @@ func buildSessionsListCommand() *cobra.Command {
 			}
 			defer cleanup()
 
-			f, err := buildSessionListFilter(project, since, until, harness, tag, sort, reverse, limit)
+			f, err := buildSessionListFilter(project, session, since, until, harness, tag, sort, reverse, limit)
 			if err != nil {
 				return err
 			}
@@ -59,6 +61,7 @@ func buildSessionsListCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&project, "project", "", "Filter by project name (matches git remote URL or directory basename)")
+	cmd.Flags().StringVar(&session, "session", "", "Filter to one exact session id")
 	cmd.Flags().StringVar(&since, "since", "", "Show sessions starting after this date (e.g. 7d, 24h, 2026-01-01)")
 	cmd.Flags().StringVar(&until, "until", "", "Show sessions starting before this date (e.g. 7d, 24h, 2026-01-01)")
 	cmd.Flags().StringVar(&harness, "harness", "", "Filter by harness (claude-code, gemini-cli, codex, opencode)")
@@ -97,12 +100,13 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 	entries := make([]sessionListEntry, 0, len(rows))
 	for _, row := range rows {
 		entries = append(entries, sessionListEntry{
-			ID:      row.SessionID,
-			Date:    formatSessionDate(row.StartMs),
-			Project: projectDisplayName(row.CanonicalRemote, row.ProjectName),
-			Turns:   row.TurnCount,
-			Tokens:  row.TokensTotal,
-			Preview: previews[row.SessionID], // empty string when key absent
+			ID:          row.SessionID,
+			Date:        formatSessionDate(row.StartMs),
+			Project:     projectDisplayName(row.CanonicalRemote, row.ProjectName),
+			ProjectHash: row.ProjectHash,
+			Turns:       row.TurnCount,
+			Tokens:      row.TokensTotal,
+			Preview:     previews[row.SessionID], // empty string when key absent
 		})
 	}
 
@@ -133,10 +137,15 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 }
 
 // buildSessionListFilter parses CLI flag values into a SessionListFilter.
-func buildSessionListFilter(project, since, until, harness, tag, sort string, reverse bool, limit int) (store.SessionListFilter, error) {
+func buildSessionListFilter(project, session, since, until, harness, tag, sort string, reverse bool, limit int) (store.SessionListFilter, error) {
 	f := store.SessionListFilter{
 		SortDesc: !reverse, // default is DESC (newest first); --reverse flips to ASC
 		Limit:    limit,
+	}
+
+	// Optional exact session-id filter.
+	if session != "" {
+		f.SessionID = &session
 	}
 
 	// Sort field.
