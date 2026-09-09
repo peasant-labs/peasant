@@ -147,27 +147,28 @@ cases:
     expectedHighWater: 0
     stages: [push.discovery, push.selection]
   - <<: *success
-    name: push_preflight_counts_unstarted_sessions
+    name: push_refusal_does_not_stop_healthy_sessions
     sessions: [sess_b, sess_a]
     entryReadFailOnCall: 1
-    expectedPublished: 0
+    expectedPublished: 1
     expectedFailed: 1
-    expectedSkipped: 1
-    expectedSaved: 0
-    expectedRequests: 0
-    expectedDBReads: 3
-    expectedHighWater: 0
+    expectedSaved: 1
+    expectedRequests: 2
+    expectedDBReads: 5
+    expectedHighWater: 1
     failedStage: push.session.load
-    stages: [push.discovery, push.selection, push.session.load]
+    stages: [push.discovery, push.selection, push.session.load, push.session, push.publish, push.receipt.persist]
   - <<: *success
     name: push_unsafe_subject_never_enters_profile
     sessions: [PRIVATE_TRANSCRIPT_SENTINEL]
     expectedPublished: 0
     expectedFailed: 1
     expectedSaved: 0
-    expectedRequests: 1
+    expectedRequests: 0
+    expectedDBReads: 3
+    expectedHighWater: 0
     failedStage: push.session.load
-    stages: [push.session, push.session.load]
+    stages: [push.discovery, push.selection, push.session.load]
   - <<: *success
     name: push_negotiation_fallback_is_skipped
     negotiateStatus: 503

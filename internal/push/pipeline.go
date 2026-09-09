@@ -271,28 +271,21 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	}
 	// Validate a coherent database capture before the first remote negotiation.
 	// Each session captures again immediately before constructing its publication.
-	for _, sess := range sessions {
-		var attrs perf.Attributes
-		if rec.Enabled() {
-			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
-		}
-		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
-		input, readErr := p.readPublicationInput(ctx, sess)
-		if readErr == nil {
-			readErr = ValidatePublicationInput(input)
-		}
-		if readErr != nil {
-			load.End(perf.OutcomeFailed, nil)
-			rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
-			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-			sr := entryReadFailure(sess, readErr, entryReadPreflight)
-			result.Sessions = append(result.Sessions, sr)
-			result.countStatus(sr.Status)
-			return result, nil
-		}
-		load.End(perf.OutcomeOK, nil)
-		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+	outcome, err := p.preflight(ctx, sessions, rec)
+	result.Sessions = append(result.Sessions, outcome.refused...)
+	for _, refused := range outcome.refused {
+		result.countStatus(refused.Status)
 	}
+	if err != nil {
+		return result, err
+	}
+	if len(outcome.valid) == 0 {
+		// Nothing is left to publish, so the village is never contacted: a run
+		// that refused every candidate must not open a connection to negotiate
+		// a contract for zero uploads.
+		return result, nil
+	}
+	sessions = outcome.valid
 
 	// 6b. Version-negotiation preflight: query the village's accepted
 	// contract window and decide the emit version. Aborts the whole push on an
@@ -1212,6 +1205,54 @@ func (p *Pipeline) pushSession(
 		Title:     title,
 		Status:    status,
 	}
+}
+
+// preflightOutcome separates the candidates a run may still publish from the
+// ones it has already refused. Both halves are reported: a refused candidate is
+// a result the user has to see, not a silent omission.
+type preflightOutcome struct {
+	valid   []ingest.PushSessionRow
+	refused []SessionPushResult
+}
+
+// preflight verifies a coherent database capture for every selected candidate
+// before the first remote negotiation, and collects the refusals instead of
+// ending the run on the first one.
+//
+// One unpublishable session used to abort the whole batch: a per-commit hook
+// with a single un-ingested session stopped publishing every healthy session
+// behind it, for as long as that session stayed un-ingested. Cancellation and
+// run-wide store failures still stop the run, because they are facts about the
+// database rather than verdicts about one session (see isSessionRefusal).
+func (p *Pipeline) preflight(ctx context.Context, sessions []ingest.PushSessionRow, rec perf.Recorder) (preflightOutcome, error) {
+	var out preflightOutcome
+	for _, sess := range sessions {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		var attrs perf.Attributes
+		if rec.Enabled() {
+			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
+		}
+		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
+		input, readErr := p.readPublicationInput(ctx, sess)
+		if readErr == nil {
+			readErr = ValidatePublicationInput(input)
+		}
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+		if readErr == nil {
+			load.End(perf.OutcomeOK, nil)
+			out.valid = append(out.valid, sess)
+			continue
+		}
+		load.End(perf.OutcomeFailed, nil)
+		rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
+		if isRunWide(readErr) {
+			return out, readErr
+		}
+		out.refused = append(out.refused, entryReadFailure(sess, readErr, entryReadPreflight))
+	}
+	return out, nil
 }
 
 type entryReadStage uint8

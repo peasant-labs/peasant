@@ -13,7 +13,7 @@ import (
 func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputReader, rawID string) (ingest.PublicationInputBundle, error) {
 	id, err := ingest.NewSessionID(rawID)
 	if err != nil {
-		return ingest.PublicationInputBundle{}, fmt.Errorf("load publication input: %w", err)
+		return ingest.PublicationInputBundle{}, fmt.Errorf("load publication input: %w: %w", ErrSessionRefused, err)
 	}
 	input, err := reader.LoadPublicationInput(ctx, id)
 	if err != nil {
