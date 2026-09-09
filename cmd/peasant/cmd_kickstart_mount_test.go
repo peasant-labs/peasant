@@ -407,21 +407,20 @@ func sessionEntries(t *testing.T, sessionID ingest.SessionID, rows []testutil.Tu
 // previewCase is one highlighted row and the lines the mounted pane must and
 // must not carry for it.
 type previewCase struct {
-	WantError    string   `yaml:"wantError"`
 	Name         string   `yaml:"name"`
 	Highlight    string   `yaml:"highlight"`
 	WantContains []string `yaml:"wantContains"`
 	WantMissing  []string `yaml:"wantMissing"`
 }
 
-// previewDoc is the whole fixture plus its row-count guard. Recorded is the
+// previewDoc is the whole fixture plus its deletion guard. Recorded is the
 // conversation the real store is seeded with.
 type previewDoc struct {
-	ExpectedCaseCount int                    `yaml:"expectedCaseCount"`
-	Width             int                    `yaml:"width"`
-	Recorded          []testutil.TurnFixture `yaml:"recorded"`
-	SourceTranscript  []string               `yaml:"sourceTranscript"`
-	Cases             []previewCase          `yaml:"cases"`
+	RequiredNames    []string               `yaml:"requiredNames"`
+	Width            int                    `yaml:"width"`
+	Recorded         []testutil.TurnFixture `yaml:"recorded"`
+	SourceTranscript []string               `yaml:"sourceTranscript"`
+	Cases            []previewCase          `yaml:"cases"`
 }
 
 //go:embed testdata/kickstart_preview.yaml
@@ -442,8 +441,8 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 		}
 		t.Fatalf("kickstart_preview.yaml must hold exactly one document: %v", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))
+	if len(doc.Cases) == 0 {
+		t.Fatal("fixture declares no preview cases")
 	}
 	if len(doc.Recorded) == 0 {
 		t.Fatal("fixture records no turns; every case would take the not-imported path")
@@ -463,7 +462,7 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 		if c.Highlight == "" {
 			t.Fatalf("preview case %q highlights nothing; the zero id previews whatever it resolves to", c.Name)
 		}
-		if len(c.WantContains)+len(c.WantMissing) == 0 && c.WantError == "" {
+		if len(c.WantContains)+len(c.WantMissing) == 0 {
 			t.Fatalf("preview case %q asserts nothing; an empty want list is a guaranteed pass", c.Name)
 		}
 		for _, want := range append(append([]string{}, c.WantContains...), c.WantMissing...) {
@@ -471,6 +470,9 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 				t.Fatalf("preview case %q declares an empty needle; it matches regardless of the code", c.Name)
 			}
 		}
+	}
+	if err := testutil.RequireFixtureNames("kickstart preview", "case", doc.RequiredNames, names); err != nil {
+		t.Fatal(err)
 	}
 	return doc
 }
@@ -519,12 +521,6 @@ func TestKickstartPreview_ReadsTheLocalStore(t *testing.T) {
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			body, err := source.Body(c.Highlight)
-			if c.WantError != "" {
-				if err == nil || !strings.Contains(err.Error(), c.WantError) {
-					t.Fatalf("preview-only capture must request recovery: %v", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("preview body for %q: %v", c.Highlight, err)
 			}
