@@ -66,11 +66,8 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	if err != nil {
 		return out, err
 	}
-	// This build refuses the conversion write rather than letting it fall
-	// through to the replacing writer, which would discard exactly the
-	// producing parser evidence a conversion has to preserve.
 	if mode == ingest.SessionEntryWriteFormatConversion {
-		return out, fmt.Errorf("store content write: session %s requested the format-conversion write mode, which this build declares but does not serve yet; the stored entries and producer evidence are unchanged; use replace_all for a parser run or content_backfill for authoritative full entries", w.SessionID)
+		return convertStoredContentOnConn(conn, w, entries, stmts)
 	}
 	if !w.RequireFullContent && mode == ingest.SessionEntryWriteContentBackfill {
 		return out, fmt.Errorf("store content backfill requires authoritative full entries; prior capture unchanged; enable RequireFullContent after strict parsing")
@@ -81,12 +78,23 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		}
 	}
 	if !w.RequireFullContent {
+		priorHash, hadPriorHash, err := readStoredSessionEntriesHash(conn, string(w.SessionID))
+		if err != nil {
+			return out, err
+		}
 		out, err = indexSessionEntriesOnConn(conn, w.SessionID, entries, stmts)
 		if err != nil {
 			return out, err
 		}
-		if err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
-			return out, err
+		// A bounded write only invalidates durable prose when the canonical
+		// entries it replaces are actually different. Re-running a preview
+		// indexer over unchanged bytes must not destroy a complete capture that
+		// still describes those exact rows; the caller would then have to
+		// recover full content it never lost.
+		if !hadPriorHash || priorHash != out.sessionEntriesHash {
+			if err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(w.SessionID)}}); err != nil {
+				return out, err
+			}
 		}
 		c := w.ContentCapture
 		c.PublicationCaptureRevision = 0
@@ -228,6 +236,62 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 		}
 	}
 	return out, writeCapture(conn, w.SessionID, c, len(entries), rows, fullHash)
+}
+
+// IndexConversionLossError refuses a format conversion that cannot be proved
+// lossless. It is returned BEFORE the stored capture, its full prose or its
+// producer history are touched, so the session keeps the representation it had.
+type IndexConversionLossError struct {
+	SessionID ingest.SessionID
+	Reason    string
+}
+
+func (e *IndexConversionLossError) Error() string {
+	return fmt.Sprintf("store index format conversion: session %s cannot be converted losslessly because %s; the conversion was refused before any row changed, so the stored representation, full content and producer history are unchanged; re-index the session from its retained input instead of converting it", e.SessionID, e.Reason)
+}
+
+// convertStoredContentOnConn persists a representation change and nothing else.
+// The canonical entries and their coordinates must already equal the projection
+// the conversion produced: a conversion is not a parser run, so it may not
+// invent, drop or move an entry. Full-content manifests, chunks, the capture row
+// and the producer stamps are therefore left exactly as they are; the caller's
+// savepoint stamps the publication binding and the new format version.
+func convertStoredContentOnConn(conn *sqlite.Conn, w ingest.SessionEntryWrite, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
+	var out sessionEntryWriteOutcome
+	for _, e := range entries {
+		if string(e.SessionID) != string(w.SessionID) {
+			return out, fmt.Errorf("store index format conversion: entry belongs to a different session; no row changed; supply entries for the requested session")
+		}
+	}
+	hash, err := computeSessionEntriesHash(entries)
+	if err != nil {
+		return out, fmt.Errorf("store: compute session_entries_hash for %s: %w", w.SessionID, err)
+	}
+	storedHash, hasStoredHash, err := readStoredSessionEntriesHash(conn, string(w.SessionID))
+	if err != nil {
+		return out, fmt.Errorf("store: read session_entries_hash for %s: %w", w.SessionID, err)
+	}
+	lossless := hasStoredHash && storedHash == hash
+	if !hasStoredHash {
+		storedEntries, readErr := readStoredSessionEntries(conn, string(w.SessionID))
+		if readErr != nil {
+			return out, fmt.Errorf("store: compare existing session entries for %s: %w", w.SessionID, readErr)
+		}
+		lossless = sessionEntriesEqual(storedEntries, entries)
+	}
+	if !lossless {
+		return out, &IndexConversionLossError{SessionID: w.SessionID, Reason: "its converted projection has different canonical entries or coordinates than the ones already stored"}
+	}
+	capture, found, err := readCapture(conn, w.SessionID)
+	if err != nil {
+		return out, err
+	}
+	if found && capture.Status == ingest.ContentCaptureComplete && !w.RequireFullContent {
+		return out, &IndexConversionLossError{SessionID: w.SessionID, Reason: "it would downgrade a complete stored capture to a bounded preview"}
+	}
+	// Coordinates already match, so this repairs derived rows and annotation
+	// anchors at most; it never deletes and reinserts the canonical entries.
+	return indexSessionEntriesOnConn(conn, w.SessionID, entries, stmts)
 }
 
 func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCaptureWrite, entries, rows int, hash string) error {

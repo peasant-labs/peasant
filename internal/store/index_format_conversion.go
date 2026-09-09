@@ -99,8 +99,35 @@ func (s *Store) ConvertIndexFormat(ctx context.Context, sessionID schema.Session
 	if !sameIndexState(before, current) {
 		return fmt.Errorf("store: index conversion for session %s changed source format, input evidence or parser history while preparing its result; the transaction was refused; correct the conversion to preserve captured source state, producer revision and run time", sessionID)
 	}
+	capture, _, err := readCapture(conn, ingest.SessionID(sessionID))
+	if err != nil {
+		return err
+	}
 	stmts := newSessionEntryWriteStatements(conn)
 	defer func() { err = errors.Join(err, stmts.Close()) }()
-	_, err, _ = s.indexSessionEntryWriteSavepoint(ctx, conn, ingest.SessionEntryWrite{SessionID: sessionID, Result: output, IndexVersion: target, ExpectedState: before}, stmts, &conversion)
+	// The conversion carries the session's OWN capture context, not a fresh
+	// parser claim: its publication revision, so the write re-stamps the same
+	// binding instead of failing the revision check or leaving the index
+	// unbound; its capture row, so a complete capture cannot be silently
+	// downgraded to a preview; and no indexer revision, because no parser ran.
+	_, err, _ = s.indexSessionEntryWriteSavepoint(ctx, conn, ingest.SessionEntryWrite{
+		SessionID:          sessionID,
+		Result:             output,
+		IndexVersion:       target,
+		Mode:               ingest.SessionEntryWriteFormatConversion,
+		CaptureRevision:    before.PublicationCaptureRevision,
+		RequireFullContent: capture.Status == ingest.ContentCaptureComplete,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			PublicationCaptureRevision: capture.PublicationCaptureRevision,
+			Status:                     capture.Status,
+			SourceAuthority:            capture.SourceAuthority,
+			TranscriptOrigin:           capture.TranscriptOrigin,
+			CaptureFormat:              capture.CaptureFormat,
+			CapturedAtMs:               capture.CapturedAtMs,
+			FailureCode:                capture.FailureCode,
+			FailureMessage:             capture.FailureMessage,
+		},
+		ExpectedState: before,
+	}, stmts, &conversion)
 	return err
 }

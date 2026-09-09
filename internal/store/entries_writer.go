@@ -236,9 +236,11 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
-	} else if conversion == nil && write.Mode != ingest.SessionEntryWriteContentBackfill {
+	} else if conversion == nil && write.Mode != ingest.SessionEntryWriteContentBackfill && write.Mode != ingest.SessionEntryWriteFormatConversion {
 		// An entry-only replacement keeps historical parser stamps but cannot
-		// certify the input, even when the canonical rows happen to match.
+		// certify the input, even when the canonical rows happen to match. A
+		// format conversion is excluded because no parser ran: it proved the
+		// canonical rows unchanged, so the input proof still describes them.
 		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}}); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal

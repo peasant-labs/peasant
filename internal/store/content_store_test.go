@@ -40,21 +40,25 @@ type contentFormatCase struct {
 	Format string
 }
 
-// contentModeRefusalCase names one declared-but-unserved content mode. Exactly
-// one of ReadMode and WriteMode is set; the empty one selects no operation.
-type contentModeRefusalCase struct {
+// contentModeBehaviourCase names one SERVED content mode and what it must do.
+// Exactly one of ReadMode and WriteMode is set; the empty one selects no
+// operation. WantErrorContains turns the case into a refusal case.
+type contentModeBehaviourCase struct {
 	Name              string                       `yaml:"name"`
 	ReadMode          ingest.SessionEntryReadMode  `yaml:"read_mode"`
 	WriteMode         ingest.SessionEntryWriteMode `yaml:"write_mode"`
+	CompleteCapture   bool                         `yaml:"complete_capture"`
+	WantFullText      bool                         `yaml:"want_full_text"`
+	IndexerVersion    bool                         `yaml:"indexer_version"`
 	WantErrorContains string                       `yaml:"want_error_contains"`
 }
 
 type contentFixtures struct {
 	Cases                   []contentCase
 	Corruptions             []contentSQLCase
-	ShapeChanges            []contentSQLCase         `yaml:"shape_changes"`
-	CaptureFormatRejections []contentFormatCase      `yaml:"capture_format_rejections"`
-	ModeRefusals            []contentModeRefusalCase `yaml:"mode_refusals"`
+	ShapeChanges            []contentSQLCase           `yaml:"shape_changes"`
+	CaptureFormatRejections []contentFormatCase        `yaml:"capture_format_rejections"`
+	ModeBehaviours          []contentModeBehaviourCase `yaml:"mode_behaviours"`
 }
 
 // contentCaseNamed selects an entry shape by NAME, so this fixture's order
@@ -89,26 +93,29 @@ func loadContentFixtures(t *testing.T) contentFixtures {
 	for _, c := range f.CaptureFormatRejections {
 		names[c.Name] = true
 	}
-	for _, c := range f.ModeRefusals {
+	for _, c := range f.ModeBehaviours {
 		names[c.Name] = true
 		if (c.ReadMode == "") == (c.WriteMode == "") {
-			t.Fatalf("mode refusal %q must name exactly one of read_mode and write_mode", c.Name)
+			t.Fatalf("mode behaviour %q must name exactly one of read_mode and write_mode", c.Name)
 		}
 		if c.ReadMode != "" {
 			if _, err := ingest.NewSessionEntryReadMode(string(c.ReadMode)); err != nil {
-				t.Fatalf("mode refusal %q: %v", c.Name, err)
+				t.Fatalf("mode behaviour %q: %v", c.Name, err)
 			}
 		}
 		if c.WriteMode != "" {
 			if _, err := ingest.NewSessionEntryWriteMode(string(c.WriteMode)); err != nil {
-				t.Fatalf("mode refusal %q: %v", c.Name, err)
+				t.Fatalf("mode behaviour %q: %v", c.Name, err)
+			}
+			if c.WantFullText {
+				t.Fatalf("mode behaviour %q is a write and cannot expect read text", c.Name)
 			}
 		}
-		if c.WantErrorContains == "" {
-			t.Fatalf("mode refusal %q must state the refusal it expects", c.Name)
+		if c.WantFullText && !c.CompleteCapture {
+			t.Fatalf("mode behaviour %q expects full text without seeding a complete capture", c.Name)
 		}
 	}
-	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format", "available_read_refused", "format_conversion_write_refused"} {
+	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format", "available_read_serves_complete_capture", "available_read_serves_bounded_preview", "format_conversion_write_keeps_complete_capture", "format_conversion_write_refuses_a_new_producer_claim"} {
 		if !names[name] {
 			t.Fatalf("required fixture %s missing", name)
 		}
@@ -505,49 +512,98 @@ func TestFullContentWriteRefusesUnknownCaptureFormat(t *testing.T) {
 	}
 }
 
-// TestContentModeRefusalsPreserveStoredCapture proves that a mode this build
-// declares but does not serve refuses with an actionable error, serves no
-// entries, and leaves the stored capture and its producer evidence untouched.
-func TestContentModeRefusalsPreserveStoredCapture(t *testing.T) {
+// TestContentModeBehavioursPreserveStoredCapture proves what each served
+// content mode actually does, and that none of them change the stored capture,
+// its producer evidence or the stored entry projection. The available read
+// shows the content the database holds whether or not the capture is complete;
+// the format-conversion write persists a representation change over unchanged
+// canonical rows and refuses to launder a new producer stamp.
+func TestContentModeBehavioursPreserveStoredCapture(t *testing.T) {
 	fixtures := loadContentFixtures(t)
-	for _, refusal := range fixtures.ModeRefusals {
-		t.Run(refusal.Name, func(t *testing.T) {
+	for _, behaviour := range fixtures.ModeBehaviours {
+		t.Run(behaviour.Name, func(t *testing.T) {
 			t.Parallel()
 			s := openTestStore(t)
 			ctx := context.Background()
 			id := ingest.SessionID("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
 			seedSession(t, s, string(id))
-			entries := contentEntries(id, contentCaseNamed(t, fixtures, "long_unicode"))
-			writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			// The text shape is the existing long-unicode fixture, but these
+			// entries carry no Extra and no tool payloads: ListEntries then
+			// returns exactly the canonical rows the database stores, which is
+			// what a real conversion re-projects and what a bounded read serves.
+			shape := contentCaseNamed(t, fixtures, "long_unicode")
+			text := strings.Repeat(shape.Prefix, shape.Repeats) + shape.Tail
+			entries := batchTestEntries(id, "mode", shape.Entries)
+			for i := range entries {
+				entries[i].ContentPreview = &text
+			}
+			if behaviour.CompleteCapture {
+				writeFull(t, s, id, entries, ingest.SessionEntryWriteReplaceAll)
+			} else if err := s.IndexSessionEntries(ctx, id, entries); err != nil {
+				t.Fatal(err)
+			}
 			before, beforeHash := capture(t, s, id), sessionEntriesHash(t, s, id)
+			stored, err := s.ListEntries(ctx, id)
+			if err != nil || len(stored) != len(entries) {
+				t.Fatalf("stored canonical rows=%d want %d: %v", len(stored), len(entries), err)
+			}
+			if (before.Status == ingest.ContentCaptureComplete) != behaviour.CompleteCapture {
+				t.Fatalf("seeded capture is %s, which does not match the case", before.Status)
+			}
 
-			var err error
+			var page ingest.SessionEntryReadPage
 			switch {
-			case refusal.ReadMode != "":
-				var page ingest.SessionEntryReadPage
-				page, err = s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: refusal.ReadMode})
-				if len(page.Entries) != 0 {
-					t.Fatalf("refused read served %d entries", len(page.Entries))
+			case behaviour.ReadMode != "":
+				page, err = s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: behaviour.ReadMode})
+			case behaviour.WriteMode != "":
+				// A conversion re-projects what the database already holds, so
+				// it carries the STORED canonical rows. Handing it the original
+				// full-text entries would be a different projection, which is
+				// exactly what the loss guard has to refuse.
+				write := ingest.SessionEntryWrite{
+					SessionID: id, Result: indexformat.V1{Entries: stored}, IndexVersion: 1,
+					RequireFullContent: behaviour.CompleteCapture, Mode: behaviour.WriteMode,
+					IndexedAtMs: 1700000009000,
 				}
-			case refusal.WriteMode != "":
-				err = s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
-					SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
-					RequireFullContent: true, Mode: refusal.WriteMode,
-					IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
-					IndexedAtMs:    1700000009000,
-				}})[0].Err
+				if behaviour.IndexerVersion {
+					write.IndexerVersion = ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion
+				}
+				err = s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{write})[0].Err
 			}
-			if err == nil {
-				t.Fatalf("unserved mode was accepted")
+			if behaviour.WantErrorContains != "" {
+				if err == nil {
+					t.Fatal("the refused mode was accepted")
+				}
+				if !strings.Contains(err.Error(), behaviour.WantErrorContains) {
+					t.Fatalf("refusal %q does not tell the caller %q", err, behaviour.WantErrorContains)
+				}
+			} else if err != nil {
+				t.Fatalf("served mode failed: %v", err)
 			}
-			if !strings.Contains(err.Error(), refusal.WantErrorContains) {
-				t.Fatalf("refusal %q does not tell the caller %q", err, refusal.WantErrorContains)
+			if behaviour.ReadMode != "" && behaviour.WantErrorContains == "" {
+				// One page is enough: this asserts WHICH text a served mode
+				// hands back, not how it pages a long session.
+				if len(page.Entries) == 0 {
+					t.Fatal("served read returned no entries at all")
+				}
+				got := *page.Entries[0].ContentPreview
+				bounded := *stored[0].ContentPreview
+				if behaviour.WantFullText {
+					if got != text {
+						t.Fatalf("available read served %d of %d bytes from a complete capture", len(got), len(text))
+					}
+					if bounded == text {
+						t.Fatal("the seeded complete capture stores no durable prose beyond its bounded row")
+					}
+				} else if got != bounded {
+					t.Fatalf("available read served %d bytes that are not the stored bounded row of %d bytes", len(got), len(bounded))
+				}
 			}
 			if after := capture(t, s, id); after != before {
-				t.Fatalf("refused mode changed the stored capture:\nbefore %+v\nafter  %+v", before, after)
+				t.Fatalf("served mode changed the stored capture:\nbefore %+v\nafter  %+v", before, after)
 			}
 			if sessionEntriesHash(t, s, id) != beforeHash {
-				t.Fatal("refused mode changed the stored entry projection")
+				t.Fatal("served mode changed the stored entry projection")
 			}
 		})
 	}
