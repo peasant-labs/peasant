@@ -177,16 +177,20 @@ func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry, prior
 		}); err != nil {
 			return 0, fmt.Errorf("store: restore unchanged publication capture; transaction rolled back, retry ingest: %w", err)
 		}
-		return revision, nil
-	}
-	err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
+	} else {
+		err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
  publication_capture_revision=publication_capture_revision+1 WHERE session_id=? RETURNING publication_capture_revision`, &sqlitex.ExecOptions{
-		Args:       []any{m.CWD, string(entry.CWDProvenance), string(m.SessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error { revision = stmt.ColumnInt64(0); return nil },
-	})
-	if err != nil {
-		return 0, fmt.Errorf("store: allocate publication capture revision; transaction rolled back, retry ingest: %w", err)
+			Args:       []any{m.CWD, string(entry.CWDProvenance), string(m.SessionID)},
+			ResultFunc: func(stmt *sqlite.Stmt) error { revision = stmt.ColumnInt64(0); return nil },
+		})
+		if err != nil {
+			return 0, fmt.Errorf("store: allocate publication capture revision; transaction rolled back, retry ingest: %w", err)
+		}
 	}
+	// The snapshot is rewritten on BOTH paths. The digest that decided the
+	// restore covers the metadata but not its redaction record or derivation
+	// time, so re-serialising is what keeps the stored snapshot equal to the
+	// metadata this ingest actually captured, at whichever revision it carries.
 	err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_publication_metadata
  (session_id,capture_revision,schema_version,metadata_json,metadata_hash,content_hash,captured_at)
  VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET
