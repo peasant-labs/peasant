@@ -340,7 +340,11 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // The turns come from api.StoreDataProvider.SessionByID - the SAME read the
 // session_detail channel and the transcript viewer use - rather than a second
 // hand-rolled query. That is what gets the preview the full turn bodies:
-// SessionByID reads verified complete content and context from one SQL snapshot.
+// SessionByID reads the available stored content and context from one SQL
+// snapshot - full text when the capture is complete, the stored bounded
+// projection otherwise. A session whose capture is not finished is therefore
+// still previewable, which is the whole point of the pane: it shows what
+// Peasant recorded, and it certifies nothing.
 //
 // Visibility is deliberately sessionvisibility.All: kickstart is where a
 // selection is being CHOSEN, so scoping the preview by a selection the user has
