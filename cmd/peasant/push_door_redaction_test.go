@@ -48,13 +48,23 @@ func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
 	if len(turns) != 1 || !strings.Contains(turns[0].Content, "FULL-PREVIEW-TAIL") || strings.Contains(turns[0].Content, doorSecret) || !strings.Contains(turns[0].Content, "ANTHROPIC_KEY") {
 		t.Fatal("publication preview lost full tail or late redaction")
 	}
-	// Replacing the capture with a legacy preview must make the same mounted
-	// reader fail closed, rather than label its preview as publishable text.
+	// Replacing the capture with a legacy preview must NOT silence the same
+	// mounted reader. A capture that can no longer publish is still readable, and
+	// refusing here removed the transcript from exactly the sessions a user opens
+	// the previewer to inspect. Publication readiness is enforced at the publish
+	// action instead.
+	//
+	// What must never change is the redaction above: this reader is the only thing
+	// between a recorded secret and the screen, and the assertion that proves it
+	// runs on the full capture, where there is content to inspect. Asserting the
+	// absence of the secret again here would pass on an empty result and prove
+	// nothing; the bounded-projection content belongs to the available-content
+	// store read.
 	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := preview(sessionID); err == nil || !strings.Contains(err.Error(), "run peasant ingest") {
-		t.Fatalf("incomplete preview did not fail with remediation: %v", err)
+	if _, err := preview(sessionID); err != nil {
+		t.Fatalf("the preview refused a session it must still be able to show: %v", err)
 	}
 }
 
