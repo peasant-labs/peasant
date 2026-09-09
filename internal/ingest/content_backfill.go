@@ -36,6 +36,20 @@ type RetainedContentCapturer interface {
 	CaptureRetainedContent(context.Context, DiscoveredSession) (ContentCaptureResult, error)
 }
 
+// UnrepresentedRecordError means a well-formed source record of a kind this
+// build does not represent. It is distinct from a malformed record: the
+// strict parser refuses to certify the transcript, but the tolerant
+// projection can still store the represented entries as an incomplete
+// capture so previews are not empty.
+type UnrepresentedRecordError struct {
+	Harness Harness
+	Kind    string
+}
+
+func (e *UnrepresentedRecordError) Error() string {
+	return fmt.Sprintf("unrepresented %s record %q; this build does not represent it, so the transcript cannot be certified complete", e.Harness, e.Kind)
+}
+
 // RetainedContentIncompleteError means the retained input is insufficient for
 // a verified complete capture. No row was written: the stored capture stays
 // incomplete and the session stays eligible for a native refresh.

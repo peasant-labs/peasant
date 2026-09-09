@@ -186,6 +186,35 @@ func (input *CapturedIndexInput) ParseForFormat(ctx context.Context, indexer Tra
 	return indexWithSourceKind(ctx, indexer, input.session, data)
 }
 
+// ParseTolerant parses the same captured bytes with the harness's tolerant
+// projection parser, the one that represents what it recognizes and skips
+// what it does not. Its result is a bounded projection only: it is stored as
+// an incomplete capture and never certified as complete content.
+func (input *CapturedIndexInput) ParseTolerant(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
+	if input.kind == TranscriptSourceDirectory {
+		native, ok := indexer.(openCodeInputIndexer)
+		if !ok {
+			return nil, fmt.Errorf("index session %s: directory indexer has no tolerant native-tree projection; no entries were stored", input.session.SessionID)
+		}
+		return native.indexJSONInput(ctx, input.session, input.tree)
+	}
+	data := input.transcript
+	if data == nil {
+		data = []byte{}
+	}
+	if versioned, ok := indexer.(VersionedTranscriptIndexer); ok {
+		return versioned.IndexTranscriptBytesResult(ctx, input.session, data)
+	}
+	entries, err := indexer.IndexTranscriptBytes(ctx, input.session, data)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, &unverifiedEmptyIndexError{session: input.session}
+	}
+	return indexformat.V1{Entries: entries}, nil
+}
+
 func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, input *CapturedIndexInput, declared int) (indexformat.Result, error) {
 	return input.ParseForFormat(ctx, indexer, declared)
 }

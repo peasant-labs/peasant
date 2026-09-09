@@ -7,6 +7,7 @@
 # required_names guards deletion by name; adding a case need not appear here.
 required_names:
   - strike-filtered-artifact-is-incomplete
+  - strike-unrepresented-event-is-incomplete
   - strike-complete-artifact-is-complete
   - opencode-missing-part-directory-is-incomplete
   - opencode-native-tree-is-complete
@@ -24,6 +25,12 @@ cases:
     harness: strike
     content_omitted: true
     complete: false
+    represented_entries: true
+  - name: strike-unrepresented-event-is-incomplete
+    harness: strike
+    unrepresented_event: true
+    complete: false
+    represented_entries: true
   - name: strike-complete-artifact-is-complete
     harness: strike
     complete: true

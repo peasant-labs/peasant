@@ -1401,7 +1401,12 @@ func (p *Pipeline) indexLoop(
 }
 
 type indexParseResult struct {
-	fullContent   bool
+	fullContent bool
+	// partial reports that the strict parser refused the transcript and the
+	// tolerant projection was stored instead, as an incomplete capture whose
+	// recorded reason is strictRefusal. Previews show it; nothing certifies it.
+	partial       bool
+	strictRefusal string
 	im            indexedMeta
 	input         *CapturedIndexInput
 	output        indexformat.Result
@@ -1539,6 +1544,24 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
 			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
+			// A refusal over a well-formed record this build does not represent is
+			// not an empty store: the represented entries are stored as an
+			// incomplete capture so previews can show them, export and publication
+			// stay refused until a complete capture exists, and the refusal is
+			// recorded with the capture and reported once. A malformed transcript
+			// stays a visible error.
+			var unrepresented *UnrepresentedRecordError
+			if _, strict := indexer.(AuthoritativeTranscriptIndexer); err != nil && strict && declared == strictIndexFormat && ctx.Err() == nil && errors.As(err, &unrepresented) {
+				if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
+					result.partial, result.strictRefusal = true, err.Error()
+					p.reportDiagnostic(DiagnosticEntry{
+						ErrorType: "content_capture_incomplete", Location: string(im.session.SessionID),
+						Message:     fmt.Sprintf("index session %s: the strict parser refused the transcript: %v; the represented entries were stored as an incomplete capture, so previews show them while export and publication stay refused until a complete capture exists", im.session.SessionID, err),
+						Remediation: "Regenerate the source with a supported harness version or upgrade Peasant so every record is represented, then rerun harvest index --force.",
+					})
+					output, err = tolerant, nil
+				}
+			}
 		} else {
 			reason := "stored index already matches captured input and current producer"
 			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
@@ -1548,7 +1571,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	// Only the strict format-1 capture path certifies complete content. A
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
-	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat
+	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat && !result.partial
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err == nil && parsed {
@@ -1646,6 +1669,8 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		capture := SessionContentCaptureWrite{}
 		if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
+		} else if result.partial {
+			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatPreviewOnly, CapturedAtMs: nowMs, FailureCode: "strict_capture_refused", FailureMessage: result.strictRefusal}
 		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
@@ -4123,19 +4148,20 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// otherwise warn once and index from the retained input, keeping the
 			// old artifact and adapter stamp. Routine version-driven indexing
 			// stays retained-first and never reacquires native input here.
-			if p.config.Force && t.originalSourcePath != "" {
-				if _, err := p.fs.Stat(t.originalSourcePath); err == nil {
-					sourceSession := p.nativeSessionForTarget(t, p.adapterTargetMetadata(ctx, t))
-					entryByID[sourceSession.SessionID] = DiffEntry{Session: sourceSession, Status: DiffUpdated, retainedOnly: true}
-					inBatch[sourceSession.SessionID] = true
+			// A native refresh needs the session as discovery saw it (workspace,
+			// worktree, commit context); a locator rebuilt from the retained
+			// sidecar alone would degrade attribution. Only a session this run
+			// discovered is refreshed natively.
+			if p.config.Force {
+				if discovered, found := sourceSessions[t.session.SessionID]; found {
+					entryByID[discovered.SessionID] = DiffEntry{Session: discovered, Status: DiffUpdated}
+					inBatch[discovered.SessionID] = true
 					continue
 				}
-			}
-			if p.config.Force {
 				p.reportDiagnostic(DiagnosticEntry{
 					ErrorType: "native_refresh_unavailable", Location: fmt.Sprintf("%s session %s forced refresh", t.session.Harness, t.session.SessionID),
-					Message:     fmt.Sprintf("forced refresh of session %s: the recorded native source %q is unavailable, so the retained input was indexed instead; the previous artifact and adapter stamp were preserved", t.session.SessionID, t.originalSourcePath),
-					Remediation: "Restore the original harness source and rerun harvest index --force to refresh from native input.",
+					Message:     fmt.Sprintf("forced refresh of session %s: native discovery did not offer the session (recorded source %q), so the retained input was indexed instead; the previous artifact and adapter stamp were preserved", t.session.SessionID, t.originalSourcePath),
+					Remediation: "Enable the harness source in the configuration and restore the original source, then rerun harvest index --force to refresh from native input.",
 				})
 			}
 			fallbackTargets = append(fallbackTargets, t)

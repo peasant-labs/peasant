@@ -23,8 +23,10 @@ type retainedContentCaptureFixtures struct {
 		Name                 string `yaml:"name"`
 		Harness              string `yaml:"harness"`
 		ContentOmitted       bool   `yaml:"content_omitted"`
+		UnrepresentedEvent   bool   `yaml:"unrepresented_event"`
 		MissingPartDirectory bool   `yaml:"missing_part_directory"`
 		Complete             bool   `yaml:"complete"`
+		RepresentedEntries   bool   `yaml:"represented_entries"`
 	} `yaml:"cases"`
 }
 
@@ -62,7 +64,11 @@ func TestRetainedContentCaptureProducers(t *testing.T) {
 					t.Fatal(err)
 				}
 				path := filepath.Join(root, sid.String()+"--transcript.jsonl")
-				if err := os.WriteFile(path, []byte(fixtures.StrikeTranscript), 0600); err != nil {
+				transcript := fixtures.StrikeTranscript
+				if fixture.UnrepresentedEvent {
+					transcript += `{"type":"future.additive.event","time":"2026-07-28T12:35:01Z","data":{"turnId":"turn-1","payload":"not represented by this build"}}` + "\n"
+				}
+				if err := os.WriteFile(path, []byte(transcript), 0600); err != nil {
 					t.Fatal(err)
 				}
 				session = DiscoveredSession{SessionID: sid, Harness: harness, SourcePath: ResolvedPath(path), SourceFormat: SourceFormatJSONL, ContentOmitted: fixture.ContentOmitted}
@@ -103,8 +109,11 @@ func TestRetainedContentCaptureProducers(t *testing.T) {
 			if fixture.Complete && len(capture.Entries) == 0 {
 				t.Fatal("complete capture carries no entries")
 			}
-			if !fixture.Complete && len(capture.Entries) != 0 {
-				t.Fatalf("incomplete capture must not certify a surviving subset: %d entries", len(capture.Entries))
+			if !fixture.Complete && fixture.RepresentedEntries && len(capture.Entries) == 0 {
+				t.Fatal("incomplete capture dropped the represented entries; previews would be empty")
+			}
+			if !fixture.Complete && !fixture.RepresentedEntries && len(capture.Entries) != 0 {
+				t.Fatalf("filtered retained input must not report entries: %d entries", len(capture.Entries))
 			}
 		})
 	}

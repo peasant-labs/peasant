@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -68,14 +69,29 @@ func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session Disc
 	if err != nil {
 		return ContentCaptureResult{}, captureFailure(session, 0, err)
 	}
-	if session.ContentOmitted {
-		return ContentCaptureResult{Complete: false, InputHash: indexInputDigest(session, data, nil)}, nil
+	inputHash := indexInputDigest(session, data, nil)
+	if !session.ContentOmitted {
+		capture, err := i.IndexTranscriptBytesForCapture(ctx, session, data)
+		if err == nil {
+			return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash}, nil
+		}
+		var unrepresented *UnrepresentedRecordError
+		if ctx.Err() != nil || !errors.As(err, &unrepresented) {
+			return ContentCaptureResult{}, err
+		}
 	}
-	capture, err := i.IndexTranscriptBytesForCapture(ctx, session, data)
+	// Filtered or unrepresented records: report the represented entries from
+	// the tolerant projection as an incomplete capture, never an empty one and
+	// never a certified one. A malformed transcript is refused above.
+	result, err := i.IndexTranscriptBytesResult(ctx, session, data)
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: indexInputDigest(session, data, nil)}, nil
+	var entries []schema.SessionEntry
+	if v1, ok := result.(indexformat.V1); ok {
+		entries = v1.Entries
+	}
+	return ContentCaptureResult{Entries: entries, Complete: false, InputHash: inputHash}, nil
 }
 
 // IndexTranscriptResult verifies completion before authorizing persistent replacement.

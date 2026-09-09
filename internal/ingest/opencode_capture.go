@@ -167,7 +167,7 @@ func (idx *OpenCodeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, 
 	var ignored []IgnoredSourceRecord
 	for kind, count := range unknown {
 		if !isOpenCodeCaptureControl(kind) {
-			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("unrepresented OpenCode part vocabulary %q", kind))
+			return TranscriptCaptureResult{}, captureFailure(s, 0, &UnrepresentedRecordError{Harness: HarnessOpenCode, Kind: kind})
 		}
 		for range count {
 			ignored = append(ignored, IgnoredSourceRecord{Kind: kind, Reason: IgnoredRecordControl})
@@ -225,7 +225,7 @@ func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s Disco
 				continue
 			}
 			if !isKnownOpenCodeSemanticPartType(part.Data.Type) {
-				return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("unrepresented OpenCode part %q", part.Data.Type))
+				return TranscriptCaptureResult{}, captureFailure(s, 0, &UnrepresentedRecordError{Harness: HarnessOpenCode, Kind: part.Data.Type})
 			}
 			if part.Data.Type == "tool" || part.Data.Type == "tool_use" {
 				if openCodeSemanticToolName(part.Data) == "" {
