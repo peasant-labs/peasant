@@ -6,10 +6,19 @@
 # below decodes to no directory on any machine, so the only directory a scan can
 # ask git about is the session's own working directory - one directory per row,
 # which is what makes "this session cost zero git lookups" countable per row.
+#
+# RENAMED CASE, recorded so the change is not silent: the required name
+# "recorded session still being written keeps its record" named the OLD verdict
+# for an active source. Capturing active sources consistently made a scan resolve
+# such a session again rather than reuse its record, and the case below was
+# renamed with its verdict to "recorded active session is refreshed". The
+# coverage was never removed, so the required name follows the case instead of
+# the old verdict being restored, which would now assert behaviour the product
+# deliberately left behind.
 required_names:
   - recorded session with a settled source reuses the record
   - recorded session whose source changed after ingest is resolved again
-  - recorded session still being written keeps its record
+  - recorded active session is refreshed
   - session recorded under an older metadata version is resolved again
   - session the store never recorded is resolved
   - recorded session whose metrics row is gone is still known
