@@ -1012,7 +1012,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		candidates := append([]SessionID(nil), p.reconciledArtifacts...)
 		candidates = append(candidates, staleIDs...)
 		for _, sid := range candidates {
-			if backfilled[sid] {
+			if _, recovered := backfilled[sid]; recovered {
 				continue
 			}
 			if queued[sid] {
@@ -3900,7 +3900,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	scanned := p.scanPeasantSyncSessions(ctx)
 	remaining := scanned[:0]
 	for _, target := range scanned {
-		if !backfilled[target.session.SessionID] {
+		if _, recovered := backfilled[target.session.SessionID]; !recovered {
 			remaining = append(remaining, target)
 		}
 	}
