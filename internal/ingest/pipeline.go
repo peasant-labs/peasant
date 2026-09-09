@@ -1501,20 +1501,23 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	input, err := p.captureIndexInput(ctx, im, indexer)
 	var output indexformat.Result
 	parsed := false
+	declared := p.versionTargets()[im.session.Harness].IndexVersion
 	if err == nil {
 		result.input = input
 		result.im.captureRevision = input.expected.PublicationCaptureRevision
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
-			output, err = parseCapturedIndexInput(ctx, indexer, input)
+			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
 		} else {
 			reason := "stored index already matches captured input and current producer"
 			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 		}
 		input.transcript, input.tree = nil, nil
 	}
+	// Only the strict format-1 capture path certifies complete content. A
+	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
-	result.fullContent = authoritative && err == nil && parsed
+	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err == nil && parsed {
