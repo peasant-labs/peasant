@@ -181,6 +181,9 @@ func TestHarvestCmd_DryRun(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
 		"--source-harness=claude-code",
@@ -213,6 +216,9 @@ func TestHarvestCmd_JSONOutput(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
 		"--source-harness=claude-code",
@@ -244,6 +250,9 @@ func TestHarvestCmd_VerboseOutput(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
 		"--source-harness=claude-code",
@@ -270,6 +279,9 @@ func TestHarvestCmd_SourcePathReplaces(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
 		"--source-harness=claude-code",
@@ -819,6 +831,9 @@ func TestHarvestCmd_DryRun_CustomPatternCount(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	configYAML := fmt.Sprintf(`version: 1
 redaction:
@@ -868,6 +883,9 @@ func TestHarvestCmd_AllImpliesIncludeActive(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	// Run with --all (which should imply --include-active and --force).
 	output, err := executeHarvestCmd(t, dir, []string{
@@ -906,8 +924,17 @@ func TestHarvestCmd_DryRun_DoesNotCreateDB(t *testing.T) {
 		"--output=" + outputDir,
 		"--dry-run",
 	})
-	if err != nil {
-		t.Fatalf("dry-run should succeed; got error: %v\noutput: %s", err, output)
+	// On a fresh install there is nothing to inspect, and a dry run does not
+	// create or migrate state to get something. It says so and stops: the
+	// alternative is a command that quietly writes a database while the user
+	// asked what it WOULD do.
+	if err == nil {
+		t.Fatalf("dry-run on a missing database should refuse; output: %s", output)
+	}
+	for _, want := range []string{"dry-run", "no files were changed", "run a normal harvest"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal must say %q so the user knows what to do; got: %v", want, err)
+		}
 	}
 
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
@@ -1277,6 +1304,9 @@ func TestHarvestCmd_SinceFlag_ValidDuration(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
 		"--source-harness=claude-code",
@@ -1747,6 +1777,10 @@ func TestHarvestCmd_SourcePathIsolatesProvider(t *testing.T) {
 	if err := os.WriteFile(claudeFile, []byte(claudeLine+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
+	// The forecast reads an existing checkpointed database and creates none, so
+	// seed one at the path this environment resolves to.
+	seedClosedStoreAt(t, string(defaults.ResolveDBFilePath()))
 
 	// Sanity: a bare (unscoped) harvest DOES discover the codex default session.
 	if out := runHarvestNoTestConfig(t); !strings.Contains(out, codexID) {

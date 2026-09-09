@@ -23,7 +23,13 @@ import (
 // a fixture that never checkpointed.
 func seedClosedStore(t testing.TB, dir string) string {
 	t.Helper()
-	path := string(defaults.ResolveDBFilePathWith(dir))
+	return seedClosedStoreAt(t, string(defaults.ResolveDBFilePathWith(dir)))
+}
+
+// seedClosedStoreAt is seedClosedStore for a test that lets the environment
+// resolve the data directory instead of passing --data-dir.
+func seedClosedStoreAt(t testing.TB, path string) string {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("prepare the data directory for a dry-run fixture: %v", err)
 	}
