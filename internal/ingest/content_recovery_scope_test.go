@@ -185,6 +185,16 @@ func TestContentRecoveryScope(t *testing.T) {
 				if err != nil || state == nil || state.IndexedInputHash == nil || state.IndexerVersion != producer {
 					t.Fatalf("recovered session was excluded from independent index work: %+v %v", state, err)
 				}
+				// The repair is reported in the run's index log and counted once.
+				logged := false
+				for _, entry := range result.IndexLog {
+					if entry.SessionID == id && entry.Outcome == ingest.IndexOutcomeReindexed && entry.Reason != nil && *entry.Reason == "content recovered from retained input" {
+						logged = true
+					}
+				}
+				if !logged || result.Summary.Indexed != 1 {
+					t.Fatalf("recovery is not reported and counted once: indexed=%d log=%+v", result.Summary.Indexed, result.IndexLog)
+				}
 			case recoveryScopeUntouched:
 				if found && capture.Status == ingest.ContentCaptureComplete {
 					t.Fatalf("out-of-scope session was recovered: %+v", capture)

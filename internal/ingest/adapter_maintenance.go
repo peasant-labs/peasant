@@ -127,7 +127,9 @@ func (e *adapterAcquisitionError) Unwrap() error { return e.cause }
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
 	metadata, metadataErr := p.metadataForRewrite(entry.Session)
 	metadataPath, pathErr := p.findMetadataPath(ctx, entry.Session)
-	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !(p.config.Force && !p.config.Reindex) && !p.nativeInputChanged(entry.Session, metadata) {
+	// A forced run is an explicit manual refresh and tries native input first;
+	// routine version-driven maintenance prefers sufficient retained input.
+	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !p.config.Force && !p.nativeInputChanged(entry.Session, metadata) {
 		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath)
 		var insufficient *InsufficientRetainedInputError
 		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
@@ -145,8 +147,12 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if !errors.As(result.result.Error, &acquisition) || metadataPath == "" || pathErr != nil {
 		return result
 	}
+	errorType, location := "adapter_refresh_unavailable", fmt.Sprintf("%s session %s adapter refresh", entry.Session.Harness, entry.Session.SessionID)
+	if p.config.Force {
+		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", entry.Session.Harness, entry.Session.SessionID)
+	}
 	p.reportDiagnostic(DiagnosticEntry{
-		ErrorType: "adapter_refresh_unavailable", Location: fmt.Sprintf("%s session %s adapter refresh", entry.Session.Harness, entry.Session.SessionID),
+		ErrorType: errorType, Location: location,
 		Message:     acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported retained indexing may continue",
 		Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
 	})

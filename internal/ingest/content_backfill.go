@@ -143,6 +143,14 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 					return recovered, cancelErr
 				}
+				var mismatch *ContentShapeMismatchError
+				if p.config.Force && errors.As(err, &mismatch) {
+					// The forced run replaces this projection through the ordinary
+					// captured-input parse in the same invocation; a content-only
+					// refusal is not something the user must act on here.
+					slog.Debug("content backfill deferred to forced index replacement", "session_id", id)
+					continue
+				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
 				p.reportDiagnostic(DiagnosticEntry{
 					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s retained-content recovery", id),

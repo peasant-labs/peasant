@@ -7,7 +7,8 @@
 #                      replace them either)
 # A refused shape mismatch is content-only recovery declining to reshape the
 # projection; the ordinary index run then replaces the unproven projection
-# through captured input, with or without --force.
+# through captured input. Without --force the refusal is reported; under
+# --force the same run replaces the projection, so nothing is reported.
 # required_names guards deletion by name; adding a case need not appear here.
 required_names: [retained-root, retained-child, corrupt-snapshot-rollback, force-shape-replacement, shape-mismatch-defers-to-ordinary-index, failing-first-target-page-progress, cursor-query-shape-defers-to-ordinary-index, cursor-query-force-remaps-anchor, invalid-project-proof-rollback]
 cases:
@@ -21,7 +22,6 @@ cases:
   - name: cursor-query-force-remaps-anchor
     cursor: true
     force: true
-    recovery_reported: true
   - name: retained-root
   - name: retained-child
     child: true
@@ -32,7 +32,6 @@ cases:
   - name: force-shape-replacement
     mismatch: true
     force: true
-    recovery_reported: true
   - name: shape-mismatch-defers-to-ordinary-index
     mismatch: true
     recovery_reported: true

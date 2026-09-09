@@ -214,8 +214,12 @@ type OrphanCleaner interface {
 // replaces asserted the reverse as settled fact, and that assertion - repeated
 // one layer downstream - is what got the outward safety-net re-redaction deleted.
 type indexedMeta struct {
-	captureRevision      int64
-	capturedSource       *captureFileSystem
+	captureRevision int64
+	capturedSource  *captureFileSystem
+	// published reports that this run committed the artifact being indexed,
+	// so its full-content capture is attributed to the new ingest rather than
+	// to the retained snapshot it would otherwise be read from.
+	published            bool
 	session              DiscoveredSession
 	startMs              int64
 	outputTranscriptPath string // final on-disk path: {sessionDir}/{sessionId}--transcript.{ext}
@@ -1060,7 +1064,33 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	}
 
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, drainIndexLogEntries, IndexOutcomeIndexed, "pipeline", &drainDownstream)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream)
+}
+
+// contentRecoveryReason labels a retained-content repair in the index log.
+// Recovery reuses the reindexed outcome with this reason: no new outcome
+// value and no new JSON shape, but the repair is visible and counted.
+const contentRecoveryReason = "content recovered from retained input"
+
+// contentRecoveryLogEntries reports this run's completed retained-content
+// repairs as index log entries, so a repair a preliminary sweep performed
+// does not disappear from the run's reported outcomes.
+func (p *Pipeline) contentRecoveryLogEntries() []IndexLogEntry {
+	if len(p.contentRecoveries) == 0 {
+		return nil
+	}
+	ids := make([]SessionID, 0, len(p.contentRecoveries))
+	for id := range p.contentRecoveries {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	entries := make([]IndexLogEntry, 0, len(ids))
+	for _, id := range ids {
+		recovery := p.contentRecoveries[id]
+		reason := contentRecoveryReason
+		entries = append(entries, p.makeIndexLogEntry(indexedMeta{session: recovery.session, outputTranscriptPath: recovery.session.SourcePath.String()}, IndexOutcomeReindexed, recovery.entries, recovery.recoveredAt, &reason, nil))
+	}
+	return entries
 }
 
 // drainLoop is the consumer goroutine for stage 4b (DB INSERT).
@@ -1168,6 +1198,7 @@ func (p *Pipeline) drainLoop(
 						outputTranscriptPath: wr.outputTranscriptPath,
 						transcriptData:       wr.transcriptData,
 						capturedSource:       wr.capturedSource,
+						published:            wr.artifact != nil,
 					})
 				}
 				sessionResults = append(sessionResults, wr.result)
@@ -1614,7 +1645,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		capture := SessionContentCaptureWrite{}
 		if result.fullContent {
-			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: ContentSourceNewIngest, TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
+			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
@@ -1696,6 +1727,20 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
 	}
 	return flush
+}
+
+// contentAuthorityFor names where a certified full capture's bytes came from:
+// an artifact this run committed is new ingest, a native OpenCode directory
+// tree is the provider source, and anything else was parsed from the retained
+// managed snapshot. The label never claims a native read that did not happen.
+func contentAuthorityFor(result indexParseResult) ContentSourceAuthority {
+	switch {
+	case result.im.published:
+		return ContentSourceNewIngest
+	case result.input != nil && result.input.kind == TranscriptSourceDirectory:
+		return ContentSourceProviderSource
+	}
+	return ContentSourcePeasantSnapshot
 }
 
 func (p *Pipeline) makeIndexProfileSession(result indexParseResult, logEntry IndexLogEntry, writeDuration time.Duration) IndexProfileSession {
@@ -3328,6 +3373,19 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(batchIndexed), len(indexSessions))
 	}
+	// A retained-content repair counts as indexed work once per session; a
+	// session that was also indexed by the ordinary path is not counted twice.
+	if len(p.contentRecoveries) > 0 {
+		counted := make(map[SessionID]bool, len(successfullyIndexed))
+		for _, sid := range successfullyIndexed {
+			counted[sid] = true
+		}
+		for sid := range p.contentRecoveries {
+			if !counted[sid] {
+				indexed++
+			}
+		}
+	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageIndex, Done: indexed, Total: len(priorIndexed) + len(indexSessions)})
 
 	// Persist index_log entries (best-effort).
@@ -4060,6 +4118,26 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	for _, t := range targeted {
 		if !t.refreshMetadata && !p.adapterTargetNeedsWork(ctx, t) {
+			// harvest index --force is an explicit manual refresh: use a usable
+			// native capture when the recorded source is still there, and
+			// otherwise warn once and index from the retained input, keeping the
+			// old artifact and adapter stamp. Routine version-driven indexing
+			// stays retained-first and never reacquires native input here.
+			if p.config.Force && t.originalSourcePath != "" {
+				if _, err := p.fs.Stat(t.originalSourcePath); err == nil {
+					sourceSession := p.nativeSessionForTarget(t, p.adapterTargetMetadata(ctx, t))
+					entryByID[sourceSession.SessionID] = DiffEntry{Session: sourceSession, Status: DiffUpdated, retainedOnly: true}
+					inBatch[sourceSession.SessionID] = true
+					continue
+				}
+			}
+			if p.config.Force {
+				p.reportDiagnostic(DiagnosticEntry{
+					ErrorType: "native_refresh_unavailable", Location: fmt.Sprintf("%s session %s forced refresh", t.session.Harness, t.session.SessionID),
+					Message:     fmt.Sprintf("forced refresh of session %s: the recorded native source %q is unavailable, so the retained input was indexed instead; the previous artifact and adapter stamp were preserved", t.session.SessionID, t.originalSourcePath),
+					Remediation: "Restore the original harness source and rerun harvest index --force to refresh from native input.",
+				})
+			}
 			fallbackTargets = append(fallbackTargets, t)
 			continue
 		}
@@ -4225,7 +4303,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		p.recordIndexProfileStage(StageExtract, fallbackExtractProfileStart, len(fallbackTargets), len(fallbackTargets))
 
 		// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(indexLogEntries, drainIndexLogEntries...), IndexOutcomeReindexed, "reindex", &reindexDownstream)
+		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream)
 	}
 
 	// No extractable sessions — all are fallback. Process fallback sessions directly.
@@ -4256,7 +4334,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var storeErr error
 
 	// Steps 3e-end: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(indexLogEntries, drainIndexLogEntries...), IndexOutcomeReindexed, "reindex", nil)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil)
 }
 
 // reindexTarget represents a session found in the peasant-sync output directory
