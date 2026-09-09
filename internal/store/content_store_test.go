@@ -321,8 +321,8 @@ func TestFullContentLegacyBackfillAndKeyset(t *testing.T) {
 	if _, err := s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err == nil {
 		t.Fatal("legacy full read succeeded")
 	}
-	targets, err := s.ListContentCaptureIncompleteSessions(ctx, 1)
-	if err != nil || len(targets) != 1 || targets[0] != id {
+	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 1)
+	if err != nil || len(targets) != 1 || targets[0].SessionID != id {
 		t.Fatalf("first targets: %v %v", targets, err)
 	}
 	later, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
@@ -373,12 +373,12 @@ PRAGMA ignore_check_constraints=OFF;`)
 	if targets[0].Harness != ingest.HarnessClaudeCode {
 		t.Fatalf("recoverable target lost its harness: %+v", targets[0])
 	}
-	ids, err := s.ListContentCaptureIncompleteSessions(ctx, 3)
+	page, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 3)
 	if err != nil {
 		t.Fatalf("full page: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != recoverable {
-		t.Fatalf("unrecognised sessions were offered as recovery targets: %v", ids)
+	if len(page) != 1 || page[0].SessionID != recoverable {
+		t.Fatalf("unrecognised sessions were offered as recovery targets: %+v", page)
 	}
 	after, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, recoverable, 1)
 	if err != nil || len(after) != 0 {

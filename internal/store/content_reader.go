@@ -79,17 +79,6 @@ func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionI
 	defer s.pool.Put(conn)
 	return readCapture(conn, id)
 }
-func (s *Store) ListContentCaptureIncompleteSessions(ctx context.Context, limit int) ([]ingest.SessionID, error) {
-	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", limit)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]ingest.SessionID, 0, len(targets))
-	for _, target := range targets {
-		ids = append(ids, target.SessionID)
-	}
-	return ids, nil
-}
 
 // After is an exclusive keyset cursor. Failed targets cannot starve later ones.
 func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int) ([]ingest.ContentCaptureIncompleteSession, error) {
