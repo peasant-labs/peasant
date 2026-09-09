@@ -44,7 +44,7 @@ func loadPublicationMetadataFixtures(t *testing.T) []publicationMetadataFixture 
 	}
 	required := strings.Fields(`exact-root-reopened exact-child-reopened confirmed-absent workspace-is-not-exact worktree-is-not-exact legacy-seed capture-before-index noop-stamps-new-capture stale-writer-refused stale-noop-refused manual-entry-reindex manual-index-state manual-hashed-index-state zero-revision-noop legacy-upsert-invalidates metrics-are-independent unsupported-snapshot malformed-snapshot corrupt-snapshot-digest conflicting-cwd-column conflicting-snapshot-identity unknown-capture-intent exact-without-literal workspace-with-fake-cwd repaired-project-capture model-absence-is-consumer-policy`)
 	seen := make(map[string]bool)
-	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture equivalent-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped")...)
+	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture equivalent-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped unchanged-recapture-keeps-its-binding")...)
 	for _, c := range cases {
 		if seen[c.Name] {
 			t.Fatalf("duplicate fixture %s", c.Name)
@@ -156,7 +156,22 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 			}
 			ctx := context.Background()
 			switch tc.Action {
+			case "unchanged-recapture":
+				// Re-ingesting a session nothing has changed is not a new
+				// capture. Allocating one here would put the metadata a
+				// revision ahead of the index stamp after EVERY harvest, so
+				// the session could never be published again without being
+				// re-indexed first, forever, for no reason.
+				next := capturePublication(t, s, e)
+				if next != revision {
+					t.Fatalf("an unchanged re-ingest allocated a new capture: %d -> %d", revision, next)
+				}
 			case "recapture-noop", "stale-write", "stale-noop":
+				// A second capture is a NEW capture only when the session
+				// actually changed. Grow it, as a later harvest of a session
+				// that was still being written would find it.
+				e.Metadata.Timestamp.End += 1000
+				e.Metadata.MetadataHash = schema.ComputeMetadataHash(e.Metadata)
 				next := capturePublication(t, s, e)
 				if next != revision+1 {
 					t.Fatalf("revision %d -> %d", revision, next)

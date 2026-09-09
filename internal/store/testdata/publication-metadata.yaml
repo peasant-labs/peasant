@@ -24,6 +24,12 @@
   kind: source_absent
   action: skip-index
   readiness: needs_ingest
+# A harvest that finds nothing changed must leave the session exactly as
+# publishable as it already was, without re-indexing it.
+- name: unchanged-recapture-keeps-its-binding
+  kind: source_absent
+  action: unchanged-recapture
+  readiness: ready
 - name: noop-stamps-new-capture
   kind: source_absent
   action: recapture-noop
