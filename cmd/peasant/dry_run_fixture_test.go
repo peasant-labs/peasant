@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/schema"
 )
 
 // seedClosedStore prepares the ONE database state a dry run may inspect: an
@@ -104,4 +107,71 @@ func seedClosedStoreForForecast(t testing.TB, dir string, args []string) {
 		return // the test arranged its own database
 	}
 	seedClosedStore(t, dir)
+}
+
+// fakeAvailableContent serves the available-content read the share preview
+// consumes, so the preview can be driven over the CONTRACT rather than over
+// whatever the store currently implements.
+type fakeAvailableContent struct {
+	snapshot *store.SessionContentSnapshot
+	err      error
+	asked    []string
+}
+
+var _ availableContentReader = (*fakeAvailableContent)(nil)
+
+func (f *fakeAvailableContent) ReadSessionAvailable(_ context.Context, sessionID string) (*store.SessionContentSnapshot, error) {
+	f.asked = append(f.asked, sessionID)
+	return f.snapshot, f.err
+}
+
+// TestStoredSessionEntriesShowsAvailableContent pins what the share preview asks
+// of the store and what it does with the answer.
+//
+// The preview's whole purpose is to show a session a user may still have to
+// repair, so it reads the AVAILABLE content: a bounded projection is a valid
+// answer and must reach the pane, the session is asked for by its own validated
+// identifier, and an unreadable projection is still an error because available
+// content may be partial and never invented.
+func TestStoredSessionEntriesShowsAvailableContent(t *testing.T) {
+	t.Parallel()
+	const sessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
+	preview := "a bounded projection of a session that cannot publish yet"
+
+	t.Run("a-bounded-projection-reaches-the-pane", func(t *testing.T) {
+		t.Parallel()
+		reader := &fakeAvailableContent{snapshot: &store.SessionContentSnapshot{Entries: []schema.SessionEntry{{
+			SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: defaults.HarnessClaudeCode,
+			Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &preview,
+		}}}}
+		entries, err := storedSessionEntries(t.Context(), reader)(sessionID)
+		if err != nil {
+			t.Fatalf("the preview refused available content: %v", err)
+		}
+		if len(entries) != 1 || entries[0].ContentPreview == nil || *entries[0].ContentPreview != preview {
+			t.Fatalf("the preview lost the available content: %+v", entries)
+		}
+		if !slices.Equal(reader.asked, []string{sessionID}) {
+			t.Fatalf("the preview asked for %v, want exactly the session it was given", reader.asked)
+		}
+	})
+
+	t.Run("an-unreadable-projection-is-reported", func(t *testing.T) {
+		t.Parallel()
+		reader := &fakeAvailableContent{err: errors.New("stored projection is an unknown format")}
+		if _, err := storedSessionEntries(t.Context(), reader)(sessionID); err == nil {
+			t.Fatal("an unreadable projection was reported as an empty transcript")
+		}
+	})
+
+	t.Run("an-unusable-identifier-never-reaches-the-store", func(t *testing.T) {
+		t.Parallel()
+		reader := &fakeAvailableContent{}
+		if _, err := storedSessionEntries(t.Context(), reader)("not-a-session-id"); err == nil {
+			t.Fatal("an unusable identifier was accepted")
+		}
+		if len(reader.asked) != 0 {
+			t.Fatalf("the store was asked about an unusable identifier: %v", reader.asked)
+		}
+	})
 }

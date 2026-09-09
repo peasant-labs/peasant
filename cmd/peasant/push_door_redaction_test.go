@@ -40,7 +40,7 @@ func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preview := push.NewPublishedTurns(storedSessionEntries(t.Context(), db), redactor)
+	preview := push.NewPublishedTurns(storedSessionEntries(t.Context(), availableContentFrom(db)), redactor)
 	turns, err := preview(sessionID)
 	if err != nil {
 		t.Fatal(err)
