@@ -186,12 +186,17 @@ var runWideSQLiteCodes = [...]sqlite.ResultCode{
 	sqlite.ResultMisuse,
 }
 
+// sqliteDriverMessage is a fragment of text the SQLite driver itself produces.
+// It is a named type so it cannot be mixed with the messages this package writes:
+// nothing here may be compared against a driver string by accident.
+type sqliteDriverMessage string
+
 // closedPoolMessage is what sqlitex returns once the connection pool is closed.
 // The library reports it as an unwrapped string with no sentinel and no result
 // code, so matching the text is the only signal available; the closed-store test
 // in this package fails if that text ever changes, rather than letting a closed
 // store quietly refuse every candidate one at a time.
-const closedPoolMessage = "pool closed"
+const closedPoolMessage sqliteDriverMessage = "pool closed"
 
 // isRunWide reports whether err describes the RUN rather than one candidate, so
 // the push must stop instead of refusing this session and continuing.
@@ -212,5 +217,5 @@ func isRunWide(err error) bool {
 			return true
 		}
 	}
-	return strings.Contains(err.Error(), closedPoolMessage)
+	return strings.Contains(err.Error(), string(closedPoolMessage))
 }
