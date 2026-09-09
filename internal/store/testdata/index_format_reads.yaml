@@ -1,4 +1,8 @@
-requiredNames: [unsupported-projection, unmarked-projection, supported-scope, never-indexed, metadata-stays-readable, unknown-format-before-search-limit, bounded-bulk-preview]
+# fullContent seeds a VERIFIED COMPLETE capture instead of the bounded preview
+# an entry-only index write leaves behind. Export certifies content, so only a
+# complete capture can reach it; the mounted detail read serves whatever the
+# database holds, so it is exercised on a preview-only session on purpose.
+requiredNames: [unsupported-projection, unmarked-projection, supported-scope, supported-scope-full-export, never-indexed, metadata-stays-readable, unknown-format-before-search-limit, bounded-bulk-preview]
 requiredOperations: [entries, range, maximum, exists, first-message, bulk-preview, entry-annotations, entry-annotation, annotation-inputs, entries-hash, api-detail, export, search, metadata, session-annotations]
 cases:
   - name: unsupported-projection
@@ -15,7 +19,14 @@ cases:
     entries: true
     otherSession: true
     managedTranscript: '{"type":"user","message":{"role":"user","content":"searchable healthy"}}'
-    operations: [entries, range, maximum, exists, first-message, bulk-preview, entry-annotations, entry-annotation, annotation-inputs, entries-hash, api-detail, export]
+    operations: [entries, range, maximum, exists, first-message, bulk-preview, entry-annotations, entry-annotation, annotation-inputs, entries-hash, api-detail]
+  - name: supported-scope-full-export
+    format: 99
+    entries: true
+    otherSession: true
+    fullContent: true
+    managedTranscript: '{"type":"user","message":{"role":"user","content":"searchable healthy"}}'
+    operations: [api-detail, export]
   - name: never-indexed
     operations: [entries, range, maximum, exists, first-message, bulk-preview, annotation-inputs, entries-hash]
   - name: metadata-stays-readable

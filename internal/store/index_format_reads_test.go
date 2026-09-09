@@ -50,6 +50,7 @@ type indexFormatReadCase struct {
 	Entries           bool                 `yaml:"entries"`
 	OtherSession      bool                 `yaml:"otherSession"`
 	Refuse            bool                 `yaml:"refuse"`
+	FullContent       bool                 `yaml:"fullContent"`
 	Operations        []indexReadOperation `yaml:"operations"`
 	PreviewIDs        int                  `yaml:"previewIDs"`
 	VariableLimit     int32                `yaml:"variableLimit"`
@@ -123,13 +124,25 @@ func TestIndexFormatReadsRefuseUnknownProjectionWithinScope(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := db.IndexSessionEntries(t.Context(), otherID, batchTestEntries(otherID, "searchable healthy", 1)); err != nil {
+			otherEntries := batchTestEntries(otherID, "searchable healthy", 1)
+			if err := db.IndexSessionEntries(t.Context(), otherID, otherEntries); err != nil {
 				t.Fatal(err)
 			}
 			filesystem, managedRoot := testutil.NewMemFS(), t.TempDir()
 			if row.ManagedTranscript != "" {
 				entry := makeStoreEntry(t, string(otherID), string(testutil.TestProjectHash), testutil.TestHostSlug, ingest.HarnessClaudeCode, 1700000000000, 100, 50)
 				storetest.SeedManagedInput(t, db, filesystem, managedRoot, *entry.Metadata, []byte(row.ManagedTranscript))
+			}
+			// The read under test targets otherID whenever otherSession is set,
+			// so ITS capture decides what a certifying consumer may serve. A
+			// complete capture is seeded only where the case asks for one, and
+			// last, because seeding managed input is itself a bounded write.
+			// The mounted detail read is deliberately left on a preview-only
+			// session, because that is the state it has to serve.
+			if row.FullContent {
+				if err := testutil.WriteFullEntries(t.Context(), db, otherID, otherEntries); err != nil {
+					t.Fatal(err)
+				}
 			}
 			conn := takeConn(t, db.Pool())
 			var format any

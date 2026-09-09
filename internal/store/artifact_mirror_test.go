@@ -169,9 +169,27 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 			if seeded && (after.Cursor != row.WantCursor || after.Origin != string(row.WantOrigin)) {
 				t.Fatalf("acquired/absent evidence changed: %+v", after)
 			}
+			// The mirror commits an INCOMPLETE commit capture, because a
+			// committed artifact proves the commits it names and not the
+			// absence of the ones it does not. The newly observed commit is
+			// therefore added to the current projection, and a commit a
+			// complete earlier capture proved stays bound rather than being
+			// dropped by a partial re-observation. Compare the exact set: a
+			// count would not say WHICH binding survived.
 			associations, err := db.ListCurrentSessionCommitAssociations(t.Context(), entry.Metadata.SessionID)
-			if err != nil || len(associations) != 1 || associations[0].ObservedCommitHash != fixture.ReplacementCommit {
-				t.Fatalf("association projection not mirrored: %+v %v", associations, err)
+			if err != nil {
+				t.Fatalf("current association projection unreadable: %v", err)
+			}
+			current := make(map[string]bool, len(associations))
+			for _, association := range associations {
+				current[association.ObservedCommitHash] = true
+			}
+			want := map[string]bool{fixture.ReplacementCommit: true}
+			if seeded {
+				want[fixture.OriginalCommit] = true
+			}
+			if !reflect.DeepEqual(current, want) {
+				t.Fatalf("current commit associations=%v, want %v", current, want)
 			}
 			if seeded && after.Associations != before.Associations+1 {
 				t.Fatal("mirror erased the prior durable association ledger")
