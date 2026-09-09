@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +25,18 @@ import (
 //go:embed testdata/content_snapshot.yaml
 var contentSnapshotYAML []byte
 
+// TestContentSnapshotUsesOnlyCoherentCapturedInput proves that stored content
+// is database-authoritative, and which reader answers which caller.
+//
+// It used to prove the opposite: that a retained managed FILE decided whether
+// full content could be served, so deleting or replacing a sidecar made an
+// intact SQLite capture unexportable. That is the prior-version file overlay,
+// which now has no production caller. Every case below therefore states what
+// the DATABASE holds and asserts both readers against it: the strict reader
+// behind export and publication, and the available reader behind every mounted
+// previewer. A file that changed, a parser input proof that went missing and a
+// stale producer stamp are none of them content defects; an unfinished capture
+// stops export without stopping a preview; only damaged data stops both.
 func TestContentSnapshotUsesOnlyCoherentCapturedInput(t *testing.T) {
 	var fixture struct {
 		Metadata      string   `yaml:"metadata"`
@@ -31,13 +44,15 @@ func TestContentSnapshotUsesOnlyCoherentCapturedInput(t *testing.T) {
 		Replacement   string   `yaml:"replacement"`
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
-			Name       string `yaml:"name"`
-			SQL        string `yaml:"sql"`
-			Replace    bool   `yaml:"replace"`
-			NoMirror   bool   `yaml:"noMirror"`
-			Refused    bool   `yaml:"refused"`
-			Tool       bool   `yaml:"tool"`
-			Transcript string `yaml:"transcript"`
+			Name           string `yaml:"name"`
+			SQL            string `yaml:"sql"`
+			Replace        bool   `yaml:"replace"`
+			NoMirror       bool   `yaml:"noMirror"`
+			StrictRefused  bool   `yaml:"strictRefused"`
+			PreviewRefused bool   `yaml:"previewRefused"`
+			Incomplete     bool   `yaml:"incomplete"`
+			Tool           bool   `yaml:"tool"`
+			Transcript     string `yaml:"transcript"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(contentSnapshotYAML, &fixture); err != nil {
@@ -46,6 +61,12 @@ func TestContentSnapshotUsesOnlyCoherentCapturedInput(t *testing.T) {
 	names := make(map[string]bool)
 	for _, row := range fixture.Cases {
 		names[row.Name] = true
+		if row.PreviewRefused && !row.StrictRefused {
+			t.Fatalf("case %q refuses a preview but not the strict read, which no stored state can express", row.Name)
+		}
+		if row.Incomplete && !row.StrictRefused {
+			t.Fatalf("case %q expects the incomplete-capture category without a strict refusal", row.Name)
+		}
 	}
 	if err := testutil.RequireFixtureNames("content snapshot", "case", fixture.RequiredNames, names); err != nil {
 		t.Fatal(err)
@@ -127,34 +148,58 @@ func TestContentSnapshotUsesOnlyCoherentCapturedInput(t *testing.T) {
 			if row.Replace {
 				publish(fixture.Replacement, !row.NoMirror)
 			}
-			snapshot, err := transcript.ReadSessionContent(ctx, db, fs, root, string(meta.SessionID))
-			if err != nil {
-				t.Fatal(err)
+			// The strict reader: what export and publication are allowed to
+			// certify. Only the database decides it.
+			strict, strictErr := db.ReadSessionContent(ctx, string(meta.SessionID))
+			if (strictErr != nil) != row.StrictRefused {
+				t.Fatalf("strict database read outcome=%v, want refused=%t", strictErr, row.StrictRefused)
 			}
-			if snapshot == nil || (snapshot.FullContentError != nil) != row.Refused {
-				t.Fatalf("unexpected full-content outcome: %+v", snapshot)
+			if row.Incomplete && !errors.Is(strictErr, store.ErrContentCaptureIncomplete) {
+				t.Fatalf("an unfinished capture lost its error category: %v", strictErr)
 			}
-			turns, err := transcript.EntriesToTurnsValidated(snapshot.Entries)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(turns) == 0 {
-				t.Fatal("stored preview was lost")
-			}
-			if row.Refused {
-				if turns[0].Content == body || strings.Contains(turns[0].Content, "new retained input") {
-					t.Fatal("unproven text escaped the stored preview")
+			if !row.StrictRefused {
+				turns, err := transcript.EntriesToTurnsValidated(strict.Entries)
+				if err != nil || len(turns) == 0 {
+					t.Fatalf("verified content produced no turns: %v", err)
 				}
-			} else if !row.Tool && turns[0].Content != body {
-				t.Fatal("full content was not recovered from captured bytes")
+				if !row.Tool && turns[0].Content != body {
+					t.Fatal("a file that changed or a stale stamp cost the database its stored full content")
+				}
 			}
-			viewer, err := api.NewStoreDataProviderWithFS(db, sessionvisibility.All(), fs, root).SessionByID(ctx, string(meta.SessionID))
-			if err != nil || viewer == nil {
-				t.Fatalf("viewer lost the readable SQL preview: %v", err)
+			// The available reader: what every mounted previewer shows. A
+			// capture that is merely unfinished is still previewable.
+			available, availableErr := db.ReadSessionAvailable(ctx, string(meta.SessionID))
+			if (availableErr != nil) != row.PreviewRefused {
+				t.Fatalf("available database read outcome=%v, want refused=%t", availableErr, row.PreviewRefused)
+			}
+			if !row.PreviewRefused {
+				turns, err := transcript.EntriesToTurnsValidated(available.Entries)
+				if err != nil || len(turns) == 0 {
+					t.Fatal("the previewer lost the content the database still holds")
+				}
+				if strings.Contains(turns[0].Content, "new retained input") {
+					t.Fatal("unstored text from a replaced file escaped into the preview")
+				}
+			}
+			viewer, viewerErr := api.NewStoreDataProviderWithFS(db, sessionvisibility.All(), fs, root).SessionByID(ctx, string(meta.SessionID))
+			if (viewerErr != nil) != row.PreviewRefused {
+				t.Fatalf("the mounted viewer disagreed with the available reader: %v", viewerErr)
 			}
 			payload, exportErr := export.ExportSession(ctx, db, fs, string(meta.SessionID), root)
-			if (exportErr != nil) != row.Refused {
-				t.Fatalf("export did not enforce full-content proof: %v", exportErr)
+			if (exportErr != nil) != row.StrictRefused {
+				t.Fatalf("export did not enforce verified database content: %v", exportErr)
+			}
+			if row.StrictRefused {
+				return
+			}
+			// The prior-version file overlay still runs for the one caller that
+			// has only a file. It is asserted here so it cannot rot unnoticed,
+			// and never as the oracle for what a consumer may serve.
+			if row.Name == "coherent-full-content" {
+				legacy, legacyErr := transcript.ReadSessionContent(ctx, db, fs, root, string(meta.SessionID))
+				if legacyErr != nil || legacy == nil || len(legacy.Entries) == 0 {
+					t.Fatalf("prior-version file overlay stopped returning the stored snapshot: %+v %v", legacy, legacyErr)
+				}
 			}
 			if row.Tool {
 				found := false
