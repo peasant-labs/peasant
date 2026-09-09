@@ -50,6 +50,7 @@ type contentModeBehaviourCase struct {
 	CompleteCapture   bool                         `yaml:"complete_capture"`
 	WantFullText      bool                         `yaml:"want_full_text"`
 	IndexerVersion    bool                         `yaml:"indexer_version"`
+	Damage            string                       `yaml:"damage"`
 	WantErrorContains string                       `yaml:"want_error_contains"`
 }
 
@@ -114,8 +115,11 @@ func loadContentFixtures(t *testing.T) contentFixtures {
 		if c.WantFullText && !c.CompleteCapture {
 			t.Fatalf("mode behaviour %q expects full text without seeding a complete capture", c.Name)
 		}
+		if c.Damage != "" && c.WantErrorContains == "" {
+			t.Fatalf("mode behaviour %q damages the store but expects no refusal", c.Name)
+		}
 	}
-	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format", "available_read_serves_complete_capture", "available_read_serves_bounded_preview", "format_conversion_write_keeps_complete_capture", "format_conversion_write_refuses_a_new_producer_claim"} {
+	for _, name := range []string{"long_unicode", "oversized_progress", "unicode_preview_boundary", "missing_chunk", "damaged_chunk", "wrong_capture_hash", "wrong_tool_input", "wrong_manifest_hash", "extra", "parent_id", "derived_ext", "derived_command", "timestamp", "tool_output", "unknown_capture_format", "available_read_serves_complete_capture", "available_read_serves_bounded_preview", "format_conversion_write_keeps_complete_capture", "format_conversion_write_refuses_a_projection_rebuild", "format_conversion_write_refuses_a_new_producer_claim"} {
 		if !names[name] {
 			t.Fatalf("required fixture %s missing", name)
 		}
@@ -542,11 +546,17 @@ func TestContentModeBehavioursPreserveStoredCapture(t *testing.T) {
 			} else if err := s.IndexSessionEntries(ctx, id, entries); err != nil {
 				t.Fatal(err)
 			}
-			before, beforeHash := capture(t, s, id), sessionEntriesHash(t, s, id)
+			// Read the canonical rows BEFORE any damage, so a conversion below
+			// carries the projection the database really holds and the case
+			// exercises the guard it names, not an easier one in front of it.
 			stored, err := s.ListEntries(ctx, id)
 			if err != nil || len(stored) != len(entries) {
 				t.Fatalf("stored canonical rows=%d want %d: %v", len(stored), len(entries), err)
 			}
+			if behaviour.Damage != "" {
+				execContentSQL(t, s, behaviour.Damage)
+			}
+			before, beforeHash := capture(t, s, id), sessionEntriesHash(t, s, id)
 			if (before.Status == ingest.ContentCaptureComplete) != behaviour.CompleteCapture {
 				t.Fatalf("seeded capture is %s, which does not match the case", before.Status)
 			}

@@ -68,6 +68,14 @@ mode_behaviours:
   - name: format_conversion_write_keeps_complete_capture
     write_mode: format_conversion
     complete_capture: true
+  # A conversion may not rebuild the canonical rows. session_entry_full_content
+  # cascades on their delete, so a "lossless" conversion that repaired a derived
+  # row would take the durable prose down with it.
+  - name: format_conversion_write_refuses_a_projection_rebuild
+    write_mode: format_conversion
+    complete_capture: true
+    damage: "INSERT INTO session_entries_ext (session_id,entry_index,key,value_text) SELECT session_id,entry_index,'model_id','disagrees-with-the-entries' FROM session_entries LIMIT 1"
+    want_error_contains: would have to be rebuilt
   - name: format_conversion_write_refuses_a_new_producer_claim
     write_mode: format_conversion
     complete_capture: true

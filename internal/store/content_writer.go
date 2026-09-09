@@ -289,8 +289,25 @@ func convertStoredContentOnConn(conn *sqlite.Conn, w ingest.SessionEntryWrite, e
 	if found && capture.Status == ingest.ContentCaptureComplete && !w.RequireFullContent {
 		return out, &IndexConversionLossError{SessionID: w.SessionID, Reason: "it would downgrade a complete stored capture to a bounded preview"}
 	}
-	// Coordinates already match, so this repairs derived rows and annotation
-	// anchors at most; it never deletes and reinserts the canonical entries.
+	// The canonical rows match, but the writer below still REPLACES them when a
+	// derived row or an annotation anchor disagrees, and session_entry_full_content
+	// cascades on that delete. A repair rewrite inside a conversion would
+	// therefore discard the durable prose the conversion promised to preserve.
+	// Both of the writer's skip predicates are required here, because either of
+	// its two comparison paths may run, and the conversion is refused rather
+	// than allowed to rebuild anything.
+	derivedMatch, err := sessionEntryDerivedTablesAndAnnotationsMatch(conn, string(w.SessionID), entries)
+	if err != nil {
+		return out, err
+	}
+	spansMatch, err := entryAnnotationTargetSpansMatchEntries(conn, string(w.SessionID), entries)
+	if err != nil {
+		return out, err
+	}
+	if !derivedMatch || !spansMatch {
+		return out, &IndexConversionLossError{SessionID: w.SessionID, Reason: "its stored derived rows or annotation anchors would have to be rebuilt, and rebuilding them replaces the canonical entries that the stored full content hangs from"}
+	}
+	// Nothing left for the writer to change: it takes its skip path.
 	return indexSessionEntriesOnConn(conn, w.SessionID, entries, stmts)
 }
 
