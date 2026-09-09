@@ -1,0 +1,51 @@
+# Pending-work decisions for one captured index input. Each case describes
+# the stored index state the store snapshot reported and the run's
+# conditions, and expects whether the parser must run. The stored state
+# carries the current producer and an equal input hash unless a field says
+# otherwise, so each case isolates one term of the decision.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names:
+  - current-bound-complete-is-settled
+  - force-always-reruns
+  - older-producer-reruns
+  - missing-input-proof-reruns
+  - different-input-hash-reruns
+  - unbound-current-capture-reruns
+  - unbound-without-capture-is-settled
+  - incomplete-certifiable-reruns
+  - incomplete-non-strict-format-is-settled
+  - incomplete-non-strict-indexer-is-settled
+cases:
+  - name: current-bound-complete-is-settled
+    needs_work: false
+  - name: force-always-reruns
+    force: true
+    needs_work: true
+  - name: older-producer-reruns
+    producer_delta: -1
+    needs_work: true
+  - name: missing-input-proof-reruns
+    missing_input_hash: true
+    needs_work: true
+  - name: different-input-hash-reruns
+    different_input_hash: true
+    needs_work: true
+  - name: unbound-current-capture-reruns
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: unbound-without-capture-is-settled
+    capture_revision: 0
+    unbound: true
+    needs_work: false
+  - name: incomplete-certifiable-reruns
+    incomplete: true
+    needs_work: true
+  - name: incomplete-non-strict-format-is-settled
+    incomplete: true
+    declared_format: 2
+    needs_work: false
+  - name: incomplete-non-strict-indexer-is-settled
+    incomplete: true
+    lenient_indexer: true
+    needs_work: false
