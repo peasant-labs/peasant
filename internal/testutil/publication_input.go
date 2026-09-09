@@ -61,6 +61,16 @@ func (s *StubPushStore) LoadPublicationMetadata(_ context.Context, ids []ingest.
 
 // SeedReadyPublication persists a synthetic source capture and indexes its exact
 // entries through the production transactions. It creates no source or sidecar.
+//
+// The metadata argument is the ONE seed. Any candidate row a test pairs with it
+// must take its session, project, and harness from this same metadata: the
+// production read refuses a candidate whose recorded identity moved after
+// selection, and a fixture that names the session in one place and its project in
+// another trips that guard while looking like a product defect.
+//
+// Both stamps come from HarvesterVersionRegistry for this harness, so a registry
+// change cannot leave the fixture claiming a producer or a stored format the
+// build no longer targets.
 func SeedReadyPublication(t testing.TB, db *store.Store, meta *schema.UnifiedMetadata, entries []schema.SessionEntry) {
 	t.Helper()
 	content, err := json.Marshal(entries)
@@ -77,10 +87,23 @@ func SeedReadyPublication(t testing.TB, db *store.Store, meta *schema.UnifiedMet
 	if err != nil {
 		t.Fatal(err)
 	}
-	results := db.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: meta.SessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, RequireFullContent: true, CaptureRevision: revisions[meta.SessionID], IndexerVersion: ingest.HarvesterVersionRegistry[meta.ModelHarness].IndexerVersion, IndexedAtMs: meta.Timestamp.Start}})
+	versions := HarvesterVersionsForSeed(t, meta.ModelHarness)
+	results := db.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: meta.SessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: versions.IndexVersion, RequireFullContent: true, CaptureRevision: revisions[meta.SessionID], IndexerVersion: versions.IndexerVersion, IndexedAtMs: meta.Timestamp.Start}})
 	if len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("index captured publication: %+v", results)
 	}
+}
+
+// HarvesterVersionsForSeed returns the registry targets for one harness and
+// fails the test when the harness is not registered, so a fixture can never
+// silently seed the zero versions of an unregistered harness.
+func HarvesterVersionsForSeed(t testing.TB, harness ingest.Harness) ingest.HarvesterVersions {
+	t.Helper()
+	versions, registered := ingest.HarvesterVersionRegistry[harness]
+	if !registered {
+		t.Fatalf("seed harness %q is not in HarvesterVersionRegistry, so it has no adapter, indexer, or index-format target to seed", harness)
+	}
+	return versions
 }
 
 // SeedPublicationInputs migrates existing synthetic metadata fixtures into an
