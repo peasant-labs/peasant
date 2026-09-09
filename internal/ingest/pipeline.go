@@ -1599,6 +1599,19 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
 			continue
 		}
+		if result.input == nil {
+			// Parsed output without its captured input has no expected state
+			// and no input identity to prove. Refuse to stamp it: an error
+			// outcome is visible; a fabricated empty capture would not be.
+			err := fmt.Errorf("%s: session %s produced parsed output without a captured input, so the store cannot verify what was parsed; the stored index was preserved; capture the input through the ordinary index path and retry", logPrefix, result.im.session.SessionID)
+			p.reportIndexRefusal(result.im.session.SessionID, err)
+			errMsg := err.Error()
+			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
+			flush.logEntries[i] = logEntry
+			flush.profileSessions[i] = p.makeIndexProfileSession(result, logEntry, 0)
+			continue
+		}
 		capture := SessionContentCaptureWrite{}
 		if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: ContentSourceNewIngest, TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}

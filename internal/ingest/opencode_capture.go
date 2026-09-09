@@ -14,6 +14,53 @@ import (
 )
 
 var _ AuthoritativeTranscriptIndexer = (*OpenCodeIndexer)(nil)
+var _ RetainedContentCapturer = (*OpenCodeIndexer)(nil)
+
+// CaptureRetainedContent reports the retained OpenCode input's own
+// completeness. A legacy directory-origin session is parsed from the exact
+// native message/part tree captured for it, the same tree an ordinary index
+// run hashes; a message whose part directory is absent means rows the adapter
+// could not read, so that capture is incomplete, never certified. A managed
+// projection is captured through the strict parser, which refuses anything
+// it cannot certify.
+func (idx *OpenCodeIndexer) CaptureRetainedContent(ctx context.Context, s DiscoveredSession) (ContentCaptureResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ContentCaptureResult{}, err
+	}
+	if s.ContentOmitted {
+		return ContentCaptureResult{}, captureFailure(s, 0, fmt.Errorf("upstream extraction omitted source records; regenerate the complete source with a supported Peasant version before retrying"))
+	}
+	if s.TranscriptOrigin != TranscriptOriginFile {
+		data, err := idx.fs.ReadFile(s.SourcePath.String())
+		if err != nil {
+			return ContentCaptureResult{}, captureFailure(s, 0, err)
+		}
+		capture, err := idx.IndexTranscriptBytesForCapture(ctx, s, data)
+		if err != nil {
+			return ContentCaptureResult{}, err
+		}
+		return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: indexInputDigest(s, data, nil)}, nil
+	}
+	tree, err := idx.captureJSONInput(ctx, s)
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(s, 0, err)
+	}
+	inputHash := indexInputDigest(s, nil, tree)
+	for _, message := range tree.Messages {
+		if message.PartsMissing {
+			return ContentCaptureResult{Complete: false, InputHash: inputHash}, nil
+		}
+	}
+	messages, err := parseOpenCodeJSONInput(tree, &indexCompletion{ctx: ctx, session: s})
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(s, 0, err)
+	}
+	capture, err := idx.captureSemanticMessages(ctx, s, messages)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash}, nil
+}
 
 func (idx *OpenCodeIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
 	if s.ContentOmitted {

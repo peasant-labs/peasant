@@ -1,27 +1,43 @@
-required_names: [retained-root, retained-child, corrupt-snapshot-rollback, force-shape-replacement, reject-shape-mismatch, failing-first-target-page-progress, cursor-query-shape-requires-force, cursor-query-force-remaps-anchor, invalid-project-proof-rollback]
+# Retained-content recovery cases. A failing recovery is reported as a
+# visible per-session diagnostic that names the preserved session and never
+# aborts the run, so the other sessions still recover.
+#   recovery_reported  the first session's recovery was refused or unavailable
+#   unchanged          the first session's entries and capture are untouched
+#                      after the whole run (the ordinary index run could not
+#                      replace them either)
+# A refused shape mismatch is content-only recovery declining to reshape the
+# projection; the ordinary index run then replaces the unproven projection
+# through captured input, with or without --force.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names: [retained-root, retained-child, corrupt-snapshot-rollback, force-shape-replacement, shape-mismatch-defers-to-ordinary-index, failing-first-target-page-progress, cursor-query-shape-defers-to-ordinary-index, cursor-query-force-remaps-anchor, invalid-project-proof-rollback]
 cases:
   - name: invalid-project-proof-rollback
     invalid_project: true
-    expect_error: true
-  - name: cursor-query-shape-requires-force
+    recovery_reported: true
+    unchanged: true
+  - name: cursor-query-shape-defers-to-ordinary-index
     cursor: true
-    expect_error: true
+    recovery_reported: true
   - name: cursor-query-force-remaps-anchor
     cursor: true
     force: true
+    recovery_reported: true
   - name: retained-root
   - name: retained-child
     child: true
   - name: corrupt-snapshot-rollback
     corrupt: true
-    expect_error: true
+    recovery_reported: true
+    unchanged: true
   - name: force-shape-replacement
     mismatch: true
     force: true
-  - name: reject-shape-mismatch
+    recovery_reported: true
+  - name: shape-mismatch-defers-to-ordinary-index
     mismatch: true
-    expect_error: true
+    recovery_reported: true
   - name: failing-first-target-page-progress
     count: 102
     corrupt: true
-    expect_error: true
+    recovery_reported: true
+    unchanged: true

@@ -27,6 +27,41 @@ type ContentCaptureResult struct {
 	InputHash string
 }
 
+// RetainedContentCapturer is implemented by an indexer whose retained capture
+// can tell that rows were filtered or omitted before it parsed them. It is the
+// producer of ContentCaptureResult: the adapter, not the store, declares
+// completeness. Indexers without it are captured through the strict parser,
+// which refuses anything it cannot certify, so their result is complete.
+type RetainedContentCapturer interface {
+	CaptureRetainedContent(context.Context, DiscoveredSession) (ContentCaptureResult, error)
+}
+
+// RetainedContentIncompleteError means the retained input is insufficient for
+// a verified complete capture. No row was written: the stored capture stays
+// incomplete and the session stays eligible for a native refresh.
+type RetainedContentIncompleteError struct {
+	SessionID SessionID
+	Harness   Harness
+}
+
+func (e *RetainedContentIncompleteError) Error() string {
+	return fmt.Sprintf("content recovery %s: the retained %s input omits rows the adapter filtered or could not read, so it cannot certify a complete capture; nothing was written and the stored capture stays incomplete; regenerate harvest from the complete native source", e.SessionID, e.Harness)
+}
+
+// ContentShapeMismatchError means the retained content parsed to a different
+// canonical shape than the stored projection. Content-only recovery never
+// replaces projection rows; a forced index run replaces them through the
+// ordinary captured-input parse and conditional write.
+type ContentShapeMismatchError struct {
+	SessionID SessionID
+}
+
+func (e *ContentShapeMismatchError) Error() string {
+	return fmt.Sprintf("content recovery %s: retained content does not match the stored projection shape; content-only recovery changed nothing; the ordinary index run replaces the entries with annotation remapping once the session is selected, and harvest index --force selects it explicitly", e.SessionID)
+}
+
+func (e *ContentShapeMismatchError) Unwrap() error { return ContentBackfillShapeMismatch }
+
 // contentRecovery is one completed retained-content repair. Recovering content
 // repairs the stored capture only; it does not complete the session, so the
 // pipeline still evaluates the same session for independent adapter and
@@ -184,44 +219,51 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	if !ok {
 		return contentRecovery{}, fmt.Errorf("content backfill %s: harness lacks authoritative parser; upgrade Peasant before retrying", id)
 	}
-	capture, err := indexer.IndexTranscriptForCapture(ctx, session)
+	capture, err := p.captureRetainedContent(ctx, indexer, session, authority)
 	if err != nil {
 		return contentRecovery{}, err
 	}
+	if !capture.Complete {
+		return contentRecovery{}, &RetainedContentIncompleteError{SessionID: id, Harness: session.Harness}
+	}
 	now := time.Now().UnixMilli()
-	write := SessionEntryWrite{SessionID: id, Result: indexformat.V1{Entries: capture.Entries}, IndexVersion: 1, Mode: SessionEntryWriteContentBackfill, RequireFullContent: true,
-		ContentCapture: SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: authority, TranscriptOrigin: session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: now}}
+	write := SessionEntryWrite{
+		SessionID: id, Result: indexformat.V1{Entries: capture.Entries}, IndexVersion: strictIndexFormat,
+		Mode: SessionEntryWriteContentBackfill, RequireFullContent: capture.Complete,
+		// Content repair keeps the stored producer stamp and conditions the
+		// write on the state read before parsing: a concurrent change refuses
+		// this result instead of overwriting newer evidence.
+		IndexerVersion: state.IndexerVersion,
+		ExpectedState:  state,
+		ContentCapture: SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: capture.Authority, TranscriptOrigin: session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: now},
+	}
+	if state.IndexedAt != nil {
+		write.IndexedAtMs = *state.IndexedAt
+	}
+	// Recovery never invents publication proof. The capture is bound to the
+	// current metadata capture only when the index already is; otherwise the
+	// ordinary index write binds it once its own pending-work check runs.
+	if state.PublicationBound {
+		write.CaptureRevision = state.PublicationCaptureRevision
+	}
+	// The input proof names the captured artifact and a positive producing
+	// revision; a session without either keeps recovering its content but
+	// cannot claim input identity until an ordinary index run establishes it.
+	if state.ArtifactHash != nil && state.IndexerVersion >= 1 {
+		write.IndexedInputHash = &capture.InputHash
+	}
 	results := store.IndexSessionEntryBatch(ctx, []SessionEntryWrite{write})
 	if len(results) != 1 {
 		return contentRecovery{}, fmt.Errorf("content backfill %s: store returned no atomic result; retry after checking database", id)
 	}
-	replaced := false
-	if errors.Is(results[0].Err, ContentBackfillShapeMismatch) && p.config.Force {
-		write.Mode = SessionEntryWriteReplaceAll
-		write.IndexerVersion, write.IndexedAtMs = p.versionTargets()[session.Harness].IndexerVersion, now
-		results = store.IndexSessionEntryBatch(ctx, []SessionEntryWrite{write})
-		if len(results) != 1 {
-			return contentRecovery{}, fmt.Errorf("content backfill %s: force store returned no result", id)
-		}
-		replaced = results[0].Err == nil && results[0].Written
+	if errors.Is(results[0].Err, ContentBackfillShapeMismatch) {
+		return contentRecovery{}, &ContentShapeMismatchError{SessionID: id}
 	}
 	if results[0].Err != nil {
 		return contentRecovery{}, results[0].Err
 	}
 	if !results[0].Written {
 		return contentRecovery{}, fmt.Errorf("content backfill %s: store did not confirm the atomic write; inspect database before retrying", id)
-	}
-	if replaced {
-		// Projection replacement invalidates tool-derived metrics and annotation
-		// classifiers. Content-only recovery does not need these recomputations.
-		if p.analyzer != nil {
-			if _, err := p.analyzer.ComputeMetrics(ctx, []SessionID{id}); err != nil {
-				slog.Warn("content captured but metrics recomputation failed; rerun harvest index", "session_id", id, "error", err)
-			}
-		}
-		if err := p.stageAnnotate(ctx, []SessionID{id}, nil); err != nil {
-			slog.Warn("content captured but annotation recomputation failed; rerun harvest index", "session_id", id, "error", err)
-		}
 	}
 	if p.indexLogger != nil {
 		entry := p.makeIndexLogEntry(indexedMeta{session: session, outputTranscriptPath: session.SourcePath.String()}, IndexOutcomeReindexed, len(capture.Entries), now, nil, nil)
@@ -230,6 +272,34 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 		}
 	}
 	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now}, nil
+}
+
+// captureRetainedContent produces the ContentCaptureResult for one retained
+// session. An indexer that knows about filtered or omitted rows reports its
+// own completeness; every other strict parser either certifies the retained
+// bytes or refuses them. InputHash is the index input digest over the bytes
+// actually parsed, so an ordinary index run later recognizes the same input.
+func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
+	if capturer, ok := indexer.(RetainedContentCapturer); ok {
+		capture, err := capturer.CaptureRetainedContent(ctx, session)
+		if err != nil {
+			return ContentCaptureResult{}, err
+		}
+		capture.Authority = authority
+		return capture, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return ContentCaptureResult{}, err
+	}
+	data, err := p.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(session, 0, err)
+	}
+	capture, err := indexer.IndexTranscriptBytesForCapture(ctx, session, data)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: true, InputHash: indexInputDigest(session, data, nil)}, nil
 }
 
 func captureHarness(raw string) (Harness, error) {

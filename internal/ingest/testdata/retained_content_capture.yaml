@@ -1,0 +1,36 @@
+# Retained-content capture producers: the adapter, not the store, declares
+# whether a retained capture is complete. Each case names the harness, the
+# retained-input condition the adapter can observe, and the expected
+# completeness. An incomplete capture carries no entries and is never written
+# as a verified capture; an input hash is always reported so a later run can
+# tell whether the same retained bytes were consumed.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names:
+  - strike-filtered-artifact-is-incomplete
+  - strike-complete-artifact-is-complete
+  - opencode-missing-part-directory-is-incomplete
+  - opencode-native-tree-is-complete
+# A minimal complete Strike transcript: every event is recognized and every
+# conversation event carries its payload, so the strict parser certifies it.
+strike_transcript: |
+  {"type":"session.started","time":"2026-07-28T12:34:56Z","data":{"model":"synthetic-model","version":"0.1.0"}}
+  {"type":"user.message","time":"2026-07-28T12:34:57Z","data":{"turnId":"turn-1","content":"Inspect the retained fixture."}}
+  {"type":"turn.started","time":"2026-07-28T12:34:58Z","data":{"turnId":"turn-1"}}
+  {"type":"assistant.text.delta","time":"2026-07-28T12:35:00Z","data":{"turnId":"turn-1","providerRequestId":"request-1","delta":"I will inspect it now."}}
+opencode_message: '{"role":"user","content":"captured message"}'
+opencode_part: '{"type":"text","text":"captured text"}'
+cases:
+  - name: strike-filtered-artifact-is-incomplete
+    harness: strike
+    content_omitted: true
+    complete: false
+  - name: strike-complete-artifact-is-complete
+    harness: strike
+    complete: true
+  - name: opencode-missing-part-directory-is-incomplete
+    harness: opencode
+    missing_part_directory: true
+    complete: false
+  - name: opencode-native-tree-is-complete
+    harness: opencode
+    complete: true
