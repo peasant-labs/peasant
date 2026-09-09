@@ -20,8 +20,13 @@ import (
 // lets the preview show the transcript the push will send rather than a second
 // approximation of it.
 //
-// It returns no entries for a verified empty capture. Missing, incomplete, or
-// corrupt captures return errors; a bounded preview is not publication input.
+// It returns the AVAILABLE stored content: no entries for a verified empty
+// capture, and the bounded projection when the full capture is missing or
+// incomplete. Readiness is not its question — publication readiness is enforced
+// at the publish action, in Pipeline.preflight, because a preview that first
+// demands a complete capture cannot show the session the user has to repair.
+// An unreadable or unknown-format projection still returns an error: available
+// content can be partial, never invented.
 type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
 
 // PublishedTurnsFunc returns one session's turns AS THEY WILL BE PUBLISHED:
@@ -76,6 +81,10 @@ const (
 	previewUnselectedNote = "not selected: this session stays on your machine."
 	previewWithheldNote   = "withheld: this branch matches more than one project, so peasant cannot tell which one records it. this session stays out of the push."
 	previewProjectHint    = "press space to select every session in this project."
+	// previewNeedsIngestNote sits ABOVE the available transcript rather than
+	// replacing it: it states what publication still needs, and never claims the
+	// stored content cannot be shown.
+	previewNeedsIngestNote = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
 )
 
 // wizardPreview is the split's right pane: for the highlighted session, a short
@@ -118,11 +127,17 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 		}
 		body := previewBody{th: p.th, header: sessionHeaderLines(s)}
 		if s.NeedsIngest {
-			body.note = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
-			return body, nil
+			// A session that cannot be published can still be READ. Gating the
+			// pane on publication readiness took away half of what the previewer
+			// is for: the user could not see the transcript they were being asked
+			// to repair. The note says what publishing still needs; the
+			// transcript below it is the available stored content.
+			body.note = previewNeedsIngestNote
 		}
 		if p.turns == nil {
-			body.note = previewNoTranscript
+			if body.note == "" {
+				body.note = previewNoTranscript
+			}
 			return body, nil
 		}
 		recorded, err := p.turns(id)
@@ -130,7 +145,9 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 			return nil, err
 		}
 		if len(recorded) == 0 {
-			body.note = previewNoTranscript
+			if body.note == "" {
+				body.note = previewNoTranscript
+			}
 			return body, nil
 		}
 		body.transcript = p.renderer.Document(recorded)
@@ -219,13 +236,14 @@ func (b previewBody) Render(width int) string {
 		}
 		parts = append(parts, strings.Join(head, "\n"))
 	}
-	if body := b.transcript.Render(width); body != "" {
-		parts = append(parts, body)
-	} else if b.note != "" {
+	if b.note != "" {
 		// The pane hands its body lines to the viewport UNSTYLED, so a body that
 		// does not color itself is drawn in whatever the terminal's default ink
 		// happens to be rather than the theme's.
 		parts = append(parts, styles.Base.Render(ansi.Wrap(b.note, width, "")))
+	}
+	if body := b.transcript.Render(width); body != "" {
+		parts = append(parts, body)
 	}
 	return strings.Join(parts, previewSeparator)
 }
@@ -237,10 +255,11 @@ func (b previewBody) plain() string {
 	if len(b.header) > 0 {
 		parts = append(parts, strings.Join(b.header, "\n"))
 	}
+	if b.note != "" {
+		parts = append(parts, b.note)
+	}
 	if body := b.transcript.Render(0); body != "" {
 		parts = append(parts, body)
-	} else if b.note != "" {
-		parts = append(parts, b.note)
 	}
 	return strings.Join(parts, previewSeparator)
 }

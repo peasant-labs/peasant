@@ -2001,10 +2001,16 @@ func runPushWizard(
 	return result.SelectedSessionIDs(), nil
 }
 
-// storedSessionEntries reads one session's indexed entries from the local store:
-// the SAME read the pipeline publishes from. The wizard preview redacts them and
-// renders the result, so the pane shows the transcript the push will send rather
-// than a second reading of the recorded text.
+// storedSessionEntries reads one session's AVAILABLE stored entries from the
+// local store. The wizard preview redacts them and renders the result, so the
+// pane shows the text a push would send rather than a second reading of the
+// recorded file.
+//
+// It does not ask whether the session is ready to publish. The readiness gate
+// lives at the publish action, in push.Pipeline.preflight: a preview that first
+// demanded a complete capture showed nothing at all for exactly the sessions a
+// user opens the previewer to inspect. Nothing here certifies completeness, and
+// nothing here writes, recovers, or reads a native source.
 func storedSessionEntries(ctx context.Context, db *store.Store) push.StoredEntriesFunc {
 	return func(sessionID string) ([]schema.SessionEntry, error) {
 		id, err := ingest.NewSessionID(sessionID)
@@ -2013,9 +2019,6 @@ func storedSessionEntries(ctx context.Context, db *store.Store) push.StoredEntri
 		}
 		input, err := push.LoadPublicationInput(ctx, db, string(id))
 		if err != nil {
-			return nil, err
-		}
-		if err := push.ValidatePublicationInput(input); err != nil {
 			return nil, err
 		}
 		return input.Entries, nil
