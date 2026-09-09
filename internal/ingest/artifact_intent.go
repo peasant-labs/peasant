@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -68,7 +69,7 @@ func artifactOwnedName(path, directory string, sid SessionID) bool {
 	if err != nil || !filepath.IsLocal(relative) {
 		return false
 	}
-	if relative == string(sid)+defaults.MetadataSuffix || relative == string(sid)+"--transcript.json" || relative == string(sid)+"--transcript.jsonl" {
+	if relative == string(sid)+defaults.MetadataSuffix || relative == string(sid)+"--transcript.json" || relative == string(sid)+"--transcript.jsonl" || relative == fileCaptureEvidenceName(sid) {
 		return true
 	}
 	return filepath.Dir(relative) == defaults.DirDebug.String() && validArtifactDebugName(filepath.Base(relative))
@@ -289,6 +290,35 @@ func (p *ArtifactPublisher) buildArtifactIntent(root ArtifactRoot, request Artif
 		}
 		hash := schema.ComputeTranscriptHash(data)
 		files[path] = artifactIntentFile{Path: path, PreviousHash: old, CandidateHash: &hash}
+	}
+	// The file-only freshness marker is owned private evidence, staged in the
+	// same intent as the metadata it describes and bound to those exact bytes:
+	// it commits before metadata-last and rolls back with it. Without new
+	// evidence any existing marker is removed, so a stale marker can never
+	// vouch for a newer artifact; an absent marker reads as unknown.
+	for _, markerPath := range []string{fileCaptureEvidencePath(metadataPath), fileCaptureEvidencePath(filepath.Join(request.Observation.directory, string(meta.SessionID)+defaults.MetadataSuffix))} {
+		if request.Observation.directory == "" && markerPath != fileCaptureEvidencePath(metadataPath) {
+			continue
+		}
+		if _, seen := files[markerPath]; seen {
+			continue
+		}
+		previousMarker, err := currentArtifactFileHash(root, markerPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		if previousMarker != nil {
+			previous[markerPath] = previousMarker
+			files[markerPath] = artifactIntentFile{Path: markerPath, PreviousHash: previousMarker}
+		}
+	}
+	if len(request.SourceEvidence) > 0 {
+		markerPath := fileCaptureEvidencePath(metadataPath)
+		digest := sha256.Sum256(candidate.MetadataJSON)
+		marker := append(append([]byte(nil), request.SourceEvidence...), digest[:]...)
+		hash := schema.ComputeTranscriptHash(marker)
+		payloads[markerPath] = marker
+		files[markerPath] = artifactIntentFile{Path: markerPath, PreviousHash: previous[markerPath], CandidateHash: &hash}
 	}
 	identity, err := artifactMetadataIdentity(candidate.MetadataJSON)
 	if err != nil {

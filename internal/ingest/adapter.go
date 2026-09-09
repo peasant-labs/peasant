@@ -39,7 +39,11 @@ type MaterializedTranscript struct {
 	Data              []byte
 	SourceFingerprint []byte
 	EventSeq          int64
-	Session           *DiscoveredSession
+	// EventSeqObserved reports that EventSeq was read from the native source
+	// during this materialization. A zero EventSeq without it is unknown, not
+	// an acquired position.
+	EventSeqObserved bool
+	Session          *DiscoveredSession
 }
 
 func newMaterializedTranscript(metadata *UnifiedMetadata, data []byte, eventSeq int64) MaterializedTranscript {
@@ -47,7 +51,7 @@ func newMaterializedTranscript(metadata *UnifiedMetadata, data []byte, eventSeq 
 	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: fingerprint[:], EventSeq: eventSeq}
 }
 
-func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, session DiscoveredSession) (MaterializedTranscript, error) {
+func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, session DiscoveredSession, eventSeqObserved bool) (MaterializedTranscript, error) {
 	// Only source-owned attributes participate, never discovery file/WAL clocks
 	// or decision-time Git configuration. The latter has its own identity trigger.
 	attrs := DiscoveredSession{ParentUUID: session.ParentUUID, CWD: session.CWD,
@@ -63,7 +67,7 @@ func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, ses
 	hash.Write(encoded)
 	hash.Write([]byte{'\n'})
 	hash.Write(data)
-	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: hash.Sum(nil), EventSeq: session.EventSeq, Session: &session}, nil
+	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: hash.Sum(nil), EventSeq: session.EventSeq, EventSeqObserved: eventSeqObserved, Session: &session}, nil
 }
 
 // CursorMaterializedTranscript carries optional native progress actually acquired

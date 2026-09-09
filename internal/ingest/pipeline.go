@@ -2278,8 +2278,14 @@ func fileCaptureEvidence(captured *MaterializedTranscript) []byte {
 }
 
 func fileCaptureEvidencePath(metaPath string) string {
-	return strings.TrimSuffix(metaPath, defaults.MetadataSuffix) + "--source-capture"
+	return strings.TrimSuffix(metaPath, defaults.MetadataSuffix) + fileCaptureEvidenceSuffix
 }
+
+// fileCaptureEvidenceSuffix names the owned marker file beside a session's
+// metadata; fileCaptureEvidenceName is that file's base name for one session.
+const fileCaptureEvidenceSuffix = "--source-capture"
+
+func fileCaptureEvidenceName(sid SessionID) string { return string(sid) + fileCaptureEvidenceSuffix }
 
 // captureSession detaches source bytes and metadata before any managed writes.
 // Legacy mutable multi-file formats retain their existing reader limitations.
@@ -2427,8 +2433,11 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		captureEvidence = fileCaptureEvidence(captured)
 	}
 	session.EventSeq = captured.EventSeq
+	// A cursor is acquired evidence only when the materialization observed
+	// one. An unobserved cursor stays nil, and nil preserves the stored value:
+	// an unknown cursor never becomes an acquired zero.
 	var acquiredEventSeq *int64
-	if session.Harness == HarnessOpenCode {
+	if session.Harness == HarnessOpenCode && captured.EventSeqObserved {
 		acquiredEventSeq = &captured.EventSeq
 	}
 	meta.ParentUUID = session.ParentUUID
@@ -2674,7 +2683,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		}
 		debugFiles[entry.Name()] = data
 	}
-	publication := ArtifactPublication{Artifact: artifact, Observation: observation, DebugFiles: debugFiles, EventSeq: acquiredEventSeq, CWDProvenance: publicationCWDProvenance(meta, session), SourceFingerprint: sourceFingerprint, CommitCaptureComplete: commitCaptureComplete}
+	publication := ArtifactPublication{Artifact: artifact, Observation: observation, DebugFiles: debugFiles, EventSeq: acquiredEventSeq, CWDProvenance: publicationCWDProvenance(meta, session), SourceFingerprint: sourceFingerprint, CommitCaptureComplete: commitCaptureComplete, SourceEvidence: captureEvidence}
 	if session.Origin != "" {
 		origin := session.Origin
 		publication.Origin = &origin
