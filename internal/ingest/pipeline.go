@@ -233,6 +233,10 @@ type Pipeline struct {
 	store    SessionStore // nil = skip DB insert (backward compatible)
 	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
 
+	// contentRecoveries holds this run's completed retained-content repairs,
+	// keyed by session, so the index log and summary can report them.
+	contentRecoveries map[SessionID]contentRecovery
+
 	// locationCache is pre-populated before the DIFF stage via BulkLookupSessionLocations.
 	// It maps SessionID → SessionLocation (host_slug + parent_id) for sessions already
 	// in the DB, enabling O(1) fast-path lookups in findMetadataPath without per-session
@@ -987,6 +991,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		if backfillErr != nil {
 			slog.Warn("pipeline: incomplete content recovery", "error", backfillErr)
 		}
+		p.contentRecoveries = backfilled
 		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
@@ -1011,10 +1016,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 		candidates := append([]SessionID(nil), p.reconciledArtifacts...)
 		candidates = append(candidates, staleIDs...)
+		// A recovered session is content-repaired, not complete: it still gets
+		// the same adapter/indexer evaluation as every other eligible target. An
+		// already-current session sees an equal input hash and writes nothing.
 		for _, sid := range candidates {
-			if _, recovered := backfilled[sid]; recovered {
-				continue
-			}
 			if queued[sid] {
 				continue
 			}
@@ -3893,18 +3898,14 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	if err != nil {
 		return nil, fmt.Errorf("reindex content recovery: %w", err)
 	}
+	p.contentRecoveries = backfilled
 
 	// Stage 1: DISCOVER — scan peasant-sync output.
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
+	// Content recovery repairs the stored capture only. Every scanned target,
+	// recovered or not, still receives the adapter/indexer evaluation below.
 	scanned := p.scanPeasantSyncSessions(ctx)
-	remaining := scanned[:0]
-	for _, target := range scanned {
-		if _, recovered := backfilled[target.session.SessionID]; !recovered {
-			remaining = append(remaining, target)
-		}
-	}
-	scanned = remaining
 	if err := ctx.Err(); err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)

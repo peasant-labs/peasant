@@ -179,6 +179,12 @@ func TestContentRecoveryScope(t *testing.T) {
 				if _, refused := diagnostics["content_recovery_refused"]; refused {
 					t.Fatalf("in-scope current session was refused: %+v", diagnostics["content_recovery_refused"])
 				}
+				// Recovery repairs content only. The same run still evaluates the
+				// session's indexer work and verifies its input at the current producer.
+				state, err := database.ReadIndexState(ctx, id)
+				if err != nil || state == nil || state.IndexedInputHash == nil || state.IndexerVersion != producer {
+					t.Fatalf("recovered session was excluded from independent index work: %+v %v", state, err)
+				}
 			case recoveryScopeUntouched:
 				if found && capture.Status == ingest.ContentCaptureComplete {
 					t.Fatalf("out-of-scope session was recovered: %+v", capture)
