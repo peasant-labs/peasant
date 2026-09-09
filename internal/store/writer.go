@@ -305,8 +305,15 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		if m.AdapterVersion != nil {
 			adapterVersion = *m.AdapterVersion
 		}
+		priorCapture := publicationCaptureSnapshot{}
 		if sorted[i].PublicationCapture {
 			if err = validatePublicationCapture(sorted[i]); err != nil {
+				return err
+			}
+			// Read before the upsert below: that statement names every column
+			// the v51 trigger watches, so after it runs the row can no longer
+			// say what the session carried beforehand.
+			if priorCapture, err = readPublicationCaptureSnapshot(conn, m.SessionID); err != nil {
 				return err
 			}
 		}
@@ -425,7 +432,7 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			if err = upsertSessionCommitsOnConn(conn, m.SessionID, m.Git.Commits, !sorted[i].CommitCaptureComplete); err != nil {
 				return err
 			}
-			revision, captureErr := persistPublicationCapture(conn, sorted[i])
+			revision, captureErr := persistPublicationCapture(conn, sorted[i], priorCapture)
 			if captureErr != nil {
 				return captureErr
 			}

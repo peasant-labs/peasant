@@ -171,6 +171,7 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	}); err != nil {
 		return err
 	}
+	storedOrigin := origin
 	if request.Origin != nil {
 		if err := request.Origin.Validate(); err != nil {
 			return err
@@ -218,6 +219,29 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 
 	if err := s.insertSessionsOnConn(conn, []ingest.StoreEntry{entry}, request.Artifact.MetricSeed() != nil); err != nil {
 		return err
+	}
+	// The generic metadata upsert deliberately keeps the stored session_origin,
+	// because ordinary harness metadata carries no origin evidence and must not
+	// overwrite what a resolver proved. An explicit origin on THIS request is
+	// that evidence, so it is applied here, inside the same transaction, and a
+	// nil origin still preserves the stored one.
+	if request.Origin != nil && origin != storedOrigin {
+		if err := sqlitex.ExecuteTransient(conn, "UPDATE sessions SET session_origin = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{origin.String(), string(meta.SessionID)}}); err != nil {
+			return fmt.Errorf("mirror session %s: apply acquired session origin: %w; no session change was committed; retry harvest", meta.SessionID, err)
+		}
+		// session_origin is watched by the v51 trigger, so changing it clears
+		// the indexed binding and the recovered provenance this transaction just
+		// established. Re-persist the same capture so an origin repair does not
+		// cost the session its publication proof.
+		if entry.PublicationCapture {
+			prior, snapshotErr := readPublicationCaptureSnapshot(conn, meta.SessionID)
+			if snapshotErr != nil {
+				return snapshotErr
+			}
+			if _, captureErr := persistPublicationCapture(conn, entry, prior); captureErr != nil {
+				return captureErr
+			}
+		}
 	}
 	if err := upsertSessionCommitsOnConn(conn, meta.SessionID, meta.Git.Commits, true); err != nil {
 		return err

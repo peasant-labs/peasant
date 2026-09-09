@@ -104,13 +104,81 @@ FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.sessio
 	})
 }
 
-func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) (int64, error) {
+// publicationCaptureSnapshot is the capture state as it stood BEFORE a session
+// upsert. It must be read first: the upsert names every column the v51 trigger
+// watches, so the trigger clears the indexed binding and the recovered
+// provenance on every write, and the post-upsert row can no longer say whether
+// a session fact actually changed.
+type publicationCaptureSnapshot struct {
+	Found           bool
+	Revision        int64
+	IndexedRevision int64
+	MetadataHash    string
+	ContentHash     string
+	SchemaVersion   int
+	CWD             string
+	CWDProvenance   string
+}
+
+func readPublicationCaptureSnapshot(conn *sqlite.Conn, id ingest.SessionID) (snapshot publicationCaptureSnapshot, err error) {
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.publication_capture_revision,s.indexed_publication_capture_revision,
+ COALESCE(s.session_cwd,''),s.cwd_provenance_kind,p.capture_revision,p.schema_version,p.metadata_hash,p.content_hash
+ FROM sessions s JOIN session_publication_metadata p ON p.session_id=s.session_id WHERE s.session_id=?`, &sqlitex.ExecOptions{
+		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			// A snapshot only describes a capture the session actually carries.
+			if stmt.ColumnInt64(0) != stmt.ColumnInt64(4) {
+				return nil
+			}
+			snapshot = publicationCaptureSnapshot{
+				Found: true, Revision: stmt.ColumnInt64(0), IndexedRevision: stmt.ColumnInt64(1),
+				CWD: stmt.ColumnText(2), CWDProvenance: stmt.ColumnText(3),
+				SchemaVersion: stmt.ColumnInt(5), MetadataHash: stmt.ColumnText(6), ContentHash: stmt.ColumnText(7),
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return publicationCaptureSnapshot{}, fmt.Errorf("store: read publication capture for session %s before its metadata upsert: %w; nothing was changed; restore database access and retry ingest", id, err)
+	}
+	return snapshot, nil
+}
+
+// unchangedCapture reports that this write re-states exactly the capture the
+// session already carried, bound to exactly the same index write. Only the
+// metadata digest, the transcript digest, the schema version and the recovered
+// working directory decide it; each session column the trigger watches is
+// derived from that same metadata, so an identical digest means no watched fact
+// moved.
+func (snapshot publicationCaptureSnapshot) unchangedCapture(entry ingest.StoreEntry) bool {
+	m := entry.Metadata
+	return snapshot.Found && snapshot.Revision > 0 && snapshot.Revision == snapshot.IndexedRevision &&
+		snapshot.MetadataHash == m.MetadataHash && snapshot.ContentHash == m.ContentHash &&
+		snapshot.SchemaVersion == m.SchemaVersion && snapshot.CWD == m.CWD &&
+		snapshot.CWDProvenance == string(entry.CWDProvenance)
+}
+
+func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry, prior publicationCaptureSnapshot) (int64, error) {
 	m := entry.Metadata
 	body, err := json.Marshal(m)
 	if err != nil {
 		return 0, publicationRepairError("metadata cannot be encoded")
 	}
 	var revision int64
+	if prior.unchangedCapture(entry) {
+		// Re-ingesting an unchanged session is not a new capture. Allocating a
+		// revision here would leave the index stamp one behind on every single
+		// harvest, so the session could never be published again: the stamp can
+		// never catch a number that moves each time it is read. Restore the
+		// capture the upsert's trigger just cleared, at its own revision.
+		revision = prior.Revision
+		if err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
+ publication_capture_revision=?, indexed_publication_capture_revision=? WHERE session_id=?`, &sqlitex.ExecOptions{
+			Args: []any{m.CWD, string(entry.CWDProvenance), revision, prior.IndexedRevision, string(m.SessionID)},
+		}); err != nil {
+			return 0, fmt.Errorf("store: restore unchanged publication capture; transaction rolled back, retry ingest: %w", err)
+		}
+		return revision, nil
+	}
 	err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
  publication_capture_revision=publication_capture_revision+1 WHERE session_id=? RETURNING publication_capture_revision`, &sqlitex.ExecOptions{
 		Args:       []any{m.CWD, string(entry.CWDProvenance), string(m.SessionID)},
