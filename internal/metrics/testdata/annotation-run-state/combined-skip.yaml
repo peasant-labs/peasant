@@ -6,7 +6,8 @@ cases:
     metric_compute_version: 8
     state_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     state_compute_version: 8
-    state_classifier_version: 1
+    state_classifier_version: current
+    state_metrics_output_hash: matching
     has_state: true
     want_list_entries_calls: 0
     want_get_metrics_calls: 0
@@ -18,7 +19,8 @@ cases:
     metric_compute_version: 8
     state_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
     state_compute_version: 8
-    state_classifier_version: 1
+    state_classifier_version: current
+    state_metrics_output_hash: matching
     has_state: true
     want_list_entries_calls: 1
     want_get_metrics_calls: 1
@@ -30,7 +32,8 @@ cases:
     metric_compute_version: 9
     state_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
     state_compute_version: 8
-    state_classifier_version: 1
+    state_classifier_version: current
+    state_metrics_output_hash: matching
     has_state: true
     want_list_entries_calls: 1
     want_get_metrics_calls: 1
@@ -42,11 +45,14 @@ cases:
     metric_compute_version: 8
     state_hash: ""
     state_compute_version: 0
-    state_classifier_version: 0
+    state_classifier_version: ""
+    state_metrics_output_hash: absent
     has_state: false
     want_list_entries_calls: 1
     want_get_metrics_calls: 1
     want_save_state_calls: 1
+  # No metrics are stored, so the recorded pass cannot name a current output: the
+  # hash it recorded belongs to metrics that are gone.
   - name: missing metrics recomputes without saving state
     current_hash: 1111111111111111111111111111111111111111111111111111111111111111
     has_metrics: false
@@ -54,7 +60,8 @@ cases:
     metric_compute_version: 0
     state_hash: 1111111111111111111111111111111111111111111111111111111111111111
     state_compute_version: 8
-    state_classifier_version: 1
+    state_classifier_version: current
+    state_metrics_output_hash: stale
     has_state: true
     want_list_entries_calls: 1
     want_get_metrics_calls: 1
@@ -66,8 +73,24 @@ cases:
     metric_compute_version: 0
     state_hash: 2222222222222222222222222222222222222222222222222222222222222222
     state_compute_version: 8
-    state_classifier_version: 1
+    state_classifier_version: current
+    state_metrics_output_hash: matching
     has_state: true
     want_list_entries_calls: 1
     want_get_metrics_calls: 1
     want_save_state_calls: 0
+  # The predicate's third term: the pass recorded a DIFFERENT metric output, so
+  # the annotations it produced no longer describe the current metrics.
+  - name: stale metrics output hash reads metrics and recomputes
+    current_hash: 3333333333333333333333333333333333333333333333333333333333333333
+    has_metrics: true
+    has_compute_version: true
+    metric_compute_version: 8
+    state_hash: 3333333333333333333333333333333333333333333333333333333333333333
+    state_compute_version: 8
+    state_classifier_version: current
+    state_metrics_output_hash: stale
+    has_state: true
+    want_list_entries_calls: 1
+    want_get_metrics_calls: 1
+    want_save_state_calls: 1
