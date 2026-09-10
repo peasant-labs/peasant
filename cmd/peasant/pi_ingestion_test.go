@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -104,6 +105,14 @@ func TestPiHarvestCommonModes(t *testing.T) {
 				output = filepath.Join(defaults.ResolveDataDirPathWith(root).String(), "peasant-sync")
 			}
 			base := []string{"--source-harness", schema.HarnessPi.String(), "--source-path", source, "--output", output, "--include-active", "--json"}
+			forecast := slices.Contains(tc.First, "--dry-run") || slices.Contains(tc.Second, "--dry-run")
+			seededDigest := ""
+			if forecast {
+				// A forecast inspects an existing checkpointed database and
+				// creates none, so the state it reads exists before the run and is
+				// fingerprinted here to prove the run left it alone.
+				seededDigest = databaseDigest(t, seedClosedStore(t, root))
+			}
 			result, err := executeHarvestCmd(t, root, append(append([]string{}, tc.First...), base...))
 			if err != nil {
 				t.Fatalf("harvest: %v\n%s", err, result)
@@ -151,8 +160,10 @@ func TestPiHarvestCommonModes(t *testing.T) {
 			}
 			dbPath := defaults.ResolveDBFilePathWith(root).String()
 			if !tc.Stored {
-				if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
-					t.Fatal("no-store/dry-run created database")
+				if forecast {
+					assertDatabaseUnchanged(t, dbPath, seededDigest)
+				} else if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+					t.Fatal("a run that stores nothing created a database")
 				}
 				_, err := os.Stat(output)
 				if tc.Managed && err != nil {

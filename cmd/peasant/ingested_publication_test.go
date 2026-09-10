@@ -164,11 +164,15 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			if input.Quality == nil || input.Quality.ComputeVersion == nil || *input.Quality.ComputeVersion == 0 {
 				t.Fatal("actual metrics computation did not run")
 			}
+			// Publication sees only the durable database, and the forecast below
+			// requires it: a dry run inspects a closed, checkpointed file and
+			// refuses one with a live write-ahead log rather than reading past a
+			// journal it must not touch. The production harvest command already
+			// closes and checkpoints on exit, so the only open handle here is this
+			// test's own; it closes too, and reopens after the forecast.
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db = open() // publication sees only the durable reopened database
-			defer db.Close()
 			if err := os.Remove(metadataPath); err != nil {
 				t.Fatal(err)
 			}
@@ -207,6 +211,8 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			if err != nil || !strings.Contains(out, "1 would push") || publications.Load() != 0 {
 				t.Fatalf("dry-run: %v %s %s uploads=%d", err, out, stderr, publications.Load())
 			}
+			db = open()
+			defer db.Close()
 			cfg := config.BaseConfig()
 			cfg.Output.BasePath = output
 			ctx, cancel := context.WithCancel(t.Context())

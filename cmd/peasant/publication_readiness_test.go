@@ -76,9 +76,12 @@ func TestPublicationWizardAndReportUseDatabaseReadiness(t *testing.T) {
 			if (len(model.SelectedSessionIDs()) == 1) != tc.Ready {
 				t.Fatal("wizard admitted incomplete capture or excluded ready capture")
 			}
-			_, err = storedSessionEntries(t.Context(), db)(testutil.TestSessionUUID)
-			if (err == nil) != tc.Ready {
-				t.Fatalf("preview readiness: %v", err)
+			// The preview read is NOT a readiness gate. Selection, the wizard and
+			// the redaction record below still refuse an incomplete capture; the
+			// preview must keep answering for every one of these states, because a
+			// user cannot repair a session the previewer will not show them.
+			if _, err = storedSessionEntries(t.Context(), availableContentFrom(db))(testutil.TestSessionUUID); err != nil {
+				t.Fatalf("the preview refused a session it must still be able to show: %v", err)
 			}
 			record := buildRedactionRecord(t.Context(), []ingest.PushSessionRow{row.Row}, db, redact.Standard)
 			if (record.MissingMetadataCount == 0) != tc.Ready {

@@ -17,7 +17,7 @@ requiredNames:
   - push_session_read_failure
   - push_provider_query_accounting
   - push_selection_excludes_everything
-  - push_preflight_counts_unstarted_sessions
+  - push_refusal_does_not_stop_healthy_sessions
   - push_unsafe_subject_never_enters_profile
   - push_negotiation_fallback_is_skipped
   - push_config_recorder_reaches_transport

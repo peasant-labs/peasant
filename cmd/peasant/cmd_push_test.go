@@ -56,8 +56,13 @@ func TestPushCmd_SourceHarnessHelpDerived(t *testing.T) {
 // --state-dir=dir.
 func executePushCmd(t *testing.T, dir string, args []string) (string, error) {
 	t.Helper()
+	seedClosedStoreForForecast(t, dir, args)
 	return executeWithDataDir(t, BuildPushCommand(), dir, args)
 }
+
+// testCredentialsUserID owns every publication these tests record, so a test can
+// ask the database what the run wrote for this user.
+const testCredentialsUserID = "user-00001"
 
 // writeTestCredentials writes a valid credentials.json to the peasant config dir
 // resolved from the given dir (ResolveConfigDirPathWith(dir) == dir/peasant),
@@ -191,6 +196,7 @@ func seedPublicationCursorsForTest(t *testing.T, dbPath string, sessionIDs []ing
 // (Summary / EmptyReason) lands on STDOUT.
 func executePushCmdSeparate(t *testing.T, dir string, args []string) (stdout, stderr string, err error) {
 	t.Helper()
+	seedClosedStoreForForecast(t, dir, args)
 	root := newTestRoot()
 	cmd := BuildPushCommand()
 	root.AddCommand(cmd)
@@ -1280,6 +1286,37 @@ func TestPushCmd_DryRun(t *testing.T) {
 	// Either "Nothing to push" or the dry-run banner must appear.
 	if !strings.Contains(output, "Dry run") && !strings.Contains(output, "Nothing to push") && !strings.Contains(output, "All sessions") {
 		t.Errorf("push --dry-run output should mention dry run or empty store; got: %s", output)
+	}
+}
+
+// TestPushCmd_DryRunRefusesAMissingDatabase is the push side of the forecast
+// prerequisite, and the reason every other forecast test may be seeded past it.
+//
+// A forecast inspects an existing, checkpointed database and creates nothing. On a
+// fresh install there is nothing to inspect, so it says so and stops. The failure
+// this guards is a forecast that falls through to the ordinary open and CREATES a
+// database as the side effect of a command the user ran to be told what would
+// happen — which every other push forecast test is now seeded past and could not
+// notice.
+//
+// It calls the command directly rather than through executePushCmd, because that
+// helper arranges the database this test exists to find missing.
+func TestPushCmd_DryRunRefusesAMissingDatabase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestCredentials(t, dir)
+
+	_, err := executeWithDataDir(t, BuildPushCommand(), dir, []string{"--dry-run"})
+	if err == nil {
+		t.Fatal("a forecast with no database to inspect must refuse, not report an empty push")
+	}
+	for _, want := range []string{"dry-run", "no files were changed", "run a normal harvest"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal must state %q so the user knows what to do; got: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(string(defaults.ResolveDBFilePathWith(dir))); !os.IsNotExist(statErr) {
+		t.Errorf("the forecast created the database it was asked only to inspect: %v", statErr)
 	}
 }
 

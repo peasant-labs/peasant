@@ -243,3 +243,31 @@ func TestWizardPreview_ReportsAFailedRead(t *testing.T) {
 		t.Fatal("a failed entry read must reach the pane as an error")
 	}
 }
+
+// TestWizardPreview_NeedsIngestShowsTheAvailableTranscript proves the preview
+// stopped being gated on publication readiness.
+//
+// The pane used to answer a session that cannot publish with the repair note
+// ALONE, which removed the transcript from exactly the sessions a user opens the
+// previewer to look at: they were asked to repair something they could not see.
+// Both now appear, note first, and the note still says nothing was uploaded.
+func TestWizardPreview_NeedsIngestShowsTheAvailableTranscript(t *testing.T) {
+	session := testSessions()[0]
+	session.NeedsIngest = true
+	preview := wizardPreviewSource([]PushWizardSession{session}, testPublishedTurns(), testTheme())
+	body, err := preview.Body(session.Row.SessionID)
+	if err != nil {
+		t.Fatalf("preview body for a session that needs ingest: %v", err)
+	}
+	screen := strings.Join(strings.Fields(ansi.Strip(body.Render(previewPaneWidth))), " ")
+	// The repair note, the redacted transcript, and the header all survive
+	// together; the recorded secret does not reach the pane either way.
+	for _, want := range []string{"publication needs database metadata", "redacts them", "<ANTHROPIC_KEY>", "session: " + session.Row.SessionID} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the preview of a session that needs ingest must show %q; got:\n%s", want, screen)
+		}
+	}
+	if strings.Contains(screen, "sk-ant-api03") {
+		t.Errorf("the preview published a recorded secret; got:\n%s", screen)
+	}
+}
