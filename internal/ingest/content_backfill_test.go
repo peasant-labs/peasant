@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -25,16 +26,18 @@ func TestRetainedContentBackfill(t *testing.T) {
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
-			Name           string `yaml:"name"`
-			Child          bool   `yaml:"child"`
-			Corrupt        bool   `yaml:"corrupt"`
-			Mismatch       bool   `yaml:"mismatch"`
-			Force          bool   `yaml:"force"`
-			Count          int    `yaml:"count"`
-			Reported       bool   `yaml:"recovery_reported"`
-			Unchanged      bool   `yaml:"unchanged"`
-			Cursor         bool   `yaml:"cursor"`
-			InvalidProject bool   `yaml:"invalid_project"`
+			Name           string   `yaml:"name"`
+			Child          bool     `yaml:"child"`
+			Corrupt        bool     `yaml:"corrupt"`
+			Mismatch       bool     `yaml:"mismatch"`
+			Force          bool     `yaml:"force"`
+			Count          int      `yaml:"count"`
+			Reported       bool     `yaml:"recovery_reported"`
+			Unchanged      bool     `yaml:"unchanged"`
+			Cursor         bool     `yaml:"cursor"`
+			InvalidProject bool     `yaml:"invalid_project"`
+			Diagnostics    []string `yaml:"expected_diagnostics"`
+			Preservation   string   `yaml:"preservation_phrase"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(captureBackfillFixtureData, &fixtures); err != nil {
@@ -172,11 +175,36 @@ func TestRetainedContentBackfill(t *testing.T) {
 			}
 			// A refused or unavailable recovery is visible per session and names
 			// the session it preserved; every other session still recovers.
+			// A refused or unavailable recovery is visible per session, names the
+			// session, and tells the user its stored state survived. WHICH words
+			// carry that promise depends on the reporter that owns the cause, so
+			// the fixture declares the phrase rather than the test assuming one:
+			// a refusal that stops stating preservation goes red whichever
+			// reporter it comes from.
+			if fixture.Reported == (fixture.Preservation == "") {
+				t.Fatalf("fixture %s: a reported recovery failure must declare the preservation phrase the user reads, and an unreported one must declare none", fixture.Name)
+			}
 			reported := false
 			for _, diagnostic := range result.Diagnostics {
-				if (diagnostic.ErrorType == "content_recovery_unavailable" || diagnostic.ErrorType == "content_recovery_refused") && strings.Contains(diagnostic.Location, ids[0].String()) && strings.Contains(diagnostic.Message, "preserved") {
+				if strings.Contains(diagnostic.Location, ids[0].String()) && strings.Contains(diagnostic.Message, fixture.Preservation) && fixture.Preservation != "" {
 					reported = true
 				}
+			}
+			// The exact multiset of diagnostic types naming the first session.
+			// The boolean above says a refusal is visible and preserves; this
+			// says the user is told ONCE, by one reporter, which a boolean
+			// cannot see: a cause reported by two paths reads as two warnings.
+			var naming []string
+			for _, diagnostic := range result.Diagnostics {
+				if strings.Contains(diagnostic.Location, ids[0].String()) || strings.Contains(diagnostic.Message, ids[0].String()) {
+					naming = append(naming, diagnostic.ErrorType)
+				}
+			}
+			sort.Strings(naming)
+			want := append([]string(nil), fixture.Diagnostics...)
+			sort.Strings(want)
+			if len(naming)+len(want) > 0 && !reflect.DeepEqual(naming, want) {
+				t.Fatalf("diagnostics naming the session = %v, want %v: %+v", naming, want, result.Diagnostics)
 			}
 			if reported != fixture.Reported {
 				t.Fatalf("recovery failure reported=%t, expected=%t; diagnostics=%+v", reported, fixture.Reported, result.Diagnostics)

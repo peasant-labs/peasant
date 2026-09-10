@@ -135,24 +135,14 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 				continue
 			}
 			// The same stored-metadata compatibility check the index selection
-			// applies: a session whose stored schema is newer than this build is
-			// refused before any retained read, store write or index-log entry,
-			// through the same diagnostic the selection reports, so the run
-			// carries exactly one refusal with the schema remedy for it.
+			// applies, reported the same way: EVERY failure of it goes to the
+			// refusal funnel, not just the newer-schema one. A check that fails
+			// per row (an unreadable project identifier, say) refuses this
+			// session here and again at selection, and the two entries collapse
+			// to one only because both are built by the funnel. The session is
+			// refused before any retained read, store write or index-log entry.
 			if err := p.checkStoredMetadataVersion(ctx, id); err != nil {
-				var schemaErr *UnsupportedMetadataVersionError
-				if errors.As(err, &schemaErr) {
-					p.reportMetadataRefusal(string(id), err)
-					continue
-				}
-				// The compatibility check itself failed (database access, an
-				// unreadable stored row): recovery cannot verify the session and
-				// leaves it alone; the remedy is that check's, not the indexer's.
-				p.reportDiagnostic(DiagnosticEntry{
-					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s retained-content recovery", id),
-					Message:     err.Error() + "; recovery was refused before any retained read or store write, so the stored entries and producer evidence were preserved",
-					Remediation: "Restore database access and readable, compatible stored metadata for the session, then retry harvest.",
-				})
+				p.reportMetadataRefusal(string(id), err)
 				continue
 			}
 			state, err := reader.ReadIndexState(ctx, id)

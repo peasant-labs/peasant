@@ -27,6 +27,7 @@ required_names:
   - session-filter-untouched
   - future-producer-refused
   - future-stored-schema-refused
+  - unreadable-stored-row-refused
 cases:
   - name: in-scope-recovers
     expect: recovered
@@ -46,6 +47,20 @@ cases:
     expected_diagnostics: [content_recovery_refused, index_refused]
   - name: future-stored-schema-refused
     future_stored_schema: true
+    expect: refused
+    no_index_log: true
+    expected_diagnostics: [metadata_refused]
+  # A compatibility check can fail for a reason that is NOT a newer schema. The
+  # lookup behind it parses each stored row as it reads it, so ONE unreadable
+  # identifier aborts the query; this case injects that failure for the target
+  # session and leaves every other read real. The sweep and the index selection
+  # both meet the session and both report through the refusal funnel, so the two
+  # entries are equal by value and the user sees ONE warning, not one per
+  # reporter. Corrupting the stored row directly does NOT arrange this: the
+  # harvest re-syncs the retained metadata artifact and repairs the row before
+  # any compatibility check reads it.
+  - name: unreadable-stored-row-refused
+    unreadable_stored_row: true
     expect: refused
     no_index_log: true
     expected_diagnostics: [metadata_refused]

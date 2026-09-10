@@ -51,6 +51,7 @@ type contentRecoveryScopeFixtures struct {
 		OtherSessionOnly bool     `yaml:"other_session_only"`
 		FutureProducer   bool     `yaml:"future_producer"`
 		FutureSchema     bool     `yaml:"future_stored_schema"`
+		UnreadableRow    bool     `yaml:"unreadable_stored_row"`
 		PreExistingReads int      `yaml:"pre_existing_retained_reads"`
 		NoIndexLog       bool     `yaml:"no_index_log"`
 		Diagnostics      []string `yaml:"expected_diagnostics"`
@@ -77,6 +78,28 @@ func loadContentRecoveryScopeFixtures(t *testing.T) contentRecoveryScopeFixtures
 		}
 	}
 	return fixtures
+}
+
+// unreadableRowStore is a store whose session-location lookup fails the way a
+// single bad stored row makes it fail: the lookup parses each row as it reads
+// it, so one unreadable identifier aborts the whole query with an error that is
+// NOT the newer-schema one.
+//
+// It wraps the real store, so every other read in the run is the real read.
+type unreadableRowStore struct {
+	*store.Store
+	target ingest.SessionID
+}
+
+var _ ingest.SessionStore = (*unreadableRowStore)(nil)
+
+func (s *unreadableRowStore) BulkLookupSessionLocations(ctx context.Context, ids []ingest.SessionID) (map[ingest.SessionID]ingest.SessionLocation, error) {
+	for _, id := range ids {
+		if id == s.target {
+			return nil, fmt.Errorf("invalid project hash %q: must be 64-character lowercase hex string", "not-a-hash")
+		}
+	}
+	return s.Store.BulkLookupSessionLocations(ctx, ids)
 }
 
 func TestContentRecoveryScope(t *testing.T) {
@@ -164,7 +187,11 @@ func TestContentRecoveryScope(t *testing.T) {
 				cfg.AllowedSessionIDs = map[ingest.SessionID]bool{other: true}
 			}
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+			var sessionStore ingest.SessionStore = database
+			if fixture.UnreadableRow {
+				sessionStore = &unreadableRowStore{Store: database, target: id}
+			}
+			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 			if err != nil {
 				t.Fatal(err)
 			}

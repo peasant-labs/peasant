@@ -20,6 +20,16 @@ func (p *Pipeline) reportMetadataRefusal(location string, err error) {
 	p.reportDiagnostic(diagnostic)
 }
 
+// reportDiagnostic reports one entry to the user, once.
+//
+// Identical entries collapse: "exactly one warning for one cause" rests on
+// EQUALITY BY VALUE of the whole entry, so several paths that meet the same
+// cause must build the same entry — same type, same location, same message,
+// same remedy. Two reporters that describe one refusal in different words, or
+// that name the same file by different paths, produce two warnings for the
+// user however alike they read. Route a shared cause through its own reporter
+// (reportMetadataRefusal for stored-metadata compatibility) rather than
+// restating it at each site.
 func (p *Pipeline) reportDiagnostic(diagnostic DiagnosticEntry) {
 	p.diagnosticsMu.Lock()
 	defer p.diagnosticsMu.Unlock()
