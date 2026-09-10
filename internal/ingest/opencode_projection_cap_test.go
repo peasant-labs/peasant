@@ -7,7 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,14 +22,32 @@ var openCodeProjectionCapData []byte
 
 const capProjectionPath = "/synthetic/store/opencode-managed-projection.json"
 
+// openCodeSQLiteFileHeader is the first bytes of every SQLite database. It is
+// how the provider's own file announces itself, and the only thing a reader
+// needs in order to refuse it.
+const openCodeSQLiteFileHeader = "SQLite format 3\x00"
+
+// projectionOutcome is what a reader owes one file at the managed-projection
+// path. There are two answers: read it, or refuse it for being the provider's
+// database. Size is not one of them, which is the whole point of this corpus.
+type projectionOutcome string
+
+const (
+	// projectionRead: the reader proceeds to read the file, whatever its size.
+	projectionRead projectionOutcome = "read"
+	// projectionRefusedAsDatabase: the file holds the provider's database and
+	// is refused without being read into memory.
+	projectionRefusedAsDatabase projectionOutcome = "refused-as-provider-database"
+)
+
 // openCodeProjectionCapCase sizes one synthetic projection file relative to the
-// managed-projection bound and states whether the read must be refused.
+// preview bound and states what the readers owe it.
 type openCodeProjectionCapCase struct {
-	Name               string `yaml:"name"`
-	Origin             string `yaml:"origin"`
-	OffsetFromBound    int64  `yaml:"offset_from_bound"`
-	ExpectRefused      bool   `yaml:"expect_refused"`
-	ExpectReadAttempts int    `yaml:"expect_read_attempts"`
+	Name            string            `yaml:"name"`
+	Origin          string            `yaml:"origin"`
+	OffsetFromBound int64             `yaml:"offset_from_bound"`
+	SQLiteHeader    bool              `yaml:"sqlite_header"`
+	Outcome         projectionOutcome `yaml:"outcome"`
 }
 
 func (c openCodeProjectionCapCase) size() int64 {
@@ -54,7 +72,7 @@ type openCodeProjectionCapDoc struct {
 	Cases         []openCodeProjectionCapCase `yaml:"cases"`
 }
 
-func loadOpenCodeProjectionCapDoc(t *testing.T) openCodeProjectionCapDoc {
+func loadOpenCodeProjectionCapDoc(t *testing.T) []openCodeProjectionCapCase {
 	t.Helper()
 	decoder := yaml.NewDecoder(bytes.NewReader(openCodeProjectionCapData))
 	decoder.KnownFields(true)
@@ -66,19 +84,11 @@ func loadOpenCodeProjectionCapDoc(t *testing.T) openCodeProjectionCapDoc {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("projection cap fixture must hold exactly one document")
 	}
-	presentCap := make(map[string]struct{}, len(doc.Cases))
-	for _, c := range doc.Cases {
-		presentCap[c.Name] = struct{}{}
-	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("projection cap fixture declares no required cases")
 	}
-	for _, name := range doc.RequiredCases {
-		if _, ok := presentCap[name]; !ok {
-			t.Fatalf("projection cap fixture is missing required case %q", name)
-		}
-	}
 	seen := make(map[string]struct{}, len(doc.Cases))
+	readsPastTheBound, refuses := false, false
 	for _, c := range doc.Cases {
 		if c.Name == "" || c.Origin == "" {
 			t.Fatalf("projection cap fixture has an incomplete case: %+v", c)
@@ -87,12 +97,39 @@ func loadOpenCodeProjectionCapDoc(t *testing.T) openCodeProjectionCapDoc {
 			t.Fatalf("projection cap fixture has a duplicate case name %q", c.Name)
 		}
 		seen[c.Name] = struct{}{}
+		switch c.Outcome {
+		case projectionRead:
+			if c.SQLiteHeader {
+				t.Fatalf("case %q holds a database header but expects to be read; a database must never be read into memory", c.Name)
+			}
+			if c.OffsetFromBound > 0 {
+				readsPastTheBound = true
+			}
+		case projectionRefusedAsDatabase:
+			if !c.SQLiteHeader {
+				t.Fatalf("case %q expects the provider-database refusal without holding a database header, so it would be refused for some other reason", c.Name)
+			}
+			refuses = true
+		default:
+			t.Fatalf("case %q states the unknown outcome %q; a reader either reads the file or refuses it as the provider's database", c.Name, c.Outcome)
+		}
 	}
-	return doc
+	if !readsPastTheBound {
+		t.Fatal("no case sizes a projection past the preview bound and requires it to be read; without one, a reinstated size gate would keep this corpus green while long sessions failed")
+	}
+	if !refuses {
+		t.Fatal("no case presents the provider's database; without one, deleting the defence entirely would keep this corpus green")
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("projection cap fixture is missing required case %q", name)
+		}
+	}
+	return doc.Cases
 }
 
-// sizedFileInfo reports a chosen size for one synthetic path, so the cap test
-// can present an oversized file without writing one.
+// sizedFileInfo reports a chosen size for one synthetic path, so this corpus
+// can present a very large file without writing one.
 type sizedFileInfo struct{ size int64 }
 
 func (i sizedFileInfo) Name() string       { return "opencode-managed-projection.json" }
@@ -102,15 +139,15 @@ func (i sizedFileInfo) ModTime() time.Time { return time.Unix(0, 0) }
 func (i sizedFileInfo) IsDir() bool        { return false }
 func (i sizedFileInfo) Sys() any           { return nil }
 
-// countingCapFileSystem reports a chosen size for the projection path and
-// counts every read of it, so the test can prove the cap refuses an oversized
-// file before any read and lets a within-bound file through to a read. Reads
-// return a sentinel error, so the test needs no real projection bytes; it
-// asserts on whether the read was attempted, not on decode.
+// countingCapFileSystem presents one synthetic projection: a chosen size, a
+// chosen first-bytes header, and a counter for every WHOLE read of it. Reads
+// return a sentinel error, so no real projection bytes are needed; a case
+// asserts on whether the whole file was read, not on decode.
 type countingCapFileSystem struct {
 	*ingest.OSFileSystem
-	size  int64
-	reads int
+	size   int64
+	header string
+	reads  int
 }
 
 var _ ingest.FileSystem = (*countingCapFileSystem)(nil)
@@ -132,54 +169,81 @@ func (fsys *countingCapFileSystem) ReadFile(path string) ([]byte, error) {
 	return fsys.OSFileSystem.ReadFile(path)
 }
 
-// TestOpenCodeIndexer_RefusesOversizedProjectionBeforeReading proves the
-// defense-in-depth cap: IndexTranscript sizes the managed projection first and
-// refuses anything past the bound with an actionable error naming the path and
-// the size, without ever reading the file; a within-bound file passes the cap
-// and reaches the read. The mutation that removes the cap makes the oversized
-// case attempt the read, so its read count rises from zero to one.
-func TestOpenCodeIndexer_RefusesOversizedProjectionBeforeReading(t *testing.T) {
+// ReadFileHeader serves the synthetic first bytes WITHOUT counting a read: the
+// point of the capability is that identifying the file never loads it.
+func (fsys *countingCapFileSystem) ReadFileHeader(path string, limit int) ([]byte, error) {
+	if path != capProjectionPath {
+		return fsys.OSFileSystem.ReadFileHeader(path, limit)
+	}
+	header := fsys.header
+	if len(header) > limit {
+		header = header[:limit]
+	}
+	return []byte(header), nil
+}
+
+// TestOpenCodeProjectionReadersRefuseTheProviderDatabaseNotLargeSessions pins
+// what decides whether a managed projection is read. A long session's
+// projection is large and must be read, so no size may refuse it; the
+// provider's own database must be refused, and identified from its first bytes
+// so that it is never loaded. Both readers, the indexer and the capture, follow
+// the one rule.
+func TestOpenCodeProjectionReadersRefuseTheProviderDatabaseNotLargeSessions(t *testing.T) {
 	t.Parallel()
-	doc := loadOpenCodeProjectionCapDoc(t)
-	for _, c := range doc.Cases {
+	for _, c := range loadOpenCodeProjectionCapDoc(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			fsys := &countingCapFileSystem{OSFileSystem: &ingest.OSFileSystem{}, size: c.size()}
-			indexer := ingest.NewOpenCodeIndexer(fsys)
 			session := ingest.DiscoveredSession{
 				SessionID:        ingest.SessionID("ses_3cd91f52effeXd3QAJ54jOyzv5"),
 				Harness:          ingest.HarnessOpenCode,
 				SourcePath:       ingest.ResolvedPath(capProjectionPath),
 				TranscriptOrigin: c.transcriptOrigin(t),
 			}
-
-			_, err := indexer.IndexTranscript(context.Background(), session)
-			if err == nil {
-				t.Fatalf("IndexTranscript returned no error; the sentinel read error or the cap refusal was expected")
-			}
-			if fsys.reads != c.ExpectReadAttempts {
-				t.Fatalf("projection was read %d times, want %d", fsys.reads, c.ExpectReadAttempts)
-			}
-			if !c.ExpectRefused {
-				if !errors.Is(err, errCapReadAttempted) {
-					t.Fatalf("within-bound projection must reach the read; got %v", err)
-				}
-				return
-			}
-			if errors.Is(err, errCapReadAttempted) {
-				t.Fatalf("an oversized projection must be refused before the read; the read ran")
-			}
-			message := err.Error()
-			if !contains(message, strconv.FormatInt(c.size(), 10)) {
-				t.Fatalf("refusal must name the size %d; got %q", c.size(), message)
-			}
-			if !contains(message, capProjectionPath) {
-				t.Fatalf("refusal must name the path %q; got %q", capProjectionPath, message)
+			for _, reader := range []struct {
+				name string
+				run  func(ingest.FileSystem) error
+			}{
+				{"index", func(filesystem ingest.FileSystem) error {
+					_, err := ingest.NewOpenCodeIndexer(filesystem).IndexTranscript(context.Background(), session)
+					return err
+				}},
+				{"capture", func(filesystem ingest.FileSystem) error {
+					_, err := ingest.NewOpenCodeIndexer(filesystem).IndexTranscriptForCapture(context.Background(), session)
+					return err
+				}},
+			} {
+				t.Run(reader.name, func(t *testing.T) {
+					header := ""
+					if c.SQLiteHeader {
+						header = openCodeSQLiteFileHeader
+					}
+					fsys := &countingCapFileSystem{OSFileSystem: &ingest.OSFileSystem{}, size: c.size(), header: header}
+					err := reader.run(fsys)
+					if err == nil {
+						t.Fatal("the reader returned no error; either the sentinel read error or the provider-database refusal was expected")
+					}
+					if c.Outcome == projectionRead {
+						if !errors.Is(err, errCapReadAttempted) {
+							t.Fatalf("a projection of %d bytes was not read: %v; a long session's projection is legitimately large and refusing it loses the whole session", c.size(), err)
+						}
+						if fsys.reads != 1 {
+							t.Fatalf("the projection was read %d times, want exactly 1", fsys.reads)
+						}
+						return
+					}
+					if errors.Is(err, errCapReadAttempted) {
+						t.Fatal("the provider's database was read into memory; it must be refused from its first bytes alone")
+					}
+					if fsys.reads != 0 {
+						t.Fatalf("the provider's database was read %d times; identifying it must never load it", fsys.reads)
+					}
+					for _, want := range []string{capProjectionPath, string(session.SessionID), "rerun harvest"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Fatalf("the refusal must name %q so the user can act on it; got %q", want, err)
+						}
+					}
+				})
 			}
 		})
 	}
-}
-
-func contains(haystack, needle string) bool {
-	return bytes.Contains([]byte(haystack), []byte(needle))
 }

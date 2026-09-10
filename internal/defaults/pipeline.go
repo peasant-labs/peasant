@@ -48,17 +48,18 @@ const ContentPreviewLimit = 2000
 // A single oversized session may occupy a batch without truncation.
 const FullContentWriteBatchBytes int64 = 32 << 20
 
-// OpenCodeManagedProjectionMaxBytes bounds the Peasant-managed OpenCode SQLite
-// projection file the indexer reads from disk. The projection holds one
-// session's normalized message and part rows as JSON, so it is small; a real
-// projection is kilobytes to low megabytes. The bound exists as defense in
-// depth: an OpenCode SQLite session's discovered source path is the provider
-// database, and only the post-harvest managed projection ever belongs at the
-// path the indexer reads. If any wiring mistake ever points the reader at the
-// database instead of the projection, the reader refuses the oversized file
-// rather than loading a multi-gigabyte database into memory and aborting the
-// process. 64 MiB is far above any real projection and far below a database
-// that would exhaust memory.
+// OpenCodeManagedProjectionMaxBytes is the size at which an OpenCode session's
+// payload stops being small. It bounds the kickstart PREVIEW, which shows a
+// prefix and says how much it left out.
+//
+// It is no longer a gate on reading a managed projection. It used to be: the
+// reader refused a projection past this size as defense in depth, because an
+// OpenCode SQLite session's discovered source path is the provider database and
+// a wiring mistake could point the reader at a multi-gigabyte database. That
+// defense is now a content test, which identifies a database from its first
+// bytes without reading it, because a size test also failed the long sessions
+// whose projections are legitimately large, and losing a whole session is not
+// something a size may do.
 const OpenCodeManagedProjectionMaxBytes = 64 << 20 // 64 MiB
 
 // OpenCodePreviewMaterializeMaxBytes bounds how much OpenCode session payload

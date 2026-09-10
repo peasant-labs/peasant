@@ -214,12 +214,11 @@ func isKnownOpenCodeSemanticPartType(partType string) bool {
 func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
 	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
 		projectionPath := session.SourcePath.String()
-		info, statErr := idx.fs.Stat(projectionPath)
-		if statErr != nil {
-			return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while sizing %q: %w; no entry rows were stored, so re-run harvest to restore the managed artifact", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, projectionPath, statErr)
-		}
-		if info.Size() > defaults.OpenCodeManagedProjectionMaxBytes {
-			return nil, fmt.Errorf("index %s OpenCode projection for session %q refused %q because it is %d bytes, past the %d byte managed-projection bound; no entry rows were stored and the file was never read into memory; this path must hold the small per-session managed projection, so run harvest to regenerate the projection and never point the reader at the OpenCode database", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, projectionPath, info.Size(), int64(defaults.OpenCodeManagedProjectionMaxBytes))
+		// One rule for both readers: a projection is refused for holding the
+		// provider database, never for its size. A long session's projection is
+		// large and must still index.
+		if err := refuseOpenCodeProviderDatabase(idx.fs, session, projectionPath); err != nil {
+			return nil, err
 		}
 		data, err := idx.fs.ReadFile(projectionPath)
 		if err != nil {
