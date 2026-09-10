@@ -215,6 +215,12 @@ func TestPublicationOmissions(t *testing.T) {
 			if (preflightErr == nil) != fixtureCase.Publishable {
 				t.Errorf("push preflight err=%v, want publishable=%v", preflightErr, fixtureCase.Publishable)
 			}
+			// A refusal has to say which one incompleteness is still allowed,
+			// otherwise a user whose session was omitted-records cannot tell
+			// this refusal from the one their session is exempt from.
+			if preflightErr != nil && !strings.Contains(preflightErr.Error(), "oversized source records that ingest omitted") {
+				t.Errorf("the refusal does not name the one allowed incompleteness: %v", preflightErr)
+			}
 
 			snapshot, readErr := db.ReadSessionContent(ctx, meta.SessionID.String())
 			if fixtureCase.FullContentReadable {
