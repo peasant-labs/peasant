@@ -34,6 +34,7 @@ var omittedRecordsIngestManifestYAML []byte
 // what the published request declares, and what a reader is served.
 type omittedRecordsIngestCase struct {
 	Name                      string `yaml:"name"`
+	LargeRecordShape          string `yaml:"largeRecordShape"`
 	RecordLimitBytes          int    `yaml:"recordLimitBytes"`
 	LargeRecordBytes          int    `yaml:"largeRecordBytes"`
 	CaptureStatus             string `yaml:"captureStatus"`
@@ -92,6 +93,9 @@ func loadOmittedRecordsIngestFixture(t *testing.T) omittedRecordsIngestFixture {
 		if _, err := publicationOmissionsReadiness(fixtureCase.Readiness); err != nil {
 			t.Fatalf("omitted-records ingest case %q: %v", fixtureCase.Name, err)
 		}
+		if _, err := newLargeRecordShape(fixtureCase.LargeRecordShape); err != nil {
+			t.Fatalf("omitted-records ingest case %q: %v", fixtureCase.Name, err)
+		}
 	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "omitted-records ingest"); err != nil {
 		t.Fatal(err)
@@ -131,6 +135,10 @@ const omittedRecordsSessionID = "3f2c9d18-4a6b-4c1d-8e2f-5a7b9c0d1e2f"
 // (the record was omitted); it can never carry both.
 const omittedRecordsSentinel = "LARGE_RECORD_SENTINEL"
 
+// omittedRecordsTrailingText is the closing record, which is under the limit in
+// every case and must survive the omission.
+const omittedRecordsTrailingText = "the tool finished"
+
 // TestOmittedRecordsIngestPublishesEndToEnd drives the REAL ingest pipeline,
 // the REAL store writer, the REAL readiness query, the REAL publication
 // preflight and mapper, and the REAL served-detail projection over one JSONL
@@ -152,7 +160,11 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			if err := os.MkdirAll(sourceDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			transcript := omittedRecordsTranscript(fixtureCase.LargeRecordBytes)
+			shape, err := newLargeRecordShape(fixtureCase.LargeRecordShape)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transcript := omittedRecordsTranscript(shape, fixtureCase.LargeRecordBytes)
 			sourcePath := filepath.Join(sourceDir, omittedRecordsSessionID+".jsonl")
 			if err := os.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
 				t.Fatal(err)
@@ -314,14 +326,54 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 	}
 }
 
+// largeRecordShape names the source record a case makes large. It decides
+// whether the omission placeholder can carry a tool call id at all: a Claude
+// tool_result record opens with its tool_use_id, so the placeholder pairs with
+// the tool call it answers; an assistant message carries no correlation id, so
+// the placeholder has none and has to reach the reader on its own.
+type largeRecordShape string
+
+const (
+	// largeRecordShapeClaudeToolResult makes the tool result large.
+	largeRecordShapeClaudeToolResult largeRecordShape = "claude_tool_result"
+	// largeRecordShapeClaudeAssistantText makes an assistant message large.
+	largeRecordShapeClaudeAssistantText largeRecordShape = "claude_assistant_text"
+)
+
+// newLargeRecordShape parses a fixture value at the boundary, so a typo names
+// itself instead of silently selecting the default transcript.
+func newLargeRecordShape(raw string) (largeRecordShape, error) {
+	switch largeRecordShape(raw) {
+	case largeRecordShapeClaudeToolResult:
+		return largeRecordShapeClaudeToolResult, nil
+	case largeRecordShapeClaudeAssistantText:
+		return largeRecordShapeClaudeAssistantText, nil
+	}
+	return "", fmt.Errorf(
+		"omitted-records ingest fixture names large record shape %q, which no transcript builder in internal/push/omitted_records_ingest_test.go knows; the case cannot be built, so no outcome it declares is checked; use %q or %q",
+		raw, largeRecordShapeClaudeToolResult, largeRecordShapeClaudeAssistantText,
+	)
+}
+
 // omittedRecordsTranscript builds a Claude Code JSONL transcript whose third
-// record is large: a user turn, an assistant turn, the large tool result, and
-// a closing assistant turn that proves the records AFTER the large one survive.
-func omittedRecordsTranscript(largeRecordBytes int) string {
+// record is large, in the shape the case asks for: a user turn, an assistant
+// turn, the large record, and a closing assistant turn that proves the records
+// AFTER the large one survive.
+func omittedRecordsTranscript(shape largeRecordShape, largeRecordBytes int) string {
 	record := func(format string, args ...any) string { return fmt.Sprintf(format, args...) + "\n" }
 	filler := strings.Repeat("x", largeRecordBytes)
-	return record(`{"sessionId":%q,"type":"user","uuid":"entry-first","timestamp":"2023-11-14T22:13:20Z","cwd":"/workspace","message":{"role":"user","content":"run the tool"}}`, omittedRecordsSessionID) +
+	first := record(`{"sessionId":%q,"type":"user","uuid":"entry-first","timestamp":"2023-11-14T22:13:20Z","cwd":"/workspace","message":{"role":"user","content":"run the tool"}}`, omittedRecordsSessionID)
+	last := record(`{"sessionId":%q,"type":"assistant","uuid":"entry-fourth","timestamp":"2023-11-14T22:13:23Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"%s"}]}}`, omittedRecordsSessionID, omittedRecordsTrailingText)
+	if shape == largeRecordShapeClaudeAssistantText {
+		// No tool_use, no tool_use_id anywhere: the large record opens with
+		// none of the correlation id keys, so its placeholder has no id.
+		return first +
+			record(`{"sessionId":%q,"type":"assistant","uuid":"entry-second","timestamp":"2023-11-14T22:13:21Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"reading the file"}]}}`, omittedRecordsSessionID) +
+			record(`{"sessionId":%q,"type":"assistant","uuid":"entry-third","timestamp":"2023-11-14T22:13:22Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"%s%s"}]}}`, omittedRecordsSessionID, omittedRecordsSentinel, filler) +
+			last
+	}
+	return first +
 		record(`{"sessionId":%q,"type":"assistant","uuid":"entry-second","timestamp":"2023-11-14T22:13:21Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"call-large","name":"Bash","input":{"command":"cat big"}}]}}`, omittedRecordsSessionID) +
 		record(`{"sessionId":%q,"type":"user","uuid":"entry-third","timestamp":"2023-11-14T22:13:22Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-large","content":"%s%s"}]}}`, omittedRecordsSessionID, omittedRecordsSentinel, filler) +
-		record(`{"sessionId":%q,"type":"assistant","uuid":"entry-fourth","timestamp":"2023-11-14T22:13:23Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"the tool finished"}]}}`, omittedRecordsSessionID)
+		last
 }

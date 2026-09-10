@@ -8,6 +8,7 @@
 cases:
   - name: over_cap_record_is_omitted_and_the_session_still_publishes
     # 2 KiB limit against an 8 KiB record: the record is over the limit.
+    largeRecordShape: claude_tool_result
     recordLimitBytes: 2048
     largeRecordBytes: 8192
     captureStatus: incomplete
@@ -24,6 +25,7 @@ cases:
     largeRecordInServedDetail: false
   - name: under_cap_record_is_kept_and_the_session_stays_complete
     # The same 8 KiB record under a 64 KiB limit: nothing is omitted.
+    largeRecordShape: claude_tool_result
     recordLimitBytes: 65536
     largeRecordBytes: 8192
     captureStatus: complete
@@ -35,3 +37,22 @@ cases:
     omissionWarning: false
     placeholderInServedDetail: false
     largeRecordInServedDetail: true
+  # The same omission on a record that carries NO tool call id: an assistant
+  # message the user pasted a document into. The placeholder cannot pair with a
+  # tool call, so the served projection has to show it on its own. Every
+  # harness omission whose record opens without one of the correlation id keys
+  # (a Pi record, a Cursor or Strike record) reaches the reader through this
+  # same path.
+  - name: over_cap_message_without_a_tool_call_id_is_still_served
+    largeRecordShape: claude_assistant_text
+    recordLimitBytes: 2048
+    largeRecordBytes: 8192
+    captureStatus: incomplete
+    captureFailureCode: source_records_omitted
+    captureFormat: full
+    readiness: ready
+    preflightAccepts: true
+    publishedPartial: true
+    omissionWarning: true
+    placeholderInServedDetail: true
+    largeRecordInServedDetail: false

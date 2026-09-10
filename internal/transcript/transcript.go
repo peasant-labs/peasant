@@ -163,9 +163,39 @@ func toolResultOutput(e schema.SessionEntry) string {
 	return ""
 }
 
+// unjoinedOmissionPlaceholder reports whether an entry is an omission
+// placeholder — the entry that stands where ingest left a source record out —
+// that NO tool call will show to a reader.
+//
+// A placeholder is shown as a tool call's result only when it carries the id
+// of a tool call the transcript also holds. It carries no id at all when the
+// omitted record opened without one of the correlation id keys: every Pi
+// omission, an oversized assistant message, and a Cursor or Strike record
+// whose id sits outside the read prefix. It carries an id nothing answers when
+// the tool call itself was the omitted record. In both of those cases the
+// placeholder is the only trace of the missing record, so it has to be emitted
+// as a turn of its own; suppressing it as a depth-0 tool wrapper would drop
+// the note from every served surface — the detail socket, the previews, the
+// export and the publication — and the reader would see the conversation jump.
+func unjoinedOmissionPlaceholder(entry schema.SessionEntry, toolUseIDs map[string]bool) bool {
+	if _, omitted := ingest.OmittedRecordOf(entry); !omitted {
+		return false
+	}
+	return entry.ToolCallID == nil || !toolUseIDs[*entry.ToolCallID]
+}
+
 func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
 	if len(entries) == 0 {
 		return nil
+	}
+
+	// The tool calls this transcript actually holds. An omission placeholder
+	// is folded into one of them only when its id is in this set.
+	toolUseIDs := make(map[string]bool)
+	for _, e := range entries {
+		if e.EntryType == schema.EntryTypeToolUse && e.ToolCallID != nil {
+			toolUseIDs[*e.ToolCallID] = true
+		}
 	}
 
 	// Pass 1: Collect tool_result data keyed by ToolCallID for joining.
@@ -263,6 +293,9 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	// v10+: indexer canonicalizes wrapper role to tool (R2).
 	for _, e := range entries {
 		if e.Depth == 0 && e.Role == schema.RoleTool {
+			if unjoinedOmissionPlaceholder(e, toolUseIDs) {
+				continue
+			}
 			suppress[e.EntryIndex] = true
 		}
 	}
@@ -349,7 +382,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		// Backward compatibility: old-style single-level entries carry ToolCallID
 		// directly on depth=0. These are not collected by the fold pre-pass
 		// (which only processes depth=1), so handle them here.
-		if e.ToolCallID != nil && len(t.ToolCalls) == 0 {
+		//
+		// An omission placeholder no tool call will show is emitted as its own
+		// turn carrying the note, so it gets no synthetic tool call here: that
+		// would show the reader the same note twice, once as the turn and once
+		// as the result of a call that answers nothing.
+		if e.ToolCallID != nil && len(t.ToolCalls) == 0 && !unjoinedOmissionPlaceholder(e, toolUseIDs) {
 			tc := ingest.ToolCall{
 				ID: *e.ToolCallID,
 			}

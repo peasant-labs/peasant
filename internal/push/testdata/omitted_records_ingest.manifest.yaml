@@ -1,3 +1,4 @@
 requiredNames:
   - over_cap_record_is_omitted_and_the_session_still_publishes
   - under_cap_record_is_kept_and_the_session_stays_complete
+  - over_cap_message_without_a_tool_call_id_is_still_served
