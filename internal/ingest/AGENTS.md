@@ -115,6 +115,8 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | I3 | CAS Ownership | CAS winner exclusively owns slot data. No locks needed for subsequent read/write. |
 | I4 | Committed Append-Only | `committed` map only grows. Single drainer reads it; `Commit` called between batches. No race. |
 | I5 | Worker Count Bounds | `min(config.Parallelism, len(roots))`. Buffer allocated with `len(toProcess) + 1` slots. |
+| I6 | Whole Records Up To The Limit | Every JSONL harness reads, redacts and indexes a single record up to `defaults.MaxJSONLRecordBytes` (256 MiB) IN FULL. No record size ever fails a session and no record is ever silently dropped. |
+| I7 | Omission Is Recorded, Never Silent | A record over the limit is left out before redaction, without being loaded. It is reported with the `record_too_large` diagnostic naming its size, its line and the limit; the capture is stored incomplete with failure code `source_records_omitted`; and a PLACEHOLDER ENTRY holds its position in the indexed entries (role `tool`, entry type `tool_result`, `rawByteLength` = the record size, the typed `OmittedRecord` under `omittedRecord` in `extra`, and a reader-facing note in `contentPreview`). The rule, the diagnostic and the placeholder are the same for Claude Code, Codex, Cursor, Strike and Pi. |
 
 ## Assumptions
 
@@ -169,3 +171,6 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | `metadata.go` | | `UnifiedMetadata`, `CurrentSchemaVersion`, extraction |
 | `parallel_test.go` | | Concurrency tests: MPMC, deadlock, race detection |
 | `pipeline_test.go` | | Integration tests: `MemFS` + `StubGitResolver` round-trip |
+| `jsonl_records.go` | | The shared JSONL record reader (`jsonlRecordScanner`, `forEachJSONLRecord`) and the typed `OmittedRecord`. Every JSONL read site uses it; a record over the limit is skipped, never an error |
+| `jsonl_omission.go` | | The omission stand-in line, the placeholder entry and its reader-facing note |
+| `oversized_record_filter.go` | | The one pre-redaction filter every JSONL harness runs (`filterOversizedJSONLRecords`) |
