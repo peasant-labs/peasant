@@ -264,6 +264,32 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 				t.Errorf("the published request carries the omission warning=%v, want %v (warnings %+v)", gotWarning, fixtureCase.OmissionWarning, request.Diagnostics.Warnings)
 			}
 
+			// The complete-content reader export and publication both use. It
+			// is the merge point between the writer that stores a placeholder
+			// row and the reader that requires every entry with a content
+			// preview to have one, so it is asserted on a REAL capture rather
+			// than assumed.
+			snapshot, err := db.ReadSessionContent(ctx, omittedRecordsSessionID)
+			if err != nil {
+				t.Fatalf("the complete-content reader refused the capture real ingest wrote: %v", err)
+			}
+			if snapshot == nil || len(snapshot.Entries) == 0 {
+				t.Fatalf("the complete-content reader returned no entries for a publishable capture")
+			}
+			storedPlaceholders := 0
+			for _, entry := range snapshot.Entries {
+				if _, omitted := ingest.OmittedRecordOf(entry); omitted {
+					storedPlaceholders++
+				}
+			}
+			wantPlaceholders := 0
+			if fixtureCase.PlaceholderInServedDetail {
+				wantPlaceholders = 1
+			}
+			if storedPlaceholders != wantPlaceholders {
+				t.Errorf("the complete-content reader returned %d omission placeholders, want %d", storedPlaceholders, wantPlaceholders)
+			}
+
 			// What a reader is served. The placeholder note reaches every
 			// transcript UI on the existing wire fields, so the served detail
 			// is where it has to be visible.

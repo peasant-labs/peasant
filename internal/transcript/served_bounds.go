@@ -145,7 +145,7 @@ func BoundServedDetail(detail *schema.SessionDetailPayload, budget ServedDocumen
 	}
 	report.AppliedBytes = bound
 	for _, field := range fields {
-		if len(field.original) > bound {
+		if servedTextWasBounded(field, bound) {
 			report.BoundedFields++
 		}
 	}
@@ -262,12 +262,31 @@ func applyServedBound(fields []servedTextField, showBytes int) {
 // boundServedText returns text unchanged when it fits, and otherwise the leading
 // showBytes of it (cut on a rune boundary) followed by a visible note naming what
 // was shown, what was recorded, and where the whole record still lives.
+//
+// A field is left WHOLE when its note would be no shorter than the text it
+// replaces. Bounding such a field buys the document nothing — at a low shared
+// bound a 50-byte result would be replaced by a 90-byte note, growing the very
+// document the bound is trying to fit — and it costs the reader the only copy of
+// a text they could have read in full. Because the replacement is therefore
+// never longer than the original, the document size stays non-decreasing in the
+// bound, which is what lets the search below find a fitting bound at all.
 func boundServedText(kind ServedTextKind, text string, showBytes int) string {
 	if len(text) <= showBytes {
 		return text
 	}
 	shown := text[:cutServedTextAt(text, showBytes)]
-	return shown + servedBoundNote(kind, len(shown), len(text))
+	bounded := shown + servedBoundNote(kind, len(shown), len(text))
+	if len(bounded) >= len(text) {
+		return text
+	}
+	return bounded
+}
+
+// servedTextWasBounded reports whether the bound actually replaced this field's
+// text, which is what the report counts. Asking the same function that does the
+// work keeps the counter from claiming a field the bound left whole.
+func servedTextWasBounded(field servedTextField, showBytes int) bool {
+	return boundServedText(field.kind, field.original, showBytes) != field.original
 }
 
 // cutServedTextAt backs a byte cut off the middle of a rune, so a bounded field
