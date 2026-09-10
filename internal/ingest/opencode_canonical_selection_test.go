@@ -436,7 +436,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		}
 		storedIDs[session.SessionID] = true
 	}
-	incomplete, err := database.ListContentCaptureIncompleteSessions(t.Context(), len(fixture.Cases)+1)
+	incomplete, err := database.ListContentCaptureIncompleteSessionsAfter(t.Context(), "", len(fixture.Cases)+1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,8 +484,8 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		}
 	}
 	gotIncomplete := make(map[ingest.SessionID]bool)
-	for _, id := range incomplete {
-		gotIncomplete[id] = true
+	for _, target := range incomplete {
+		gotIncomplete[target.SessionID] = true
 	}
 	if !reflect.DeepEqual(gotIncomplete, wantIncomplete) {
 		t.Fatalf("persisted incomplete identities=%v want=%v", gotIncomplete, wantIncomplete)

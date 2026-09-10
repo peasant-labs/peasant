@@ -1,0 +1,35 @@
+# A GENUINE V51 database, upgraded forward. The seed below is the historical
+# INSERT shape a V51 store actually wrote: sessions carried its 29 columns, and
+# the content-capture tables did not exist yet. No current writer runs before
+# the upgrade, which is the whole point -- a current writer against a historical
+# schema proves nothing about what a real installed database upgrades into.
+# Shipped migrations are never edited to make these cases pass.
+projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+hostSlug: fixture-host
+# Rows every case needs before its own session exists.
+seed:
+  - "INSERT INTO projects (project_hash, canonical_cwd) VALUES ('cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', '/fixture/project')"
+  - "INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('fixture-host', 'fixture-host')"
+requiredNames:
+  - indexed-legacy-session-becomes-an-incomplete-capture
+  - legacy-session-without-entries-still-declares-itself-incomplete
+cases:
+  # The ordinary legacy session: a bounded preview projection and no durable
+  # prose anywhere, because V51 had nowhere to put it.
+  - name: indexed-legacy-session-becomes-an-incomplete-capture
+    sessionID: aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa
+    previewText: legacy bounded preview text
+    wantEntryCount: 1
+    seed:
+      - "INSERT INTO sessions (session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,index_version,indexed_at,session_cwd,cwd_provenance_kind,publication_capture_revision,indexed_publication_capture_revision) VALUES ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa','claude-code','fixture-model','fixture-host','cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',1,2,3,'/fixture/legacy.jsonl','jsonl',21,4,'/fixture/project','source_exact',0,0)"
+      - "INSERT INTO session_metrics (session_id,turn_count,tool_calls,input_tokens,output_tokens,duration_minutes) VALUES ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',1,0,10,20,1.0)"
+      - "INSERT INTO session_entries (session_id,entry_index,provider,entry_type,role,content_preview) VALUES ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',0,'claude-code','text','user','legacy bounded preview text')"
+  # A session that was stored but never indexed. It still has to declare that
+  # it holds no complete capture, rather than being silently absent from the
+  # capture table and reading as an unknown state later.
+  - name: legacy-session-without-entries-still-declares-itself-incomplete
+    sessionID: bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb
+    wantEntryCount: 0
+    seed:
+      - "INSERT INTO sessions (session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format) VALUES ('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb','codex','fixture-model','fixture-host','cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',1,2,3,'/fixture/unindexed.jsonl','jsonl')"
+      - "INSERT INTO session_metrics (session_id) VALUES ('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb')"

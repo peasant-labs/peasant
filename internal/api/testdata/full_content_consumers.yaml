@@ -8,7 +8,7 @@ requiredNames:
   - native-opencode-omission-refuses-publication
   - normal-strike-structured-output-siblings
   - full-user-assistant-unicode-late-secret
-  - incomplete-refuses-all-consumers
+  - incomplete-previews-but-refuses-export-and-publication
   - corrupt-chunk-refuses-all-consumers
   - corrupt-projection-refuses-all-consumers
   - normal-claude-source-denied-publication
@@ -45,9 +45,11 @@ cases:
   - <<: *pi
     name: native-pi-corrupt-chunk-refuses-consumers
     damage: chunk
+    wantremedy: harvest index --force
   - <<: *pi
     name: native-pi-corrupt-hash-refuses-consumers
     damage: hash
+    wantremedy: harvest index --force
   - <<: *pi
     name: native-pi-force-backfill-preserves-annotations-and-commits
     backfill: true
@@ -63,7 +65,12 @@ cases:
     pii: synthetic.person@example.test
   - <<: *full
     name: native-opencode-omission-refuses-publication
+    # The omitted native conversation was never recorded, so the previewer has
+    # no rows to show. It must still answer instead of failing: "nothing was
+    # recorded" is a different, and true, thing to show a person.
     damage: source-omitted
+    previewable: true
+    wantremedy: peasant ingest
     harness: opencode
     sessionid: ses_3cd91f52effeXd3QAJ54jCtrl1
     nativesource: current-unknown-conversation-omission
@@ -115,20 +122,27 @@ cases:
     harness: opencode
     source: |
       {"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"SESSION_ID","messages":[{"id":"msg_full","session_id":"SESSION_ID","time_created":1,"time_updated":1,"data":{"id":"msg_full","role":"assistant","time":{"created":1}},"parts":[{"id":"part_full","message_id":"msg_full","session_id":"SESSION_ID","time_created":1,"time_updated":1,"data":{"id":"part_full","type":"text","text":TEXT}}]}]}
-  - name: incomplete-refuses-all-consumers
+  # An unfinished capture is not damaged data. The mounted previewer shows the
+  # bounded rows the database holds; only export and publication refuse.
+  - name: incomplete-previews-but-refuses-export-and-publication
     damage: incomplete
+    previewable: true
+    previewstail: true
+    wantremedy: peasant ingest
     prefix: "short original "
     repetitions: 1
     tail: SAFE-DURABLE-TAIL
     secret: sk-ant-api03-SYNCDOORKEY00000000000x
   - name: corrupt-chunk-refuses-all-consumers
     damage: chunk
+    wantremedy: harvest index --force
     prefix: "safe prose "
     repetitions: 300
     tail: SAFE-DURABLE-TAIL
     secret: sk-ant-api03-SYNCDOORKEY00000000000x
   - name: corrupt-projection-refuses-all-consumers
     damage: projection
+    wantremedy: harvest index --force
     prefix: "safe prose "
     repetitions: 300
     tail: SAFE-DURABLE-TAIL

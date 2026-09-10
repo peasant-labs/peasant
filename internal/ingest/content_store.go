@@ -211,7 +211,11 @@ type ContentCaptureIncompleteSession struct {
 }
 
 type ContentBackfillTargetStore interface {
-	ListContentCaptureIncompleteSessions(context.Context, int) ([]SessionID, error)
+	// One listing, one row shape. Recovery needs the harness and start time
+	// beside the identifier to scope and report its work, and the cursor to
+	// resume a walk, so that is the only listing offered: an identifier-only
+	// variant returned a second shape for the same question and told a caller
+	// less than it needs.
 	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int) ([]ContentCaptureIncompleteSession, error)
 	LookupSessionLocation(context.Context, SessionID) (string, string, error)
 	LookupSourceInfo(context.Context, SessionID) (string, SourceFormat, string, error)

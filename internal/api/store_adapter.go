@@ -47,14 +47,14 @@ type StoreDataProvider struct {
 }
 
 // NewStoreDataProvider creates a StoreDataProvider backed by the given store,
-// reading complete captured content from SQLite. Filesystem/root arguments are
+// reading available captured content from SQLite. Filesystem/root arguments are
 // retained for compatibility and never gate stored content reads.
 func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy, managedRoots ...string) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
 
 // NewStoreDataProviderWithFS retains injectable filesystem arguments for caller
-// compatibility. SessionByID reads complete content only from SQLite.
+// compatibility. SessionByID reads available content only from SQLite.
 func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem, managedRoots ...string) *StoreDataProvider {
 	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
@@ -318,8 +318,24 @@ func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.Ses
 // SessionByID returns a single session by ID, or an error if not found.
 // Populates Turns from session_entries for the trajectory view.
 // Uses one content snapshot, including git_remote, pushed_at and project_path.
+//
+// This is the read behind every MOUNTED previewer: the WebSocket session_detail
+// channel and the kickstart preview pane. It therefore reads the content the
+// database actually holds, with no full-capture, publication-readiness,
+// recovery or native-source gate. A session whose capture is still bounded is
+// previewed from its stored projection instead of being refused; export and
+// publication keep the strict reader, so a preview never certifies content.
+// The payload shape is unchanged: completeness is not reported on the wire.
 func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
-	snapshot, err := p.store.ReadSessionContent(ctx, id)
+	// The raw identifier is validated once, here at the boundary it arrives
+	// through, instead of being cast further down where nothing can vouch for
+	// it. This is the WebSocket's subscription id and the kickstart pane's
+	// highlighted row, both of which reach us as untyped text.
+	sessionID, err := ingest.NewSessionID(id)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: session by id: %w", err)
+	}
+	snapshot, err := p.store.ReadSessionAvailable(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}

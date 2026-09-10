@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite/sqlitex"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -36,12 +37,13 @@ import (
 // rather than an error, so a readable-but-invalid id here would silently send
 // every case down the not-imported path and pass.
 const (
-	mountImportedSessionID  = "3f1c9a52-7b64-4e18-9a0d-2c5e8f7b1a44"
-	mountTruncatedSessionID = "8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68"
-	mountFreshSessionID     = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
-	mountEmptySessionID     = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
-	mountProjectRowID       = "git@github.com:acme/tool.git"
-	expectedMountSeedRows   = 1
+	mountImportedSessionID   = "3f1c9a52-7b64-4e18-9a0d-2c5e8f7b1a44"
+	mountTruncatedSessionID  = "8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68"
+	mountUnreadableSessionID = "5a1f8c07-3b62-4d49-9e18-0f7a6c2b5d31"
+	mountFreshSessionID      = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
+	mountEmptySessionID      = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
+	mountProjectRowID        = "git@github.com:acme/tool.git"
+	expectedMountSeedRows    = 1
 )
 
 type mountRetentionSeedFixture struct {
@@ -229,6 +231,14 @@ func mountPreviewSessions(freshSource string) []ftue.SessionListing {
 		},
 		{
 			Harness:     string(defaults.HarnessClaudeCode),
+			SessionID:   mountUnreadableSessionID,
+			Title:       "unreadable session",
+			ProjectName: "acme/tool",
+			GitRemote:   mountProjectRowID,
+			Branch:      "main",
+		},
+		{
+			Harness:     string(defaults.HarnessClaudeCode),
 			SessionID:   mountFreshSessionID,
 			Title:       "fresh session",
 			ProjectName: "acme/tool",
@@ -301,6 +311,7 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 	sessions := []ingest.StoreEntry{
 		storeEntryFor(mountImportedSessionID, now),
 		storeEntryFor(mountTruncatedSessionID, now),
+		storeEntryFor(mountUnreadableSessionID, now),
 	}
 	if err := db.InsertSessions(t.Context(), sessions); err != nil {
 		t.Fatalf("insert sessions: %v", err)
@@ -325,6 +336,31 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 	}}
 	if err := db.IndexSessionEntries(t.Context(), truncatedID, truncatedEntries); err != nil {
 		t.Fatalf("index truncated session entries: %v", err)
+	}
+
+	// A session whose stored projection this build cannot read. Its rows exist,
+	// but the recorded index format is one no handler serves, so the content
+	// behind them cannot be trusted. Unlike an unfinished capture, this is not
+	// something to show: it is something to report.
+	unreadableID := ingest.SessionID(mountUnreadableSessionID)
+	if err := db.IndexSessionEntries(t.Context(), unreadableID, []schema.SessionEntry{{
+		SessionID:      unreadableID,
+		EntryIndex:     0,
+		Harness:        defaults.HarnessClaudeCode,
+		EntryType:      ingest.EntryTypeText,
+		Role:           ingest.RoleUser,
+		ContentPreview: &cut,
+		TimestampMs:    &now,
+	}}); err != nil {
+		t.Fatalf("index unreadable session entries: %v", err)
+	}
+	conn, err := db.Pool().Take(t.Context())
+	if err != nil {
+		t.Fatalf("take connection: %v", err)
+	}
+	defer db.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, "UPDATE sessions SET index_format_version = 99 WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{mountUnreadableSessionID}}); err != nil {
+		t.Fatalf("record an unsupported stored index format: %v", err)
 	}
 }
 
@@ -407,21 +443,24 @@ func sessionEntries(t *testing.T, sessionID ingest.SessionID, rows []testutil.Tu
 // previewCase is one highlighted row and the lines the mounted pane must and
 // must not carry for it.
 type previewCase struct {
+	Name string `yaml:"name"`
+	// WantError is the refusal the pane must surface. A preview shows less than
+	// the whole session when that is all the database holds, but it never
+	// invents content the database cannot vouch for.
 	WantError    string   `yaml:"wantError"`
-	Name         string   `yaml:"name"`
 	Highlight    string   `yaml:"highlight"`
 	WantContains []string `yaml:"wantContains"`
 	WantMissing  []string `yaml:"wantMissing"`
 }
 
-// previewDoc is the whole fixture plus its row-count guard. Recorded is the
+// previewDoc is the whole fixture plus its deletion guard. Recorded is the
 // conversation the real store is seeded with.
 type previewDoc struct {
-	ExpectedCaseCount int                    `yaml:"expectedCaseCount"`
-	Width             int                    `yaml:"width"`
-	Recorded          []testutil.TurnFixture `yaml:"recorded"`
-	SourceTranscript  []string               `yaml:"sourceTranscript"`
-	Cases             []previewCase          `yaml:"cases"`
+	RequiredNames    []string               `yaml:"requiredNames"`
+	Width            int                    `yaml:"width"`
+	Recorded         []testutil.TurnFixture `yaml:"recorded"`
+	SourceTranscript []string               `yaml:"sourceTranscript"`
+	Cases            []previewCase          `yaml:"cases"`
 }
 
 //go:embed testdata/kickstart_preview.yaml
@@ -442,8 +481,8 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 		}
 		t.Fatalf("kickstart_preview.yaml must hold exactly one document: %v", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))
+	if len(doc.Cases) == 0 {
+		t.Fatal("fixture declares no preview cases")
 	}
 	if len(doc.Recorded) == 0 {
 		t.Fatal("fixture records no turns; every case would take the not-imported path")
@@ -466,11 +505,17 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 		if len(c.WantContains)+len(c.WantMissing) == 0 && c.WantError == "" {
 			t.Fatalf("preview case %q asserts nothing; an empty want list is a guaranteed pass", c.Name)
 		}
+		if c.WantError != "" && len(c.WantContains)+len(c.WantMissing) > 0 {
+			t.Fatalf("preview case %q expects a refusal and rendered content; it can only get one", c.Name)
+		}
 		for _, want := range append(append([]string{}, c.WantContains...), c.WantMissing...) {
 			if strings.TrimSpace(want) == "" {
 				t.Fatalf("preview case %q declares an empty needle; it matches regardless of the code", c.Name)
 			}
 		}
+	}
+	if err := testutil.RequireFixtureNames("kickstart preview", "case", doc.RequiredNames, names); err != nil {
+		t.Fatal(err)
 	}
 	return doc
 }
@@ -521,7 +566,7 @@ func TestKickstartPreview_ReadsTheLocalStore(t *testing.T) {
 			body, err := source.Body(c.Highlight)
 			if c.WantError != "" {
 				if err == nil || !strings.Contains(err.Error(), c.WantError) {
-					t.Fatalf("preview-only capture must request recovery: %v", err)
+					t.Fatalf("an unreadable stored projection must be reported, not silently previewed: %v", err)
 				}
 				return
 			}

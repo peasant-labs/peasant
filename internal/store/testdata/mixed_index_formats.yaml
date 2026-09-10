@@ -15,6 +15,7 @@ requiredNames:
   - conversion-preserves-newer-producer
   - conversion-preserves-unknown-producer
   - conversion-preserves-empty-index
+  - conversion-does-not-bind-an-unbound-index
   - conversion-error-rolls-back
   - conversion-wrong-result-rolls-back
   - conversion-cannot-alter-parser-history
@@ -40,6 +41,10 @@ cases:
   - {name: conversion-preserves-newer-producer, operation: convert, producer: 99}
   - {name: conversion-preserves-unknown-producer, operation: convert, unknownProducer: true}
   - {name: conversion-preserves-empty-index, operation: convert, empty: true}
+  # The capture moved after the last index write, so the stored index is NOT
+  # bound to it. A conversion proves the canonical rows equal the STORED rows;
+  # it proves nothing about whether those rows describe the current capture.
+  - {name: conversion-does-not-bind-an-unbound-index, operation: convert, unboundCapture: true}
   - {name: conversion-error-rolls-back, operation: convert, fault: convert-error}
   - {name: conversion-wrong-result-rolls-back, operation: convert, fault: wrong-result}
   - {name: conversion-cannot-alter-parser-history, operation: convert, fault: alter-history}

@@ -99,8 +99,46 @@ func (s *Store) ConvertIndexFormat(ctx context.Context, sessionID schema.Session
 	if !sameIndexState(before, current) {
 		return fmt.Errorf("store: index conversion for session %s changed source format, input evidence or parser history while preparing its result; the transaction was refused; correct the conversion to preserve captured source state, producer revision and run time", sessionID)
 	}
+	capture, _, err := readCapture(conn, ingest.SessionID(sessionID))
+	if err != nil {
+		return err
+	}
 	stmts := newSessionEntryWriteStatements(conn)
 	defer func() { err = errors.Join(err, stmts.Close()) }()
-	_, err, _ = s.indexSessionEntryWriteSavepoint(ctx, conn, ingest.SessionEntryWrite{SessionID: sessionID, Result: output, IndexVersion: target, ExpectedState: before}, stmts, &conversion)
+	// The conversion carries the session's OWN capture context, not a fresh
+	// parser claim: its capture row, so a complete capture cannot be silently
+	// downgraded to a preview, and no indexer revision, because no parser ran.
+	//
+	// The publication revision is carried only when the stored index was
+	// ALREADY bound to it. A conversion proves the canonical rows are unchanged
+	// relative to the STORED rows; it proves nothing about whether those rows
+	// describe the current capture. Binding an index that was unbound -- because
+	// the capture moved after the last index write, or that write was held --
+	// would let a representation change alone make a session publishable, and
+	// it would publish entries nothing re-certified against the current
+	// capture. Zero leaves it exactly as unbound as it was.
+	captureRevision := int64(0)
+	if before.PublicationBound {
+		captureRevision = before.PublicationCaptureRevision
+	}
+	_, err, _ = s.indexSessionEntryWriteSavepoint(ctx, conn, ingest.SessionEntryWrite{
+		SessionID:          sessionID,
+		Result:             output,
+		IndexVersion:       target,
+		Mode:               ingest.SessionEntryWriteFormatConversion,
+		CaptureRevision:    captureRevision,
+		RequireFullContent: capture.Status == ingest.ContentCaptureComplete,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			PublicationCaptureRevision: capture.PublicationCaptureRevision,
+			Status:                     capture.Status,
+			SourceAuthority:            capture.SourceAuthority,
+			TranscriptOrigin:           capture.TranscriptOrigin,
+			CaptureFormat:              capture.CaptureFormat,
+			CapturedAtMs:               capture.CapturedAtMs,
+			FailureCode:                capture.FailureCode,
+			FailureMessage:             capture.FailureMessage,
+		},
+		ExpectedState: before,
+	}, stmts, &conversion)
 	return err
 }

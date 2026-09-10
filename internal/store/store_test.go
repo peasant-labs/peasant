@@ -537,14 +537,28 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 		t.Fatalf("second InsertSessions: %v", err)
 	}
 	// Metadata persistence must leave indexing retryable until the separate
-	// streamed index transaction acknowledges this source's entries.
+	// streamed index transaction acknowledges THIS source's entries. Input
+	// freshness is what changed here, so it is what the assertion reads: the
+	// session now carries the later captured source and NO indexed input proof,
+	// so no build may treat its stored index as current for that source.
+	state, err := s.ReadIndexState(ctx, entry.Metadata.SessionID)
+	if err != nil || state == nil || state.IndexedInputHash != nil {
+		t.Fatalf("changed captured source kept an indexed input proof: %+v, %v", state, err)
+	}
+	// The version-only selector cannot see it, and must not pretend to: the
+	// stamped indexer revision IS the current target, and inventing staleness
+	// there would re-index every unchanged session on every harvest.
 	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
-	if err != nil || len(stale) != 1 || stale[0] != entry.Metadata.SessionID {
-		t.Fatalf("changed captured source did not invalidate old index: %v, %v", stale, err)
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("a current indexer revision was reported stale: %v, %v", stale, err)
 	}
 
 	conn := takeConn(t, s.PoolForTest())
 	defer s.PoolForTest().Put(conn)
+
+	if got := queryText(t, conn, `SELECT CAST(source_fingerprint AS TEXT) FROM sessions`); got != "later captured source" {
+		t.Fatalf("stored captured source = %q, want the later capture", got)
+	}
 
 	sessCount := queryInt(t, conn, `SELECT COUNT(*) FROM sessions`)
 	if sessCount != 1 {

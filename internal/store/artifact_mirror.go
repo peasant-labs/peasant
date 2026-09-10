@@ -150,7 +150,8 @@ func (s *Store) mirrorArtifactSavepoint(conn *sqlite.Conn, request ingest.Artifa
 func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactMirrorRequest) (err error) {
 	meta := request.Artifact.Metadata
 	origin := sessionorigin.Unknown
-	if err := sqlitex.ExecuteTransient(conn, "SELECT schema_version, adapter_version, session_origin FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
+	originJudged := false
+	if err := sqlitex.ExecuteTransient(conn, "SELECT schema_version, adapter_version, session_origin, origin_version FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
 		Args: []any{string(meta.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnInt(0) > ingest.CurrentSchemaVersion {
 				return &ingest.UnsupportedMetadataVersionError{Path: string(meta.SessionID) + " (stored metadata)", Version: stmt.ColumnInt(0)}
@@ -164,6 +165,10 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 					return fmt.Errorf("mirror session %s: stored adapter revision %d exceeds captured revision %d; producer evidence was preserved; recover the matching committed artifact before retrying", meta.SessionID, stmt.ColumnInt(1), target)
 				}
 			}
+			// origin_version is the rule version a resolver verdict was
+			// recorded at. Zero means no verdict has ever been recorded for
+			// this row, which is the only state adapter evidence may fill.
+			originJudged = stmt.ColumnInt64(3) > 0
 			var parseErr error
 			origin, parseErr = sessionorigin.Parse(stmt.ColumnText(2))
 			return parseErr
@@ -171,6 +176,7 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	}); err != nil {
 		return err
 	}
+	storedOrigin := origin
 	if request.Origin != nil {
 		if err := request.Origin.Validate(); err != nil {
 			return err
@@ -216,8 +222,46 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	}
 	entry.PublicationCapture = entry.CWDProvenance != "" && entry.CWDProvenance != ingest.CWDNotRecovered
 
+	// Read once, BEFORE the upsert and any origin write: both fire the v51
+	// trigger, and afterwards the row can no longer say what it carried.
+	priorCapture := publicationCaptureSnapshot{}
+	if entry.PublicationCapture {
+		if priorCapture, err = readPublicationCaptureSnapshot(conn, meta.SessionID); err != nil {
+			return err
+		}
+	}
 	if err := s.insertSessionsOnConn(conn, []ingest.StoreEntry{entry}, request.Artifact.MetricSeed() != nil); err != nil {
 		return err
+	}
+	// The generic metadata upsert deliberately keeps the stored session_origin,
+	// because ordinary harness metadata carries no origin evidence and must not
+	// overwrite what a resolver proved.
+	//
+	// An explicit origin on this request is NOT automatically that evidence.
+	// Ordinary harvests supply one from whatever the harness adapter mined, so
+	// applying it whenever it is present would let an adapter guess overwrite a
+	// verdict the resolver recorded. Worse, session_origin and origin_version
+	// are one verdict moved by one statement (origin_state_writer.go); writing
+	// half of it would leave the row ABOVE the resolver's watermark carrying an
+	// unjudged origin, where ListStaleOriginSessions can never revisit it.
+	//
+	// So adapter evidence fills only a row no verdict has ever been recorded
+	// for. Such a row stays below the watermark and the resolver still judges
+	// it. A nil origin preserves the stored one, as before.
+	if request.Origin != nil && origin != storedOrigin && !originJudged {
+		if err := sqlitex.ExecuteTransient(conn, "UPDATE sessions SET session_origin = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{origin.String(), string(meta.SessionID)}}); err != nil {
+			return fmt.Errorf("mirror session %s: apply acquired session origin: %w; no session change was committed; retry harvest", meta.SessionID, err)
+		}
+		// session_origin is watched by the v51 trigger, so changing it clears
+		// the recovered provenance this transaction just established. Re-state
+		// the proof ROW and that provenance from the snapshot taken above. The
+		// index BINDING is not restored here and must not be: only a successful
+		// index write may certify one.
+		if entry.PublicationCapture {
+			if _, captureErr := persistPublicationCapture(conn, entry, priorCapture); captureErr != nil {
+				return captureErr
+			}
+		}
 	}
 	if err := upsertSessionCommitsOnConn(conn, meta.SessionID, meta.Git.Commits, true); err != nil {
 		return err

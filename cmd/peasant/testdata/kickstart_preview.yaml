@@ -11,14 +11,24 @@
 # truncated is a second seeded session standing in for the degraded read: its
 # stored body was cut at the database's content-preview limit and no source
 # transcript is on disk to recover the rest from. The pane must still show the
-# turn it has.
+# turn it has. That is the whole point of a preview: it shows what Peasant
+# recorded, and it certifies nothing. Refusing the pane over a capture that was
+# never finished would hide readable rows behind a demand to run a recovery
+# command, which is exactly what a person opening the pane is trying to avoid.
 #
 # sourceTranscript is the file a harness wrote for a session the store does not
 # hold. The preview reads that file in place, so the third case below shows a
 # real conversation for a session that Peasant never imported.
 #
-# expectedCaseCount is the row-count guard.
-expectedCaseCount: 5
+# requiredNames is the deletion guard: every name below must still be present,
+# so a case cannot quietly disappear.
+requiredNames:
+  - an-imported-session-shows-its-whole-recorded-transcript
+  - a-preview-only-stored-body-still-shows-the-turn-the-store-holds
+  - an-unreadable-stored-projection-is-reported-not-previewed
+  - a-discovered-session-the-store-lacks-reads-its-harness-transcript
+  - a-project-row-explains-what-to-highlight
+  - a-branch-row-explains-what-to-highlight
 width: 72
 recorded:
   - role: user
@@ -69,9 +79,31 @@ cases:
       # The session title is not repeated above the transcript that produced it.
       - imported session
 
-  - name: a-preview-only-stored-body-requests-content-recovery
+  # The capture behind this session was never finished, and its stored row is
+  # still real recorded content. The pane shows it.
+  - name: a-preview-only-stored-body-still-shows-the-turn-the-store-holds
     highlight: 8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68
-    wantError: "harvest index --force"
+    wantContains:
+      - "harness: claude code"
+      - "project: acme/tool"
+      - you
+      - the store cut this body at its preview limit
+    wantMissing:
+      # The store DOES hold this session, so the harness-transcript fallback
+      # must not have run.
+      - not imported yet
+      # An unfinished capture is not a failure to hand the person: the pane may
+      # show less than the whole session, and it does not send them to a
+      # recovery command to see the part that is already there.
+      - harvest index --force
+
+  # An unfinished capture is shown; content the database cannot vouch for is
+  # not. This session's rows exist but its recorded index format is one no
+  # handler in this build serves, so the pane reports that instead of rendering
+  # rows whose representation nothing can verify.
+  - name: an-unreadable-stored-projection-is-reported-not-previewed
+    highlight: 5a1f8c07-3b62-4d49-9e18-0f7a6c2b5d31
+    wantError: unsupported index format
 
   # The store does not hold this session. Its transcript is still on disk where
   # its harness wrote it, so the pane reads that file and shows the whole

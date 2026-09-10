@@ -2,6 +2,12 @@
 # One session per case. The store seeds the content capture through the
 # production writers, then the case sets the publication columns.
 #
+# wantFormat is the capture format the production writer must have STORED for
+# the seeded write. No caller supplies one, so these cases pin the writer's own
+# defaults: a bounded write records preview_only and a verified full write
+# records full. Without this, swapping those defaults would store a preview
+# under a format that claims whole-session content, and no test would notice.
+#
 # publicationRevision is the captured metadata revision. sessionRevision and
 # indexedRevision are the two sessions columns the binding predicate compares
 # against it. A zero publicationRevision means the session has no captured
@@ -26,6 +32,7 @@ cases:
     provenance: source_exact
     wantBound: true
     wantStatus: complete
+    wantFormat: full
   - name: bound-with-preview-capture
     capture: preview
     publicationRevision: 7
@@ -34,6 +41,7 @@ cases:
     provenance: source_workspace
     wantBound: true
     wantStatus: incomplete
+    wantFormat: preview_only
   - name: unbound-by-session-revision
     capture: full
     publicationRevision: 7
@@ -42,6 +50,7 @@ cases:
     provenance: source_exact
     wantBound: false
     wantStatus: complete
+    wantFormat: full
   # A realistic stale state: indexed at 6 while the metadata is now at 7. A
   # zero here could not tell equality from a bare "is positive" test.
   - name: unbound-by-indexed-revision
@@ -52,6 +61,7 @@ cases:
     provenance: source_exact
     wantBound: false
     wantStatus: complete
+    wantFormat: full
   - name: unbound-by-provenance
     capture: full
     publicationRevision: 7
@@ -60,6 +70,7 @@ cases:
     provenance: not_recovered
     wantBound: false
     wantStatus: complete
+    wantFormat: full
   - name: unbound-without-metadata-row
     capture: full
     publicationRevision: 0
@@ -68,6 +79,7 @@ cases:
     provenance: source_exact
     wantBound: false
     wantStatus: complete
+    wantFormat: full
   - name: no-capture-row-reads-incomplete
     capture: none
     publicationRevision: 7
@@ -86,3 +98,4 @@ cases:
     provenance: source_exact
     wantBound: true
     wantStatus: failed
+    wantFormat: preview_only

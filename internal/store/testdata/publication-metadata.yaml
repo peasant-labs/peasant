@@ -24,6 +24,15 @@
   kind: source_absent
   action: skip-index
   readiness: needs_ingest
+# A harvest that finds nothing changed must not invent a new capture. It keeps
+# the revision it already had, so the index stamp is never left chasing a number
+# that moves every time it is read. It does NOT come back publishable on its
+# own: the v51 trigger cleared the binding, and only a successful index write
+# may certify a new one.
+- name: unchanged-recapture-keeps-its-capture-revision
+  kind: source_absent
+  action: unchanged-recapture
+  readiness: needs_ingest
 - name: noop-stamps-new-capture
   kind: source_absent
   action: recapture-noop

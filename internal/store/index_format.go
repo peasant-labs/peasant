@@ -222,6 +222,9 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 		}
 	}
 	producer := write.IndexerVersion
+	if write.Mode == ingest.SessionEntryWriteFormatConversion && producer != 0 {
+		return nil, nil, fmt.Errorf("store: session %s requested a format conversion that also claims indexer revision %d; the write was refused and the stored index preserved; a conversion changes only the representation, so run the parser through replace_all if a new producer revision actually processed the input", write.SessionID, producer)
+	}
 	if conversion != nil {
 		if state.IndexVersion == nil || *state.IndexVersion != conversion.FromVersion || write.IndexVersion != conversion.ToVersion || producer != 0 {
 			return nil, nil, fmt.Errorf("store: conversion source/target or producer history changed for session %s; replacement was refused; retry the registered upgrade against current stored state", write.SessionID)

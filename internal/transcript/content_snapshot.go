@@ -13,6 +13,17 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// PRIOR-VERSION, DEPRECATION CANDIDATE. Database content is authoritative.
+//
+// ContentSnapshot and the ReadSessionContent below overlay full text parsed
+// from a retained managed FILE onto the stored SQL projection. They predate
+// durable full-content capture in SQLite and have no production caller left:
+// the viewer, export and publication all read verified content from the
+// database, which never depends on a file still being present, unchanged, or
+// parseable by today's harness parser. The code is retained, not deleted,
+// because no replacement has been ratified for a caller that genuinely has
+// only a file; nothing in this build may start using it as a content source.
+//
 // ContentSnapshot retains one SQL view and, when proven compatible, full text
 // from its captured input. A viewer may use Entries despite FullContentError;
 // export/publish callers must refuse full-content success when it is non-nil.
@@ -31,6 +42,9 @@ type ContentStore interface {
 
 var _ ContentStore = (*store.Store)(nil)
 
+// PRIOR-VERSION, DEPRECATION CANDIDATE. Database content is authoritative;
+// this file overlay has no production caller. See the ContentSnapshot note.
+//
 // ReadSessionContent takes file ownership before the content SQL snapshot, then
 // releases both before parsing. A locator lookup is only a hint: the captured
 // artifact and SQL identity must agree. This never creates or repairs artifacts.

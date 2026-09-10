@@ -9,6 +9,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// PRIOR-VERSION, DEPRECATION CANDIDATE. Database content is authoritative.
+// This overlay has no production caller: full detail, export and publication
+// read verified content from SQLite, which does not depend on a retained file
+// still existing or still parsing. It is retained, not deleted, because no
+// replacement has been ratified for a caller that genuinely has only a file.
+//
 // BuildContentOverlay is a legacy source-only compatibility helper. It cannot
 // establish capture completeness or stable stored entry coordinates. Full
 // detail, export and publication use verified database content instead.
