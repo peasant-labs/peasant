@@ -308,23 +308,13 @@ func cutServedTextAt(text string, showBytes int) int {
 // servedBoundNote is the visible note. Its wording follows the partial-preview
 // line style: plain sentence text, because it is content a reader sees, not UI
 // chrome.
+// The note says WHERE the whole record is without saying "locally". This exact
+// text travels into the publication body, so a reader on another machine reads
+// it too, and for them nothing about the record is local; naming the store that
+// recorded the session is true for both readers.
 func servedBoundNote(kind ServedTextKind, shown, recorded int) string {
-	return fmt.Sprintf("\n[%s bounded for display: showing %s of %s; the full record is stored locally]",
-		kind, formatServedBytes(shown), formatServedBytes(recorded))
-}
-
-// formatServedBytes renders a size the way the note reports it.
-func formatServedBytes(size int) string {
-	if size < 1<<10 {
-		return fmt.Sprintf("%d B", size)
-	}
-	// A size that would render as "1024.0 KiB" is reported in the next unit
-	// instead, so a bound landing one byte under a mebibyte does not read as more
-	// than a mebibyte.
-	if kib := float64(size) / float64(1<<10); kib < 1023.95 {
-		return fmt.Sprintf("%.1f KiB", kib)
-	}
-	return fmt.Sprintf("%.1f MiB", float64(size)/float64(1<<20))
+	return fmt.Sprintf("\n[%s bounded for display: showing %s of %s; the full record is kept by the peasant store that recorded this session]",
+		kind, defaults.HumanByteSize(int64(shown)), defaults.HumanByteSize(int64(recorded)))
 }
 
 // jsonEncodedStringLen is the number of bytes the JSON encoder writes for s,

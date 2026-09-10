@@ -25,7 +25,9 @@ no placeholder, so it stays a bounded preview. What decides is the stored entrie
 A stored record may be much larger than the wire contract lets a served session detail document
 be. No session is refused for size. On the read path each served tool result, tool argument
 document and turn body is bounded for display, and a shortened value carries a plain note saying
-how much is shown, how much was recorded, and that the whole record is still stored locally. The
+how much is shown, how much was recorded, and that the whole record is still held by the peasant
+store that recorded the session. That wording is deliberate: the same note travels into a published
+transcript, which is read on another machine where nothing about the record is local. The
 same bound applies to the session detail channel, the kickstart preview, `peasant export` and the
 published transcript, because all four come from one projection. Stored entries are never
 changed by it: a full-content read still returns every byte.

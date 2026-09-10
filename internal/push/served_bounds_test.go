@@ -86,10 +86,15 @@ func TestPushContent_BoundsAnOversizedToolResult(t *testing.T) {
 	if note != defaults.ServedTextFieldBudgetBytes {
 		t.Errorf("the published tool result shows %d bytes, want the per-field budget %d", note, defaults.ServedTextFieldBudgetBytes)
 	}
-	for _, want := range []string{"tool result bounded for display", "showing 1.0 MiB of 9.0 MiB", "the full record is stored locally"} {
+	for _, want := range []string{"tool result bounded for display", "showing 1.0 MiB of 9.0 MiB", "kept by the peasant store that recorded this session"} {
 		if !strings.Contains(found[note:], want) {
 			t.Errorf("bound note %q does not contain %q", found[note:], want)
 		}
+	}
+	// This body is uploaded and read on another machine. A reader there has no
+	// store of their own, so nothing about the record is local to them.
+	if strings.Contains(found[note:], "stored locally") {
+		t.Errorf("the published bound note tells a remote reader the record is %q: %q", "stored locally", found[note:])
 	}
 }
 

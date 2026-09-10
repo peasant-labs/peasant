@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
+
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
@@ -152,24 +154,8 @@ func omissionPlaceholderEntry(
 func omissionPlaceholderNote(record OmittedRecord) string {
 	return fmt.Sprintf(
 		"tool output omitted: %s record at line %d is over the %s limit; the rest of the session was kept",
-		humanByteSize(record.Bytes), record.Line, humanByteSize(record.LimitBytes),
+		defaults.HumanByteSize(record.Bytes), record.Line, defaults.HumanByteSize(record.LimitBytes),
 	)
-}
-
-// humanByteSize renders a byte count the way the diagnostics and the reader
-// note both state it, so the two never disagree.
-func humanByteSize(size int64) string {
-	const unit = 1024
-	switch {
-	case size >= unit*unit*unit:
-		return fmt.Sprintf("%.1f GiB", float64(size)/float64(unit*unit*unit))
-	case size >= unit*unit:
-		return fmt.Sprintf("%.0f MiB", float64(size)/float64(unit*unit))
-	case size >= unit:
-		return fmt.Sprintf("%.0f KiB", float64(size)/float64(unit))
-	default:
-		return fmt.Sprintf("%d bytes", size)
-	}
 }
 
 // appendOmissionPlaceholders adds one placeholder entry for every omission the

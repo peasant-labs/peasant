@@ -12,7 +12,7 @@ cases:
         noteContains:
           - "tool result bounded for display"
           - "showing 1.0 MiB of 9.0 MiB"
-          - "the full record is stored locally"
+          - "kept by the peasant store that recorded this session"
   - name: small_tool_result_is_served_whole
     kind: tool_result
     fill: "x"

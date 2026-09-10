@@ -1,0 +1,29 @@
+# The one byte rendering every reader-facing note and diagnostic uses.
+requiredNames:
+  - under_a_kibibyte_is_plain_bytes
+  - a_whole_kibibyte_carries_one_decimal
+  - a_size_one_byte_under_a_mebibyte_reads_as_a_mebibyte
+  - the_served_document_cap_reads_in_mebibytes
+  - the_per_record_cap_reads_in_mebibytes
+  - a_gibibyte_scale_record_reads_in_gibibytes
+cases:
+  - name: under_a_kibibyte_is_plain_bytes
+    bytes: 512
+    want: 512 B
+  - name: a_whole_kibibyte_carries_one_decimal
+    bytes: 8192
+    want: 8.0 KiB
+  # 1048575 is one byte under a mebibyte. Rendered in kibibytes it would read
+  # "1024.0 KiB", which a reader compares against "1.0 MiB" as if it were more.
+  - name: a_size_one_byte_under_a_mebibyte_reads_as_a_mebibyte
+    bytes: 1048575
+    want: 1.0 MiB
+  - name: the_served_document_cap_reads_in_mebibytes
+    bytes: 8388608
+    want: 8.0 MiB
+  - name: the_per_record_cap_reads_in_mebibytes
+    bytes: 268435456
+    want: 256.0 MiB
+  - name: a_gibibyte_scale_record_reads_in_gibibytes
+    bytes: 3221225472
+    want: 3.0 GiB

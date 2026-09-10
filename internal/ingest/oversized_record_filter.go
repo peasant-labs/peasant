@@ -118,12 +118,12 @@ func OversizedRecordDiagnostic(sourcePath string, record OmittedRecord) Diagnost
 		Location:  fmt.Sprintf("%s line %d", sourcePath, record.Line),
 		Message: fmt.Sprintf(
 			"omitted one JSONL record of %d bytes (%s) at line %d because it is over this build's %d-byte (%s) per-record limit; the record was left out before redaction, every other record in the session was kept and indexed, and a placeholder entry marks the position it held",
-			record.Bytes, humanByteSize(record.Bytes), record.Line,
-			record.LimitBytes, humanByteSize(record.LimitBytes),
+			record.Bytes, defaults.HumanByteSize(record.Bytes), record.Line,
+			record.LimitBytes, defaults.HumanByteSize(record.LimitBytes),
 		),
 		Remediation: fmt.Sprintf(
 			"No action is needed to keep the session: it is stored as a partial capture with a placeholder standing in the omitted record's place, and it stays readable, searchable, exportable and publishable as it is, with the placeholder and the partial flag travelling with it. The record itself returns on the next harvest of this session if it becomes smaller than %s in the source, or if a build with a larger per-record limit indexes it.",
-			humanByteSize(record.LimitBytes),
+			defaults.HumanByteSize(record.LimitBytes),
 		),
 	}
 }
