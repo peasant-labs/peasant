@@ -21,42 +21,43 @@ expectedRootKeys: [duration, sessions, summary]
 #                       the run. Declared per case from what the run emits today;
 #                       a case whose refusal gains a log line flips this field
 #                       deliberately.
-#   wantWarningLines  - how many "warning:" lines the command prints. Here the
-#                       number IS the contract: one refused session should be
-#                       reported once, so a second reporting path for the same
-#                       cause shows up as a second line even when it says the
-#                       same thing in other words. Declared per case from what
-#                       the run prints today, exactly like wantStructuredLog;
-#                       a case that warns must declare a positive count and a
-#                       case that does not must declare none.
+#   wantWarningLines  - the exact multiset of "warning:" lines the command
+#                       prints, named by the EVIDENCE each line read rather
+#                       than by its wording:
+#                         managed-metadata-file  the managed metadata file
+#                         stored-metadata-row    the session's stored row
+#                       One refused session is reported once per piece of
+#                       evidence, so a second reporting path for the same
+#                       evidence shows up here even when it says the same thing
+#                       in other words. Names, not a count: a count cannot say
+#                       WHICH lines it saw, so one line vanishing while another
+#                       arrives would leave it unchanged. A case that warns
+#                       must name at least one line; one that does not must
+#                       name none.
 #
-# The stored-schema refusal reports once. A metadata-ARTIFACT refusal still
-# reports the SAME refusal TWICE, and the count is declared so that collapsing
-# the pair is a deliberate, visible change rather than a silent one:
-#   1. the rewrite check, naming the metadata file by its absolute path;
-#   2. the selection check, naming the same file by its path relative to the
-#      managed output directory.
-# Same session, same version, same remedy. The two entries survive dedup only
-# because the two reporters spell the location differently, which is the one
-# thing dedup by value cannot see through.
-#
-# A third warning used to come from the retained-content recovery sweep. It is
-# gone because the seed now leaves a COMPLETE content capture, as a finished
-# harvest does, and a session with nothing missing is not a recovery target.
+# Every refusal here reports ONCE. Two earlier duplicates are gone and stay
+# gone because this corpus names lines rather than counting them:
+#   - the managed-metadata scan and the index selection both refuse the same
+#     FILE; they used to spell its path absolute and relative, so dedup by
+#     whole-value equality could not collapse them. Both now name the file by
+#     its path under the managed output directory;
+#   - the retained-content recovery sweep used to add a third line, until the
+#     seed began leaving a COMPLETE content capture as a finished harvest does.
+#     A session with nothing missing is not a recovery target.
 cases:
   - name: normal refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-    wantWarningLines: 2
+    wantWarningLines: [managed-metadata-file]
   - name: forced refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     force: true
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-    wantWarningLines: 2
+    wantWarningLines: [managed-metadata-file]
   - name: index refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     reindex: true
@@ -64,7 +65,7 @@ cases:
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-    wantWarningLines: 2
+    wantWarningLines: [managed-metadata-file]
   # This refusal is reported to the user but logs nothing structured today.
   - name: stored schema refusal stays nonfatal and keeps last-good state
     schemaVersion: 9
@@ -74,7 +75,7 @@ cases:
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: false
-    wantWarningLines: 1
+    wantWarningLines: [stored-metadata-row]
   # The only case that indexes anything, so the only one whose document carries
   # an index log.
   - name: compatible metadata has no false warning

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"maps"
@@ -52,6 +53,44 @@ var harvestMetadataDiagnosticsYAML []byte
 // suppressed anything.
 
 // harvestDiagnosticsFixtures is the corpus both surfaces drive.
+// harvestWarningLine identifies ONE line the harvest prints, by the thing that
+// line is about rather than by its wording.
+//
+// A refusal names the evidence it read. The managed file and the stored row are
+// different evidence for the same session, so they are different lines; two
+// reporters that read the SAME evidence must produce one.
+type harvestWarningLine string
+
+const (
+	// harvestWarningManagedFile is a refusal that read the managed metadata
+	// FILE, named by its path under the managed output directory.
+	harvestWarningManagedFile harvestWarningLine = "managed-metadata-file"
+	// harvestWarningStoredRow is a refusal that read the session's STORED
+	// metadata row, named by the session and "(stored metadata)".
+	harvestWarningStoredRow harvestWarningLine = "stored-metadata-row"
+)
+
+func newHarvestWarningLine(raw string) (harvestWarningLine, error) {
+	switch line := harvestWarningLine(raw); line {
+	case harvestWarningManagedFile, harvestWarningStoredRow:
+		return line, nil
+	}
+	return "", fmt.Errorf("harvest diagnostics fixture: unknown warning line %q; use managed-metadata-file or stored-metadata-row", raw)
+}
+
+// identifyHarvestWarning says which line this is. It reads the evidence the
+// line names, which is the one part of the sentence the two reporters cannot
+// spell differently without meaning different things.
+func identifyHarvestWarning(line string) (harvestWarningLine, error) {
+	switch {
+	case strings.Contains(line, "(stored metadata)"):
+		return harvestWarningStoredRow, nil
+	case strings.Contains(line, defaults.MetadataSuffix):
+		return harvestWarningManagedFile, nil
+	}
+	return "", fmt.Errorf("the command printed a warning this corpus cannot name: %q; add its identity to harvestWarningLine before declaring it", line)
+}
+
 type harvestDiagnosticsFixtures struct {
 	RequiredNames    []string                 `yaml:"requiredNames"`
 	ExpectedRootKeys []string                 `yaml:"expectedRootKeys"`
@@ -76,13 +115,18 @@ type harvestDiagnosticsCase struct {
 	// run, and it is declared per case rather than inferred from what happens to
 	// appear: inferring it would pass however the command behaved.
 	WantStructuredLog bool `yaml:"wantStructuredLog"`
-	// WantWarningLines is how many "warning:" lines the command surface prints
-	// for this case. Here the number IS the contract: one cause reported once.
+	// WantWarningLines names the "warning:" lines the command surface prints
+	// for this case, as an exact multiset of line IDENTITIES.
+	//
 	// The harvest prints one line per reported diagnostic (cmd_harvest.go:527),
 	// so a cause that reaches the user through two reporters, or through one
 	// reporter twice, shows as two lines however similar the sentences are.
-	// Containment cannot see that, which is why the count is declared.
-	WantWarningLines int `yaml:"wantWarningLines"`
+	// Containment cannot see that. Neither can a bare count: it cannot say
+	// WHICH lines it saw, so one line disappearing while a different one
+	// arrives leaves the number unchanged and the test green. Naming each line
+	// makes both halves of such a swap visible, and makes collapsing a
+	// duplicate a one-name edit with the cause written down.
+	WantWarningLines []harvestWarningLine `yaml:"wantWarningLines"`
 }
 
 func loadHarvestDiagnosticsFixtures(t *testing.T) harvestDiagnosticsFixtures {
@@ -94,9 +138,14 @@ func loadHarvestDiagnosticsFixtures(t *testing.T) harvestDiagnosticsFixtures {
 		t.Fatal(err)
 	}
 	for _, fixture := range fixtures.Cases {
-		if fixture.WantWarning == (fixture.WantWarningLines == 0) {
-			t.Fatalf("fixture %q: a case that warns must declare how many warning lines the user sees, and a case that does not must declare none; wantWarning=%v wantWarningLines=%d",
+		if fixture.WantWarning == (len(fixture.WantWarningLines) == 0) {
+			t.Fatalf("fixture %q: a case that warns must name the warning lines the user reads, and a case that does not must name none; wantWarning=%v wantWarningLines=%v",
 				fixture.Name, fixture.WantWarning, fixture.WantWarningLines)
+		}
+		for _, line := range fixture.WantWarningLines {
+			if _, err := newHarvestWarningLine(string(line)); err != nil {
+				t.Fatalf("fixture %q: %v", fixture.Name, err)
+			}
 		}
 	}
 	return fixtures
@@ -219,17 +268,26 @@ func (w harvestDiagnosticsWorld) assertWarning(t *testing.T, fixture harvestDiag
 				t.Fatalf("the post-render warning must name %q: %q", want, shown)
 			}
 		}
-		// One cause, one line. The interactive surface writes its render into the
-		// same stream, so only the document surface can count.
+		// One piece of evidence, one line. The interactive surface writes its
+		// render into the same stream, so only the document surface can be read
+		// line by line.
 		if surface == diagnosticsSurfaceDocument {
-			lines := 0
+			var printed []harvestWarningLine
 			for _, line := range strings.Split(shown, "\n") {
-				if strings.HasPrefix(line, "warning:") {
-					lines++
+				if !strings.HasPrefix(line, "warning:") {
+					continue
 				}
+				identity, err := identifyHarvestWarning(line)
+				if err != nil {
+					t.Fatal(err)
+				}
+				printed = append(printed, identity)
 			}
-			if lines != fixture.WantWarningLines {
-				t.Fatalf("the command printed %d warning lines, want %d: one refused session must be reported once, whatever the reporting path: %q", lines, fixture.WantWarningLines, shown)
+			want := slices.Clone(fixture.WantWarningLines)
+			slices.Sort(printed)
+			slices.Sort(want)
+			if !slices.Equal(printed, want) {
+				t.Fatalf("the command printed the warning lines %v, want %v: one refused session must be reported once per piece of evidence, whatever the reporting path: %q", printed, want, shown)
 			}
 		}
 		return
