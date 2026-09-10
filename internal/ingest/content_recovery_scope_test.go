@@ -17,6 +17,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/content_recovery_scope.yaml
@@ -47,6 +49,9 @@ type contentRecoveryScopeFixtures struct {
 		SinceAfterStart  bool   `yaml:"since_after_start"`
 		OtherSessionOnly bool   `yaml:"other_session_only"`
 		FutureProducer   bool   `yaml:"future_producer"`
+		FutureSchema     bool   `yaml:"future_stored_schema"`
+		PreExistingReads int    `yaml:"pre_existing_retained_reads"`
+		NoIndexLog       bool   `yaml:"no_index_log"`
 		Expect           string `yaml:"expect"`
 	} `yaml:"cases"`
 }
@@ -81,7 +86,7 @@ func TestContentRecoveryScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := context.Background()
-			fs := testutil.NewMemFS()
+			fs := testutil.NewCountingFS(testutil.NewMemFS())
 			database, err := store.Open(filepath.Join(t.TempDir(), "scope.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -94,7 +99,13 @@ func TestContentRecoveryScope(t *testing.T) {
 			meta := makeMinimalMeta(t, id.String())
 			meta.Project.Hash = testutil.TestProjectHash
 			meta.Source.FilePath = "/synthetic/missing.jsonl"
-			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+			stored := *meta
+			if fixture.FutureSchema {
+				// The stored row claims a schema this build does not know; the
+				// retained file stays at the current schema.
+				stored.SchemaVersion = ingest.CurrentSchemaVersion + 1
+			}
+			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &stored}}); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(testOutputDir, testutil.TestHostSlug)
@@ -151,13 +162,26 @@ func TestContentRecoveryScope(t *testing.T) {
 				cfg.AllowedSessionIDs = map[ingest.SessionID]bool{other: true}
 			}
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 			if err != nil {
 				t.Fatal(err)
 			}
+			fs.ResetCounts()
 			result, err := pipeline.Run(ctx)
 			if err != nil {
 				t.Fatalf("reindex: %v", err)
+			}
+			if fs.ReadCount(meta.Source.FilePath) != 0 {
+				t.Fatalf("retained recovery read the native source %d times", fs.ReadCount(meta.Source.FilePath))
+			}
+			logged, recoveryLogged := 0, 0
+			for _, entry := range result.IndexLog {
+				if entry.SessionID == id {
+					logged++
+					if entry.Reason != nil && *entry.Reason == "content recovered from retained input" {
+						recoveryLogged++
+					}
+				}
 			}
 			diagnostics := make(map[string]ingest.DiagnosticEntry)
 			for _, diagnostic := range result.Diagnostics {
@@ -185,19 +209,29 @@ func TestContentRecoveryScope(t *testing.T) {
 				if err != nil || state == nil || state.IndexedInputHash == nil || state.IndexerVersion != producer {
 					t.Fatalf("recovered session was excluded from independent index work: %+v %v", state, err)
 				}
-				// The repair is reported in the run's index log and counted once.
-				logged := false
+				if fs.ReadCount(path) == 0 {
+					t.Fatal("recovery did not read the retained transcript")
+				}
+				// The repair is reported in the run's index log, counted once, and
+				// persisted as exactly one recovery row.
+				reported := false
 				for _, entry := range result.IndexLog {
 					if entry.SessionID == id && entry.Outcome == ingest.IndexOutcomeReindexed && entry.Reason != nil && *entry.Reason == "content recovered from retained input" {
-						logged = true
+						reported = true
 					}
 				}
-				if !logged || result.Summary.Indexed != 1 {
+				if !reported || result.Summary.Indexed != 1 {
 					t.Fatalf("recovery is not reported and counted once: indexed=%d log=%+v", result.Summary.Indexed, result.IndexLog)
+				}
+				if rows := countRecoveryLogRows(t, database, id); rows != 1 {
+					t.Fatalf("recovery persisted %d index_log rows, want exactly 1", rows)
 				}
 			case recoveryScopeUntouched:
 				if found && capture.Status == ingest.ContentCaptureComplete {
 					t.Fatalf("out-of-scope session was recovered: %+v", capture)
+				}
+				if fs.ReadCount(path) != 0 {
+					t.Fatalf("out-of-scope session's retained transcript was read %d times", fs.ReadCount(path))
 				}
 				for errorType := range diagnostics {
 					if errorType == "content_recovery_refused" || errorType == "content_recovery_unavailable" {
@@ -221,9 +255,34 @@ func TestContentRecoveryScope(t *testing.T) {
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("refused session entries changed: before=%+v after=%+v", before, after)
 				}
+				if reads := fs.ReadCount(path); reads != fixture.PreExistingReads {
+					t.Fatalf("refused session's retained transcript was read %d times, want %d (recovery itself reads nothing; any pre-existing read outside recovery is pinned by the fixture)", reads, fixture.PreExistingReads)
+				}
+				if rows := countRecoveryLogRows(t, database, id); recoveryLogged != 0 || rows != 0 {
+					t.Fatalf("refused session grew a recovery index-log entry: run=%d persisted=%d", recoveryLogged, rows)
+				}
+				if fixture.NoIndexLog && logged != 0 {
+					t.Fatalf("stored-schema refusal grew %d index-log entries: %+v", logged, result.IndexLog)
+				}
 			}
 		})
 	}
+}
+
+// countRecoveryLogRows counts persisted index_log rows carrying the recovery
+// reason for one session: the audit table must hold exactly one per repair.
+func countRecoveryLogRows(t *testing.T, database *store.Store, id ingest.SessionID) int {
+	t.Helper()
+	conn, err := database.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Pool().Put(conn)
+	rows := 0
+	if err := sqlitex.ExecuteTransient(conn, "SELECT count(*) FROM index_log WHERE session_id = ? AND reason = ?", &sqlitex.ExecOptions{Args: []any{id.String(), "content recovered from retained input"}, ResultFunc: func(stmt *sqlite.Stmt) error { rows = stmt.ColumnInt(0); return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	return rows
 }
 
 func containsAll(text string, needles ...string) bool {

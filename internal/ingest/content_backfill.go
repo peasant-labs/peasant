@@ -134,7 +134,13 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			if !p.includesIndexTarget(scope) {
 				continue
 			}
-			state, err := reader.ReadIndexState(ctx, id)
+			// The same stored-metadata compatibility check the index filter
+			// applies: a session whose stored schema is newer than this build is
+			// refused before any retained read, store write or index-log entry.
+			state, err := (*SessionIndexState)(nil), p.checkStoredMetadataVersion(ctx, id)
+			if err == nil {
+				state, err = reader.ReadIndexState(ctx, id)
+			}
 			if err == nil && state == nil {
 				err = fmt.Errorf("content recovery %s: the store lists the session as a recovery target but reports no index state for it", id)
 			}
@@ -287,12 +293,8 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	if !results[0].Written {
 		return contentRecovery{}, fmt.Errorf("content backfill %s: store did not confirm the atomic write; inspect database before retrying", id)
 	}
-	if p.indexLogger != nil {
-		entry := p.makeIndexLogEntry(indexedMeta{session: session, outputTranscriptPath: session.SourcePath.String()}, IndexOutcomeReindexed, len(capture.Entries), now, nil, nil)
-		if err := p.indexLogger.LogIndexEntry(ctx, entry); err != nil {
-			slog.Warn("content captured but index audit failed", "session_id", id, "error", err)
-		}
-	}
+	// The run-level recovery entry (contentRecoveryLogEntries) is the one
+	// index-log row for this repair; it is persisted once by the finalize stage.
 	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now}, nil
 }
 

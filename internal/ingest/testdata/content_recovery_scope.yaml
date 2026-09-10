@@ -2,9 +2,21 @@
 # index maintenance. Each case runs one reindex over a single stored session
 # whose content capture is absent, with one scope filter or one stored
 # producer condition applied, and asserts the observable outcome:
-#   recovered  the capture becomes complete
-#   untouched  no read, no write, no recovery diagnostic
-#   refused    a content_recovery_refused diagnostic; nothing written
+#   recovered  the capture becomes complete; the retained transcript was read,
+#              the native source was not; exactly one recovery index-log row
+#   untouched  no retained read, no write, no recovery diagnostic
+#   refused    a content_recovery_refused diagnostic; recovery reads nothing,
+#              nothing is written, no recovery index-log entry. A producer
+#              refusal still gets the index path's visible error outcome; a
+#              stored-schema refusal (no_index_log) grows no entry at all,
+#              matching the index filter that drops it before parsing.
+#              pre_existing_retained_reads pins a read that happens outside
+#              recovery: the reindex fallback preparation reads the retained
+#              transcript of a target the index path then refuses
+#              (index_selection.go returns needs-work on a capture refusal;
+#              publication_capture.go reads the transcript before parsing). It
+#              goes red when that read is removed, so the fixture is updated
+#              with the change, never silently.
 # required_names guards deletion by name; adding a case need not appear here.
 required_names:
   - in-scope-recovers
@@ -12,6 +24,7 @@ required_names:
   - since-after-start-untouched
   - session-filter-untouched
   - future-producer-refused
+  - future-stored-schema-refused
 cases:
   - name: in-scope-recovers
     expect: recovered
@@ -27,3 +40,8 @@ cases:
   - name: future-producer-refused
     future_producer: true
     expect: refused
+    pre_existing_retained_reads: 1
+  - name: future-stored-schema-refused
+    future_stored_schema: true
+    expect: refused
+    no_index_log: true
