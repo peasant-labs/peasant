@@ -647,7 +647,7 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
 CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
 p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
-c.status,c.full_capture_sha256,c.publication_capture_revision,s.adapter_version
+c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
@@ -675,8 +675,8 @@ WHERE s.session_id IN (` +
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
 			var adapterVersion *int
-			if stmt.ColumnType(19) != sqlite.TypeNull {
-				value := stmt.ColumnInt(19)
+			if stmt.ColumnType(21) != sqlite.TypeNull {
+				value := stmt.ColumnInt(21)
 				adapterVersion = &value
 			}
 			var sourceFingerprint []byte

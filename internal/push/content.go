@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
@@ -363,7 +364,7 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	// Nothing leaks in that case, which is why it is a shape check and not a
 	// second redaction; a body the village stores as a transcript should still be
 	// one.
-	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
+	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.SessionDetailDocumentCapBytes, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
 		return nil, err
 	}
 	var check schema.TranscriptContent

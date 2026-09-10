@@ -5,10 +5,28 @@ content from the local database. Provider source files and retained transcript f
 read by these consumers. Search and list previews remain bounded. Tool input and output keep
 their existing full stored values.
 
-An incomplete or corrupt capture cannot serve as a complete transcript or publication. The
-error identifies the failed read and asks for `peasant harvest index --force` with the retained
-artifacts available. Rebuild the capture before retrying. A short legacy preview is not proof
-that a capture is complete.
+An incomplete or corrupt capture cannot serve as a complete transcript or publication, with one
+exception. The error identifies the failed read and asks for `peasant harvest index --force`
+with the retained artifacts available. Rebuild the capture before retrying. A short legacy
+preview is not proof that a capture is complete.
+
+The exception is a capture whose only gap is oversized source records that ingest omitted. That
+capture holds every entry the source had, with a placeholder standing in each omitted record's
+place, so it is read, exported and published like a complete one; the published metadata declares
+the session partial and carries the omission warning, so a reader is told what is missing. Every
+other incompleteness is refused as before: a strict-parser refusal, a legacy preview-only
+capture, a failed capture, and the omitted-record state over a bounded preview rather than the
+full stored text.
+
+## Bounded tool results on served reads
+
+A stored record may be much larger than the wire contract lets a served session detail document
+be. No session is refused for size. On the read path each served tool result, tool argument
+document and turn body is bounded for display, and a shortened value carries a plain note saying
+how much is shown, how much was recorded, and that the whole record is still stored locally. The
+same bound applies to the session detail channel, the kickstart preview, `peasant export` and the
+published transcript, because all four come from one projection. Stored entries are never
+changed by it: a full-content read still returns every byte.
 
 Indexing first attempts recovery of database-listed incomplete captures. It parses retained
 root and subagent artifacts first. `peasant harvest index --force` also reprocesses other
