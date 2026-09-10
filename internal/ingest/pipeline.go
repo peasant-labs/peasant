@@ -2656,9 +2656,14 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	var transcriptData []byte
 
 	sourceFingerprint := captured.SourceFingerprint
-	if session.Harness == HarnessStrike && session.SourceFormat == SourceFormatJSONL {
+	if session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
-		rawData, diagnostics = filterStrikeOversizedRecords(rawData, session.SourcePath.String())
+		var filterErr error
+		rawData, diagnostics, filterErr = filterOversizedJSONLRecords(ctx, rawData, session.SourcePath.String(), defaults.MaxJSONLRecordBytes)
+		if filterErr != nil {
+			result.Error = errors.Join(filterErr, p.fs.RemoveAll(tmpDir))
+			return workerResult{result: result}
+		}
 		if len(diagnostics) > 0 {
 			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, diagnostics...)
 			partial := true
@@ -2671,7 +2676,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if p.redactor != nil {
 		switch session.SourceFormat {
 		case SourceFormatJSONL:
-			redacted, redactErr := redact.RedactJSONLBytes(p.redactor, rawData, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.ScannerMaxLine))
+			redacted, redactErr := redact.RedactJSONLBytes(p.redactor, rawData, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
 			if redactErr != nil {
 				result.Error = errors.Join(
 					fmt.Errorf("redact transcript for %s: %w", session.SessionID, redactErr),
@@ -4512,7 +4517,7 @@ func (p *Pipeline) redactTranscript(path string, format SourceFormat) error {
 	switch format {
 	case SourceFormatJSONL:
 		var redactErr error
-		out, redactErr = redact.RedactJSONLBytes(p.redactor, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.ScannerMaxLine))
+		out, redactErr = redact.RedactJSONLBytes(p.redactor, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
 		if redactErr != nil {
 			return fmt.Errorf("redactTranscript JSONL %s: %w", path, redactErr)
 		}

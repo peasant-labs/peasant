@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -483,8 +482,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		return evidence, false
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	var identity *ClaudeTeammateIdentity
 	var invalidIdentity, malformed, conversation bool
@@ -762,8 +760,7 @@ func (a *ClaudeAdapter) hasClaudeConversationRecord(path string) bool {
 		defer closeFile()
 	}
 
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	scanner := newJSONLRecordStreamScanner(reader, defaults.MaxJSONLRecordBytes)
 	var validRecords int
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -1018,13 +1015,10 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 		tokensOut      int
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	// Set scanner buffer to handle large lines. While the entire file is already
-	// in memory via ReadFile(), bufio.Scanner has an internal line-length limit
-	// that defaults to 64KiB. The 10 MiB limit prevents token scan errors on
-	// assistant messages with very large tool outputs.
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	// The shared record reader handles a record of any size: a record up to
+	// defaults.MaxJSONLRecordBytes is read whole, and a longer one is skipped
+	// and listed by Oversized() rather than failing the scan.
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		lineNum++

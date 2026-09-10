@@ -127,10 +127,21 @@ const OpenCodePreviewFirstPageMaxBytes = 64 << 10 // 64 KiB
 // retains grow only as far as the reader scrolls.
 const OpenCodePreviewSliceMaxBytes = 8 << 20 // 8 MiB
 
-// Scanner buffer sizes for reading large JSONL lines.
+// MaxJSONLRecordBytes is the largest single JSONL record Peasant reads,
+// redacts and indexes whole. The rule is the same for every JSONL harness
+// (Claude Code, Codex, Cursor, Strike, Pi) and for the per-record reads of
+// the OpenCode sources: a record up to this size is processed in full; a
+// record over it is omitted without being loaded, is reported with an
+// actionable diagnostic and a placeholder entry at its position, and the
+// session still ingests and is stored partial. No size ever fails a session
+// and no record is ever silently dropped.
+//
+// ScannerInitBuf is the starting read buffer. Readers grow from it on demand
+// up to MaxJSONLRecordBytes, so an ordinary transcript never allocates the
+// maximum.
 const (
-	ScannerMaxLine = 10 << 20 // 10 MiB
-	ScannerInitBuf = 64 << 10 // 64 KiB
+	MaxJSONLRecordBytes = 256 << 20 // 256 MiB
+	ScannerInitBuf      = 64 << 10  // 64 KiB
 )
 
 // WebAssetsSubdir is the embedded filesystem subdirectory for web assets.

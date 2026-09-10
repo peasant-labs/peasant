@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -95,8 +94,7 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 // validateRetainedJSONL checks complete object records before metadata recovery
 // or the adapters' historically tolerant metadata extraction scans.
 func validateRetainedJSONL(ctx context.Context, data []byte) error {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
