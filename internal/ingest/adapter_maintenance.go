@@ -147,8 +147,11 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if !errors.As(result.result.Error, &acquisition) || metadataPath == "" || pathErr != nil {
 		return result
 	}
+	// The manual index refresh (harvest index --force) names its own
+	// unavailable native input; every other path, including a forced ordinary
+	// harvest, reports the adapter refresh it could not complete.
 	errorType, location := "adapter_refresh_unavailable", fmt.Sprintf("%s session %s adapter refresh", entry.Session.Harness, entry.Session.SessionID)
-	if p.config.Force {
+	if p.config.Reindex && p.config.Force {
 		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", entry.Session.Harness, entry.Session.SessionID)
 	}
 	p.reportDiagnostic(DiagnosticEntry{

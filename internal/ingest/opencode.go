@@ -300,8 +300,11 @@ func (a *OpenCodeAdapter) withOpenCodeMaterializationSource(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	// A snapshot source began its private read transaction when it opened,
+	// and Close releases it; beginning a second one inside would nest. A
+	// plain source is covered by one read transaction around fn instead.
 	var fnErr error
-	if sqliteSource, ok := source.(*zombiezenOpenCodeSQLiteSource); ok {
+	if sqliteSource, ok := source.(*zombiezenOpenCodeSQLiteSource); ok && !snapshot {
 		fnErr = sqliteSource.withReadTransaction(ctx, func() error { return fn(source) })
 	} else {
 		fnErr = fn(source)

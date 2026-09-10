@@ -2546,6 +2546,25 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 		}
 	}
 	if session.TranscriptOrigin != TranscriptOriginFile {
+		if acquirer, ok := adapter.(CursorTranscriptMaterializer); ok {
+			// The cursor materialization checks the consumed row against
+			// discovery and acquires the cursor from the same read snapshot
+			// as the transcript, so the acquisition evidence describes what
+			// was read. Its diagnostics are the run's: an unavailable cursor
+			// is reported once and stays unknown, never an acquired zero.
+			acquired, err := acquirer.MaterializeTranscriptWithCursor(ctx, session)
+			if err != nil {
+				return nil, err
+			}
+			for _, diagnostic := range acquired.Diagnostics {
+				p.reportDiagnostic(diagnostic)
+			}
+			captured := MaterializedTranscript{Metadata: acquired.Metadata, Data: acquired.Transcript, SourceFingerprint: acquired.SourceFingerprint, Session: acquired.Session}
+			if acquired.EventSeq != nil {
+				captured.EventSeq, captured.EventSeqObserved = *acquired.EventSeq, true
+			}
+			return &captured, nil
+		}
 		materializer, ok := adapter.(TranscriptMaterializer)
 		if !ok {
 			return nil, fmt.Errorf("materialize session %s: adapter lacks managed source support; no state written; use the production OpenCode adapter", session.SessionID)
