@@ -109,6 +109,33 @@ type unreadableRowStore struct {
 
 var _ ingest.SessionStore = (*unreadableRowStore)(nil)
 
+// preUpgradeLookupStore hides a newer stored schema from the COMPATIBILITY
+// CHECK only, which is what a build without the pre-check looked like.
+//
+// The mirror reads the stored schema version straight from the row, so it
+// still refuses and still leaves its publication intent behind. That intent on
+// disk is what every user upgrading from such a build carries, and the only
+// thing that turns it back into one actionable refusal is the routing in
+// reportPendingRecoveryFailure.
+type preUpgradeLookupStore struct {
+	*store.Store
+	target ingest.SessionID
+}
+
+var _ ingest.SessionStore = (*preUpgradeLookupStore)(nil)
+
+func (s *preUpgradeLookupStore) BulkLookupSessionLocations(ctx context.Context, ids []ingest.SessionID) (map[ingest.SessionID]ingest.SessionLocation, error) {
+	locations, err := s.Store.BulkLookupSessionLocations(ctx, ids)
+	if err != nil {
+		return locations, err
+	}
+	if location, ok := locations[s.target]; ok {
+		location.SchemaVersion = ingest.CurrentSchemaVersion
+		locations[s.target] = location
+	}
+	return locations, nil
+}
+
 func (s *unreadableRowStore) BulkLookupSessionLocations(ctx context.Context, ids []ingest.SessionID) (map[ingest.SessionID]ingest.SessionLocation, error) {
 	for _, id := range ids {
 		if id == s.target {
