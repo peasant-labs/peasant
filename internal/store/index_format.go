@@ -119,13 +119,24 @@ const publicationBindingSQL = `p.capture_revision > 0 AND p.capture_revision = s
  AND p.capture_revision = s.indexed_publication_capture_revision
  AND s.cwd_provenance_kind != 'not_recovered'`
 
+// publicationCaptureRevisionSQL reports the capture revision a real captured
+// metadata row carries, and 0 when none does. The session row holds a counter,
+// which is not the same thing: a session whose captured metadata was never
+// written, or was written at another revision, would otherwise report a
+// revision no publication row can be found at, and every later caller would
+// treat that number as evidence of a capture. Reporting the counter belongs
+// nowhere but here, so no writer has to tolerate a revision that names nothing.
+const publicationCaptureRevisionSQL = `CASE WHEN s.cwd_provenance_kind != 'not_recovered'
+ AND p.capture_revision = s.publication_capture_revision
+ THEN s.publication_capture_revision ELSE 0 END`
+
 func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*ingest.SessionIndexState, error) {
 	var state *ingest.SessionIndexState
 	// One snapshot, one statement: the publication binding and the content
 	// capture status describe the same instant as the index columns.
 	err := sqlitex.ExecuteTransient(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
-CASE WHEN s.cwd_provenance_kind != 'not_recovered' THEN s.publication_capture_revision ELSE 0 END,
+`+publicationCaptureRevisionSQL+`,
 CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
 c.status,c.failure_code
 FROM sessions s
