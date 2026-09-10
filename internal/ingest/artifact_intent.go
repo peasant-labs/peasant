@@ -231,7 +231,7 @@ func (p *ArtifactPublisher) Publish(ctx context.Context, request ArtifactPublica
 			continue
 		}
 		if err := applyArtifactIntentFile(root, key, index, file); err != nil {
-			return nil, errors.Join(err, rollbackArtifactIntent(root, key, intent))
+			return nil, errors.Join(p.artifactInstallError(observation.sessionID, file.Path, err), rollbackArtifactIntent(root, key, intent))
 		}
 	}
 	for index, file := range intent.Files {
@@ -458,6 +458,18 @@ func updateArtifactIntentPhase(root ArtifactRoot, key string, intent *artifactIn
 	}
 	*intent = updated
 	return nil
+}
+
+// artifactInstallError describes a failed install of one owned file the way the
+// user needs it: which file, in which session, why, what state the managed
+// output is in now, and what to do next. The underlying error is a bare
+// filesystem failure such as "no space left on device", which on its own names
+// neither the artifact it was installing nor a way forward, so a user reading
+// the harvest summary cannot tell which session to look at.
+func (p *ArtifactPublisher) artifactInstallError(sid SessionID, path string, cause error) error {
+	absolute := filepath.Join(p.output, path)
+	return fmt.Errorf("install owned file %s of session %s: %w; the publication was rolled back, so the previous artifact and its index were preserved and no partial file was left behind; restore write access and free space under %s, then rerun ingest for this session",
+		absolute, sid, cause, filepath.Dir(absolute))
 }
 
 func applyArtifactIntentFile(root ArtifactRoot, key string, index int, file artifactIntentFile) error {
