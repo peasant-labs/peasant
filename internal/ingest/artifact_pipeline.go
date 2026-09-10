@@ -46,6 +46,28 @@ func (s *serializedArtifactMirror) ReadIndexState(ctx context.Context, sid Sessi
 	return reader.ReadIndexState(ctx, sid)
 }
 
+// reportPendingRecoveryFailure reports what recoverPending could not finish.
+//
+// The failures are joined across independent intents, so each leaf is reported
+// on its own. A leaf that is a stored-metadata refusal goes to the refusal
+// funnel against ITS session, where it collapses with the same refusal from
+// the selection and carries the remedy that lifts it; anything else stays an
+// artifact-recovery diagnostic against the output directory.
+func (p *Pipeline) reportPendingRecoveryFailure(err error) {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, leaf := range joined.Unwrap() {
+			p.reportPendingRecoveryFailure(leaf)
+		}
+		return
+	}
+	var sessionErr *artifactSessionError
+	if errors.As(err, &sessionErr) && isMetadataCompatibilityError(err) {
+		p.reportMetadataRefusal(string(sessionErr.SessionID), err)
+		return
+	}
+	p.reportDiagnostic(artifactRecoveryDiagnostic(string(p.config.OutputDir), err))
+}
+
 func (p *Pipeline) includesManagedArtifact(meta *UnifiedMetadata) bool {
 	return p.includesManagedSession(meta.SessionID, meta.ModelHarness) &&
 		(p.config.Since == nil || !time.UnixMilli(meta.Timestamp.Start).Before(*p.config.Since))
@@ -68,10 +90,22 @@ func (p *Pipeline) reconcileManagedArtifacts(ctx context.Context) {
 	changed, err := publisher.recoverPending(ctx, p.includesManagedSession, p.config.Since)
 	p.reconciledArtifacts = append(p.reconciledArtifacts, changed...)
 	if err != nil {
-		p.reportDiagnostic(artifactRecoveryDiagnostic(string(p.config.OutputDir), err))
+		p.reportPendingRecoveryFailure(err)
 	}
 	if publisher.mirror != nil {
 		err = publisher.WalkMetadata(ctx, func(sid SessionID, path string) error {
+			// Decide the refusal BEFORE any intent is staged. ReconcileStored
+			// stages a publication intent and only then asks the mirror, so a
+			// session whose stored schema this build cannot read used to leave
+			// a pending intent behind: every later harvest then met that intent
+			// first and reported the same refusal twice more, in words that
+			// send the user to delete recovery evidence or to re-run the very
+			// harvest that cannot reconcile it. Refusing here leaves nothing
+			// behind, so the second harvest costs exactly what the first did.
+			if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+				p.reportMetadataRefusal(string(sid), err)
+				return nil
+			}
 			_, changed, err := publisher.ReconcileStored(ctx, sid, path, p.includesManagedArtifact)
 			var schemaErr *UnsupportedMetadataVersionError
 			if errors.As(err, &schemaErr) {

@@ -26,6 +26,8 @@ import (
 var contentRecoveryScopeFixtureData []byte
 
 // recoveryScopeOutcome is the observable result of one scoped recovery run.
+type PipelineResult = ingest.PipelineResult
+
 type recoveryScopeOutcome string
 
 const (
@@ -52,6 +54,7 @@ type contentRecoveryScopeFixtures struct {
 		FutureProducer   bool     `yaml:"future_producer"`
 		FutureSchema     bool     `yaml:"future_stored_schema"`
 		UnreadableRow    bool     `yaml:"unreadable_stored_row"`
+		Runs             int      `yaml:"runs"`
 		PreExistingReads int      `yaml:"pre_existing_retained_reads"`
 		NoIndexLog       bool     `yaml:"no_index_log"`
 		Diagnostics      []string `yaml:"expected_diagnostics"`
@@ -208,10 +211,25 @@ func TestContentRecoveryScope(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fs.ResetCounts()
-			result, err := pipeline.Run(ctx)
-			if err != nil {
-				t.Fatalf("reindex: %v", err)
+			// runs > 1 asserts the STEADY state: a refusal this build cannot lift
+			// must cost the same on the second harvest as on the first, so the
+			// counts and diagnostics below are measured on the LAST run over the
+			// same file system and database. A first run that leaves work behind
+			// shows up as extra diagnostics here.
+			runs := max(1, fixture.Runs)
+			var result *PipelineResult
+			for run := range runs {
+				if run > 0 {
+					pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				fs.ResetCounts()
+				result, err = pipeline.Run(ctx)
+				if err != nil {
+					t.Fatalf("reindex run %d: %v", run+1, err)
+				}
 			}
 			if fs.ReadCount(meta.Source.FilePath) != 0 {
 				t.Fatalf("retained recovery read the native source %d times", fs.ReadCount(meta.Source.FilePath))

@@ -28,6 +28,7 @@ required_names:
   - future-producer-refused
   - future-stored-schema-refused
   - unreadable-stored-row-refused
+  - future-stored-schema-refused-second-harvest
 cases:
   - name: in-scope-recovers
     expect: recovered
@@ -61,6 +62,16 @@ cases:
   # any compatibility check reads it.
   - name: unreadable-stored-row-refused
     unreadable_stored_row: true
+    expect: refused
+    no_index_log: true
+    expected_diagnostics: [metadata_refused]
+  # The SAME arrangement, harvested twice over one file system and database.
+  # A refusal this build cannot lift must reach a steady state: the second
+  # harvest owes the user exactly what the first did, one warning, and must not
+  # be made noisier by state the first harvest left behind.
+  - name: future-stored-schema-refused-second-harvest
+    future_stored_schema: true
+    runs: 2
     expect: refused
     no_index_log: true
     expected_diagnostics: [metadata_refused]

@@ -117,6 +117,20 @@ func intentCandidateMetadata(root ArtifactRoot, key string, intent *artifactInte
 	return nil, fmt.Errorf("inspect pending session %s: candidate metadata is missing", intent.SessionID)
 }
 
+// artifactSessionError names the session a pending-recovery failure belongs to.
+//
+// recoverPending joins failures across independent intents, which loses which
+// session each came from; this keeps it so the caller can report a refusal
+// against the session, with the remedy that actually lifts it.
+type artifactSessionError struct {
+	SessionID SessionID
+	Err       error
+}
+
+func (e *artifactSessionError) Error() string { return e.Err.Error() }
+
+func (e *artifactSessionError) Unwrap() error { return e.Err }
+
 // recoverPending visits independent pending intents in bounded pages. A bad
 // session reports its own failure without preventing another session's recovery.
 // Flat parent publications finish before nested child publications.
@@ -174,7 +188,15 @@ func (p *ArtifactPublisher) recoverPending(ctx context.Context, include func(Ses
 			if err == nil && artifact != nil {
 				changed = append(changed, intent.SessionID)
 			}
-			return err
+			if err != nil {
+				// Name the session the failure belongs to. The caller joins
+				// failures across independent intents, and a refusal it can
+				// report per session (a stored schema this build cannot read)
+				// must not reach the user as an anonymous output-directory
+				// entry telling them to inspect recovery evidence.
+				return &artifactSessionError{SessionID: intent.SessionID, Err: err}
+			}
+			return nil
 		}))
 	}
 	return changed, failures
