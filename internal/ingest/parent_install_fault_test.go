@@ -53,12 +53,50 @@ type parentInstallFaultFixture struct {
 // rollback), so this cannot mistake a copy/delete helper for atomic rename.
 type parentInstallFaultFS struct {
 	*ingest.OSFileSystem
+	// output is the managed output directory. An artifact root confines every
+	// path to that directory, so a root operation names its file relatively and
+	// has to be rejoined with output before it can be compared with target.
+	output  string
 	target  string
 	mode    parentInstallFaultMode
 	tripped bool
 }
 
 var _ ingest.FileSystem = (*parentInstallFaultFS)(nil)
+var _ ingest.DurableFileSystem = (*parentInstallFaultFS)(nil)
+
+// OpenArtifactRoot and CreateArtifactRoot are the seam the shipped install
+// actually crosses. An owned file is installed by the pinned artifact root's
+// transaction apply, not through the plain filesystem, so a fault injected only
+// at the FileSystem level never sees the install and proves nothing. Both
+// openers are wrapped: publication takes the creating one.
+func (f *parentInstallFaultFS) OpenArtifactRoot(path string) (ingest.ArtifactRoot, error) {
+	root, err := f.OSFileSystem.OpenArtifactRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	return &parentInstallFaultRoot{ArtifactRoot: root, fault: f}, nil
+}
+
+func (f *parentInstallFaultFS) CreateArtifactRoot(path string) (ingest.ArtifactRoot, error) {
+	root, err := f.OSFileSystem.CreateArtifactRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	return &parentInstallFaultRoot{ArtifactRoot: root, fault: f}, nil
+}
+
+// parentInstallFaultRoot injects the fault at the install of one owned file.
+type parentInstallFaultRoot struct {
+	ingest.ArtifactRoot
+	fault *parentInstallFaultFS
+}
+
+func (r *parentInstallFaultRoot) Rename(oldPath, newPath string) error {
+	return r.fault.install(filepath.Join(r.fault.output, newPath), func() error {
+		return r.ArtifactRoot.Rename(oldPath, newPath)
+	})
+}
 
 func (f *parentInstallFaultFS) Rename(src, dst string) error {
 	if !strings.Contains(src, defaults.TempDirPrefix) {
@@ -137,7 +175,7 @@ func TestParentInstallFaultProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	filesystem := &parentInstallFaultFS{OSFileSystem: &ingest.OSFileSystem{}, target: os.Getenv("PEASANT_INSTALL_TEST_TARGET"), mode: mode}
+	filesystem := &parentInstallFaultFS{OSFileSystem: &ingest.OSFileSystem{}, output: filepath.Join(root, "output"), target: os.Getenv("PEASANT_INSTALL_TEST_TARGET"), mode: mode}
 	result := runParentInstallPipeline(t, filesystem, database, filepath.Join(root, "source"), filepath.Join(root, "output"), os.Getenv("PEASANT_INSTALL_TEST_REMOTE"), os.Getenv("PEASANT_INSTALL_TEST_PARENT"))
 	if !filesystem.tripped {
 		t.Fatal("installation fault was not exercised")
