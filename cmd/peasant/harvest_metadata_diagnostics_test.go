@@ -250,8 +250,13 @@ func arrangeHarvestDiagnostics(t *testing.T, fixtures harvestDiagnosticsFixtures
 	if err := os.WriteFile(nativePath, []byte(fixtures.Transcript), 0600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.UnixMilli(1700000000000)
-	if err := os.Chtimes(nativePath, old, old); err != nil {
+	// The retained recording carries a modification time NEWER than the stored
+	// session's ingest clock and old enough not to look active. A run trusts
+	// retained evidence when the native source has not moved since it was
+	// ingested, so a source frozen in the distant past would leave every case
+	// here with nothing to do, and the one case that indexes could not index.
+	changed := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(nativePath, changed, changed); err != nil {
 		t.Fatal(err)
 	}
 	files[nativePath] = []byte(fixtures.Transcript)
