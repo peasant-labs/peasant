@@ -30,29 +30,33 @@ expectedRootKeys: [duration, sessions, summary]
 #                       a case that warns must declare a positive count and a
 #                       case that does not must declare none.
 #
-# The stored-schema refusal reports once. The three metadata-ARTIFACT refusals
-# report the SAME refusal three times, and the count is declared at 3 so that
-# collapsing them is a deliberate, visible change rather than a silent one:
+# The stored-schema refusal reports once. A metadata-ARTIFACT refusal still
+# reports the SAME refusal TWICE, and the count is declared so that collapsing
+# the pair is a deliberate, visible change rather than a silent one:
 #   1. the rewrite check, naming the metadata file by its absolute path;
 #   2. the selection check, naming the same file by its path relative to the
-#      managed output directory. Same session, same version, same remedy: the
-#      two entries survive dedup only because the two reporters spell the
-#      location differently;
-#   3. the retained-content recovery sweep, which adds a preservation sentence.
+#      managed output directory.
+# Same session, same version, same remedy. The two entries survive dedup only
+# because the two reporters spell the location differently, which is the one
+# thing dedup by value cannot see through.
+#
+# A third warning used to come from the retained-content recovery sweep. It is
+# gone because the seed now leaves a COMPLETE content capture, as a finished
+# harvest does, and a session with nothing missing is not a recovery target.
 cases:
   - name: normal refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-    wantWarningLines: 3
+    wantWarningLines: 2
   - name: forced refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     force: true
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-    wantWarningLines: 3
+    wantWarningLines: 2
   - name: index refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     reindex: true
@@ -60,7 +64,7 @@ cases:
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-    wantWarningLines: 3
+    wantWarningLines: 2
   # This refusal is reported to the user but logs nothing structured today.
   - name: stored schema refusal stays nonfatal and keeps last-good state
     schemaVersion: 9
