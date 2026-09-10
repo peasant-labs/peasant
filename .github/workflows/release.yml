@@ -110,7 +110,8 @@ jobs:
 
   # Build + publish: one Linux runner cross-compiles all four targets (pure-Go,
   # CGO_ENABLED=0), then goreleaser produces archives + checksums + deb/rpm and
-  # creates the GitHub (pre)release. AUR/tap pushes are skip_upload:true (no-op).
+  # creates the GitHub (pre)release. The Homebrew cask push is skip_upload:"auto"
+  # (final tags only, never rc); the AUR push stays skip_upload:"true" (no-op).
   release:
     name: release (goreleaser)
     needs: [guard, nix-vendor-hash, e2e, release-e2e]
@@ -171,10 +172,10 @@ jobs:
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # Publisher-disabled placeholders: skip_upload:true means these are never
-          # used for v0.1.0, but the Goreleaser templates must resolve. AUR_KEY is
-          # set only after separate AUR approval; the tap token is minted from the
-          # GitHub App installation above.
+          # AUR_KEY is a placeholder: the AUR push stays skip_upload:"true", so it
+          # is never used until AUR publishing is separately approved. The tap
+          # token IS used — the Homebrew cask push is skip_upload:"auto" and writes
+          # to the tap on final tags — and is minted from the GitHub App above.
           AUR_KEY: ${{ secrets.AUR_KEY || 'unset-publisher-disabled' }}
           TAP_GITHUB_TOKEN: ${{ steps.tap_tok.outputs.token }}
 
@@ -228,6 +229,40 @@ jobs:
           set -euo pipefail
           expected="${TAG#v}"
           got="$(./peasant version)"
+          echo "peasant version output: '${got}' (must contain '${expected}')"
+          if ! printf '%s' "$got" | grep -qF "$expected"; then
+            echo "::error::peasant version '${got}' does not match tag '${TAG}'"
+            exit 1
+          fi
+
+  # Post-publish macOS smoke: on FINAL tags only, install the just-published cask
+  # from the live tap and assert it runs + reports the tag version. This exercises
+  # the real tap push end-to-end — homebrew_casks skip_upload:"auto" writes the
+  # cask to peasant-labs/homebrew-tap on finals (and never on rc), so this job is
+  # gated to non-rc pushes. goreleaser commits the cask inside the `release` job
+  # before it exits, so a fresh `brew tap` clone (needs: release) observes it.
+  macos-cask-smoke:
+    name: macos cask smoke (final only)
+    needs: release
+    if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Tap + install the published cask
+        run: |
+          set -euxo pipefail
+          brew tap peasant-labs/tap
+          brew install --cask peasant
+
+      - name: Assert version matches the tag
+        run: |
+          set -euo pipefail
+          expected="${TAG#v}"
+          got="$(peasant version)"
           echo "peasant version output: '${got}' (must contain '${expected}')"
           if ! printf '%s' "$got" | grep -qF "$expected"; then
             echo "::error::peasant version '${got}' does not match tag '${TAG}'"
