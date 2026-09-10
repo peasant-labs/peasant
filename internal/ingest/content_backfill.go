@@ -140,7 +140,19 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			// through the same diagnostic the selection reports, so the run
 			// carries exactly one refusal with the schema remedy for it.
 			if err := p.checkStoredMetadataVersion(ctx, id); err != nil {
-				p.reportMetadataRefusal(string(id), err)
+				var schemaErr *UnsupportedMetadataVersionError
+				if errors.As(err, &schemaErr) {
+					p.reportMetadataRefusal(string(id), err)
+					continue
+				}
+				// The compatibility check itself failed (database access, an
+				// unreadable stored row): recovery cannot verify the session and
+				// leaves it alone; the remedy is that check's, not the indexer's.
+				p.reportDiagnostic(DiagnosticEntry{
+					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s retained-content recovery", id),
+					Message:     err.Error() + "; recovery was refused before any retained read or store write, so the stored entries and producer evidence were preserved",
+					Remediation: "Restore database access and readable, compatible stored metadata for the session, then retry harvest.",
+				})
 				continue
 			}
 			state, err := reader.ReadIndexState(ctx, id)
