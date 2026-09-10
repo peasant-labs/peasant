@@ -909,14 +909,44 @@ func TestHarvestCmd_AllImpliesIncludeActive(t *testing.T) {
 	}
 }
 
-// TestHarvestCmd_DryRun_DoesNotCreateDB verifies that --dry-run does NOT create
-// the analytics database file. Uses --data-dir (via the helper) so we can assert
-// on a known path without touching the real data directory.
+// TestHarvestCmd_DryRun_DoesNotCreateDB pins the forecast a user gets on a fresh
+// install: `peasant harvest --dry-run` with no analytics database REPORTS what a
+// normal harvest would do and creates nothing at all.
+//
+// It is the harvest side of the forecast contract, and it is deliberately the
+// opposite of the push side. `peasant push --dry-run` forecasts an upload of
+// sessions that were already recorded, so with no database it has nothing to
+// describe and refuses (TestPushCmd_DryRunRefusesAMissingDatabase). A harvest
+// forecast describes the sessions on disk, which exist whether or not the
+// database does, so refusing would withhold the answer on exactly the install
+// where the user asks the question first.
+//
+// The failure this guards, on both sides, is a forecast that CREATES the
+// database, the data directory or a write-ahead log as the side effect of a
+// command the user ran only to be told what would happen. So the assertions are
+// success plus a real forecast plus an untouched filesystem, never success alone.
 func TestHarvestCmd_DryRun_DoesNotCreateDB(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+
+	// One settled native session, so the forecast has something to report and
+	// "0 sessions" cannot pass as a report of what would be done.
+	sessions, _ := LoadHarvestIndexSelectionFixtures(t)
+	session := sessions[0]
+	project := filepath.Join(sourceDir, "-fixture-project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatalf("prepare the project directory the forecast discovers: %v", err)
+	}
+	transcript := filepath.Join(project, string(session.ID)+".jsonl")
+	if err := os.WriteFile(transcript, []byte(session.Transcript), 0o600); err != nil {
+		t.Fatalf("write the native transcript the forecast reads: %v", err)
+	}
+	settled := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(transcript, settled, settled); err != nil {
+		t.Fatalf("settle the native transcript so it is not debounced as active: %v", err)
+	}
 
 	output, err := executeHarvestCmd(t, dir, []string{
 		"--source-harness=claude-code",
@@ -924,22 +954,35 @@ func TestHarvestCmd_DryRun_DoesNotCreateDB(t *testing.T) {
 		"--output=" + outputDir,
 		"--dry-run",
 	})
-	// On a fresh install there is nothing to inspect, and a dry run does not
-	// create or migrate state to get something. It says so and stops: the
-	// alternative is a command that quietly writes a database while the user
-	// asked what it WOULD do.
-	if err == nil {
-		t.Fatalf("dry-run on a missing database should refuse; output: %s", output)
+	if err != nil {
+		t.Fatalf("a forecast on a fresh install must report what a harvest would do, not refuse: %v\noutput: %s", err, output)
 	}
-	for _, want := range []string{"dry-run", "no files were changed", "run a normal harvest"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal must say %q so the user knows what to do; got: %v", want, err)
+
+	// The report: the same summary a normal run prints, with the discovered
+	// session counted as new because no database has recorded it yet.
+	for _, want := range []string{"peasant harvest: 1 sessions", "1     new", string(session.ID)} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the forecast must report what would be done, including %q; got: %s", want, output)
 		}
 	}
 
+	// The notice: without it, a reader cannot tell a first harvest apart from a
+	// harvest that has already recorded everything and found nothing new.
+	if !strings.Contains(output, "no analytics database exists yet") {
+		t.Errorf("the forecast must say no database exists yet, so 'new' is understood as a first harvest; got: %s", output)
+	}
+
+	// Nothing created: not the database, not its sidecars, not the directory
+	// that would hold them.
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	if _, err := os.Stat(dbPath); err == nil {
-		t.Errorf("dry-run should NOT create DB file at %s", dbPath)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if _, statErr := os.Stat(dbPath + suffix); !os.IsNotExist(statErr) {
+			t.Errorf("the forecast created %s, which it was never asked to write: %v", dbPath+suffix, statErr)
+		}
+	}
+	dataDir := string(defaults.ResolveDataDirPathWith(dir))
+	if _, statErr := os.Stat(dataDir); !os.IsNotExist(statErr) {
+		t.Errorf("the forecast created the data directory %s: %v", dataDir, statErr)
 	}
 }
 

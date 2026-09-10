@@ -48,3 +48,22 @@ func openRunStore(cmd *cobra.Command, dryRun bool) (*store.Store, error) {
 	}
 	return store.Open(path)
 }
+
+// runStoreIsAbsent reports whether the analytics database this run would use does
+// not exist yet, so a forecast can decide between inspecting existing state and
+// forecasting a first harvest. It never creates the file or its directory.
+//
+// A stat error other than "not found" is returned rather than treated as absent:
+// an unreadable path is a state the caller must report, not a fresh install.
+func runStoreIsAbsent(cmd *cobra.Command) (string, bool, error) {
+	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+	_, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return path, false, nil
+	case errors.Is(err, os.ErrNotExist):
+		return path, true, nil
+	default:
+		return path, false, fmt.Errorf("check for an analytics database at %s before forecasting: %w; no files were changed; make the path readable, or pass --data-dir to point at a directory this user can read", path, err)
+	}
+}

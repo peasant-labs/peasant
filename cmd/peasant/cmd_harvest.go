@@ -424,6 +424,28 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	// Logs-only mode skips all DB operations.
 	skipDB := mode == harvestLogsOnly
 
+	// A forecast on a fresh install has nothing to inspect and must create
+	// nothing, so it runs without a store and reports what a first harvest would
+	// do. Refusing here instead would answer "what would happen?" with an error
+	// on exactly the install where the answer matters most. The refusal on a
+	// missing database belongs to `peasant push --dry-run`, which forecasts an
+	// upload of recorded sessions that cannot exist yet.
+	//
+	// Every other forecast keeps the read-only path and its refusals unchanged:
+	// an existing file, a live write-ahead log, and a database that needs
+	// migration all still stop the run rather than guess at stored state.
+	if !skipDB && flags.dryRun {
+		dbPath, absent, err := runStoreIsAbsent(cmd)
+		if err != nil {
+			cmd.SilenceUsage = true
+			return err
+		}
+		if absent {
+			skipDB = true
+			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s — this dry run creates none and reports every discovered session as new. Run 'peasant harvest' to create it.\n", dbPath)
+		}
+	}
+
 	if !skipDB {
 		db, err := openRunStore(cmd, flags.dryRun)
 		if err != nil {
