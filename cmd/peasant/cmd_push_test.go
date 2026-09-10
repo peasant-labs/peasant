@@ -1289,6 +1289,37 @@ func TestPushCmd_DryRun(t *testing.T) {
 	}
 }
 
+// TestPushCmd_DryRunRefusesAMissingDatabase is the push side of the forecast
+// prerequisite, and the reason every other forecast test may be seeded past it.
+//
+// A forecast inspects an existing, checkpointed database and creates nothing. On a
+// fresh install there is nothing to inspect, so it says so and stops. The failure
+// this guards is a forecast that falls through to the ordinary open and CREATES a
+// database as the side effect of a command the user ran to be told what would
+// happen — which every other push forecast test is now seeded past and could not
+// notice.
+//
+// It calls the command directly rather than through executePushCmd, because that
+// helper arranges the database this test exists to find missing.
+func TestPushCmd_DryRunRefusesAMissingDatabase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestCredentials(t, dir)
+
+	_, err := executeWithDataDir(t, BuildPushCommand(), dir, []string{"--dry-run"})
+	if err == nil {
+		t.Fatal("a forecast with no database to inspect must refuse, not report an empty push")
+	}
+	for _, want := range []string{"dry-run", "no files were changed", "run a normal harvest"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal must state %q so the user knows what to do; got: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(string(defaults.ResolveDBFilePathWith(dir))); !os.IsNotExist(statErr) {
+		t.Errorf("the forecast created the database it was asked only to inspect: %v", statErr)
+	}
+}
+
 // TestPushCmd_Timing_RollupAndLog verifies that `peasant push --timing` emits the
 // per-phase rollup to stderr and writes a per-upload JSONL log under the XDG state
 // directory. An empty store does no network, so the rollup reports zero uploads —
