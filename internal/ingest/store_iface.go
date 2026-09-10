@@ -113,7 +113,15 @@ type StoreEntry struct {
 	Metadata           *UnifiedMetadata
 	Session            DiscoveredSession
 	SourceFingerprint  []byte
-	EventSeq           int64
+	// EventSeq is the OpenCode event cursor this write ACQUIRED, or nil when
+	// the materialization observed none.
+	//
+	// The distinction has to be representable: the cursor is a monotonic
+	// per-session sequence, so a stored zero asserts "no events ever", which
+	// is a claim, not an absence. A nil cursor preserves whatever is stored,
+	// and a caller that simply never learned one cannot overwrite a cursor an
+	// earlier harvest acquired.
+	EventSeq *int64
 }
 
 // MetricsStore abstracts the analytics read/write path for session entries

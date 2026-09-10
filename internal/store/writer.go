@@ -438,8 +438,12 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 			}
 			revisions[m.SessionID] = revision
 		}
-		if sorted[i].Session.Harness == ingest.HarnessOpenCode && sorted[i].SourceFingerprint != nil {
-			if err = upsertOpenCodeSeqCursorOnConn(conn, m.SessionID, sorted[i].EventSeq); err != nil {
+		// A cursor is written only when this write ACQUIRED one. A fingerprint
+		// says the source was read; it does not say a cursor was among what was
+		// read, and the cursor is monotonic, so writing an unknown one as zero
+		// would erase a cursor an earlier harvest acquired.
+		if sorted[i].Session.Harness == ingest.HarnessOpenCode && sorted[i].EventSeq != nil {
+			if err = upsertOpenCodeSeqCursorOnConn(conn, m.SessionID, *sorted[i].EventSeq); err != nil {
 				return err
 			}
 		}

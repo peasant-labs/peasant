@@ -266,6 +266,9 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	if err := upsertSessionCommitsOnConn(conn, meta.SessionID, meta.Git.Commits, true); err != nil {
 		return err
 	}
+	// The mirror applies its own acquired cursor. The generic upsert above
+	// leaves the stored cursor alone, because the entry it was given carries
+	// none: only a materialization that OBSERVED a cursor may move it.
 	if request.EventSeq != nil {
 		if err := upsertOpenCodeSeqCursorOnConn(conn, meta.SessionID, *request.EventSeq); err != nil {
 			return err
