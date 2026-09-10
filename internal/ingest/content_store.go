@@ -43,6 +43,39 @@ func NewContentCaptureStatus(s string) (ContentCaptureStatus, error) {
 	return "", fmt.Errorf("content capture: unknown status %q; use complete, incomplete or failed before storing capture", s)
 }
 
+// ContentCaptureFailureCode says WHY a stored capture is not complete, in a
+// value the selector can act on.
+//
+// The distinction it carries is between "not certified yet" and "this build
+// cannot certify this input". A legacy preview-only capture must be certified
+// once; a capture the current strict parser already refused cannot change
+// until the input changes or a newer indexer ships, so re-parsing it on every
+// harvest is work that can never succeed. An empty code means no failure was
+// recorded, which is the not-certified-yet state.
+type ContentCaptureFailureCode string
+
+const (
+	// ContentCaptureNoFailure is the absent code: nothing refused this capture.
+	ContentCaptureNoFailure ContentCaptureFailureCode = ""
+	// ContentCaptureStrictRefused means the strict parser refused this exact
+	// input under the recorded producer, and the tolerant projection was stored
+	// instead. Previews show it; nothing certifies it.
+	ContentCaptureStrictRefused ContentCaptureFailureCode = "strict_capture_refused"
+	// ContentCaptureLegacyPreviewOnly marks the captures the content-capture
+	// migration wrote for sessions that predate it. Nothing refused them; no
+	// build ever tried to certify them, so a build that can certify them owes
+	// exactly one attempt and this code is NOT a steady state.
+	ContentCaptureLegacyPreviewOnly ContentCaptureFailureCode = "legacy_preview_only"
+)
+
+func NewContentCaptureFailureCode(s string) (ContentCaptureFailureCode, error) {
+	switch code := ContentCaptureFailureCode(s); code {
+	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureLegacyPreviewOnly:
+		return code, nil
+	}
+	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)
+}
+
 type ContentSourceAuthority string
 
 const (
@@ -131,7 +164,7 @@ type SessionContentCaptureWrite struct {
 	TranscriptOrigin           TranscriptOrigin
 	CaptureFormat              ContentCaptureFormat
 	CapturedAtMs               int64
-	FailureCode                string
+	FailureCode                ContentCaptureFailureCode
 	FailureMessage             string
 }
 type SessionContentCapture struct {
@@ -145,7 +178,7 @@ type SessionContentCapture struct {
 	ContentRowCount            int
 	FullCaptureSHA256          string
 	CapturedAtMs               int64
-	FailureCode                string
+	FailureCode                ContentCaptureFailureCode
 	FailureMessage             string
 }
 type SessionEntryReadMode string

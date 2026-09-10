@@ -1704,7 +1704,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
-			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatPreviewOnly, CapturedAtMs: nowMs, FailureCode: "strict_capture_refused", FailureMessage: result.strictRefusal}
+			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatPreviewOnly, CapturedAtMs: nowMs, FailureCode: ContentCaptureStrictRefused, FailureMessage: result.strictRefusal}
 		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,

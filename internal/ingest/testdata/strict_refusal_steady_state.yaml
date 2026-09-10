@@ -1,0 +1,109 @@
+# A strict refusal this build cannot lift must reach a STEADY STATE.
+#
+# A Strike transcript carrying one well-formed event kind this build does not
+# represent is captured incomplete: the strict parser refuses it and the
+# tolerant projection is stored instead. That is correct and final for this
+# build. What must not happen is the run treating it as pending work forever,
+# re-reading the retained file and warning the user again on every harvest
+# about a condition they cannot act on until Peasant is upgraded.
+#
+# Each case harvests TWICE over one file system and database and states what
+# the SECOND harvest owes: how many diagnostics name the session, and how many
+# times it read the retained transcript. Here the numbers ARE the contract.
+# Both are stated because either alone can be satisfied by the wrong behaviour
+# - a run that stops warning while still re-parsing, or one that stops working
+# while still warning - and each reader that skips or repeats moves the read
+# count, so a reader that gives up on evidence it should act on is visible too.
+required_names:
+  - unrepresented-record-settles-after-one-harvest
+  - a-newer-indexer-lifts-the-refusal
+  - changed-bytes-lift-the-refusal
+  - a-capture-nothing-refused-is-still-certified
+transcript: |
+  {"type":"session.started","time":"2026-07-28T12:34:56Z","data":{"model":"synthetic-model","version":"0.1.0"}}
+  {"type":"user.message","time":"2026-07-28T12:34:57Z","data":{"turnId":"turn-1","content":"Inspect the retained fixture."}}
+  {"type":"turn.started","time":"2026-07-28T12:34:58Z","data":{"turnId":"turn-1"}}
+  {"type":"assistant.text.delta","time":"2026-07-28T12:35:00Z","data":{"turnId":"turn-1","providerRequestId":"request-1","delta":"I will inspect it now."}}
+# The record no shipped build represents. It is well formed: this is a refusal,
+# not corruption.
+unrepresented_record: '{"type":"future.additive.event","time":"2026-07-28T12:35:01Z","data":{"turnId":"turn-1","payload":"not represented by this build"}}'
+cases:
+  # The steady state itself: nothing changed, so the second harvest owes
+  # nothing and reads nothing.
+  - name: unrepresented-record-settles-after-one-harvest
+    second_harvest_diagnostics: 0
+    second_harvest_retained_reads: 0
+  # A newer indexer might represent the record, so the refusal is retried. This
+  # is the case that proves the steady state is conditional and not a mute.
+  # Two readers act: the recovery sweep, whose whole job is to certify a capture
+  # a newer producer might now certify, and the index path.
+  - name: a-newer-indexer-lifts-the-refusal
+    bump_indexer: true
+    second_harvest_diagnostics: 2
+    second_harvest_retained_reads: 2
+  # New bytes are new evidence, whatever the previous refusal said.
+  # Only the index path acts. The producer has not moved, so the sweep would be
+  # refused the same way again; the index path reads the new bytes, and one read
+  # is all the run owes.
+  - name: changed-bytes-lift-the-refusal
+    append_record: true
+    second_harvest_diagnostics: 1
+    second_harvest_retained_reads: 1
+  # The distinction the failure code exists for. An older build stored what it
+  # could read and marked it incomplete without ever trying to certify it, so
+  # there is no recorded refusal. This build can certify the same transcript,
+  # and owes exactly one attempt: treating it as settled would leave the user
+  # with a preview forever.
+  - name: a-capture-nothing-refused-is-still-certified
+    legacy_preview_capture: true
+
+# THE PREDICATE ITSELF.
+#
+# The cases above drive whole harvests, and a harvest cannot cheaply arrange
+# every stored state a real installation holds: a legacy preview-only capture
+# written WITH an input proof, for one, which older builds do produce. The
+# predicate is small and total, so each term is stated over its own inputs
+# here, and the harvests above prove the callers ask it.
+settled_required_names:
+  - a-recorded-refusal-at-the-current-producer-is-settled
+  - a-capture-nothing-refused-is-not-settled
+  - a-refusal-under-an-older-producer-is-not-settled
+  - a-refusal-with-no-input-proof-is-not-settled
+  - a-migrated-legacy-capture-is-not-settled
+settled_cases:
+  - name: a-recorded-refusal-at-the-current-producer-is-settled
+    failure_code: strict_capture_refused
+    stored_indexer_version: 16
+    target_indexer_version: 16
+    input_proof: true
+    settled: true
+  # The distinction the code exists for: no recorded refusal means nothing has
+  # tried, so this build owes one attempt even with a current producer and an
+  # input proof. This is the state a harvest cannot cheaply seed.
+  - name: a-capture-nothing-refused-is-not-settled
+    failure_code: ""
+    stored_indexer_version: 16
+    target_indexer_version: 16
+    input_proof: true
+    settled: false
+  - name: a-refusal-under-an-older-producer-is-not-settled
+    failure_code: strict_capture_refused
+    stored_indexer_version: 15
+    target_indexer_version: 16
+    input_proof: true
+    settled: false
+  - name: a-refusal-with-no-input-proof-is-not-settled
+    failure_code: strict_capture_refused
+    stored_indexer_version: 16
+    target_indexer_version: 16
+    input_proof: false
+    settled: false
+  # The value the content-capture migration wrote for every session that
+  # predates it. Nothing refused those captures, so they are pending work: this
+  # is a real stored state, not a hypothetical one.
+  - name: a-migrated-legacy-capture-is-not-settled
+    failure_code: legacy_preview_only
+    stored_indexer_version: 16
+    target_indexer_version: 16
+    input_proof: true
+    settled: false

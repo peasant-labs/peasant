@@ -64,7 +64,13 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 		c.ContentRowCount = st.ColumnInt(5)
 		c.FullCaptureSHA256 = st.ColumnText(6)
 		c.CapturedAtMs = st.ColumnInt64(7)
-		c.FailureCode = st.ColumnText(8)
+		// An unknown stored failure code fails closed: the selector acts on this
+		// value, so a code it cannot name must never read as "no failure".
+		failureCode, codeErr := ingest.NewContentCaptureFailureCode(st.ColumnText(8))
+		if codeErr != nil {
+			return fmt.Errorf("read stored content capture for session %s: %w; the capture was not returned; restore valid capture state or use a Peasant build that knows this code", id, codeErr)
+		}
+		c.FailureCode = failureCode
 		c.FailureMessage = st.ColumnText(9)
 		c.PublicationCaptureRevision = st.ColumnInt64(10)
 		return nil

@@ -163,6 +163,14 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 				})
 				continue
 			}
+			// A refusal this build already recorded against the producer it would
+			// use again is settled: recovery would read the file, parse it
+			// strictly, be refused the same way, and warn the user about a
+			// condition they cannot act on until Peasant is upgraded. The index
+			// path still evaluates the session, so changed bytes are still seen.
+			if strictRefusalIsSettled(state, p.versionTargets()[state.Harness]) {
+				continue
+			}
 			recovery, err := p.backfillContentSession(ctx, store, id, state)
 			if err != nil {
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {

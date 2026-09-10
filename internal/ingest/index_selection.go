@@ -30,7 +30,28 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 		// The capture is incomplete and this build can certify it: the strict
 		// format-1 parser is the only path that produces complete content, so
 		// a harness on another declared format is at its steady state instead.
-		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness)
+		// A refusal this build already recorded for this producer is a steady
+		// state too, and is excluded below.
+		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
+			!strictRefusalIsSettled(expected, target)
+}
+
+// strictRefusalIsSettled reports that the incomplete capture is as good as this
+// build can make it, so re-parsing it would fail the same way again.
+//
+// The stored capture says the strict parser REFUSED this input, the producer
+// that refused it is the producer this build would use, and the bytes have not
+// moved. Nothing in that can change without a newer indexer or a changed
+// transcript, either of which lifts the steady state through the terms above:
+// a producer bump fails the version comparison, and new bytes fail the input
+// hash. Without this, a session holding one record this build cannot represent
+// is parsed strictly, parsed tolerantly, and re-stamped on every harvest, and
+// warns the user about a condition they cannot act on until Peasant is
+// upgraded.
+func strictRefusalIsSettled(expected *SessionIndexState, target HarvesterVersions) bool {
+	return expected.ContentFailureCode == ContentCaptureStrictRefused &&
+		expected.IndexerVersion >= target.IndexerVersion &&
+		expected.IndexedInputHash != nil
 }
 
 // certifiesContent reports whether this build's indexer for the harness can

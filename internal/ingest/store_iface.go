@@ -205,6 +205,11 @@ type SessionIndexState struct {
 	// session. A session with no capture row reads as ContentCaptureIncomplete:
 	// absent content is never evidence of a complete capture.
 	ContentStatus ContentCaptureStatus
+	// ContentFailureCode is the stored session_content_captures.failure_code.
+	// It separates a capture that has not been certified yet from one this
+	// build's parser already refused, which is what lets the selector give a
+	// refusal a steady state instead of re-parsing it every harvest.
+	ContentFailureCode ContentCaptureFailureCode
 }
 
 // StaleIndexWorkError means the captured SQL state changed before the index

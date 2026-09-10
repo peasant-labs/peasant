@@ -127,7 +127,7 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*inges
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
 CASE WHEN s.cwd_provenance_kind != 'not_recovered' THEN s.publication_capture_revision ELSE 0 END,
 CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
-c.status
+c.status,c.failure_code
 FROM sessions s
 LEFT JOIN session_publication_metadata p ON p.session_id = s.session_id
 LEFT JOIN session_content_captures c ON c.session_id = s.session_id
@@ -147,7 +147,16 @@ WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 					return fmt.Errorf("stored content capture status for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, statusErr)
 				}
 			}
+			// The failure code says WHY the capture is not complete. It is read
+			// in the same snapshot as the status it explains, and an unknown
+			// code fails closed: the selector acts on this value, so a code
+			// this build cannot name must never read as "no failure".
+			failureCode, codeErr := ingest.NewContentCaptureFailureCode(stmt.ColumnText(10))
+			if codeErr != nil {
+				return fmt.Errorf("stored content capture failure code for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, codeErr)
+			}
 			state = &ingest.SessionIndexState{SessionID: sessionID, IndexerVersion: stmt.ColumnInt(0), Harness: harness}
+			state.ContentFailureCode = failureCode
 			state.PublicationCaptureRevision = stmt.ColumnInt64(7)
 			state.PublicationBound = stmt.ColumnInt(8) == 1
 			state.ContentStatus = status
