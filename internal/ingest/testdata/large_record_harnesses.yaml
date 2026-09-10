@@ -20,6 +20,15 @@
 #
 # Mutation note: with the 10 MiB limit restored, every
 # "...-indexed-whole" case fails.
+# `survivingRecordTexts` is the content every harness puts in the record BEFORE
+# the large one and the record AFTER it. Both records are well within the limit
+# in every case, so both must reach the indexed entries even when the record
+# between them is omitted. That is what the stored diagnostic promises when it
+# says every other record in the session was kept and indexed.
+survivingRecordTexts:
+  - first record
+  - last record
+
 requiredNames:
   - claude-code-large-record-indexed-whole
   - claude-code-over-limit-record-omitted
@@ -82,17 +91,16 @@ harnesses:
       - '{"type":"session","version":3,"id":"SESSION_ID","cwd":"/synthetic/project"}'
       - '{"type":"message","id":"pi-first","parentId":null,"message":{"role":"user","content":"first record"}}'
     largeRecord: '{"type":"message","id":"pi-large","parentId":"pi-first","message":{"role":"user","content":"MARKPAD"}}'
-    # The trailing record hangs off the record BEFORE the large one. A Pi
-    # recording that referenced the omitted record as a parent would be a
-    # dangling active parent, which is a tree fault this change does not
-    # alter and is not what these cases are about.
+    # The trailing record hangs off the LARGE one, which is how a Pi
+    # recording appends: each record names the record before it as its
+    # parent. So the omitted record sits in the middle of the active path
+    # and the records before it are reachable only through it.
     trailingRecords:
       - '{"type":"message","id":"pi-last","parentId":"pi-large","message":{"role":"user","content":"last record"}}'
     wantToolCallId: ""
-    # Pi projects the ACTIVE PATH through an entry tree, not the physical
-    # record order, and an omitted record breaks the path at that point, so
-    # the surviving path starts after the omission and the placeholder is
-    # legitimately the first projected entry. Every other assertion, the
-    # typed omission record, the note, the byte length and the retention of
-    # the records that survive, still applies.
-    projectionFollowsPhysicalOrder: false
+    # Pi projects the ACTIVE PATH through an entry tree rather than the
+    # physical record order, but the placeholder still stands in the omitted
+    # record's place on that path, so the records before and after the
+    # omitted one are both projected and the placeholder is neither first
+    # nor last. Omitting one record must cost one record on every harness.
+    projectionFollowsPhysicalOrder: true

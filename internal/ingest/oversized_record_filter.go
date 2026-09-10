@@ -129,10 +129,36 @@ func oversizedRecordDiagnostic(sourcePath string, record OmittedRecord) Diagnost
 // record is kept or stored. A prefix that does not clearly carry one yields
 // no id rather than a guess.
 func toolCallIDFromRecordPrefix(prefix []byte) *string {
+	return stringFieldFromRecordPrefix(prefix, `"tool_use_id"`, `"toolCallId"`, `"toolUseId"`, `"call_id"`, `"callId"`)
+}
+
+// entryIDFromRecordPrefix reads the omitted record's own entry id, and
+// parentEntryIDFromRecordPrefix the id it named as its parent, out of the same
+// opening bytes.
+//
+// They are what lets a harness that projects an entry TREE keep the ancestors
+// of an omitted record: the omission stands in the record's place on the path
+// from the last entry to the root. A Pi record opens with both keys, which is
+// the harness that needs them; a record that names neither leaves both nil and
+// the reader falls back to ending the walk there. A parent recorded as null
+// also yields nil, which is correct: a root record has no ancestor to keep.
+func entryIDFromRecordPrefix(prefix []byte) *string {
+	return stringFieldFromRecordPrefix(prefix, `"id"`)
+}
+
+func parentEntryIDFromRecordPrefix(prefix []byte) *string {
+	return stringFieldFromRecordPrefix(prefix, `"parentId"`)
+}
+
+// stringFieldFromRecordPrefix returns the first of the named JSON string
+// fields the prefix carries. Only that value is taken; no other byte of the
+// omitted record is kept or stored. A prefix that does not clearly carry one
+// yields nothing rather than a guess.
+func stringFieldFromRecordPrefix(prefix []byte, keys ...string) *string {
 	if len(prefix) == 0 {
 		return nil
 	}
-	for _, key := range []string{`"tool_use_id"`, `"toolCallId"`, `"toolUseId"`, `"call_id"`, `"callId"`} {
+	for _, key := range keys {
 		at := bytes.Index(prefix, []byte(key))
 		if at < 0 {
 			continue

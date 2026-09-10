@@ -166,6 +166,16 @@ type OmittedRecordAt struct {
 	Record     OmittedRecord
 	Line       int
 	ToolCallID *string
+	// EntryID and ParentEntryID are the omitted record's own entry id and the
+	// id of the entry it named as its parent, when its opening bytes carry
+	// them. A harness that projects an entry TREE rather than the physical
+	// record order needs them: without the pair, an omitted record breaks the
+	// chain from the last entry to the root, and every record before it drops
+	// out of the projection. With them the omission stands in the omitted
+	// record's place on that chain, so omitting one record costs one record.
+	// A record whose opening bytes name no id leaves both nil.
+	EntryID       *string
+	ParentEntryID *string
 }
 
 // newJSONLRecordScanner reads data with the given per-record limit. Production
@@ -230,9 +240,11 @@ func (s *jsonlRecordScanner) Scan() bool {
 				return false
 			}
 			s.omissions = append(s.omissions, OmittedRecordAt{
-				Record:     omitted,
-				Line:       s.line,
-				ToolCallID: toolCallIDFromRecordPrefix(prefix),
+				Record:        omitted,
+				Line:          s.line,
+				ToolCallID:    toolCallIDFromRecordPrefix(prefix),
+				EntryID:       entryIDFromRecordPrefix(prefix),
+				ParentEntryID: parentEntryIDFromRecordPrefix(prefix),
 			})
 			continue
 		}

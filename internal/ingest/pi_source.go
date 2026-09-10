@@ -249,24 +249,46 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	if len(order) == 0 {
 		return doc, nil
 	}
+	// The records this read left out, by the entry id each one held. An
+	// omitted record is a node of the entry tree like any other: the walk
+	// below passes THROUGH it to the parent it named, so the records before an
+	// omitted record stay on the active path and the placeholder takes the
+	// place the record held. Omitting one record must cost one record, here as
+	// on every other harness.
+	omittedByID := make(map[string]piOmission, len(doc.omissions))
+	for _, omission := range doc.omissions {
+		if omission.At.EntryID != nil {
+			omittedByID[*omission.At.EntryID] = omission
+		}
+	}
 	seen := make(map[string]bool)
 	for id := order[len(order)-1]; id != ""; {
 		if seen[id] {
 			return doc, piSourceError("active tree", 0, fmt.Errorf("cycle in active path"))
 		}
+		seen[id] = true
 		entry, ok := entries[id]
 		if !ok {
-			if len(doc.omissions) > 0 {
+			if omission, omitted := omittedByID[id]; omitted {
 				// The missing parent is a record this read left out for its
-				// size. Ending the walk here keeps the rest of the session,
-				// which is the point of omitting one record instead of
-				// failing the session; the placeholder entry states what is
-				// missing and where.
+				// size, and its opening bytes named the record before it. The
+				// walk continues from there; the placeholder entry states what
+				// is missing and where.
+				id = ""
+				if omission.At.ParentEntryID != nil {
+					id = *omission.At.ParentEntryID
+				}
+				continue
+			}
+			if len(doc.omissions) > 0 {
+				// A record was left out, but its opening bytes named no entry
+				// id, so which node of the tree is missing cannot be known.
+				// Ending the walk here keeps the rest of the session, which is
+				// still better than failing it.
 				break
 			}
 			return doc, piSourceError("active tree", 0, fmt.Errorf("dangling active parent"))
 		}
-		seen[id] = true
 		doc.active = append(doc.active, entry)
 		id = ""
 		if entry.ParentID != nil {

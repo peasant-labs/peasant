@@ -80,11 +80,12 @@ func (f largeRecordHarnessFixture) build(t *testing.T, recordBytes int) ([]byte,
 	return []byte(builder.String()), marker
 }
 
-func loadLargeRecordHarnessFixtures(t *testing.T) ([]largeRecordHarnessFixture, []string) {
+func loadLargeRecordHarnessFixtures(t *testing.T) ([]largeRecordHarnessFixture, []string, []string) {
 	t.Helper()
 	var fixture struct {
-		RequiredNames []string                    `yaml:"requiredNames"`
-		Harnesses     []largeRecordHarnessFixture `yaml:"harnesses"`
+		SurvivingRecordTexts []string                    `yaml:"survivingRecordTexts"`
+		RequiredNames        []string                    `yaml:"requiredNames"`
+		Harnesses            []largeRecordHarnessFixture `yaml:"harnesses"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(largeRecordHarnessYAML))
 	decoder.KnownFields(true)
@@ -102,7 +103,15 @@ func loadLargeRecordHarnessFixtures(t *testing.T) ([]largeRecordHarnessFixture, 
 		}
 		seen[harness.Name] = true
 	}
-	return fixture.Harnesses, fixture.RequiredNames
+	if len(fixture.SurvivingRecordTexts) == 0 {
+		t.Fatalf("committed fixture %s names no survivingRecordTexts, so nothing would check that the records around an omitted one were kept", largeRecordHarnessFixturePath)
+	}
+	for index, text := range fixture.SurvivingRecordTexts {
+		if strings.TrimSpace(text) == "" {
+			t.Fatalf("committed fixture %s survivingRecordTexts[%d] is empty; an empty needle is found in every transcript and would check nothing", largeRecordHarnessFixturePath, index)
+		}
+	}
+	return fixture.Harnesses, fixture.RequiredNames, fixture.SurvivingRecordTexts
 }
 
 // TestLargeRecordsAreHandledUniformlyAcrossHarnesses is the one shared
@@ -110,7 +119,7 @@ func loadLargeRecordHarnessFixtures(t *testing.T) ([]largeRecordHarnessFixture, 
 // whole, and omits an over-limit one the same way, with the same diagnostic
 // and the same placeholder.
 func TestLargeRecordsAreHandledUniformlyAcrossHarnesses(t *testing.T) {
-	harnesses, requiredNames := loadLargeRecordHarnessFixtures(t)
+	harnesses, requiredNames, survivingRecordTexts := loadLargeRecordHarnessFixtures(t)
 	ran := make(map[string]bool, len(requiredNames))
 
 	for _, fixture := range harnesses {
@@ -210,6 +219,14 @@ func TestLargeRecordsAreHandledUniformlyAcrossHarnesses(t *testing.T) {
 			}
 			if entriesCarry(entries, marker) {
 				t.Fatal("content of the omitted record reached the indexed entries")
+			}
+			// Omitting one record costs one record. The stored diagnostic
+			// tells the user that every other record was kept and indexed, so
+			// the records on both sides of the omitted one must be there.
+			for _, text := range survivingRecordTexts {
+				if !entriesCarry(entries, text) {
+					t.Errorf("the record carrying %q is missing from the %d indexed entries; omitting one record cost more than that record", text, len(entries))
+				}
 			}
 		})
 	}

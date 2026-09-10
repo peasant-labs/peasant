@@ -30,6 +30,13 @@ type omittedRecordSentinel struct {
 	Bytes      int64               `json:"bytes"`
 	LimitBytes int64               `json:"limitBytes"`
 	ToolCallID *string             `json:"toolCallId,omitempty"`
+	// EntryID and ParentEntryID keep the omitted record's place in an entry
+	// tree, for the harness that projects one. The filter reads them from the
+	// omitted record's opening bytes and the stand-in carries them, because
+	// the harness source reads the FILTERED artifact and the omitted record's
+	// own bytes are gone by then.
+	EntryID       *string `json:"entryId,omitempty"`
+	ParentEntryID *string `json:"parentEntryId,omitempty"`
 }
 
 // encodeOmittedRecordSentinel renders the stand-in line, without its newline.
@@ -39,11 +46,13 @@ func encodeOmittedRecordSentinel(at OmittedRecordAt) ([]byte, error) {
 	}
 	encoded, err := json.Marshal(map[string]omittedRecordSentinel{
 		omittedRecordSentinelKey: {
-			Reason:     at.Record.Reason,
-			Line:       at.Record.Line,
-			Bytes:      at.Record.Bytes,
-			LimitBytes: at.Record.LimitBytes,
-			ToolCallID: at.ToolCallID,
+			Reason:        at.Record.Reason,
+			Line:          at.Record.Line,
+			Bytes:         at.Record.Bytes,
+			LimitBytes:    at.Record.LimitBytes,
+			ToolCallID:    at.ToolCallID,
+			EntryID:       at.EntryID,
+			ParentEntryID: at.ParentEntryID,
 		},
 	})
 	if err != nil {
@@ -85,7 +94,13 @@ func parseOmittedRecordSentinel(raw []byte) (OmittedRecordAt, bool) {
 	if err != nil {
 		return OmittedRecordAt{}, false
 	}
-	return OmittedRecordAt{Record: record, Line: sentinel.Line, ToolCallID: sentinel.ToolCallID}, true
+	return OmittedRecordAt{
+		Record:        record,
+		Line:          sentinel.Line,
+		ToolCallID:    sentinel.ToolCallID,
+		EntryID:       sentinel.EntryID,
+		ParentEntryID: sentinel.ParentEntryID,
+	}, true
 }
 
 // omissionPlaceholderEntry builds the entry that stands in the indexed
