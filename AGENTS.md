@@ -98,12 +98,21 @@ ast-grep scan --config sgconfig.yml .
   `defaults.MaxJSONLRecordBytes` (256 MiB) in full. No record size ever fails a session and no
   record is ever silently dropped. A record over the limit is left out before redaction, reported
   with the `record_too_large` diagnostic naming its size, its line and the limit, and stored as an
-  incomplete capture with the failure code `source_records_omitted`, so previews keep working
-  while export and publication stay refused. The indexed entries hold a placeholder entry at the
-  omitted record's position, carrying the typed omission record in `extra` and a reader-facing
-  note in `contentPreview`. Those are existing `SessionEntry` fields, so the omission reaches
-  every transcript UI with no schema-repository change; promoting it to a first-class wire field
-  follows the contract ceremony.
+  incomplete capture with the failure code `source_records_omitted`. The indexed entries hold a
+  placeholder entry at the omitted record's position, carrying the typed omission record in
+  `extra` and a reader-facing note in `contentPreview`. Those are existing `SessionEntry` fields,
+  so the omission reaches every transcript UI with no schema-repository change; promoting it to a
+  first-class wire field follows the contract ceremony.
+- Because the placeholder accounts for what is missing, that capture is written as FULL content
+  and previews, export and publication all carry it, with the placeholder and with
+  `diagnostics.partial` set. It is the ONE incompleteness that may be published. The same failure
+  code is also raised where nothing stands in the gap, by an OpenCode part this build cannot
+  render and by an orphan graph part. There the content is simply missing, the capture stays a
+  bounded preview, and export and publication stay refused. What decides is the stored entries,
+  not the code: a capture is certified full exactly when a placeholder accounts for the omission.
+- OpenCode reads rows and legacy documents rather than lines and has no per-record size limit at
+  all, so no OpenCode record fails or is dropped at any size and the over-limit omission does not
+  apply to it.
 - The Village publish and pull formats are shared contracts. Coordinate the schema, producer, and
   server changes so that validation stays documented and enforced.
 - A wider license set needs a new SQLite migration. The migration rebuilds both local tables that

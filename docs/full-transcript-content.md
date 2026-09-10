@@ -15,8 +15,10 @@ capture holds every entry the source had, with a placeholder standing in each om
 place, so it is read, exported and published like a complete one; the published metadata declares
 the session partial and carries the omission warning, so a reader is told what is missing. Every
 other incompleteness is refused as before: a strict-parser refusal, a legacy preview-only
-capture, a failed capture, and the omitted-record state over a bounded preview rather than the
-full stored text.
+capture, a failed capture, the omitted-record state over a bounded preview rather than the full
+stored text, and an omission that nothing stands in for. That last one is raised by an OpenCode
+part this build cannot render and by an orphan graph part: it carries the same failure code with
+no placeholder, so it stays a bounded preview. What decides is the stored entries, not the code.
 
 ## Bounded tool results on served reads
 
@@ -27,6 +29,15 @@ how much is shown, how much was recorded, and that the whole record is still sto
 same bound applies to the session detail channel, the kickstart preview, `peasant export` and the
 published transcript, because all four come from one projection. Stored entries are never
 changed by it: a full-content read still returns every byte.
+
+The bound is shared across the whole document, so a session with very many recorded fields lowers
+it for all of them. A field is left whole when its note would be no shorter than the text it
+replaces, so bounding can only make the document smaller and a short value is never destroyed to
+save nothing. One case is still open: the note that stands where a source record was omitted is
+about a hundred bytes, a little longer than the note that would replace it, so a document under
+extreme pressure can still shorten it. The replacement then says the whole record is stored
+locally, which is not true of a record that was omitted. Reaching that state needs on the order
+of tens of thousands of tool calls in one session.
 
 Indexing first attempts recovery of database-listed incomplete captures. It parses retained
 root and subagent artifacts first. `peasant harvest index --force` also reprocesses other
