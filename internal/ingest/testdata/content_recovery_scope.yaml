@@ -5,11 +5,13 @@
 #   recovered  the capture becomes complete; the retained transcript was read,
 #              the native source was not; exactly one recovery index-log row
 #   untouched  no retained read, no write, no recovery diagnostic
-#   refused    a content_recovery_refused diagnostic; recovery reads nothing,
-#              nothing is written, no recovery index-log entry. A producer
-#              refusal still gets the index path's visible error outcome; a
-#              stored-schema refusal (no_index_log) grows no entry at all,
-#              matching the index filter that drops it before parsing.
+#   refused    recovery reads nothing, nothing is written, no recovery
+#              index-log entry. expected_diagnostics is the exact multiset of
+#              diagnostic types naming the session: a producer refusal is the
+#              sweep's content_recovery_refused plus the index path's visible
+#              index_refused; a stored-schema refusal is exactly one
+#              metadata_refused with the schema remedy (no_index_log: it grows
+#              no index-log entry at all, matching the index filter).
 #              pre_existing_retained_reads pins a read that happens outside
 #              recovery: the reindex fallback preparation reads the retained
 #              transcript of a target the index path then refuses
@@ -41,7 +43,9 @@ cases:
     future_producer: true
     expect: refused
     pre_existing_retained_reads: 1
+    expected_diagnostics: [content_recovery_refused, index_refused]
   - name: future-stored-schema-refused
     future_stored_schema: true
     expect: refused
     no_index_log: true
+    expected_diagnostics: [metadata_refused]

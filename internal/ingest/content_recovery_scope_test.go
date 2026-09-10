@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -44,15 +45,16 @@ func newRecoveryScopeOutcome(raw string) (recoveryScopeOutcome, error) {
 type contentRecoveryScopeFixtures struct {
 	Required []string `yaml:"required_names"`
 	Cases    []struct {
-		Name             string `yaml:"name"`
-		Harness          string `yaml:"harness"`
-		SinceAfterStart  bool   `yaml:"since_after_start"`
-		OtherSessionOnly bool   `yaml:"other_session_only"`
-		FutureProducer   bool   `yaml:"future_producer"`
-		FutureSchema     bool   `yaml:"future_stored_schema"`
-		PreExistingReads int    `yaml:"pre_existing_retained_reads"`
-		NoIndexLog       bool   `yaml:"no_index_log"`
-		Expect           string `yaml:"expect"`
+		Name             string   `yaml:"name"`
+		Harness          string   `yaml:"harness"`
+		SinceAfterStart  bool     `yaml:"since_after_start"`
+		OtherSessionOnly bool     `yaml:"other_session_only"`
+		FutureProducer   bool     `yaml:"future_producer"`
+		FutureSchema     bool     `yaml:"future_stored_schema"`
+		PreExistingReads int      `yaml:"pre_existing_retained_reads"`
+		NoIndexLog       bool     `yaml:"no_index_log"`
+		Diagnostics      []string `yaml:"expected_diagnostics"`
+		Expect           string   `yaml:"expect"`
 	} `yaml:"cases"`
 }
 
@@ -184,9 +186,14 @@ func TestContentRecoveryScope(t *testing.T) {
 				}
 			}
 			diagnostics := make(map[string]ingest.DiagnosticEntry)
+			var naming []string
 			for _, diagnostic := range result.Diagnostics {
 				diagnostics[diagnostic.ErrorType] = diagnostic
+				if strings.Contains(diagnostic.Message, id.String()) || strings.Contains(diagnostic.Location, id.String()) {
+					naming = append(naming, diagnostic.ErrorType)
+				}
 			}
+			sort.Strings(naming)
 			capture, found, err := database.GetSessionContentCapture(ctx, id)
 			if err != nil {
 				t.Fatal(err)
@@ -242,12 +249,21 @@ func TestContentRecoveryScope(t *testing.T) {
 					t.Fatalf("out-of-scope session entries changed: before=%+v after=%+v", before, after)
 				}
 			case recoveryScopeRefused:
-				refused, ok := diagnostics["content_recovery_refused"]
-				if !ok {
-					t.Fatalf("future producer was not refused: %+v", result.Diagnostics)
+				// Every diagnostic naming the session, as an exact multiset: a
+				// second entry for one cause is a duplicate the user must not see.
+				want := append([]string(nil), fixture.Diagnostics...)
+				sort.Strings(want)
+				if !reflect.DeepEqual(naming, want) {
+					t.Fatalf("diagnostics naming the session = %v, want %v: %+v", naming, want, result.Diagnostics)
 				}
-				if !containsAll(refused.Message, id.String(), "preserved") {
-					t.Fatalf("refusal is not visible and actionable: %+v", refused)
+				for _, errorType := range want {
+					refused := diagnostics[errorType]
+					if !containsAll(refused.Message, id.String()) || (errorType == "content_recovery_refused" && !containsAll(refused.Message, "preserved")) {
+						t.Fatalf("refusal is not visible and actionable: %+v", refused)
+					}
+					if fixture.FutureSchema && !strings.Contains(refused.Remediation, "Upgrade Peasant") {
+						t.Fatalf("stored-schema refusal carries the wrong remedy: %+v", refused)
+					}
 				}
 				if found && capture.Status == ingest.ContentCaptureComplete {
 					t.Fatalf("refused session was written: %+v", capture)

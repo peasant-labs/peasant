@@ -134,13 +134,16 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			if !p.includesIndexTarget(scope) {
 				continue
 			}
-			// The same stored-metadata compatibility check the index filter
+			// The same stored-metadata compatibility check the index selection
 			// applies: a session whose stored schema is newer than this build is
-			// refused before any retained read, store write or index-log entry.
-			state, err := (*SessionIndexState)(nil), p.checkStoredMetadataVersion(ctx, id)
-			if err == nil {
-				state, err = reader.ReadIndexState(ctx, id)
+			// refused before any retained read, store write or index-log entry,
+			// through the same diagnostic the selection reports, so the run
+			// carries exactly one refusal with the schema remedy for it.
+			if err := p.checkStoredMetadataVersion(ctx, id); err != nil {
+				p.reportMetadataRefusal(string(id), err)
+				continue
 			}
+			state, err := reader.ReadIndexState(ctx, id)
 			if err == nil && state == nil {
 				err = fmt.Errorf("content recovery %s: the store lists the session as a recovery target but reports no index state for it", id)
 			}
