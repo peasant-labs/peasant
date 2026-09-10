@@ -36,6 +36,31 @@ const (
 	indexOutputNil    indexOutputPayload = "nil-v1"
 )
 
+// transcriptIdentity says whether the fixture's transcript text belongs to one
+// named session or can be shared by every session in a case. A harness whose
+// transcript carries a session header refuses a header id that is not the
+// reading session's, so its text must name the peer it is written for; the
+// placeholder SESSION_ID is replaced with that peer's id.
+type transcriptIdentity string
+
+const (
+	// transcriptIdentityShared is the default: the text names no session, so
+	// both peers of a mixed run can be seeded from the same string.
+	transcriptIdentityShared transcriptIdentity = ""
+	// transcriptIdentitySessionScoped: the text names its own session.
+	transcriptIdentitySessionScoped transcriptIdentity = "session-scoped"
+)
+
+// expandSessionPlaceholder writes fixture text for one session. Shared text is
+// used as it stands, so a stray placeholder in a shared case stays visible
+// instead of being silently filled in.
+func (identity transcriptIdentity) expandSessionPlaceholder(text string, sessionID schema.SessionID) string {
+	if identity != transcriptIdentitySessionScoped {
+		return text
+	}
+	return strings.ReplaceAll(text, "SESSION_ID", string(sessionID))
+}
+
 type indexFormatOutputCase struct {
 	Name                 string              `yaml:"name"`
 	DeclaredFormat       int                 `yaml:"declaredFormat"`
@@ -56,6 +81,7 @@ type indexFormatOutputCase struct {
 	SourceDirectories    []string            `yaml:"sourceDirectories"`
 	HealthyTranscript    string              `yaml:"healthyTranscript"`
 	HealthySourceFiles   map[string]string   `yaml:"healthySourceFiles"`
+	TranscriptIdentity   transcriptIdentity  `yaml:"transcriptIdentity"`
 }
 
 func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
@@ -82,6 +108,14 @@ func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
 		case indexOutputV1, indexOutputV2, indexOutputEmpty, indexOutputError, indexOutputAbsent, indexOutputNil:
 		default:
 			t.Fatalf("unknown output payload %q", row.Payload)
+		}
+		switch row.TranscriptIdentity {
+		case transcriptIdentityShared, transcriptIdentitySessionScoped:
+		default:
+			t.Fatalf("index output case %q declares the unknown transcript identity %q; a transcript either names its own session or names none", row.Name, row.TranscriptIdentity)
+		}
+		if row.TranscriptIdentity == transcriptIdentityShared && strings.Contains(row.Transcript+row.HealthyTranscript, "SESSION_ID") {
+			t.Fatalf("index output case %q holds a SESSION_ID placeholder in transcript text it declares shared; declare transcriptIdentity: session-scoped so each peer is seeded with its own id", row.Name)
 		}
 		names[row.Name] = true
 	}
@@ -180,7 +214,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			meta.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			metadataPath, transcriptPath := setupPeasantSyncSession(t, fs, testOutputDir, testutil.TestHostSlug, string(sid), meta)
 			if row.Transcript != "" || row.EmptyTranscript {
-				if err := fs.WriteFile(transcriptPath, []byte(row.Transcript), 0600); err != nil {
+				if err := fs.WriteFile(transcriptPath, []byte(row.TranscriptIdentity.expandSessionPlaceholder(row.Transcript, sid)), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -210,7 +244,17 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				t.Fatal(err)
 			}
 			old := "last-good stored result"
-			oldEntries := []schema.SessionEntry{{SessionID: sid, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &old}}
+			oldEntry := schema.SessionEntry{SessionID: sid, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &old}
+			if harness == ingest.HarnessPi {
+				// A Pi row carries typed evidence or the store refuses to decode
+				// it, so the last-good seed must be a row Pi could have written.
+				extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi})
+				if err != nil {
+					t.Fatal(err)
+				}
+				oldEntry.Extra = extra
+			}
+			oldEntries := []schema.SessionEntry{oldEntry}
 			seed := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: oldEntries}, IndexVersion: 1, IndexerVersion: 14, IndexedAtMs: 1700000000000}})
 			if !seed[0].Written {
 				t.Fatalf("seed failed: %v", seed[0].Err)
