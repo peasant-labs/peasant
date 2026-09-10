@@ -10,7 +10,7 @@
 required_members:
   - ""
   - strict_capture_refused
-  - oversized_record_omitted
+  - source_records_omitted
   - legacy_preview_only
 members:
   # No failure was recorded. Not a steady state: nothing has tried to certify
@@ -20,9 +20,11 @@ members:
   # The strict parser met a well-formed record this build does not represent.
   - value: strict_capture_refused
     permanent: true
-  # Ingest removed a source record longer than the scanner line limit before
-  # writing the artifact, so the retained transcript is missing rows.
-  - value: oversized_record_omitted
+  # Ingest wrote the artifact without records the source had: one longer than
+  # the scanner line limit, one of a part type this build cannot render, or one
+  # whose parent message the native source lacks. The session's own metadata
+  # diagnostics say which, so the code claims only the omission itself.
+  - value: source_records_omitted
     permanent: true
   # Written by the content-capture migration for every session that predates
   # it. Nothing refused these; they owe one certification attempt.

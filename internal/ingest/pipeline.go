@@ -1394,7 +1394,7 @@ type indexParseResult struct {
 // it does not represent.
 func permanentRefusalCode(session DiscoveredSession, err error) ContentCaptureFailureCode {
 	if session.ContentOmitted {
-		return ContentCaptureOversizedRecordOmitted
+		return ContentCaptureSourceRecordsOmitted
 	}
 	var unrepresented *UnrepresentedRecordError
 	if errors.As(err, &unrepresented) {
@@ -1413,8 +1413,15 @@ func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, e
 		Message:     fmt.Sprintf("index session %s: the strict parser refused the transcript: %v; the represented entries were stored as an incomplete capture, so previews show them while export and publication stay refused until a complete capture exists", sid, err),
 		Remediation: "Regenerate the source with a supported harness version or upgrade Peasant so every record is represented, then rerun harvest index --force.",
 	}
-	if code == ContentCaptureOversizedRecordOmitted {
-		entry.Remediation = "Nothing in this transcript can be repaired: the oversized record was removed at ingest and the same source omits it again. Recover the session from a source that keeps records this long, or accept the stored preview."
+	if code == ContentCaptureSourceRecordsOmitted {
+		// Three ingest diagnostics raise this code and each has its own remedy:
+		// reduce an oversized event and re-ingest, upgrade for a part type this
+		// build cannot render, or accept that the native source never had the
+		// missing parent. Which one happened is recorded in the session's
+		// metadata, so this points there instead of naming a cause it cannot
+		// tell apart, and it must not contradict what the message already
+		// tells the user to do.
+		entry.Remediation = "Ingest omitted source records from this transcript, so re-harvesting the same source omits them again. The session's metadata diagnostics name each omitted record and what fixes it; act on those, or accept the stored preview."
 	}
 	return entry
 }

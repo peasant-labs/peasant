@@ -162,7 +162,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 			}
 			wantCode := ingest.ContentCaptureStrictRefused
 			if fixture.Omitted {
-				wantCode = ingest.ContentCaptureOversizedRecordOmitted
+				wantCode = ingest.ContentCaptureSourceRecordsOmitted
 			}
 			if capture.FailureCode != wantCode {
 				t.Fatalf("the refusal was stored as %q, want %q; nothing later can tell a refusal apart from a capture that was never certified unless its cause is recorded", capture.FailureCode, wantCode)

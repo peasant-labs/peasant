@@ -61,13 +61,23 @@ const (
 	// input under the recorded producer, and the tolerant projection was stored
 	// instead. Previews show it; nothing certifies it.
 	ContentCaptureStrictRefused ContentCaptureFailureCode = "strict_capture_refused"
-	// ContentCaptureOversizedRecordOmitted means the retained transcript is
-	// KNOWN to be missing records: ingest removed a source record longer than
-	// the scanner's line limit before writing the artifact. The strict parser
-	// refuses such a transcript however it is re-read, and the source it came
-	// from omits the same record again, so this is permanent for this build in
-	// the same way a refused record is.
-	ContentCaptureOversizedRecordOmitted ContentCaptureFailureCode = "oversized_record_omitted"
+	// ContentCaptureSourceRecordsOmitted means the retained transcript is KNOWN
+	// to be missing source records: ingest wrote the artifact without them.
+	//
+	// It is named for what its predicate attests and no more. Three ingest
+	// diagnostics raise it and they have different causes and different
+	// remedies: a record longer than the scanner line limit, a part type this
+	// build's OpenCode adapter does not know, and a part whose parent message
+	// is absent from the native source. The session's own metadata diagnostics
+	// say which happened and what fixes it, so nothing here should claim a
+	// cause it cannot tell apart.
+	//
+	// What all three share is why the strict parser refuses the transcript
+	// however often it is re-read: the records are not in it, and re-harvesting
+	// the same source omits them again. That makes it permanent for this build
+	// in the same way a refused record is, and a newer Peasant lifts it through
+	// the producer term or through the bytes a re-ingest changes.
+	ContentCaptureSourceRecordsOmitted ContentCaptureFailureCode = "source_records_omitted"
 	// ContentCaptureLegacyPreviewOnly marks the captures the content-capture
 	// migration wrote for sessions that predate it. Nothing refused them; no
 	// build ever tried to certify them, so a build that can certify them owes
@@ -82,10 +92,10 @@ const (
 // put a session back into pending work on every harvest, forever.
 func NewContentCaptureFailureCode(s string) (ContentCaptureFailureCode, error) {
 	switch code := ContentCaptureFailureCode(s); code {
-	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureOversizedRecordOmitted, ContentCaptureLegacyPreviewOnly:
+	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureSourceRecordsOmitted, ContentCaptureLegacyPreviewOnly:
 		return code, nil
 	}
-	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused or oversized_record_omitted for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)
+	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused or source_records_omitted for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)
 }
 
 type ContentSourceAuthority string

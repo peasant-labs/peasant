@@ -89,7 +89,7 @@ settled_required_names:
   - a-refusal-under-an-older-producer-is-not-settled
   - a-refusal-with-no-input-proof-is-not-settled
   - a-migrated-legacy-capture-is-not-settled
-  - an-omitted-record-refusal-is-settled
+  - an-omitted-source-record-refusal-is-settled
 settled_cases:
   - name: a-recorded-refusal-at-the-current-producer-is-settled
     failure_code: strict_capture_refused
@@ -128,8 +128,8 @@ settled_cases:
     input_proof: true
     settled: false
   # The second permanent cause reaches the same steady state as the first.
-  - name: an-omitted-record-refusal-is-settled
-    failure_code: oversized_record_omitted
+  - name: an-omitted-source-record-refusal-is-settled
+    failure_code: source_records_omitted
     stored_indexer_version: 16
     target_indexer_version: 16
     input_proof: true

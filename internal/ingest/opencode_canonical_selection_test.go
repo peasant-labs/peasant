@@ -482,12 +482,30 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		// build could read ARE stored, as an incomplete capture with the
 		// reason recorded, so the previewer shows the user what was captured
 		// instead of an empty session they cannot inspect.
-		if !found || capture.FailureCode != ingest.ContentCaptureOversizedRecordOmitted {
+		if !found || capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted {
 			t.Fatalf("omitted source %q stored no capture, or stored one whose reason nothing can read: found=%t capture=%+v", name, found, capture)
 		}
 		available, err := database.ReadSessionAvailable(t.Context(), id)
 		if err != nil || available == nil || len(available.Entries) == 0 {
 			t.Fatalf("omitted source %q has nothing to preview: %+v %v", name, available, err)
+		}
+		// The one warning this user reads must not argue with itself. The
+		// message carries the strict parser's own sentence, which for an
+		// OpenCode omission asks them to act; a remedy naming a cause that did
+		// not happen here - no record was oversized, a part was dropped - would
+		// send them looking for a source that does not exist.
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.ErrorType != "content_capture_incomplete" || diagnostic.Location != expectation.SessionID {
+				continue
+			}
+			for _, claim := range []string{"oversized", "records this long"} {
+				if strings.Contains(diagnostic.Remediation, claim) {
+					t.Fatalf("omitted source %q is told %q, which did not happen to it: %+v", name, claim, diagnostic)
+				}
+			}
+			if !strings.Contains(diagnostic.Remediation, "metadata diagnostics") {
+				t.Fatalf("omitted source %q is not sent to the record naming its cause: %+v", name, diagnostic)
+			}
 		}
 		host, parent, err := database.LookupSessionLocation(t.Context(), id)
 		if err != nil || parent != "" {
