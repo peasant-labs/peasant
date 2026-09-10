@@ -327,7 +327,7 @@ const publicationMetadataSelect = `SELECT s.project_hash,s.session_origin,s.publ
  s.indexed_publication_capture_revision,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,
  COALESCE(s.parent_id,''),h.host_slug,COALESCE(h.git_remote,''),
  p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash,s.session_id,
- c.status,c.full_capture_sha256,c.publication_capture_revision
+ c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,'')
  FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id
  LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
  LEFT JOIN session_content_captures c ON c.session_id=s.session_id`
@@ -346,6 +346,12 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 }
 
 // Capture-state columns only: eligibility deliberately does not verify payload.
+//
+// The columns are read back into the typed capture value and judged by the ONE
+// publication rule (PublishableWithOmissions), so readiness cannot drift from
+// what the complete-content readers will actually serve. Both readiness queries
+// select the same five capture columns in the same order from this offset:
+// status, full-capture proof, publication revision, failure code, capture format.
 func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (bool, error) {
 	if stmt.ColumnType(offset) == sqlite.TypeNull {
 		return false, nil
@@ -365,7 +371,23 @@ func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (
 	if contentRevision < 0 {
 		return false, publicationRepairError("negative full content publication revision")
 	}
-	return status == ingest.ContentCaptureComplete && revision > 0 && contentRevision == revision, nil
+	// An unrecognized code or format fails CLOSED: readiness acts on these
+	// values, so a state this build cannot name must never read as publishable.
+	code, err := ingest.NewContentCaptureFailureCode(stmt.ColumnText(offset + 3))
+	if err != nil {
+		return false, publicationRepairError("invalid full content capture failure code")
+	}
+	format, err := ingest.NewContentCaptureFormat(stmt.ColumnText(offset + 4))
+	if err != nil {
+		return false, publicationRepairError("invalid full content capture format")
+	}
+	capture := ingest.SessionContentCapture{Status: status, FailureCode: code, CaptureFormat: format}
+	// A publishable capture that is not complete still needs its full-capture
+	// proof: its entries are read and hashed like any other full capture.
+	if status != ingest.ContentCaptureComplete && hash == "" {
+		return false, nil
+	}
+	return PublishableWithOmissions(capture) && revision > 0 && contentRevision == revision, nil
 }
 
 // Metadata/index proof is also used to bind content-only retained backfills.

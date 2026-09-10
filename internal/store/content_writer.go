@@ -135,8 +135,17 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	if c.CaptureFormat == "" {
 		c.CaptureFormat = ingest.ContentCaptureFormatFull
 	}
-	if c.Status != ingest.ContentCaptureComplete || c.SourceAuthority == ingest.ContentSourceNone || c.FailureCode != ingest.ContentCaptureNoFailure || c.FailureMessage != "" {
-		return out, fmt.Errorf("store full content write: capture is not complete and attributable; prior data unchanged; resolve strict parser failures before retrying")
+	// A full capture is certified for a complete session AND for the one
+	// incompleteness that still holds every entry: oversized source records were
+	// omitted, and a placeholder entry stands in each one's place. That capture
+	// carries its failure code and its explaining message, which is why neither
+	// is required to be empty here. Every other refusal still has to be stored as
+	// the bounded preview it is.
+	if !FullCaptureWritable(c) || c.SourceAuthority == ingest.ContentSourceNone {
+		return out, fmt.Errorf("store full content write: capture %q with failure code %q is not a state this writer may certify as full content; prior data unchanged; resolve strict parser failures, or store the tolerant projection as a preview capture, before retrying", c.Status, c.FailureCode)
+	}
+	if c.Status == ingest.ContentCaptureComplete && c.FailureMessage != "" {
+		return out, fmt.Errorf("store full content write: a complete capture carries a failure message (%q); prior data unchanged; a complete capture records no failure, so clear the message or store the capture with the code that explains it", c.FailureMessage)
 	}
 	if c.CapturedAtMs == 0 {
 		c.CapturedAtMs = time.Now().UnixMilli()

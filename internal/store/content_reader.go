@@ -295,7 +295,7 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 	// bounded projection that is actually stored. It never refuses for
 	// incompleteness alone.
 	if mode == ingest.SessionEntryReadAvailable {
-		if found && c.Status == ingest.ContentCaptureComplete {
+		if found && PublishableWithOmissions(c) {
 			mode = ingest.SessionEntryReadFullContent
 		} else {
 			mode = ingest.SessionEntryReadPreview
@@ -303,7 +303,11 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 		opts.Mode = mode
 	}
 	if mode == ingest.SessionEntryReadFullContent {
-		if !found || c.Status != ingest.ContentCaptureComplete {
+		// A capture incomplete ONLY because oversized source records were
+		// omitted still holds every entry, with a placeholder in each omitted
+		// record's place, so it is read whole here. Every other incompleteness
+		// is refused exactly as before.
+		if !found || !PublishableWithOmissions(c) {
 			return page, fmt.Errorf("store full content read: %w; run harvest index --force with retained artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
 		}
 		// Validate even a standalone nonzero cursor: callers need not have read
@@ -427,7 +431,9 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 	if err != nil {
 		return fail(err)
 	}
-	if !found || capture.Status != ingest.ContentCaptureComplete || capture.FullCaptureSHA256 == "" || capture.SessionID != id {
+	// The omitted-record capture is read whole here too: it carries the same
+	// full-capture proof, and its placeholders are entries like any other.
+	if !found || !PublishableWithOmissions(capture) || capture.FullCaptureSHA256 == "" || capture.SessionID != id {
 		return fail(ErrContentCaptureIncomplete)
 	}
 	if err := verifyCaptureProjection(ctx, conn, id, capture, false); err != nil {
@@ -467,7 +473,10 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 	if err != nil {
 		return nil, capture, err
 	}
-	if found && capture.Status == ingest.ContentCaptureComplete {
+	// A capture the full readers may serve is served whole here as well, so a
+	// preview of an omitted-record session shows the placeholders in place
+	// rather than the bounded projection.
+	if found && PublishableWithOmissions(capture) {
 		return loadFullSessionEntriesOnConn(ctx, conn, id, 0)
 	}
 	entries, err = listEntriesOnConn(conn, id)
