@@ -615,6 +615,19 @@ func TestContentModeBehavioursPreserveStoredCapture(t *testing.T) {
 			if sessionEntriesHash(t, s, id) != beforeHash {
 				t.Fatal("served mode changed the stored entry projection")
 			}
+			// An accepted conversion promises the durable prose is still THERE,
+			// which the capture row and the entries hash cannot show: both stay
+			// identical if the manifests and chunks behind them are dropped.
+			// Read the full text back.
+			if behaviour.WriteMode != "" && behaviour.WantErrorContains == "" && behaviour.CompleteCapture {
+				page, readErr := s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent})
+				if readErr != nil || len(page.Entries) == 0 {
+					t.Fatalf("the converted session no longer serves its complete capture: %v", readErr)
+				}
+				if page.Entries[0].ContentPreview == nil || *page.Entries[0].ContentPreview != text {
+					t.Fatal("the conversion kept the capture row but lost the prose behind it")
+				}
+			}
 		})
 	}
 }

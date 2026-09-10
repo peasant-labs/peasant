@@ -129,7 +129,7 @@ func TestMigrationV52LegacyCaptureIncomplete(t *testing.T) {
 			}
 			// The preview is not complete, and it is still content a person
 			// recorded, so every mounted previewer must be able to show it.
-			available, err := db.ReadSessionAvailable(ctx, row.SessionID)
+			available, err := db.ReadSessionAvailable(ctx, id)
 			if err != nil || available == nil || len(available.Entries) != row.WantEntryCount {
 				t.Fatalf("a legacy session became unpreviewable after the upgrade: %+v %v", available, err)
 			}

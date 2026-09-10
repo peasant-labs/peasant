@@ -39,8 +39,12 @@ func (s *Store) ReadSessionContent(ctx context.Context, sessionID string) (*Sess
 // than the whole session, never content the database cannot prove it stored.
 // Reading it successfully does not certify the session for export or
 // publication; those use ReadSessionContent.
-func (s *Store) ReadSessionAvailable(ctx context.Context, sessionID string) (*SessionContentSnapshot, error) {
-	return s.readSessionSnapshot(ctx, sessionID, ingest.SessionEntryReadAvailable)
+// The identifier is typed: a caller validates a raw string through
+// ingest.NewSessionID at its own input boundary and passes the result, rather
+// than every reader re-casting a string it cannot vouch for. The sibling reads
+// on this store take the same type.
+func (s *Store) ReadSessionAvailable(ctx context.Context, id ingest.SessionID) (*SessionContentSnapshot, error) {
+	return s.readSessionSnapshot(ctx, string(id), ingest.SessionEntryReadAvailable)
 }
 
 func (s *Store) readSessionSnapshot(ctx context.Context, sessionID string, mode ingest.SessionEntryReadMode) (_ *SessionContentSnapshot, retErr error) {

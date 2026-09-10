@@ -168,7 +168,7 @@ func TestContentSnapshotUsesOnlyCoherentCapturedInput(t *testing.T) {
 			}
 			// The available reader: what every mounted previewer shows. A
 			// capture that is merely unfinished is still previewable.
-			available, availableErr := db.ReadSessionAvailable(ctx, string(meta.SessionID))
+			available, availableErr := db.ReadSessionAvailable(ctx, meta.SessionID)
 			if (availableErr != nil) != row.PreviewRefused {
 				t.Fatalf("available database read outcome=%v, want refused=%t", availableErr, row.PreviewRefused)
 			}

@@ -327,7 +327,15 @@ func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.Ses
 // publication keep the strict reader, so a preview never certifies content.
 // The payload shape is unchanged: completeness is not reported on the wire.
 func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
-	snapshot, err := p.store.ReadSessionAvailable(ctx, id)
+	// The raw identifier is validated once, here at the boundary it arrives
+	// through, instead of being cast further down where nothing can vouch for
+	// it. This is the WebSocket's subscription id and the kickstart pane's
+	// highlighted row, both of which reach us as untyped text.
+	sessionID, err := ingest.NewSessionID(id)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: session by id: %w", err)
+	}
+	snapshot, err := p.store.ReadSessionAvailable(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}
