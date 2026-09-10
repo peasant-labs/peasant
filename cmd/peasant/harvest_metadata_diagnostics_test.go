@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"maps"
@@ -41,9 +40,17 @@ var harvestMetadataDiagnosticsYAML []byte
 //     warning has to survive the render.
 //
 // The earlier single test asked for both at once: it passed --json and then
-// required the interactive run's global log suppression, a state the command
-// cannot be in. Global log suppression is not restored for non-interactive
-// output, so neither test asserts it.
+// required the interactive run's log suppression, a state the command cannot be
+// in: --json turns the renderer off, and the command suppresses structured logs
+// only while the renderer owns the terminal.
+//
+// That suppression is the command's own, at the renderer.IsTTY() branch in
+// cmd_harvest.go, and it is what keeps a slog line out of the rendered frames.
+// Each test asserts it from its own side: the terminal test requires the default
+// logger to stay silent for the whole interactive run, and the document test
+// requires the same logs to flow when the renderer is off. Neither test discards
+// the logger, because a discarded logger cannot tell whether the command
+// suppressed anything.
 
 // harvestDiagnosticsFixtures is the corpus both surfaces drive.
 type harvestDiagnosticsFixtures struct {
@@ -65,6 +72,11 @@ type harvestDiagnosticsCase struct {
 	// carries an index log only for work that happened, so a refusal must NOT
 	// grow one.
 	WantIndexLog bool `yaml:"wantIndexLog"`
+	// WantStructuredLog says whether this run emits a structured WARN at all.
+	// The document surface suppresses nothing, so this is a statement about the
+	// run, and it is declared per case rather than inferred from what happens to
+	// appear: inferring it would pass however the command behaved.
+	WantStructuredLog bool `yaml:"wantStructuredLog"`
 }
 
 func loadHarvestDiagnosticsFixtures(t *testing.T) harvestDiagnosticsFixtures {
@@ -205,6 +217,10 @@ func (w harvestDiagnosticsWorld) assertWarning(t *testing.T, fixture harvestDiag
 	}
 	// The render's own control sequences are not a warning. What must be absent
 	// is the refusal itself, in any of the words it is made of.
+	//
+	// The "warning:" prefix is live, not decoration: the harvest prints every
+	// diagnostic as "warning: <location>: <message>" on the command's error
+	// stream, which a refusal case on this same surface is observed to produce.
 	for _, forbidden := range []string{"upgrade Peasant", "warning:", "999"} {
 		if strings.Contains(shown, forbidden) {
 			t.Fatalf("compatible input produced a false warning naming %q: %q", forbidden, shown)
@@ -289,6 +305,10 @@ func TestHarvestMetadataDiagnosticsJSON(t *testing.T) {
 		names[fixture.Name] = true
 		t.Run(fixture.Name, func(t *testing.T) {
 			world := arrangeHarvestDiagnostics(t, fixtures, fixture)
+			oldLogger := slog.Default()
+			var logged bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+			defer slog.SetDefault(oldLogger)
 			root := buildRootCommand()
 			var stdout, stderr bytes.Buffer
 			root.SetOut(&stdout)
@@ -296,6 +316,13 @@ func TestHarvestMetadataDiagnosticsJSON(t *testing.T) {
 			root.SetArgs(world.args(fixture, true))
 			if err := root.Execute(); err != nil {
 				t.Fatalf("a metadata refusal must stay non-fatal: %v; stderr=%s", err, &stderr)
+			}
+			// The document surface turns the renderer off, so nothing owns the
+			// terminal and structured logs are NOT suppressed. A refusal's own log
+			// line is the evidence: suppressing it here would hide a refusal from
+			// every non-interactive consumer, which is what this surface is for.
+			if got := strings.Contains(logged.String(), "level=WARN"); got != fixture.WantStructuredLog {
+				t.Fatalf("structured WARN present=%v, want %v on the document surface; this surface suppresses nothing, so the value is whatever the run emits: %q", got, fixture.WantStructuredLog, logged.String())
 			}
 			world.assertWarning(t, fixture, stderr.String(), diagnosticsSurfaceDocument)
 			var result map[string]json.RawMessage
@@ -361,7 +388,13 @@ func TestHarvestMetadataDiagnosticsTTY(t *testing.T) {
 			}()
 			oldStderr, oldLogger := os.Stderr, slog.Default()
 			os.Stderr = terminal
-			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			// A buffer, never io.Discard. Every structured log this scenario emits
+			// is emitted while the renderer owns the terminal, so the command's own
+			// suppression is exactly what decides whether this buffer stays empty.
+			// Discarding here would answer that question for the command and leave
+			// its suppression untested.
+			var logged bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
 			root := buildRootCommand()
 			var stdout bytes.Buffer
 			root.SetOut(&stdout)
@@ -382,6 +415,18 @@ func TestHarvestMetadataDiagnosticsTTY(t *testing.T) {
 			// so "the warning survived the render" is a claim about a render.
 			if !strings.Contains(visible, "\x1b[") {
 				t.Fatalf("the interactive run drew no terminal control sequences, so this case cannot show a warning surviving a render: %q", visible)
+			}
+			// The command suppressed structured logs for the whole render. Deleting
+			// its renderer.IsTTY() branch in cmd_harvest.go sends this scenario's
+			// warnings here instead, and this assertion is what reports it.
+			if logged.Len() != 0 {
+				t.Fatalf("the interactive run let structured logs through while the renderer owned the terminal: %q", logged.String())
+			}
+			// And they did not reach the frames by another route either.
+			for _, leaked := range []string{"level=WARN", "level=ERROR", "level=INFO", "msg="} {
+				if strings.Contains(visible, leaked) {
+					t.Fatalf("a structured log line reached the rendered frames (%q): %q", leaked, visible)
+				}
 			}
 			world.assertWarning(t, fixture, visible, diagnosticsSurfaceInteractive)
 			world.assertOutcome(t, fixture)
