@@ -590,7 +590,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	// self-assessment card; nil when the session has no computed metrics.
 	scorecard := qualityMetricsToScorecard(s.Metadata.Quality)
 
-	return &schema.SessionDetailPayload{
+	detail := &schema.SessionDetailPayload{
 		NativeMetadata:   s.NativeMetadata,
 		ID:               string(s.ID),
 		Harness:          s.Harness,
@@ -613,4 +613,13 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Outcome:          outcome,
 		Scorecard:        scorecard,
 	}
+	// Every served detail leaves this one producer bounded for display. A stored
+	// record may be far larger than the contract's document policy allows the
+	// served document to be, and a session is never refused for size: the
+	// oversized text is shortened here, with a visible note, and the store keeps
+	// the whole record. Every consumer of this projection — the session_detail
+	// WebSocket, the kickstart preview, `peasant export` and the publication
+	// content — inherits the same bound because they all come through here.
+	BoundServedDetail(detail, DefaultServedDocumentBudget())
+	return detail
 }
