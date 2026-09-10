@@ -143,11 +143,17 @@ cases:
     name: reindex_unreadable_old_entries_ready
     reindex_remove_source: true
     reindex_unreadable_entries: true
+  # The managed transcript no longer matches its committed metadata and the
+  # native source is gone: the reindex is held. It refuses the pair with a
+  # warning, writes nothing, and the run does not fail; the last-good index,
+  # the verified capture and its publication binding stay exactly as they
+  # were, so the session still reads as ready from the store.
   - <<: *claude
     name: reindex_changed_fallback_held
     reindex_remove_source: true
     reindex_change_managed: true
-    expected_manual_readiness: needs_ingest
+    expected_manual_indexed: 0
+    expected_manual_readiness: ready
   - <<: *claude
     name: reindex_stale_source_capture_held
     reindex_concurrent_capture: true
