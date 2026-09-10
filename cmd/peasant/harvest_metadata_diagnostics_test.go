@@ -76,6 +76,13 @@ type harvestDiagnosticsCase struct {
 	// run, and it is declared per case rather than inferred from what happens to
 	// appear: inferring it would pass however the command behaved.
 	WantStructuredLog bool `yaml:"wantStructuredLog"`
+	// WantWarningLines is how many "warning:" lines the command surface prints
+	// for this case. Here the number IS the contract: one cause reported once.
+	// The harvest prints one line per reported diagnostic (cmd_harvest.go:527),
+	// so a cause that reaches the user through two reporters, or through one
+	// reporter twice, shows as two lines however similar the sentences are.
+	// Containment cannot see that, which is why the count is declared.
+	WantWarningLines int `yaml:"wantWarningLines"`
 }
 
 func loadHarvestDiagnosticsFixtures(t *testing.T) harvestDiagnosticsFixtures {
@@ -85,6 +92,12 @@ func loadHarvestDiagnosticsFixtures(t *testing.T) harvestDiagnosticsFixtures {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
 		t.Fatal(err)
+	}
+	for _, fixture := range fixtures.Cases {
+		if fixture.WantWarning == (fixture.WantWarningLines == 0) {
+			t.Fatalf("fixture %q: a case that warns must declare how many warning lines the user sees, and a case that does not must declare none; wantWarning=%v wantWarningLines=%d",
+				fixture.Name, fixture.WantWarning, fixture.WantWarningLines)
+		}
 	}
 	return fixtures
 }
@@ -204,6 +217,19 @@ func (w harvestDiagnosticsWorld) assertWarning(t *testing.T, fixture harvestDiag
 		for _, want := range []string{string(w.session), "999", "upgrade Peasant"} {
 			if !strings.Contains(shown, want) {
 				t.Fatalf("the post-render warning must name %q: %q", want, shown)
+			}
+		}
+		// One cause, one line. The interactive surface writes its render into the
+		// same stream, so only the document surface can count.
+		if surface == diagnosticsSurfaceDocument {
+			lines := 0
+			for _, line := range strings.Split(shown, "\n") {
+				if strings.HasPrefix(line, "warning:") {
+					lines++
+				}
+			}
+			if lines != fixture.WantWarningLines {
+				t.Fatalf("the command printed %d warning lines, want %d: one refused session must be reported once, whatever the reporting path: %q", lines, fixture.WantWarningLines, shown)
 			}
 		}
 		return

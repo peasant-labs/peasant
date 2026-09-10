@@ -21,18 +21,38 @@ expectedRootKeys: [duration, sessions, summary]
 #                       the run. Declared per case from what the run emits today;
 #                       a case whose refusal gains a log line flips this field
 #                       deliberately.
+#   wantWarningLines  - how many "warning:" lines the command prints. Here the
+#                       number IS the contract: one refused session should be
+#                       reported once, so a second reporting path for the same
+#                       cause shows up as a second line even when it says the
+#                       same thing in other words. Declared per case from what
+#                       the run prints today, exactly like wantStructuredLog;
+#                       a case that warns must declare a positive count and a
+#                       case that does not must declare none.
+#
+# The stored-schema refusal reports once. The three metadata-ARTIFACT refusals
+# report the SAME refusal three times, and the count is declared at 3 so that
+# collapsing them is a deliberate, visible change rather than a silent one:
+#   1. the rewrite check, naming the metadata file by its absolute path;
+#   2. the selection check, naming the same file by its path relative to the
+#      managed output directory. Same session, same version, same remedy: the
+#      two entries survive dedup only because the two reporters spell the
+#      location differently;
+#   3. the retained-content recovery sweep, which adds a preservation sentence.
 cases:
   - name: normal refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
+    wantWarningLines: 3
   - name: forced refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     force: true
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
+    wantWarningLines: 3
   - name: index refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
     reindex: true
@@ -40,6 +60,7 @@ cases:
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
+    wantWarningLines: 3
   # This refusal is reported to the user but logs nothing structured today.
   - name: stored schema refusal stays nonfatal and keeps last-good state
     schemaVersion: 9
@@ -49,6 +70,7 @@ cases:
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: false
+    wantWarningLines: 1
   # The only case that indexes anything, so the only one whose document carries
   # an index log.
   - name: compatible metadata has no false warning
