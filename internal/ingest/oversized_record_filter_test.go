@@ -109,13 +109,22 @@ func TestFilterOversizedJSONLRecordsBoundary(t *testing.T) {
 					t.Errorf("diagnostic message %q does not say %q", diagnostic.Message, want)
 				}
 			}
-			for _, want := range []string{"partial capture", "next harvest", "Publishing refuses"} {
+			for _, want := range []string{"partial capture", "next harvest", "publishable"} {
 				if !strings.Contains(diagnostic.Remediation, want) {
 					t.Errorf("diagnostic remediation %q does not say %q", diagnostic.Remediation, want)
 				}
 			}
-			if strings.Contains(diagnostic.Remediation, "not available yet") {
-				t.Error("remediation still claims large-record support is unavailable")
+			// This warning is copied verbatim into the publication request, so
+			// a sentence that sends the user away from sharing is shown to a
+			// reader of the very session it says cannot be shared.
+			for _, forbidden := range []string{
+				"not available yet",
+				"Publishing refuses",
+				"before sharing this session",
+			} {
+				if strings.Contains(diagnostic.Remediation, forbidden) {
+					t.Errorf("diagnostic remediation %q still says %q, which is not true of a session that may be published as it stands", diagnostic.Remediation, forbidden)
+				}
 			}
 
 			if !bytes.Contains(filtered, laterRecord) {

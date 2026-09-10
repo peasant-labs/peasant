@@ -260,16 +260,18 @@ func TestPublicationOmissionsCarryPartialDiagnostics(t *testing.T) {
 	meta.MetadataHash = schema.ComputeMetadataHash(meta)
 	partial := true
 	meta.Diagnostics.Partial = &partial
-	meta.Diagnostics.Warnings = []ingest.DiagnosticEntry{{
-		ErrorType:   "record_too_large",
-		Location:    "line 5",
-		Message:     "the record at line 5 is larger than the per-record limit and was omitted",
-		Remediation: "Reduce the record at the source and re-ingest, or accept the stored placeholder.",
-	}}
-
-	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
+	// The REAL warning ingest raises, not a hand-written stand-in: the mapper
+	// copies message and remediation verbatim into the published request, so a
+	// test that writes its own warning never sees the sentence a reader reads.
+	omitted, err := ingest.NewOmittedRecord(ingest.OmittedRecordTooLarge, 5, 300<<20, 256<<20)
 	if err != nil {
-		t.Fatalf("map the publication metadata: %v", err)
+		t.Fatal(err)
+	}
+	meta.Diagnostics.Warnings = []ingest.DiagnosticEntry{ingest.OversizedRecordDiagnostic("/nonexistent/source.jsonl", omitted)}
+
+	payload, mapErr := push.MapMetadata(mapOpts(meta, nil, nil))
+	if mapErr != nil {
+		t.Fatalf("map the publication metadata: %v", mapErr)
 	}
 	var request schema.PublishRequest
 	if err := json.Unmarshal(payload, &request); err != nil {
@@ -285,11 +287,20 @@ func TestPublicationOmissionsCarryPartialDiagnostics(t *testing.T) {
 		t.Fatalf("the published metadata carries %d warnings, want the omission warning", len(request.Diagnostics.Warnings))
 	}
 	warning := request.Diagnostics.Warnings[0]
-	if warning.ErrorType != "record_too_large" || warning.Location != "line 5" {
+	if warning.ErrorType != "record_too_large" || !strings.Contains(warning.Location, "line 5") {
 		t.Fatalf("the published warning is %+v, want the record_too_large omission at line 5", warning)
 	}
 	if !strings.Contains(warning.Message, "omitted") {
 		t.Errorf("the published warning does not say the record was omitted: %q", warning.Message)
+	}
+	// What the reader of the PUBLISHED session is told to do about it.
+	for _, forbidden := range []string{"Publishing refuses", "before sharing this session"} {
+		if strings.Contains(warning.Remediation, forbidden) {
+			t.Errorf("the published omission warning tells a reader %q about a session that was published as it stands: %q", forbidden, warning.Remediation)
+		}
+	}
+	if !strings.Contains(warning.Remediation, "publishable") {
+		t.Errorf("the published omission warning does not tell the reader the session is publishable as it stands: %q", warning.Remediation)
 	}
 }
 

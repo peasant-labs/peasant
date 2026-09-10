@@ -254,8 +254,9 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 				Diagnostics struct {
 					Partial  *bool `json:"partial"`
 					Warnings []struct {
-						ErrorType string `json:"errorType"`
-						Message   string `json:"message"`
+						ErrorType   string `json:"errorType"`
+						Message     string `json:"message"`
+						Remediation string `json:"remediation"`
 					} `json:"warnings"`
 				} `json:"diagnostics"`
 			}
@@ -268,8 +269,20 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			}
 			gotWarning := false
 			for _, warning := range request.Diagnostics.Warnings {
-				if warning.ErrorType == ingest.OversizedRecordDiagnosticType {
-					gotWarning = true
+				if warning.ErrorType != ingest.OversizedRecordDiagnosticType {
+					continue
+				}
+				gotWarning = true
+				// The remediation travels verbatim, so a reader of the
+				// PUBLISHED session reads it. It may not send them away from
+				// the sharing they have just done.
+				for _, forbidden := range []string{"Publishing refuses", "before sharing this session"} {
+					if strings.Contains(warning.Remediation, forbidden) {
+						t.Errorf("the published omission warning tells a reader %q, on a session this same run published: %q", forbidden, warning.Remediation)
+					}
+				}
+				if !strings.Contains(warning.Remediation, "publishable") {
+					t.Errorf("the published omission warning does not tell the reader the session is publishable as it stands: %q", warning.Remediation)
 				}
 			}
 			if gotWarning != fixtureCase.OmissionWarning {

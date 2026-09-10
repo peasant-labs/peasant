@@ -55,7 +55,7 @@ func filterOversizedJSONLRecords(
 		}
 		filtered.Write(sentinel)
 		filtered.WriteByte('\n')
-		diagnostics = append(diagnostics, oversizedRecordDiagnostic(sourcePath, at.Record))
+		diagnostics = append(diagnostics, OversizedRecordDiagnostic(sourcePath, at.Record))
 		omitted = true
 		lastWasRecord = false
 		return nil
@@ -105,9 +105,14 @@ func filterOversizedJSONLRecords(
 	return out, diagnostics, nil
 }
 
-// oversizedRecordDiagnostic states what was omitted, why, where, what it means
+// OversizedRecordDiagnostic states what was omitted, why, where, what it means
 // for the stored session, and what makes it come back.
-func oversizedRecordDiagnostic(sourcePath string, record OmittedRecord) DiagnosticEntry {
+//
+// It is exported because this exact entry, remediation included, is copied
+// verbatim into the publication request and shown to a reader of the published
+// session. A test of that path builds the warning here rather than writing its
+// own, so what is asserted is the sentence users are actually shown.
+func OversizedRecordDiagnostic(sourcePath string, record OmittedRecord) DiagnosticEntry {
 	return DiagnosticEntry{
 		ErrorType: OversizedRecordDiagnosticType,
 		Location:  fmt.Sprintf("%s line %d", sourcePath, record.Line),
@@ -117,7 +122,7 @@ func oversizedRecordDiagnostic(sourcePath string, record OmittedRecord) Diagnost
 			record.LimitBytes, humanByteSize(record.LimitBytes),
 		),
 		Remediation: fmt.Sprintf(
-			"No action is needed to keep the session: it is stored as a partial capture and stays readable and searchable without that one record. The record returns on the next harvest of this session if it becomes smaller than %s in the source, or if a build with a larger per-record limit indexes it. Publishing refuses a partial capture, so shrink or re-record the oversized tool output before sharing this session.",
+			"No action is needed to keep the session: it is stored as a partial capture with a placeholder standing in the omitted record's place, and it stays readable, searchable, exportable and publishable as it is, with the placeholder and the partial flag travelling with it. The record itself returns on the next harvest of this session if it becomes smaller than %s in the source, or if a build with a larger per-record limit indexes it.",
 			humanByteSize(record.LimitBytes),
 		),
 	}

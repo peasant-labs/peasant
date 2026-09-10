@@ -171,7 +171,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 		for _, at := range scanner.TakeOmissions() {
 			offset += int(at.Record.Bytes) + 1
 			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
-			doc.warnings = append(doc.warnings, oversizedRecordDiagnostic("Pi recording", at.Record))
+			doc.warnings = append(doc.warnings, OversizedRecordDiagnostic("Pi recording", at.Record))
 		}
 		return nil
 	}
