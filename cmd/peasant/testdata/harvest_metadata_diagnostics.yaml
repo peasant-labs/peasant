@@ -15,12 +15,12 @@ expectedRootKeys: [duration, sessions, summary]
 # inference, rather than leaving them to whatever the run happens to produce:
 #
 #   wantIndexLog      - does the document carry an index log? It records work
-#                       that happened, so a refusal must not grow one. This is
-#                       the ratified answer, not a local convention.
+#                       that happened, so a refusal must not grow one.
 #   wantStructuredLog - does the run emit a structured WARN at all? The document
 #                       surface suppresses nothing, so this is a statement about
-#                       the run. Measured per case on this tip; a case whose
-#                       refusal gains a log line flips this field deliberately.
+#                       the run. Declared per case from what the run emits today;
+#                       a case whose refusal gains a log line flips this field
+#                       deliberately.
 cases:
   - name: normal refusal stays nonfatal and keeps last-good state
     schemaVersion: 999
@@ -40,7 +40,7 @@ cases:
     wantWarning: true
     wantIndexLog: false
     wantStructuredLog: true
-  # This refusal is reported to the user but logs nothing structured on this tip.
+  # This refusal is reported to the user but logs nothing structured today.
   - name: stored schema refusal stays nonfatal and keeps last-good state
     schemaVersion: 9
     storedSchemaVersion: 999
