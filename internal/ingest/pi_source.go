@@ -265,6 +265,14 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 		}
 		entry, ok := entries[id]
 		if !ok {
+			if len(doc.omissions) > 0 {
+				// The missing parent is a record this read left out for its
+				// size. Ending the walk here keeps the rest of the session,
+				// which is the point of omitting one record instead of
+				// failing the session; the placeholder entry states what is
+				// missing and where.
+				break
+			}
 			return doc, piSourceError("active tree", 0, fmt.Errorf("dangling active parent"))
 		}
 		seen[id] = true
