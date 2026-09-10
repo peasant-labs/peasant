@@ -4075,8 +4075,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		}
 		if allowed {
 			if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
+				// The refusal is a run diagnostic, not a structured log line the
+				// interactive renderer would have to suppress.
 				p.reportMetadataRefusal(string(target.session.SessionID), err)
-				slog.Warn("reindex: stored metadata refused", "session_id", target.session.SessionID, "error", err)
 				allowed = false
 			}
 		}

@@ -45,6 +45,13 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	if !p.includesIndexTarget(target) || p.metricsStore == nil {
 		return false
 	}
+	// A session whose stored metadata schema is newer than this build is
+	// refused here, before it can become a target: the refusal is one
+	// diagnostic on the run, never a structured log line or an index-log entry.
+	if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
+		p.reportMetadataRefusal(string(target.session.SessionID), err)
+		return false
+	}
 	indexer, ok := p.indexers[target.session.Harness]
 	if !ok {
 		return false
