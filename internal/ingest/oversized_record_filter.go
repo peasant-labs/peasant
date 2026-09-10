@@ -41,36 +41,36 @@ func filterOversizedJSONLRecords(
 	}
 
 	var (
-		filtered    bytes.Buffer
-		diagnostics []DiagnosticEntry
-		omitted     bool
+		filtered      bytes.Buffer
+		diagnostics   []DiagnosticEntry
+		omitted       bool
+		lastWasRecord bool
 	)
 	filtered.Grow(len(data))
 
+	writeStandIn := func(at OmittedRecordAt) error {
+		sentinel, err := encodeOmittedRecordSentinel(at)
+		if err != nil {
+			return err
+		}
+		filtered.Write(sentinel)
+		filtered.WriteByte('\n')
+		diagnostics = append(diagnostics, oversizedRecordDiagnostic(sourcePath, at.Record))
+		omitted = true
+		lastWasRecord = false
+		return nil
+	}
+
+	// writeOmissions puts a stand-in at the position of each record the reader
+	// left out since the last call. The reader reports both a record this pass
+	// skipped for its size and a stand-in the input already carried, so
+	// filtering an artifact that already records an omission keeps that
+	// omission rather than losing it.
 	writeOmissions := func() error {
-		for _, skipped := range scanner.TakeOversized() {
-			record, err := NewOmittedRecord(
-				OmittedRecordTooLarge,
-				skipped.Line,
-				int64(skipped.Size),
-				int64(maxRecordBytes),
-			)
-			if err != nil {
+		for _, omission := range scanner.TakeOmissions() {
+			if err := writeStandIn(omission); err != nil {
 				return err
 			}
-			at := OmittedRecordAt{
-				Record:     record,
-				Line:       skipped.Line,
-				ToolCallID: toolCallIDFromRecordPrefix(skipped.Prefix),
-			}
-			sentinel, err := encodeOmittedRecordSentinel(at)
-			if err != nil {
-				return err
-			}
-			filtered.Write(sentinel)
-			filtered.WriteByte('\n')
-			diagnostics = append(diagnostics, oversizedRecordDiagnostic(sourcePath, record))
-			omitted = true
 		}
 		return nil
 	}
@@ -84,6 +84,7 @@ func filterOversizedJSONLRecords(
 		}
 		filtered.Write(scanner.Bytes())
 		filtered.WriteByte('\n')
+		lastWasRecord = true
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, nil, err
@@ -94,7 +95,14 @@ func filterOversizedJSONLRecords(
 	if !omitted {
 		return data, nil, nil
 	}
-	return filtered.Bytes(), diagnostics, nil
+	out := filtered.Bytes()
+	// Keep the source's own ending. A transcript still being written has no
+	// final newline, and adding one would make an unfinished last record look
+	// finished to every later reader.
+	if lastWasRecord && len(data) > 0 && data[len(data)-1] != '\n' {
+		out = out[:len(out)-1]
+	}
+	return out, diagnostics, nil
 }
 
 // oversizedRecordDiagnostic states what was omitted, why, where, what it means

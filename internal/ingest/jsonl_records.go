@@ -256,15 +256,6 @@ func (s *jsonlRecordScanner) Line() int { return s.line }
 // Oversized lists every record skipped so far, in source order.
 func (s *jsonlRecordScanner) Oversized() []OversizedRecord { return s.oversized }
 
-// TakeOversized returns the records skipped since the last call and clears
-// them, so a caller that rewrites the stream can put a stand-in at the exact
-// position each skipped record held.
-func (s *jsonlRecordScanner) TakeOversized() []OversizedRecord {
-	taken := s.oversized
-	s.oversized = nil
-	return taken
-}
-
 // TakeOmissions returns the omissions the reader has passed since the last
 // call and clears them. An indexer calls it at the top of its record loop and
 // once after the loop, so every omission becomes a placeholder entry at the

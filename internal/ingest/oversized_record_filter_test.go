@@ -240,3 +240,53 @@ func TestOmittedRecordRoundTrip(t *testing.T) {
 		t.Error("an ordinary entry's extra field was read as an omission record")
 	}
 }
+
+// TestFilterOversizedJSONLRecordsKeepsTheSourceEnding pins that the filter
+// does not finish an unfinished last record. A transcript still being written
+// has no final newline; adding one would make its last record look complete
+// to every later reader, including the incomplete-tail check.
+func TestFilterOversizedJSONLRecordsKeepsTheSourceEnding(t *testing.T) {
+	over := append(bytes.Repeat([]byte{'x'}, oversizedFilterTestLimit+1), '\n')
+	unfinished := append(over, []byte(`{"type":"session.titled","data":{"title":"unfinis`)...)
+
+	filtered, diagnostics, err := filterOversizedJSONLRecords(t.Context(), unfinished, "unfinished.jsonl", oversizedFilterTestLimit)
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %+v, want one omission", diagnostics)
+	}
+	if len(filtered) == 0 || filtered[len(filtered)-1] == '\n' {
+		t.Fatalf("the filter finished an unfinished last record: %q", filtered)
+	}
+	if !bytes.HasSuffix(filtered, []byte(`"unfinis`)) {
+		t.Fatalf("the unfinished last record was changed: %q", filtered)
+	}
+}
+
+// TestFilterOversizedJSONLRecordsKeepsAnOmissionItAlreadyCarries pins that
+// filtering an artifact that already records an omission keeps that omission,
+// at its position, instead of dropping the record of it.
+func TestFilterOversizedJSONLRecordsKeepsAnOmissionItAlreadyCarries(t *testing.T) {
+	over := append(bytes.Repeat([]byte{'x'}, oversizedFilterTestLimit+1), '\n')
+	later := []byte(`{"type":"session.titled","data":{"title":"retained"}}` + "\n")
+	once, firstDiagnostics, err := filterOversizedJSONLRecords(t.Context(), append(over, later...), "twice.jsonl", oversizedFilterTestLimit)
+	if err != nil || len(firstDiagnostics) != 1 {
+		t.Fatalf("first pass: %v / %+v", err, firstDiagnostics)
+	}
+
+	twice, secondDiagnostics, err := filterOversizedJSONLRecords(t.Context(), once, "twice.jsonl", oversizedFilterTestLimit)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if len(secondDiagnostics) != 1 || secondDiagnostics[0].ErrorType != OversizedRecordDiagnosticType {
+		t.Fatalf("second pass diagnostics = %+v, want the omission reported again", secondDiagnostics)
+	}
+	if !bytes.Equal(twice, once) {
+		t.Fatalf("a second pass changed the artifact:\n once = %q\ntwice = %q", once, twice)
+	}
+	firstLine, _, _ := bytes.Cut(twice, []byte{'\n'})
+	if _, isStandIn := parseOmittedRecordSentinel(firstLine); !isStandIn {
+		t.Fatalf("the second pass dropped the omission stand-in: %q", twice)
+	}
+}

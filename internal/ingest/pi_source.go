@@ -168,17 +168,8 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	// takeOmissions records the records this read left out, at the position
 	// they held, before the next accepted record is processed.
 	takeOmissions := func() error {
-		for _, skipped := range scanner.TakeOversized() {
-			offset += skipped.Size + 1
-			record, err := NewOmittedRecord(OmittedRecordTooLarge, skipped.Line, int64(skipped.Size), int64(limit))
-			if err != nil {
-				return piSourceError("parse", skipped.Line, err)
-			}
-			at := OmittedRecordAt{Record: record, Line: skipped.Line, ToolCallID: toolCallIDFromRecordPrefix(skipped.Prefix)}
-			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
-			doc.warnings = append(doc.warnings, oversizedRecordDiagnostic("Pi recording", record))
-		}
 		for _, at := range scanner.TakeOmissions() {
+			offset += int(at.Record.Bytes) + 1
 			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
 			doc.warnings = append(doc.warnings, oversizedRecordDiagnostic("Pi recording", at.Record))
 		}
