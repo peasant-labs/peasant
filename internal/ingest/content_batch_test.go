@@ -85,9 +85,12 @@ func TestFullContentWriteBatchCommitsEachSession(t *testing.T) {
 			// Built by literal to reach the unexported flush. The path under test
 			// reads exactly these: fs and config.OutputDir for the artifact
 			// publisher, and metricsStore for the atomic write. Every other field
-			// is nil or zero on purpose: store nil makes the metadata-compatibility
-			// check fall back to metricsStore and return, and a nil harvester
-			// version map means the shipped registry.
+			// is nil or zero on purpose: store stays nil and metricsStore is not a
+			// SessionStore, so the metadata-compatibility check has no backing
+			// store and returns nil in file-only mode, asking nothing here for a
+			// schema version; a nil harvester version map means the shipped
+			// registry.
+			assertFileOnlyCompatibility(t, observer)
 			pipeline := &Pipeline{metricsStore: observer, fs: &OSFileSystem{}, config: PipelineConfig{OutputDir: ResolvedPath(output)}}
 			var parsed []indexParseResult
 			for index, size := range fixture.Bytes {
@@ -311,10 +314,12 @@ func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 			// Built by literal to reach the unexported grouping. This path reads
 			// fs and config.OutputDir for the artifact publisher, metricsStore for
 			// both the index-state read and the atomic write, and indexers for the
-			// parse. store stays nil so the metadata-compatibility check falls back
-			// to metricsStore and returns; the harvester version map stays nil so
-			// the shipped registry applies; the profiler stays nil and records
-			// nothing.
+			// parse. store stays nil and metricsStore is not a SessionStore, so the
+			// metadata-compatibility check has no backing store and returns nil in
+			// file-only mode: nothing here is asked for a schema version. The
+			// harvester version map stays nil so the shipped registry applies, and
+			// the profiler stays nil and records nothing.
+			assertFileOnlyCompatibility(t, store)
 			pipeline := &Pipeline{
 				fs:           &OSFileSystem{},
 				metricsStore: store,
@@ -435,6 +440,20 @@ func expectedCommitOrder(t *testing.T, groups [][]int, metas []indexedMeta) []Se
 		t.Fatalf("the flush groups cover %d of %d seeded sessions; every session is committed exactly once", len(seen), len(metas))
 	}
 	return order
+}
+
+// assertFileOnlyCompatibility holds what the comments above these pipelines
+// claim: with no store, the metadata-compatibility check has a backing store
+// only if the metrics store is also a SessionStore. These stores are not, so
+// the check returns in file-only mode and asks nothing for a schema version.
+//
+// A future test store that grew the session-lookup method would change what
+// this path reads, silently, while the comment kept saying otherwise.
+func assertFileOnlyCompatibility(t *testing.T, metricsStore MetricsStore) {
+	t.Helper()
+	if _, backing := metricsStore.(SessionStore); backing {
+		t.Fatalf("%T is now a SessionStore, so the metadata-compatibility check has a backing store and this path no longer runs in file-only mode; re-read what it asks before trusting the grouping", metricsStore)
+	}
 }
 
 // streamingBudgetFixtures is the second half of the budget corpus: the
