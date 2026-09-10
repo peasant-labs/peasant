@@ -477,7 +477,7 @@ func reapStaleE2EInfra(t *testing.T) {
 		t.Logf("e2e: could not list stale podman infrastructure before self-provisioning: %v\n%s", err, out)
 		return
 	}
-	names := staleStoppedE2EInfraNames(string(out), time.Now(), staleE2ETTL)
+	names := reapableE2EInfraNames(string(out), time.Now(), staleE2ETTL, processAlive)
 	args := podmanReapE2EInfraArgs(names)
 	if len(args) == 0 {
 		return
