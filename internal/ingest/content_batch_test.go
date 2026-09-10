@@ -81,6 +81,12 @@ func TestFullContentWriteBatchCommitsEachSession(t *testing.T) {
 				observer.cancel = cancel
 			}
 			output := t.TempDir()
+			// Built by literal to reach the unexported flush. The path under test
+			// reads exactly these: fs and config.OutputDir for the artifact
+			// publisher, and metricsStore for the atomic write. Every other field
+			// is nil or zero on purpose: store nil makes the metadata-compatibility
+			// check fall back to metricsStore and return, and a nil harvester
+			// version map means the shipped registry.
 			pipeline := &Pipeline{metricsStore: observer, fs: &OSFileSystem{}, config: PipelineConfig{OutputDir: ResolvedPath(output)}}
 			var parsed []indexParseResult
 			for index, size := range fixture.Bytes {
@@ -301,6 +307,13 @@ func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 			output := t.TempDir()
 			indexer := &budgetIndexer{bytes: make(map[SessionID]int)}
 			store := &budgetStore{states: make(map[SessionID]*SessionIndexState)}
+			// Built by literal to reach the unexported grouping. This path reads
+			// fs and config.OutputDir for the artifact publisher, metricsStore for
+			// both the index-state read and the atomic write, and indexers for the
+			// parse. store stays nil so the metadata-compatibility check falls back
+			// to metricsStore and returns; the harvester version map stays nil so
+			// the shipped registry applies; the profiler stays nil and records
+			// nothing.
 			pipeline := &Pipeline{
 				fs:           &OSFileSystem{},
 				metricsStore: store,
