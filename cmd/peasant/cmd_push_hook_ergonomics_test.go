@@ -181,15 +181,14 @@ func writeTestCredentialsFor(t *testing.T, dir, villageURL string) {
 	}
 }
 
-// seedPushableSession puts one eligible session in the store at dir, so a push
-// reaches the network instead of returning early with nothing to send.
 // pushableSessionID is the session seedPushableSession puts in the store, named
 // so a test can ask the database what the run recorded for it.
 const pushableSessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
 
 // seedPushableSession seeds a session the push actually SELECTS and carries as
 // far as the village: a store row plus a verified full capture, written through
-// the production transactions.
+// the production transactions. A push over it reaches the network instead of
+// returning early with nothing to send.
 //
 // It used to stop at the store row, on the older contract where a session reached
 // the network first and failed later at a metadata read. Publication is now
