@@ -485,7 +485,16 @@ func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
 		case persistenceMutationMissingOrderedEntry:
 			mutated = bytes.Replace(mutated, []byte("ordered_entry_ids: [msg_current_all]"), []byte("ordered_entry_ids: []"), 1)
 		case persistenceMutationInvalidMetrics:
-			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
+			// Built from the shipped version, not copied from it: the corpus rows
+			// move with every metrics bump, and a hard-coded needle would then
+			// find nothing, leave the corpus unchanged, and report the loader as
+			// having ACCEPTED a mutation that was never applied. The replacement
+			// stays literal; it is the mutation, not the corpus.
+			needle := []byte(fmt.Sprintf("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: %d}", metrics.CurrentComputeVersion))
+			if !bytes.Contains(mutated, needle) {
+				t.Fatalf("the invalid-metrics mutation needle %q no longer matches the corpus; the rows moved, so rebuild the needle rather than reading this as an accepted mutation", needle)
+			}
+			mutated = bytes.Replace(mutated, needle, []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
 		}
 		if _, err := loadCanonicalPersistenceFixture(mutated); err == nil || strings.TrimSpace(mutation.Name) == "" {
 			t.Errorf("canonical persistence loader mutation %q was accepted", mutation.Name)
