@@ -35,11 +35,9 @@ changed by it: a full-content read still returns every byte.
 The bound is shared across the whole document, so a session with very many recorded fields lowers
 it for all of them. A field is left whole when its note would be no shorter than the text it
 replaces, so bounding can only make the document smaller and a short value is never destroyed to
-save nothing. One case is still open: the note that stands where a source record was omitted is
-about a hundred bytes, a little longer than the note that would replace it, so a document under
-extreme pressure can still shorten it. The replacement then says the whole record is stored
-locally, which is not true of a record that was omitted. Reaching that state needs on the order
-of tens of thousands of tool calls in one session.
+save nothing. The note that stands where a source record was omitted is shorter than any bound
+note, so the floor leaves it whole under every pressure: a reader always sees why that tool
+output is missing, and a bound note never replaces it.
 
 Indexing first attempts recovery of database-listed incomplete captures. It parses retained
 root and subagent artifacts first. `peasant harvest index --force` also reprocesses other
