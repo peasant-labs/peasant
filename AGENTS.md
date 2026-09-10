@@ -94,6 +94,16 @@ ast-grep scan --config sgconfig.yml .
 - [`github.com/peasant-labs/redact`](https://github.com/peasant-labs/redact) owns the redaction
   rules and their canonical fixtures. When you update that dependency, keep the coverage of the
   mounted command, of ingest, of configuration, and of the API integration.
+- Every JSONL harness reads, redacts and indexes a single source record up to
+  `defaults.MaxJSONLRecordBytes` (256 MiB) in full. No record size ever fails a session and no
+  record is ever silently dropped. A record over the limit is left out before redaction, reported
+  with the `record_too_large` diagnostic naming its size, its line and the limit, and stored as an
+  incomplete capture with the failure code `source_records_omitted`, so previews keep working
+  while export and publication stay refused. The indexed entries hold a placeholder entry at the
+  omitted record's position, carrying the typed omission record in `extra` and a reader-facing
+  note in `contentPreview`. Those are existing `SessionEntry` fields, so the omission reaches
+  every transcript UI with no schema-repository change; promoting it to a first-class wire field
+  follows the contract ceremony.
 - The Village publish and pull formats are shared contracts. Coordinate the schema, producer, and
   server changes so that validation stays documented and enforced.
 - A wider license set needs a new SQLite migration. The migration rebuilds both local tables that
