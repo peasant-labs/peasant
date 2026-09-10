@@ -954,10 +954,13 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		}
 	case "text":
 		entry.EntryType, entry.Role = EntryTypeText, parentRole
-		// A text part that repeats its message's own preview would render the
-		// same prose twice: once on the message turn and once on the part turn.
-		// The message turn already carries it, so drop the part.
-		if parentContent != nil && *parentContent != "" && part.Data.Text == truncateString(*parentContent, defaults.ContentPreviewLimit) {
+		// A text part that repeats its message's own text would render the same
+		// prose twice: once on the message turn and once on the part turn. The
+		// message turn already carries it, so drop the part. Both sides are the
+		// recorded text, never a preview: comparing a bounded preview would keep
+		// the duplicate whenever the prose is longer than the preview limit,
+		// which is exactly when reading it twice costs the reader most.
+		if parentContent != nil && *parentContent != "" && part.Data.Text == *parentContent {
 			return schema.SessionEntry{}, false
 		}
 		if part.Data.Text != "" {
