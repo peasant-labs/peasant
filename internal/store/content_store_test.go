@@ -591,12 +591,27 @@ func TestContentModeBehavioursPreserveStoredCapture(t *testing.T) {
 				t.Fatalf("served mode failed: %v", err)
 			}
 			if behaviour.ReadMode != "" && behaviour.WantErrorContains == "" {
-				// One page is enough: this asserts WHICH text a served mode
-				// hands back, not how it pages a long session.
-				if len(page.Entries) == 0 {
-					t.Fatal("served read returned no entries at all")
+				// The read is byte-budget paged, so one page of a long session
+				// is not the whole session. Follow the cursor: a served mode
+				// has to REACH every stored entry, not just answer with a
+				// plausible first page. Anything less would pass while the read
+				// silently truncated the conversation.
+				served := append([]schema.SessionEntry(nil), page.Entries...)
+				for next := page.NextIndex; next != nil; {
+					more, pageErr := s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: behaviour.ReadMode, FromIndex: *next})
+					if pageErr != nil {
+						t.Fatalf("served read failed part way through the session at entry %d: %v", *next, pageErr)
+					}
+					if len(more.Entries) == 0 {
+						t.Fatalf("served read stopped advancing at entry %d with entries still to come", *next)
+					}
+					served = append(served, more.Entries...)
+					next = more.NextIndex
 				}
-				got := *page.Entries[0].ContentPreview
+				if len(served) != len(entries) {
+					t.Fatalf("served read reached %d of %d stored entries", len(served), len(entries))
+				}
+				got := *served[0].ContentPreview
 				bounded := *stored[0].ContentPreview
 				if behaviour.WantFullText {
 					if got != text {
