@@ -531,7 +531,15 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			if _, err := metricspkg.NewEngine(fixtureStore).ComputeMetrics(t.Context(), []ingest.SessionID{nonStaleID}); err != nil {
 				t.Fatal(err)
 			}
-			nonStaleMetric := *metrics.SavedMetrics[nonStaleID]
+			// Read the peer metric from the store that holds it. The seed
+			// computes it through the metrics engine, which leaves current
+			// metrics alone on a later compute, so the recorded copy is the
+			// only place it is guaranteed to be.
+			storedPeerMetric, err := fixtureStore.GetMetrics(t.Context(), nonStaleID)
+			if err != nil || storedPeerMetric == nil {
+				t.Fatalf("peer metrics were not computed for %s: %v", nonStaleID, err)
+			}
+			nonStaleMetric := *storedPeerMetric
 			metrics.IndexedEntries[nonStaleID] = peerEntries
 			metrics.SavedMetrics[nonStaleID] = &nonStaleMetric
 			peerState, err := fixtureStore.ReadIndexState(t.Context(), nonStaleID)

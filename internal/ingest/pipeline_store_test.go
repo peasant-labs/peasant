@@ -102,6 +102,24 @@ func (s *pipelineFixtureStore) SaveMetrics(ctx context.Context, metrics *ingest.
 	return nil
 }
 
+// The production engine writes metrics through the input-proof path, so a
+// fixture that only mirrors SaveMetrics sees none of them and a test that asks
+// whether metrics were computed measures the mirror instead of the run.
+func (s *pipelineFixtureStore) SaveMetricsForInput(ctx context.Context, expected *ingest.MetricInput, metrics *ingest.SessionMetrics) error {
+	if s.metrics != nil && s.metrics.SaveErr != nil {
+		return s.metrics.SaveErr
+	}
+	if err := s.Store.SaveMetricsForInput(ctx, expected, metrics); err != nil {
+		return err
+	}
+	if s.metrics != nil && metrics != nil {
+		s.mu.Lock()
+		s.metrics.SavedMetrics[metrics.SessionID] = metrics
+		s.mu.Unlock()
+	}
+	return nil
+}
+
 func (s *pipelineFixtureStore) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
 	if s.metrics != nil {
 		s.mu.Lock()
