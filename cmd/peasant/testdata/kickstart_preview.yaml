@@ -25,6 +25,7 @@
 requiredNames:
   - an-imported-session-shows-its-whole-recorded-transcript
   - a-preview-only-stored-body-still-shows-the-turn-the-store-holds
+  - an-unreadable-stored-projection-is-reported-not-previewed
   - a-discovered-session-the-store-lacks-reads-its-harness-transcript
   - a-project-row-explains-what-to-highlight
   - a-branch-row-explains-what-to-highlight
@@ -95,6 +96,14 @@ cases:
       # show less than the whole session, and it does not send them to a
       # recovery command to see the part that is already there.
       - harvest index --force
+
+  # An unfinished capture is shown; content the database cannot vouch for is
+  # not. This session's rows exist but its recorded index format is one no
+  # handler in this build serves, so the pane reports that instead of rendering
+  # rows whose representation nothing can verify.
+  - name: an-unreadable-stored-projection-is-reported-not-previewed
+    highlight: 5a1f8c07-3b62-4d49-9e18-0f7a6c2b5d31
+    wantError: unsupported index format
 
   # The store does not hold this session. Its transcript is still on disk where
   # its harness wrote it, so the pane reads that file and shows the whole
