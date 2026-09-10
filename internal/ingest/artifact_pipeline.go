@@ -102,7 +102,12 @@ func (p *Pipeline) reconcileManagedArtifacts(ctx context.Context) {
 			// send the user to delete recovery evidence or to re-run the very
 			// harvest that cannot reconcile it. Refusing here leaves nothing
 			// behind, so the second harvest costs exactly what the first did.
-			if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+			//
+			// Only a refusal this build cannot lift is decided here. A check that
+			// merely failed - a transient lookup fault the run goes on to recover
+			// from - is left to the paths that already own it, so an extra reader
+			// cannot turn a recovered fault into a warning the user must read.
+			if err := p.checkStoredMetadataVersion(ctx, sid); isMetadataCompatibilityError(err) {
 				p.reportMetadataRefusal(string(sid), err)
 				return nil
 			}
