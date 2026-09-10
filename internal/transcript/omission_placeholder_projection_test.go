@@ -177,7 +177,7 @@ func omissionPlaceholderEntries(t *testing.T, fixtureCase omissionPlaceholderPro
 	if err != nil {
 		t.Fatal(err)
 	}
-	note := "tool output omitted: 8 KiB record at line 3 is over the 8 KiB limit"
+	note := "only showing preview of tool output: full output is over the 8 KiB limit"
 
 	text := func(index int, role schema.Role, entryType schema.EntryType, content string) schema.SessionEntry {
 		preview := content

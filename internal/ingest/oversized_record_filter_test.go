@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -211,10 +212,37 @@ func assertOmissionPlaceholder(t *testing.T, entry schema.SessionEntry, want Omi
 	if len(note) >= 500 {
 		t.Errorf("placeholder note is %d characters, over the wire's content preview bound", len(note))
 	}
-	for _, wantText := range []string{"tool output omitted", "line", "limit", "the rest of the session was kept"} {
+	for _, wantText := range []string{"only showing preview of tool output", "full output is over the", "limit"} {
 		if !strings.Contains(note, wantText) {
 			t.Errorf("placeholder note %q does not say %q", note, wantText)
 		}
+	}
+	// The note speaks about ONE tool output. The line and the size of the
+	// omitted record live in the typed record in the entry's extra field and in
+	// the session's metadata diagnostic; repeating them here crowds out the one
+	// thing a reader of the conversation needs at that position.
+	for _, forbidden := range []string{"tool output omitted", "the rest of the session was kept"} {
+		if strings.Contains(note, forbidden) {
+			t.Errorf("placeholder note %q still says %q", note, forbidden)
+		}
+	}
+}
+
+// TestOmissionPlaceholderNoteIsTheReadersLine pins the EXACT sentence a reader is
+// shown where a tool output was left out, at the per-record limit production
+// runs with. Every viewer the placeholder reaches shows this string, and the
+// publication body carries it to a reader on another machine, so the wording is
+// pinned as a literal here rather than assembled from the code under test.
+func TestOmissionPlaceholderNoteIsTheReadersLine(t *testing.T) {
+	t.Parallel()
+	limit := int64(defaults.MaxJSONLRecordBytes)
+	record, err := NewOmittedRecord(OmittedRecordTooLarge, 7, limit+1, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "only showing preview of tool output: full output is over the 256 MiB limit"
+	if got := OmissionPlaceholderNote(record); got != want {
+		t.Errorf("the reader's omission note = %q, want %q", got, want)
 	}
 }
 

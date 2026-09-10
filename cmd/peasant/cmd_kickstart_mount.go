@@ -494,7 +494,7 @@ func storedPartialPreviewNotice(ctx context.Context, captures sessionCaptureRead
 			return fallback()
 		}
 		capture, found, err := captures.GetSessionContentCapture(ctx, id)
-		if err != nil || !found || capture.Status == ingest.ContentCaptureComplete {
+		if err != nil || !found || !store.PartialPreviewNeeded(capture) {
 			return fallback()
 		}
 		return transcriptview.PartialPreviewNote

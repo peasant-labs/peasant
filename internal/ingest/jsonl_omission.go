@@ -122,7 +122,7 @@ func omissionPlaceholderEntry(
 	if err != nil {
 		return schema.SessionEntry{}, err
 	}
-	note := omissionPlaceholderNote(at.Record)
+	note := OmissionPlaceholderNote(at.Record)
 	rawByteLength := int(at.Record.Bytes)
 	if int64(rawByteLength) != at.Record.Bytes {
 		// A size that does not fit the wire's int field would be reported
@@ -148,13 +148,29 @@ func omissionPlaceholderEntry(
 	return entry, nil
 }
 
-// omissionPlaceholderNote is the reader-facing sentence the placeholder shows
-// where the omitted record used to be. It stays well under the wire's 500
-// character content-preview bound.
-func omissionPlaceholderNote(record OmittedRecord) string {
+// OmissionPlaceholderNote is the reader-facing line the placeholder shows where
+// the omitted record used to be, in every viewer the placeholder reaches: the
+// web transcript, the kickstart pane, the share wizard and the publication body.
+//
+// It says one thing, about one tool output, at that tool output's own position.
+// The line and the size of the omitted record are NOT repeated here: they are in
+// the typed omission record in the entry's extra field and in the session's
+// metadata diagnostic, which is where a reader who wants them looks. A reader
+// looking at the conversation needs to know which output is short and why, and
+// nothing else competes for that line.
+//
+// A session-level warning is a different statement and is not made from here: a
+// capture whose only incompleteness is recorded omissions is whole everywhere
+// except at these positions, so the only honest place to say so is each
+// position. It stays well under the wire's 500 character content-preview bound.
+//
+// It is exported so a reader of a stored session can recognise the note it is
+// about to show, and so a test of any viewer asserts the one sentence users see
+// rather than its own copy of the wording.
+func OmissionPlaceholderNote(record OmittedRecord) string {
 	return fmt.Sprintf(
-		"tool output omitted: %s record at line %d is over the %s limit; the rest of the session was kept",
-		defaults.HumanByteSize(record.Bytes), record.Line, defaults.HumanByteSize(record.LimitBytes),
+		"only showing preview of tool output: full output is over the %s limit",
+		defaults.HumanByteSize(record.LimitBytes),
 	)
 }
 

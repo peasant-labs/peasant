@@ -86,7 +86,7 @@ func TestPushContent_BoundsAnOversizedToolResult(t *testing.T) {
 	if note != defaults.ServedTextFieldBudgetBytes {
 		t.Errorf("the published tool result shows %d bytes, want the per-field budget %d", note, defaults.ServedTextFieldBudgetBytes)
 	}
-	for _, want := range []string{"tool result bounded for display", "showing 1.0 MiB of 9.0 MiB", "kept by the peasant store that recorded this session"} {
+	for _, want := range []string{"tool result bounded for display", "showing 1 MiB of 9 MiB", "kept by the peasant store that recorded this session"} {
 		if !strings.Contains(found[note:], want) {
 			t.Errorf("bound note %q does not contain %q", found[note:], want)
 		}

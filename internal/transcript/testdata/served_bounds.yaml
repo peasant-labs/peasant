@@ -11,7 +11,7 @@ cases:
         shownBytes: 1048576
         noteContains:
           - "tool result bounded for display"
-          - "showing 1.0 MiB of 9.0 MiB"
+          - "showing 1 MiB of 9 MiB"
           - "kept by the peasant store that recorded this session"
   - name: small_tool_result_is_served_whole
     kind: tool_result
@@ -112,7 +112,7 @@ cases:
         shownBytes: 1048576
         noteContains:
           - "turn content bounded for display"
-          - "showing 1.0 MiB of 9.0 MiB"
+          - "showing 1 MiB of 9 MiB"
   # The per-field bound of 1048576 bytes lands one byte inside a three-byte
   # rune, so the cut backs up to 1048575 and the served text stays valid UTF-8.
   - name: multibyte_text_is_cut_on_a_rune_boundary
@@ -123,4 +123,4 @@ cases:
       - bounded: true
         shownBytes: 1048575
         noteContains:
-          - "showing 1.0 MiB of 3.0 MiB"
+          - "showing 1 MiB of 3 MiB"

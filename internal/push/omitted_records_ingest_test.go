@@ -14,11 +14,14 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -143,6 +146,18 @@ const omittedRecordsSentinel = "LARGE_RECORD_SENTINEL"
 // omittedRecordsTrailingText is the closing record, which is under the limit in
 // every case and must survive the omission.
 const omittedRecordsTrailingText = "the tool finished"
+
+// omittedRecordsPlaceholderNote is the line a reader is shown where the omitted
+// record used to be. The cases run under an injected 2 KiB limit, so the note
+// names that limit rather than the production one; the exact production sentence
+// is pinned where the note is built.
+const omittedRecordsPlaceholderNote = "only showing preview of tool output: full output is over the 2 KiB limit"
+
+// omittedRecordsOldPlaceholderNote is the superseded wording. It named the line
+// and the size of the omitted record and claimed the rest of the session was
+// kept, three statements competing for the one line a reader reads at that
+// position. No viewer may show it again.
+const omittedRecordsOldPlaceholderNote = "tool output omitted"
 
 // TestOmittedRecordsIngestPublishesEndToEnd drives the REAL ingest pipeline,
 // the REAL store writer, the REAL readiness query, the REAL publication
@@ -343,14 +358,39 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			gotPlaceholder := strings.Contains(string(served), "tool output omitted")
+			gotPlaceholder := strings.Contains(string(served), omittedRecordsPlaceholderNote)
 			if gotPlaceholder != fixtureCase.PlaceholderInServedDetail {
 				t.Errorf("the served detail carries the omission placeholder note=%v, want %v", gotPlaceholder, fixtureCase.PlaceholderInServedDetail)
+			}
+			if strings.Contains(string(served), omittedRecordsOldPlaceholderNote) {
+				t.Errorf("the served detail carries the superseded omission note %q", omittedRecordsOldPlaceholderNote)
 			}
 			gotRecord := strings.Contains(string(served), omittedRecordsSentinel)
 			if gotRecord != fixtureCase.LargeRecordInServedDetail {
 				t.Errorf("the served detail carries the large record=%v, want %v", gotRecord, fixtureCase.LargeRecordInServedDetail)
 			}
+			// The PUBLICATION body, built from the same stored entries by the
+			// exported builder the push path serialises. The note has to reach a
+			// reader on the village too, not only a reader of the local detail.
+			published, err := push.BuildTranscriptContentValidated(
+				&meta, snapshot.Entries, schema.PushContractVersion("0.1.1"),
+				config.PushFieldVisibility{}, sessionorigin.Agent,
+			)
+			if err != nil {
+				t.Fatalf("build the publication body for a session holding an omitted record: %v", err)
+			}
+			publishedBody, err := json.Marshal(published)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotPublishedNote := strings.Contains(string(publishedBody), omittedRecordsPlaceholderNote)
+			if gotPublishedNote != fixtureCase.PlaceholderInServedDetail {
+				t.Errorf("the publication body carries the omission note=%v, want %v; a village reader sees the same note as a local one", gotPublishedNote, fixtureCase.PlaceholderInServedDetail)
+			}
+			if strings.Contains(string(publishedBody), omittedRecordsOldPlaceholderNote) {
+				t.Errorf("the publication body carries the superseded omission note %q", omittedRecordsOldPlaceholderNote)
+			}
+
 			gotTrailing := strings.Contains(string(served), omittedRecordsTrailingText)
 			if gotTrailing != fixtureCase.TrailingRecordInServedDetail {
 				t.Errorf("the served detail carries the record after the large one=%v, want %v; omitting one record must cost one record", gotTrailing, fixtureCase.TrailingRecordInServedDetail)

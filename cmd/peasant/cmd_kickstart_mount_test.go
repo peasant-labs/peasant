@@ -19,6 +19,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -40,10 +41,15 @@ const (
 	mountImportedSessionID   = "3f1c9a52-7b64-4e18-9a0d-2c5e8f7b1a44"
 	mountTruncatedSessionID  = "8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68"
 	mountUnreadableSessionID = "5a1f8c07-3b62-4d49-9e18-0f7a6c2b5d31"
-	mountFreshSessionID      = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
-	mountEmptySessionID      = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
-	mountProjectRowID        = "git@github.com:acme/tool.git"
-	expectedMountSeedRows    = 1
+	// A session stored whole around a placeholder, because one source record was
+	// over the per-record limit. Its capture is incomplete and every entry is
+	// present, which is the one state that must NOT draw the session-level
+	// partial line.
+	mountOmittedRecordsSessionID = "1b6d4f82-2a57-4c03-8d91-4e7f3a0b6c25"
+	mountFreshSessionID          = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
+	mountEmptySessionID          = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
+	mountProjectRowID            = "git@github.com:acme/tool.git"
+	expectedMountSeedRows        = 1
 )
 
 type mountRetentionSeedFixture struct {
@@ -239,6 +245,14 @@ func mountPreviewSessions(freshSource string) []ftue.SessionListing {
 		},
 		{
 			Harness:     string(defaults.HarnessClaudeCode),
+			SessionID:   mountOmittedRecordsSessionID,
+			Title:       "omitted records session",
+			ProjectName: "acme/tool",
+			GitRemote:   mountProjectRowID,
+			Branch:      "main",
+		},
+		{
+			Harness:     string(defaults.HarnessClaudeCode),
 			SessionID:   mountFreshSessionID,
 			Title:       "fresh session",
 			ProjectName: "acme/tool",
@@ -312,6 +326,7 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 		storeEntryFor(mountImportedSessionID, now),
 		storeEntryFor(mountTruncatedSessionID, now),
 		storeEntryFor(mountUnreadableSessionID, now),
+		storeEntryFor(mountOmittedRecordsSessionID, now),
 	}
 	if err := db.InsertSessions(t.Context(), sessions); err != nil {
 		t.Fatalf("insert sessions: %v", err)
@@ -337,6 +352,8 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 	if err := db.IndexSessionEntries(t.Context(), truncatedID, truncatedEntries); err != nil {
 		t.Fatalf("index truncated session entries: %v", err)
 	}
+
+	seedOmittedRecordsSession(t, db, now)
 
 	// A session whose stored projection this build cannot read. Its rows exist,
 	// but the recorded index format is one no handler serves, so the content
@@ -715,5 +732,68 @@ func TestIngestedSessionIDs_ReadsTheStore(t *testing.T) {
 	}
 	if got := ingestedSessionIDs(mountTestCmd(t, t.TempDir()), nil); len(got) != 0 {
 		t.Fatalf("with no store nothing can be marked imported; got %v", got)
+	}
+}
+
+// mountOmittedRecordsLimit is the per-record limit the omitted-records session
+// was harvested under. It is small so the note names a size a reader can tell
+// apart from the production limit at a glance.
+const mountOmittedRecordsLimit = 8192
+
+// seedOmittedRecordsSession writes the one capture state whose incompleteness is
+// accounted for INSIDE the transcript: every entry is stored, and a placeholder
+// built by the production constructors stands where the over-limit record was.
+//
+// It is written through the real full-content batch writer, with the real capture
+// state, so the pane is asked the same question a harvest leaves behind rather
+// than a state assembled to suit the assertion.
+func seedOmittedRecordsSession(t *testing.T, db *store.Store, now int64) {
+	t.Helper()
+	id := ingest.SessionID(mountOmittedRecordsSessionID)
+	record, err := ingest.NewOmittedRecord(
+		ingest.OmittedRecordTooLarge, 2, mountOmittedRecordsLimit+1, mountOmittedRecordsLimit,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra, err := record.Extra()
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := ingest.OmissionPlaceholderNote(record)
+	asked := "read the whole log"
+	finished := "the tool finished"
+	text := func(index int, role schema.Role, content *string) schema.SessionEntry {
+		return schema.SessionEntry{
+			SessionID: id, EntryIndex: index, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeText, Role: role, ContentPreview: content, TimestampMs: &now,
+		}
+	}
+	entries := []schema.SessionEntry{
+		text(0, ingest.RoleUser, &asked),
+		{
+			SessionID: id, EntryIndex: 1, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeToolResult, Role: schema.RoleTool, Depth: 0,
+			ContentPreview: &note, Extra: &extra, TimestampMs: &now,
+		},
+		text(2, schema.RoleAssistant, &finished),
+	}
+	versions := testutil.HarvesterVersionsForSeed(t, defaults.HarnessClaudeCode)
+	results := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{
+		SessionID: id, Result: indexformat.V1{Entries: entries},
+		IndexVersion: versions.IndexVersion, IndexerVersion: versions.IndexerVersion,
+		RequireFullContent: true, IndexedAtMs: now,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			Status:          ingest.ContentCaptureIncomplete,
+			FailureCode:     ingest.ContentCaptureSourceRecordsOmitted,
+			CaptureFormat:   ingest.ContentCaptureFormatFull,
+			SourceAuthority: ingest.ContentSourceNewIngest,
+		},
+	}})
+	if len(results) != 1 {
+		t.Fatalf("one write, %d results", len(results))
+	}
+	if results[0].Err != nil {
+		t.Fatalf("seed the omitted-records session: %v", results[0].Err)
 	}
 }

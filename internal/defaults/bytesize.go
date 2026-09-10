@@ -1,6 +1,9 @@
 package defaults
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // HumanByteSize renders a byte count the way every reader-facing note and
 // diagnostic states it.
@@ -12,10 +15,12 @@ import "fmt"
 // The sizes this reports are the ones bounded against the limits in this
 // package, so the rendering belongs beside them.
 //
-// Every unit carries one decimal place, which is what a bound needs: the
-// shown and recorded sizes of one record are often within the same unit. A
-// value that would render as "1024.0" is reported in the next unit instead, so
-// a size one byte under a mebibyte never reads as more than a mebibyte.
+// A size carries one decimal place only when that decimal says something: a
+// bound reports the shown and the recorded size of one record and those often
+// sit in the same unit, while a limit is a round number and "256.0 MiB" invites
+// a reader to wonder what the zero is hiding. A value that would render as
+// "1024.0" is reported in the next unit instead, so a size one byte under a
+// mebibyte never reads as more than a mebibyte.
 func HumanByteSize(size int64) string {
 	const unit = 1 << 10
 	if size < unit {
@@ -29,8 +34,17 @@ func HumanByteSize(size int64) string {
 	for index, suffix := range units {
 		value /= unit
 		if value < 1023.95 || index == len(units)-1 {
-			return fmt.Sprintf("%.1f %s", value, suffix)
+			return fmt.Sprintf("%s %s", trimWholeByteSize(value), suffix)
 		}
 	}
-	return fmt.Sprintf("%.1f TiB", value)
+	return fmt.Sprintf("%s TiB", trimWholeByteSize(value))
+}
+
+// trimWholeByteSize renders one decimal place, and drops it when it is zero.
+func trimWholeByteSize(value float64) string {
+	rendered := fmt.Sprintf("%.1f", value)
+	if whole, found := strings.CutSuffix(rendered, ".0"); found {
+		return whole
+	}
+	return rendered
 }

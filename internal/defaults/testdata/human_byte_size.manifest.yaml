@@ -1,6 +1,7 @@
 requiredNames:
   - under_a_kibibyte_is_plain_bytes
-  - a_whole_kibibyte_carries_one_decimal
+  - a_whole_kibibyte_carries_no_decimal
+  - a_fractional_size_keeps_its_decimal
   - a_size_one_byte_under_a_mebibyte_reads_as_a_mebibyte
   - the_served_document_cap_reads_in_mebibytes
   - the_per_record_cap_reads_in_mebibytes

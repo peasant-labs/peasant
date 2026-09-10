@@ -2038,8 +2038,8 @@ func storedSessionEntries(ctx context.Context, reader availableContentReader) pu
 		// reports completeness from the SAME read that produced them rather than
 		// asking the store a second, separately-timed question.
 		return push.StoredContent{
-			Entries: snapshot.Entries,
-			Partial: snapshot.Capture.Status != ingest.ContentCaptureComplete,
+			Entries:       snapshot.Entries,
+			PartialNotice: store.PartialPreviewNeeded(snapshot.Capture),
 		}, nil
 	}
 }

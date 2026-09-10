@@ -30,13 +30,13 @@ import (
 type StoredEntriesFunc func(sessionID string) (StoredContent, error)
 
 // StoredContent is one preview read's answer: the available stored entries, and
-// whether they stand for only part of the session.
+// whether the pane must warn that they stand for only part of the session.
 //
-// Partial is carried BESIDE the entries because it cannot be derived from them.
-// A bounded projection of a long session and a complete short session both come
-// back as "some entries", so a pane handed entries alone can only guess, and it
-// guessed "this is the whole session" every time. The store already proves the
-// difference through the session's capture status; this is that proof, reaching
+// The warning is carried BESIDE the entries because it cannot be derived from
+// them. A bounded projection of a long session and a complete short session both
+// come back as "some entries", so a pane handed entries alone can only guess, and
+// it guessed "this is the whole session" every time. The store already proves the
+// difference through the session's capture state; this is that proof, reaching
 // the one screen that has to state it.
 //
 // It stays inside the TUI: no wire, JSON or WebSocket payload reports it.
@@ -44,9 +44,13 @@ type StoredContent struct {
 	// Entries is the available stored content, empty for a session the store
 	// holds nothing for.
 	Entries []schema.SessionEntry
-	// Partial is true when the stored capture of this session is not complete,
-	// so the entries above are as much of it as the database can prove it has.
-	Partial bool
+	// PartialNotice is store.PartialPreviewNeeded for this session's capture: the
+	// entries above are missing content that nothing in the transcript accounts
+	// for. It is deliberately NOT "the capture is incomplete": a capture whose
+	// only incompleteness is recorded omissions holds every entry, each omitted
+	// record carries its own note at its own position, and a session-level line
+	// over such a transcript would claim a gap the reader cannot find.
+	PartialNotice bool
 }
 
 // PublishedTurnsFunc returns one session's turns AS THEY WILL BE PUBLISHED:
@@ -58,13 +62,13 @@ type StoredContent struct {
 // directly.
 type PublishedTurnsFunc func(sessionID string) (PublishedTranscript, error)
 
-// PublishedTranscript is one session's turns as they will be published, with
-// the same partial-capture flag the stored read reported. The pane needs both
-// in one answer: it draws the turns and, above them, the line that says the
-// turns are only part of the session.
+// PublishedTranscript is one session's turns as they will be published, with the
+// same notice flag the stored read reported. The pane needs both in one answer:
+// it draws the turns and, above them, the line that says the turns are only part
+// of the session.
 type PublishedTranscript struct {
-	Turns   []ingest.Turn
-	Partial bool
+	Turns         []ingest.Turn
+	PartialNotice bool
 }
 
 // NewPublishedTurns builds the preview read over a stored-entry reader and the
@@ -90,11 +94,11 @@ func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) 
 		if err != nil {
 			return PublishedTranscript{}, err
 		}
-		// The partial flag survives an empty read: a session whose capture broke
+		// The notice survives an empty read: a session whose capture broke
 		// before any entry was stored is still a partial session, and the pane
 		// says so rather than calling it simply unrecorded.
 		if len(stored.Entries) == 0 {
-			return PublishedTranscript{Partial: stored.Partial}, nil
+			return PublishedTranscript{PartialNotice: stored.PartialNotice}, nil
 		}
 		redacted, err := RedactEntries(redactor, stored.Entries)
 		if err != nil {
@@ -104,7 +108,7 @@ func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) 
 		if err != nil {
 			return PublishedTranscript{}, err
 		}
-		return PublishedTranscript{Turns: turns, Partial: stored.Partial}, nil
+		return PublishedTranscript{Turns: turns, PartialNotice: stored.PartialNotice}, nil
 	}
 }
 
@@ -180,7 +184,7 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 		if err != nil {
 			return nil, err
 		}
-		if recorded.Partial {
+		if recorded.PartialNotice {
 			// Said LAST, so it sits directly above the transcript it describes.
 			// The publication note above it answers a different question - what
 			// this session still needs before it can be pushed - and a reader

@@ -11,7 +11,13 @@
 # An unfinished capture is also ANNOUNCED: the pane prints one line saying the
 # preview is partial and that ingesting shows the whole session. The cases below
 # assert it on the session whose capture never finished, and assert its ABSENCE
-# on the complete one.
+# on the complete one AND on the omitted-records one.
+#
+# The omitted-records session is the one incompleteness that must not draw that
+# line: every entry it had is stored, and the record that was left out is stood
+# in for by a placeholder carrying its own note at its own position. A
+# session-level line there would send the reader to ingest again for content that
+# is already as recorded as it can be, and point at a gap they cannot find.
 #
 # truncated is a second seeded session standing in for the degraded read: its
 # stored body was cut at the database's content-preview limit and no source
@@ -34,6 +40,7 @@ requiredNames:
   - a-discovered-session-the-store-lacks-reads-its-harness-transcript
   - a-project-row-explains-what-to-highlight
   - a-branch-row-explains-what-to-highlight
+  - an-omitted-records-capture-does-not-say-the-session-is-partial
 width: 72
 recorded:
   - role: user
@@ -146,3 +153,25 @@ cases:
       - select a session to preview it
     wantMissing:
       - "harness:"
+
+  # Stored whole around a placeholder: the capture is incomplete, and the only
+  # thing missing is one tool output that was over the per-record limit.
+  - name: an-omitted-records-capture-does-not-say-the-session-is-partial
+    highlight: 1b6d4f82-2a57-4c03-8d91-4e7f3a0b6c25
+    wantContains:
+      - "harness: claude code"
+      - read the whole log
+      - the tool finished
+      # The statement the reader does get, at the position it is about. The
+      # needles are split because the pane wraps the note at its width.
+      - only showing preview of tool output
+      - 8 KiB limit
+    wantMissing:
+      - not imported yet
+      # The session-level line: the transcript accounts for what is missing, so
+      # this would be a second, false statement about the same session.
+      - showing a partial preview of the session
+      - ingest to preview entire session
+      # The superseded placeholder wording.
+      - tool output omitted
+      - the rest of the session was kept

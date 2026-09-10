@@ -209,7 +209,7 @@ func TestLargeRecordsAreHandledUniformlyAcrossHarnesses(t *testing.T) {
 				t.Errorf("placeholder is role %q type %q, want role %q type %q",
 					placeholder.Role, placeholder.EntryType, schema.RoleTool, schema.EntryTypeToolResult)
 			}
-			if placeholder.ContentPreview == nil || !strings.Contains(*placeholder.ContentPreview, "tool output omitted") {
+			if placeholder.ContentPreview == nil || !strings.Contains(*placeholder.ContentPreview, "only showing preview of tool output") {
 				t.Errorf("placeholder note = %v, want the reader-facing omission note", placeholder.ContentPreview)
 			}
 			if fixture.WantToolCallID != "" {

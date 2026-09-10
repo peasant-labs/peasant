@@ -52,7 +52,7 @@ func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
 	// A verified complete capture is the whole session, so this preview must not
 	// carry the partial line. The seeded session is the mounted producer of that
 	// state, read through the real store.
-	if published.Partial {
+	if published.PartialNotice {
 		t.Fatal("a complete capture reached the pane labelled partial, which would put the partial line on every session")
 	}
 	// Replacing the capture with a legacy preview must NOT silence the same
@@ -76,7 +76,7 @@ func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
 	}
 	// The capture that replaced it can no longer prove the whole session, so the
 	// pane is told to say the preview is partial.
-	if !legacy.Partial {
+	if !legacy.PartialNotice {
 		t.Fatal("a capture that can no longer prove the whole session was offered to the pane as complete")
 	}
 }

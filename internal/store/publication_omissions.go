@@ -25,6 +25,30 @@ func PublishableWithOmissions(capture ingest.SessionContentCapture) bool {
 	return publishableCaptureState(capture.Status, capture.FailureCode, capture.CaptureFormat)
 }
 
+// PartialPreviewNeeded reports whether a previewer must warn, ABOVE the
+// transcript, that what it draws stands for only part of its session.
+//
+// It is the same rule read from the other side, not a second one. A capture that
+// may be read whole holds every entry the source had, so the pane is drawing the
+// whole session and a warning over it would be false. That covers a complete
+// capture and the one incompleteness whose omissions are recorded as entries: the
+// session is whole everywhere except at the omitted records' own positions, and
+// each of those positions already carries its own note, which is where the
+// statement belongs. Every other incomplete capture is genuinely missing content
+// nothing in the transcript accounts for, and for those the line stays.
+//
+// Callers pass the capture the store read; nothing here reads the database.
+func PartialPreviewNeeded(capture ingest.SessionContentCapture) bool {
+	if capture.Status == ingest.ContentCaptureComplete {
+		// Unchanged, and deliberately not routed through the rule above: a
+		// complete capture never carried this line, whatever else it records,
+		// and a previewer must not start warning about sessions it never
+		// warned about.
+		return false
+	}
+	return !PublishableWithOmissions(capture)
+}
+
 // FullCaptureWritable is the same rule on the way IN: which capture states the
 // full-content writer may certify. A full capture is written for a complete
 // session, and for the one incompleteness that still holds every entry — the

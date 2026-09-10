@@ -152,6 +152,15 @@ func TestStoredSessionEntriesShowsAvailableContent(t *testing.T) {
 			Capture: ingest.SessionContentCapture{SessionID: ingest.SessionID(sessionID), Status: status},
 		}
 	}
+	// The one incompleteness whose missing content is accounted for INSIDE the
+	// transcript: every entry is stored and a placeholder carrying its own note
+	// stands where each omitted record was.
+	omissionsOnly := func() *store.SessionContentSnapshot {
+		snapshot := snapshotWith(ingest.ContentCaptureIncomplete)
+		snapshot.Capture.FailureCode = ingest.ContentCaptureSourceRecordsOmitted
+		snapshot.Capture.CaptureFormat = ingest.ContentCaptureFormatFull
+		return snapshot
+	}
 
 	t.Run("a-bounded-projection-reaches-the-pane", func(t *testing.T) {
 		t.Parallel()
@@ -175,8 +184,20 @@ func TestStoredSessionEntriesShowsAvailableContent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the preview refused available content: %v", err)
 		}
-		if !content.Partial {
+		if !content.PartialNotice {
 			t.Fatal("a session whose capture never completed was offered to the pane as the whole session")
+		}
+	})
+
+	t.Run("an-omitted-records-capture-is-not-reported-as-partial", func(t *testing.T) {
+		t.Parallel()
+		reader := &fakeAvailableContent{snapshot: omissionsOnly()}
+		content, err := storedSessionEntries(t.Context(), reader)(sessionID)
+		if err != nil {
+			t.Fatalf("the preview refused available content: %v", err)
+		}
+		if content.PartialNotice {
+			t.Fatal("a capture whose only incompleteness is recorded omissions was offered to the pane as a partial session; every entry is stored and each omitted record carries its own note, so a session-level warning points the reader at a gap they cannot find")
 		}
 	})
 
@@ -187,7 +208,7 @@ func TestStoredSessionEntriesShowsAvailableContent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the preview refused available content: %v", err)
 		}
-		if content.Partial {
+		if content.PartialNotice {
 			t.Fatal("a complete capture was labelled partial, which would teach the reader to ignore the label")
 		}
 	})
