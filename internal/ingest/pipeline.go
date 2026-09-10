@@ -4128,22 +4128,27 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		return cancelDiff(err)
 	}
 	var targeted []reindexTarget
-	if !p.config.DryRun {
-		for index, target := range scanned {
-			if p.adapterTargetNeedsWork(ctx, target) || p.indexTargetNeedsWork(ctx, target) {
-				targeted = append(targeted, target)
-			}
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
+	for _, target := range scanned {
+		if err := ctx.Err(); err != nil {
+			return cancelDiff(err)
 		}
-	} else {
-		// Plan from recorded SQL evidence without reading full transcripts.
-		for index, t := range scanned {
-			if p.dryRunIndexNeedsWork(ctx, t) || p.adapterTargetNeedsWork(ctx, t) {
-				targeted = append(targeted, t)
-			}
-			diffDone = index + 1
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
+		var needsWork bool
+		if p.config.DryRun {
+			// Plan from recorded SQL evidence without reading full transcripts.
+			needsWork = p.dryRunIndexNeedsWork(ctx, target) || p.adapterTargetNeedsWork(ctx, target)
+		} else {
+			needsWork = p.adapterTargetNeedsWork(ctx, target) || p.indexTargetNeedsWork(ctx, target)
 		}
+		// A target whose evaluation was interrupted was not classified, so it
+		// does not count as diff work this stage completed.
+		if err := ctx.Err(); err != nil {
+			return cancelDiff(err)
+		}
+		if needsWork {
+			targeted = append(targeted, target)
+		}
+		diffDone++
+		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: diffDone, Total: len(scanned)})
 	}
 	if err := ctx.Err(); err != nil {
 		return cancelDiff(err)
