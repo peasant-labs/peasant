@@ -1223,7 +1223,8 @@ type preflightOutcome struct {
 // with a single un-ingested session stopped publishing every healthy session
 // behind it, for as long as that session stayed un-ingested. Cancellation and
 // run-wide store failures still stop the run, because they are facts about the
-// database rather than verdicts about one session (see isSessionRefusal).
+// database rather than verdicts about one session: isRunWide is the one
+// classifier that decides which a failure is.
 func (p *Pipeline) preflight(ctx context.Context, sessions []ingest.PushSessionRow, rec perf.Recorder) (preflightOutcome, error) {
 	var out preflightOutcome
 	for _, sess := range sessions {

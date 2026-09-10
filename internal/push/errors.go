@@ -161,13 +161,6 @@ func SummarizePushErrors(result *PushResult) []ErrorTypeCount {
 	return out
 }
 
-// ErrSessionRefused marks a refusal that belongs to exactly ONE candidate: the
-// run can keep going with the others. A refusal is per-session when it describes
-// THAT session's recorded state: an unusable identifier, an identity that moved
-// after selection, a project the requested scope does not admit, or a selection
-// decision that no longer holds.
-var ErrSessionRefused = errors.New("this candidate cannot be published as recorded")
-
 // runWideSQLiteCodes are the SQLite primary result codes that describe the
 // DATABASE, not one session. Reporting any of them as a per-session refusal
 // would print "re-ingest this session" once per candidate while the real cause
