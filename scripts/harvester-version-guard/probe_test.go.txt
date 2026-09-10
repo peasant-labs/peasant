@@ -67,7 +67,19 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			metadata, adapterErr := adapter.ExtractMetadata(t.Context(), session)
 			guardRecord(t, &result, string(session.Harness)+"/AdapterVersion/"+name, guardMetadata(t, metadata, ""), adapterErr)
 		}
-		indexer := ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{MaxRecordBytes: maxRecordBytes})[session.Harness]
+		// The probe runs inside every compared revision, so it may only name
+		// the fields that revision has. A revision without a record limit
+		// cannot observe an over-limit case; the case is then a candidate-only
+		// observation, which the comparison accepts.
+		options := ingest.IndexerRegistryOptions{}
+		if maxRecordBytes > 0 {
+			field := reflect.ValueOf(&options).Elem().FieldByName("MaxRecordBytes")
+			if !field.IsValid() {
+				return
+			}
+			field.SetInt(int64(maxRecordBytes))
+		}
+		indexer := ingest.NewIndexerRegistry(filesystem, options)[session.Harness]
 		var output any
 		var indexErr error
 		// Use the same preference as ingestion: authoritative full capture,
