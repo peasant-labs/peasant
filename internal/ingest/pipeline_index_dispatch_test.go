@@ -569,9 +569,14 @@ func assertDispatchOutcome(
 		if logged.Outcome != ingest.IndexOutcomeError || !strings.Contains(derefOrEmpty(logged.ErrorMessage), testCase.ErrorContains) {
 			t.Errorf("refusal lacks its actionable source explanation %q: %+v", testCase.ErrorContains, logged)
 		}
-		state.ArtifactHash = previousState.ArtifactHash // Publication can mirror metadata; refusal cannot replace the index.
+		// Publication can mirror metadata, and its capture revision counts that
+		// mirror. Neither is an index fact: the entries, the producer stamp, the
+		// input proof, the entries hash and the content status below all still
+		// have to be exactly what the last good index left.
+		state.ArtifactHash = previousState.ArtifactHash
+		state.PublicationCaptureRevision = previousState.PublicationCaptureRevision
 		if !reflect.DeepEqual(entries, previousEntries) || !reflect.DeepEqual(state, previousState) {
-			t.Fatalf("refused capture changed the last-good index: entries=%+v state=%+v", entries, state)
+			t.Fatalf("refused capture changed the last-good index:\n before entries=%+v\n after  entries=%+v\n before state=%+v\n after  state=%+v", previousEntries, entries, previousState, state)
 		}
 	}
 }
