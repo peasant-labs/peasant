@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -184,4 +188,237 @@ func syntheticClaudeTranscript(sessionID string, size int) []byte {
 		body = 1
 	}
 	return []byte(line(strings.Repeat("a", body)) + "\n")
+}
+
+//go:embed testdata/content_batch_budget.yaml
+var contentBatchBudgetFixtureData []byte
+
+// budgetIndexer is the parser seam for the byte-budget cases: for one session it
+// returns entries whose total write bytes are exactly what the case declares.
+//
+// The grouping boundary measures the PARSE OUTPUT, not the transcript, so a case
+// can cross a 32 MiB budget from a transcript of a few bytes. Everything else on
+// the path is real: the artifact is committed and validated, the input is captured
+// and hashed, and the grouping and the flush are the production ones.
+type budgetIndexer struct{ bytes map[SessionID]int }
+
+var (
+	_ TranscriptIndexer              = (*budgetIndexer)(nil)
+	_ AuthoritativeTranscriptIndexer = (*budgetIndexer)(nil)
+)
+
+func (idx *budgetIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
+
+func (idx *budgetIndexer) entries(session DiscoveredSession) []schema.SessionEntry {
+	size := idx.bytes[session.SessionID]
+	if size < 1 {
+		size = 1
+	}
+	content := strings.Repeat("a", size)
+	return []schema.SessionEntry{{
+		SessionID: schema.SessionID(session.SessionID), EntryIndex: 0, Harness: HarnessClaudeCode,
+		Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &content,
+	}}
+}
+
+func (idx *budgetIndexer) IndexTranscript(_ context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
+	return idx.entries(session), nil
+}
+
+func (idx *budgetIndexer) IndexTranscriptBytes(_ context.Context, session DiscoveredSession, _ []byte) ([]schema.SessionEntry, error) {
+	return idx.entries(session), nil
+}
+
+func (idx *budgetIndexer) IndexTranscriptForCapture(_ context.Context, session DiscoveredSession) (TranscriptCaptureResult, error) {
+	return TranscriptCaptureResult{Entries: idx.entries(session)}, nil
+}
+
+func (idx *budgetIndexer) IndexTranscriptBytesForCapture(_ context.Context, session DiscoveredSession, _ []byte) (TranscriptCaptureResult, error) {
+	return TranscriptCaptureResult{Entries: idx.entries(session)}, nil
+}
+
+// budgetStore is the store the grouping boundary writes through: it records the
+// ORDER sessions were committed in and answers the index-state read the capture
+// requires. The order is what reveals the grouping; see the fixture header.
+type budgetStore struct {
+	MetricsStore
+	states    map[SessionID]*SessionIndexState
+	committed []SessionID
+}
+
+var (
+	_ SessionEntryBatchStore  = (*budgetStore)(nil)
+	_ SessionIndexStateReader = (*budgetStore)(nil)
+)
+
+func (s *budgetStore) ReadIndexState(_ context.Context, id SessionID) (*SessionIndexState, error) {
+	return s.states[id], nil
+}
+
+func (s *budgetStore) IndexSessionEntryBatch(_ context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+	results := make([]SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		s.committed = append(s.committed, write.SessionID)
+		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: true}
+	}
+	return results
+}
+
+// TestFullContentWriteBatchBudgetGroupsByBytes holds the byte budget that bounds
+// one write wave.
+//
+// The budget is what keeps a wave of large sessions from being held in memory at
+// once; losing the split is an out-of-memory failure on a real store, not a
+// cosmetic regression. It is asserted at the boundary that applies it: the batch
+// grouping that decides how many parsed sessions travel to one flush.
+//
+// Sizes are declared as a FRACTION of the shipped budget rather than in bytes, so
+// the corpus still describes the same situations if the budget ever moves.
+func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
+	var fixtures struct {
+		Budget   string   `yaml:"budget"`
+		Required []string `yaml:"required_names"`
+		Cases    []struct {
+			Name      string    `yaml:"name"`
+			Fractions []float64 `yaml:"session_budget_fractions"`
+			Groups    [][]int   `yaml:"expected_flush_groups"`
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(contentBatchBudgetFixtureData, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if fixtures.Budget != "defaults.FullContentWriteBatchBytes" {
+		t.Fatalf("the corpus must name the budget under test, got %q", fixtures.Budget)
+	}
+	names := make(map[string]bool)
+	for _, fixture := range fixtures.Cases {
+		if names[fixture.Name] {
+			t.Fatalf("duplicate fixture %s", fixture.Name)
+		}
+		names[fixture.Name] = true
+		t.Run(fixture.Name, func(t *testing.T) {
+			ctx := context.Background()
+			output := t.TempDir()
+			indexer := &budgetIndexer{bytes: make(map[SessionID]int)}
+			store := &budgetStore{states: make(map[SessionID]*SessionIndexState)}
+			pipeline := &Pipeline{
+				fs:           &OSFileSystem{},
+				metricsStore: store,
+				indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer},
+				// One parser worker keeps the waves and therefore the observed
+				// grouping deterministic; Force makes every session need work, so
+				// no case is skipped for being current.
+				config: PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true},
+			}
+			var metas []indexedMeta
+			for index, fraction := range fixture.Fractions {
+				written := int(float64(defaults.FullContentWriteBatchBytes) * fraction)
+				meta, artifactHash := publishSyntheticArtifact(t, output, index)
+				indexer.bytes[meta.session.SessionID] = written
+				store.states[meta.session.SessionID] = &SessionIndexState{
+					SessionID: meta.session.SessionID, Harness: HarnessClaudeCode, ArtifactHash: &artifactHash,
+				}
+				metas = append(metas, meta)
+			}
+			indexed, logs := pipeline.indexBatch(ctx, metas, IndexOutcomeIndexed, "budget test")
+			if len(indexed) != len(metas) || len(logs) != len(metas) {
+				t.Fatalf("the grouping lost a session: indexed=%d logs=%d for %d sessions", len(indexed), len(logs), len(metas))
+			}
+			want := expectedCommitOrder(t, fixture.Groups, metas)
+			if !reflect.DeepEqual(store.committed, want) {
+				t.Fatalf("commit order %v does not match the flush groups %v (that grouping commits in order %v); the budget is %d bytes and this case wrote fractions %v",
+					store.committed, fixture.Groups, want, defaults.FullContentWriteBatchBytes, fixture.Fractions)
+			}
+		})
+	}
+	for _, name := range fixtures.Required {
+		if !names[name] {
+			t.Fatalf("missing required fixture %s", name)
+		}
+	}
+}
+
+// publishSyntheticArtifact commits one tiny managed artifact and returns the meta
+// the index stage consumes plus the artifact hash the capture will demand.
+func publishSyntheticArtifact(t *testing.T, output string, index int) (indexedMeta, string) {
+	t.Helper()
+	// Descending identifiers: a flush sorts its own sessions, so this is what makes
+	// a change in grouping show up as a change in commit order.
+	sessionID, err := NewSessionID(fmt.Sprintf("22222222-2222-4222-8222-00000000000%d", 9-index))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hostSlug = "github.com--peasant-labs--content-batch-budget"
+	meta := NewUnifiedMetadata()
+	meta.SessionID = sessionID
+	meta.ModelHarness = HarnessClaudeCode
+	meta.Model = "claude-opus-4-8"
+	meta.HostSlug = hostSlug
+	meta.Timestamp = TimestampInfo{Start: 1700000000000, End: 1700000001000}
+	meta.Project = ProjectInfo{Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "content-batch", FilePath: "/synthetic/content-batch"}
+	transcriptPath := filepath.Join(SessionDir(output, hostSlug, string(sessionID), ""), string(sessionID)+"--transcript."+string(SourceFormatJSONL))
+	meta.Source = SourceInfo{Format: SourceFormatJSONL, FilePath: transcriptPath}
+	transcript := syntheticClaudeTranscript(string(sessionID), 256)
+	meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadataPath := SessionMetadataPath(output, hostSlug, string(sessionID), "")
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, metaJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcriptPath, transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(output, artifactLockPath(artifactKey(sessionID)))
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := NewManagedArtifact(metaJSON, transcript)
+	if err != nil {
+		t.Fatalf("publish a synthetic managed artifact: %v", err)
+	}
+	session := DiscoveredSession{SessionID: sessionID, Harness: HarnessClaudeCode, SourceFormat: SourceFormatJSONL, SourcePath: ResolvedPath(transcriptPath)}
+	return indexedMeta{session: session, outputTranscriptPath: transcriptPath, startMs: meta.Timestamp.Start}, artifact.ArtifactHash
+}
+
+// expectedCommitOrder turns the flush groups a case declares into the commit
+// order they produce.
+//
+// A flush commits each of its sessions separately, so the NUMBER of commits
+// cannot show the grouping. The order can: a flush sorts its own sessions by
+// identifier before committing them, while the flushes themselves run in parse
+// order, and these fixtures seed identifiers that DESCEND as parsing advances.
+// Any change in grouping therefore changes the order, which is what makes a lost
+// split visible here instead of silently identical.
+func expectedCommitOrder(t *testing.T, groups [][]int, metas []indexedMeta) []SessionID {
+	t.Helper()
+	seen := make(map[int]bool)
+	var order []SessionID
+	for _, group := range groups {
+		var ids []SessionID
+		for _, index := range group {
+			if index < 0 || index >= len(metas) {
+				t.Fatalf("a flush group names session %d, which this case does not seed", index)
+			}
+			if seen[index] {
+				t.Fatalf("session %d appears in more than one flush group", index)
+			}
+			seen[index] = true
+			ids = append(ids, metas[index].session.SessionID)
+		}
+		slices.Sort(ids)
+		order = append(order, ids...)
+	}
+	if len(seen) != len(metas) {
+		t.Fatalf("the flush groups cover %d of %d seeded sessions; every session is committed exactly once", len(seen), len(metas))
+	}
+	return order
 }

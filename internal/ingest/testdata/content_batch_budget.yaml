@@ -1,0 +1,32 @@
+# The byte budget that bounds ONE write wave, asserted at the grouping boundary
+# that applies it.
+#
+# Sizes are a fraction of the shipped budget, never a byte count, so the corpus
+# keeps describing the same situations if the budget moves. The sessions here
+# write a few hundred bytes each to disk: the boundary measures PARSE OUTPUT, so a
+# case crosses the budget through the parser seam instead of through 32 MiB of
+# synthetic transcript.
+#
+# HOW THE GROUPING IS OBSERVED: a flush commits each of its sessions separately,
+# so counting commits cannot show the grouping. Each flush sorts its own sessions
+# by identifier, while the flushes run in parse order, and these sessions are
+# seeded with identifiers that descend as parsing advances. The commit ORDER
+# therefore changes whenever the grouping changes.
+budget: defaults.FullContentWriteBatchBytes
+required_names: [byte-budget-splits, oversized-session-progress, under-budget-sessions-share-one-flush]
+cases:
+  # Two sessions that cannot share the budget, then a small one that can join the
+  # second: the split happens where the budget is crossed, not per session.
+  - name: byte-budget-splits
+    session_budget_fractions: [0.6, 0.6, 0.000001]
+    expected_flush_groups: [[0], [1, 2]]
+  # A session larger than the whole budget still makes progress on its own, and
+  # does not drag the next session into its flush.
+  - name: oversized-session-progress
+    session_budget_fractions: [1.1, 0.000001]
+    expected_flush_groups: [[0], [1]]
+  # Under the budget, sessions travel together: this is the case a lost split
+  # would make look correct, so it is stated separately.
+  - name: under-budget-sessions-share-one-flush
+    session_budget_fractions: [0.2, 0.2, 0.2]
+    expected_flush_groups: [[0, 1, 2]]
