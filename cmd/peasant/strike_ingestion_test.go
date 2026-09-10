@@ -186,7 +186,12 @@ func TestStrikeIngestCommandAddsChildAfterParentSourceDisappears(t *testing.T) {
 	}
 }
 
-func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
+// retiredStrikePerLineLimit is the 10 MiB per-line limit this build replaced.
+// A record that long once failed or was omitted forever; the mounted case
+// below proves the real command now ingests it whole.
+const retiredStrikePerLineLimit = 10 << 20
+
+func TestStrikeIngestKeepsARecordOverTheRetiredPerLineLimit(t *testing.T) {
 	t.Parallel()
 
 	testRoot := t.TempDir()
@@ -202,12 +207,15 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 	if markerIndex < 0 {
 		t.Fatalf("root fixture is missing insertion marker %q", marker)
 	}
-	const oversizedSentinel = "OVERSIZED_PRIVATE_RECORD"
-	oversized := `{"type":"assistant.text.delta","time":"2026-07-28T12:34:58.500Z","data":{"turnId":"turn-1","delta":"` +
-		oversizedSentinel + strings.Repeat("x", defaults.ScannerMaxLine) + `"}}` + "\n"
-	withOversized := string(transcript[:markerIndex]) + oversized + string(transcript[markerIndex:])
-	if err := os.WriteFile(rootTranscript, []byte(withOversized), 0o600); err != nil {
-		t.Fatalf("write generated oversized Strike record: %v", err)
+	const largeRecordSentinel = "LARGE_RECORD_KEPT_SENTINEL"
+	large := `{"type":"assistant.text.delta","time":"2026-07-28T12:34:58.500Z","data":{"turnId":"turn-1","delta":"` +
+		largeRecordSentinel + strings.Repeat("x", retiredStrikePerLineLimit) + `"}}` + "\n"
+	if len(large) <= retiredStrikePerLineLimit {
+		t.Fatalf("built a %d-byte record; the case only means something over the retired %d-byte limit", len(large), retiredStrikePerLineLimit)
+	}
+	withLarge := string(transcript[:markerIndex]) + large + string(transcript[markerIndex:])
+	if err := os.WriteFile(rootTranscript, []byte(withLarge), 0o600); err != nil {
+		t.Fatalf("write generated large Strike record: %v", err)
 	}
 
 	outputDir := filepath.Join(testRoot, "sync")
@@ -219,19 +227,19 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 		"--json",
 	})
 	if err != nil {
-		t.Fatalf("harvest Strike fixture with oversized record: %v\n%s", err, result)
+		t.Fatalf("harvest a Strike session holding a record over the retired per-line limit: %v\n%s", err, result)
 	}
 
 	artifactPath := findStrikeArtifact(t, outputDir, strikeFixtureRootID+"--transcript.jsonl")
 	artifact, err := os.ReadFile(artifactPath)
 	if err != nil {
-		t.Fatalf("read filtered Strike artifact: %v", err)
+		t.Fatalf("read persisted Strike artifact: %v", err)
 	}
-	if strings.Contains(string(artifact), oversizedSentinel) {
-		t.Fatal("persisted Strike artifact contains the oversized source record")
+	if !strings.Contains(string(artifact), largeRecordSentinel) {
+		t.Fatal("the persisted Strike artifact dropped the large source record")
 	}
 	if !strings.Contains(string(artifact), "I will inspect it now.") {
-		t.Fatal("persisted Strike artifact lost valid content after the oversized record")
+		t.Fatal("the persisted Strike artifact lost valid content after the large record")
 	}
 
 	metadataPath := findStrikeArtifact(t, outputDir, strikeFixtureRootID+defaults.MetadataSuffix)
@@ -243,32 +251,34 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
 		t.Fatalf("decode Strike metadata artifact: %v", err)
 	}
-	if metadata.Diagnostics.Partial == nil || !*metadata.Diagnostics.Partial {
-		t.Errorf("oversized-record metadata partial = %v, want true", metadata.Diagnostics.Partial)
+	if metadata.Diagnostics.Partial != nil && *metadata.Diagnostics.Partial {
+		t.Errorf("the session was stored partial; a record within the limit is kept whole and the capture stays complete")
 	}
-	foundDiagnostic := false
 	for _, warning := range metadata.Diagnostics.Warnings {
 		if warning.ErrorType == "record_too_large" {
-			foundDiagnostic = strings.Contains(warning.Message, "before redaction") && strings.Contains(warning.Remediation, "rerun peasant ingest")
+			t.Errorf("a record within the limit was reported as too large: %+v", warning)
 		}
-	}
-	if !foundDiagnostic {
-		t.Errorf("metadata diagnostics do not contain an actionable oversized-record warning: %+v", metadata.Diagnostics.Warnings)
 	}
 
 	db, err := store.Open(defaults.ResolveDBFilePathWith(testRoot).String())
 	if err != nil {
-		t.Fatalf("open oversized-record test store: %v", err)
+		t.Fatalf("open large-record test store: %v", err)
 	}
 	defer db.Close()
 	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
-	_, err = provider.SessionByID(context.Background(), strikeFixtureRootID)
-	if err == nil || !strings.Contains(err.Error(), "harvest index --force") {
-		t.Fatalf("partial source must not serve as a complete session detail; want recovery error, got %v", err)
+	detail, err := provider.SessionByID(context.Background(), strikeFixtureRootID)
+	if err != nil {
+		t.Fatalf("the session detail read refused a session holding a large record: %v", err)
 	}
-	_, err = executeHarvestCmd(t, testRoot, []string{"index", "--force", "--output", outputDir, "--json"})
-	if err == nil || !strings.Contains(err.Error(), "omitted oversized source records") {
-		t.Fatalf("retained filtered artifact must not backfill as complete: %v", err)
+	served, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("marshal served session detail: %v", err)
+	}
+	if !strings.Contains(string(served), largeRecordSentinel) {
+		t.Fatal("the served session detail does not carry the large record's turn")
+	}
+	if _, err := executeHarvestCmd(t, testRoot, []string{"index", "--force", "--output", outputDir, "--json"}); err != nil {
+		t.Fatalf("harvest index --force refused a complete session holding a large record: %v", err)
 	}
 }
 
