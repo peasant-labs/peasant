@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -276,6 +278,16 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 			stale := filepath.Join(parentDir, "debug", "obsolete.log")
 			write(stale, "obsolete parent debug file")
 			write(parentSource, fixture.UpdatedParent)
+			// The updated recording carries a CURRENT modification time, the way
+			// a harness that just wrote to it leaves it. write() backdates every
+			// file it makes so the first ingest sees settled sessions; keeping
+			// that backdate on an update would describe something no harness
+			// does, a file whose bytes changed while its clock went backwards,
+			// and the run would settle the session from retained evidence and
+			// never install the file this fault is aimed at.
+			if err := os.Chtimes(parentSource, time.Now(), time.Now()); err != nil {
+				t.Fatal(err)
+			}
 			// Force normal recovery of the parent only; the child remains DB-ready.
 			if err := database.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: &parent.Metadata, Session: ingest.DiscoveredSession{SessionID: parentID, Harness: ingest.HarnessClaudeCode}}}); err != nil {
 				t.Fatal(err)
@@ -284,6 +296,12 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			var sentinel string
+			// A relocated parent has TWO possible homes while its publication is
+			// mid-flight: the directory it was published in and the one its new
+			// project identity names. Both are kept so the assertions below can
+			// say where the transcript actually is instead of assuming the move
+			// finished.
+			originalParentTranscript := parentTranscript
 			if c.Remote != "" {
 				_, host, err := ingest.DeriveProjectIdentifiers(database.InstallationSalt(), c.Remote, "/synthetic/parent")
 				if err != nil {
@@ -313,9 +331,9 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 			if c.Mode == installSuccess || c.Mode == installExitAfter {
 				wantParent = fixture.UpdatedParent
 			}
-			assertFileBytes(t, filesystem, parentTranscript, []byte(wantParent))
+			assertParentTranscriptPreserved(t, []string{parentTranscript, originalParentTranscript}, []byte(wantParent), []byte(fixture.Parent))
 			if c.Mode != installSuccess {
-				assertFileBytes(t, filesystem, parentMetadata, beforeParentMetadata)
+				assertParentMetadataRecoverable(t, output, parentMetadata, beforeParentMetadata)
 			}
 			if c.Mode == installFailOnce || c.Mode == installFailPersistent {
 				if !strings.Contains(string(log), parentDir) || !strings.Contains(string(log), "rerun ingest") {
@@ -345,6 +363,7 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 				}
 			}
 			assertFileBytes(t, filesystem, parentTranscript, []byte(fixture.UpdatedParent))
+			assertPublishedPairIsCoherent(t, parentMetadata, parentTranscript, parentID, beforeParentMetadata)
 			assertFileBytes(t, filesystem, parentSource, []byte(fixture.UpdatedParent))
 			assertFileBytes(t, filesystem, childSource, []byte(fixture.Child))
 			if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
@@ -397,4 +416,164 @@ func snapshotManagedTree(t *testing.T, root string) map[string]string {
 		t.Fatal(err)
 	}
 	return files
+}
+
+// managedMetadataDerivedAt is the one field of a managed metadata document that
+// a reconciliation refreshes without changing anything the document SAYS about
+// the session. It is a cache of when the artifact was derived, so two documents
+// that differ only here describe the same session identically.
+const managedMetadataDerivedAt = "derivedAt"
+
+// artifactJournalTransactions and artifactJournalPreviousGroup name the two
+// directories a publication transaction writes its previous-bytes group under:
+// <transactions>/<key>/old/NNNN, the layout intentFilePath builds.
+const (
+	artifactJournalTransactions  = "transactions"
+	artifactJournalPreviousGroup = "old"
+)
+
+// sameManagedMetadata reports whether two managed metadata documents describe
+// the same thing, and how their derived-at caches compare. Every other field is
+// compared byte for byte on its raw JSON, so a change to any of them is a
+// difference; only the cache is allowed to move, and the caller decides which
+// way it may move.
+func sameManagedMetadata(t *testing.T, got, want []byte) (same bool, gotDerivedAt, wantDerivedAt float64) {
+	t.Helper()
+	gotFields, wantFields := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	if json.Unmarshal(got, &gotFields) != nil || json.Unmarshal(want, &wantFields) != nil {
+		return false, 0, 0
+	}
+	read := func(fields map[string]json.RawMessage) float64 {
+		var value float64
+		if raw, ok := fields[managedMetadataDerivedAt]; ok {
+			_ = json.Unmarshal(raw, &value)
+		}
+		delete(fields, managedMetadataDerivedAt)
+		return value
+	}
+	gotDerivedAt, wantDerivedAt = read(gotFields), read(wantFields)
+	return reflect.DeepEqual(gotFields, wantFields), gotDerivedAt, wantDerivedAt
+}
+
+// assertParentMetadataRecoverable pins what a faulted publication owes the user
+// BEFORE anything is restarted.
+//
+// The final metadata install is the commit point of the publication
+// transaction: the old metadata is deliberately detached first, and between
+// that detach and the install the journal is the only holder of the previous
+// bytes, by design. Requiring the canonical path to hold them throughout would
+// pin the older whole-directory design, which no longer exists.
+//
+// What the user is still owed is that the previous metadata is RECOVERABLE. It
+// is either back at the canonical path, because an in-process rollback already
+// restored it, or held in the pending transaction journal for the recovery the
+// next run performs. Whichever holds it, it is the same document as before the
+// fault apart from the derived-at cache the run legitimately refreshed, whose
+// value may only have moved forward; and if a canonical file exists at all it
+// is never anything else, so a partially installed or foreign metadata still
+// fails here.
+func assertParentMetadataRecoverable(t *testing.T, output, canonicalPath string, before []byte) {
+	t.Helper()
+	recoverable := false
+	check := func(where string, data []byte, mustMatch bool) {
+		same, derivedAt, previous := sameManagedMetadata(t, data, before)
+		if same && derivedAt >= previous {
+			recoverable = true
+			return
+		}
+		if mustMatch {
+			t.Fatalf("the faulted publication left %s holding metadata that is not the pre-fault document (same-except-derived-at=%v, derivedAt %v against the pre-fault %v):\n%s", where, same, derivedAt, previous, data)
+		}
+	}
+	if data, err := os.ReadFile(canonicalPath); err == nil {
+		check("the canonical metadata path", data, true)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	// A journal backup is <transactions>/<key>/old/NNNN, the layout the
+	// transaction writes its previous-bytes group in. The two directory names
+	// are the only structural fact this needs, so the managed state directory
+	// itself is never spelled out here.
+	if err := filepath.WalkDir(output, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return nil
+		}
+		group := filepath.Dir(path)
+		if filepath.Base(group) != artifactJournalPreviousGroup || filepath.Base(filepath.Dir(filepath.Dir(group))) != artifactJournalTransactions {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		check("the pending transaction journal", data, false)
+		return nil
+	}); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if !recoverable {
+		t.Fatal("the pre-fault parent metadata is neither at the canonical path nor in a pending transaction journal, so a restart has nothing to recover it from")
+	}
+}
+
+// assertPublishedPairIsCoherent pins what the completed restart owes the user:
+// the metadata beside a transcript describes THAT transcript and names this
+// session. A publication that finished with metadata pointing at other bytes
+// would be one session's artifact wearing another's identity.
+func assertPublishedPairIsCoherent(t *testing.T, metadataPath, transcriptPath string, sessionID ingest.SessionID, previous []byte) {
+	t.Helper()
+	metadataJSON, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("the completed restart left no published metadata: %v", err)
+	}
+	transcript, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("the completed restart left no published transcript: %v", err)
+	}
+	var published ingest.UnifiedMetadata
+	if err := json.Unmarshal(metadataJSON, &published); err != nil {
+		t.Fatalf("decode the published metadata: %v", err)
+	}
+	if published.SessionID != sessionID {
+		t.Fatalf("the published artifact names session %s, not %s", published.SessionID, sessionID)
+	}
+	if published.ContentHash != schema.ComputeTranscriptHash(transcript) {
+		t.Fatal("the published metadata's content hash does not match the transcript beside it")
+	}
+	_, derivedAt, wasDerivedAt := sameManagedMetadata(t, metadataJSON, previous)
+	if derivedAt < wasDerivedAt {
+		t.Fatalf("the published metadata's derived-at cache moved backwards, from %v to %v", wasDerivedAt, derivedAt)
+	}
+}
+
+// assertParentTranscriptPreserved pins the parent transcript after a fault,
+// across every home it can legitimately have at that moment. A relocation that
+// was interrupted may have installed the file under the new project identity
+// while the old directory still holds the previous bytes, and one that was
+// rolled back leaves it where it was; both are the artifact being preserved,
+// and neither may leave a partial or foreign file behind.
+func assertParentTranscriptPreserved(t *testing.T, candidates []string, want, previous []byte) {
+	t.Helper()
+	found := false
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case bytes.Equal(data, want):
+			found = true
+		case bytes.Equal(data, previous):
+			// The other home still holds the pre-fault artifact, which is what
+			// preserving it means while the move is unfinished.
+		default:
+			t.Fatalf("the faulted publication left %s holding neither the expected transcript nor the pre-fault one:\n%s", path, data)
+		}
+	}
+	if !found {
+		t.Fatalf("the expected parent transcript is at none of %v, so the fault lost the artifact rather than preserving it", candidates)
+	}
 }
