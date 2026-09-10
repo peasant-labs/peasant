@@ -1,0 +1,59 @@
+# Whether a stored sidecar must be rebuilt is decided by a declared set of
+# versions whose difference from the current one is optional fields only, never
+# by a comparison written against one particular current version.
+#
+# Each case states the recorded version, the version the build writes, and
+# whether the sidecar has to be refreshed. The "next expected" cases are the
+# point: a contract re-pin that adds nothing required must not mark a whole
+# corpus stale, so they run the same recorded versions against a current
+# version this build does not write yet.
+requiredNames:
+  - absent_version_is_refreshed
+  - version_before_the_declared_set_is_refreshed
+  - declared_version_9_is_read_as_it_stands
+  - declared_version_10_is_read_as_it_stands
+  - declared_version_9_survives_the_next_contract_bump
+  - declared_version_10_survives_the_next_contract_bump
+  - version_before_the_declared_set_is_still_refreshed_after_the_bump
+  - declared_version_11_survives_a_later_bump
+  - a_newer_recorded_version_is_never_refreshed_backwards
+cases:
+  - name: absent_version_is_refreshed
+    recorded: 0
+    current: 10
+    want: refresh
+  - name: version_before_the_declared_set_is_refreshed
+    recorded: 8
+    current: 10
+    want: refresh
+  - name: declared_version_9_is_read_as_it_stands
+    recorded: 9
+    current: 10
+    want: keep
+  - name: declared_version_10_is_read_as_it_stands
+    recorded: 10
+    current: 10
+    want: keep
+  - name: declared_version_9_survives_the_next_contract_bump
+    recorded: 9
+    current: 11
+    want: keep
+  - name: declared_version_10_survives_the_next_contract_bump
+    recorded: 10
+    current: 11
+    want: keep
+  - name: version_before_the_declared_set_is_still_refreshed_after_the_bump
+    recorded: 8
+    current: 11
+    want: refresh
+  # Every declared version has to be load-bearing. This is the case that makes
+  # version 11 so: without it in the declared set, a sidecar recorded at 11
+  # under a build writing 12 would be refreshed.
+  - name: declared_version_11_survives_a_later_bump
+    recorded: 11
+    current: 12
+    want: keep
+  - name: a_newer_recorded_version_is_never_refreshed_backwards
+    recorded: 12
+    current: 10
+    want: keep

@@ -11,13 +11,21 @@ import (
 	"strings"
 )
 
-// nativeRefreshMetadataVersion is the last metadata change that required
-// re-extracting native data. Version 10 adds optional producer evidence; reading
-// version 9 does not require source access, a rewrite, or a guessed adapter stamp.
-const nativeRefreshMetadataVersion = 9
-
+// metadataNeedsNativeRefresh reports whether a stored sidecar has to be rebuilt
+// from native data before this build can rely on it. It is the one rule, stated
+// once in metadata.go: a version whose only difference from the current one is
+// optional fields is read as it stands, and anything older is refreshed.
+//
+// An unreadable version is treated as needing a refresh. That is the safe
+// answer: it sends the session down the reporting refresh path, which preserves
+// the existing artifact and index, rather than certifying a version this build
+// cannot name.
 func metadataNeedsNativeRefresh(version int) bool {
-	return version < nativeRefreshMetadataVersion
+	recorded, err := newMetadataSchemaVersion(version)
+	if err != nil {
+		return true
+	}
+	return metadataNeedsRefresh(recorded, CurrentSchemaVersion)
 }
 
 func managedInputIOError(path string, err error) error {
