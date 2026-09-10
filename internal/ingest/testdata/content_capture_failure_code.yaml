@@ -1,0 +1,41 @@
+# The closed set of reasons a stored content capture is not complete.
+#
+# The selector acts on this value (index_selection.go), so the set is a
+# contract, not a convenience: a code this build cannot name must be refused at
+# every boundary rather than read as "no failure recorded", which would put a
+# session back into pending work on every harvest forever.
+#
+# members lists the set EXACTLY. Adding a code without adding it here, or
+# removing one that production or a migration still writes, goes red by name.
+required_members:
+  - ""
+  - strict_capture_refused
+  - oversized_record_omitted
+  - legacy_preview_only
+members:
+  # No failure was recorded. Not a steady state: nothing has tried to certify
+  # this capture yet.
+  - value: ""
+    permanent: false
+  # The strict parser met a well-formed record this build does not represent.
+  - value: strict_capture_refused
+    permanent: true
+  # Ingest removed a source record longer than the scanner line limit before
+  # writing the artifact, so the retained transcript is missing rows.
+  - value: oversized_record_omitted
+    permanent: true
+  # Written by the content-capture migration for every session that predates
+  # it. Nothing refused these; they owe one certification attempt.
+  - value: legacy_preview_only
+    permanent: false
+# Values that must be refused, each for a reason worth stating.
+refused:
+  - name: an-unknown-code
+    value: not_a_code
+  - name: a-code-from-a-newer-build
+    value: quarantined_pending_review
+  # Case and spacing are not normalised: the stored value is compared exactly.
+  - name: the-right-word-in-the-wrong-case
+    value: STRICT_CAPTURE_REFUSED
+  - name: the-right-word-with-space
+    value: " strict_capture_refused"

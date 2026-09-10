@@ -135,7 +135,7 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	if c.CaptureFormat == "" {
 		c.CaptureFormat = ingest.ContentCaptureFormatFull
 	}
-	if c.Status != ingest.ContentCaptureComplete || c.SourceAuthority == ingest.ContentSourceNone || c.FailureCode != "" || c.FailureMessage != "" {
+	if c.Status != ingest.ContentCaptureComplete || c.SourceAuthority == ingest.ContentSourceNone || c.FailureCode != ingest.ContentCaptureNoFailure || c.FailureMessage != "" {
 		return out, fmt.Errorf("store full content write: capture is not complete and attributable; prior data unchanged; resolve strict parser failures before retrying")
 	}
 	if c.CapturedAtMs == 0 {
@@ -322,6 +322,12 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 		return err
 	}
 	if _, err := ingest.NewContentCaptureFormat(string(c.CaptureFormat)); err != nil {
+		return err
+	}
+	// The selector reads this value back and acts on it, so a code no build can
+	// name must not reach the row in the first place. Validated here beside its
+	// siblings, since a raw conversion at any caller would otherwise pass.
+	if _, err := ingest.NewContentCaptureFailureCode(string(c.FailureCode)); err != nil {
 		return err
 	}
 	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(string(c.FailureCode)), nullString(c.FailureMessage), c.PublicationCaptureRevision}})

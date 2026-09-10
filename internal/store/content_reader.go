@@ -39,7 +39,19 @@ func contentIntegrityError() error {
 	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from retained artifacts to repair")
 }
 
+// readCapture returns the stored capture, or NOTHING.
+//
+// Every typed column is parsed as it is read, and a value this build cannot
+// name refuses the whole row: callers act on these values, so half a capture
+// with its unreadable field silently zeroed is worse than no capture at all.
+// A refused read therefore reports no capture as well as the error, so a
+// caller that checks presence first cannot use one.
 func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionContentCapture, found bool, err error) {
+	defer func() {
+		if err != nil {
+			c, found = ingest.SessionContentCapture{}, false
+		}
+	}()
 	c.SessionID = id
 	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
