@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -434,4 +435,150 @@ func expectedCommitOrder(t *testing.T, groups [][]int, metas []indexedMeta) []Se
 		t.Fatalf("the flush groups cover %d of %d seeded sessions; every session is committed exactly once", len(seen), len(metas))
 	}
 	return order
+}
+
+// streamingBudgetFixtures is the second half of the budget corpus: the
+// predicate both grouping sites ask, and the streaming drain that asks it on
+// the primary harvest path. The first half (indexBatch) is loaded above from
+// the same file.
+type streamingBudgetFixtures struct {
+	Budget            string   `yaml:"budget"`
+	PredicateRequired []string `yaml:"predicate_required_names"`
+	PredicateCases    []struct {
+		Name            string  `yaml:"name"`
+		PendingCount    int     `yaml:"pending_count"`
+		PendingFraction float64 `yaml:"pending_budget_fraction"`
+		NextFraction    float64 `yaml:"next_budget_fraction"`
+		WantFlush       bool    `yaml:"want_flush"`
+	} `yaml:"predicate_cases"`
+	DrainRequired []string `yaml:"drain_required_names"`
+	DrainCases    []struct {
+		Name      string    `yaml:"name"`
+		Fractions []float64 `yaml:"session_budget_fractions"`
+		Groups    [][]int   `yaml:"expected_flush_groups"`
+	} `yaml:"drain_cases"`
+}
+
+func loadStreamingBudgetFixtures(t *testing.T) streamingBudgetFixtures {
+	t.Helper()
+	var fixtures streamingBudgetFixtures
+	if err := yaml.Unmarshal(contentBatchBudgetFixtureData, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if fixtures.Budget != "defaults.FullContentWriteBatchBytes" {
+		t.Fatalf("the corpus must name the budget under test, got %q", fixtures.Budget)
+	}
+	return fixtures
+}
+
+// requireFixtureNames refuses a corpus that lost a case. The manifest names the
+// situations that must stay covered, so deleting one is a load failure rather
+// than a quietly smaller run.
+func requireFixtureNames(t *testing.T, corpus string, required []string, present map[string]bool) {
+	t.Helper()
+	if len(required) == 0 {
+		t.Fatalf("%s: the corpus must declare the case names it requires", corpus)
+	}
+	for _, name := range required {
+		if !present[name] {
+			t.Fatalf("%s: required case %q is missing from the corpus", corpus, name)
+		}
+	}
+	if len(present) != len(required) {
+		t.Fatalf("%s: the corpus carries %d cases and requires %d; add the new case to the manifest", corpus, len(present), len(required))
+	}
+}
+
+// budgetFractionBytes turns a fraction of the shipped budget into bytes, so a
+// case keeps describing the same situation if the budget moves.
+func budgetFractionBytes(fraction float64) int64 {
+	return int64(float64(defaults.FullContentWriteBatchBytes) * fraction)
+}
+
+// TestIndexWriteBudgetPredicate holds the rule both grouping sites apply,
+// stated over its own inputs rather than over a pipeline.
+//
+// The rule is small and total, so it is asserted directly: an empty batch takes
+// anything (an oversized session must still be written, alone), a full batch
+// flushes on the session count before bytes are consulted, and a non-empty
+// batch flushes exactly when the next result would carry it past the budget.
+func TestIndexWriteBudgetPredicate(t *testing.T) {
+	t.Parallel()
+	fixtures := loadStreamingBudgetFixtures(t)
+	present := make(map[string]bool, len(fixtures.PredicateCases))
+	for _, fixture := range fixtures.PredicateCases {
+		if present[fixture.Name] {
+			t.Fatalf("duplicate fixture %s", fixture.Name)
+		}
+		present[fixture.Name] = true
+	}
+	requireFixtureNames(t, "index write budget predicate", fixtures.PredicateRequired, present)
+	for _, fixture := range fixtures.PredicateCases {
+		t.Run(fixture.Name, func(t *testing.T) {
+			t.Parallel()
+			got := exceedsIndexWriteBudget(
+				fixture.PendingCount,
+				budgetFractionBytes(fixture.PendingFraction),
+				budgetFractionBytes(fixture.NextFraction),
+			)
+			if got != fixture.WantFlush {
+				t.Fatalf("a pending batch of %d sessions holding %.6f of the budget, offered %.6f more, flushes=%v want %v",
+					fixture.PendingCount, fixture.PendingFraction, fixture.NextFraction, got, fixture.WantFlush)
+			}
+		})
+	}
+}
+
+// TestStreamingIndexDrainGroupsByBytes holds the byte budget at the boundary
+// EVERY parsed session crosses: the streaming drain that an ordinary harvest
+// and a reindex both run.
+//
+// Losing the split here is the out-of-memory failure the budget exists to
+// prevent, on the primary path rather than on the stale-session batch. The
+// drain is driven over a channel the test fills and CLOSES first: its receive
+// is then always ready, so the select never falls to its default and the
+// grouping depends on the budget alone, not on parser timing.
+func TestStreamingIndexDrainGroupsByBytes(t *testing.T) {
+	t.Parallel()
+	fixtures := loadStreamingBudgetFixtures(t)
+	present := make(map[string]bool, len(fixtures.DrainCases))
+	for _, fixture := range fixtures.DrainCases {
+		if present[fixture.Name] {
+			t.Fatalf("duplicate fixture %s", fixture.Name)
+		}
+		present[fixture.Name] = true
+	}
+	requireFixtureNames(t, "streaming index drain", fixtures.DrainRequired, present)
+	for _, fixture := range fixtures.DrainCases {
+		t.Run(fixture.Name, func(t *testing.T) {
+			t.Parallel()
+			parsedCh := make(chan indexParseResult, len(fixture.Fractions))
+			for index, fraction := range fixture.Fractions {
+				content := strings.Repeat("a", int(budgetFractionBytes(fraction)))
+				id := SessionID(fmt.Sprintf("session-%02d", index))
+				parsedCh <- indexParseResult{output: indexformat.V1{Entries: []schema.SessionEntry{{
+					SessionID: schema.SessionID(id), EntryIndex: 0, Harness: HarnessClaudeCode,
+					Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &content,
+				}}}}
+			}
+			close(parsedCh)
+			var groups [][]int
+			drainIndexParseResults(parsedCh, make([]indexParseResult, 0, indexWriteBatchLimit), func(results []indexParseResult) {
+				group := make([]int, 0, len(results))
+				for _, result := range results {
+					entries := result.output.(indexformat.V1).Entries
+					var index int
+					if _, err := fmt.Sscanf(string(entries[0].SessionID), "session-%d", &index); err != nil {
+						t.Errorf("a flushed result lost its identity: %v", err)
+						return
+					}
+					group = append(group, index)
+				}
+				groups = append(groups, group)
+			})
+			if !reflect.DeepEqual(groups, fixture.Groups) {
+				t.Fatalf("the drain flushed %v, want %v: the budget decides where a wave is split", groups, fixture.Groups)
+			}
+		})
+	}
 }
