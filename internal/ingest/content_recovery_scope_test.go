@@ -77,6 +77,19 @@ func loadContentRecoveryScopeFixtures(t *testing.T) contentRecoveryScopeFixtures
 			t.Fatalf("missing content recovery scope fixture %s", name)
 		}
 	}
+	// A refusal the user never sees is the defect this corpus exists to catch,
+	// so a refused case that declares no diagnostics fails at LOAD rather than
+	// passing an empty-against-empty comparison. The field is unread anywhere
+	// else, so declaring it elsewhere is a mistake too.
+	for _, fixture := range fixtures.Cases {
+		refused := fixture.Expect == string(recoveryScopeRefused)
+		if refused && len(fixture.Diagnostics) == 0 {
+			t.Fatalf("content recovery scope fixture %s: a refused case must declare the diagnostics the user sees; without them a silent refusal would pass", fixture.Name)
+		}
+		if !refused && len(fixture.Diagnostics) > 0 {
+			t.Fatalf("content recovery scope fixture %s: expected_diagnostics is read only for a refused case, so declaring it here claims an assertion that does not run", fixture.Name)
+		}
+	}
 	return fixtures
 }
 
