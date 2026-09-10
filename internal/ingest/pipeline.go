@@ -3869,9 +3869,11 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 	if refreshMetadata && meta.AdapterVersion != nil {
 		target := p.versionTargets()[meta.ModelHarness].AdapterVersion
 		if *meta.AdapterVersion > target {
-			p.reportMetadataRefusal(string(sid), &AdapterVersionError{Path: metaPath, Version: *meta.AdapterVersion, Target: target})
-			slog.Warn(logPrefix+": retaining newer adapter output", "session_id", sid,
-				"error", &AdapterVersionError{Path: metaPath, Version: *meta.AdapterVersion, Target: target})
+			// The same file, spelled the way every other reporter spells it, so
+			// this refusal collapses with the same refusal from another path.
+			adapterErr := &AdapterVersionError{Path: p.managedRelativePath(metaPath), Version: *meta.AdapterVersion, Target: target}
+			p.reportMetadataRefusal(string(sid), adapterErr)
+			slog.Warn(logPrefix+": retaining newer adapter output", "session_id", sid, "error", adapterErr)
 			refreshMetadata = false
 		}
 	}

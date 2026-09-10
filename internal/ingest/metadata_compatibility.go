@@ -69,11 +69,35 @@ func (p *Pipeline) managedRelativePath(path string) string {
 	return filepath.ToSlash(relative)
 }
 
-func isMetadataCompatibilityError(err error) bool {
+// metadataCompatibilityCause unwraps err to the compatibility refusal inside
+// it, if there is one.
+//
+// This is the ONE place the closed list of compatibility refusals is written.
+// Callers that only ask whether err is one use isMetadataCompatibilityError;
+// callers that REPORT it want the cause rather than whatever operation met it,
+// because diagnostics collapse by whole-value equality and a wrapper is one
+// more spelling of one cause. Returning the cause from the same list they test
+// against means a type added here cannot be recognised by one and missed by
+// the other.
+func metadataCompatibilityCause(err error) (error, bool) {
 	var schemaErr *UnsupportedMetadataVersionError
+	if errors.As(err, &schemaErr) {
+		return schemaErr, true
+	}
 	var adapterErr *AdapterVersionError
+	if errors.As(err, &adapterErr) {
+		return adapterErr, true
+	}
 	var headerErr *MetadataHeaderError
-	return errors.As(err, &schemaErr) || errors.As(err, &adapterErr) || errors.As(err, &headerErr)
+	if errors.As(err, &headerErr) {
+		return headerErr, true
+	}
+	return nil, false
+}
+
+func isMetadataCompatibilityError(err error) bool {
+	_, ok := metadataCompatibilityCause(err)
+	return ok
 }
 
 // MetadataHeaderError distinguishes an unreadable compatibility field from

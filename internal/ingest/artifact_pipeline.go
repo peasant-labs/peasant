@@ -60,25 +60,19 @@ func (p *Pipeline) reportPendingRecoveryFailure(err error) {
 		}
 		return
 	}
+	// Report the REFUSAL, not the operation that met it. The selection reports
+	// the same refusal for the same session, and diagnostics collapse by
+	// whole-value equality, so the wrapper this path adds ("mirror committed
+	// session ...") would be one more spelling of one cause. The refusal's own
+	// sentence already says the session's artifacts and index were not
+	// changed, and the remedy is the same either way: upgrade.
+	//
+	// The cause comes from the same closed list that decides whether this IS a
+	// compatibility refusal, so a type added to that list cannot be recognised
+	// here and then reported wrapped anyway.
 	var sessionErr *artifactSessionError
-	var schemaErr *UnsupportedMetadataVersionError
-	var adapterErr *AdapterVersionError
-	if errors.As(err, &sessionErr) && isMetadataCompatibilityError(err) {
-		// Report the REFUSAL, not the operation that met it. The selection
-		// reports the same refusal for the same session, and diagnostics
-		// collapse by whole-value equality, so the wrapper this path adds
-		// ("mirror committed session ...") would be one more spelling of one
-		// cause. The refusal's own sentence already says the session's
-		// artifacts and index were not changed, and the remedy is the same
-		// either way: upgrade.
-		switch {
-		case errors.As(err, &schemaErr):
-			p.reportMetadataRefusal(string(sessionErr.SessionID), schemaErr)
-		case errors.As(err, &adapterErr):
-			p.reportMetadataRefusal(string(sessionErr.SessionID), adapterErr)
-		default:
-			p.reportMetadataRefusal(string(sessionErr.SessionID), err)
-		}
+	if cause, ok := metadataCompatibilityCause(err); ok && errors.As(err, &sessionErr) {
+		p.reportMetadataRefusal(string(sessionErr.SessionID), cause)
 		return
 	}
 	p.reportDiagnostic(artifactRecoveryDiagnostic(string(p.config.OutputDir), err))
