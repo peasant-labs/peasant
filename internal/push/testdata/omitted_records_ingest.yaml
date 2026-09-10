@@ -1,0 +1,37 @@
+# What a REAL harvest of a JSONL session must leave behind when one source
+# record is over this build's per-record limit, and when it is not.
+#
+# Both cases feed the SAME transcript to the SAME ingest pipeline and differ in
+# ONE value: the per-record limit. That is what makes the pair a proof rather
+# than two independent assertions — restoring the omission would change the
+# first case only, and raising the limit would change it back.
+cases:
+  - name: over_cap_record_is_omitted_and_the_session_still_publishes
+    # 2 KiB limit against an 8 KiB record: the record is over the limit.
+    recordLimitBytes: 2048
+    largeRecordBytes: 8192
+    captureStatus: incomplete
+    captureFailureCode: source_records_omitted
+    # The point of the case: the omitted-records session is stored as a FULL
+    # capture, not as the bounded preview a permanent refusal used to write,
+    # because only a full capture may be read whole, exported and published.
+    captureFormat: full
+    readiness: ready
+    preflightAccepts: true
+    publishedPartial: true
+    omissionWarning: true
+    placeholderInServedDetail: true
+    largeRecordInServedDetail: false
+  - name: under_cap_record_is_kept_and_the_session_stays_complete
+    # The same 8 KiB record under a 64 KiB limit: nothing is omitted.
+    recordLimitBytes: 65536
+    largeRecordBytes: 8192
+    captureStatus: complete
+    captureFailureCode: ""
+    captureFormat: full
+    readiness: ready
+    preflightAccepts: true
+    publishedPartial: false
+    omissionWarning: false
+    placeholderInServedDetail: false
+    largeRecordInServedDetail: true

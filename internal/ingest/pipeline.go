@@ -256,6 +256,15 @@ type Pipeline struct {
 	// had to mine again, collected from the adapters that can report it.
 	reminedEvidence int
 
+	// maxJSONLRecordBytes is the per-record read limit the pre-redaction
+	// oversized-record filter applies. Zero, the production value, means
+	// defaults.MaxJSONLRecordBytes. It is the same parameter
+	// IndexerRegistryOptions.MaxRecordBytes already gives the indexers, on the
+	// one JSONL read the pipeline owns itself, so a caller that must exercise
+	// the over-limit path can do it without building a record of production
+	// size and without mutating anything global.
+	maxJSONLRecordBytes int
+
 	// originResolve and originResolveErr hold what the stored-origin pass did
 	// this run. They live on the pipeline rather than in Run because the report
 	// is assembled by a helper the reindex path shares, where the pass does not
@@ -385,6 +394,18 @@ func WithRedactor(r TextRedactor) PipelineOption {
 // after disk writes. Indexing errors are non-fatal.
 func WithIndexers(idx map[Harness]TranscriptIndexer) PipelineOption {
 	return func(p *Pipeline) { p.indexers = idx }
+}
+
+// WithMaxJSONLRecordBytes sets the per-record read limit the pre-redaction
+// oversized-record filter applies to every JSONL harness. Zero, the production
+// value, means defaults.MaxJSONLRecordBytes.
+//
+// It mirrors IndexerRegistryOptions.MaxRecordBytes on the read the pipeline
+// performs itself, so the whole omit-and-continue path can be exercised with a
+// small record. Set both to the same value: the filter decides what is omitted
+// and the indexers decide what they will certify.
+func WithMaxJSONLRecordBytes(limit int) PipelineOption {
+	return func(p *Pipeline) { p.maxJSONLRecordBytes = limit }
 }
 
 // WithMetricsStore injects a MetricsStore for session_entries persistence.
@@ -1377,15 +1398,22 @@ type indexParseResult struct {
 	strictRefusal string
 	// refusalCode is why the strict parser refused, as the value the selector
 	// reads back to decide that re-trying cannot help.
-	refusalCode   ContentCaptureFailureCode
-	im            indexedMeta
-	input         *CapturedIndexInput
-	output        indexformat.Result
-	entryCount    int
-	startedAt     int64
-	logEntry      IndexLogEntry
-	parseDuration time.Duration
-	bytes         int64
+	refusalCode ContentCaptureFailureCode
+	// omissionsRecorded reports that the stored entries account for every
+	// record ingest left out, because a placeholder entry stands in each
+	// omitted record's position. Such a capture is incomplete but holds the
+	// whole session's text, so it is written as FULL content and stays
+	// readable, exportable and publishable; a partial capture without that
+	// proof is written as the bounded preview it is.
+	omissionsRecorded bool
+	im                indexedMeta
+	input             *CapturedIndexInput
+	output            indexformat.Result
+	entryCount        int
+	startedAt         int64
+	logEntry          IndexLogEntry
+	parseDuration     time.Duration
+	bytes             int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -1652,6 +1680,14 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
 						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
+						// A session whose only gap is an omitted source record
+						// carries a placeholder entry in that record's place,
+						// so the tolerant projection still describes the whole
+						// session and is stored as full content. The same code
+						// raised WITHOUT a placeholder (an OpenCode part this
+						// build cannot render, an orphan graph part) leaves
+						// content simply missing and stays a preview.
+						result.omissionsRecorded = code == ContentCaptureSourceRecordsOmitted && outputRecordsItsOmissions(tolerant)
 						p.reportDiagnostic(permanentRefusalDiagnostic(im.session.SessionID, code, err))
 						output, err = tolerant, nil
 					}
@@ -1762,14 +1798,24 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		capture := SessionContentCaptureWrite{}
+		// requireFullContent selects the store's full-content path. It is the
+		// certified-complete case AND the one incompleteness that still holds
+		// every entry, because a bounded preview may never be read whole,
+		// exported or published, and an omitted-records session must be.
+		requireFullContent := result.fullContent
 		if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
-			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatPreviewOnly, CapturedAtMs: nowMs, FailureCode: result.refusalCode, FailureMessage: result.strictRefusal}
+			format := ContentCaptureFormatPreviewOnly
+			if result.omissionsRecorded {
+				format = ContentCaptureFormatFull
+				requireFullContent = true
+			}
+			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: format, CapturedAtMs: nowMs, FailureCode: result.refusalCode, FailureMessage: result.strictRefusal}
 		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
-			RequireFullContent: result.fullContent,
+			RequireFullContent: requireFullContent,
 			ContentCapture:     capture,
 			SessionID:          result.im.session.SessionID,
 			Result:             result.output,
@@ -2736,7 +2782,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
 		var filterErr error
-		rawData, diagnostics, filterErr = filterOversizedJSONLRecords(ctx, rawData, session.SourcePath.String(), defaults.MaxJSONLRecordBytes)
+		rawData, diagnostics, filterErr = filterOversizedJSONLRecords(ctx, rawData, session.SourcePath.String(), productionJSONLRecordLimit(p.maxJSONLRecordBytes))
 		if filterErr != nil {
 			result.Error = errors.Join(filterErr, p.fs.RemoveAll(tmpDir))
 			return workerResult{result: result}

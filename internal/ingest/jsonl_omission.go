@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -191,4 +192,48 @@ func uncertifiableOversizedRecord(skipped []OversizedRecord, limit int) error {
 		"a %d-byte record at line %d is over this build's %d-byte per-record limit and was left out, so this index covers %d record(s) fewer than the transcript; the transcript was indexed directly instead of through the ingest filter that writes an omission record for such a record, so nothing here certifies what is missing; rerun `peasant harvest index --force` for this session so ingest records the omission and stores the session as a partial capture, or shrink the oversized record in the source",
 		first.Size, first.Line, limit, len(skipped),
 	)
+}
+
+// outputRecordsItsOmissions reports whether an indexed result accounts for the
+// records ingest left out, by carrying at least one omission placeholder entry.
+//
+// It is the discriminator between the two very different things the
+// source_records_omitted code covers today. An oversized JSONL record is
+// omitted with a placeholder standing in its position, so the stored entries
+// still describe the whole session and the capture may be certified as full
+// text and published. An OpenCode part this build cannot render, and an orphan
+// graph part, raise the SAME code with NO placeholder: content is simply
+// missing, and such a capture must stay the bounded preview it is.
+//
+// Reading the answer out of the entries themselves, rather than out of a
+// parallel flag, is what keeps the two from drifting: a capture is certified
+// full exactly when the omission is visible in what was stored.
+func outputRecordsItsOmissions(output indexformat.Result) bool {
+	v1, ok := output.(indexformat.V1)
+	if !ok {
+		return false
+	}
+	for _, entry := range v1.Entries {
+		if _, omitted := OmittedRecordOf(entry); omitted {
+			return true
+		}
+	}
+	return false
+}
+
+// OmittedRecordOf reports the omission a stored entry stands for, when that
+// entry is an omission placeholder.
+//
+// It is the read-side boundary of the placeholder: a reader asks the entry what
+// it is instead of guessing from its shape, so the projection that shows a
+// reader the note and the writer that stored it agree on one definition.
+func OmittedRecordOf(entry schema.SessionEntry) (OmittedRecord, bool) {
+	if entry.Extra == nil {
+		return OmittedRecord{}, false
+	}
+	record, err := ParseOmittedRecord(*entry.Extra)
+	if err != nil {
+		return OmittedRecord{}, false
+	}
+	return record, true
 }

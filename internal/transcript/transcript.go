@@ -144,6 +144,25 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	return projection.Turns
 }
 
+// toolResultOutput is the text a tool_result entry contributes as a tool call's
+// result on the served projection.
+//
+// It is the recorded output; and for an OMISSION PLACEHOLDER — the entry that
+// stands where ingest left a source record out — it is the reader-facing note,
+// which is the only text such an entry carries and the whole reason it exists.
+// Without this the placeholder would be stored, published and served as an
+// empty result, and a reader would see a tool call that silently returned
+// nothing instead of being told what is missing and why.
+func toolResultOutput(e schema.SessionEntry) string {
+	if e.ToolOutput != nil {
+		return *e.ToolOutput
+	}
+	if _, omitted := ingest.OmittedRecordOf(e); omitted && e.ContentPreview != nil {
+		return *e.ContentPreview
+	}
+	return ""
+}
+
 func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
 	if len(entries) == 0 {
 		return nil
@@ -159,10 +178,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		}
 		// Depth=1 tool_result entries are the primary source.
 		if e.Depth == 1 && e.EntryType == schema.EntryTypeToolResult {
-			rd := toolResultData{IsError: e.IsError}
-			if e.ToolOutput != nil {
-				rd.Output = *e.ToolOutput
-			}
+			rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
 			if e.TimestampMs != nil {
 				rd.Timestamp = *e.TimestampMs
 			}
@@ -173,10 +189,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		// Explicit depth-1 results above take precedence in either entry order.
 		if e.ToolOutput != nil || (e.Depth == 0 && e.EntryType == schema.EntryTypeToolResult) {
 			if _, exists := resultMap[*e.ToolCallID]; !exists {
-				rd := toolResultData{IsError: e.IsError}
-				if e.ToolOutput != nil {
-					rd.Output = *e.ToolOutput
-				}
+				rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
 				if e.TimestampMs != nil {
 					rd.Timestamp = *e.TimestampMs
 				}
@@ -347,9 +360,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 				tc.Arguments = *e.ToolInput
 				tc.FilePath = extractFilePath(*e.ToolInput)
 			}
-			if e.ToolOutput != nil {
-				tc.Result = *e.ToolOutput
-			}
+			tc.Result = toolResultOutput(e)
 			if e.ToolKind != nil {
 				tc.ToolKind = *e.ToolKind
 			}
