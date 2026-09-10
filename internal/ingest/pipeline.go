@@ -1625,7 +1625,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	declared := p.versionTargets()[im.session.Harness].IndexVersion
 	if err == nil {
 		result.input = input
-		result.im.captureRevision = input.expected.PublicationCaptureRevision
+		// The write binds the index to the current metadata capture when the
+		// input is one the capture vouches for; otherwise the caller's
+		// revision stands, and a retained fallback's is unbound, so a tree
+		// re-read without byte proof holds publication instead of certifying it.
+		if input.bindsPublication() {
+			result.im.captureRevision = input.expected.PublicationCaptureRevision
+		}
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
 			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
@@ -4532,13 +4538,16 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 // forcedNativeRefreshUsable decides whether harvest index --force re-reads a
 // discovered native source or indexes the retained input. Force is an
-// explicit manual refresh, so a native source that shows change evidence
-// against the retained capture (a newer clock, a moved locator, a changed
-// parent, an advanced cursor) is captured. A source that shows none is what
-// the retained artifact already consumed; re-reading it is the original-source
-// I/O the retained-first rule exists to avoid, so the retained input is indexed
-// with no native read. A retained artifact produced by a newer adapter than
-// this build is never replaced from native input: the newer producer's
+// explicit manual refresh, so the native source is captured when the retained
+// input cannot settle the session: the source shows change evidence against
+// the retained capture (a newer clock, a moved locator, a changed parent, an
+// advanced cursor), or the retained input is a directory tree, which has no
+// byte proof against the publication capture and so cannot bind publication
+// when indexed on its own. A file source that shows no change is what the
+// retained artifact already consumed; re-reading it is the original-source
+// I/O the retained-first rule exists to avoid, so the retained input is
+// indexed with no native read. A retained artifact produced by a newer adapter
+// than this build is never replaced from native input: the newer producer's
 // evidence is kept and its retained input is indexed as it is.
 func (p *Pipeline) forcedNativeRefreshUsable(ctx context.Context, target reindexTarget, discovered DiscoveredSession) bool {
 	metadata := p.adapterTargetMetadata(ctx, target)
@@ -4548,7 +4557,21 @@ func (p *Pipeline) forcedNativeRefreshUsable(ctx context.Context, target reindex
 	if metadata.AdapterVersion != nil && *metadata.AdapterVersion > p.versionTargets()[target.session.Harness].AdapterVersion {
 		return false
 	}
-	return p.nativeInputChanged(discovered, metadata)
+	return p.nativeInputChanged(discovered, metadata) || p.retainedInputKind(target) == TranscriptSourceDirectory
+}
+
+// retainedInputKind reports the source kind the target's indexer reads for
+// its retained input, or the zero kind when no indexer is registered.
+func (p *Pipeline) retainedInputKind(target reindexTarget) TranscriptSourceKind {
+	indexer, ok := p.indexers[target.session.Harness]
+	if !ok {
+		return TranscriptSourceKind(0)
+	}
+	im := indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath}
+	if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
+		return resolver.TranscriptSourceKindFor(indexTargetSession(im))
+	}
+	return indexer.SourceKind()
 }
 
 // reindexTarget represents a session found in the peasant-sync output directory

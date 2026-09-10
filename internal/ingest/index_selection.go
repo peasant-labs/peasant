@@ -25,8 +25,9 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 		expected.IndexerVersion < target.IndexerVersion ||
 		expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash ||
 		// A current metadata capture exists (revision > 0) but the index is not
-		// bound to it: bytes match, publication proof does not.
-		expected.PublicationCaptureRevision > 0 && !expected.PublicationBound ||
+		// bound to it: bytes match, publication proof does not. Only an input
+		// the capture can vouch for is pending on that account.
+		expected.PublicationCaptureRevision > 0 && !expected.PublicationBound && input.bindsPublication() ||
 		// The capture is incomplete and this build can certify it: the strict
 		// format-1 parser is the only path that produces complete content, so
 		// a harness on another declared format is at its steady state instead.
@@ -34,6 +35,17 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 		// state too, and is excluded below.
 		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
 			!permanentRefusalIsSettled(expected, target)
+}
+
+// bindsPublication reports whether an index written from this input may be
+// bound to the current publication metadata capture. A managed transcript's
+// bytes are what the capture hashed, so a file input binds. A directory tree
+// is read beside a header the capture hashed without the tree, so a tree read
+// from retained input has no byte proof against the capture and its index is
+// held unbound; the tree this run captured with the artifact is the tree the
+// capture saw, and binds.
+func (input *CapturedIndexInput) bindsPublication() bool {
+	return input.kind != TranscriptSourceDirectory || input.published
 }
 
 // permanentRefusalIsSettled reports that the incomplete capture is as good as

@@ -231,7 +231,17 @@ func checkPublicationIndexRevision(conn *sqlite.Conn, id ingest.SessionID, expec
 	if err != nil {
 		return err
 	}
-	if expected < 0 || current != expected {
+	if expected < 0 {
+		return publicationRepairError("stale index capture revision; existing entries were not changed")
+	}
+	// No current capture means there is nothing this write could race: the
+	// session's counter advanced past a capture that no longer exists. The
+	// entries are written, and the binding predicate, which needs the capture
+	// row, leaves publication held until a capture exists again.
+	if current == 0 {
+		return nil
+	}
+	if current != expected {
 		return publicationRepairError("stale index capture revision; existing entries were not changed")
 	}
 	return nil
