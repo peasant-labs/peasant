@@ -187,9 +187,12 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 		if completion != nil {
 			completion.line = line
 		}
-		if strikeRecordTooLarge(raw) {
+		// The limit this indexer was GIVEN, not the production constant: an
+		// injected limit that nothing reads makes the registry option inert
+		// for Strike alone and lets an over-limit record reach the parser.
+		if strikeRecordTooLarge(raw, i.maxRecordBytes) {
 			if completion != nil {
-				parseErr = fmt.Errorf("record exceeds the %d-byte supported processing limit; it was not silently omitted", defaults.MaxJSONLRecordBytes)
+				parseErr = fmt.Errorf("record exceeds the %d-byte supported processing limit; it was not silently omitted", productionJSONLRecordLimit(i.maxRecordBytes))
 			}
 			return
 		}

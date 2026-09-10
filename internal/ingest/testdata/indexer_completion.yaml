@@ -51,24 +51,31 @@ requiredNames:
   - codex-mixed-future-opaque-fields
   - codex-missing-source
   - codex-long-content-parity
+# `oversizedRecord` is the record an `oversized` case appends: a record VALID
+# for its harness, whose PAD token the test grows until the record is one byte
+# over the injected limit. It must be valid, or the case would be refused as
+# malformed input and would prove nothing about the size rule it exists for.
 cases:
   - name: claude-scan-failure-after-valid
     harness: claude-code
     input: |
       {"type":"user","message":{"role":"user","content":"valid"}}
     oversized: true
+    oversizedRecord: '{"type":"user","message":{"role":"user","content":"PAD"}}'
     error: true
   - name: codex-scan-failure-after-valid
     harness: codex
     input: |
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"valid"}]}}
     oversized: true
+    oversizedRecord: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"PAD"}]}}'
     error: true
   - name: cursor-scan-failure-after-valid
     harness: cursor
     input: |
       {"role":"user","content":"valid"}
     oversized: true
+    oversizedRecord: '{"role":"user","content":"PAD"}'
     error: true
   - {name: claude-partial-read, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":"valid"}}', partialRead: true, error: true}
   - {name: codex-partial-read, harness: codex, input: '{"type":"response_item","payload":{"type":"message","role":"user","content":[]}}', partialRead: true, error: true}
@@ -124,6 +131,10 @@ cases:
     input: |
       {"type":"user.message","data":{"text":"hello"}}
     oversized: true
+    # A VALID Strike envelope padded past the injected limit. A blob of
+    # padding would be refused as malformed JSON whatever the limit is, so
+    # the case would pass without the over-limit rule ever running.
+    oversizedRecord: '{"type":"user.message","data":{"text":"PAD"}}'
     error: true
     legacyEntries: 1
   - {name: claude-empty-readable, harness: claude-code, input: '', entries: 0}

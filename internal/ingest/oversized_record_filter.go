@@ -208,8 +208,9 @@ func jsonlRecordTooLarge(record []byte, maxRecordBytes int) bool {
 	return len(record) > productionJSONLRecordLimit(maxRecordBytes)
 }
 
-// strikeRecordTooLarge applies the shared per-record limit at the Strike
-// call sites that check a record they already hold.
-func strikeRecordTooLarge(record []byte) bool {
-	return jsonlRecordTooLarge(record, 0)
+// strikeRecordTooLarge applies the per-record limit at the Strike call sites
+// that check a record they already hold. maxRecordBytes is the limit the
+// caller was given; zero means the production limit.
+func strikeRecordTooLarge(record []byte, maxRecordBytes int) bool {
+	return jsonlRecordTooLarge(record, maxRecordBytes)
 }

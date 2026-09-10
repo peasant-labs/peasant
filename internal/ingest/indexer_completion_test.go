@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -22,16 +23,17 @@ import (
 var indexerCompletionData []byte
 
 type indexerCompletionFixture struct {
-	Name          string         `yaml:"name"`
-	Harness       ingest.Harness `yaml:"harness"`
-	Input         string         `yaml:"input"`
-	Missing       bool           `yaml:"missing"`
-	Error         bool           `yaml:"error"`
-	Entries       int            `yaml:"entries"`
-	LegacyEntries *int           `yaml:"legacyEntries"`
-	LongContent   bool           `yaml:"longContent"`
-	Oversized     bool           `yaml:"oversized"`
-	PartialRead   bool           `yaml:"partialRead"`
+	Name            string         `yaml:"name"`
+	Harness         ingest.Harness `yaml:"harness"`
+	Input           string         `yaml:"input"`
+	Missing         bool           `yaml:"missing"`
+	Error           bool           `yaml:"error"`
+	Entries         int            `yaml:"entries"`
+	LegacyEntries   *int           `yaml:"legacyEntries"`
+	LongContent     bool           `yaml:"longContent"`
+	Oversized       bool           `yaml:"oversized"`
+	OversizedRecord string         `yaml:"oversizedRecord"`
+	PartialRead     bool           `yaml:"partialRead"`
 }
 
 type completionPartialReadFS struct{ ingest.FileSystem }
@@ -97,7 +99,7 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 			registryOptions := ingest.IndexerRegistryOptions{}
 			if fixture.Oversized {
 				registryOptions.MaxRecordBytes = completionOversizedRecordLimit
-				data = append(data, []byte(strings.Repeat("x", completionOversizedRecordLimit+1)+"\n")...)
+				data = append(data, completionOversizedRecord(t, fixture)...)
 			}
 			if !fixture.Missing {
 				if err := fs.WriteFile(session.SourcePath.String(), data, 0600); err != nil {
@@ -178,4 +180,36 @@ func assertCompletionEntries(t *testing.T, result indexformat.Result, err error,
 	if !ok || len(output.Entries) != count {
 		t.Fatalf("result=%#v, want V1 with %d entries", result, count)
 	}
+}
+
+// completionOversizedRecord builds the over-limit record an oversized case
+// appends: the harness-valid record the fixture names, padded to exactly one
+// byte over the injected limit.
+//
+// It must be VALID for its harness. A blob of padding is refused as malformed
+// input by every parser whatever the limit is, so a case built from one is
+// green whether or not the indexer applies the limit it was given, and the
+// rule the case exists to prove never runs.
+func completionOversizedRecord(t *testing.T, fixture indexerCompletionFixture) []byte {
+	t.Helper()
+	const pad = "PAD"
+	if !strings.Contains(fixture.OversizedRecord, pad) {
+		t.Fatalf(
+			"indexer completion case %q sets oversized but its oversizedRecord %q carries no %s token, so no over-limit record can be built for it; give the case a record valid for harness %q with %s where the padding goes",
+			fixture.Name, fixture.OversizedRecord, pad, fixture.Harness, pad,
+		)
+	}
+	base := strings.ReplaceAll(fixture.OversizedRecord, pad, "")
+	target := completionOversizedRecordLimit + 1
+	if len(base) > target {
+		t.Fatalf("indexer completion case %q: its oversizedRecord is already %d bytes, over the %d-byte target", fixture.Name, len(base), target)
+	}
+	record := strings.ReplaceAll(fixture.OversizedRecord, pad, strings.Repeat("x", target-len(base)))
+	if len(record) != target {
+		t.Fatalf("indexer completion case %q: built a %d-byte record, want exactly %d", fixture.Name, len(record), target)
+	}
+	if !json.Valid([]byte(record)) {
+		t.Fatalf("indexer completion case %q: the padded oversizedRecord is not valid JSON, so it would be refused as malformed rather than as over-limit", fixture.Name)
+	}
+	return []byte(record + "\n")
 }

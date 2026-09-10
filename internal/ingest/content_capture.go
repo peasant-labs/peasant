@@ -391,7 +391,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	processes := make(map[string]string)
 	pending := make(map[string]bool)
 	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
-		if strikeRecordTooLarge(raw) {
+		if strikeRecordTooLarge(raw, 0) {
 			return nil, fmt.Errorf("record exceeds Strike format limit")
 		}
 		var env strikeEnvelope
