@@ -80,7 +80,7 @@ func loadJSONLRecordReaderFixtures(t *testing.T) jsonlRecordReaderFixtures {
 	return fixtures
 }
 
-func TestForEachJSONLRecord(t *testing.T) {
+func TestJSONLRecordScannerReadsEveryRecordShape(t *testing.T) {
 	fixtures := loadJSONLRecordReaderFixtures(t)
 
 	for _, fixture := range fixtures.Cases {
@@ -98,29 +98,25 @@ func TestForEachJSONLRecord(t *testing.T) {
 			}
 
 			var gotYielded []int
+			scanner := newJSONLRecordScanner(input.Bytes(), fixture.LimitBytes)
+			for scanner.Scan() {
+				line, raw := scanner.Line(), scanner.Bytes()
+				gotYielded = append(gotYielded, line)
+				want, known := wantBytes[line]
+				if !known {
+					t.Errorf("reader yielded line %d, which the input does not contain", line)
+					continue
+				}
+				if !bytes.Equal(raw, want) {
+					t.Errorf("line %d yielded %d bytes, want the whole %d-byte record; the reader truncated or merged it", line, len(raw), len(want))
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				t.Fatalf("the reader returned %v; no record size may fail a read", err)
+			}
 			var gotOversized []jsonlRecordReaderOversized
-			err := forEachJSONLRecord(
-				t.Context(),
-				bytes.NewReader(input.Bytes()),
-				fixture.LimitBytes,
-				func(line int, raw []byte) error {
-					gotYielded = append(gotYielded, line)
-					want, known := wantBytes[line]
-					if !known {
-						t.Errorf("reader yielded line %d, which the input does not contain", line)
-						return nil
-					}
-					if !bytes.Equal(raw, want) {
-						t.Errorf("line %d yielded %d bytes, want the whole %d-byte record; the reader truncated or merged it", line, len(raw), len(want))
-					}
-					return nil
-				},
-				func(line int, size int) {
-					gotOversized = append(gotOversized, jsonlRecordReaderOversized{Line: line, Size: size})
-				},
-			)
-			if err != nil {
-				t.Fatalf("forEachJSONLRecord returned %v; no record size may fail a read", err)
+			for _, skipped := range scanner.Oversized() {
+				gotOversized = append(gotOversized, jsonlRecordReaderOversized{Line: skipped.Line, Size: skipped.Size})
 			}
 
 			if !equalIntSlices(gotYielded, fixture.WantYielded) {
@@ -138,10 +134,14 @@ func TestForEachJSONLRecord(t *testing.T) {
 	}
 }
 
-// TestForEachJSONLRecordRefusesUnusableLimit pins the actionable refusal for a
+// TestJSONLRecordScannerRefusesUnusableLimit pins the actionable refusal for a
 // limit that would omit every record.
-func TestForEachJSONLRecordRefusesUnusableLimit(t *testing.T) {
-	err := forEachJSONLRecord(t.Context(), strings.NewReader("{}\n"), 0, func(int, []byte) error { return nil }, nil)
+func TestJSONLRecordScannerRefusesUnusableLimit(t *testing.T) {
+	scanner := newJSONLRecordScanner([]byte("{}\n"), 0)
+	if scanner.Scan() {
+		t.Fatal("a zero record limit yielded a record")
+	}
+	err := scanner.Err()
 	if err == nil {
 		t.Fatal("a zero record limit was accepted; every record would be reported omitted")
 	}
@@ -152,21 +152,39 @@ func TestForEachJSONLRecordRefusesUnusableLimit(t *testing.T) {
 	}
 }
 
-// TestForEachJSONLRecordStopsOnCallbackError proves a caller's own parse error
-// still stops the read, so the reader's size tolerance does not swallow real
-// failures.
-func TestForEachJSONLRecordStopsOnCallbackError(t *testing.T) {
-	sentinel := fmt.Errorf("caller refused the record")
-	seen := 0
-	err := forEachJSONLRecord(t.Context(), strings.NewReader("a\nb\nc\n"), 1024, func(int, []byte) error {
-		seen++
-		return sentinel
-	}, nil)
-	if err != sentinel {
-		t.Fatalf("err = %v, want the caller's own error", err)
+// TestJSONLRecordScannerYieldsAStandInAsAnOmission pins that a stand-in line
+// never reaches a harness parser and is reported at the position it holds.
+func TestJSONLRecordScannerYieldsAStandInAsAnOmission(t *testing.T) {
+	record, err := NewOmittedRecord(OmittedRecordTooLarge, 2, 4097, 4096)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if seen != 1 {
-		t.Fatalf("callback ran %d times, want 1; the reader kept going after the caller refused", seen)
+	standIn, err := encodeOmittedRecordSentinel(OmittedRecordAt{Record: record, Line: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []byte("{\"a\":1}\n" + string(standIn) + "\n{\"b\":2}\n")
+
+	scanner := newJSONLRecordScanner(input, 4096)
+	var yielded [][]byte
+	var omissionsAt []int
+	for scanner.Scan() {
+		for _, omission := range scanner.TakeOmissions() {
+			omissionsAt = append(omissionsAt, len(yielded))
+			if omission.Record != record {
+				t.Errorf("omission = %+v, want %+v", omission.Record, record)
+			}
+		}
+		yielded = append(yielded, append([]byte(nil), scanner.Bytes()...))
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("the reader returned %v", err)
+	}
+	if len(yielded) != 2 {
+		t.Fatalf("yielded %d records, want the two ordinary ones; the stand-in must not reach a parser", len(yielded))
+	}
+	if len(omissionsAt) != 1 || omissionsAt[0] != 1 {
+		t.Fatalf("omissions surfaced at %v, want one before the second record", omissionsAt)
 	}
 }
 

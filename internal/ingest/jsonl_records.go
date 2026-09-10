@@ -3,7 +3,6 @@ package ingest
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -222,14 +221,19 @@ func (s *jsonlRecordScanner) Scan() bool {
 			// too means a reader that indexes a transcript directly still
 			// gets a placeholder at the record's position instead of a
 			// silent gap.
-			record, recordErr := NewOmittedRecord(OmittedRecordTooLarge, s.line, int64(size), int64(s.limit))
-			if recordErr == nil {
-				s.omissions = append(s.omissions, OmittedRecordAt{
-					Record:     record,
-					Line:       s.line,
-					ToolCallID: toolCallIDFromRecordPrefix(prefix),
-				})
+			// size is over s.limit and s.line is at least 1 here, which is
+			// all NewOmittedRecord requires, so it cannot refuse.
+			omitted, omitErr := NewOmittedRecord(OmittedRecordTooLarge, s.line, int64(size), int64(s.limit))
+			if omitErr != nil {
+				s.err = omitErr
+				s.done = true
+				return false
 			}
+			s.omissions = append(s.omissions, OmittedRecordAt{
+				Record:     omitted,
+				Line:       s.line,
+				ToolCallID: toolCallIDFromRecordPrefix(prefix),
+			})
 			continue
 		}
 		if omission, ok := parseOmittedRecordSentinel(record); ok {
@@ -273,55 +277,6 @@ func (s *jsonlRecordScanner) SawOversized() bool { return len(s.oversized) > 0 }
 
 // Err reports a read failure. A record's size is never one.
 func (s *jsonlRecordScanner) Err() error { return s.err }
-
-// forEachJSONLRecord reads r as newline-separated records and hands each one
-// to fn whole, including a final record with no trailing newline.
-//
-// A record up to maxRecordBytes is yielded complete. A record over
-// maxRecordBytes is never held in memory: the reader discards it to the next
-// newline, reports its line and its true size through onOversized, and goes
-// on to the next record. The reader never truncates a record and never
-// returns an error because of a record's size, so no transcript can fail
-// ingestion for being large. The slice handed to fn is only valid until fn
-// returns; a caller that keeps it must copy it.
-//
-// The line number is the 1-based physical line of the source, counting
-// omitted records, so a diagnostic points at the record in the original file.
-func forEachJSONLRecord(
-	ctx context.Context,
-	r io.Reader,
-	maxRecordBytes int,
-	fn func(line int, raw []byte) error,
-	onOversized func(line int, size int),
-) error {
-	scanner := newJSONLRecordStreamScanner(r, maxRecordBytes)
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	reported := 0
-	drainOversized := func() {
-		for ; reported < len(scanner.oversized); reported++ {
-			if onOversized != nil {
-				skipped := scanner.oversized[reported]
-				onOversized(skipped.Line, skipped.Size)
-			}
-		}
-	}
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		drainOversized()
-		if err := fn(scanner.Line(), scanner.Bytes()); err != nil {
-			return err
-		}
-	}
-	drainOversized()
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return ctx.Err()
-}
 
 // readOneJSONLRecord returns the next record without its newline. oversized
 // reports that the record was over the limit and was discarded rather than

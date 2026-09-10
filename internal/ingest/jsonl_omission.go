@@ -17,6 +17,12 @@ import (
 // parser ever sees it.
 const omittedRecordSentinelKey = "peasantOmittedRecord"
 
+// maxOmittedRecordSentinelBytes bounds the stand-in line. The object holds a
+// reason, three numbers and at most one tool call id, so it is well under
+// this; the bound exists so an ordinary record is rejected on its length
+// alone, without a second scan of its bytes.
+const maxOmittedRecordSentinelBytes = 8 << 10
+
 type omittedRecordSentinel struct {
 	Reason     OmittedRecordReason `json:"reason"`
 	Line       int                 `json:"line"`
@@ -52,6 +58,12 @@ func encodeOmittedRecordSentinel(at OmittedRecordAt) ([]byte, error) {
 // is, the omission it carries. A line that is not a stand-in is left to the
 // harness parser untouched.
 func parseOmittedRecordSentinel(raw []byte) (OmittedRecordAt, bool) {
+	// A stand-in is one small object this code writes, so anything longer
+	// cannot be one. Checking the length first keeps an ordinary large record
+	// from being scanned again for the key.
+	if len(raw) > maxOmittedRecordSentinelBytes {
+		return OmittedRecordAt{}, false
+	}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '{' || !bytes.Contains(trimmed, []byte(`"`+omittedRecordSentinelKey+`"`)) {
 		return OmittedRecordAt{}, false
