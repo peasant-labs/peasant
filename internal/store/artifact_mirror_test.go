@@ -31,7 +31,10 @@ type artifactMirrorCase struct {
 	Orphan        bool                  `yaml:"orphan"`
 	ParentFirst   bool                  `yaml:"parentFirst"`
 	StoredAdapter *int                  `yaml:"storedAdapter"`
-	MissingStats  bool                  `yaml:"missingStats"`
+	// JudgedOrigin records a resolver verdict, at the current rule version,
+	// before the mirror runs. A row carrying one must keep it.
+	JudgedOrigin sessionorigin.Origin `yaml:"judgedOrigin"`
+	MissingStats bool                 `yaml:"missingStats"`
 }
 
 type artifactMirrorFixtures struct {
@@ -61,7 +64,7 @@ func loadArtifactMirrorFixtures(t *testing.T) artifactMirrorFixtures {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		t.Fatal("artifact mirror fixture requires one document")
 	}
-	required := []string{"acquired-evidence", "retained-preserves-evidence", "explicit-zero-cursor", "association-failure-rolls-back", "orphan-refused", "parent-first", "future-stored-adapter-refused", "missing-stats-stay-unknown"}
+	required := []string{"acquired-evidence", "judged-origin-outranks-adapter-evidence", "retained-preserves-evidence", "explicit-zero-cursor", "association-failure-rolls-back", "orphan-refused", "parent-first", "future-stored-adapter-refused", "missing-stats-stay-unknown"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {
 		t.Fatal("artifact mirror required-name manifest changed")
 	}
@@ -104,6 +107,13 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 				}
 				if err := db.UpsertSessionCommits(t.Context(), entry.Metadata.SessionID, []ingest.CommitInfo{{Hash: fixture.OriginalCommit}}); err != nil {
 					t.Fatal(err)
+				}
+				if row.JudgedOrigin != "" {
+					// The resolver pass, through its own production writer, so
+					// the row carries both halves of the verdict.
+					if err := db.UpdateOriginState(t.Context(), entry.Metadata.SessionID, row.JudgedOrigin.String(), ingest.OriginRuleVersion); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			before := mirrorDatabaseState(t, db.Pool(), fixture.SessionID)
@@ -169,6 +179,13 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 			if seeded && (after.Cursor != row.WantCursor || after.Origin != string(row.WantOrigin)) {
 				t.Fatalf("acquired/absent evidence changed: %+v", after)
 			}
+			// The verdict moves as a PAIR or not at all. Checking the version
+			// too is what catches a writer that changes the origin and leaves
+			// the row above the resolver's watermark, which no assertion on the
+			// origin alone can see.
+			if seeded && after.OriginVersion != before.OriginVersion {
+				t.Fatalf("mirror moved the origin rule version from %d to %d", before.OriginVersion, after.OriginVersion)
+			}
 			// The mirror commits an INCOMPLETE commit capture, because a
 			// committed artifact proves the commits it names and not the
 			// absence of the ones it does not. The newly observed commit is
@@ -202,6 +219,7 @@ type mirrorState struct {
 	Hash, Seed, Origin string
 	AdapterVersion     *int
 	Cursor             int64
+	OriginVersion      int
 	Associations       int
 }
 
@@ -212,7 +230,8 @@ func mirrorDatabaseState(t *testing.T, pool *sqlitex.Pool, sid string) mirrorSta
 	var state mirrorState
 	if err := sqlitex.ExecuteTransient(conn, `SELECT artifact_hash, metric_seed_json, adapter_version, session_origin,
 (SELECT last_seq FROM opencode_session_seq_cursor WHERE session_id = sessions.session_id),
-(SELECT COUNT(*) FROM session_commit_associations WHERE session_id = sessions.session_id)
+(SELECT COUNT(*) FROM session_commit_associations WHERE session_id = sessions.session_id),
+origin_version
 FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{sid}, ResultFunc: func(stmt *sqlite.Stmt) error {
 		state.Hash, state.Seed, state.Origin = stmt.ColumnText(0), stmt.ColumnText(1), stmt.ColumnText(3)
 		if stmt.ColumnType(2) != sqlite.TypeNull {
@@ -220,6 +239,7 @@ FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{sid}, Resu
 			state.AdapterVersion = &value
 		}
 		state.Cursor, state.Associations = stmt.ColumnInt64(4), stmt.ColumnInt(5)
+		state.OriginVersion = stmt.ColumnInt(6)
 		return nil
 	}}); err != nil {
 		t.Fatal(err)
