@@ -121,11 +121,15 @@ func (p *Pipeline) computeReadyMetrics(ctx context.Context, ids []SessionID) (in
 		return computed, ready, nil
 	}
 	n, err := p.computeIndexedMetrics(ctx, ids)
-	if err != nil {
-		return n, nil, fmt.Errorf("metrics prerequisite was not confirmed: %w", err)
-	}
 	// Legacy injected analyzers have no input-proof contract. Their classifier
-	// must establish its own freshness before writing.
+	// must establish its own freshness before writing, so a failed batch does
+	// not withdraw its sessions from annotation: withdrawing them would both
+	// take the freshness decision away from the classifier that owns it and
+	// leave the ANNOTATE stage reporting no work for sessions it accounted for.
+	// The failure is still reported and no session counts as computed.
+	if err != nil {
+		return n, ids, fmt.Errorf("metrics prerequisite was not confirmed: %w", err)
+	}
 	return n, ids, nil
 }
 

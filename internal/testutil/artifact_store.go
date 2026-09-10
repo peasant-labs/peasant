@@ -33,7 +33,19 @@ func (s *StubSessionStore) MirrorArtifacts(ctx context.Context, requests []inges
 		if request.EventSeq != nil {
 			session.EventSeq = *request.EventSeq
 		}
-		if err := s.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &meta, Session: session}}); err != nil {
+		// The mirror request carries the acquisition evidence the real store
+		// persists with the row. Dropping it here leaves the recorded session
+		// looking as if its source was never consumed, so a later run
+		// re-ingests an unchanged session.
+		entry := ingest.StoreEntry{
+			Metadata:              &meta,
+			Session:               session,
+			SourceFingerprint:     request.SourceFingerprint,
+			CWDProvenance:         request.CWDProvenance,
+			CommitCaptureComplete: request.CommitCaptureComplete,
+			EventSeq:              request.EventSeq,
+		}
+		if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 			results[index].Err = err
 			continue
 		}

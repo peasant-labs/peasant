@@ -34,7 +34,7 @@ cases:
     transcript: |
       {"type":"session_meta","payload":{"id":"synthetic"}}
       {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
-    wantLogError: unrecognized records cannot prove an empty transcript
+    wantLogError: 'at source record 2: json: cannot unmarshal object'
   - name: strike-control-plus-unknown-preserves-last-good
     declaredFormat: 1
     payload: empty
@@ -43,7 +43,7 @@ cases:
     transcript: |
       {"type":"session.started","data":{"sessionId":"synthetic"}}
       {"type":"future.conversation","data":{"text":"not understood"}}
-    wantLogError: unrecognized records cannot prove an empty transcript
+    wantLogError: 'unrepresented strike record "future.conversation"'
   - name: completed-empty-opencode-directory
     declaredFormat: 1
     payload: empty
@@ -64,7 +64,7 @@ cases:
     sourceFiles:
       storage/message/SESSION_ID/msg_1.json: '{"role":"user","content":"new content that must not replace old data"}'
       storage/message/SESSION_ID/msg_2.json: malformed
-    wantLogError: could not verify complete input
+    wantLogError: 'message msg_2.json: invalid character'
   - {name: completed-empty-cursor, declaredFormat: 1, payload: empty, realIndexer: true, harness: cursor, emptyTranscript: true, wantIndexed: true}
   - {name: completed-empty-strike, declaredFormat: 1, payload: empty, realIndexer: true, harness: strike, emptyTranscript: true, wantIndexed: true}
   - name: mixed-malformed-cursor-preserves-last-good
@@ -76,7 +76,7 @@ cases:
     transcript: |
       {"role":"user","content":"new content that must not replace old data"}
       malformed
-    wantLogError: could not verify complete input
+    wantLogError: 'at source record 2: malformed JSON'
   - name: mixed-malformed-strike-preserves-last-good
     declaredFormat: 1
     payload: v1
@@ -86,12 +86,12 @@ cases:
     transcript: |
       {"type":"user.message","data":{"text":"new content that must not replace old data"}}
       {"type":"usage.reported","data":{"inputTokens":"wrong"}}
-    wantLogError: could not verify complete input
+    wantLogError: 'at source record 2: json: cannot unmarshal string into Go struct field strikeEventData.inputTokens'
   - {name: legacy-v1-result, declaredFormat: 1, payload: v1, wantIndexed: true}
   - {name: versioned-v1-result, declaredFormat: 1, versioned: true, payload: v1, wantIndexed: true}
   - {name: completed-empty-v1, declaredFormat: 1, versioned: true, payload: empty, wantIndexed: true}
   - {name: legacy-empty-preserves-last-good, declaredFormat: 1, payload: empty, wantDiagnostic: true}
-  - {name: malformed-claude-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, transcript: "malformed json", wantLogError: could not verify complete input}
+  - {name: malformed-claude-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, transcript: "malformed json", wantLogError: 'at source record 1: malformed JSON'}
   - {name: completed-empty-claude, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, emptyTranscript: true, wantIndexed: true}
   - {name: completed-empty-codex, declaredFormat: 1, payload: empty, realIndexer: true, harness: codex, emptyTranscript: true, wantIndexed: true}
   - name: mixed-malformed-claude-preserves-last-good
@@ -103,7 +103,7 @@ cases:
     transcript: |
       {"type":"user","message":{"role":"user","content":"new content that must not replace old data"}}
       malformed
-    wantLogError: could not verify complete input
+    wantLogError: 'at source record 2: malformed JSON'
   - name: mixed-malformed-codex-preserves-last-good
     declaredFormat: 1
     payload: v1
@@ -113,7 +113,7 @@ cases:
     transcript: |
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new content that must not replace old data"}]}}
       malformed
-    wantLogError: could not verify complete input
+    wantLogError: 'at source record 2: malformed JSON'
   - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantLogError: read message directory}
   - {name: parse-error-preserves-last-good, declaredFormat: 1, payload: parse-error, wantLogError: synthetic parser failure}
   - {name: absent-versioned-result-refused, declaredFormat: 1, versioned: true, payload: absent, wantLogError: no concrete result}

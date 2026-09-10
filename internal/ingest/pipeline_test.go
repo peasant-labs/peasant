@@ -3711,7 +3711,11 @@ func setupPeasantSyncSession(t *testing.T, mfs *testutil.MemFS, outputDir, hostS
 	}
 	transcriptFilename := fmt.Sprintf("%s--transcript.%s", sessionIDStr, ext)
 	transcriptPath := fmt.Sprintf("%s/%s", sessionDir, transcriptFilename)
-	content := []byte(`{"type":"user","content":"hello"}` + "\n")
+	// A real Claude Code JSONL record carries its text under message.content.
+	// The complete-content capture the store performs on a seeded managed
+	// transcript refuses a record that has no message content, so the fixture
+	// must use the shape the shipped harness writes.
+	content := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
 	if err := mfs.WriteFile(transcriptPath, content, 0644); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
@@ -4115,11 +4119,19 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 	git := testutil.DefaultGitResolver()
 
 	meta := makeReindexMeta(t, testSessionID, "/nonexistent/source.jsonl")
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
+	_, transcriptPath := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
-	sid, _ := ingest.NewSessionID(testSessionID)
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	// Planning reads recorded evidence, so the session must carry the state a
+	// real retained session carries: a published and mirrored artifact that no
+	// indexer has produced output for yet. That session has genuine index work
+	// waiting, which is what the plan must report.
+	transcript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *meta, transcript)
 
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
@@ -4130,7 +4142,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 	})
 
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4231,7 +4243,7 @@ func setupPeasantSyncSubagentSession(t *testing.T, mfs *testutil.MemFS, outputDi
 	}
 	transcriptFilename := fmt.Sprintf("%s--transcript.%s", subagentIDStr, ext)
 	transcriptPath := fmt.Sprintf("%s/%s", sessionDir, transcriptFilename)
-	content := []byte(`{"type":"user","content":"subagent hello"}` + "\n")
+	content := []byte(`{"type":"user","message":{"role":"user","content":"subagent hello"}}` + "\n")
 	if err := mfs.WriteFile(transcriptPath, content, 0644); err != nil {
 		t.Fatalf("write subagent transcript: %v", err)
 	}
@@ -4250,23 +4262,42 @@ func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
 	// Set up parent session in flat layout.
 	parentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	parentMeta := makeReindexMeta(t, testSessionID, parentSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
+	_, parentTranscriptPath := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
 
 	// Set up subagent session in nested layout under parent.
 	subagentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testutil.TestSubagentID)
 	subagentMeta := makeReindexMeta(t, testutil.TestSubagentID, subagentSourcePath)
-	setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
+	parentUUID := ingest.SessionID(testSessionID)
+	subagentMeta.ParentUUID = &parentUUID
+	_, subagentTranscriptPath := setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
+
+	// Planning reads recorded evidence. Both sessions therefore carry the state
+	// a real retained session carries: a published and mirrored artifact with no
+	// index output yet.
+	fixtureStore := newPipelineFixtureStore(t, nil, testutil.NewStubMetricsStore())
+	for _, seed := range []struct {
+		meta *ingest.UnifiedMetadata
+		path string
+	}{{parentMeta, parentTranscriptPath}, {subagentMeta, subagentTranscriptPath}} {
+		transcript, err := mfs.ReadFile(seed.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *seed.meta, transcript)
+	}
 
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 	}
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Reindex = true
-		c.Force = true // target ALL sessions (no MetricsStore needed)
+		c.Force = true // target ALL sessions
 		c.DryRun = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+		ingest.WithMetricsStore(fixtureStore),
+	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5056,7 +5087,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 		t.Fatalf("Run 2: %v", err)
 	}
 	if result2.Summary.Unchanged != 1 {
-		t.Errorf("Run 2: Summary.Unchanged = %d, want 1 (session unchanged)", result2.Summary.Unchanged)
+		t.Errorf("Run 2: Summary.Unchanged = %d, want 1 (session unchanged); full summary %+v", result2.Summary.Unchanged, result2.Summary)
 	}
 
 	// Metadata on disk is unchanged — commits still present.

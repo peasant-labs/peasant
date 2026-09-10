@@ -312,7 +312,11 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				}
 			}
 			if row.WantLogError != "" && (attempt.ErrorMessage == nil || !strings.Contains(*attempt.ErrorMessage, row.WantLogError)) {
-				t.Fatalf("log lacks %q: %+v", row.WantLogError, attempt)
+				logged := "<none>"
+				if attempt.ErrorMessage != nil {
+					logged = *attempt.ErrorMessage
+				}
+				t.Fatalf("index log for %s lacks %q; it recorded %q (outcome %s)", sid, row.WantLogError, logged, attempt.Outcome)
 			}
 			if row.WantLogError != "" {
 				visible := false
