@@ -205,7 +205,11 @@ func decodeManagedMetadataBody(data []byte) (*UnifiedMetadata, error) {
 // metadataForRewrite runs before --force or any adapter/source access. Corrupt
 // older metadata retains the existing re-extraction policy; known incompatible
 // metadata is not corruption and must never be overwritten by that recovery path.
-func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetadata, error) {
+//
+// ctx is the run's context, never a fresh background one: the metadata lookup
+// walks the managed output directory, so a cancelled run must stop reading the
+// filesystem here as it does everywhere else.
+func (p *Pipeline) metadataForRewrite(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.SchemaVersion > CurrentSchemaVersion {
 		return nil, &UnsupportedMetadataVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: loc.SchemaVersion}
 	}
@@ -215,7 +219,7 @@ func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetada
 			return nil, &AdapterVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: *loc.AdapterVersion, Target: target}
 		}
 	}
-	path, err := p.findMetadataPath(context.Background(), session)
+	path, err := p.findMetadataPath(ctx, session)
 	if err != nil {
 		return nil, err
 	}
