@@ -6,6 +6,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
@@ -65,9 +66,30 @@ func SeedManagedInput(t *testing.T, db *store.Store, fs ingest.FileSystem, outpu
 		entries = result.(indexformat.V1).Entries
 		hash := input.Hash()
 		target := ingest.HarvesterVersionRegistry[meta.ModelHarness]
-		return db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: meta.SessionID, Result: result, IndexVersion: result.IndexVersion(), IndexerVersion: target.IndexerVersion, IndexedAtMs: 100, ExpectedState: state, IndexedInputHash: &hash}})[0].Err
+		// Seed the state a completed harvest leaves, not a half of it. Without
+		// a complete content capture the session stays pending content work
+		// forever, so a test that seeds a "current" session and then asserts
+		// nothing touched it is asserting against a session production would
+		// still be working on.
+		return db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+			SessionID: meta.SessionID, Result: result, IndexVersion: result.IndexVersion(),
+			IndexerVersion: target.IndexerVersion, IndexedAtMs: 100, ExpectedState: state,
+			IndexedInputHash: &hash, RequireFullContent: true,
+			ContentCapture: ingest.SessionContentCaptureWrite{
+				Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
+				TranscriptOrigin: session.TranscriptOrigin, CaptureFormat: ingest.ContentCaptureFormatFull,
+				CapturedAtMs: 100,
+			},
+		}})[0].Err
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Metrics are the last thing a completed harvest leaves behind. Without
+	// them the next run has real work to do on this session, so a test that
+	// seeds it as "current" and asserts nothing touched it is asserting about a
+	// session production has not finished.
+	if _, err := metrics.NewEngine(db).ComputeMetrics(ctx, []ingest.SessionID{meta.SessionID}); err != nil {
 		t.Fatal(err)
 	}
 	return entries
