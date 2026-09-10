@@ -1435,25 +1435,42 @@ func permanentRefusalCode(session DiscoveredSession, err error) ContentCaptureFa
 }
 
 // permanentRefusalDiagnostic tells the user what was stored and what it costs
-// them, in the words of the cause. Both causes leave previews working and
-// both refuse export and publication; they differ in what would fix them, and
-// for an omitted record nothing the user does to this transcript will.
-func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, err error) DiagnosticEntry {
+// them, in the words of the cause. Every cause leaves previews working; they
+// differ in what the session may still be used for and in what would fix it.
+//
+// omissionsRecorded is what tells the two omission cases apart, and it is the
+// difference the user feels. When a placeholder entry stands in each omitted
+// record's place, the stored entries still describe the whole session: it is
+// certified as full content and previews, export AND publication all carry it
+// with its placeholder and its partial flag. When the same code is raised with
+// nothing standing in the gap, content is simply missing, the capture stays a
+// bounded preview, and export and publication stay refused.
+func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, omissionsRecorded bool, err error) DiagnosticEntry {
 	entry := DiagnosticEntry{
 		ErrorType: "content_capture_incomplete", Location: string(sid),
 		Message:     fmt.Sprintf("index session %s: the strict parser refused the transcript: %v; the represented entries were stored as an incomplete capture, so previews show them while export and publication stay refused until a complete capture exists", sid, err),
 		Remediation: "Regenerate the source with a supported harness version or upgrade Peasant so every record is represented, then rerun harvest index --force.",
 	}
-	if code == ContentCaptureSourceRecordsOmitted {
-		// Three ingest diagnostics raise this code and each has its own remedy:
-		// reduce an oversized event and re-ingest, upgrade for a part type this
-		// build cannot render, or accept that the native source never had the
-		// missing parent. Which one happened is recorded in the session's
-		// metadata, so this points there instead of naming a cause it cannot
-		// tell apart, and it must not contradict what the message already
-		// tells the user to do.
-		entry.Remediation = "Ingest omitted source records from this transcript, so re-harvesting the same source omits them again. The session's metadata diagnostics name each omitted record and what fixes it; act on those, or accept the stored preview."
+	if code != ContentCaptureSourceRecordsOmitted {
+		return entry
 	}
+	if omissionsRecorded {
+		// The record is gone, but its place is not: the session is stored
+		// whole around a placeholder that names the size, the limit and the
+		// line, and everything a complete session can do this session can do
+		// too. Saying "publication stays refused" here would send a user to
+		// repair a session that is already publishable.
+		entry.Message = fmt.Sprintf("index session %s: %v; every other record was stored, with a placeholder entry standing in each omitted record's place, so this session is kept as full content and previews, export and publication all carry it with its placeholder and its partial flag", sid, err)
+		entry.Remediation = "Read, export or publish the session as it stands; the placeholder and the partial flag travel with it. To recover the omitted record itself, make it smaller at the source and re-harvest, or re-harvest with a build whose per-record limit is larger; the session's metadata diagnostics name each omitted record, its line and its size."
+		return entry
+	}
+	// Two ingest diagnostics raise this code with nothing standing in the
+	// gap and each has its own remedy: upgrade for a part type this build
+	// cannot render, or accept that the native source never had the missing
+	// parent. Which one happened is recorded in the session's metadata, so
+	// this points there instead of naming a cause it cannot tell apart, and
+	// it must not contradict what the message already tells the user to do.
+	entry.Remediation = "Ingest omitted source records from this transcript, so re-harvesting the same source omits them again. The session's metadata diagnostics name each omitted record and what fixes it; act on those, or accept the stored preview."
 	return entry
 }
 
@@ -1664,18 +1681,25 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			parsed = true
 			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
 			// A refusal NOTHING ABOUT THIS BUILD CAN LIFT is not an empty store:
-			// the represented entries are stored as an incomplete capture so
-			// previews can show them, export and publication stay refused until a
-			// complete capture exists, and the refusal is recorded with the
-			// capture and reported once. A malformed transcript stays a visible
-			// error.
+			// the represented entries are stored as an incomplete capture, the
+			// refusal is recorded with the capture and reported once, and
+			// previews show what was stored. A malformed transcript stays a
+			// visible error.
 			//
 			// Two causes qualify. The strict parser met a well-formed record this
 			// build does not represent; or the retained transcript is KNOWN to be
-			// missing records, because ingest removed a source record longer than
-			// the scanner's line limit before writing the artifact. Re-reading
-			// either one gives the same answer, and re-harvesting the same source
-			// omits the same record again.
+			// missing records, because ingest removed a source record over the
+			// per-record limit before writing the artifact. Re-reading either one
+			// gives the same answer, and re-harvesting the same source omits the
+			// same record again.
+			//
+			// What the session may still do depends on whether the gap is
+			// accounted for. A record ingest left out leaves a PLACEHOLDER entry
+			// in its place, so the stored entries still describe the whole
+			// session: that capture is certified as full content and export and
+			// publication carry it with its partial flag. Every other refusal
+			// stores a bounded preview, and export and publication stay refused
+			// until a complete capture exists.
 			if _, strict := indexer.(AuthoritativeTranscriptIndexer); err != nil && strict && declared == strictIndexFormat && ctx.Err() == nil {
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
@@ -1688,7 +1712,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 						// build cannot render, an orphan graph part) leaves
 						// content simply missing and stays a preview.
 						result.omissionsRecorded = code == ContentCaptureSourceRecordsOmitted && outputRecordsItsOmissions(tolerant)
-						p.reportDiagnostic(permanentRefusalDiagnostic(im.session.SessionID, code, err))
+						p.reportDiagnostic(permanentRefusalDiagnostic(im.session.SessionID, code, result.omissionsRecorded, err))
 						output, err = tolerant, nil
 					}
 				}

@@ -63,7 +63,7 @@ func captureTranscriptFile(ctx context.Context, fs FileSystem, idx Authoritative
 // assembly kernel; no partial parse escapes this boundary.
 func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data []byte, validate func([]byte) (*IgnoredSourceRecord, error)) ([]IgnoredSourceRecord, error) {
 	if session.ContentOmitted {
-		return nil, captureFailure(session, 0, fmt.Errorf("retained transcript omitted oversized source records; regenerate harvest from a supported complete source before retrying"))
+		return nil, captureFailure(session, 0, fmt.Errorf("the retained transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
 	}
 	var ignored []IgnoredSourceRecord
 	for line := 1; len(data) > 0; line++ {
