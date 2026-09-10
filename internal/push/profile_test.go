@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -576,8 +577,8 @@ func assertPushProfileRelationships(t *testing.T, tc pushProfileCase, doc perf.P
 	// neither can answer an ordering question. The collector's own event sequence
 	// can: it records each span where it closes, in the order the run closed them.
 	closed := stageCloseOrder(collector)
-	assertStageOrder(t, closed, perf.StagePushSessionLoad, perf.StagePushPublish)
-	assertStageOrder(t, closed, perf.StagePushPublish, perf.StagePushReceiptPersist)
+	assertStageOrder(t, closed, tc.Stages, perf.StagePushSessionLoad, perf.StagePushPublish)
+	assertStageOrder(t, closed, tc.Stages, perf.StagePushPublish, perf.StagePushReceiptPersist)
 }
 
 // profileSessionSpans returns the span ids of the sessions that reached
@@ -610,11 +611,17 @@ func stageCloseOrder(collector *perf.Collector) []perf.StageID {
 }
 
 // assertStageOrder checks that the first appearance of before precedes the first
-// appearance of after. Stages the run never reached are not ordered.
-func assertStageOrder(t *testing.T, stages []perf.StageID, before, after perf.StageID) {
+// appearance of after.
+//
+// A stage the run never reached is only allowed to be missing when the case did
+// not DECLARE it. Returning silently on any absence made both order checks
+// vacuous on every case that does not publish, and it would have passed a seed
+// regression that stopped a case short of the stage it names — the exact defect
+// class that hid an unexercised upload budget.
+func assertStageOrder(t *testing.T, closed []perf.StageID, declared []perf.StageID, before, after perf.StageID) {
 	t.Helper()
 	first := func(want perf.StageID) int {
-		for index, stage := range stages {
+		for index, stage := range closed {
 			if stage == want {
 				return index
 			}
@@ -622,6 +629,11 @@ func assertStageOrder(t *testing.T, stages []perf.StageID, before, after perf.St
 		return -1
 	}
 	beforeAt, afterAt := first(before), first(after)
+	for stage, at := range map[perf.StageID]int{before: beforeAt, after: afterAt} {
+		if at < 0 && slices.Contains(declared, stage) {
+			t.Errorf("this case declares stage %s and the run never completed it, so the order of %s and %s is unproved", stage, before, after)
+		}
+	}
 	if beforeAt < 0 || afterAt < 0 {
 		return
 	}
