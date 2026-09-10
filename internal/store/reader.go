@@ -123,6 +123,7 @@ type SessionFilter struct {
 // sessions list command. All nil pointer fields mean "no constraint".
 type SessionListFilter struct {
 	SessionFilter                           // embed base filter (ModelHarness, ProjectHash, HostSlug, StartFrom, StartBefore)
+	SessionID     *string                   // filter to one exact session id (s.session_id = X); nil = all sessions
 	Tag           *string                   // filter by session tag (matches any tag in the JSON tags array)
 	ProjectName   *string                   // filter by project: canonical_remote LIKE '%X%' first, fallback basename(canonical_cwd) = X
 	SortField     defaults.SessionSortField // column to sort by (date, turns, tokens, project)
@@ -717,6 +718,12 @@ WHERE s.session_id IN (` +
 //
 // Tag filtering (f.Tag) uses SQLite json_each() over the sessions.tags JSON array.
 func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args []any) {
+	// Exact session id — the most selective filter (primary key).
+	if f.SessionID != nil {
+		conditions = append(conditions, "s.session_id = ?")
+		args = append(args, *f.SessionID)
+	}
+
 	// Base SessionFilter conditions.
 	if f.ModelHarness != nil {
 		conditions = append(conditions, "s.model_harness = ?")
