@@ -25,9 +25,10 @@ Peasant ships a single statically linked binary (no runtime dependencies) for
 Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
 `checksums.txt`, and put the `peasant` binary on your `PATH`.
 
-> **Note:** `v0.1.0` publishes GitHub release archives plus `.deb` and `.rpm`
-> packages. AUR, Homebrew, nixpkgs, hosted apt, and macOS signing remain deferred
-> until separately approved; see the [release runbook](docs/release-runbook.md).
+> **Note:** Final releases publish GitHub release archives, `.deb` and `.rpm`
+> packages, and a macOS [Homebrew cask](docs/install/macos.md). AUR, nixpkgs,
+> hosted apt, and macOS signing remain deferred until separately approved; see the
+> [release runbook](docs/release-runbook.md).
 
 ## Quick start
 

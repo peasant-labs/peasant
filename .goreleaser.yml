@@ -4,9 +4,10 @@
 # binaries (CGO_ENABLED=0, pure-Go SQLite — no C toolchain), tar.gz archives,
 # checksums.txt, deb + rpm (nfpm), an AUR -bin package, and a Homebrew cask.
 #
-# External publisher safety: AUR and Homebrew stay skip_upload: true for v0.1.0
-# and until a separately approved later final release. That approval changes these
-# settings to "auto", which also keeps prereleases off the package repos forever.
+# External publisher safety: the Homebrew cask publishes via skip_upload: "auto"
+# (final tags only — "auto" also keeps every -rcN off the tap forever). The AUR
+# package stays skip_upload: "true" (disabled) until AUR publishing is separately
+# approved; flipping it before then hard-fails on the placeholder AUR_KEY.
 #
 # The real web dashboard (//go:embed all:web/out) must be built before Goreleaser
 # runs its `go build`. Artifact-producing workflows fail if that build is absent
@@ -143,9 +144,9 @@ homebrew_casks:
     homepage: "https://github.com/peasant-labs/peasant"
     description: "Agent-session ingest, analytics, and publishing CLI"
     license: "Apache-2.0"
-    # External publication stays disabled for v0.1.0. Change to "auto" only for a
-    # separately approved later final.
-    skip_upload: "true"
+    # Publish the cask on final tags only. "auto" additionally keeps every -rcN
+    # off the tap forever, so release candidates never update the tap.
+    skip_upload: "auto"
     # Two thin per-arch darwin binaries (no universal_binaries) — goreleaser emits
     # per-arch url/sha256 stanzas when both darwin archives exist.
     hooks:
