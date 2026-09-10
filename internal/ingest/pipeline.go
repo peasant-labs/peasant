@@ -3732,13 +3732,17 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		readErr := managedInputIOError(metaPath, err)
+		readErr := managedInputIOError(p.managedRelativePath(metaPath), err)
 		p.reportMetadataRefusal(string(sid), readErr)
 		slog.Warn(logPrefix+": managed metadata unreadable", "session_id", sid, "error", readErr)
 		return nil, readErr
 	}
 
-	meta, err := decodeManagedMetadata(data, metaPath)
+	// Name the file the way every other reporter names it: relative to the
+	// managed output directory. Diagnostics collapse by whole-value equality,
+	// so an absolute spelling here is the one difference that turns a single
+	// refusal, refused again by the index selection, into two warnings.
+	meta, err := decodeManagedMetadata(data, p.managedRelativePath(metaPath))
 	if err != nil {
 		if isMetadataCompatibilityError(err) {
 			p.reportMetadataRefusal(string(sid), err)

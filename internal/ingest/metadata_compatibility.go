@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
+	"strings"
 )
 
 // nativeRefreshMetadataVersion is the last metadata change that required
@@ -53,6 +55,18 @@ func (p *Pipeline) checkStoredMetadataCompatibility(ctx context.Context, sid Ses
 		return &AdapterVersionError{Path: string(sid) + " (stored metadata)", Version: *location.AdapterVersion, Target: *adapterTarget}
 	}
 	return nil
+}
+
+// managedRelativePath is the one spelling a managed file gets in anything the
+// user reads: its path under the managed output directory, which is what the
+// index selection reports and what a user can locate without knowing where the
+// directory itself lives. A path outside the managed tree is left alone.
+func (p *Pipeline) managedRelativePath(path string) string {
+	relative, err := filepath.Rel(string(p.config.OutputDir), path)
+	if err != nil || relative == "" || strings.HasPrefix(relative, "..") {
+		return path
+	}
+	return filepath.ToSlash(relative)
 }
 
 func isMetadataCompatibilityError(err error) bool {
@@ -189,13 +203,18 @@ func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetada
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, managedInputIOError(path, err)
+		return nil, managedInputIOError(p.managedRelativePath(path), err)
 	}
-	header, err := decodeManagedMetadataHeader(data, path)
+	// Name the file the way the index selection names it. Both checks refuse
+	// the same file for the same reason with the same remedy, and diagnostics
+	// collapse by whole-value equality, so a second spelling of the location is
+	// the one difference that turns one refusal into two warnings.
+	reported := p.managedRelativePath(path)
+	header, err := decodeManagedMetadataHeader(data, reported)
 	if header != nil && header.AdapterVersion != nil {
 		target := p.versionTargets()[session.Harness].AdapterVersion
 		if *header.AdapterVersion > target {
-			return nil, &AdapterVersionError{Path: path, Version: *header.AdapterVersion, Target: target}
+			return nil, &AdapterVersionError{Path: reported, Version: *header.AdapterVersion, Target: target}
 		}
 	}
 	if err != nil {
