@@ -716,14 +716,17 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			}
 		}
 
-		// Selected supported sources are decided inside the bounded root worker,
-		// never captured into the whole-batch discovery maps.
-		if supportsSessionCapture(entry.Session) && !p.config.DryRun {
+		// A supported source the discovery hint could not prove unchanged is
+		// decided inside the bounded root worker, with captured bytes, never
+		// captured into the whole-batch discovery maps. A source the hint
+		// proves unchanged (known clock, no newer schema, no captured evidence
+		// to re-compare) is recorded as-is: no native read, no stat.
+		if supportsSessionCapture(entry.Session) && entry.Status != DiffUnchanged && !p.config.DryRun {
 			toProcessEntries = append(toProcessEntries, entry)
 			advanceFilter()
 			continue
 		}
-		if supportsSessionCapture(entry.Session) && p.config.DryRun {
+		if supportsSessionCapture(entry.Session) && entry.Status != DiffUnchanged && p.config.DryRun {
 			// Dry-run has no workers or staging. Compare one temporary capture
 			// at a time, retaining only the classification in its report.
 			captured, captureErr := p.captureSession(ctx, entry.Session)
@@ -2177,13 +2180,45 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 	// stale DB mirror state cannot authorize overwriting a future file version.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
 		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest {
+			// Publication readiness is a repair hint, not change evidence.
+			// Before any capture it re-reads native input only for a session
+			// that has no retained artifact to hold its input: a legacy row
+			// with nothing under the managed tree can be repaired from the
+			// native source alone. A session whose retained pair exists keeps
+			// its retained-first path: its clock, schema, cursor and captured
+			// evidence decide whether native input is read, and the ordinary
+			// index write binds publication once a capture exists.
+			settled := loc
+			settled.PublicationReadiness = PublicationReady
+			if ClassifyAgainstStore(session, settled, p.config.StalenessThreshold) == DiffUnchanged {
+				if metaPath, err := p.findMetadataPath(ctx, session); err == nil && metaPath != "" {
+					status = DiffUnchanged
+				}
+			}
+		}
 		if captured != nil && loc.SourceEvidenceSupported {
 			status = DiffUnchanged
 			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) || loc.PublicationReadiness == PublicationNeedsIngest {
 				status = DiffUpdated
 			}
 		}
-		if loc.SourceEvidenceSupported && loc.SourceFingerprint == nil && status == DiffUnchanged {
+		// Captured-source evidence decides a supported source, and only a
+		// capture produces it. Before the capture (captured == nil) the clock
+		// hint cannot prove a source that already holds a fingerprint
+		// unchanged: an append can land between the previous capture and its
+		// ingest stamp, so that row goes to the worker, whose captured
+		// comparison above is the authority. A store that cannot hold the
+		// evidence at all cannot prove the source unchanged either, so its
+		// supported sources go to the worker as well. A row in an
+		// evidence-holding store that has no fingerprint has nothing to
+		// compare, so the clock hint stands and the session is left alone: no
+		// native read, no stat. The first capture any clock, schema or force
+		// reason triggers acquires the evidence. After a capture, a row that
+		// still holds no fingerprint records what it read.
+		if status == DiffUnchanged && supportsSessionCapture(session) &&
+			(captured == nil && (!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0) ||
+				captured != nil && loc.SourceEvidenceSupported && len(loc.SourceFingerprint) == 0) {
 			if isActive {
 				return DiffActive, nil
 			}
@@ -2259,6 +2294,23 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			return DiffActive, nil
 		}
 		return DiffNew, nil
+	}
+	if captured == nil && supportsSessionCapture(session) {
+		// The owned marker beside the metadata is the file-only counterpart
+		// of the store's captured fingerprint, and only the worker's capture
+		// can compare it. A present marker sends the session to the worker,
+		// whose comparison below settles it at the cost of one source read.
+		// An absent marker beside an artifact this marker-writing generation
+		// produced is interrupted evidence, unknown rather than current, so
+		// the worker re-reads the source and writes the marker again. An
+		// absent marker beside an older artifact predates the evidence: the
+		// clock hint below stands and no native input is read.
+		if _, markerErr := p.fs.Stat(fileCaptureEvidencePath(metaPath)); markerErr == nil || existing.SchemaVersion >= CurrentSchemaVersion {
+			if isActive {
+				return DiffActive, nil
+			}
+			return DiffUpdated, nil
+		}
 	}
 	if captured != nil {
 		// Private evidence is bound to the exact successful metadata file, whose
@@ -4246,16 +4298,19 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// sidecar alone would degrade attribution. Only a session this run
 			// discovered is refreshed natively.
 			if p.config.Force {
-				if discovered, found := sourceSessions[t.session.SessionID]; found {
+				discovered, found := sourceSessions[t.session.SessionID]
+				if found && p.forcedNativeRefreshUsable(ctx, t, discovered) {
 					entryByID[discovered.SessionID] = DiffEntry{Session: discovered, Status: DiffUpdated}
 					inBatch[discovered.SessionID] = true
 					continue
 				}
-				p.reportDiagnostic(DiagnosticEntry{
-					ErrorType: "native_refresh_unavailable", Location: fmt.Sprintf("%s session %s forced refresh", t.session.Harness, t.session.SessionID),
-					Message:     fmt.Sprintf("forced refresh of session %s: native discovery did not offer the session (recorded source %q), so the retained input was indexed instead; the previous artifact and adapter stamp were preserved", t.session.SessionID, t.originalSourcePath),
-					Remediation: "Enable the harness source in the configuration and restore the original source, then rerun harvest index --force to refresh from native input.",
-				})
+				if !found {
+					p.reportDiagnostic(DiagnosticEntry{
+						ErrorType: "native_refresh_unavailable", Location: fmt.Sprintf("%s session %s forced refresh", t.session.Harness, t.session.SessionID),
+						Message:     fmt.Sprintf("forced refresh of session %s: native discovery did not offer the session (recorded source %q), so the retained input was indexed instead; the previous artifact and adapter stamp were preserved", t.session.SessionID, t.originalSourcePath),
+						Remediation: "Enable the harness source in the configuration and restore the original source, then rerun harvest index --force to refresh from native input.",
+					})
+				}
 			}
 			fallbackTargets = append(fallbackTargets, t)
 			continue
@@ -4454,6 +4509,27 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	// Steps 3e-end: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
 	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil)
+}
+
+// forcedNativeRefreshUsable decides whether harvest index --force re-reads a
+// discovered native source or indexes the retained input. Force is an
+// explicit manual refresh, so a native source that shows change evidence
+// against the retained capture (a newer clock, a moved locator, a changed
+// parent, an advanced cursor) is captured. A source that shows none is what
+// the retained artifact already consumed; re-reading it is the original-source
+// I/O the retained-first rule exists to avoid, so the retained input is indexed
+// with no native read. A retained artifact produced by a newer adapter than
+// this build is never replaced from native input: the newer producer's
+// evidence is kept and its retained input is indexed as it is.
+func (p *Pipeline) forcedNativeRefreshUsable(ctx context.Context, target reindexTarget, discovered DiscoveredSession) bool {
+	metadata := p.adapterTargetMetadata(ctx, target)
+	if metadata == nil {
+		return false
+	}
+	if metadata.AdapterVersion != nil && *metadata.AdapterVersion > p.versionTargets()[target.session.Harness].AdapterVersion {
+		return false
+	}
+	return p.nativeInputChanged(discovered, metadata)
 }
 
 // reindexTarget represents a session found in the peasant-sync output directory
