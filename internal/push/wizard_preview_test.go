@@ -13,6 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
@@ -25,11 +27,6 @@ import (
 //go:embed testdata/wizard_preview.yaml
 var wizardPreviewData []byte
 
-const (
-	expectedPreviewSessionCount = 3
-	expectedPreviewCaseCount    = 3
-)
-
 // previewEntryFixture is one recorded entry of a fixture transcript.
 type previewEntryFixture struct {
 	Role      schema.Role      `yaml:"role"`
@@ -37,9 +34,11 @@ type previewEntryFixture struct {
 	Content   string           `yaml:"content"`
 }
 
-// previewSessionFixture is the stored transcript of one session.
+// previewSessionFixture is the stored transcript of one session, and whether the
+// database's capture of it is incomplete - the state the pane must announce.
 type previewSessionFixture struct {
 	SessionID string                `yaml:"sessionId"`
+	Partial   bool                  `yaml:"partial"`
 	Entries   []previewEntryFixture `yaml:"entries"`
 }
 
@@ -53,10 +52,10 @@ type previewCaseFixture struct {
 }
 
 type previewDoc struct {
-	ExpectedSessionCount int                     `yaml:"expectedSessionCount"`
-	ExpectedCaseCount    int                     `yaml:"expectedCaseCount"`
-	Sessions             []previewSessionFixture `yaml:"sessions"`
-	Cases                []previewCaseFixture    `yaml:"cases"`
+	RequiredSessionIDs []string                `yaml:"requiredSessionIds"`
+	RequiredCaseNames  []string                `yaml:"requiredCaseNames"`
+	Sessions           []previewSessionFixture `yaml:"sessions"`
+	Cases              []previewCaseFixture    `yaml:"cases"`
 }
 
 func decodeWizardPreview(data []byte) (previewDoc, error) {
@@ -73,13 +72,8 @@ func decodeWizardPreview(data []byte) (previewDoc, error) {
 		}
 		return doc, fmt.Errorf("wizard_preview.yaml must hold exactly one document: %w", err)
 	}
-	if doc.ExpectedSessionCount != expectedPreviewSessionCount || len(doc.Sessions) != expectedPreviewSessionCount {
-		return doc, fmt.Errorf("preview sessions: declared=%d actual=%d required=%d",
-			doc.ExpectedSessionCount, len(doc.Sessions), expectedPreviewSessionCount)
-	}
-	if doc.ExpectedCaseCount != expectedPreviewCaseCount || len(doc.Cases) != expectedPreviewCaseCount {
-		return doc, fmt.Errorf("preview cases: declared=%d actual=%d required=%d",
-			doc.ExpectedCaseCount, len(doc.Cases), expectedPreviewCaseCount)
+	if len(doc.RequiredSessionIDs) == 0 || len(doc.RequiredCaseNames) == 0 {
+		return doc, fmt.Errorf("testdata/wizard_preview.yaml declares no required session or case names, so a deleted row would go unnoticed")
 	}
 	known := make(map[string]bool, len(doc.Sessions))
 	for _, session := range doc.Sessions {
@@ -107,6 +101,18 @@ func decodeWizardPreview(data []byte) (previewDoc, error) {
 			}
 		}
 	}
+	// Deletion protection is by NAME: a row that is removed or renamed is named
+	// in the failure, and adding a row does not churn a count.
+	for _, required := range doc.RequiredSessionIDs {
+		if !known[required] {
+			return doc, fmt.Errorf("testdata/wizard_preview.yaml no longer holds the required session %q", required)
+		}
+	}
+	for _, required := range doc.RequiredCaseNames {
+		if !names[required] {
+			return doc, fmt.Errorf("testdata/wizard_preview.yaml no longer holds the required case %q", required)
+		}
+	}
 	return doc, nil
 }
 
@@ -131,7 +137,7 @@ func previewFixtureEntries() StoredEntriesFunc {
 	if err != nil {
 		panic(err)
 	}
-	stored := make(map[string][]schema.SessionEntry, len(doc.Sessions))
+	stored := make(map[string]StoredContent, len(doc.Sessions))
 	for _, session := range doc.Sessions {
 		entries := make([]schema.SessionEntry, 0, len(session.Entries))
 		for index, entry := range session.Entries {
@@ -144,9 +150,9 @@ func previewFixtureEntries() StoredEntriesFunc {
 				ContentPreview: &content,
 			})
 		}
-		stored[session.SessionID] = entries
+		stored[session.SessionID] = StoredContent{Entries: entries, Partial: session.Partial}
 	}
-	return func(sessionID string) ([]schema.SessionEntry, error) { return stored[sessionID], nil }
+	return func(sessionID string) (StoredContent, error) { return stored[sessionID], nil }
 }
 
 // testRedactor is the redactor the preview tests publish through: the real one,
@@ -170,12 +176,45 @@ func testPublishedTurns() PublishedTurnsFunc {
 // gives it, normalised the way the screen guards are.
 func previewScreen(t *testing.T, sessionID string) string {
 	t.Helper()
-	preview := wizardPreviewSource(testSessions(), testPublishedTurns(), testTheme())
+	preview := wizardPreviewSource(previewPaneSessions(t), testPublishedTurns(), testTheme())
 	body, err := preview.Body(sessionID)
 	if err != nil {
 		t.Fatalf("preview body for %s: %v", sessionID, err)
 	}
 	return strings.Join(strings.Fields(ansi.Strip(body.Render(previewPaneWidth))), " ")
+}
+
+// previewPaneSessions is the row list the preview pane is mounted over: the
+// wizard's own fixture sessions, plus a plain selected row for every fixture
+// transcript they do not cover.
+//
+// The pane only previews rows it was given, so a fixture session with no row
+// would silently render the "select a session" note and pass any case that
+// asserts something is ABSENT. Deriving the extra rows from the fixture keeps a
+// new transcript from needing a code change, and leaves the shared wizard
+// fixture - which the rendered golden screens are pinned to - untouched.
+func previewPaneSessions(t *testing.T) []PushWizardSession {
+	t.Helper()
+	sessions := testSessions()
+	present := make(map[string]bool, len(sessions))
+	for _, session := range sessions {
+		present[session.Row.SessionID] = true
+	}
+	for _, fixture := range loadWizardPreviewDoc(t).Sessions {
+		if present[fixture.SessionID] {
+			continue
+		}
+		sessions = append(sessions, PushWizardSession{
+			Row: ingest.PushSessionRow{
+				SessionID:    fixture.SessionID,
+				ModelHarness: string(defaults.HarnessClaudeCode),
+				ProjectName:  "my-project",
+				StartMs:      1700003000000,
+			},
+			Action: PushWithRedaction,
+		})
+	}
+	return sessions
 }
 
 // previewPaneWidth is a pane width close to what the mounted split gives the
@@ -222,12 +261,12 @@ func TestWizardPreview_NamesTheSessionAndItsState(t *testing.T) {
 // is handed no redactor, so a preview built without one would draw exactly the
 // values this screen exists to show removed.
 func TestWizardPreview_FailsClosedWithoutARedactor(t *testing.T) {
-	turns, err := NewPublishedTurns(previewFixtureEntries(), nil)("sess-aaa-111")
+	published, err := NewPublishedTurns(previewFixtureEntries(), nil)("sess-aaa-111")
 	if err == nil {
-		t.Fatalf("a preview without a redactor must fail rather than render recorded text; got %d turns", len(turns))
+		t.Fatalf("a preview without a redactor must fail rather than render recorded text; got %d turns", len(published.Turns))
 	}
-	if len(turns) != 0 {
-		t.Errorf("a failed preview read must return no turns, got %d", len(turns))
+	if len(published.Turns) != 0 {
+		t.Errorf("a failed preview read must return no turns, got %d", len(published.Turns))
 	}
 }
 
@@ -235,8 +274,8 @@ func TestWizardPreview_FailsClosedWithoutARedactor(t *testing.T) {
 // the pane as an error rather than as an empty transcript, which the pane would
 // otherwise report as a session with nothing stored.
 func TestWizardPreview_ReportsAFailedRead(t *testing.T) {
-	failing := StoredEntriesFunc(func(string) ([]schema.SessionEntry, error) {
-		return nil, fmt.Errorf("the local store could not be read")
+	failing := StoredEntriesFunc(func(string) (StoredContent, error) {
+		return StoredContent{}, fmt.Errorf("the local store could not be read")
 	})
 	preview := wizardPreviewSource(testSessions(), NewPublishedTurns(failing, testRedactor()), testTheme())
 	if _, err := preview.Body("sess-aaa-111"); err == nil {

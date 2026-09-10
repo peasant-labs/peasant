@@ -6,9 +6,18 @@
 # both the published form the pane must show and the recorded form it must not.
 #
 # The third session holds no entries: that is the state the pane answers with
-# one short note instead of a transcript.
-expectedSessionCount: 3
-expectedCaseCount: 3
+# one short note instead of a transcript. The fourth stands for a session whose
+# stored capture is not complete, so the pane must say the preview is partial.
+#
+# Deletion protection is by NAME, not by count: a count says only that something
+# was removed, and it churns on every addition.
+requiredSessionIds: [sess-aaa-111, sess-bbb-222, sess-ccc-333, sess-ddd-444]
+requiredCaseNames:
+  - secrets-are-replaced-before-the-pane-draws-them
+  - personal-data-is-replaced-before-the-pane-draws-it
+  - a-session-with-no-stored-entries-gets-one-note
+  - a-complete-capture-is-never-called-partial
+  - an-incomplete-capture-says-the-preview-is-partial
 
 sessions:
   - sessionId: sess-aaa-111
@@ -20,6 +29,12 @@ sessions:
       - {role: user, entryType: text, content: "tell alice@example.com when the village has it"}
   - sessionId: sess-ccc-333
     entries: []
+  # Recorded under a capture that never completed: the entries below are as much
+  # of the session as the database can prove it holds.
+  - sessionId: sess-ddd-444
+    partial: true
+    entries:
+      - {role: user, entryType: text, content: "the harvest stopped before the whole session was recorded"}
 
 cases:
   - name: secrets-are-replaced-before-the-pane-draws-them
@@ -38,3 +53,16 @@ cases:
     sessionId: sess-ccc-333
     wantContains: ["no transcript is stored for this session yet."]
     wantMissing: ["stored copy", "never been redacted"]
+  # A complete capture is the whole session, so the partial line must never
+  # appear: a preview that always warned would train the reader to ignore it.
+  - name: a-complete-capture-is-never-called-partial
+    sessionId: sess-aaa-111
+    wantContains: ["redacts them"]
+    wantMissing: ["showing a partial preview of the session", "ingest to preview entire session"]
+  # An incomplete capture prints the line ABOVE the turns it describes, and the
+  # turns it does hold are still shown: the reader sees what was recorded and
+  # what to do to see the rest.
+  - name: an-incomplete-capture-says-the-preview-is-partial
+    sessionId: sess-ddd-444
+    wantContains: ["showing a partial preview of the session, ingest to preview entire session", "the harvest stopped before the whole session was recorded"]
+    wantMissing: ["no transcript is stored for this session yet."]

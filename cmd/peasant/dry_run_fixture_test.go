@@ -134,26 +134,61 @@ func (f *fakeAvailableContent) ReadSessionAvailable(_ context.Context, sessionID
 // answer and must reach the pane, the session is asked for by its own validated
 // identifier, and an unreadable projection is still an error because available
 // content may be partial and never invented.
+//
+// It also carries the ANSWER TO "is this the whole session?" out of the same
+// read, because the entries alone cannot be asked: a bounded projection of a
+// long session and a complete short one are both simply "some entries". The
+// capture status the snapshot already holds is what the pane states.
 func TestStoredSessionEntriesShowsAvailableContent(t *testing.T) {
 	t.Parallel()
 	const sessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
 	preview := "a bounded projection of a session that cannot publish yet"
+	snapshotWith := func(status ingest.ContentCaptureStatus) *store.SessionContentSnapshot {
+		return &store.SessionContentSnapshot{
+			Entries: []schema.SessionEntry{{
+				SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: defaults.HarnessClaudeCode,
+				Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &preview,
+			}},
+			Capture: ingest.SessionContentCapture{SessionID: ingest.SessionID(sessionID), Status: status},
+		}
+	}
 
 	t.Run("a-bounded-projection-reaches-the-pane", func(t *testing.T) {
 		t.Parallel()
-		reader := &fakeAvailableContent{snapshot: &store.SessionContentSnapshot{Entries: []schema.SessionEntry{{
-			SessionID: schema.SessionID(sessionID), EntryIndex: 0, Harness: defaults.HarnessClaudeCode,
-			Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &preview,
-		}}}}
-		entries, err := storedSessionEntries(t.Context(), reader)(sessionID)
+		reader := &fakeAvailableContent{snapshot: snapshotWith(ingest.ContentCaptureIncomplete)}
+		content, err := storedSessionEntries(t.Context(), reader)(sessionID)
 		if err != nil {
 			t.Fatalf("the preview refused available content: %v", err)
 		}
-		if len(entries) != 1 || entries[0].ContentPreview == nil || *entries[0].ContentPreview != preview {
-			t.Fatalf("the preview lost the available content: %+v", entries)
+		if len(content.Entries) != 1 || content.Entries[0].ContentPreview == nil || *content.Entries[0].ContentPreview != preview {
+			t.Fatalf("the preview lost the available content: %+v", content.Entries)
 		}
 		if !slices.Equal(reader.asked, []string{sessionID}) {
 			t.Fatalf("the preview asked for %v, want exactly the session it was given", reader.asked)
+		}
+	})
+
+	t.Run("an-incomplete-capture-is-reported-as-partial", func(t *testing.T) {
+		t.Parallel()
+		reader := &fakeAvailableContent{snapshot: snapshotWith(ingest.ContentCaptureIncomplete)}
+		content, err := storedSessionEntries(t.Context(), reader)(sessionID)
+		if err != nil {
+			t.Fatalf("the preview refused available content: %v", err)
+		}
+		if !content.Partial {
+			t.Fatal("a session whose capture never completed was offered to the pane as the whole session")
+		}
+	})
+
+	t.Run("a-complete-capture-is-not-reported-as-partial", func(t *testing.T) {
+		t.Parallel()
+		reader := &fakeAvailableContent{snapshot: snapshotWith(ingest.ContentCaptureComplete)}
+		content, err := storedSessionEntries(t.Context(), reader)(sessionID)
+		if err != nil {
+			t.Fatalf("the preview refused available content: %v", err)
+		}
+		if content.Partial {
+			t.Fatal("a complete capture was labelled partial, which would teach the reader to ignore the label")
 		}
 	})
 

@@ -537,8 +537,10 @@ func pushPublishedTurns(fixture pushFixture) (push.PublishedTurnsFunc, error) {
 		}
 		stored[sessionID] = entries
 	}
-	return push.NewPublishedTurns(func(sessionID string) ([]schema.SessionEntry, error) {
-		return stored[sessionID], nil
+	return push.NewPublishedTurns(func(sessionID string) (push.StoredContent, error) {
+		// The captured screens stand for complete recordings, so none of them
+		// carries the partial-preview line.
+		return push.StoredContent{Entries: stored[sessionID]}, nil
 	}, redactor), nil
 }
 

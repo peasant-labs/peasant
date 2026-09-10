@@ -2022,19 +2022,25 @@ type availableContentReader interface {
 // user opens the previewer to inspect. Nothing here certifies completeness, and
 // nothing here writes, recovers, or reads a native source.
 func storedSessionEntries(ctx context.Context, reader availableContentReader) push.StoredEntriesFunc {
-	return func(sessionID string) ([]schema.SessionEntry, error) {
+	return func(sessionID string) (push.StoredContent, error) {
 		id, err := ingest.NewSessionID(sessionID)
 		if err != nil {
-			return nil, fmt.Errorf("preview session %q: %w", sessionID, err)
+			return push.StoredContent{}, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
 		snapshot, err := reader.ReadSessionAvailable(ctx, id)
 		if err != nil {
-			return nil, err
+			return push.StoredContent{}, err
 		}
 		if snapshot == nil {
-			return nil, nil
+			return push.StoredContent{}, nil
 		}
-		return snapshot.Entries, nil
+		// The snapshot already proves what the entries stand for, so the preview
+		// reports completeness from the SAME read that produced them rather than
+		// asking the store a second, separately-timed question.
+		return push.StoredContent{
+			Entries: snapshot.Entries,
+			Partial: snapshot.Capture.Status != ingest.ContentCaptureComplete,
+		}, nil
 	}
 }
 

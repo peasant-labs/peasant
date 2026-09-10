@@ -25,6 +25,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/peasant/internal/tui/transcriptview"
 )
 
 const kickstartRawSourcePreviewLimit = 16 * 1024
@@ -437,9 +438,14 @@ func kickstartPreviewWithRoot(
 	})
 	// The notice reports what the bounded harness read left out. A session the
 	// store already answered has no harness read behind it, so its notice is
-	// empty and the pane shows the stored turns alone.
+	// empty and the pane shows the stored turns alone - UNLESS what the store
+	// holds is only part of that session, which the stored notice below says.
+	notice := kickstart.SessionPreviewNoticeFunc(sourceTurns.Notice)
+	if db != nil {
+		notice = storedPartialPreviewNotice(ctx, db, notice)
+	}
 	opts := []kickstart.ListingPreviewOption{
-		kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
+		kickstart.WithSessionPreviewNotice(notice),
 		kickstart.WithSessionFirstTurns(firstTurns),
 		// The scrolled continuation. A session the store already answered has no
 		// harness read behind it, so it reports nothing more and the pane offers
@@ -451,6 +457,48 @@ func kickstartPreviewWithRoot(
 	}
 	opts = append(opts, options...)
 	return kickstart.NewListingPreview(th, sessions, turns, opts...)
+}
+
+// sessionCaptureReader reads what the database can prove about one session's
+// stored content. It is declared here, where the preview consumes it, so the
+// pane depends on the one read it needs rather than on everything a Store does.
+type sessionCaptureReader interface {
+	GetSessionContentCapture(ctx context.Context, id ingest.SessionID) (ingest.SessionContentCapture, bool, error)
+}
+
+// storedPartialPreviewNotice says, above the turns, that the preview stands for
+// only part of the session, whenever the stored capture of that session is not
+// complete.
+//
+// Without it the pane draws a bounded projection exactly like a whole session,
+// so a reader cannot tell a short session from a session Peasant has only part
+// of, and has no reason to harvest again. It reads the capture row alone rather
+// than the entries, so naming the state costs one small query on top of the
+// read the pane already does.
+//
+// It takes precedence over the harness notice because the two describe the same
+// gap from different sides, and the stored one is the state the user can act
+// on. A session the store does not hold, or a capture read that fails, falls
+// back to the harness notice: this is chrome, and a notice cannot report an
+// error, so it must never invent a claim about stored content it could not read.
+func storedPartialPreviewNotice(ctx context.Context, captures sessionCaptureReader, harnessNotice kickstart.SessionPreviewNoticeFunc) kickstart.SessionPreviewNoticeFunc {
+	return func(sessionID string) string {
+		fallback := func() string {
+			if harnessNotice == nil {
+				return ""
+			}
+			return harnessNotice(sessionID)
+		}
+		id, err := ingest.NewSessionID(sessionID)
+		if err != nil {
+			return fallback()
+		}
+		capture, found, err := captures.GetSessionContentCapture(ctx, id)
+		if err != nil || !found || capture.Status == ingest.ContentCaptureComplete {
+			return fallback()
+		}
+		return transcriptview.PartialPreviewNote
+	}
 }
 
 // kickstartImportedEmptySessionBody gives an already stored session with no

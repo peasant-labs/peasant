@@ -27,7 +27,27 @@ import (
 // demands a complete capture cannot show the session the user has to repair.
 // An unreadable or unknown-format projection still returns an error: available
 // content can be partial, never invented.
-type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
+type StoredEntriesFunc func(sessionID string) (StoredContent, error)
+
+// StoredContent is one preview read's answer: the available stored entries, and
+// whether they stand for only part of the session.
+//
+// Partial is carried BESIDE the entries because it cannot be derived from them.
+// A bounded projection of a long session and a complete short session both come
+// back as "some entries", so a pane handed entries alone can only guess, and it
+// guessed "this is the whole session" every time. The store already proves the
+// difference through the session's capture status; this is that proof, reaching
+// the one screen that has to state it.
+//
+// It stays inside the TUI: no wire, JSON or WebSocket payload reports it.
+type StoredContent struct {
+	// Entries is the available stored content, empty for a session the store
+	// holds nothing for.
+	Entries []schema.SessionEntry
+	// Partial is true when the stored capture of this session is not complete,
+	// so the entries above are as much of it as the database can prove it has.
+	Partial bool
+}
 
 // PublishedTurnsFunc returns one session's turns AS THEY WILL BE PUBLISHED:
 // read from the local store and redacted by the same redactor, over the same
@@ -36,7 +56,16 @@ type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
 // It is the read seam the selection preview binds to. The mounted command fills
 // it from the store and the push redactor; a test fills it with recorded turns
 // directly.
-type PublishedTurnsFunc func(sessionID string) ([]ingest.Turn, error)
+type PublishedTurnsFunc func(sessionID string) (PublishedTranscript, error)
+
+// PublishedTranscript is one session's turns as they will be published, with
+// the same partial-capture flag the stored read reported. The pane needs both
+// in one answer: it draws the turns and, above them, the line that says the
+// turns are only part of the session.
+type PublishedTranscript struct {
+	Turns   []ingest.Turn
+	Partial bool
+}
 
 // NewPublishedTurns builds the preview read over a stored-entry reader and the
 // redactor the push runs with.
@@ -46,9 +75,9 @@ type PublishedTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 // screen that promises the published text. This fails closed instead: the pane
 // reports that it cannot show the published transcript, and shows nothing.
 func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) PublishedTurnsFunc {
-	return func(sessionID string) ([]ingest.Turn, error) {
+	return func(sessionID string) (PublishedTranscript, error) {
 		if entries == nil || redactor == nil {
-			return nil, fmt.Errorf(
+			return PublishedTranscript{}, fmt.Errorf(
 				"push preview: the transcript of session %s cannot be shown as it will be published.\n"+
 					"What went wrong: the preview was mounted without a stored-entry reader or without the push redactor.\n"+
 					"Where: push.NewPublishedTurns, drawing the selection page of the push wizard.\n"+
@@ -59,16 +88,23 @@ func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) 
 		}
 		stored, err := entries(sessionID)
 		if err != nil {
-			return nil, err
+			return PublishedTranscript{}, err
 		}
-		if len(stored) == 0 {
-			return nil, nil
+		// The partial flag survives an empty read: a session whose capture broke
+		// before any entry was stored is still a partial session, and the pane
+		// says so rather than calling it simply unrecorded.
+		if len(stored.Entries) == 0 {
+			return PublishedTranscript{Partial: stored.Partial}, nil
 		}
-		redacted, err := RedactEntries(redactor, stored)
+		redacted, err := RedactEntries(redactor, stored.Entries)
 		if err != nil {
-			return nil, err
+			return PublishedTranscript{}, err
 		}
-		return transcript.EntriesToTurnsValidated(redacted)
+		turns, err := transcript.EntriesToTurnsValidated(redacted)
+		if err != nil {
+			return PublishedTranscript{}, err
+		}
+		return PublishedTranscript{Turns: turns, Partial: stored.Partial}, nil
 	}
 }
 
@@ -144,16 +180,32 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(recorded) == 0 {
+		if recorded.Partial {
+			// Said LAST, so it sits directly above the transcript it describes.
+			// The publication note above it answers a different question - what
+			// this session still needs before it can be pushed - and a reader
+			// needs both when both are true.
+			body.note = joinNotes(body.note, transcriptview.PartialPreviewNote)
+		}
+		if len(recorded.Turns) == 0 {
 			if body.note == "" {
 				body.note = previewNoTranscript
 			}
 			return body, nil
 		}
-		body.transcript = p.renderer.Document(recorded)
+		body.transcript = p.renderer.Document(recorded.Turns)
 		return body, nil
 	}
 	return previewBody{th: p.th, note: previewNoSessionNote}, nil
+}
+
+// joinNotes stacks the pane's notes in the order they were added, so adding a
+// second note never silently replaces the first.
+func joinNotes(existing, added string) string {
+	if existing == "" {
+		return added
+	}
+	return existing + "\n\n" + added
 }
 
 // projectLines describes one project group.

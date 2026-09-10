@@ -8,6 +8,11 @@
 # reply. A fixture that put fenced code in the first turn would pass while the
 # mounted pane showed a wall of plain characters.
 #
+# An unfinished capture is also ANNOUNCED: the pane prints one line saying the
+# preview is partial and that ingesting shows the whole session. The cases below
+# assert it on the session whose capture never finished, and assert its ABSENCE
+# on the complete one.
+#
 # truncated is a second seeded session standing in for the degraded read: its
 # stored body was cut at the database's content-preview limit and no source
 # transcript is on disk to recover the rest from. The pane must still show the
@@ -78,6 +83,9 @@ cases:
       - not imported yet
       # The session title is not repeated above the transcript that produced it.
       - imported session
+      # This capture is complete, so the pane must not call the preview partial.
+      # A line that appeared on every session would teach the reader to skip it.
+      - showing a partial preview of the session
 
   # The capture behind this session was never finished, and its stored row is
   # still real recorded content. The pane shows it.
@@ -88,6 +96,10 @@ cases:
       - "project: acme/tool"
       - you
       - the store cut this body at its preview limit
+      # The stored capture of this session was never finished, so the pane says
+      # the preview stands for only part of it and names what shows the rest.
+      # Without the line, a cut body reads as the whole conversation.
+      - showing a partial preview of the session, ingest to preview entire session
     wantMissing:
       # The store DOES hold this session, so the harness-transcript fallback
       # must not have run.
