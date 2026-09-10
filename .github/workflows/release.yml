@@ -256,7 +256,9 @@ jobs:
         run: |
           set -euxo pipefail
           brew tap peasant-labs/tap
-          brew install --cask peasant
+          # Fully-qualified token so this never resolves a same-named cask from
+          # another tap.
+          brew install --cask peasant-labs/tap/peasant
 
       - name: Assert version matches the tag
         run: |
