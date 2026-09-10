@@ -125,7 +125,17 @@ func makeMinimalMeta(t *testing.T, sessionIDStr string) *ingest.UnifiedMetadata 
 		Remote:   &remote,
 		Worktree: &worktree,
 	}
+	// Derive the project identity the way every adapter does, rather than
+	// leaving it empty. A metadata record without one is not a shape production
+	// can produce: the publication metadata capture refuses to mirror it, and a
+	// pipeline seeded this way never authorizes indexing at all, so a test
+	// arranged around it measures the refusal instead of what it asked about.
+	projectHash, _, err := ingest.DeriveProjectIdentifiers(salt.Salt{}, remote, worktree)
+	if err != nil {
+		t.Fatalf("makeMinimalMeta derive project identity: %v", err)
+	}
 	meta.Project = ingest.ProjectInfo{
+		Hash:     projectHash,
 		FilePath: "/home/test/testrepo",
 		Name:     "testrepo",
 	}
