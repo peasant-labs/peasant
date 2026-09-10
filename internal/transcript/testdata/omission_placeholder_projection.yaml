@@ -1,5 +1,5 @@
-# How an omission placeholder — the entry that stands where ingest left a source
-# record out — must reach a reader on the served projection, for each way the
+# How an omission placeholder, the entry that stands where ingest left a source
+# record out, must reach a reader on the served projection, for each way the
 # placeholder can relate to a tool call.
 #
 # The projection is harness-agnostic, so these three relations cover every

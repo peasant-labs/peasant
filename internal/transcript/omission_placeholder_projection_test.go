@@ -108,9 +108,9 @@ func TestOmissionPlaceholderProjectionFixtureGuards(t *testing.T) {
 const omissionPlaceholderProjectionTrailing = "the tool finished"
 
 // TestOmissionPlaceholderReachesTheServedProjection drives the production
-// projection every served surface reads through — the detail socket, the
+// projection every served surface reads through: the detail socket, the
 // kickstart and wizard previews, the export and the publication body all call
-// EntriesToTurns — over the stored entries a real harvest leaves behind.
+// EntriesToTurns, over the stored entries a real harvest leaves behind.
 func TestOmissionPlaceholderReachesTheServedProjection(t *testing.T) {
 	t.Parallel()
 	fixture := loadOmissionPlaceholderProjectionFixture(t)

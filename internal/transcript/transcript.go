@@ -164,7 +164,7 @@ func toolResultOutput(e schema.SessionEntry) string {
 }
 
 // unjoinedOmissionPlaceholder reports whether an entry is an omission
-// placeholder — the entry that stands where ingest left a source record out —
+// placeholder, the entry that stands where ingest left a source record out,
 // that NO tool call will show to a reader.
 //
 // A placeholder is shown as a tool call's result only when it carries the id
@@ -175,8 +175,8 @@ func toolResultOutput(e schema.SessionEntry) string {
 // the tool call itself was the omitted record. In both of those cases the
 // placeholder is the only trace of the missing record, so it has to be emitted
 // as a turn of its own; suppressing it as a depth-0 tool wrapper would drop
-// the note from every served surface — the detail socket, the previews, the
-// export and the publication — and the reader would see the conversation jump.
+// the note from every served surface (the detail socket, the previews, the
+// export and the publication) and the reader would see the conversation jump.
 func unjoinedOmissionPlaceholder(entry schema.SessionEntry, toolUseIDs map[string]bool) bool {
 	if _, omitted := ingest.OmittedRecordOf(entry); !omitted {
 		return false

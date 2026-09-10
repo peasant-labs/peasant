@@ -971,6 +971,11 @@ func TestHarvestCmd_DryRun_DoesNotCreateDB(t *testing.T) {
 	if !strings.Contains(output, "no analytics database exists yet") {
 		t.Errorf("the forecast must say no database exists yet, so 'new' is understood as a first harvest; got: %s", output)
 	}
+	// House style for anything printed to a user: plain punctuation only. An
+	// em dash also renders as a box in a terminal with no glyph for it.
+	if strings.ContainsRune(output, '\u2014') {
+		t.Errorf("the forecast printed an em dash; user-facing text uses plain punctuation: %s", output)
+	}
 
 	// Nothing created: not the database, not its sidecars, not the directory
 	// that would hold them.

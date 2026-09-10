@@ -442,7 +442,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		}
 		if absent {
 			skipDB = true
-			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s — this dry run creates none and reports every discovered session as new. Run 'peasant harvest' to create it.\n", dbPath)
+			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s. This dry run creates none and reports every discovered session as new. Run 'peasant harvest' to create it.\n", dbPath)
 		}
 	}
 

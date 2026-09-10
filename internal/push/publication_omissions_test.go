@@ -209,7 +209,7 @@ func TestPublicationOmissions(t *testing.T) {
 				t.Fatalf("load publication input: %v", err)
 			}
 			if bundle.Readiness != wantReadiness {
-				t.Errorf("readiness SQL says %q, want %q — the SQL and the Go predicate disagree", bundle.Readiness, wantReadiness)
+				t.Errorf("readiness SQL says %q, want %q; the SQL and the Go predicate disagree", bundle.Readiness, wantReadiness)
 			}
 			preflightErr := push.ValidatePublicationInput(bundle)
 			if (preflightErr == nil) != fixtureCase.Publishable {
