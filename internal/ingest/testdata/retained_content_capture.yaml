@@ -1,9 +1,12 @@
 # Retained-content capture producers: the adapter, not the store, declares
 # whether a retained capture is complete. Each case names the harness, the
 # retained-input condition the adapter can observe, and the expected
-# completeness. An incomplete capture carries no entries and is never written
-# as a verified capture; an input hash is always reported so a later run can
-# tell whether the same retained bytes were consumed.
+# completeness. An incomplete capture reports the entries this build could
+# represent (filtered records or an unrepresented event among recognized
+# ones) so previews are not empty, and is never written as a verified
+# capture; a missing native part directory reports none. An input hash is
+# always reported so a later run can tell whether the same retained bytes
+# were consumed.
 # required_names guards deletion by name; adding a case need not appear here.
 required_names:
   - strike-filtered-artifact-is-incomplete

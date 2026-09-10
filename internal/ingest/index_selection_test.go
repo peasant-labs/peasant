@@ -76,6 +76,8 @@ func TestCapturedInputNeedsWork(t *testing.T) {
 			if fixture.LenientIndexer {
 				indexer = lenientIndexer{}
 			}
+			// A decision table over the fields capturedInputNeedsWork and
+			// certifiesContent read: config.Force, harvesterVersions, indexers.
 			pipeline := &Pipeline{
 				config:            PipelineConfig{Force: fixture.Force},
 				harvesterVersions: versions,

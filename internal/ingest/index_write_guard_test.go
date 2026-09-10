@@ -14,6 +14,8 @@ import (
 // a visible error outcome instead of dereferencing the absent capture.
 func TestIndexWriteRefusesParsedOutputWithoutCapturedInput(t *testing.T) {
 	observer := &captureBatchObserver{}
+	// flushIndexParseResults reads metricsStore (the batch writer), versionTargets
+	// (defaults when harvesterVersions is nil) and the diagnostics set.
 	pipeline := &Pipeline{metricsStore: observer}
 	id, err := NewSessionID("ses_uncapturedoutput")
 	if err != nil {
