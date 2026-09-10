@@ -13,8 +13,12 @@ import (
 // CapturedIndexInput owns the exact bytes and consumed context for one parse.
 // The native OpenCode tree remains private; Parse never reopens the source.
 type CapturedIndexInput struct {
-	session      DiscoveredSession
-	kind         TranscriptSourceKind
+	session DiscoveredSession
+	kind    TranscriptSourceKind
+	// published reports that this run committed the artifact the input was
+	// captured from, so a directory tree read for it is the tree the
+	// publication capture saw.
+	published    bool
 	metadataPath string
 	artifactHash string
 	inputHash    string
@@ -42,7 +46,15 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	}
 	metadataPath := filepath.Join(filepath.Dir(im.outputTranscriptPath), string(im.session.SessionID)+defaults.MetadataSuffix)
 	var input *CapturedIndexInput
-	err = publisher.WithCapture(ctx, im.session.SessionID, metadataPath, func(artifact *ManagedArtifact) error {
+	// Bytes the caller already read are the bytes it verified; the committed
+	// transcript is not read again behind them. A retained fallback that
+	// verified its input against the publication snapshot parses exactly that
+	// input, and an artifact this run wrote parses the bytes it wrote.
+	var verified []byte
+	if len(im.transcriptData) > 0 {
+		verified = im.transcriptData
+	}
+	err = publisher.WithVerifiedCapture(ctx, im.session.SessionID, metadataPath, verified, func(artifact *ManagedArtifact) error {
 		state, err := reader.ReadIndexState(ctx, im.session.SessionID)
 		if err != nil {
 			return err
@@ -59,7 +71,7 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 		if err != nil {
 			return err
 		}
-		input.expected, input.metadataPath = state, metadataPath
+		input.expected, input.metadataPath, input.published = state, metadataPath, im.published
 		return nil
 	})
 	if err != nil {
@@ -224,8 +236,13 @@ func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *CapturedInd
 	if err != nil {
 		return err
 	}
-	return publisher.WithCapture(ctx, input.session.SessionID, input.metadataPath, func(current *ManagedArtifact) error {
-		if current.ArtifactHash != input.artifactHash {
+	// The committed identity is what the write must still describe. It is read
+	// from the committed metadata, not by hashing the transcript file again: a
+	// replaced pair rewrites its metadata and is caught; a transcript that
+	// moved on disk after the input was verified does not invalidate the
+	// verified parse.
+	return publisher.WithCommittedIdentity(ctx, input.session.SessionID, input.metadataPath, func(current string) error {
+		if current != input.artifactHash {
 			return &StaleIndexWorkError{SessionID: input.session.SessionID}
 		}
 		if input.kind == TranscriptSourceDirectory {

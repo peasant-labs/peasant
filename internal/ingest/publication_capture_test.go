@@ -390,6 +390,10 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			lastGood, err := database.ListEntries(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cfg.Reindex = true
 			if c.ReindexMutateAfterRead {
 				filesystem.mutateAfterRead = filepath.Join(filepath.Dir(metadataPath), c.ID+"--transcript."+string(session.SourceFormat))
@@ -400,6 +404,29 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			if manualResult.Summary.Indexed != *c.ExpectedManualIndexed {
 				t.Fatalf("manual indexed = %d want %d: %+v", manualResult.Summary.Indexed, *c.ExpectedManualIndexed, manualResult)
+			}
+			if c.ReindexChangeManaged {
+				// A managed pair whose transcript no longer matches its committed
+				// metadata is refused, not re-indexed: the refusal is a warning
+				// naming the session, the run has no error, the last-good index is
+				// untouched, and the verified capture is still served.
+				warned := false
+				for _, diagnostic := range manualResult.Diagnostics {
+					if diagnostic.ErrorType == "artifact_recovery_incomplete" && strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != "" {
+						warned = true
+					}
+				}
+				if !warned {
+					t.Fatalf("inconsistent managed pair was not reported as a recovery warning: %+v", manualResult.Diagnostics)
+				}
+				untouched, err := database.ListEntries(ctx, id)
+				if err != nil || !reflect.DeepEqual(untouched, lastGood) {
+					t.Fatalf("refused reindex changed the last-good index: %v", err)
+				}
+				snapshot, err := database.ReadSessionAvailable(ctx, id)
+				if err != nil || !reflect.DeepEqual(snapshot.Entries, lastGood) {
+					t.Fatalf("verified capture is no longer served after the refused reindex: %+v %v", snapshot, err)
+				}
 			}
 			if err := database.Close(); err != nil {
 				t.Fatal(err)

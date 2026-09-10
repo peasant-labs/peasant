@@ -77,6 +77,12 @@ type CursorMaterializedTranscript struct {
 	Transcript  []byte
 	EventSeq    *int64
 	Diagnostics []DiagnosticEntry
+	// Session is the source view the materialization consumed and
+	// SourceFingerprint the digest of that view: the same capture facts the
+	// plain materialization reports, so a caller can carry either result
+	// into the one capture path.
+	Session           *DiscoveredSession
+	SourceFingerprint []byte
 }
 
 // CursorTranscriptMaterializer is optional; callers without it preserve prior
