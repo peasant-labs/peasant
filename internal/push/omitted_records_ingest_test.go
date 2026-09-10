@@ -46,6 +46,11 @@ type omittedRecordsIngestCase struct {
 	OmissionWarning           bool   `yaml:"omissionWarning"`
 	PlaceholderInServedDetail bool   `yaml:"placeholderInServedDetail"`
 	LargeRecordInServedDetail bool   `yaml:"largeRecordInServedDetail"`
+	// TrailingRecordInServedDetail is the record AFTER the large one. It is
+	// under the limit in every case, so it must survive the omission: a
+	// filter that stopped at the stand-in line, or a projection that dropped
+	// the turns after a placeholder, would otherwise leave every case green.
+	TrailingRecordInServedDetail bool `yaml:"trailingRecordInServedDetail"`
 }
 
 type omittedRecordsIngestFixture struct {
@@ -314,6 +319,17 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			if storedPlaceholders != wantPlaceholders {
 				t.Errorf("the complete-content reader returned %d omission placeholders, want %d", storedPlaceholders, wantPlaceholders)
 			}
+			storedTrailing := false
+			for _, entry := range snapshot.Entries {
+				for _, field := range []*string{entry.ContentPreview, entry.ToolOutput} {
+					if field != nil && strings.Contains(*field, omittedRecordsTrailingText) {
+						storedTrailing = true
+					}
+				}
+			}
+			if storedTrailing != fixtureCase.TrailingRecordInServedDetail {
+				t.Errorf("the complete-content reader export and publication use returned the record after the large one=%v, want %v", storedTrailing, fixtureCase.TrailingRecordInServedDetail)
+			}
 
 			// What a reader is served. The placeholder note reaches every
 			// transcript UI on the existing wire fields, so the served detail
@@ -334,6 +350,10 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			gotRecord := strings.Contains(string(served), omittedRecordsSentinel)
 			if gotRecord != fixtureCase.LargeRecordInServedDetail {
 				t.Errorf("the served detail carries the large record=%v, want %v", gotRecord, fixtureCase.LargeRecordInServedDetail)
+			}
+			gotTrailing := strings.Contains(string(served), omittedRecordsTrailingText)
+			if gotTrailing != fixtureCase.TrailingRecordInServedDetail {
+				t.Errorf("the served detail carries the record after the large one=%v, want %v; omitting one record must cost one record", gotTrailing, fixtureCase.TrailingRecordInServedDetail)
 			}
 		})
 	}
