@@ -399,7 +399,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			return nil, err
 		}
 		if !isKnownStrikeEvent(env.Type) {
-			return nil, fmt.Errorf("unrepresented Strike event %q", env.Type)
+			return nil, &UnrepresentedRecordError{Harness: HarnessStrike, Kind: string(env.Type)}
 		}
 		if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
 			return nil, fmt.Errorf("event requires data object")

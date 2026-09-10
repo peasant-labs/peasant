@@ -45,6 +45,24 @@ func (p *Pipeline) refreshStoredMetrics(ctx context.Context) (computed, checked,
 				p.reportMetadataRefusal(string(session.SessionID), err)
 				continue
 			}
+			// A session whose stored producer or index format is newer than this
+			// build is refused for indexing; its derived rows are left alone too,
+			// so a future producer's output is never reinterpreted by an older
+			// metrics algorithm. The refusal is the same visible diagnostic the
+			// index path reports, deduplicated when both paths see the session.
+			if reader, ok := p.metricsStore.(SessionIndexStateReader); ok {
+				state, err := reader.ReadIndexState(ctx, session.SessionID)
+				if err != nil {
+					p.reportMetricFailure(string(session.SessionID), err)
+					continue
+				}
+				if state != nil {
+					if err := p.checkIndexProducer(state); err != nil {
+						p.reportIndexRefusal(session.SessionID, err)
+						continue
+					}
+				}
+			}
 			changed, current, err := engine.EnsureSessionMetrics(ctx, session.SessionID)
 			if err != nil {
 				p.reportMetricFailure(string(session.SessionID), err)

@@ -277,7 +277,7 @@ func (p *ArtifactPublisher) reconcileArtifactIntent(ctx context.Context, root Ar
 			return nil, &artifactMirrorError{fmt.Errorf("mirror committed session %s: store returned an invalid per-session outcome; files and recovery evidence were retained", intent.SessionID)}
 		}
 		if results[0].Err != nil || !results[0].Mirrored {
-			return nil, &artifactMirrorError{fmt.Errorf("mirror committed session %s: %v; committed files were not rolled back; restore database compatibility/access and retry harvest", intent.SessionID, results[0].Err)}
+			return nil, &artifactMirrorError{fmt.Errorf("mirror committed session %s: %w; committed files were not rolled back; restore database compatibility/access and retry harvest", intent.SessionID, results[0].Err)}
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(artifact.MetadataJSON, &fields); err != nil {

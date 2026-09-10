@@ -136,9 +136,36 @@ func CaptureIndexInput(ctx context.Context, indexer TranscriptIndexer, session D
 // Hash identifies actual parser input, independently of preview mode and version.
 func (input *CapturedIndexInput) Hash() string { return input.inputHash }
 
+// strictIndexFormat is the only stored format the strict capture parsers can
+// produce; complete-content certification is possible only on this path.
+const strictIndexFormat = 1
+
 // Parse runs against captured input only, preserving the existing strict Result
 // and legacy nonempty-result completion rules.
 func (input *CapturedIndexInput) Parse(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
+	return input.ParseForFormat(ctx, indexer, strictIndexFormat)
+}
+
+// ParseForFormat selects the parser by the harness's declared output format.
+// Format 1 is the strict capture path. Any other declared format needs the
+// indexer's own versioned result, because the strict capture interface only
+// produces format 1 and using it would contradict the declaration; such a
+// result is never certified as complete content.
+func (input *CapturedIndexInput) ParseForFormat(ctx context.Context, indexer TranscriptIndexer, declared int) (indexformat.Result, error) {
+	if declared != strictIndexFormat {
+		versioned, ok := indexer.(VersionedTranscriptIndexer)
+		if !ok {
+			return nil, fmt.Errorf("index session %s: harness %s declares output format %d but its indexer only produces format %d; no entries were replaced; correct the indexer declaration or supply a versioned indexer", input.session.SessionID, input.session.Harness, declared, strictIndexFormat)
+		}
+		if input.kind == TranscriptSourceDirectory {
+			return versioned.IndexTranscriptResult(ctx, input.session)
+		}
+		data := input.transcript
+		if data == nil {
+			data = []byte{}
+		}
+		return versioned.IndexTranscriptBytesResult(ctx, input.session, data)
+	}
 	if input.kind == TranscriptSourceDirectory {
 		if native, ok := indexer.(*OpenCodeIndexer); ok {
 			messages, err := parseOpenCodeJSONInput(input.tree, &indexCompletion{ctx: ctx, session: input.session})
@@ -159,8 +186,37 @@ func (input *CapturedIndexInput) Parse(ctx context.Context, indexer TranscriptIn
 	return indexWithSourceKind(ctx, indexer, input.session, data)
 }
 
-func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, input *CapturedIndexInput) (indexformat.Result, error) {
-	return input.Parse(ctx, indexer)
+// ParseTolerant parses the same captured bytes with the harness's tolerant
+// projection parser, the one that represents what it recognizes and skips
+// what it does not. Its result is a bounded projection only: it is stored as
+// an incomplete capture and never certified as complete content.
+func (input *CapturedIndexInput) ParseTolerant(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
+	if input.kind == TranscriptSourceDirectory {
+		native, ok := indexer.(openCodeInputIndexer)
+		if !ok {
+			return nil, fmt.Errorf("index session %s: directory indexer has no tolerant native-tree projection; no entries were stored", input.session.SessionID)
+		}
+		return native.indexJSONInput(ctx, input.session, input.tree)
+	}
+	data := input.transcript
+	if data == nil {
+		data = []byte{}
+	}
+	if versioned, ok := indexer.(VersionedTranscriptIndexer); ok {
+		return versioned.IndexTranscriptBytesResult(ctx, input.session, data)
+	}
+	entries, err := indexer.IndexTranscriptBytes(ctx, input.session, data)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, &unverifiedEmptyIndexError{session: input.session}
+	}
+	return indexformat.V1{Entries: entries}, nil
+}
+
+func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, input *CapturedIndexInput, declared int) (indexformat.Result, error) {
+	return input.ParseForFormat(ctx, indexer, declared)
 }
 
 func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *CapturedIndexInput, use func() error) error {

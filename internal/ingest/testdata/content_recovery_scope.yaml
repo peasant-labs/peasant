@@ -1,0 +1,51 @@
+# Retained-content recovery obeys the same eligibility boundary as ordinary
+# index maintenance. Each case runs one reindex over a single stored session
+# whose content capture is absent, with one scope filter or one stored
+# producer condition applied, and asserts the observable outcome:
+#   recovered  the capture becomes complete; the retained transcript was read,
+#              the native source was not; exactly one recovery index-log row
+#   untouched  no retained read, no write, no recovery diagnostic
+#   refused    recovery reads nothing, nothing is written, no recovery
+#              index-log entry. expected_diagnostics is the exact multiset of
+#              diagnostic types naming the session: a producer refusal is the
+#              sweep's content_recovery_refused plus the index path's visible
+#              index_refused; a stored-schema refusal is exactly one
+#              metadata_refused with the schema remedy (no_index_log: it grows
+#              no index-log entry at all, matching the index filter).
+#              pre_existing_retained_reads pins a read that happens outside
+#              recovery: the reindex fallback preparation reads the retained
+#              transcript of a target the index path then refuses
+#              (index_selection.go returns needs-work on a capture refusal;
+#              publication_capture.go reads the transcript before parsing). It
+#              goes red when that read is removed, so the fixture is updated
+#              with the change, never silently.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names:
+  - in-scope-recovers
+  - other-harness-untouched
+  - since-after-start-untouched
+  - session-filter-untouched
+  - future-producer-refused
+  - future-stored-schema-refused
+cases:
+  - name: in-scope-recovers
+    expect: recovered
+  - name: other-harness-untouched
+    harness: codex
+    expect: untouched
+  - name: since-after-start-untouched
+    since_after_start: true
+    expect: untouched
+  - name: session-filter-untouched
+    other_session_only: true
+    expect: untouched
+  - name: future-producer-refused
+    future_producer: true
+    expect: refused
+    pre_existing_retained_reads: 1
+    expected_diagnostics: [content_recovery_refused, index_refused]
+  - name: future-stored-schema-refused
+    future_stored_schema: true
+    expect: refused
+    no_index_log: true
+    expected_diagnostics: [metadata_refused]

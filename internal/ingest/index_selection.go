@@ -11,14 +11,45 @@ func (p *Pipeline) includesIndexTarget(target reindexTarget) bool {
 		(p.config.Since == nil || !time.UnixMilli(target.startMs).Before(*p.config.Since))
 }
 
+// capturedInputNeedsWork decides whether a captured input still has pending
+// indexer work. A current parser and an equal input hash are not enough on
+// their own: the stored index must also be bound to the current publication
+// metadata capture, and a harness whose strict parser can certify complete
+// content must have done so. Both are settled by the ordinary index write, so
+// a repair completes in one harvest and the next unchanged harvest does no
+// parser work.
 func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 	target := p.versionTargets()[input.session.Harness]
-	return p.config.Force || input.expected.IndexerVersion < target.IndexerVersion ||
-		input.expected.IndexedInputHash == nil || *input.expected.IndexedInputHash != input.inputHash
+	expected := input.expected
+	return p.config.Force ||
+		expected.IndexerVersion < target.IndexerVersion ||
+		expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash ||
+		// A current metadata capture exists (revision > 0) but the index is not
+		// bound to it: bytes match, publication proof does not.
+		expected.PublicationCaptureRevision > 0 && !expected.PublicationBound ||
+		// The capture is incomplete and this build can certify it: the strict
+		// format-1 parser is the only path that produces complete content, so
+		// a harness on another declared format is at its steady state instead.
+		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness)
+}
+
+// certifiesContent reports whether this build's indexer for the harness can
+// produce a verified complete capture: a strict parser writing the strict
+// stored format. Anything else stores what it parsed without certification.
+func (p *Pipeline) certifiesContent(harness Harness) bool {
+	_, strict := p.indexers[harness].(AuthoritativeTranscriptIndexer)
+	return strict && p.versionTargets()[harness].IndexVersion == strictIndexFormat
 }
 
 func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarget) bool {
 	if !p.includesIndexTarget(target) || p.metricsStore == nil {
+		return false
+	}
+	// A session whose stored metadata schema is newer than this build is
+	// refused here, before it can become a target: the refusal is one
+	// diagnostic on the run, never a structured log line or an index-log entry.
+	if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
+		p.reportMetadataRefusal(string(target.session.SessionID), err)
 		return false
 	}
 	indexer, ok := p.indexers[target.session.Harness]

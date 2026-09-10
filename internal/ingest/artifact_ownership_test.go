@@ -124,6 +124,12 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			config.Force = row.Force
+			// A newer clock alone is not a source change once the file-only
+			// marker exists; the parent's recorded bytes must actually change.
+			parentSource := []byte(fixture.Transcript + fixture.Transcript)
+			if err := os.WriteFile(parentPath, parentSource, 0600); err != nil {
+				t.Fatal(err)
+			}
 			parent.ModTime = time.Now().Add(time.Minute)
 			adapter.Sessions = []ingest.DiscoveredSession{parent}
 			if !row.HideChild {
@@ -149,7 +155,7 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 			if data, err := os.ReadFile(notePath); err != nil || string(data) != fixture.UnrelatedContent {
 				t.Errorf("parent publication removed unrelated file: %v", err)
 			}
-			if data, err := os.ReadFile(parentPath); err != nil || string(data) != fixture.Transcript {
+			if data, err := os.ReadFile(parentPath); err != nil || !bytes.Equal(data, parentSource) {
 				t.Errorf("native parent source changed: %v", err)
 			}
 			if data, err := os.ReadFile(childPath); err != nil || string(data) != fixture.Transcript {

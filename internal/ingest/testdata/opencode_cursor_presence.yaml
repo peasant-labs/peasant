@@ -1,0 +1,21 @@
+# Native OpenCode cursor presence. The materialization reports a cursor as
+# acquired only when the source actually observed one; a source without an
+# event sequence leaves the cursor unknown so the mirror preserves the stored
+# value. Zero is valid evidence when observed.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names:
+  - absent-cursor-stays-unknown
+  - observed-zero-cursor-is-acquired
+  - observed-cursor-is-acquired
+cases:
+  - name: absent-cursor-stays-unknown
+    present: false
+    observed: false
+  - name: observed-zero-cursor-is-acquired
+    present: true
+    seq: 0
+    observed: true
+  - name: observed-cursor-is-acquired
+    present: true
+    seq: 42
+    observed: true

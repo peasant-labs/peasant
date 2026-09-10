@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -52,6 +53,46 @@ func (i *StrikeIndexer) IndexTranscriptBytes(_ context.Context, session Discover
 }
 
 var _ VersionedTranscriptIndexer = (*StrikeIndexer)(nil)
+var _ RetainedContentCapturer = (*StrikeIndexer)(nil)
+
+// CaptureRetainedContent reports the retained Strike transcript's own
+// completeness. Ingest removes oversized records before the artifact is
+// written (filterStrikeOversizedRecords) and records that in the metadata
+// diagnostics, so a retained artifact carrying that mark is known to omit
+// rows: it is captured as incomplete, never certified. A missing metadata
+// sidecar does not omit conversation rows and does not affect completeness.
+func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session DiscoveredSession) (ContentCaptureResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ContentCaptureResult{}, err
+	}
+	data, err := i.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(session, 0, err)
+	}
+	inputHash := indexInputDigest(session, data, nil)
+	if !session.ContentOmitted {
+		capture, err := i.IndexTranscriptBytesForCapture(ctx, session, data)
+		if err == nil {
+			return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash}, nil
+		}
+		var unrepresented *UnrepresentedRecordError
+		if ctx.Err() != nil || !errors.As(err, &unrepresented) {
+			return ContentCaptureResult{}, err
+		}
+	}
+	// Filtered or unrepresented records: report the represented entries from
+	// the tolerant projection as an incomplete capture, never an empty one and
+	// never a certified one. A malformed transcript is refused above.
+	result, err := i.IndexTranscriptBytesResult(ctx, session, data)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	var entries []schema.SessionEntry
+	if v1, ok := result.(indexformat.V1); ok {
+		entries = v1.Entries
+	}
+	return ContentCaptureResult{Entries: entries, Complete: false, InputHash: inputHash}, nil
+}
 
 // IndexTranscriptResult verifies completion before authorizing persistent replacement.
 func (i *StrikeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {

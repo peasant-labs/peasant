@@ -150,9 +150,10 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 		}
 		var projection openCodeCurrentProjection
 		var unknown map[string]int
+		eventSeqObserved := false
 		if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 			var readErr error
-			session, readErr = capturedOpenCodeSession(ctx, source, session)
+			session, eventSeqObserved, readErr = capturedOpenCodeSession(ctx, source, session)
 			if readErr != nil {
 				return readErr
 			}
@@ -165,7 +166,7 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 		if err != nil {
 			return MaterializedTranscript{}, err
 		}
-		return newSQLiteMaterializedTranscript(metadata, data, session)
+		return newSQLiteMaterializedTranscript(metadata, data, session, eventSeqObserved)
 	}
 	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
 		return MaterializedTranscript{}, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
@@ -180,9 +181,10 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	}
 	var projection openCodeLegacyProjection
 	var dropped []openCodeDroppedOrphanPart
+	eventSeqObserved := false
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 		var readErr error
-		session, readErr = capturedOpenCodeSession(ctx, source, session)
+		session, eventSeqObserved, readErr = capturedOpenCodeSession(ctx, source, session)
 		if readErr != nil {
 			return readErr
 		}
@@ -195,7 +197,7 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	if err != nil {
 		return MaterializedTranscript{}, err
 	}
-	return newSQLiteMaterializedTranscript(metadata, data, session)
+	return newSQLiteMaterializedTranscript(metadata, data, session, eventSeqObserved)
 }
 
 type openCodeSelectedProjectReader interface {
@@ -207,30 +209,38 @@ func (a *OpenCodeAdapter) MaterializeTranscriptWithCursor(ctx context.Context, s
 	if err != nil {
 		return CursorMaterializedTranscript{}, err
 	}
-	return CursorMaterializedTranscript{Metadata: captured.Metadata, Transcript: captured.Data, EventSeq: &captured.EventSeq}, nil
+	cursor := CursorMaterializedTranscript{Metadata: captured.Metadata, Transcript: captured.Data}
+	if captured.EventSeqObserved {
+		cursor.EventSeq = &captured.EventSeq
+	}
+	return cursor, nil
 }
 
 var _ openCodeSelectedProjectReader = (*zombiezenOpenCodeSQLiteSource)(nil)
 
-func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, session DiscoveredSession) (DiscoveredSession, error) {
+// capturedOpenCodeSession reads the authoritative session row for the
+// materialization. The returned flag reports whether the native event cursor
+// was observed; a session whose source has no cursor keeps an unknown cursor
+// rather than a default zero.
+func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, session DiscoveredSession) (DiscoveredSession, bool, error) {
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
-		return session, err
+		return session, false, err
 	}
 	linkID, err := NewOpenCodeSessionLinkID(string(session.SessionID))
 	if err != nil {
-		return session, err
+		return session, false, err
 	}
 	request := OpenCodeSessionRecordPageRequest{PageSize: pageSize, SessionID: &linkID}
 	page, err := source.SessionRecords(ctx, request)
 	if err != nil {
-		return session, err
+		return session, false, err
 	}
 	if page.Table == OpenCodeSessionTableV2 && len(page.PresentSessionIDs) == 0 && len(page.Records) == 0 {
 		request.Selection = OpenCodeSessionRecordsLegacy
 		legacy, readErr := source.SessionRecords(ctx, request)
 		if readErr != nil {
-			return session, readErr
+			return session, false, readErr
 		}
 		if len(legacy.Records) > 0 {
 			page = legacy
@@ -255,7 +265,7 @@ func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, s
 		if record.ParentID.String() != "" {
 			parent, parseErr := NewSessionID(record.ParentID.String())
 			if parseErr != nil {
-				return session, parseErr
+				return session, false, parseErr
 			}
 			session.ParentUUID = &parent
 		}
@@ -267,7 +277,7 @@ func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, s
 		}
 	}
 	if !found && page.Supported && (page.HasClock || page.Table == OpenCodeSessionTableV2 || len(page.Skipped) > 0) {
-		return session, fmt.Errorf("capture OpenCode session %q: authoritative session row is missing or malformed; prior stored state retained; restore the source row or retry discovery", session.SessionID)
+		return session, false, fmt.Errorf("capture OpenCode session %q: authoritative session row is missing or malformed; prior stored state retained; restore the source row or retry discovery", session.SessionID)
 	}
 	var attribution OpenCodeProjectAttribution
 	if selected, ok := source.(openCodeSelectedProjectReader); ok {
@@ -276,19 +286,19 @@ func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, s
 		attribution, err = source.ProjectAttribution(ctx)
 	}
 	if err != nil {
-		return session, err
+		return session, false, err
 	}
 	candidates := []openCodeSessionCandidate{{session: session}}
 	attributeOpenCodeProjects(candidates, attribution)
 	session = candidates[0].session
 	latest, err := source.MaxEventSeq(ctx, linkID)
 	if err != nil {
-		return session, err
+		return session, false, err
 	}
 	if latest.Present {
 		session.EventSeq = latest.Seq
 	}
-	return session, nil
+	return session, latest.Present, nil
 }
 
 // finishLegacyManagedProjection encodes a read legacy projection into the

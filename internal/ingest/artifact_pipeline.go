@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -72,7 +73,12 @@ func (p *Pipeline) reconcileManagedArtifacts(ctx context.Context) {
 	if publisher.mirror != nil {
 		err = publisher.WalkMetadata(ctx, func(sid SessionID, path string) error {
 			_, changed, err := publisher.ReconcileStored(ctx, sid, path, p.includesManagedArtifact)
-			if err != nil {
+			var schemaErr *UnsupportedMetadataVersionError
+			if errors.As(err, &schemaErr) {
+				// A stored schema newer than this build is the same refusal the
+				// index selection reports; one diagnostic with the schema remedy.
+				p.reportMetadataRefusal(string(sid), schemaErr)
+			} else if err != nil {
 				p.reportDiagnostic(artifactRecoveryDiagnostic(path, err))
 			} else if changed {
 				p.reconciledArtifacts = append(p.reconciledArtifacts, sid)

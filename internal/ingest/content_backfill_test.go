@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -30,7 +31,8 @@ func TestRetainedContentBackfill(t *testing.T) {
 			Mismatch       bool   `yaml:"mismatch"`
 			Force          bool   `yaml:"force"`
 			Count          int    `yaml:"count"`
-			Error          bool   `yaml:"expect_error"`
+			Reported       bool   `yaml:"recovery_reported"`
+			Unchanged      bool   `yaml:"unchanged"`
 			Cursor         bool   `yaml:"cursor"`
 			InvalidProject bool   `yaml:"invalid_project"`
 		} `yaml:"cases"`
@@ -93,7 +95,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 						t.Fatal(err)
 					}
 					// The parent already has complete empty content; only the child is a recovery target.
-					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: parentID, RequireFullContent: true}})
+					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: parentID, Result: indexformat.V1{}, IndexVersion: 1, RequireFullContent: true}})
 					if writes[0].Err != nil {
 						t.Fatal(writes[0].Err)
 					}
@@ -164,9 +166,20 @@ func TestRetainedContentBackfill(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = pipeline.Run(ctx)
-			if (err != nil) != fixture.Error {
-				t.Fatalf("reindex error=%v expected error=%v", err, fixture.Error)
+			result, err := pipeline.Run(ctx)
+			if err != nil {
+				t.Fatalf("a failed recovery must not abort the run: %v", err)
+			}
+			// A refused or unavailable recovery is visible per session and names
+			// the session it preserved; every other session still recovers.
+			reported := false
+			for _, diagnostic := range result.Diagnostics {
+				if (diagnostic.ErrorType == "content_recovery_unavailable" || diagnostic.ErrorType == "content_recovery_refused") && strings.Contains(diagnostic.Location, ids[0].String()) && strings.Contains(diagnostic.Message, "preserved") {
+					reported = true
+				}
+			}
+			if reported != fixture.Reported {
+				t.Fatalf("recovery failure reported=%t, expected=%t; diagnostics=%+v", reported, fixture.Reported, result.Diagnostics)
 			}
 			if err := fs.RemoveAll(testOutputDir); err != nil {
 				t.Fatal(err)
@@ -178,7 +191,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 						t.Fatalf("Cursor annotation anchor lost: %v %v", annotations, err)
 					}
 				}
-				if fixture.Error && i == 0 {
+				if fixture.Unchanged && i == 0 {
 					after, err := database.ListEntries(ctx, id)
 					if err != nil {
 						t.Fatal(err)

@@ -171,8 +171,17 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 				t.Fatalf("metric refresh changed nonfatal pipeline outcome: %+v %v", result, err)
 			}
 			if row.WantDiagnostic == "" {
-				if len(result.Diagnostics) != 0 {
-					t.Fatalf("successful metrics produced warning: %+v", result.Diagnostics)
+				// The forced run tries native input first; the fixture's recorded
+				// source is synthetic and absent, so that warning is expected and
+				// is not a metrics diagnostic.
+				var unexpected []ingest.DiagnosticEntry
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.ErrorType != "native_refresh_unavailable" {
+						unexpected = append(unexpected, diagnostic)
+					}
+				}
+				if len(unexpected) != 0 {
+					t.Fatalf("successful metrics produced warning: %+v", unexpected)
 				}
 			} else {
 				found := false
