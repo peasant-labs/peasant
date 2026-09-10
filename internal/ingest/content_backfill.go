@@ -176,6 +176,10 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 					return recovered, cancelErr
 				}
+				if isMetadataCompatibilityError(err) {
+					p.reportMetadataRefusal(string(id), err)
+					continue
+				}
 				var mismatch *ContentShapeMismatchError
 				if p.config.Force && errors.As(err, &mismatch) {
 					// The forced run replaces this projection through the ordinary
@@ -244,6 +248,16 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 		}
 		harness, err := captureHarness(provider)
 		if err != nil {
+			return contentRecovery{}, err
+		}
+		// Without a retained artifact the only content input is the native
+		// source. Substituting native data under a stored producer needs the
+		// compatibility this build demands before any rewrite: a stored
+		// adapter revision newer than this build refuses the read here, so the
+		// newer producer is not downgraded and the original source is not
+		// touched. The refusal is a compatibility error, reported once through
+		// the same funnel as every other refusal of this session.
+		if err := p.checkStoredRewriteVersion(ctx, id, harness); err != nil {
 			return contentRecovery{}, err
 		}
 		if path == "" {

@@ -104,10 +104,13 @@ cases:
   - <<: *claude
     name: disappeared_source_during_extraction
     disappear_during_extract: true
+  # The interrupted metadata write leaves a pending publication that the next
+  # invocation recovers from its intent, so the forced reindex has a retained
+  # pair to index; the verified capture keeps the session ready throughout.
   - <<: *claude
     name: optional_metadata_write_failure_still_ready
     fail_sidecar: true
-    expected_manual_indexed: 0
+    expected_manual_indexed: 1
     expected_manual_readiness: ready
   - <<: *claude
     name: changed_source_updates_metadata_and_entries
@@ -140,11 +143,17 @@ cases:
     name: reindex_unreadable_old_entries_ready
     reindex_remove_source: true
     reindex_unreadable_entries: true
+  # The managed transcript no longer matches its committed metadata and the
+  # native source is gone: the reindex is held. It refuses the pair with a
+  # warning, writes nothing, and the run does not fail; the last-good index,
+  # the verified capture and its publication binding stay exactly as they
+  # were, so the session still reads as ready from the store.
   - <<: *claude
     name: reindex_changed_fallback_held
     reindex_remove_source: true
     reindex_change_managed: true
-    expected_manual_readiness: needs_ingest
+    expected_manual_indexed: 0
+    expected_manual_readiness: ready
   - <<: *claude
     name: reindex_stale_source_capture_held
     reindex_concurrent_capture: true

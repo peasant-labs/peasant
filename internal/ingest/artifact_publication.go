@@ -278,6 +278,17 @@ func (p *ArtifactPublisher) Capture(ctx context.Context, sid SessionID, metadata
 // database snapshot. The callback must release database resources before return;
 // redaction/network I/O belongs outside it. No recovery or lock creation occurs.
 func (p *ArtifactPublisher) WithCapture(ctx context.Context, sid SessionID, metadataPath string, use func(*ManagedArtifact) error) error {
+	return p.WithVerifiedCapture(ctx, sid, metadataPath, nil, use)
+}
+
+// WithVerifiedCapture is WithCapture for a caller that already read the
+// transcript bytes it intends to parse and verified them. The committed
+// metadata is read under the same read ownership and paired with those bytes,
+// so a transcript that moved on disk after the verification does not replace
+// what was verified, and metadata that no longer describes the bytes refuses
+// the pair the same way a mismatched pair on disk is refused. A nil transcript
+// reads the committed transcript.
+func (p *ArtifactPublisher) WithVerifiedCapture(ctx context.Context, sid SessionID, metadataPath string, transcript []byte, use func(*ManagedArtifact) error) error {
 	if use == nil {
 		return fmt.Errorf("capture managed artifact: missing snapshot consumer; no file was changed")
 	}
@@ -294,14 +305,70 @@ func (p *ArtifactPublisher) WithCapture(ctx context.Context, sid SessionID, meta
 	if err := refusePendingArtifact(root, artifactKey(sid)); err != nil {
 		return err
 	}
-	artifact, err := readArtifactPair(root, path, sid)
+	artifact, err := readArtifactPairWith(root, path, sid, transcript)
 	if err != nil {
 		return err
 	}
 	return use(artifact)
 }
 
+// WithCommittedIdentity retains read ownership while use runs and hands it
+// the identity of the committed artifact as its committed metadata declares
+// it. The metadata's own content checksum stands in for hashing the transcript
+// file, so a transcript that moved on disk after a verified read leaves the
+// identity as it was, while a replaced pair, whose metadata is rewritten,
+// changes it. Metadata that carries no content checksum is identified by
+// reading the pair.
+func (p *ArtifactPublisher) WithCommittedIdentity(ctx context.Context, sid SessionID, metadataPath string, use func(artifactHash string) error) error {
+	if use == nil {
+		return fmt.Errorf("identify managed artifact: missing identity consumer; no file was changed")
+	}
+	path, err := p.relativeMetadataPath(metadataPath, sid)
+	if err != nil {
+		return err
+	}
+	root, lock, err := p.lockedRoot(ctx, artifactKey(sid), ArtifactLockRead, false)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	defer lock.Close()
+	if err := refusePendingArtifact(root, artifactKey(sid)); err != nil {
+		return err
+	}
+	data, err := root.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	meta, err := decodeManagedMetadata(data, path)
+	if err != nil {
+		return err
+	}
+	if meta.SessionID != sid {
+		return fmt.Errorf("identify session %s: metadata names different session %s; preserve the files and restore the correct locator", sid, meta.SessionID)
+	}
+	if meta.ContentHash == "" {
+		artifact, err := readArtifactPairWith(root, path, sid, nil)
+		if err != nil {
+			return err
+		}
+		return use(artifact.ArtifactHash)
+	}
+	semantic, err := artifactSemanticJSON(data, meta.ContentHash)
+	if err != nil {
+		return err
+	}
+	return use(schema.ComputeTranscriptHash(semantic))
+}
+
 func readArtifactPair(root ArtifactRoot, metadataPath string, sid SessionID) (*ManagedArtifact, error) {
+	return readArtifactPairWith(root, metadataPath, sid, nil)
+}
+
+// readArtifactPairWith reads and validates the committed pair. A non-nil
+// transcript stands in for the committed transcript file: the caller verified
+// those bytes, and the committed metadata must still describe them.
+func readArtifactPairWith(root ArtifactRoot, metadataPath string, sid SessionID, transcript []byte) (*ManagedArtifact, error) {
 	data, err := root.ReadFile(metadataPath)
 	if err != nil {
 		return nil, err
@@ -323,10 +390,12 @@ func readArtifactPair(root ArtifactRoot, metadataPath string, sid SessionID) (*M
 	if meta.Source.Format != SourceFormatJSON && meta.Source.Format != SourceFormatJSONL {
 		return nil, fmt.Errorf("capture session %s: unsupported transcript format %q; no transcript was read", sid, meta.Source.Format)
 	}
-	transcriptPath := filepath.Join(filepath.Dir(metadataPath), string(sid)+"--transcript."+string(meta.Source.Format))
-	transcript, err := root.ReadFile(transcriptPath)
-	if err != nil {
-		return nil, err
+	if transcript == nil {
+		transcriptPath := filepath.Join(filepath.Dir(metadataPath), string(sid)+"--transcript."+string(meta.Source.Format))
+		transcript, err = root.ReadFile(transcriptPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return NewManagedArtifact(data, transcript)
 }
