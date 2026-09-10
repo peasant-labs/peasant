@@ -10,9 +10,9 @@ package consumers, and why the Nix hash gate sits before tag publication — see
 [Release Architecture](release-architecture.md).
 
 > **Status:** the release pipeline is configured and locally validated. The first
-> public-root tag used the exact `v0.1.0` initial-final bootstrap. Downstream AUR and
-> Homebrew publication stays disabled until the publication checklist is complete
-> (`skip_upload: true`).
+> public-root tag used the exact `v0.1.0` initial-final bootstrap. The Homebrew cask
+> now publishes on final tags (`skip_upload: "auto"`). AUR publication stays disabled
+> until its publication checklist is complete (`skip_upload: "true"`).
 
 ---
 
@@ -242,11 +242,15 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
 3. `release.yml` runs; the **guard** job verifies the release App actor and tag grammar,
    followed by the tag-time **nix-vendor-hash** freshness gate and the full-stack
    e2e and installed-package release e2e publication gates. On success goreleaser
-   publishes a **full** (non-prerelease) Release. AUR and Homebrew remain untouched
-   while their explicit `skip_upload: true` safety settings remain in force. The smoke
-   job re-checks static linkage + `peasant version`.
-4. Verify the full Release and complete artifact set. Verify AUR, the tap, and nixpkgs
-   only after their separate publication checklist items are approved and enabled.
+   publishes a **full** (non-prerelease) Release and pushes the Homebrew cask to the
+   tap (`skip_upload: "auto"`). AUR remains untouched while its `skip_upload: "true"`
+   safety setting stays in force. The smoke job re-checks static linkage +
+   `peasant version`, and the **macos-cask-smoke** job installs the just-published
+   cask and asserts its version.
+4. Verify the full Release and complete artifact set, including the cask pushed to the
+   tap (the macOS cask-smoke job also asserts `brew install --cask peasant`). Verify
+   AUR and nixpkgs only after their separate publication checklist items are approved
+   and enabled.
 
 ---
 
@@ -316,8 +320,9 @@ Run these, in order, when enabling external package publication.
         `Peasant Labs <admin@peasantlabs.org>` (obfuscated where AUR requires it).
         Neither bot identity is a maintainer contact.
 - [x] Make the repository **public**.
-- [ ] Confirm the GitHub App has `Contents: write` on `peasant-labs/peasant` and
-      `peasant-labs/homebrew-tap` (§2).
+- [x] Confirm the GitHub App has `Contents: write` on `peasant-labs/peasant` and
+      `peasant-labs/homebrew-tap` (§2). Satisfied by the org-wide App installation
+      (`repository_selection: all`).
 - [x] Configure branch protection on `develop` as defense-in-depth. Do not add the
       self-approval gate while the single-maintainer constraint remains.
 - [x] Configure the `v*` tag ruleset so only GitHub App ID `3988034`
@@ -328,12 +333,15 @@ Run these, in order, when enabling external package publication.
       `goreleaser` push to `ssh://aur@aur.archlinux.org/peasant-bin.git` **creates**
       the package (no web form). The first AUR push must use a separately approved
       later final release; `v0.1.0` keeps uploads disabled.
-- [ ] **Homebrew tap:** create the `peasant-labs/homebrew-tap` repository and grant
-      the App `Contents: write` on it. `release.yml` mints the short-lived tap token
-      at release time; there is no long-lived `TAP_GITHUB_TOKEN` secret.
-- [ ] **Flip `skip_upload`:** change `aurs` and `homebrew_casks` `skip_upload` from
-      `true` to **`auto`** in `.goreleaser.yml`. (`auto` additionally keeps prereleases
-      off the package repos forever — rc tags never touch AUR/tap.)
+- [x] **Homebrew tap:** the `peasant-labs/homebrew-tap` repository exists and the App
+      has `Contents: write` on it (org-wide install). `release.yml` mints the
+      short-lived tap token at release time; there is no long-lived `TAP_GITHUB_TOKEN`
+      secret.
+- [x] **Flip `homebrew_casks` `skip_upload`:** set to **`auto`** in `.goreleaser.yml`
+      (publishes the cask on final tags; `auto` keeps prereleases off the tap forever —
+      rc tags never touch the tap).
+- [ ] **Flip `aurs` `skip_upload`:** change from `true` to **`auto`** once AUR
+      publishing is approved and `AUR_KEY` is set. It stays `true` until then.
 - [ ] **nixpkgs:** open the `pkgs/by-name/pe/peasant/package.nix` PR (requires public
       repo + finalized license + a tagged release). Add yourself to the maintainer
       list; use `versionCheckHook` + `nix-update-script`.
@@ -354,7 +362,7 @@ documentation are part of the current release contract rather than this list.
 1. **macOS native install** — Developer ID signing + notarization (quill-from-Linux is
    feasible, ~1–2 days once the Apple account + $99/yr entity exist) and a notarized
    `.pkg`. Raw browser downloads currently require the manual `xattr` step in the
-   macOS install guide; the cask hook takes over only after Homebrew publication.
+   macOS install guide; cask installs clear it automatically via the post-install hook.
 2. **SBOM** generation for release artifacts.
 3. **Build provenance / artifact attestations**.
 4. **cosign** signing of artifacts.
