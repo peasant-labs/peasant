@@ -11,9 +11,15 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// SeedManagedInput establishes actual publication and parser evidence for a
-// test-owned retained transcript. It never stamps a proof over manual rows.
-func SeedManagedInput(t *testing.T, db *store.Store, fs ingest.FileSystem, output string, meta ingest.UnifiedMetadata, data []byte) []schema.SessionEntry {
+// SeedManagedArtifact publishes and mirrors a test-owned managed artifact and
+// stops there. It leaves the state a completed publication leaves behind and no
+// index evidence at all, which is the retained-but-not-yet-indexed session a
+// harvest still has real work to do on.
+//
+// It returns the publisher, the discovered session, and the managed metadata
+// path, so a caller that needs the rest of a completed harvest can continue
+// from the same publication.
+func SeedManagedArtifact(t *testing.T, db *store.Store, fs ingest.FileSystem, output string, meta ingest.UnifiedMetadata, data []byte) (*ingest.ArtifactPublisher, ingest.DiscoveredSession, string) {
 	t.Helper()
 	ctx := t.Context()
 	meta.SchemaVersion = ingest.CurrentSchemaVersion
@@ -48,8 +54,18 @@ func SeedManagedInput(t *testing.T, db *store.Store, fs ingest.FileSystem, outpu
 	if _, err := publisher.Reconcile(ctx, committed); err != nil {
 		t.Fatal(err)
 	}
+	return publisher, session, path
+}
+
+// SeedManagedInput establishes actual publication and parser evidence for a
+// test-owned retained transcript. It never stamps a proof over manual rows.
+func SeedManagedInput(t *testing.T, db *store.Store, fs ingest.FileSystem, output string, meta ingest.UnifiedMetadata, data []byte) []schema.SessionEntry {
+	t.Helper()
+	ctx := t.Context()
+	meta.SchemaVersion = ingest.CurrentSchemaVersion
+	publisher, session, path := SeedManagedArtifact(t, db, fs, output, meta, data)
 	var entries []schema.SessionEntry
-	err = publisher.WithCapture(ctx, meta.SessionID, path, func(current *ingest.ManagedArtifact) error {
+	err := publisher.WithCapture(ctx, meta.SessionID, path, func(current *ingest.ManagedArtifact) error {
 		state, err := db.ReadIndexState(ctx, meta.SessionID)
 		if err != nil {
 			return err
