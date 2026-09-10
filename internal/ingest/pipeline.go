@@ -1372,6 +1372,9 @@ type indexParseResult struct {
 	// recorded reason is strictRefusal. Previews show it; nothing certifies it.
 	partial       bool
 	strictRefusal string
+	// refusalCode is why the strict parser refused, as the value the selector
+	// reads back to decide that re-trying cannot help.
+	refusalCode   ContentCaptureFailureCode
 	im            indexedMeta
 	input         *CapturedIndexInput
 	output        indexformat.Result
@@ -1380,6 +1383,40 @@ type indexParseResult struct {
 	logEntry      IndexLogEntry
 	parseDuration time.Duration
 	bytes         int64
+}
+
+// permanentRefusalCode names the refusal when this build can never clear it,
+// and ContentCaptureNoFailure when it might.
+//
+// A session whose retained transcript is marked as missing records is refused
+// for that reason whatever else the parser would have said, so it is checked
+// first: the strict parser stops at the omission before it can reach a record
+// it does not represent.
+func permanentRefusalCode(session DiscoveredSession, err error) ContentCaptureFailureCode {
+	if session.ContentOmitted {
+		return ContentCaptureOversizedRecordOmitted
+	}
+	var unrepresented *UnrepresentedRecordError
+	if errors.As(err, &unrepresented) {
+		return ContentCaptureStrictRefused
+	}
+	return ContentCaptureNoFailure
+}
+
+// permanentRefusalDiagnostic tells the user what was stored and what it costs
+// them, in the words of the cause. Both causes leave previews working and
+// both refuse export and publication; they differ in what would fix them, and
+// for an omitted record nothing the user does to this transcript will.
+func permanentRefusalDiagnostic(sid SessionID, code ContentCaptureFailureCode, err error) DiagnosticEntry {
+	entry := DiagnosticEntry{
+		ErrorType: "content_capture_incomplete", Location: string(sid),
+		Message:     fmt.Sprintf("index session %s: the strict parser refused the transcript: %v; the represented entries were stored as an incomplete capture, so previews show them while export and publication stay refused until a complete capture exists", sid, err),
+		Remediation: "Regenerate the source with a supported harness version or upgrade Peasant so every record is represented, then rerun harvest index --force.",
+	}
+	if code == ContentCaptureOversizedRecordOmitted {
+		entry.Remediation = "Nothing in this transcript can be repaired: the oversized record was removed at ingest and the same source omits it again. Recover the session from a source that keeps records this long, or accept the stored preview."
+	}
+	return entry
 }
 
 // exceedsIndexWriteBudget reports whether the pending write batch must be
@@ -1578,22 +1615,26 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
 			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
-			// A refusal over a well-formed record this build does not represent is
-			// not an empty store: the represented entries are stored as an
-			// incomplete capture so previews can show them, export and publication
-			// stay refused until a complete capture exists, and the refusal is
-			// recorded with the capture and reported once. A malformed transcript
-			// stays a visible error.
-			var unrepresented *UnrepresentedRecordError
-			if _, strict := indexer.(AuthoritativeTranscriptIndexer); err != nil && strict && declared == strictIndexFormat && ctx.Err() == nil && errors.As(err, &unrepresented) {
-				if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
-					result.partial, result.strictRefusal = true, err.Error()
-					p.reportDiagnostic(DiagnosticEntry{
-						ErrorType: "content_capture_incomplete", Location: string(im.session.SessionID),
-						Message:     fmt.Sprintf("index session %s: the strict parser refused the transcript: %v; the represented entries were stored as an incomplete capture, so previews show them while export and publication stay refused until a complete capture exists", im.session.SessionID, err),
-						Remediation: "Regenerate the source with a supported harness version or upgrade Peasant so every record is represented, then rerun harvest index --force.",
-					})
-					output, err = tolerant, nil
+			// A refusal NOTHING ABOUT THIS BUILD CAN LIFT is not an empty store:
+			// the represented entries are stored as an incomplete capture so
+			// previews can show them, export and publication stay refused until a
+			// complete capture exists, and the refusal is recorded with the
+			// capture and reported once. A malformed transcript stays a visible
+			// error.
+			//
+			// Two causes qualify. The strict parser met a well-formed record this
+			// build does not represent; or the retained transcript is KNOWN to be
+			// missing records, because ingest removed a source record longer than
+			// the scanner's line limit before writing the artifact. Re-reading
+			// either one gives the same answer, and re-harvesting the same source
+			// omits the same record again.
+			if _, strict := indexer.(AuthoritativeTranscriptIndexer); err != nil && strict && declared == strictIndexFormat && ctx.Err() == nil {
+				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
+					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
+						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
+						p.reportDiagnostic(permanentRefusalDiagnostic(im.session.SessionID, code, err))
+						output, err = tolerant, nil
+					}
 				}
 			}
 		} else {
@@ -1704,7 +1745,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
-			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatPreviewOnly, CapturedAtMs: nowMs, FailureCode: ContentCaptureStrictRefused, FailureMessage: result.strictRefusal}
+			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatPreviewOnly, CapturedAtMs: nowMs, FailureCode: result.refusalCode, FailureMessage: result.strictRefusal}
 		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,

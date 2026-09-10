@@ -1,11 +1,14 @@
-# A strict refusal this build cannot lift must reach a STEADY STATE.
+# A refusal this build cannot lift must reach a STEADY STATE.
 #
-# A Strike transcript carrying one well-formed event kind this build does not
-# represent is captured incomplete: the strict parser refuses it and the
-# tolerant projection is stored instead. That is correct and final for this
-# build. What must not happen is the run treating it as pending work forever,
-# re-reading the retained file and warning the user again on every harvest
-# about a condition they cannot act on until Peasant is upgraded.
+# Two causes qualify, and both are captured incomplete with the tolerant
+# projection stored instead: a Strike transcript carrying one well-formed event
+# kind this build does not represent, and a retained transcript KNOWN to be
+# missing records because ingest removed one longer than the scanner line limit
+# before writing the artifact. Both are correct and final for this build; the
+# second is final for any build reading the same source, which omits the same
+# record again. What must not happen is the run treating either as pending work
+# forever, re-reading the retained file and warning the user again on every
+# harvest about a condition they cannot act on.
 #
 # Each case harvests TWICE over one file system and database and states what
 # the SECOND harvest owes: how many diagnostics name the session, and how many
@@ -19,6 +22,7 @@ required_names:
   - a-newer-indexer-lifts-the-refusal
   - changed-bytes-lift-the-refusal
   - a-capture-nothing-refused-is-still-certified
+  - an-omitted-oversized-record-settles-after-one-harvest
 transcript: |
   {"type":"session.started","time":"2026-07-28T12:34:56Z","data":{"model":"synthetic-model","version":"0.1.0"}}
   {"type":"user.message","time":"2026-07-28T12:34:57Z","data":{"turnId":"turn-1","content":"Inspect the retained fixture."}}
@@ -57,6 +61,21 @@ cases:
   - name: a-capture-nothing-refused-is-still-certified
     legacy_preview_capture: true
 
+  # The SECOND permanent cause. Ingest removes a source record longer than the
+  # scanner's line limit before writing the artifact and records that in the
+  # metadata as a record_too_large warning, which is what marks the retained
+  # transcript as missing rows. The strict parser refuses such a transcript
+  # however often it is re-read, and re-harvesting the same source omits the
+  # same record again, so nothing the user does to this session can lift it.
+  #
+  # The fixture arranges the shipped state directly - the warning in the
+  # metadata - rather than writing a record over the limit, because that
+  # warning IS the signal production reads.
+  - name: an-omitted-oversized-record-settles-after-one-harvest
+    omitted_record: true
+    second_harvest_diagnostics: 0
+    second_harvest_retained_reads: 0
+
 # THE PREDICATE ITSELF.
 #
 # The cases above drive whole harvests, and a harvest cannot cheaply arrange
@@ -70,6 +89,7 @@ settled_required_names:
   - a-refusal-under-an-older-producer-is-not-settled
   - a-refusal-with-no-input-proof-is-not-settled
   - a-migrated-legacy-capture-is-not-settled
+  - an-omitted-record-refusal-is-settled
 settled_cases:
   - name: a-recorded-refusal-at-the-current-producer-is-settled
     failure_code: strict_capture_refused
@@ -107,3 +127,10 @@ settled_cases:
     target_indexer_version: 16
     input_proof: true
     settled: false
+  # The second permanent cause reaches the same steady state as the first.
+  - name: an-omitted-record-refusal-is-settled
+    failure_code: oversized_record_omitted
+    stored_indexer_version: 16
+    target_indexer_version: 16
+    input_proof: true
+    settled: true

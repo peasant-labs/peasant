@@ -168,7 +168,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			// strictly, be refused the same way, and warn the user about a
 			// condition they cannot act on until Peasant is upgraded. The index
 			// path still evaluates the session, so changed bytes are still seen.
-			if strictRefusalIsSettled(state, p.versionTargets()[state.Harness]) {
+			if permanentRefusalIsSettled(state, p.versionTargets()[state.Harness]) {
 				continue
 			}
 			recovery, err := p.backfillContentSession(ctx, store, id, state)

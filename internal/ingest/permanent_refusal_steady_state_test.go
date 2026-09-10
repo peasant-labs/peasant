@@ -13,13 +13,14 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/strict_refusal_steady_state.yaml
-var strictRefusalSteadyStateFixtureData []byte
+//go:embed testdata/permanent_refusal_steady_state.yaml
+var permanentRefusalSteadyStateFixtureData []byte
 
-type strictRefusalFixtures struct {
+type permanentRefusalFixtures struct {
 	Required   []string `yaml:"required_names"`
 	Transcript string   `yaml:"transcript"`
 	Record     string   `yaml:"unrepresented_record"`
@@ -28,12 +29,13 @@ type strictRefusalFixtures struct {
 		BumpIndexer  bool   `yaml:"bump_indexer"`
 		AppendRecord bool   `yaml:"append_record"`
 		Legacy       bool   `yaml:"legacy_preview_capture"`
+		Omitted      bool   `yaml:"omitted_record"`
 		Diagnostics  int    `yaml:"second_harvest_diagnostics"`
 		Reads        int    `yaml:"second_harvest_retained_reads"`
 	} `yaml:"cases"`
 }
 
-// TestStrictRefusalReachesASteadyState holds what a refusal this build cannot
+// TestPermanentRefusalReachesASteadyState holds what a refusal this build cannot
 // lift costs on the harvest after the one that recorded it.
 //
 // A Strike transcript carrying one well-formed event kind this build does not
@@ -43,21 +45,21 @@ type strictRefusalFixtures struct {
 // and owe the user no new warning. Both are asserted: a run that stopped
 // warning while still re-reading, and one that stopped working while still
 // warning, are each wrong in a way the other assertion cannot see.
-func TestStrictRefusalReachesASteadyState(t *testing.T) {
-	var fixtures strictRefusalFixtures
-	if err := yaml.Unmarshal(strictRefusalSteadyStateFixtureData, &fixtures); err != nil {
+func TestPermanentRefusalReachesASteadyState(t *testing.T) {
+	var fixtures permanentRefusalFixtures
+	if err := yaml.Unmarshal(permanentRefusalSteadyStateFixtureData, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
-			t.Fatalf("empty or duplicate strict refusal fixture %q", fixture.Name)
+			t.Fatalf("empty or duplicate permanent refusal fixture %q", fixture.Name)
 		}
 		names[fixture.Name] = true
 	}
 	for _, name := range fixtures.Required {
 		if !names[name] {
-			t.Fatalf("missing strict refusal fixture %s", name)
+			t.Fatalf("missing permanent refusal fixture %s", name)
 		}
 	}
 	for _, fixture := range fixtures.Cases {
@@ -76,6 +78,16 @@ func TestStrictRefusalReachesASteadyState(t *testing.T) {
 			meta := makeMinimalMeta(t, id.String())
 			meta.Project.Hash = testutil.TestProjectHash
 			meta.ModelHarness = ingest.HarnessStrike
+			if fixture.Omitted {
+				// The state ingest leaves when it removes a record longer than the
+				// scanner's line limit: the artifact is short that record and the
+				// metadata says so. captureContentOmitted reads exactly this.
+				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, schema.DiagnosticEntry{
+					ErrorType: "record_too_large", Location: "line 5",
+					Message:     "a source record exceeded the scanner line limit and was removed before redaction",
+					Remediation: "rerun peasant ingest from a source that keeps records this long",
+				})
+			}
 			dir := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String())
 			path := filepath.Join(dir, id.String()+"--transcript.jsonl")
 			meta.Source.FilePath = "/synthetic/strike-source.jsonl"
@@ -84,7 +96,10 @@ func TestStrictRefusalReachesASteadyState(t *testing.T) {
 			// carries no failure code, which is exactly what separates it from a
 			// refusal: it must still be certified, once.
 			transcript := fixtures.Transcript
-			if !fixture.Legacy {
+			if fixture.Omitted {
+				// The transcript itself is well formed: what makes it incomplete is
+				// the record that is NOT in it.
+			} else if !fixture.Legacy {
 				transcript += fixtures.Record + "\n"
 			}
 			if err := fs.WriteFile(path, []byte(transcript), 0600); err != nil {
@@ -145,8 +160,12 @@ func TestStrictRefusalReachesASteadyState(t *testing.T) {
 			if capture.Status == ingest.ContentCaptureComplete {
 				t.Fatalf("a refused transcript was certified complete: %+v", capture)
 			}
-			if capture.FailureCode != ingest.ContentCaptureStrictRefused {
-				t.Fatalf("the refusal was stored as %q, so nothing later can tell it apart from a capture that was never certified", capture.FailureCode)
+			wantCode := ingest.ContentCaptureStrictRefused
+			if fixture.Omitted {
+				wantCode = ingest.ContentCaptureOversizedRecordOmitted
+			}
+			if capture.FailureCode != wantCode {
+				t.Fatalf("the refusal was stored as %q, want %q; nothing later can tell a refusal apart from a capture that was never certified unless its cause is recorded", capture.FailureCode, wantCode)
 			}
 
 			// What changed between the harvests, if anything.

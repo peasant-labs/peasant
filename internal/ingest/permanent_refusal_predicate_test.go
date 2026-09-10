@@ -7,10 +7,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/strict_refusal_steady_state.yaml
-var strictRefusalSteadyStateCorpus []byte
+//go:embed testdata/permanent_refusal_steady_state.yaml
+var permanentRefusalSteadyStateCorpus []byte
 
-type strictRefusalSettledFixtures struct {
+type permanentRefusalSettledFixtures struct {
 	Required []string `yaml:"settled_required_names"`
 	Cases    []struct {
 		Name          string `yaml:"name"`
@@ -22,7 +22,7 @@ type strictRefusalSettledFixtures struct {
 	} `yaml:"settled_cases"`
 }
 
-// TestStrictRefusalSettledPredicate holds each term of the rule that gives a
+// TestPermanentRefusalSettledPredicate holds each term of the rule that gives a
 // strict refusal a steady state.
 //
 // The harvest corpus proves the selector and the recovery sweep ask this
@@ -31,10 +31,10 @@ type strictRefusalSettledFixtures struct {
 // written with an input proof is the one that matters most, because without
 // the failure-code term it would look settled and the user would be left with
 // a preview forever.
-func TestStrictRefusalSettledPredicate(t *testing.T) {
+func TestPermanentRefusalSettledPredicate(t *testing.T) {
 	t.Parallel()
-	var fixtures strictRefusalSettledFixtures
-	if err := yaml.Unmarshal(strictRefusalSteadyStateCorpus, &fixtures); err != nil {
+	var fixtures permanentRefusalSettledFixtures
+	if err := yaml.Unmarshal(permanentRefusalSteadyStateCorpus, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	present := make(map[string]bool, len(fixtures.Cases))
@@ -44,7 +44,7 @@ func TestStrictRefusalSettledPredicate(t *testing.T) {
 		}
 		present[fixture.Name] = true
 	}
-	requireFixtureNames(t, "strict refusal settled predicate", fixtures.Required, present)
+	requireFixtureNames(t, "permanent refusal settled predicate", fixtures.Required, present)
 	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
@@ -61,7 +61,7 @@ func TestStrictRefusalSettledPredicate(t *testing.T) {
 				proof := "an input this parser already consumed"
 				state.IndexedInputHash = &proof
 			}
-			got := strictRefusalIsSettled(state, HarvesterVersions{IndexerVersion: fixture.TargetVersion})
+			got := permanentRefusalIsSettled(state, HarvesterVersions{IndexerVersion: fixture.TargetVersion})
 			if got != fixture.Settled {
 				t.Fatalf("a capture refused=%q stored at producer %d, target %d, input proof=%v is settled=%v, want %v",
 					fixture.FailureCode, fixture.StoredVersion, fixture.TargetVersion, fixture.InputProof, got, fixture.Settled)

@@ -61,6 +61,13 @@ const (
 	// input under the recorded producer, and the tolerant projection was stored
 	// instead. Previews show it; nothing certifies it.
 	ContentCaptureStrictRefused ContentCaptureFailureCode = "strict_capture_refused"
+	// ContentCaptureOversizedRecordOmitted means the retained transcript is
+	// KNOWN to be missing records: ingest removed a source record longer than
+	// the scanner's line limit before writing the artifact. The strict parser
+	// refuses such a transcript however it is re-read, and the source it came
+	// from omits the same record again, so this is permanent for this build in
+	// the same way a refused record is.
+	ContentCaptureOversizedRecordOmitted ContentCaptureFailureCode = "oversized_record_omitted"
 	// ContentCaptureLegacyPreviewOnly marks the captures the content-capture
 	// migration wrote for sessions that predate it. Nothing refused them; no
 	// build ever tried to certify them, so a build that can certify them owes
@@ -68,12 +75,17 @@ const (
 	ContentCaptureLegacyPreviewOnly ContentCaptureFailureCode = "legacy_preview_only"
 )
 
+// NewContentCaptureFailureCode returns the named code for a stored value, or
+// an error for any value this build cannot name. Callers at store boundaries
+// must treat that error as a refusal and never as the absent code: the
+// selector acts on this value, so an unknown code read as "no failure" would
+// put a session back into pending work on every harvest, forever.
 func NewContentCaptureFailureCode(s string) (ContentCaptureFailureCode, error) {
 	switch code := ContentCaptureFailureCode(s); code {
-	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureLegacyPreviewOnly:
+	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureOversizedRecordOmitted, ContentCaptureLegacyPreviewOnly:
 		return code, nil
 	}
-	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)
+	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused or oversized_record_omitted for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)
 }
 
 type ContentSourceAuthority string

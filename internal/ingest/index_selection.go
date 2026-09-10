@@ -33,25 +33,36 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 		// A refusal this build already recorded for this producer is a steady
 		// state too, and is excluded below.
 		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
-			!strictRefusalIsSettled(expected, target)
+			!permanentRefusalIsSettled(expected, target)
 }
 
-// strictRefusalIsSettled reports that the incomplete capture is as good as this
-// build can make it, so re-parsing it would fail the same way again.
+// permanentRefusalIsSettled reports that the incomplete capture is as good as
+// this build can make it, so re-parsing it would fail the same way again.
 //
-// The stored capture says the strict parser REFUSED this input, the producer
-// that refused it is the producer this build would use, and the bytes have not
-// moved. Nothing in that can change without a newer indexer or a changed
-// transcript, either of which lifts the steady state through the terms above:
-// a producer bump fails the version comparison, and new bytes fail the input
-// hash. Without this, a session holding one record this build cannot represent
-// is parsed strictly, parsed tolerantly, and re-stamped on every harvest, and
-// warns the user about a condition they cannot act on until Peasant is
-// upgraded.
-func strictRefusalIsSettled(expected *SessionIndexState, target HarvesterVersions) bool {
-	return expected.ContentFailureCode == ContentCaptureStrictRefused &&
+// The stored capture records a refusal NOTHING ABOUT THIS BUILD CAN LIFT: the
+// strict parser rejected a record it does not represent, or the retained
+// transcript is known to be missing a record ingest removed for being longer
+// than the scanner's line limit, and re-reading the same source omits it
+// again. The producer that recorded the refusal is the producer this build
+// would use, and the bytes have not moved.
+//
+// Either of the two things that could change the answer lifts the steady state
+// through the terms above: a newer indexer fails the version comparison, and
+// new bytes fail the input hash. Without this, such a session is parsed
+// strictly, parsed tolerantly and re-stamped on every harvest, and warns the
+// user about a condition they cannot act on until Peasant is upgraded.
+func permanentRefusalIsSettled(expected *SessionIndexState, target HarvesterVersions) bool {
+	return permanentCaptureRefusal(expected.ContentFailureCode) &&
 		expected.IndexerVersion >= target.IndexerVersion &&
 		expected.IndexedInputHash != nil
+}
+
+// permanentCaptureRefusal reports whether a recorded failure code is one this
+// build can never clear on its own. A capture nothing refused, and a capture
+// that predates content capture, are both PENDING work rather than settled:
+// they have simply never been tried by a build that could certify them.
+func permanentCaptureRefusal(code ContentCaptureFailureCode) bool {
+	return code == ContentCaptureStrictRefused || code == ContentCaptureOversizedRecordOmitted
 }
 
 // certifiesContent reports whether this build's indexer for the harness can
