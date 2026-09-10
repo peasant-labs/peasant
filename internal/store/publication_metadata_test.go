@@ -449,6 +449,32 @@ func TestPublicationBundleRetainsCurrentDurableAssociations(t *testing.T) {
 	}
 }
 
+// publicationRaceRounds is how many capture/index rounds the writer performs
+// while the reader keeps loading bundles. It decides how much interleaving the
+// test observes, not how long it may take.
+const publicationRaceRounds = 30
+
+// publicationRaceBudget bounds the interleaving loop so a genuine hang fails
+// this test instead of the whole binary. It is taken from the test's OWN
+// deadline rather than fixed: a fixed budget expires under ordinary
+// whole-package contention and interrupts a read that is still making
+// progress, which reads as a failure of the code under test and never
+// reproduces when the test runs alone. A margin is kept so this test reports
+// the hang itself rather than being killed with the binary.
+func publicationRaceBudget(t *testing.T) time.Duration {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		// `go test -timeout 0` sets no deadline. Guard against a hang anyway.
+		return 10 * time.Minute
+	}
+	budget := time.Until(deadline) - 30*time.Second
+	if budget < time.Second {
+		budget = time.Second
+	}
+	return budget
+}
+
 func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
@@ -461,11 +487,11 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	if result := indexPublication(t, s, e, revision, entries); result.Err != nil {
 		t.Fatal(result.Err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), publicationRaceBudget(t))
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		for i := 1; i <= 30; i++ {
+		for i := 1; i <= publicationRaceRounds; i++ {
 			m := *e.Metadata
 			m.Version = fmt.Sprintf("capture-%d", i)
 			m.MetadataHash = schema.ComputeMetadataHash(&m)
@@ -489,6 +515,9 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	for {
 		bundle, err := s.LoadPublicationInput(ctx, e.Metadata.SessionID)
 		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("the guard budget ran out before the writer finished its %d capture rounds: %v; the budget only exists to stop a hang, so this means the run is genuinely stuck rather than slow", publicationRaceRounds, err)
+			}
 			t.Fatal(err)
 		}
 		if bundle.Readiness == ingest.PublicationReady && (len(bundle.Entries) != 1 || bundle.Entries[0].ContentPreview == nil || *bundle.Entries[0].ContentPreview != bundle.Metadata.Version) {

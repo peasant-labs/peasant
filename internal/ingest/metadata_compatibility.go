@@ -11,13 +11,21 @@ import (
 	"strings"
 )
 
-// nativeRefreshMetadataVersion is the last metadata change that required
-// re-extracting native data. Version 10 adds optional producer evidence; reading
-// version 9 does not require source access, a rewrite, or a guessed adapter stamp.
-const nativeRefreshMetadataVersion = 9
-
+// metadataNeedsNativeRefresh reports whether a stored sidecar has to be rebuilt
+// from native data before this build can rely on it. It is the one rule, stated
+// once in metadata.go: a version whose only difference from the current one is
+// optional fields is read as it stands, and anything older is refreshed.
+//
+// An unreadable version is treated as needing a refresh. That is the safe
+// answer: it sends the session down the reporting refresh path, which preserves
+// the existing artifact and index, rather than certifying a version this build
+// cannot name.
 func metadataNeedsNativeRefresh(version int) bool {
-	return version < nativeRefreshMetadataVersion
+	recorded, err := newMetadataSchemaVersion(version)
+	if err != nil {
+		return true
+	}
+	return metadataNeedsRefresh(recorded, CurrentSchemaVersion)
 }
 
 func managedInputIOError(path string, err error) error {
@@ -205,7 +213,11 @@ func decodeManagedMetadataBody(data []byte) (*UnifiedMetadata, error) {
 // metadataForRewrite runs before --force or any adapter/source access. Corrupt
 // older metadata retains the existing re-extraction policy; known incompatible
 // metadata is not corruption and must never be overwritten by that recovery path.
-func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetadata, error) {
+//
+// ctx is the run's context, never a fresh background one: the metadata lookup
+// walks the managed output directory, so a cancelled run must stop reading the
+// filesystem here as it does everywhere else.
+func (p *Pipeline) metadataForRewrite(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.SchemaVersion > CurrentSchemaVersion {
 		return nil, &UnsupportedMetadataVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: loc.SchemaVersion}
 	}
@@ -215,7 +227,7 @@ func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetada
 			return nil, &AdapterVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: *loc.AdapterVersion, Target: target}
 		}
 	}
-	path, err := p.findMetadataPath(context.Background(), session)
+	path, err := p.findMetadataPath(ctx, session)
 	if err != nil {
 		return nil, err
 	}

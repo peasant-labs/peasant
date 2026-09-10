@@ -125,7 +125,7 @@ func (e *adapterAcquisitionError) Unwrap() error { return e.cause }
 // processSession keeps adapter preparation separate from publication failure.
 // Only failed native acquisition permits the last-good retained index fallback.
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
-	metadata, metadataErr := p.metadataForRewrite(entry.Session)
+	metadata, metadataErr := p.metadataForRewrite(ctx, entry.Session)
 	metadataPath, pathErr := p.findMetadataPath(ctx, entry.Session)
 	// A forced run is an explicit manual refresh and tries native input first;
 	// routine version-driven maintenance prefers sufficient retained input.

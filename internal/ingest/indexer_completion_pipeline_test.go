@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,8 +34,8 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 			t.Cleanup(func() { _ = database.Close() })
 			badID, goodID := schema.SessionID(testutil.TestSessionUUID), schema.SessionID(testutil.TestSessionUUID2)
 			beforeInputs := make(map[string][]byte)
-			seedCompletionPeer(t, filesystem, database, fixture.Harness, badID, fixture.Transcript, beforeInputs)
-			seedCompletionPeer(t, filesystem, database, fixture.Harness, goodID, fixture.HealthyTranscript, beforeInputs)
+			seedCompletionPeer(t, filesystem, database, fixture.Harness, badID, fixture.TranscriptIdentity.expandSessionPlaceholder(fixture.Transcript, badID), beforeInputs)
+			seedCompletionPeer(t, filesystem, database, fixture.Harness, goodID, fixture.TranscriptIdentity.expandSessionPlaceholder(fixture.HealthyTranscript, goodID), beforeInputs)
 			seedCompletionSourceFiles(t, filesystem, fixture.SourceRoot, badID, fixture.SourceFiles, beforeInputs)
 			seedCompletionSourceFiles(t, filesystem, fixture.SourceRoot, goodID, fixture.HealthySourceFiles, beforeInputs)
 			beforeEntries, err := database.ListEntries(t.Context(), badID)
@@ -58,9 +59,13 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Summary.Indexed != 1 || result.Summary.Errors != 0 || len(result.Diagnostics) != 1 || len(result.IndexLog) != 2 {
+			if result.Summary.Indexed != 1 || result.Summary.Errors != 0 || len(result.IndexLog) != 2 {
 				t.Fatalf("malformed session blocked its healthy sibling or hid its failure: %+v, diagnostics=%+v logs=%+v", result.Summary, result.Diagnostics, result.IndexLog)
 			}
+			assertCompletionDiagnostics(t, "first run", result.Diagnostics, map[schema.SessionID][]completionDiagnosticCode{
+				badID:  {diagnosticIndexRefused, diagnosticContentRecoveryUnavailable},
+				goodID: {diagnosticContentRecoveryUnavailable},
+			})
 			afterEntries, err := database.ListEntries(t.Context(), badID)
 			if err != nil || !reflect.DeepEqual(beforeEntries, afterEntries) {
 				t.Fatalf("partial parser output replaced last-good entries: %v", err)
@@ -80,9 +85,12 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if retry.Summary.Indexed != 0 || retry.Summary.Errors != 0 || len(retry.Diagnostics) != 1 || len(retry.IndexLog) != 1 || retry.IndexLog[0].SessionID != badID {
+			if retry.Summary.Indexed != 0 || retry.Summary.Errors != 0 || len(retry.IndexLog) != 1 || retry.IndexLog[0].SessionID != badID {
 				t.Fatalf("next invocation did not retry only the incomplete parser: %+v diagnostics=%+v logs=%+v", retry.Summary, retry.Diagnostics, retry.IndexLog)
 			}
+			assertCompletionDiagnostics(t, "retry", retry.Diagnostics, map[schema.SessionID][]completionDiagnosticCode{
+				badID: {diagnosticIndexRefused, diagnosticContentRecoveryUnavailable},
+			})
 			if after := readMetadataPolicyIndexState(t, database, goodID); after != goodState {
 				t.Fatal("retry unnecessarily re-indexed healthy session")
 			}
@@ -106,6 +114,62 @@ func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
 	for harness := range covered {
 		if _, ok := registry[harness]; !ok {
 			t.Errorf("unexpected fixture harness %s", harness)
+		}
+	}
+}
+
+// completionDiagnosticCode is the closed set of diagnostic codes a mixed
+// healthy/malformed run may report. A code outside this set is a change in
+// what the run tells the user and must be read before it is accepted, so the
+// assertion below refuses an unknown code rather than ignoring it.
+type completionDiagnosticCode string
+
+const (
+	// diagnosticIndexRefused reports the refused parse of the malformed peer.
+	diagnosticIndexRefused completionDiagnosticCode = "index_refused"
+	// diagnosticContentRecoveryUnavailable reports that complete content could
+	// not be recovered for a session whose stored index holds previews only.
+	// Both peers are seeded in exactly that state, and the malformed peer's
+	// transcript is the very thing the run must refuse, so this code is what
+	// the seed implies for both of them.
+	diagnosticContentRecoveryUnavailable completionDiagnosticCode = "content_recovery_unavailable"
+)
+
+// assertCompletionDiagnostics pins the exact SET of diagnostic codes each
+// session carries, which says more than a total count: it names which session
+// is refused, proves the healthy peer is never refused, and fails on any
+// diagnostic that names neither peer or names an unknown code.
+func assertCompletionDiagnostics(t *testing.T, stage string, diagnostics []schema.DiagnosticEntry, want map[schema.SessionID][]completionDiagnosticCode) {
+	t.Helper()
+	got := make(map[schema.SessionID][]completionDiagnosticCode, len(want))
+	for _, diagnostic := range diagnostics {
+		code := completionDiagnosticCode(diagnostic.ErrorType)
+		if code != diagnosticIndexRefused && code != diagnosticContentRecoveryUnavailable {
+			t.Fatalf("%s reported the unrecognised diagnostic code %q for %q; read the new diagnostic and either name it in completionDiagnosticCode or fix what produces it", stage, diagnostic.ErrorType, diagnostic.Location)
+		}
+		named := schema.SessionID("")
+		for sessionID := range want {
+			if strings.Contains(diagnostic.Location, string(sessionID)) {
+				named = sessionID
+			}
+		}
+		if named == "" {
+			t.Fatalf("%s reported %q at %q, which names neither peer under test; a diagnostic a user cannot attribute to a session is not usable", stage, diagnostic.ErrorType, diagnostic.Location)
+		}
+		got[named] = append(got[named], code)
+	}
+	for sessionID, expected := range want {
+		actual := append([]completionDiagnosticCode(nil), got[sessionID]...)
+		sorted := append([]completionDiagnosticCode(nil), expected...)
+		slices.Sort(actual)
+		slices.Sort(sorted)
+		if !slices.Equal(actual, sorted) {
+			t.Fatalf("%s reported %v for session %s, want exactly %v; the run must tell the user about this session precisely once for each cause", stage, actual, sessionID, sorted)
+		}
+	}
+	for sessionID := range got {
+		if _, expected := want[sessionID]; !expected {
+			t.Fatalf("%s reported %v for session %s, which was expected to carry no diagnostic at all", stage, got[sessionID], sessionID)
 		}
 	}
 }
@@ -141,7 +205,17 @@ func seedCompletionPeer(t *testing.T, filesystem *testutil.MemFS, database *stor
 	}
 	before[metadataPath] = data
 	previous := "last-good indexed content"
-	entries := []schema.SessionEntry{{SessionID: sessionID, Harness: harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &previous}}
+	entry := schema.SessionEntry{SessionID: sessionID, Harness: harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &previous}
+	if harness == ingest.HarnessPi {
+		// A Pi row carries typed evidence or the store refuses to decode it, so
+		// the last-good seed must be a row the harness could really have written.
+		extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry.Extra = extra
+	}
+	entries := []schema.SessionEntry{entry}
 	result := database.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[harness].IndexerVersion - 1, IndexedAtMs: 1700000000000}})
 	if !result[0].Written {
 		t.Fatalf("seed prior index: %v", result[0].Err)

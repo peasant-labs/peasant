@@ -29,6 +29,11 @@ import (
 //go:embed testdata/harvest_metadata_diagnostics.yaml
 var harvestMetadataDiagnosticsYAML []byte
 
+// harvestDiagnosticsProjectDir is the project directory the arranged session
+// ran in. It is the decoded form of the native source directory this corpus
+// writes, so the arrangement describes one coherent session.
+const harvestDiagnosticsProjectDir = "/synthetic/project"
+
 // An incompatible metadata artifact is a refusal for ONE session: the harvest
 // stays non-fatal, the last-good index and every artifact are left alone, and the
 // user is told what to upgrade. Two surfaces have to carry that, and they are
@@ -187,6 +192,14 @@ func arrangeHarvestDiagnostics(t *testing.T, fixtures harvestDiagnosticsFixtures
 		t.Fatal(err)
 	}
 	meta.SchemaVersion = fixture.SchemaVersion
+	// A recorded session knows the project directory it ran in, and the title
+	// metric uses that directory as its privacy context: without it the metric
+	// is omitted and the run emits a structured WARN. Every case here declares
+	// whether it emits one, and none of them is about a missing project path,
+	// so the arrangement records the directory this corpus's native source
+	// lives in. The assertion below keeps that a stated fact, not a hope.
+	worktree := harvestDiagnosticsProjectDir
+	meta.Git.Worktree, meta.Project.FilePath = &worktree, harvestDiagnosticsProjectDir
 	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 	files[metaPath], err = json.Marshal(meta)
 	if err != nil {
@@ -194,6 +207,23 @@ func arrangeHarvestDiagnostics(t *testing.T, fixtures harvestDiagnosticsFixtures
 	}
 	if err := os.WriteFile(metaPath, files[metaPath], 0600); err != nil {
 		t.Fatal(err)
+	}
+	// Refresh the stored rows so the project directory recorded above is the one
+	// the run reads back, then prove it: a session whose project path is empty
+	// makes the title metric warn, which would move a case's declared
+	// structured-log value for a reason that case is not about.
+	worktreeConn, err := db.Pool().Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sqlitex.ExecuteTransient(worktreeConn, "UPDATE sessions SET git_worktree = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{harvestDiagnosticsProjectDir, string(fixtures.SessionID)}})
+	db.Pool().Put(worktreeConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness, projectPath, err := db.GetTitleContext(t.Context(), fixtures.SessionID)
+	if err != nil || harness == "" || projectPath == "" {
+		t.Fatalf("the arranged session reports harness %q and project path %q (%v); both are the title metric's privacy context, and an empty one makes every indexing case emit a structured warning this corpus does not declare", harness, projectPath, err)
 	}
 	if fixture.SchemaVersion <= ingest.CurrentSchemaVersion {
 		// Settle the compatible artifact change before recording the
@@ -220,8 +250,13 @@ func arrangeHarvestDiagnostics(t *testing.T, fixtures harvestDiagnosticsFixtures
 	if err := os.WriteFile(nativePath, []byte(fixtures.Transcript), 0600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.UnixMilli(1700000000000)
-	if err := os.Chtimes(nativePath, old, old); err != nil {
+	// The retained recording carries a modification time NEWER than the stored
+	// session's ingest clock and old enough not to look active. A run trusts
+	// retained evidence when the native source has not moved since it was
+	// ingested, so a source frozen in the distant past would leave every case
+	// here with nothing to do, and the one case that indexes could not index.
+	changed := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(nativePath, changed, changed); err != nil {
 		t.Fatal(err)
 	}
 	files[nativePath] = []byte(fixtures.Transcript)

@@ -2157,7 +2157,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 	if err := ctx.Err(); err != nil {
 		return DiffNew, err
 	}
-	existingMeta, guardErr := p.metadataForRewrite(session)
+	existingMeta, guardErr := p.metadataForRewrite(ctx, session)
 	if guardErr != nil {
 		p.reportMetadataRefusal(string(session.SessionID), guardErr)
 		return DiffUnchanged, nil
@@ -2614,7 +2614,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		result.Status = DiffUnchanged
 		return workerResult{result: result}
 	}
-	if _, err := p.metadataForRewrite(session); err != nil {
+	if _, err := p.metadataForRewrite(ctx, session); err != nil {
 		p.reportMetadataRefusal(string(session.SessionID), err)
 		result.Status = DiffUnchanged
 		return workerResult{result: result}

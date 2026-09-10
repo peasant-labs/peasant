@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -73,6 +74,18 @@ func observeArtifactFiles(root ArtifactRoot, directory string, sid SessionID, de
 		}
 		names = append(names, filepath.Join(defaults.DirDebug.String(), name))
 	}
+	// The names above are what THIS run intends to write. A session directory
+	// can also still hold members of the same owned families that an earlier
+	// run wrote and this one no longer produces, and those are the session's
+	// own files just as much: observing them is what lets the publication
+	// retire them instead of leaving them beside the current artifact forever.
+	// Anything whose name is not one of peasant's own is not observed and so
+	// can never be touched.
+	stale, err := observeStaleOwnedNames(root, directory, sid, names)
+	if err != nil {
+		return nil, err
+	}
+	names = append(names, stale...)
 	versions := make([]artifactFileVersion, 0, len(names))
 	for _, name := range names {
 		path := filepath.Join(directory, name)
@@ -95,4 +108,41 @@ func observeArtifactFiles(root ArtifactRoot, directory string, sid SessionID, de
 		versions = append(versions, artifactFileVersion{Path: path, Hash: &hash})
 	}
 	return versions, nil
+}
+
+// observeStaleOwnedNames lists the owned files already in the session directory
+// whose names known does not already carry. It reads the directory and its
+// debug subdirectory only; a directory that is absent contributes nothing, and
+// a member the naming rule does not claim is skipped rather than refused,
+// because a publication must leave a user's own files alone.
+func observeStaleOwnedNames(root ArtifactRoot, directory string, sid SessionID, known []string) ([]string, error) {
+	var found []string
+	for _, sub := range []string{"", defaults.DirDebug.String()} {
+		listing := directory
+		if sub != "" {
+			listing = filepath.Join(directory, sub)
+		}
+		entries, err := root.ReadDir(listing)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, managedInputIOError(listing, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := filepath.Join(sub, entry.Name())
+			if slices.Contains(known, name) || slices.Contains(found, name) {
+				continue
+			}
+			if _, err := newArtifactOwnedFile(filepath.Join(directory, name), directory, sid); err != nil {
+				continue
+			}
+			found = append(found, name)
+		}
+	}
+	slices.Sort(found)
+	return found, nil
 }

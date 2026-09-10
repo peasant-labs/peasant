@@ -12,6 +12,13 @@
 # indexedRevision are the two sessions columns the binding predicate compares
 # against it. A zero publicationRevision means the session has no captured
 # publication metadata row at all.
+#
+# wantCaptureRevision is what the read may SAY the capture revision is. The
+# session row holds a counter; only a captured metadata row standing at that
+# counter is evidence of a capture, so a case whose row is absent, stands at a
+# different revision, or whose working directory was never recovered must read
+# as none. It is stated per case, never derived from the columns above, so a
+# rule change has to be written down here before it can pass.
 metadataHash: 1111111111111111111111111111111111111111111111111111111111111111
 contentHash: 2222222222222222222222222222222222222222222222222222222222222222
 requiredNames:
@@ -31,6 +38,7 @@ cases:
     indexedRevision: 7
     provenance: source_exact
     wantBound: true
+    wantCaptureRevision: recorded
     wantStatus: complete
     wantFormat: full
   - name: bound-with-preview-capture
@@ -40,6 +48,7 @@ cases:
     indexedRevision: 7
     provenance: source_workspace
     wantBound: true
+    wantCaptureRevision: recorded
     wantStatus: incomplete
     wantFormat: preview_only
   - name: unbound-by-session-revision
@@ -49,6 +58,7 @@ cases:
     indexedRevision: 7
     provenance: source_exact
     wantBound: false
+    wantCaptureRevision: none
     wantStatus: complete
     wantFormat: full
   # A realistic stale state: indexed at 6 while the metadata is now at 7. A
@@ -60,6 +70,7 @@ cases:
     indexedRevision: 6
     provenance: source_exact
     wantBound: false
+    wantCaptureRevision: recorded
     wantStatus: complete
     wantFormat: full
   - name: unbound-by-provenance
@@ -69,6 +80,7 @@ cases:
     indexedRevision: 7
     provenance: not_recovered
     wantBound: false
+    wantCaptureRevision: none
     wantStatus: complete
     wantFormat: full
   - name: unbound-without-metadata-row
@@ -78,6 +90,7 @@ cases:
     indexedRevision: 7
     provenance: source_exact
     wantBound: false
+    wantCaptureRevision: none
     wantStatus: complete
     wantFormat: full
   - name: no-capture-row-reads-incomplete
@@ -87,6 +100,7 @@ cases:
     indexedRevision: 7
     provenance: source_exact
     wantBound: true
+    wantCaptureRevision: recorded
     wantStatus: incomplete
   # The third capture status must read back through the new column too.
   - name: failed-capture-reads-failed
@@ -97,5 +111,6 @@ cases:
     indexedRevision: 7
     provenance: source_exact
     wantBound: true
+    wantCaptureRevision: recorded
     wantStatus: failed
     wantFormat: preview_only

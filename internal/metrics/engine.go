@@ -127,6 +127,63 @@ func (e *Engine) computeTitleWithContext(sessionID ingest.SessionID, entries []s
 	return &ingest.SessionMetrics{QualityMetrics: schema.QualityMetrics{TitleGenerated: &result.Text}}
 }
 
+// applyNativeSessionName overrides the generated title with the session name
+// the harness itself recorded, when the indexed rows carry one. It is the one
+// rule for both compute paths: the stored-input path and the older
+// list-entries path call it, so a session shows the same title whichever path
+// computed it, and a native name can never reach the store unsanitized.
+//
+// An explicit clear (a recorded empty name) clears the title rather than
+// falling back to generated prose: the user removed the name on purpose.
+// A recorded non-empty name is user-written text from outside Peasant, so it
+// passes the same title privacy policy as every outward title before it is
+// stored. resolveTitleContext is called only when there is a name to sanitize,
+// so a session with no native name costs no extra lookup.
+func (e *Engine) applyNativeSessionName(merged *ingest.SessionMetrics, indexed []schema.SessionEntry, resolveTitleContext func() (schema.Harness, string, error)) error {
+	nativeName, err := recordedNativeSessionName(indexed)
+	if err != nil {
+		return err
+	}
+	if nativeName == nil {
+		return nil
+	}
+	name := ""
+	if *nativeName != "" && e.titles != nil {
+		harness, projectPath, err := resolveTitleContext()
+		if err != nil {
+			return fmt.Errorf("read the title context of session %s before applying its recorded harness-native name: %w; prior metrics were preserved; restore the session's stored harness and project path, then recompute", merged.SessionID, err)
+		}
+		result, err := e.titles.Sanitize(*nativeName, redact.TitleContext{Harness: harness, ProjectPath: projectPath})
+		if err != nil {
+			return fmt.Errorf("apply the title privacy policy to the recorded harness-native name of session %s: %w; the unsanitized name was not stored; correct the policy input and recompute", merged.SessionID, err)
+		}
+		name = result.Text
+	}
+	merged.TitleGenerated = &name
+	return nil
+}
+
+// recordedNativeSessionName reports the last harness-native session name the
+// indexed rows carry, or nil when no row records one. A recorded empty name is
+// an explicit clear and is reported as a non-nil empty string, which is why the
+// result is a pointer.
+func recordedNativeSessionName(indexed []schema.SessionEntry) (*string, error) {
+	var nativeName *string
+	for _, entry := range indexed {
+		if entry.Harness != schema.HarnessPi {
+			continue
+		}
+		extra, _, err := ingest.DecodePiEntryExtra(entry)
+		if err != nil {
+			return nil, fmt.Errorf("read the typed evidence of indexed row %d of session %s while looking for its harness-native name: %w; prior metrics were preserved; reindex the session, then recompute", entry.EntryIndex, entry.SessionID, err)
+		}
+		if extra.SessionName != nil {
+			nativeName = extra.SessionName
+		}
+	}
+	return nativeName, nil
+}
+
 // SetForce enables or disables force mode. When true, ComputeMetrics
 // skips the compute_version check and recomputes all sessions.
 func (e *Engine) SetForce(force bool) {
@@ -217,20 +274,9 @@ func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.Session
 			continue
 		}
 
-		// Run all MetricFuncs and merge results.
-		var nativeName *string
-		for _, entry := range entries {
-			if entry.Harness != schema.HarnessPi {
-				continue
-			}
-			extra, _, decodeErr := ingest.DecodePiEntryExtra(entry)
-			if decodeErr != nil {
-				return computed, decodeErr
-			}
-			if extra.SessionName != nil {
-				nativeName = extra.SessionName
-			}
-		}
+		// Run all MetricFuncs and merge results. The native session name is
+		// read from every indexed row, not only the conversational ones.
+		indexed := entries
 		entries = ingest.ConversationalEntries(entries)
 		merged := &ingest.SessionMetrics{
 			SessionID: sid,
@@ -265,22 +311,10 @@ func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.Session
 				mergeSessionMetrics(merged, result)
 			}
 		}
-		if nativeName != nil {
-			// An explicit native name (including a clear) overrides generated prose.
-			// Use the same title privacy policy as every outward title consumer.
-			name := ""
-			if *nativeName != "" && e.titles != nil {
-				harness, projectPath, err := e.store.GetTitleContext(ctx, sid)
-				if err != nil {
-					return computed, err
-				}
-				result, err := e.titles.Sanitize(*nativeName, redact.TitleContext{Harness: harness, ProjectPath: projectPath})
-				if err != nil {
-					return computed, err
-				}
-				name = result.Text
-			}
-			merged.TitleGenerated = &name
+		if err := e.applyNativeSessionName(merged, indexed, func() (schema.Harness, string, error) {
+			return e.store.GetTitleContext(ctx, sid)
+		}); err != nil {
+			return computed, err
 		}
 
 		// Set metadata.

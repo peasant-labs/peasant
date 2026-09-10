@@ -83,6 +83,11 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 			mergeSessionMetrics(merged, result)
 		}
 	}
+	if err := e.applyNativeSessionName(merged, input.Entries, func() (schema.Harness, string, error) {
+		return input.Harness, input.ProjectPath, nil
+	}); err != nil {
+		return false, err
+	}
 	if git.Result != nil {
 		mergeSessionMetrics(merged, git.Result)
 	}

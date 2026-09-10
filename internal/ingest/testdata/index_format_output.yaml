@@ -16,6 +16,7 @@ requiredNames:
   - completed-empty-codex
   - mixed-malformed-claude-preserves-last-good
   - mixed-malformed-codex-preserves-last-good
+  - mixed-malformed-pi-preserves-last-good
   - missing-opencode-tree-preserves-last-good
   - parse-error-preserves-last-good
   - absent-versioned-result-refused
@@ -67,6 +68,20 @@ cases:
     wantLogError: 'message msg_2.json: invalid character'
   - {name: completed-empty-cursor, declaredFormat: 1, payload: empty, realIndexer: true, harness: cursor, emptyTranscript: true, wantIndexed: true}
   - {name: completed-empty-strike, declaredFormat: 1, payload: empty, realIndexer: true, harness: strike, emptyTranscript: true, wantIndexed: true}
+  - name: mixed-malformed-pi-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: pi
+    transcriptIdentity: session-scoped
+    healthyTranscript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"new content that must not replace old data","timestamp":1767312001000}}
+      malformed
+    wantLogError: 'at physical line 3: raw JSON validation failed'
   - name: mixed-malformed-cursor-preserves-last-good
     declaredFormat: 1
     payload: v1

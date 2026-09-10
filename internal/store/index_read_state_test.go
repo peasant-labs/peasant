@@ -16,6 +16,24 @@ import (
 //go:embed testdata/index_read_state.yaml
 var indexReadStateYAML []byte
 
+// captureRevisionReport is what the read may say about the publication capture
+// revision. The session row holds a COUNTER a publication bumps; the captured
+// metadata row holds the revision it was written at. Only the second is
+// evidence that a capture exists, so there are two answers and no third.
+type captureRevisionReport string
+
+const (
+	// captureRevisionRecorded: a captured metadata row stands at the session's
+	// revision, so the read reports that revision.
+	captureRevisionRecorded captureRevisionReport = "recorded"
+	// captureRevisionNone: no captured metadata row stands behind the counter,
+	// so the read must report nothing rather than a revision that names no
+	// capture. Reporting the counter here forces every later caller to tolerate
+	// a revision it cannot find a capture at, which is the wrong layer to be
+	// lenient in.
+	captureRevisionNone captureRevisionReport = "none"
+)
+
 // indexReadCapture names how the case seeds the stored content capture.
 type indexReadCapture string
 
@@ -34,6 +52,7 @@ type indexReadStateCase struct {
 	Provenance          ingest.CWDProvenanceKind    `yaml:"provenance"`
 	StatusOverride      ingest.ContentCaptureStatus `yaml:"statusOverride"`
 	WantBound           bool                        `yaml:"wantBound"`
+	WantCaptureRevision captureRevisionReport       `yaml:"wantCaptureRevision"`
 	WantStatus          ingest.ContentCaptureStatus `yaml:"wantStatus"`
 	WantFormat          ingest.ContentCaptureFormat `yaml:"wantFormat"`
 }
@@ -77,6 +96,15 @@ func loadIndexReadStateFixtures(t *testing.T) indexReadStateDocument {
 			if _, err := ingest.NewContentCaptureFormat(string(row.WantFormat)); err != nil {
 				t.Fatalf("case %q expects an unknown capture format: %v", row.Name, err)
 			}
+		}
+		switch row.WantCaptureRevision {
+		case captureRevisionRecorded:
+			if row.PublicationRevision <= 0 {
+				t.Fatalf("case %q expects a recorded capture revision but seeds no captured metadata row; a revision with no row behind it is exactly what must NOT be reported", row.Name)
+			}
+		case captureRevisionNone:
+		default:
+			t.Fatalf("case %q declares the unknown capture-revision report %q; state recorded or none for every case, because the read has no third answer", row.Name, row.WantCaptureRevision)
 		}
 		if _, err := ingest.NewCWDProvenanceKind(string(row.Provenance)); err != nil {
 			t.Fatalf("case %q names an unknown provenance kind %q: %v", row.Name, row.Provenance, err)
@@ -147,6 +175,17 @@ func TestIndexReadStateReportsPublicationBindingAndContentStatus(t *testing.T) {
 			}
 			if state.PublicationBound != row.WantBound {
 				t.Fatalf("publication bound=%v, want %v", state.PublicationBound, row.WantBound)
+			}
+			wantRevision := int64(0)
+			if row.WantCaptureRevision == captureRevisionRecorded {
+				wantRevision = row.PublicationRevision
+			}
+			if state.PublicationCaptureRevision != wantRevision {
+				t.Fatalf("publication capture revision=%d, want %d (%s): the session counter is %d and the captured metadata row stands at %d, and only a revision a row actually carries may be reported",
+					state.PublicationCaptureRevision, wantRevision, row.WantCaptureRevision, row.SessionRevision, row.PublicationRevision)
+			}
+			if state.PublicationCaptureRevision == 0 && state.PublicationBound {
+				t.Fatal("the snapshot reports no capture revision yet calls the publication bound; both answers come from one statement and cannot disagree")
 			}
 			if state.ContentStatus != row.WantStatus {
 				t.Fatalf("content status=%q, want %q", state.ContentStatus, row.WantStatus)
