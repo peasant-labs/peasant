@@ -4,6 +4,9 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -609,6 +612,7 @@ func presence(present bool) string {
 func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 	t.Helper()
 	var preflightReached atomic.Bool
+	var refusedUploads atomic.Int64
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/schema/version":
@@ -616,10 +620,12 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/annotations/manifest":
 			// The annotation stage can check its empty manifest after preflight.
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/transcripts/publish":
-			// The seeded session is publishable, which is what carries the run
-			// past the preflight this test needs reached. The village refuses the
-			// upload so nothing is published: this is a test of what the command
-			// DISCLOSES, and a stored receipt would add a second subject.
+			// The seeded session is publishable, which is what carries the run past
+			// the preflight this test needs reached. The village REFUSES the upload,
+			// and the assertions after the run prove nothing was certified locally:
+			// the subject here is what the command discloses, and a stored receipt
+			// would add a second one.
+			refusedUploads.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_, _ = w.Write([]byte(`{}`))
@@ -658,5 +664,33 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 	if !preflightReached.Load() {
 		t.Fatalf("the Village preflight was never reached; an early return cannot prove disclosure behavior, especially for quiet cases\nstdout: %s\nstderr: %s", stdout, stderr)
 	}
+	// Allowing the upload request must not cost the guarantee the old handler
+	// carried by rejecting it: the village refused every attempt, and the run
+	// certified nothing locally for the session it attempted.
+	if refusedUploads.Load() == 0 {
+		t.Fatalf("no upload was attempted, so the refusal this scenario relies on never happened\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	assertNothingPublishedLocally(t, dir, village.URL)
 	return stderr
+}
+
+// assertNothingPublishedLocally opens the database the command just used and
+// requires that no publication was recorded for the seeded session.
+//
+// A village refusal is only half of "nothing was published": the other half is
+// that Peasant wrote no receipt and advanced no publication cursor for it.
+func assertNothingPublishedLocally(t *testing.T, dir, villageURL string) {
+	t.Helper()
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatalf("reopen the database the command used: %v", err)
+	}
+	defer db.Close()
+	receipt, err := db.Publication(t.Context(), villageURL, testCredentialsUserID, testutil.TestProjectHash, pushableSessionID)
+	if err != nil {
+		t.Fatalf("read the publication record for the seeded session: %v", err)
+	}
+	if receipt != nil {
+		t.Fatalf("a refused upload was still recorded as published: %+v", receipt)
+	}
 }

@@ -64,6 +64,10 @@ func executePushCmd(t *testing.T, dir string, args []string) (string, error) {
 // resolved from the given dir (ResolveConfigDirPathWith(dir) == dir/peasant),
 // which is exactly where the push RunE's auth.LoadCredentialsFrom(--config-dir)
 // reads when --config-dir=dir is injected by executeWithDataDir.
+// testCredentialsUserID owns every publication these tests record, so a test can
+// ask the database what the run wrote for this user.
+const testCredentialsUserID = "user-00001"
+
 func writeTestCredentials(t *testing.T, dir string) {
 	t.Helper()
 	peasantDir := string(defaults.ResolveConfigDirPathWith(dir))

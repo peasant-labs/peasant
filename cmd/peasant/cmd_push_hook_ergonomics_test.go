@@ -183,6 +183,10 @@ func writeTestCredentialsFor(t *testing.T, dir, villageURL string) {
 
 // seedPushableSession puts one eligible session in the store at dir, so a push
 // reaches the network instead of returning early with nothing to send.
+// pushableSessionID is the session seedPushableSession puts in the store, named
+// so a test can ask the database what the run recorded for it.
+const pushableSessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
+
 // seedPushableSession seeds a session the push actually SELECTS and carries as
 // far as the village: a store row plus a verified full capture, written through
 // the production transactions.
@@ -204,7 +208,7 @@ func seedPushableSession(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	entry := makeCmdStoreEntry(t, "cccc3333-cccc-4ccc-8ccc-cccccccccccc", "github.com-user-repo",
+	entry := makeCmdStoreEntry(t, pushableSessionID, "github.com-user-repo",
 		"git@github.com:user/repo.git", "main", 1700000000000)
 	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 }

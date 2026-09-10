@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"maps"
@@ -258,38 +257,58 @@ func (w harvestDiagnosticsWorld) assertOutcome(t *testing.T, fixture harvestDiag
 	if err != nil || !bytes.Equal(sourceBytes, []byte(w.transcript)) {
 		t.Fatalf("the run changed the retained native source: %v", err)
 	}
-	transcript, err := w.publishedTranscript()
-	if err != nil {
-		t.Fatalf("the compatible run left no published transcript for this session: %v", err)
+	// EXACTLY ONE artifact pair for this session. The directory is the session's
+	// project identity, so a compatible re-ingest may move the pair; what it may
+	// never do is leave two, which would be one session claiming two projects.
+	metadataPaths, transcriptPaths := w.publishedArtifactPaths(t)
+	if len(metadataPaths) != 1 || len(transcriptPaths) != 1 {
+		t.Fatalf("this session has %d published metadata files and %d transcripts, want exactly one of each: %v %v",
+			len(metadataPaths), len(transcriptPaths), metadataPaths, transcriptPaths)
 	}
-	if !bytes.Equal(transcript, []byte(w.transcript)) {
-		t.Fatalf("re-publishing the artifact changed the transcript text:\n%s", transcript)
+	transcript, err := os.ReadFile(transcriptPaths[0])
+	if err != nil || !bytes.Equal(transcript, []byte(w.transcript)) {
+		t.Fatalf("re-publishing the artifact changed the transcript text (%v):\n%s", err, transcript)
+	}
+	// The pair still describes THIS session, and its committed metadata still
+	// matches the transcript beside it: a republication that rewrote either is a
+	// different session's artifact wearing this one's name.
+	metadataJSON, err := os.ReadFile(metadataPaths[0])
+	if err != nil {
+		t.Fatalf("read the republished metadata: %v", err)
+	}
+	var published ingest.UnifiedMetadata
+	if err := json.Unmarshal(metadataJSON, &published); err != nil {
+		t.Fatalf("decode the republished metadata: %v", err)
+	}
+	if published.SessionID != w.session {
+		t.Fatalf("the republished artifact names session %s, not %s", published.SessionID, w.session)
+	}
+	if published.ContentHash != schema.ComputeTranscriptHash(transcript) {
+		t.Fatalf("the republished metadata's content hash does not match the transcript beside it")
 	}
 }
 
-// publishedTranscript finds this session's published transcript wherever the run
-// placed it, because the artifact's directory is its project identity and a
-// compatible re-ingest may legitimately change that.
-func (w harvestDiagnosticsWorld) publishedTranscript() ([]byte, error) {
-	var found []byte
+// publishedArtifactPaths returns every published metadata file and transcript for
+// this session, wherever the run placed them: the artifact's directory is its
+// project identity, and a compatible re-ingest may legitimately change that.
+func (w harvestDiagnosticsWorld) publishedArtifactPaths(t *testing.T) (metadata, transcripts []string) {
+	t.Helper()
 	err := filepath.WalkDir(w.output, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(path, string(w.session)+"--transcript.jsonl") {
+		if walkErr != nil || entry.IsDir() {
 			return walkErr
 		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
+		switch {
+		case strings.HasSuffix(path, string(w.session)+defaults.MetadataSuffix):
+			metadata = append(metadata, path)
+		case strings.HasSuffix(path, string(w.session)+"--transcript.jsonl"):
+			transcripts = append(transcripts, path)
 		}
-		found = data
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		t.Fatalf("walk the published artifacts: %v", err)
 	}
-	if found == nil {
-		return nil, fmt.Errorf("no transcript named %s--transcript.jsonl exists under %s", w.session, w.output)
-	}
-	return found, nil
+	return metadata, transcripts
 }
 
 // TestHarvestMetadataDiagnosticsJSON drives the document surface: the refusal is
