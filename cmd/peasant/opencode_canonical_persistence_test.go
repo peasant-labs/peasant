@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -119,6 +120,17 @@ type canonicalPersistenceLoaderMutation struct {
 //go:embed testdata/opencode_canonical_persistence.yaml
 var canonicalPersistenceYAML []byte
 
+// canonicalPersistenceDeclaredMetrics collects the per-session expectations a
+// case carries, so the compute-version rule covers every row rather than the
+// case-level one alone.
+func canonicalPersistenceDeclaredMetrics(testCase canonicalPersistenceCase) []canonicalPersistenceMetrics {
+	declared := make([]canonicalPersistenceMetrics, 0, len(testCase.CanonicalSessions))
+	for _, session := range testCase.CanonicalSessions {
+		declared = append(declared, session.ExpectedMetrics)
+	}
+	return declared
+}
+
 func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -132,6 +144,18 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 	}
 	if len(fixture.RequiredCases) == 0 || len(fixture.RequiredLoaderMutations) == 0 {
 		return fixture, errors.New("canonical OpenCode persistence fixture declares an empty required manifest")
+	}
+	// The header states that every declared compute version equals the shipped
+	// one, so a metrics bump updates every row here. Stating it is not enough:
+	// the fixture had drifted a version behind, and every case failed against
+	// real analytics until it was noticed. The rule is now enforced where it is
+	// written, and it names the bump as the reason so the fix is obvious.
+	for _, testCase := range fixture.Cases {
+		for _, declared := range append([]canonicalPersistenceMetrics{testCase.ExpectedMetrics}, canonicalPersistenceDeclaredMetrics(testCase)...) {
+			if declared.ComputeVersion != metrics.CurrentComputeVersion {
+				return fixture, fmt.Errorf("canonical OpenCode persistence fixture case %q declares compute version %d but this build computes %d; a metrics bump updates every expected_metrics row in the corpus", testCase.Name, declared.ComputeVersion, metrics.CurrentComputeVersion)
+			}
+		}
 	}
 	seen := make(map[string]bool)
 	for _, testCase := range fixture.Cases {
@@ -461,7 +485,7 @@ func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
 		case persistenceMutationMissingOrderedEntry:
 			mutated = bytes.Replace(mutated, []byte("ordered_entry_ids: [msg_current_all]"), []byte("ordered_entry_ids: []"), 1)
 		case persistenceMutationInvalidMetrics:
-			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
+			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
 		}
 		if _, err := loadCanonicalPersistenceFixture(mutated); err == nil || strings.TrimSpace(mutation.Name) == "" {
 			t.Errorf("canonical persistence loader mutation %q was accepted", mutation.Name)
