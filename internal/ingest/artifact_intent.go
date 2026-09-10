@@ -64,15 +64,64 @@ func validArtifactHash(hash string) bool {
 	return err == nil && len(decoded) == 32 && strings.ToLower(hash) == hash
 }
 
-func artifactOwnedName(path, directory string, sid SessionID) bool {
+// artifactOwnedKind names the families of file peasant's own artifact naming
+// claims inside one session directory. A publication owns every member of these
+// families for its session and nothing else, so this list is the whole of what
+// a publication may write, replace or prune.
+type artifactOwnedKind string
+
+const (
+	// artifactOwnedMetadata is the session's metadata document, the file whose
+	// presence is the publication's commit point.
+	artifactOwnedMetadata artifactOwnedKind = "metadata"
+	// artifactOwnedTranscript is the session's managed transcript.
+	artifactOwnedTranscript artifactOwnedKind = "transcript"
+	// artifactOwnedSourceCapture is the private marker recording which source
+	// bytes a file-only capture read.
+	artifactOwnedSourceCapture artifactOwnedKind = "source-capture"
+	// artifactOwnedDebug is one of the session's debug outputs, which live in
+	// their own directory beside the pair.
+	artifactOwnedDebug artifactOwnedKind = "debug"
+)
+
+// artifactOwnedFile is a path inside a session directory that peasant's own
+// naming claims for that session. Values are produced only by
+// newArtifactOwnedFile, so a path that reached this type has been checked.
+type artifactOwnedFile struct {
+	// Relative is the path under the session directory, in slash-free
+	// platform form, exactly as an intent and an observation name it.
+	Relative string
+	Kind     artifactOwnedKind
+}
+
+// newArtifactOwnedFile admits a path this session's publication owns and
+// refuses every other member of the directory. Ownership is decided by NAME
+// alone, never by what a particular run happens to write, so a file this build
+// no longer produces is still recognised as the session's own and can be
+// pruned, while a file a user or another tool put beside the artifact is never
+// touched.
+func newArtifactOwnedFile(path, directory string, sid SessionID) (artifactOwnedFile, error) {
 	relative, err := filepath.Rel(directory, path)
 	if err != nil || !filepath.IsLocal(relative) {
-		return false
+		return artifactOwnedFile{}, fmt.Errorf("classify managed path %q for session %s: it is not inside that session's directory %q; nothing was changed; publish only paths under the session's own directory", path, sid, directory)
 	}
-	if relative == string(sid)+defaults.MetadataSuffix || relative == string(sid)+"--transcript.json" || relative == string(sid)+"--transcript.jsonl" || relative == fileCaptureEvidenceName(sid) {
-		return true
+	switch relative {
+	case string(sid) + defaults.MetadataSuffix:
+		return artifactOwnedFile{Relative: relative, Kind: artifactOwnedMetadata}, nil
+	case string(sid) + "--transcript.json", string(sid) + "--transcript.jsonl":
+		return artifactOwnedFile{Relative: relative, Kind: artifactOwnedTranscript}, nil
+	case fileCaptureEvidenceName(sid):
+		return artifactOwnedFile{Relative: relative, Kind: artifactOwnedSourceCapture}, nil
 	}
-	return filepath.Dir(relative) == defaults.DirDebug.String() && validArtifactDebugName(filepath.Base(relative))
+	if filepath.Dir(relative) == defaults.DirDebug.String() && validArtifactDebugName(filepath.Base(relative)) {
+		return artifactOwnedFile{Relative: relative, Kind: artifactOwnedDebug}, nil
+	}
+	return artifactOwnedFile{}, fmt.Errorf("classify managed path %q for session %s: its name is not one this session's artifacts use; the file was left untouched; only peasant's own artifact names are owned, everything else beside them is the user's", path, sid)
+}
+
+func artifactOwnedName(path, directory string, sid SessionID) bool {
+	_, err := newArtifactOwnedFile(path, directory, sid)
+	return err == nil
 }
 
 func validateArtifactIntent(intent *artifactIntent, key string) error {
@@ -275,9 +324,18 @@ func (p *ArtifactPublisher) buildArtifactIntent(root ArtifactRoot, request Artif
 	files := make(map[string]artifactIntentFile)
 	for _, old := range request.Observation.files {
 		previous[old.Path] = old.Hash
-		if old.Hash != nil && filepath.Dir(old.Path) == request.Observation.directory {
-			files[old.Path] = artifactIntentFile{Path: old.Path, PreviousHash: old.Hash}
+		// An existing owned file this intent does not write becomes a removal.
+		// Ownership is decided by peasant's own artifact naming, so a debug
+		// output an earlier run produced retires with the publication that
+		// stopped producing it, while an unrelated member of the directory is
+		// never in the observed set and therefore never removed.
+		if old.Hash == nil {
+			continue
 		}
+		if _, err := newArtifactOwnedFile(old.Path, request.Observation.directory, meta.SessionID); err != nil {
+			continue
+		}
+		files[old.Path] = artifactIntentFile{Path: old.Path, PreviousHash: old.Hash}
 	}
 	for path, data := range payloads {
 		old, observed := previous[path]

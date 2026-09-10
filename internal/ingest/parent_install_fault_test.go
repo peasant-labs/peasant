@@ -277,6 +277,11 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 			}
 			stale := filepath.Join(parentDir, "debug", "obsolete.log")
 			write(stale, "obsolete parent debug file")
+			// A file whose name is not one of peasant's own, sitting in the same
+			// directory. Pruning the session's own retired output must never
+			// reach it: the directory is the user's too.
+			foreign := filepath.Join(parentDir, "notes-from-the-user.txt")
+			write(foreign, "a file peasant did not write")
 			write(parentSource, fixture.UpdatedParent)
 			// The updated recording carries a CURRENT modification time, the way
 			// a harness that just wrote to it leaves it. write() backdates every
@@ -367,8 +372,9 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 			assertFileBytes(t, filesystem, parentSource, []byte(fixture.UpdatedParent))
 			assertFileBytes(t, filesystem, childSource, []byte(fixture.Child))
 			if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
-				t.Fatalf("stale parent file remains: %v", err)
+				t.Fatalf("a retired debug output peasant itself wrote was left beside the current artifact: %v", err)
 			}
+			assertFileBytes(t, filesystem, foreign, []byte("a file peasant did not write"))
 			entries, err := os.ReadDir(output)
 			if err != nil {
 				t.Fatal(err)
