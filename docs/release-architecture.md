@@ -127,7 +127,7 @@ sequenceDiagram
 | `nix-vendor-hash.yml` | Pushes to `develop` touching `go.mod`, `go.sum`, `web/package.json`, `web/pnpm-lock.yaml`, flake files, `Makefile`, hash script, or the workflow; manual dispatch | Keeps `flake.nix` `vendorHash` current on `develop` | Yes, commits `chore: update nix vendor hash` when needed | GitHub App token with `Contents: write` |
 | `release-pr.yml` | PR open/edit/synchronize/reopen/close into `develop` | Validates release PR title/author; on merge updates Nix hash and pushes an immutable annotated tag | Yes, possibly commits hash fix and pushes tag | `GITHUB_TOKEN` read for collaborator checks; GitHub App token with `Contents: write` |
 | `release-validate.yml` | PRs to `develop` touching packaging-relevant files; `workflow_call` from rc releases | Builds a Goreleaser snapshot and validates deb, rpm, AUR PKGBUILD, Homebrew cask style/install, and `nix build .#peasant` | No | `GITHUB_TOKEN` read |
-| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, guards tag lineage, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), publishes via Goreleaser, smokes released archives; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes GitHub Release; may push AUR/tap only after separate publisher approval | `GITHUB_TOKEN` contents write/actions read; GitHub App token for `homebrew-tap`; `AUR_KEY` after AUR approval |
+| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, guards tag lineage, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), publishes via Goreleaser, smokes released archives; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes GitHub Release; pushes the Homebrew cask to the tap on final tags; may push AUR only after separate publisher approval | `GITHUB_TOKEN` contents write/actions read; GitHub App token for `homebrew-tap`; `AUR_KEY` after AUR approval |
 | `e2e.yml` | PRs to `develop` on relevant paths; `workflow_call`; pushes to `develop`/`main`; manual dispatch | Full-stack push skip-gate (podman Postgres + MinIO + real village server + peasant CLI); asserts a positive `--- PASS: TestSkipGateE2E` — a SKIP or `no tests to run` fails the job | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 | `release-e2e.yml` | `workflow_call`; manual dispatch | Installed-binary / per-distro release gate; asserts a positive `--- PASS: TestReleasePerDistro` | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 
@@ -186,7 +186,7 @@ Homebrew style exceptions.
 | `.deb` | Ubuntu/Debian amd64/arm64 | Goreleaser `nfpms` | `release-validate.yml` deb matrix on Ubuntu 22.04/24.04 | GitHub Release | Empty `Depends`; static binary installed to `/usr/bin/peasant` |
 | `.rpm` | Fedora/openSUSE; **produced** amd64+arm64, **validated** amd64 | Goreleaser `nfpms` | `release-validate.yml` Fedora `dnf` and openSUSE `zypper modifyrepo --disable --all` followed by local `zypper --allow-unsigned-rpm` (amd64) | GitHub Release | Unsigned local rpm install in validation; artifact name `peasant_{version}_linux_{amd64\|arm64}.rpm` (goreleaser `file_name_template`, not the conventional `name-version-release.arch`) |
 | AUR `peasant-bin` | Arch Linux x86_64 | Goreleaser `aurs` | Offline `makepkg` with local release tarball and full checksum verification | Disabled for `v0.1.0` via `skip_upload: true`; separate approval changes it to `auto` for a later final | Requires public repo and `AUR_KEY`; prereleases remain skipped with `auto` |
-| Homebrew cask | macOS amd64/arm64 | Goreleaser `homebrew_casks` | `brew style` on Linux; cask install on macOS for rc tags | Disabled for `v0.1.0` via `skip_upload: true`; separate approval changes it to `auto` for a later final | Requires tap repo and GitHub App `Contents: write`; unsigned binary uses quarantine-removal hook |
+| Homebrew cask | macOS amd64/arm64 | Goreleaser `homebrew_casks` | `brew style` on Linux + `brew audit` on macOS (tap CI); cask install on macOS for rc tags; cask smoke on macOS for final tags | Enabled via `skip_upload: "auto"` — publishes to the tap on final tags; rc tags never touch the tap | Requires tap repo and GitHub App `Contents: write` (granted); unsigned binary uses quarantine-removal hook |
 | In-repo Nix flake | Nix systems supported by the flake | `flake.nix` `buildGoModule` | `release-validate.yml` `nix build .#peasant`; `release.yml` hash freshness | Available from source checkout/GitHub flake | Requires current `vendorHash`; stubs `web/out` until frontend derivation exists |
 | Future nixpkgs | nixpkgs-supported systems | nixpkgs expression | Future nixpkgs CI plus local update checks | Deferred until a stable GitHub release exists | Requires public repo, tagged release, maintainer metadata; the license requirement is met (Apache-2.0, free) |
 
@@ -227,18 +227,18 @@ first-party edit to the schema module's sources no longer moves peasant's
 Web package manifests are also treated as packaging-relevant inputs because the
 release build embeds the dashboard output.
 
-External package publication remains disabled until its operational checklist is complete.
-The project is licensed Apache-2.0. Publication still requires branch protection, a GitHub App with
-`Contents: write` on both the source repo and the Homebrew tap, and an AUR key. `release.yml` mints the short-lived tap token from the
-App installation; there is no long-lived tap token secret. Until then, Goreleaser
-keeps AUR and Homebrew cask upload disabled.
+The Homebrew cask publishes to `peasant-labs/homebrew-tap` on final tags
+(`skip_upload: "auto"`; rc tags never touch the tap). `release.yml` mints the
+short-lived tap token from the GitHub App installation (`Contents: write` on the tap);
+there is no long-lived tap token secret. AUR publication remains disabled until its
+operational checklist is complete (a dedicated `AUR_KEY`); Goreleaser keeps the AUR
+upload `skip_upload: "true"` until then. The project is licensed Apache-2.0.
 
-macOS binaries are not signed or notarized yet. For `v0.1.0`, browser-downloaded raw
-tarballs require the manual `xattr -dr com.apple.quarantine ./peasant` step documented
-in the macOS install guide. The planned Homebrew cask includes a post-install
-quarantine-removal hook, but it applies only after Homebrew publication is separately
-approved and enabled. Signing, SBOMs, cosign signatures, and provenance attestations
-are deferred release-hardening work.
+macOS binaries are not signed or notarized yet. Browser-downloaded raw tarballs
+require the manual `xattr -dr com.apple.quarantine ./peasant` step documented in the
+macOS install guide. The Homebrew cask includes a post-install quarantine-removal
+hook, so cask installs clear the attribute automatically. Signing, SBOMs, cosign
+signatures, and provenance attestations are deferred release-hardening work.
 
 ## Failure Modes
 
