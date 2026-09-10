@@ -90,6 +90,10 @@ type mixedFormatCase struct {
 	Producer        int                  `yaml:"producer"`
 	UnknownProducer bool                 `yaml:"unknownProducer"`
 	Empty           bool                 `yaml:"empty"`
+	// UnboundCapture gives the session a CURRENT publication capture whose
+	// index write never bound to it, which is the state a conversion must not
+	// silently repair.
+	UnboundCapture bool `yaml:"unboundCapture"`
 }
 type mixedFormatDocument struct {
 	LegacySession       schema.SessionID    `yaml:"legacySession"`

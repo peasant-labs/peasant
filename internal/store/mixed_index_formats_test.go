@@ -185,7 +185,24 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				}
 				assertMixedReads(t, db, document)
 			case mixedConvert:
+				if row.UnboundCapture {
+					seedUnboundPublicationCapture(t, db, document.TargetSession)
+				}
 				err := db.ConvertIndexFormat(t.Context(), document.TargetSession, 2)
+				if row.UnboundCapture {
+					if err != nil {
+						t.Fatalf("conversion of an unbound session failed: %v", err)
+					}
+					// The exact stamp value is not the contract; staying unbound
+					// is. A bound conversion would make a representation change
+					// alone enough to publish entries that nothing re-certified
+					// against the current capture.
+					current, indexed := publicationRevisions(t, db, document.TargetSession)
+					if current == 0 || indexed == current {
+						t.Fatalf("conversion bound an index that was unbound: capture=%d indexed=%d", current, indexed)
+					}
+					return
+				}
 				after := mixedSnapshot(t, db, document.TargetSession)
 				if row.Fault != mixedNoFault {
 					if err == nil || !reflect.DeepEqual(before, after) {
@@ -241,6 +258,47 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 			}
 		})
 	}
+}
+
+// seedUnboundPublicationCapture gives the session a current publication capture
+// that its last index write is NOT bound to: the capture moved on (revision 7)
+// while the index write stayed behind (6). Written as raw rows because the
+// point is the STATE, not the path that produces it.
+func seedUnboundPublicationCapture(t *testing.T, db *store.Store, sid schema.SessionID) {
+	t.Helper()
+	conn := takeConn(t, db.Pool())
+	defer db.Pool().Put(conn)
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO session_publication_metadata (session_id,capture_revision,schema_version,metadata_json,metadata_hash,content_hash,captured_at) VALUES (?,?,?,?,?,?,?)`,
+			[]any{string(sid), int64(7), int64(ingest.CurrentSchemaVersion), `{"seed":true}`,
+				strings.Repeat("1", 64), strings.Repeat("2", 64), int64(1700000000000)}},
+		{`UPDATE sessions SET publication_capture_revision=7, indexed_publication_capture_revision=6, cwd_provenance_kind='source_exact' WHERE session_id=?`,
+			[]any{string(sid)}},
+	} {
+		if err := sqlitex.ExecuteTransient(conn, statement.sql, &sqlitex.ExecOptions{Args: statement.args}); err != nil {
+			t.Fatalf("seed unbound publication capture: %v", err)
+		}
+	}
+}
+
+// publicationRevisions reads the capture revision the session carries and the
+// revision its last index write bound to.
+func publicationRevisions(t *testing.T, db *store.Store, sid schema.SessionID) (current, indexed int64) {
+	t.Helper()
+	conn := takeConn(t, db.Pool())
+	defer db.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `SELECT publication_capture_revision, indexed_publication_capture_revision FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			current, indexed = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read publication revisions: %v", err)
+	}
+	return current, indexed
 }
 
 func assertMixedBatchFailure(t *testing.T, db *store.Store, document mixedFormatDocument, row mixedFormatCase, targetBefore mixedStoreSnapshot) {
