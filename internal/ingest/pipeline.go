@@ -1458,8 +1458,12 @@ func drainIndexParseResults(parsedCh <-chan indexParseResult, pending []indexPar
 		pending = append(pending, result)
 		pendingBytes := indexResultWriteBytes(result.output)
 		parsedClosed := false
+		// No bound is restated here: exceedsIndexWriteBudget owns the split and
+		// applies it below, before each result joins the batch, so the batch
+		// never grows past the limit or the budget however long this absorbs.
+		// A second copy of those terms would be one more place to miss.
 	drainParsed:
-		for len(pending) < indexWriteBatchLimit && pendingBytes < defaults.FullContentWriteBatchBytes {
+		for {
 			select {
 			case next, ok := <-parsedCh:
 				if !ok {
