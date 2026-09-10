@@ -65,7 +65,7 @@ func loadPublicationOmissionsFixture(t *testing.T) publicationOmissionsFixture {
 	if err != nil {
 		t.Fatalf("decode publication omissions fixture: %v", err)
 	}
-	manifest, err := testutil.DecodeSemanticManifest(publicationOmissionsManifestYAML, "publication omissions")
+	manifest, err := testutil.DecodeRequiredNamesManifest(publicationOmissionsManifestYAML, "publication omissions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func loadPublicationOmissionsFixture(t *testing.T) publicationOmissionsFixture {
 			t.Fatalf("publication omissions case %q: %v", fixtureCase.Name, err)
 		}
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "publication omissions"); err != nil {
+	if err := testutil.ValidateRequiredNames(manifest, names, "publication omissions"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
@@ -103,7 +103,7 @@ func publicationOmissionsReadiness(name string) (ingest.PublicationReadiness, er
 
 func TestPublicationOmissionsFixtureGuards(t *testing.T) {
 	loadPublicationOmissionsFixture(t)
-	manifest, err := testutil.DecodeSemanticManifest(publicationOmissionsManifestYAML, "publication omissions")
+	manifest, err := testutil.DecodeRequiredNamesManifest(publicationOmissionsManifestYAML, "publication omissions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestPublicationOmissionsFixtureGuards(t *testing.T) {
 		for index, fixtureCase := range fixture.Cases {
 			names[index] = fixtureCase.Name
 		}
-		if err := testutil.ValidateSemanticNames(manifest, names, "publication omissions"); err == nil {
+		if err := testutil.ValidateRequiredNames(manifest, names, "publication omissions"); err == nil {
 			t.Fatalf("required case %q replacement unexpectedly validated", required)
 		}
 	}

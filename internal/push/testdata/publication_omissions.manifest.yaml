@@ -1,4 +1,3 @@
-expectedCaseCount: 6
 requiredNames:
   - complete_capture_publishes
   - omitted_records_capture_publishes

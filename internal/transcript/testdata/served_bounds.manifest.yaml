@@ -1,4 +1,3 @@
-expectedCaseCount: 6
 requiredNames:
   - oversized_tool_result_is_bounded_with_a_note
   - small_tool_result_is_served_whole

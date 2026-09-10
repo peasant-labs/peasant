@@ -77,7 +77,7 @@ func loadServedBoundsFixture(t *testing.T) servedBoundsFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := testutil.DecodeSemanticManifest(servedBoundsManifestYAML, "served bounds")
+	manifest, err := testutil.DecodeRequiredNamesManifest(servedBoundsManifestYAML, "served bounds")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func loadServedBoundsFixture(t *testing.T) servedBoundsFixture {
 			t.Fatalf("served bounds fixture case %q asserts nothing about its fields", fixtureCase.Name)
 		}
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "served bounds"); err != nil {
+	if err := testutil.ValidateRequiredNames(manifest, names, "served bounds"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
@@ -105,7 +105,7 @@ func loadServedBoundsFixture(t *testing.T) servedBoundsFixture {
 
 func TestServedBoundsFixtureGuards(t *testing.T) {
 	loadServedBoundsFixture(t)
-	manifest, err := testutil.DecodeSemanticManifest(servedBoundsManifestYAML, "served bounds")
+	manifest, err := testutil.DecodeRequiredNamesManifest(servedBoundsManifestYAML, "served bounds")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestServedBoundsFixtureGuards(t *testing.T) {
 		for index, fixtureCase := range fixture.Cases {
 			names[index] = fixtureCase.Name
 		}
-		if err := testutil.ValidateSemanticNames(manifest, names, "served bounds"); err == nil {
+		if err := testutil.ValidateRequiredNames(manifest, names, "served bounds"); err == nil {
 			t.Fatalf("required case %q replacement unexpectedly validated", required)
 		}
 	}
