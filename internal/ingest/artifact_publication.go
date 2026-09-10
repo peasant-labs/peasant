@@ -221,7 +221,10 @@ func (p *ArtifactPublisher) Observe(ctx context.Context, session DiscoveredSessi
 	for _, path := range session.DebugPaths {
 		name := filepath.Base(string(path))
 		if !validArtifactDebugName(name) || slices.Contains(names, name) {
-			return nil, fmt.Errorf("observe session %s before extraction: debug filenames collide or are invalid; no output was changed; use uniquely named regular debug files", session.SessionID)
+			return nil, fmt.Errorf(
+				"observe session %s before extraction: debug file name %q either repeats another one or is not one of peasant's own debug outputs, which are regular files inside the session's %s directory whose names end in one of %v; no output was changed, and a name outside that set is left alone because it may be a file the user put there; give each debug output a unique name with one of those extensions",
+				session.SessionID, name, defaults.DirDebug, defaults.DebugArtifactSuffixes(),
+			)
 		}
 		names = append(names, name)
 	}
@@ -400,8 +403,28 @@ func readArtifactPairWith(root ArtifactRoot, metadataPath string, sid SessionID,
 	return NewManagedArtifact(data, transcript)
 }
 
+// validArtifactDebugName reports whether a name inside a session's debug
+// directory is one of Peasant's OWN debug outputs.
+//
+// It is deliberately narrower than "any local file name". A publication may
+// retire a file it owns, and the debug directory is an ordinary directory a
+// user or another tool can write into, so claiming every name there by
+// location alone would let a publication delete a file that was never
+// Peasant's. The extension has to be one of the closed set Peasant's own
+// outputs use; a name outside it is the user's and is left untouched.
 func validArtifactDebugName(name string) bool {
-	return name != "" && name != "." && name != ".." && filepath.Base(name) == name && filepath.IsLocal(name)
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if filepath.Base(name) != name || !filepath.IsLocal(name) {
+		return false
+	}
+	for _, suffix := range defaults.DebugArtifactSuffixes() {
+		if stem, found := strings.CutSuffix(name, suffix); found && stem != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizedArtifactCandidate(candidate *ManagedArtifact) (*ManagedArtifact, error) {

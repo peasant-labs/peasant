@@ -35,6 +35,18 @@ const (
 	OpenCodeDirProject DirName = "project"
 )
 
+// DebugArtifactSuffixes is the CLOSED set of extensions a debug output Peasant
+// writes into a session's debug directory carries: ".json" for a captured tool
+// output and ".log" for a harness log.
+//
+// Ownership inside that directory is decided by the name, not by the directory:
+// a publication may retire a file it owns, and the directory is an ordinary one
+// a user or another tool can write into, so a name outside this set is left
+// alone exactly like a file beside the artifact. Widening the set widens what a
+// publication may delete, so a new debug output takes one of these extensions
+// rather than adding a third.
+func DebugArtifactSuffixes() []string { return []string{".json", ".log"} }
+
 // Provider-specific filename prefixes.
 const (
 	ClaudeSubagentPrefix  = "agent-"
