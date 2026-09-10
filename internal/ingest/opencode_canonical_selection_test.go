@@ -441,7 +441,14 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantIncomplete := make(map[ingest.SessionID]bool)
-	eligible := 0
+	// Two different questions, kept apart. eligible counts the sessions that
+	// end with a durable FULL capture, which is what publication needs.
+	// wantIndexed counts the sessions the run is expected to index at all: a
+	// session whose source omitted records is indexed too, storing the entries
+	// it does have as an incomplete capture, so previews show them while
+	// publication stays refused. The two coincided only while such a session
+	// was indexed zero times and stored nothing at all.
+	eligible, wantIndexed := 0, 0
 	for name, expectation := range fixture.MountedCaptures {
 		if !storedIDs[expectation.SessionID] {
 			t.Fatalf("named canonical session %q was not persisted", name)
@@ -457,6 +464,9 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		// Publication uses this same full DB loader; omission must fail before
 		// any transcript can be converted or uploaded as complete.
 		entries, _, fullErr := transcript.LoadEntriesForDetail(t.Context(), database, id, transcript.DetailLoadOptions{})
+		if *expectation.Eligible || expectation.SourceArtifactOmission {
+			wantIndexed++
+		}
 		if *expectation.Eligible {
 			eligible++
 			if !found || capture.Status != ingest.ContentCaptureComplete || fullErr != nil || len(entries) == 0 {
@@ -467,6 +477,17 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		wantIncomplete[id] = true
 		if fullErr == nil || !strings.Contains(fullErr.Error(), "session capture is incomplete") || len(entries) != 0 || found && capture.Status == ingest.ContentCaptureComplete {
 			t.Fatalf("omitted source %q was certified publishable: capture=%+v error=%v", name, capture, fullErr)
+		}
+		// Refused for publication is not the same as lost. The records this
+		// build could read ARE stored, as an incomplete capture with the
+		// reason recorded, so the previewer shows the user what was captured
+		// instead of an empty session they cannot inspect.
+		if !found || capture.FailureCode != ingest.ContentCaptureOversizedRecordOmitted {
+			t.Fatalf("omitted source %q stored no capture, or stored one whose reason nothing can read: found=%t capture=%+v", name, found, capture)
+		}
+		available, err := database.ReadSessionAvailable(t.Context(), id)
+		if err != nil || available == nil || len(available.Entries) == 0 {
+			t.Fatalf("omitted source %q has nothing to preview: %+v %v", name, available, err)
 		}
 		host, parent, err := database.LookupSessionLocation(t.Context(), id)
 		if err != nil || parent != "" {
@@ -490,8 +511,8 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if !reflect.DeepEqual(gotIncomplete, wantIncomplete) {
 		t.Fatalf("persisted incomplete identities=%v want=%v", gotIncomplete, wantIncomplete)
 	}
-	if result.Summary.New != len(fixture.Cases) || len(storedIDs) != len(fixture.Cases) || result.Summary.Indexed != eligible || result.Summary.Computed != eligible || result.Summary.Errors != 0 || result.Summary.StoreError != nil {
-		t.Fatalf("mounted canonical ingest summary=%+v stored=%d; want %d named sessions and %d eligible captures", result.Summary, len(storedIDs), len(fixture.Cases), eligible)
+	if result.Summary.New != len(fixture.Cases) || len(storedIDs) != len(fixture.Cases) || result.Summary.Indexed != wantIndexed || result.Summary.Computed != wantIndexed || result.Summary.Errors != 0 || result.Summary.StoreError != nil {
+		t.Fatalf("mounted canonical ingest summary=%+v stored=%d; want %d named sessions, %d indexed and %d of those carrying a full capture", result.Summary, len(storedIDs), len(fixture.Cases), wantIndexed, eligible)
 	}
 }
 
