@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
@@ -120,8 +121,8 @@ type fakeAvailableContent struct {
 
 var _ availableContentReader = (*fakeAvailableContent)(nil)
 
-func (f *fakeAvailableContent) ReadSessionAvailable(_ context.Context, sessionID string) (*store.SessionContentSnapshot, error) {
-	f.asked = append(f.asked, sessionID)
+func (f *fakeAvailableContent) ReadSessionAvailable(_ context.Context, sessionID ingest.SessionID) (*store.SessionContentSnapshot, error) {
+	f.asked = append(f.asked, sessionID.String())
 	return f.snapshot, f.err
 }
 

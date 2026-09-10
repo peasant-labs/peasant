@@ -353,7 +353,7 @@ func BuildPushCommand() *cobra.Command {
 					wizardIDs, wizErr := runPushWizard(
 						ctx, db, theme.New(themeModeFor(cfg)),
 						wizQuery, runCfg.Selection,
-						push.NewPublishedTurns(storedSessionEntries(ctx, availableContentFrom(db)), pushRedactor),
+						push.NewPublishedTurns(storedSessionEntries(ctx, db), pushRedactor),
 					)
 					if wizErr != nil {
 						return wizErr
@@ -2009,7 +2009,7 @@ func runPushWizard(
 // It is declared here, where it is consumed, so the preview depends on the read
 // it needs rather than on everything a Store can do.
 type availableContentReader interface {
-	ReadSessionAvailable(ctx context.Context, sessionID string) (*store.SessionContentSnapshot, error)
+	ReadSessionAvailable(ctx context.Context, sessionID ingest.SessionID) (*store.SessionContentSnapshot, error)
 }
 
 // storedSessionEntries reads one session's AVAILABLE stored entries. The wizard
@@ -2027,7 +2027,7 @@ func storedSessionEntries(ctx context.Context, reader availableContentReader) pu
 		if err != nil {
 			return nil, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		snapshot, err := reader.ReadSessionAvailable(ctx, id.String())
+		snapshot, err := reader.ReadSessionAvailable(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -2036,34 +2036,6 @@ func storedSessionEntries(ctx context.Context, reader availableContentReader) pu
 		}
 		return snapshot.Entries, nil
 	}
-}
-
-// availableContentFrom is the single adapter between the preview's read and the
-// store, and the ONLY place that changes when Store.ReadSessionAvailable lands.
-// Its body is marked below: one call replaces the whole method.
-func availableContentFrom(db *store.Store) availableContentReader {
-	return storeAvailableContent{db: db}
-}
-
-// storeAvailableContent serves the available-content read from the store.
-//
-// Until the store's own available-content read lands, it serves the verified
-// publication read instead, which returns the full entries of a complete capture
-// and none for an incomplete one. That is a SUBSET of what the preview is meant
-// to show: the note renders, the bounded projection does not. Publication
-// readiness is not consulted either way, so no session is refused a preview for
-// being unready.
-type storeAvailableContent struct{ db *store.Store }
-
-var _ availableContentReader = storeAvailableContent{}
-
-func (r storeAvailableContent) ReadSessionAvailable(ctx context.Context, sessionID string) (*store.SessionContentSnapshot, error) {
-	// SWAP POINT: return r.db.ReadSessionAvailable(ctx, sessionID)
-	input, err := push.LoadPublicationInput(ctx, r.db, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return &store.SessionContentSnapshot{Entries: input.Entries}, nil
 }
 
 // preparePushSelection reads every pushable row before pushed-at, provider,
