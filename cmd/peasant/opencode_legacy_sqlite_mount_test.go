@@ -197,6 +197,19 @@ func applyLegacySQLiteMountedMutation(t *testing.T, databasePath string, testCas
 	writeMountedOpenCodeSession(t, filepath.Dir(databasePath), "mixed-project", testCase.TargetSession, "/synthetic/work/mixed-json", "mixed JSON session")
 }
 
+// assertNoOpenCodeSeqCursor proves a source that records no event sequence
+// leaves no cursor row behind, naming the run that was measured.
+//
+// The absence is the assertion, not a placeholder for one: a cursor row for a
+// session whose source has no event table could only hold a default position,
+// and staleness would then be decided against a number nothing ever observed.
+func assertNoOpenCodeSeqCursor(t *testing.T, cursors map[ingest.SessionID]int64, sessionID ingest.SessionID, stage string) {
+	t.Helper()
+	if cursor, ok := cursors[sessionID]; ok {
+		t.Fatalf("%s recorded SQLite cursor %d for a source with no event sequence numbers; the cursor must stay absent so later harvests compare the content fingerprint instead", stage, cursor)
+	}
+}
+
 func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t *testing.T) {
 	document := loadLegacySQLiteMountDocument(t)
 	for _, testCase := range document.Cases {
@@ -296,13 +309,17 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if err != nil || len(firstLocations[sessionID].SourceFingerprint) == 0 {
 				t.Fatalf("initial consumed evidence missing: %v", err)
 			}
+			// The legacy source holds no event table, so no event sequence is
+			// observed for this session and NO cursor row may be written. A
+			// cursor written anyway would be a default zero standing in for a
+			// position nothing measured, and every later harvest would compare
+			// against it. Repeat runs report this session unchanged through the
+			// content fingerprint asserted above instead.
 			firstCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := firstCursors[sessionID]; !ok {
-				t.Fatal("initial SQLite cursor was not persisted")
-			}
+			assertNoOpenCodeSeqCursor(t, firstCursors, sessionID, "the first harvest")
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil {
 				t.Fatalf("repeat mounted harvest command: %v\n%s", err, output)
@@ -358,6 +375,13 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if changedBytes := mustReadFile(t, managedPath); bytes.Equal(changedBytes, firstBytes) {
 				t.Fatal("changed selected source row did not update the managed projection")
 			}
+			// Reprocessing a changed source does not invent the cursor its
+			// source still does not record.
+			changedCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertNoOpenCodeSeqCursor(t, changedCursors, sessionID, "the changed-source harvest")
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil || !harvestSummaryHasCount(output, firstRows, "unchanged") {
 				t.Fatalf("ordinary repeat after captured update did not converge: %v\n%s", err, output)
@@ -367,9 +391,10 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				t.Fatalf("unchanged source rewrote consumed state: %v", err)
 			}
 			stableCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
-			if err != nil || stableCursors[sessionID] != firstCursors[sessionID] {
+			if err != nil {
 				t.Fatalf("ordinary no-sequence source changed cursor: %v", err)
 			}
+			assertNoOpenCodeSeqCursor(t, stableCursors, sessionID, "the converged repeat harvest")
 			stableBytes := mustReadFile(t, managedPath)
 			sourceConn, err := sqlite.OpenConn(materialized.Path, sqlite.OpenReadWrite)
 			if err != nil {
@@ -380,18 +405,39 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if err := errors.Join(mutationErr, closeErr); err != nil {
 				t.Fatal(err)
 			}
+			// A re-extraction that fails on an ALREADY CAPTURED session is
+			// reported, not fatal: "Failure to re-extract is reported but does
+			// not cause a blocking error. Preserve the usable managed
+			// transcript, allow supported fallback processing, and continue
+			// other sessions." The run therefore succeeds, and everything the
+			// failed refresh must not have touched is asserted below: the
+			// consumed evidence, the cursor, the managed snapshot and the
+			// indexed entries all stay exactly as they were.
+			//
+			// The first acquisition of a session that was never stored keeps the
+			// per-session failure, and is asserted above: there is no last-good
+			// artifact to fall back to, so nothing may claim the session imported.
 			output, err = executeHarvestCmd(t, commandRoot, args)
-			if err == nil || !strings.Contains(err.Error(), "session(s) failed") {
-				t.Fatalf("malformed captured row was accepted: %v\n%s", err, output)
+			if err != nil {
+				t.Fatalf("a failed refresh of an already captured session must not fail the run: %v\n%s", err, output)
+			}
+			for _, want := range []string{"warning:", string(sessionID), "adapter refresh", "data is not valid JSON"} {
+				if !strings.Contains(output, want) {
+					t.Errorf("the failed refresh must be reported and say why; the run output is missing %q:\n%s", want, output)
+				}
+			}
+			if !harvestSummaryHasCount(output, 0, "errors") {
+				t.Errorf("a reported refresh failure must not be counted as a failed session:\n%s", output)
 			}
 			preservedLocations, err := localStore.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sessionID})
 			if err != nil || !bytes.Equal(stableLocations[sessionID].SourceFingerprint, preservedLocations[sessionID].SourceFingerprint) || *stableLocations[sessionID].IngestedMs != *preservedLocations[sessionID].IngestedMs {
 				t.Fatalf("failed acquisition advanced consumed state: %v", err)
 			}
 			preservedCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
-			if err != nil || preservedCursors[sessionID] != stableCursors[sessionID] {
+			if err != nil {
 				t.Fatalf("failed acquisition advanced SQLite cursor: %v", err)
 			}
+			assertNoOpenCodeSeqCursor(t, preservedCursors, sessionID, "the failed acquisition")
 			if !bytes.Equal(stableBytes, mustReadFile(t, managedPath)) {
 				t.Fatal("failed acquisition replaced managed snapshot")
 			}
