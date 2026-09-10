@@ -17,6 +17,10 @@ import (
 type StrikeIndexer struct {
 	fs          FileSystem
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 type StrikeIndexerOption func(*StrikeIndexer)
@@ -24,6 +28,14 @@ type StrikeIndexerOption func(*StrikeIndexer)
 // WithStrikeFullContent disables preview truncation for detail/export overlays.
 func WithStrikeFullContent(enabled bool) StrikeIndexerOption {
 	return func(indexer *StrikeIndexer) { indexer.fullContent = enabled }
+}
+
+// WithStrikeMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithStrikeMaxRecordBytes(limit int) StrikeIndexerOption {
+	return func(idx *StrikeIndexer) { idx.maxRecordBytes = limit }
 }
 
 var _ TranscriptIndexer = (*StrikeIndexer)(nil)
@@ -177,8 +189,21 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 		}
 		if strikeRecordTooLarge(raw) {
 			if completion != nil {
-				parseErr = fmt.Errorf("record exceeds the %d-byte supported processing limit; it was not silently omitted", defaults.ScannerMaxLine)
+				parseErr = fmt.Errorf("record exceeds the %d-byte supported processing limit; it was not silently omitted", defaults.MaxJSONLRecordBytes)
 			}
+			return
+		}
+		if at, isOmission := parseOmittedRecordSentinel(raw); isOmission {
+			// Peasant's own stand-in for a record ingest omitted. It is not a
+			// Strike event: it becomes the placeholder entry that holds the
+			// omitted record's position in the indexed transcript.
+			entry, placeholderErr := omissionPlaceholderEntry(a.sessionID, HarnessStrike, a.nextIndex, at)
+			if placeholderErr != nil {
+				parseErr = placeholderErr
+				return
+			}
+			a.entries = append(a.entries, entry)
+			a.nextIndex++
 			return
 		}
 		trimmed := bytes.TrimSpace(raw)

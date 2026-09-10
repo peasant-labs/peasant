@@ -76,6 +76,12 @@ func loadIndexerCompletionFixtures(t *testing.T) []indexerCompletionFixture {
 	return fixtures.Cases
 }
 
+// completionOversizedRecordLimit is the per-record limit the oversized cases
+// inject. It is small so a case can build a record over it in memory; the
+// behavior under test, that an over-limit record is never certified, does not
+// depend on the limit's value.
+const completionOversizedRecordLimit = 8192
+
 func TestConcreteIndexerCompletion(t *testing.T) {
 	for _, fixture := range loadIndexerCompletionFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -85,8 +91,13 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 			if fixture.LongContent {
 				data = []byte(strings.ReplaceAll(fixture.Input, "LONG_CONTENT", strings.Repeat("x", defaults.ContentPreviewLimit+50)))
 			}
+			// An over-limit record must never be certified as a complete
+			// index. The limit is injected below so the case can build a
+			// record over it cheaply instead of one of production size.
+			registryOptions := ingest.IndexerRegistryOptions{}
 			if fixture.Oversized {
-				data = append(data, []byte(strings.Repeat("x", defaults.ScannerMaxLine)+"\n")...)
+				registryOptions.MaxRecordBytes = completionOversizedRecordLimit
+				data = append(data, []byte(strings.Repeat("x", completionOversizedRecordLimit+1)+"\n")...)
 			}
 			if !fixture.Missing {
 				if err := fs.WriteFile(session.SourcePath.String(), data, 0600); err != nil {
@@ -97,7 +108,7 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 			if fixture.PartialRead {
 				inputFS = completionPartialReadFS{FileSystem: fs}
 			}
-			indexer := ingest.NewIndexerRegistry(inputFS, ingest.IndexerRegistryOptions{})[fixture.Harness]
+			indexer := ingest.NewIndexerRegistry(inputFS, registryOptions)[fixture.Harness]
 			strict, ok := indexer.(ingest.VersionedTranscriptIndexer)
 			if !ok {
 				t.Fatal("production indexer cannot verify completion")
@@ -130,7 +141,9 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 				}
 			}
 			if !fixture.Error {
-				full := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[fixture.Harness].(ingest.VersionedTranscriptIndexer)
+				fullOptions := registryOptions
+				fullOptions.FullContent = true
+				full := ingest.NewIndexerRegistry(fs, fullOptions)[fixture.Harness].(ingest.VersionedTranscriptIndexer)
 				fullResult, fullErr := full.IndexTranscriptResult(context.Background(), session)
 				assertCompletionEntries(t, fullResult, fullErr, fixture.Entries)
 				boundedEntries := result.(indexformat.V1).Entries

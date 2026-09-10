@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -165,9 +164,7 @@ func (a *CodexAdapter) loadCodexSessionTitles(root string) map[string]string {
 		return titles
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -203,9 +200,7 @@ func (a *CodexAdapter) extractCodexHints(path string) codexSessionHints {
 		return codexSessionHints{}
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -459,9 +454,7 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 		gotSessionMeta bool
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {

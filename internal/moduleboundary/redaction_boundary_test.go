@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/redact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -277,7 +279,7 @@ func assertScannerCalls(t *testing.T, root string, calls []scannerCallFixture) {
 				}
 				matchedCalls++
 				if !hasScannerOption(call.Args) {
-					t.Errorf("%s function %s calls redact.RedactJSONLBytes without redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.ScannerMaxLine)", want.File, want.Function)
+					t.Errorf("%s function %s calls redact.RedactJSONLBytes without redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes)", want.File, want.Function)
 				}
 				return true
 			})
@@ -296,7 +298,7 @@ func hasScannerOption(arguments []ast.Expr) bool {
 		if !ok || !isSelectorCall(call.Fun, "redact", "WithRedactScannerBufSize") || len(call.Args) != 2 {
 			continue
 		}
-		if isSelectorCall(call.Args[0], "defaults", "ScannerInitBuf") && isSelectorCall(call.Args[1], "defaults", "ScannerMaxLine") {
+		if isSelectorCall(call.Args[0], "defaults", "ScannerInitBuf") && isSelectorCall(call.Args[1], "defaults", "MaxJSONLRecordBytes") {
 			return true
 		}
 	}
@@ -327,5 +329,60 @@ func moduleRoot(t *testing.T) string {
 			t.Fatalf("locate Peasant module root from %s: no go.mod found", strings.TrimSpace(dir))
 		}
 		dir = parent
+	}
+}
+
+// TestRedactionEngineHandlesRecordOverTheOldLimit proves the outcome the
+// mounted scanner-buffer option exists for: a JSONL record far larger than the
+// 10 MiB limit this build replaced is still REDACTED, not returned as its
+// original bytes. Before the limit was raised, the pinned engine refused a
+// record that long, returned the original bytes with an error, and Peasant
+// treated that as fatal, so a session with one long record could not be
+// ingested at all and its secrets never reached the redactor.
+//
+// Cost: the record has to be over the retired 10 MiB limit for the case to
+// mean anything, and redacting that much takes about half a second normally
+// and about six minutes under the race detector. The size is not negotiable,
+// so this is the price of proving the outcome on the real engine.
+func TestRedactionEngineHandlesRecordOverTheOldLimit(t *testing.T) {
+	const oldScannerLimit = 10 << 20
+	const secret = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatalf("construct the pinned redaction engine: %v", err)
+	}
+
+	padding := strings.Repeat("p", oldScannerLimit)
+	record, err := json.Marshal(map[string]any{
+		"type":    "user",
+		"message": map[string]any{"role": "user", "content": padding + " " + secret},
+	})
+	if err != nil {
+		t.Fatalf("build the oversized record: %v", err)
+	}
+	if len(record) <= oldScannerLimit {
+		t.Fatalf("record is %d bytes; the case only means something over the old %d-byte limit", len(record), oldScannerLimit)
+	}
+	input := append(record, '\n')
+
+	out, err := redact.RedactJSONLBytes(redactor, input,
+		redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
+	if err != nil {
+		t.Fatalf("the engine refused a %d-byte record: %v; a record within %d bytes must be redacted whole", len(record), err, defaults.MaxJSONLRecordBytes)
+	}
+	if bytes.Contains(out, []byte(secret)) {
+		t.Fatal("the secret survived redaction; the engine returned the original bytes for the oversized record")
+	}
+	if !bytes.Contains(out, []byte(padding[:1024])) {
+		t.Fatal("the record's ordinary content did not survive; the engine truncated instead of redacting")
+	}
+
+	// Mutation guard: with the limit this build replaced, the same call fails
+	// and hands back the original bytes, secret included.
+	old, oldErr := redact.RedactJSONLBytes(redactor, input,
+		redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, oldScannerLimit))
+	if oldErr == nil || !bytes.Contains(old, []byte(secret)) {
+		t.Fatalf("the old %d-byte limit no longer refuses this record (err=%v); the case can no longer tell the two limits apart", oldScannerLimit, oldErr)
 	}
 }

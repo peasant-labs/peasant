@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,6 +26,10 @@ import (
 type CodexIndexer struct {
 	fs          FileSystem
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 // CodexIndexerOption configures a CodexIndexer.
@@ -36,6 +39,14 @@ type CodexIndexerOption func(*CodexIndexer)
 // remain complete independently of preview mode.
 func WithCodexFullContent(enabled bool) CodexIndexerOption {
 	return func(idx *CodexIndexer) { idx.fullContent = enabled }
+}
+
+// WithCodexMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithCodexMaxRecordBytes(limit int) CodexIndexerOption {
+	return func(idx *CodexIndexer) { idx.maxRecordBytes = limit }
 }
 
 var _ TranscriptIndexer = (*CodexIndexer)(nil)
@@ -98,16 +109,19 @@ func (idx *CodexIndexer) parseRollout(sessionID SessionID, data []byte) ([]schem
 }
 
 func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
 
 	for scanner.Scan() {
+		var placeholderErr error
+		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCodex, &entryIndex)
+		if placeholderErr != nil {
+			return entries, placeholderErr
+		}
 		if completion != nil {
-			completion.line++
+			completion.line = scanner.Line()
 		}
 		raw := scanner.Bytes()
 		trimmed := bytes.TrimSpace(raw)
@@ -189,6 +203,16 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 
 	if err := scanner.Err(); err != nil {
 		return entries, fmt.Errorf("codex indexer: scanner error for %s: %w", sessionID, err)
+	}
+	if completion != nil && scanner.SawOversized() {
+		return entries, uncertifiableOversizedRecord(scanner.Oversized(), scanner.limit)
+	}
+	entries, err := appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCodex, &entryIndex)
+	if err != nil {
+		return entries, err
+	}
+	if completion != nil {
+		completion.line = scanner.Line()
 	}
 	return entries, nil
 }

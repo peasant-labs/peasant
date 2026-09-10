@@ -1,0 +1,98 @@
+# One shared expectation for large JSONL records, per harness.
+#
+# Every harness gets the same two cases:
+#   * a record larger than the 10 MiB per-line limit this build replaced, but
+#     within the per-record limit, is extracted and indexed WHOLE, with no
+#     diagnostic and no placeholder;
+#   * a record over an INJECTED small limit is OMITTED, reported with the
+#     record_too_large diagnostic, marked by a placeholder entry at its
+#     position, and the records before and after it are still indexed.
+#
+# `largeRecord` carries the token PAD, which the test replaces with padding to
+# reach the size a case needs, and the token MARK, which the test replaces
+# with a sentinel string it then looks for in the indexed entries. A harness
+# whose large record carries a tool call id also names it in `wantToolCallId`,
+# so the placeholder is proved to pair with the tool call it answers.
+#
+# `projectionFollowsPhysicalOrder` says whether the harness indexes records in
+# physical order. Only Pi does not: it projects the active path through an
+# entry tree.
+#
+# Mutation note: with the 10 MiB limit restored, every
+# "...-indexed-whole" case fails.
+requiredNames:
+  - claude-code-large-record-indexed-whole
+  - claude-code-over-limit-record-omitted
+  - codex-large-record-indexed-whole
+  - codex-over-limit-record-omitted
+  - cursor-large-record-indexed-whole
+  - cursor-over-limit-record-omitted
+  - strike-large-record-indexed-whole
+  - strike-over-limit-record-omitted
+  - pi-large-record-indexed-whole
+  - pi-over-limit-record-omitted
+
+harnesses:
+  - name: claude-code
+    harness: claude-code
+    leadingRecords:
+      - '{"type":"user","message":{"role":"user","content":"first record"}}'
+    largeRecord: '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_large_record_probe","content":"MARKPAD"}]}}'
+    trailingRecords:
+      - '{"type":"user","message":{"role":"user","content":"last record"}}'
+    wantToolCallId: toolu_large_record_probe
+    projectionFollowsPhysicalOrder: true
+
+  - name: codex
+    harness: codex
+    leadingRecords:
+      - '{"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cli_version":"native-version","cwd":"/synthetic/project"}}'
+      - '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first record"}]}}'
+    largeRecord: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"MARKPAD"}]}}'
+    trailingRecords:
+      - '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"last record"}]}}'
+    wantToolCallId: ""
+    projectionFollowsPhysicalOrder: true
+
+  - name: cursor
+    harness: cursor
+    leadingRecords:
+      - '{"role":"user","content":"first record"}'
+    largeRecord: '{"role":"user","content":"MARKPAD"}'
+    trailingRecords:
+      - '{"role":"user","content":"last record"}'
+    wantToolCallId: ""
+    projectionFollowsPhysicalOrder: true
+
+  - name: strike
+    harness: strike
+    leadingRecords:
+      - '{"type":"user.message","data":{"text":"first record"}}'
+    largeRecord: '{"type":"user.message","data":{"text":"MARKPAD"}}'
+    trailingRecords:
+      - '{"type":"user.message","data":{"text":"last record"}}'
+    wantToolCallId: ""
+    projectionFollowsPhysicalOrder: true
+
+  - name: pi
+    harness: pi
+    # A Pi recording must open with its v3 session header, so the header is
+    # the leading record and the ordinary entry follows it.
+    leadingRecords:
+      - '{"type":"session","version":3,"id":"SESSION_ID","cwd":"/synthetic/project"}'
+      - '{"type":"message","id":"pi-first","parentId":null,"message":{"role":"user","content":"first record"}}'
+    largeRecord: '{"type":"message","id":"pi-large","parentId":"pi-first","message":{"role":"user","content":"MARKPAD"}}'
+    # The trailing record hangs off the record BEFORE the large one. A Pi
+    # recording that referenced the omitted record as a parent would be a
+    # dangling active parent, which is a tree fault this change does not
+    # alter and is not what these cases are about.
+    trailingRecords:
+      - '{"type":"message","id":"pi-last","parentId":"pi-large","message":{"role":"user","content":"last record"}}'
+    wantToolCallId: ""
+    # Pi projects the ACTIVE PATH through an entry tree, not the physical
+    # record order, and an omitted record breaks the path at that point, so
+    # the surviving path starts after the omission and the placeholder is
+    # legitimately the first projected entry. Every other assertion, the
+    # typed omission record, the note, the byte length and the retention of
+    # the records that survive, still applies.
+    projectionFollowsPhysicalOrder: false

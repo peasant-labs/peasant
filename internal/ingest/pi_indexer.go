@@ -478,5 +478,38 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			return nil, err
 		}
 	}
-	return rows, nil
+	return insertPiOmissionPlaceholders(rows, doc, sessionID)
+}
+
+// insertPiOmissionPlaceholders puts a placeholder entry where each record
+// ingest left out used to stand, so a reader of a Pi session sees the gap and
+// its reason in place instead of a silent jump.
+//
+// A Pi recording is an append-only log and the projection follows the active
+// path through it, so the count of accepted entries before an omitted record
+// is that record's position for an unbranched session and the nearest position
+// on the active path for a branched one. The record's true physical line is in
+// the typed omission record and in the reader-facing note either way.
+func insertPiOmissionPlaceholders(rows []schema.SessionEntry, doc piDocument, sessionID SessionID) ([]schema.SessionEntry, error) {
+	if len(doc.omissions) == 0 {
+		return rows, nil
+	}
+	out := make([]schema.SessionEntry, 0, len(rows)+len(doc.omissions))
+	next := 0
+	for _, omission := range doc.omissions {
+		position := min(max(omission.AfterEntries, 0), len(rows))
+		for ; next < position; next++ {
+			out = append(out, rows[next])
+		}
+		entry, err := omissionPlaceholderEntry(sessionID, HarnessPi, len(out), omission.At)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entry)
+	}
+	out = append(out, rows[next:]...)
+	for index := range out {
+		out[index].EntryIndex = index
+	}
+	return out, nil
 }

@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -63,6 +62,10 @@ type ClaudeIndexer struct {
 	fs          FileSystem
 	fullDepth   bool
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 // ClaudeIndexerOption configures a ClaudeIndexer.
@@ -80,6 +83,14 @@ func WithClaudeFullDepth(enabled bool) ClaudeIndexerOption {
 // When disabled (default), content is truncated to defaults.ContentPreviewLimit.
 func WithClaudeFullContent(enabled bool) ClaudeIndexerOption {
 	return func(idx *ClaudeIndexer) { idx.fullContent = enabled }
+}
+
+// WithClaudeMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithClaudeMaxRecordBytes(limit int) ClaudeIndexerOption {
+	return func(idx *ClaudeIndexer) { idx.maxRecordBytes = limit }
 }
 
 var _ TranscriptIndexer = (*ClaudeIndexer)(nil)
@@ -144,9 +155,7 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
@@ -156,8 +165,13 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 	askUserCallIDs := make(map[string]bool)
 
 	for scanner.Scan() {
+		var placeholderErr error
+		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessClaudeCode, &entryIndex)
+		if placeholderErr != nil {
+			return entries, placeholderErr
+		}
 		if completion != nil {
-			completion.line++
+			completion.line = scanner.Line()
 		}
 		raw := scanner.Bytes()
 		trimmed := bytes.TrimSpace(raw)
@@ -264,6 +278,16 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		return entries, fmt.Errorf("claude indexer: scanner error for %s: %w", sessionID, err)
 	}
 
+	if completion != nil && scanner.SawOversized() {
+		return entries, uncertifiableOversizedRecord(scanner.Oversized(), scanner.limit)
+	}
+	entries, err := appendOmissionPlaceholders(entries, scanner, sessionID, HarnessClaudeCode, &entryIndex)
+	if err != nil {
+		return entries, err
+	}
+	if completion != nil {
+		completion.line = scanner.Line()
+	}
 	return entries, nil
 }
 

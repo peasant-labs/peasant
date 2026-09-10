@@ -1,0 +1,28 @@
+# Boundary cases for the shared pre-redaction oversized-record filter
+# (internal/ingest/oversized_record_filter.go).
+#
+# Each case builds one record of `limitBytes + sizeDelta` bytes followed by a
+# second, ordinary record. `omitted` says whether the first record is left out
+# and reported.
+#
+# The at-limit case expects the record to be KEPT. That reverses the earlier
+# expectation, which came from bufio.Scanner needing buffer headroom beyond the
+# token. The shared record reader needs no headroom, and the user requirement of
+# 2026-09-10 is that "a JSONL record up to 256 MiB is read, redacted and indexed
+# in full on every harness", so a record exactly at the limit is within it.
+requiredNames: [below-limit, at-limit, above-limit, far-above-limit]
+cases:
+  - name: below-limit
+    sizeDelta: -1
+    omitted: false
+  - name: at-limit
+    sizeDelta: 0
+    omitted: false
+  - name: above-limit
+    sizeDelta: 1
+    omitted: true
+  - name: far-above-limit
+    # Many times the read buffer, to prove the filter discards a long record to
+    # the next newline and resynchronizes instead of buffering it.
+    sizeDelta: 300000
+    omitted: true

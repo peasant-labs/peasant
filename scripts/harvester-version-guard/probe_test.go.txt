@@ -11,13 +11,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
+
+// probeOversizedRecordLimit is the per-record read limit the oversized
+// completion cases inject. It is small so a case can build a record over it
+// in memory; the behavior under test, that an over-limit record is never
+// certified, does not depend on the limit's value.
+const probeOversizedRecordLimit = 8192
 
 type versions struct{ AdapterVersion, IndexerVersion int }
 type guardSnapshot struct {
@@ -47,7 +52,11 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	observe := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem) {
+	// observeWithLimit records one probe. maxRecordBytes is the per-record
+	// read limit the indexers get; zero means the production limit. A case
+	// that needs an over-limit record injects a small limit here instead of
+	// building a record of production size.
+	observeWithLimit := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem, maxRecordBytes int) {
 		if _, registered := result.Versions[string(session.Harness)]; !registered {
 			return // A historical revision cannot observe a not-yet-supported harness.
 		}
@@ -58,7 +67,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			metadata, adapterErr := adapter.ExtractMetadata(t.Context(), session)
 			guardRecord(t, &result, string(session.Harness)+"/AdapterVersion/"+name, guardMetadata(t, metadata, ""), adapterErr)
 		}
-		indexer := ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})[session.Harness]
+		indexer := ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{MaxRecordBytes: maxRecordBytes})[session.Harness]
 		var output any
 		var indexErr error
 		// Use the same preference as ingestion: authoritative full capture,
@@ -94,6 +103,9 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			}
 		}
 		guardRecord(t, &result, string(session.Harness)+"/IndexerVersion/"+name, output, indexErr)
+	}
+	observe := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem) {
+		observeWithLimit(name, session, filesystem, 0)
 	}
 
 	// Existing native E2E corpora exercise full adapter extraction and shared
@@ -159,13 +171,18 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			if row.LongContent {
 				data = strings.ReplaceAll(data, "LONG_CONTENT", strings.Repeat("x", 2050))
 			}
+			recordLimit := 0
 			if row.Oversized {
-				data += strings.Repeat("x", defaults.ScannerMaxLine) + "\n"
+				// An over-limit record must never be certified as a complete
+				// index. The limit is injected so the case builds a record
+				// over it cheaply instead of one of production size.
+				recordLimit = probeOversizedRecordLimit
+				data += strings.Repeat("x", probeOversizedRecordLimit+1) + "\n"
 			}
 			if !row.Missing {
 				write(filesystem, "/synthetic/transcript.jsonl", data)
 			}
-			observe(row.Name, ingest.DiscoveredSession{SessionID: testutil.TestSessionUUID, Harness: row.Harness, SourcePath: "/synthetic/transcript.jsonl", SourceFormat: ingest.SourceFormatJSONL}, filesystem)
+			observeWithLimit(row.Name, ingest.DiscoveredSession{SessionID: testutil.TestSessionUUID, Harness: row.Harness, SourcePath: "/synthetic/transcript.jsonl", SourceFormat: ingest.SourceFormatJSONL}, filesystem, recordLimit)
 		}
 		for _, name := range completion.RequiredNames {
 			if !seen[name] {

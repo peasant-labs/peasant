@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -230,9 +229,7 @@ func (a *CursorAdapter) extractCursorHints(path string) cursorSessionHints {
 	if err != nil {
 		return cursorSessionHints{}
 	}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 	for i := 0; i < 10 && scanner.Scan(); i++ {
 		var line cursorJSONLLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
@@ -314,9 +311,7 @@ func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, i
 		tokensOut      int
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 	for scanner.Scan() {
 		lineNum++
 		raw := bytes.TrimSpace(scanner.Bytes())
@@ -525,11 +520,23 @@ type CursorIndexer struct {
 	fs          FileSystem
 	fullDepth   bool
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 // WithCursorFullContent retains source prose before store preview normalization.
 func WithCursorFullContent(enabled bool) CursorIndexerOption {
 	return func(idx *CursorIndexer) { idx.fullContent = enabled }
+}
+
+// WithCursorMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithCursorMaxRecordBytes(limit int) CursorIndexerOption {
+	return func(idx *CursorIndexer) { idx.maxRecordBytes = limit }
 }
 
 var _ TranscriptIndexer = (*CursorIndexer)(nil)
@@ -594,15 +601,18 @@ func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
 	for scanner.Scan() {
+		var placeholderErr error
+		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCursor, &entryIndex)
+		if placeholderErr != nil {
+			return entries, placeholderErr
+		}
 		if completion != nil {
-			completion.line++
+			completion.line = scanner.Line()
 		}
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
@@ -646,6 +656,16 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 	}
 	if err := scanner.Err(); err != nil {
 		return entries, fmt.Errorf("cursor indexer: scanner error for %s: %w", sessionID, err)
+	}
+	if completion != nil && scanner.SawOversized() {
+		return entries, uncertifiableOversizedRecord(scanner.Oversized(), scanner.limit)
+	}
+	entries, err := appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCursor, &entryIndex)
+	if err != nil {
+		return entries, err
+	}
+	if completion != nil {
+		completion.line = scanner.Line()
 	}
 	return entries, nil
 }
