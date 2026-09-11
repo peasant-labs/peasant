@@ -291,6 +291,10 @@ type openOptions struct {
 	migrationConsent MigrationConsent
 	poolSize         int
 	skipMigrations   bool
+	// walAutocheckpointDisabled keeps every committed frame in the write-ahead
+	// log for the life of the pool. It exists so a test can count commits by
+	// reading the log, and is never set on a production open.
+	walAutocheckpointDisabled bool
 }
 
 // WithSkipMigrations skips the migration-state check on Open. The caller MUST
@@ -308,6 +312,15 @@ func WithSkipMigrations() OpenOption {
 // PRAGMAs. A value <= 0 falls back to the EnvPoolSize override / DefaultPoolSize.
 func WithPoolSize(n int) OpenOption {
 	return func(o *openOptions) { o.poolSize = n }
+}
+
+// WithWALAutocheckpointDisabled sets PRAGMA wal_autocheckpoint=0 on every
+// connection of this Open, so the write-ahead log keeps one frame per written
+// page until the pool closes. It is a measurement aid for tests that count
+// database commits from the log's commit frames; production opens never use
+// it, because a log that is never checkpointed grows without bound.
+func WithWALAutocheckpointDisabled() OpenOption {
+	return func(o *openOptions) { o.walAutocheckpointDisabled = true }
 }
 
 // WithMigrationConsent supplies a callback that gates running the V33 harness
@@ -341,9 +354,18 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, err
 	}
 
+	prepare := preparePragmas
+	if o.walAutocheckpointDisabled {
+		prepare = func(conn *sqlite.Conn) error {
+			if err := preparePragmas(conn); err != nil {
+				return err
+			}
+			return sqlitex.ExecuteTransient(conn, "PRAGMA wal_autocheckpoint = 0;", nil)
+		}
+	}
 	pool, err := sqlitex.NewPool(dbPath, sqlitex.PoolOptions{
 		PoolSize:    resolvePoolSize(o.poolSize),
-		PrepareConn: preparePragmas,
+		PrepareConn: prepare,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: open pool: %w", err)
