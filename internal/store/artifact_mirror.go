@@ -151,7 +151,12 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	meta := request.Artifact.Metadata
 	origin := sessionorigin.Unknown
 	originJudged := false
-	if err := sqlitex.ExecuteTransient(conn, "SELECT schema_version, adapter_version, session_origin, origin_version FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
+	// Read the row's PRIOR artifact hash before the upsert, which writes the new
+	// one. When the pair changed, the stored index input proof no longer
+	// describes the saved bytes, so it is cleared below and the repair predicate
+	// re-selects the session on the next harvest.
+	var priorArtifactHash *string
+	if err := sqlitex.ExecuteTransient(conn, "SELECT schema_version, adapter_version, session_origin, origin_version, artifact_hash FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
 		Args: []any{string(meta.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnInt(0) > ingest.CurrentSchemaVersion {
 				return &ingest.UnsupportedMetadataVersionError{Path: string(meta.SessionID) + " (stored metadata)", Version: stmt.ColumnInt(0)}
@@ -169,6 +174,10 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 			// recorded at. Zero means no verdict has ever been recorded for
 			// this row, which is the only state adapter evidence may fill.
 			originJudged = stmt.ColumnInt64(3) > 0
+			if stmt.ColumnType(4) != sqlite.TypeNull {
+				value := stmt.ColumnText(4)
+				priorArtifactHash = &value
+			}
 			var parseErr error
 			origin, parseErr = sessionorigin.Parse(stmt.ColumnText(2))
 			return parseErr
@@ -274,5 +283,14 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 			return err
 		}
 	}
-	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET artifact_hash = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{request.Artifact.ArtifactHash, string(meta.SessionID)}})
+	// Record the saved pair's hash, and clear the index input proof when the
+	// pair changed: the prior proof described the previous bytes. One statement,
+	// bound as (new hash, prior hash or NULL, new hash), so a first mirror (no
+	// prior hash) and an unchanged pair both keep the proof, and only a changed
+	// pair clears it.
+	var prior any
+	if priorArtifactHash != nil {
+		prior = *priorArtifactHash
+	}
+	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET artifact_hash = ?, indexed_input_hash = CASE WHEN ? IS ? THEN indexed_input_hash ELSE NULL END WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{request.Artifact.ArtifactHash, prior, request.Artifact.ArtifactHash, string(meta.SessionID)}})
 }

@@ -271,6 +271,13 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			if err != nil || readErr != nil || second.Summary.Indexed != 0 || indexer.byteParses != 1 || !reflect.DeepEqual(state, after) {
 				t.Fatalf("unchanged proven input reran: %+v parses=%d err=%v", second, indexer.byteParses, err)
 			}
+			// Replace the saved pair with malformed bytes and record it. Per the
+			// write-path design, a changed pair clears the stored index input
+			// proof at mirror time, because that proof described the previous
+			// bytes; the repair predicate then re-selects the session. The
+			// last-good OUTPUT (entries and producer revision) is preserved
+			// until a successful re-index replaces it.
+			priorInputHash := *state.IndexedInputHash
 			if err := publishIndexInputFixture(ctx, database, filesystem, output, publicationTestArtifact(t, fixture.Malformed), metadataPath); err != nil {
 				t.Fatal(err)
 			}
@@ -278,22 +285,31 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			lastGoodEntries, err := database.ListEntries(ctx, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lastGood.IndexedInputHash != nil {
+				t.Fatalf("a changed saved pair did not clear the stored index input proof: %+v", lastGood)
+			}
 			failed, err := pipeline.Run(ctx)
 			after, readErr = database.ReadIndexState(ctx, sid)
-			if err != nil || readErr != nil || failed.Summary.Indexed != 0 || indexer.byteParses != 2 || !reflect.DeepEqual(lastGood, after) {
-				t.Fatalf("changed input failure changed last-good proof or retried within this invocation: %+v parses=%d err=%v", failed, indexer.byteParses, err)
+			afterEntries, entriesErr := database.ListEntries(ctx, sid)
+			if err != nil || readErr != nil || entriesErr != nil || failed.Summary.Indexed != 0 || indexer.byteParses != 2 || after.IndexedInputHash != nil || after.IndexerVersion != lastGood.IndexerVersion || !reflect.DeepEqual(lastGoodEntries, afterEntries) {
+				t.Fatalf("changed input failure replaced last-good output or did not retry once: %+v parses=%d err=%v", failed, indexer.byteParses, err)
 			}
 			retry, err := pipeline.Run(ctx)
 			after, readErr = database.ReadIndexState(ctx, sid)
-			if err != nil || readErr != nil || retry.Summary.Indexed != 0 || indexer.byteParses != 3 || !reflect.DeepEqual(lastGood, after) {
-				t.Fatalf("next invocation did not retry changed input: %+v parses=%d err=%v", retry, indexer.byteParses, err)
+			afterEntries, entriesErr = database.ListEntries(ctx, sid)
+			if err != nil || readErr != nil || entriesErr != nil || retry.Summary.Indexed != 0 || indexer.byteParses != 3 || after.IndexedInputHash != nil || !reflect.DeepEqual(lastGoodEntries, afterEntries) {
+				t.Fatalf("next invocation did not retry changed input or replaced last-good output: %+v parses=%d err=%v", retry, indexer.byteParses, err)
 			}
 			if err := publishIndexInputFixture(ctx, database, filesystem, output, publicationTestArtifact(t, fixture.Replacement), metadataPath); err != nil {
 				t.Fatal(err)
 			}
 			repaired, err := pipeline.Run(ctx)
 			after, readErr = database.ReadIndexState(ctx, sid)
-			if err != nil || readErr != nil || repaired.Summary.Indexed != 1 || indexer.byteParses != 4 || after.IndexedInputHash == nil || *after.IndexedInputHash == *lastGood.IndexedInputHash {
+			if err != nil || readErr != nil || repaired.Summary.Indexed != 1 || indexer.byteParses != 4 || after.IndexedInputHash == nil || *after.IndexedInputHash == priorInputHash {
 				t.Fatalf("repaired input did not complete current-version indexing: %+v parses=%d state=%+v err=%v", repaired, indexer.byteParses, after, err)
 			}
 		})
