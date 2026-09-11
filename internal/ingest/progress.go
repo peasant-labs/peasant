@@ -6,20 +6,27 @@ import "sync"
 type Stage string
 
 const (
-	StageDiscover Stage = "DISCOVER"
-	StageDiff     Stage = "DIFF"
-	StageFilter   Stage = "FILTER"
-	StageExtract  Stage = "EXTRACT+WRITE"
-	StageDBInsert Stage = "DB INSERT"
-	StageIndex    Stage = "INDEX"
-	StageCompute  Stage = "COMPUTE"
-	StageAnnotate Stage = "ANNOTATE"
-	StageCleanup  Stage = "CLEANUP"
-	StageReport   Stage = "REPORT"
+	// StageReconcile covers the reconciliation of the retained tree, which runs
+	// before discovery: it visits every retained session's committed metadata and
+	// repairs the ones whose retained pair and mirrored record disagree. It is a
+	// displayed stage because that walk is proportional to the whole retained
+	// tree, so on a large tree it is the first thing the user waits for.
+	StageReconcile Stage = "RECONCILE"
+	StageDiscover  Stage = "DISCOVER"
+	StageDiff      Stage = "DIFF"
+	StageFilter    Stage = "FILTER"
+	StageExtract   Stage = "EXTRACT+WRITE"
+	StageDBInsert  Stage = "DB INSERT"
+	StageIndex     Stage = "INDEX"
+	StageCompute   Stage = "COMPUTE"
+	StageAnnotate  Stage = "ANNOTATE"
+	StageCleanup   Stage = "CLEANUP"
+	StageReport    Stage = "REPORT"
 )
 
 // StageOrder is the canonical display order of pipeline stages.
 var StageOrder = []Stage{
+	StageReconcile,
 	StageDiscover,
 	StageDiff,
 	StageFilter,

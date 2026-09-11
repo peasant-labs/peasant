@@ -105,3 +105,20 @@ func (p *ArtifactPublisher) WalkMetadata(ctx context.Context, visit func(Session
 		})
 	})
 }
+
+// CountMetadata reports how many retained sessions WalkMetadata would visit.
+//
+// It is the inventory count the reconciliation progress bar needs before it
+// visits the first session, and it is deliberately the same walk: directory
+// enumeration and one Lstat per session, no transcript, no database and no
+// coordination state. A partially readable tree still returns the count of the
+// locators it did reach, together with the failure, so a caller that only wants
+// a total can use the count and leave the reporting to the walk that follows.
+func (p *ArtifactPublisher) CountMetadata(ctx context.Context) (int, error) {
+	total := 0
+	err := p.WalkMetadata(ctx, func(SessionID, string) error {
+		total++
+		return nil
+	})
+	return total, err
+}

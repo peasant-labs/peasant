@@ -31,6 +31,7 @@ const (
 
 // IndexProfileStageOrder is the display order for profile-only stage timings.
 var IndexProfileStageOrder = []Stage{
+	StageReconcile,
 	StageDiscover,
 	StagePrepare,
 	StageDiff,

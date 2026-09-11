@@ -105,13 +105,42 @@ func (p *Pipeline) reconcileManagedArtifacts(ctx context.Context) {
 		p.reportDiagnostic(artifactRecoveryDiagnostic(string(p.config.OutputDir), err))
 		return
 	}
+	// The reconciliation of the retained tree is a displayed stage from here to
+	// the end of the walk. It runs before discovery and is proportional to the
+	// whole retained tree, so without it a large tree is an empty screen for as
+	// long as the walk takes.
+	prog := p.config.Progress
+	reconcileStart := time.Now()
+	total := 0
+	if publisher.mirror != nil {
+		// The total is the inventory the walk is about to visit, counted by the
+		// same enumeration: directory entries and one Lstat per session, no
+		// transcript and no database. A tree the count cannot fully read is
+		// reported by the walk that follows over the same locators, so the count
+		// keeps its partial total and says nothing twice.
+		//
+		// Without a mirror there is no walk, so the stage carries no sessions
+		// rather than a total it would never reach.
+		total, _ = publisher.CountMetadata(ctx)
+	}
+	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageReconcile, Total: total})
+	reconciled := 0
+	var walkErr error
 	changed, err := publisher.recoverPending(ctx, p.includesManagedSession, p.config.Since)
 	p.reconciledArtifacts = append(p.reconciledArtifacts, changed...)
 	if err != nil {
 		p.reportPendingRecoveryFailure(err)
 	}
 	if publisher.mirror != nil {
-		err = publisher.WalkMetadata(ctx, func(sid SessionID, path string) error {
+		walkErr = publisher.WalkMetadata(ctx, func(sid SessionID, path string) error {
+			// The counter advances for every session the walk finishes, whatever
+			// the session cost, because the bar measures the walk and not the
+			// repairs: a settled tree is exactly the case where every session is
+			// cheap and the user still waits for all of them.
+			defer func() {
+				reconciled++
+				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageReconcile, Done: reconciled, Total: total})
+			}()
 			// Decide the refusal BEFORE any intent is staged. ReconcileStored
 			// stages a publication intent and only then asks the mirror, so a
 			// session whose stored schema this build cannot read used to leave
@@ -142,10 +171,16 @@ func (p *Pipeline) reconcileManagedArtifacts(ctx context.Context) {
 			}
 			return nil // An independent valid session can still make progress.
 		})
-		if err != nil {
-			p.reportDiagnostic(artifactRecoveryDiagnostic(string(p.config.OutputDir), err))
+		if walkErr != nil {
+			p.reportDiagnostic(artifactRecoveryDiagnostic(string(p.config.OutputDir), walkErr))
 		}
 	}
+	// The walk's own failure ends the stage as failed: a locator it could not
+	// enumerate is a session it never reconciled, so the bar must not read as a
+	// completed pass. Individual sessions report their own diagnostics and never
+	// reach here, and the harvest goes on either way.
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageReconcile, Done: reconciled, Total: total, Err: walkErr})
+	p.recordIndexProfileStage(StageReconcile, reconcileStart, reconciled, total)
 	var includeLifecycle func(SessionID, Harness) bool
 	if p.config.Harness != nil || p.config.AllowedSessionIDs != nil || p.config.Since != nil {
 		includeLifecycle = func(sid SessionID, harness Harness) bool {

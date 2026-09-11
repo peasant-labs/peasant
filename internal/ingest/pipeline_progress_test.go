@@ -85,13 +85,28 @@ func TestPipelineCancellationBeforeDiff(t *testing.T) {
 			if filesystem.afterCancel != 0 {
 				t.Fatalf("unexpected filesystem calls = %d", filesystem.afterCancel)
 			}
-			for _, stage := range StageOrder[1:] {
+			for _, stage := range stagesAfter(t, StageDiscover) {
 				if progress.Snapshot()[stage].Started {
 					t.Errorf("stage %s started after preparation cancellation", stage)
 				}
 			}
 		})
 	}
+}
+
+// stagesAfter names every stage the pipeline may reach only once the named
+// stage has run. It is derived from the display order by the NAME of that
+// stage, not by its position, so a stage added earlier in the order cannot
+// silently move the boundary these assertions guard.
+func stagesAfter(t *testing.T, after Stage) []Stage {
+	t.Helper()
+	for index, stage := range StageOrder {
+		if stage == after {
+			return StageOrder[index+1:]
+		}
+	}
+	t.Fatalf("stage display order %v has no %s stage", StageOrder, after)
+	return nil
 }
 
 type cancelProgressStore struct {
@@ -134,7 +149,7 @@ func TestPipelineReindexCancellationDuringDiffLookup(t *testing.T) {
 	if got := snapshot[StageDiff]; !got.Ended || !got.HasErr || got.Done != 0 {
 		t.Fatalf("interrupted reindex DIFF = %+v, want error with no classified sessions", got)
 	}
-	for _, stage := range StageOrder[2:] {
+	for _, stage := range stagesAfter(t, StageDiff) {
 		if snapshot[stage].Started {
 			t.Errorf("stage %s started after cancellation", stage)
 		}
@@ -214,7 +229,7 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 	if got := snapshot[StageDiff]; got.Done != 1 || got.Total != 3 || !got.Ended || !got.HasErr {
 		t.Fatalf("interrupted DIFF = %+v, want 1/3 ended with error", got)
 	}
-	for _, stage := range StageOrder[2:] {
+	for _, stage := range stagesAfter(t, StageDiff) {
 		if snapshot[stage].Started {
 			t.Errorf("stage %s started after DIFF cancellation", stage)
 		}
