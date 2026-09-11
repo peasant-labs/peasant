@@ -1038,7 +1038,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				"what", "failed to query sessions needing re-indexing",
 				"why", "DB query error on sessions table",
 				"user_impact", "sessions indexed with older logic will not be auto-upgraded",
-				"how_to_fix", "run peasant ingest index --all to force re-index all sessions")
+				"how_to_fix", "run peasant harvest index --all to force re-index all sessions")
 		}
 		// Build a set of already-queued session IDs for O(1) lookup.
 		queued := make(map[SessionID]bool, len(indexSessions))
@@ -1084,12 +1084,6 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				}
 			}
 			queued[sid] = true
-			// A selected session whose row does not yet record its saved pair (a
-			// legacy or logs-only row with a null artifact hash) is recorded from
-			// its own pair before indexing, so its stale index can be refreshed
-			// without re-reading the native source. Only the selected session's
-			// pair is read, never the tree.
-			p.bootstrapUnrecordedPair(ctx, *reconstructed, transcriptPath)
 			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
 			}
@@ -2997,7 +2991,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if metadataPath != "" {
 		oldDir := filepath.Dir(metadataPath)
 		if filepath.Clean(oldDir) != filepath.Clean(sessionDir) {
-			if relocateErr := p.removeRelocatedSession(oldDir, sessionDir, string(session.SessionID)); relocateErr != nil {
+			if relocateErr := p.removeRelocatedSession(oldDir, string(session.SessionID)); relocateErr != nil {
 				p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_relocation", Location: oldDir, Message: relocateErr.Error(), Remediation: "Remove the session's previous project directory by hand; its current pair is saved under its new project."})
 			}
 		}
@@ -4175,11 +4169,16 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineResult, error) {
 	prog := p.config.Progress
 	// harvest index runs the content pass to the end with no budget.
-	backfilled, _, _, err := p.backfillIncompleteContent(ctx, 0)
+	contentProfileStart := time.Now()
+	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageContent})
+	backfilled, _, contentRemaining, err := p.backfillIncompleteContent(ctx, 0)
 	if err != nil {
+		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageContent, Err: err})
 		return nil, fmt.Errorf("reindex content recovery: %w", err)
 	}
 	p.contentRecoveries = backfilled
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageContent, Done: len(backfilled), Total: len(backfilled) + contentRemaining})
+	p.recordIndexProfileStage(StageContent, contentProfileStart, len(backfilled), len(backfilled)+contentRemaining)
 
 	// Stage 1: DISCOVER — scan peasant-sync output.
 	discoverProfileStart := time.Now()
@@ -4191,18 +4190,24 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
 	}
-	// Record the database rows for saved pairs the database does not yet
-	// identify: a session whose row is absent, or present without a recorded
-	// artifact hash (a logs-only or legacy session). This is the rebuild the
-	// ordinary harvest no longer does; a present pair whose recorded hash
-	// disagrees is left for the crash-row-3 report, never overwritten.
-	p.reconcileScannedPairs(ctx, scanned)
-	if err := ctx.Err(); err != nil {
-		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
-		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
-	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(scanned), len(scanned))
+
+	// Stage RECONCILE — record the database rows for saved pairs the database
+	// does not yet identify: a session whose row is absent, or present without a
+	// recorded artifact hash (a logs-only or legacy session). This is the
+	// rebuild the ordinary harvest no longer does; a present pair whose recorded
+	// hash disagrees is left for the crash-row-3 report, never overwritten. Its
+	// cost is proportional to the scanned tree, so the user sees it as a stage.
+	reconcileProfileStart := time.Now()
+	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageReconcile, Total: len(scanned)})
+	p.reconcileScannedPairs(ctx, scanned)
+	if err := ctx.Err(); err != nil {
+		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageReconcile, Err: err})
+		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
+	}
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageReconcile, Done: len(scanned), Total: len(scanned)})
+	p.recordIndexProfileStage(StageReconcile, reconcileProfileStart, len(scanned), len(scanned))
 	prepareProfileStart := time.Now()
 	p.recordIndexProfileStage(StagePrepare, prepareProfileStart, len(scanned), len(scanned))
 
@@ -4703,7 +4708,7 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 						"what", "classifier failed to annotate session entries",
 						"why", "classifier error, missing session_entries rows, or annotation persistence failure",
 						"user_impact", "session annotations may be incomplete or recomputed on the next index run",
-						"how_to_fix", "re-run peasant ingest index --force --session "+string(sid))
+						"how_to_fix", "re-run peasant harvest index --force --session "+string(sid))
 				}
 				n := int(done.Add(1))
 				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: n, Total: total})
@@ -4745,7 +4750,7 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 					"what", "classifier failed to annotate session entries",
 					"why", "classifier error, missing session_entries rows, or annotation persistence failure",
 					"user_impact", "session annotations may be incomplete or recomputed on the next index run",
-					"how_to_fix", "re-run peasant ingest index --force --session "+string(result.SessionID))
+					"how_to_fix", "re-run peasant harvest index --force --session "+string(result.SessionID))
 			}
 			done++
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: done, Total: total})

@@ -129,6 +129,17 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	if !ok {
 		return false
 	}
+	// A stored producer or index format newer than this build is refused from
+	// the database state, before the pair is read: reading it only to refuse it
+	// is a wasted read, and the shared parse path reports the refusal once when
+	// the session reaches it as work.
+	if reader, ok := p.metricsStore.(SessionIndexStateReader); ok {
+		if state, stateErr := reader.ReadIndexState(ctx, target.session.SessionID); stateErr == nil && state != nil {
+			if p.checkIndexProducer(state) != nil {
+				return true
+			}
+		}
+	}
 	input, err := p.captureIndexInput(ctx, indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath}, indexer)
 	if err != nil {
 		// Incomplete capture is not current input. The shared parse path owns

@@ -116,6 +116,14 @@ func (p *Pipeline) appendStoredAdapterWork(ctx context.Context, entries []DiffEn
 		if !p.adapterNeedsRefresh(metadata) {
 			continue
 		}
+		// The stored metadata carries the original native source locator. A
+		// retained-input reconstruction has no native session, so the target
+		// must carry it forward: without it the reconstructed session's source
+		// path is empty and reads as native input that moved, which forces a
+		// native re-extraction the retained pair could have served.
+		if metadata != nil {
+			target.originalSourcePath = metadata.Source.FilePath
+		}
 		session, found := native[sid]
 		if !found {
 			session = p.nativeSessionForTarget(target, metadata)
@@ -249,8 +257,12 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 		if session == nil {
 			continue
 		}
-		path := adapterTargetMetadataPath(reindexTarget{session: *session, transcriptPath: transcriptPath})
-		if _, err := readArtifactPair(p.fs, output, path, sid); err == nil {
+		// A lost metadata file beside an intact transcript is still a usable
+		// retained session: the index-recovery pass reconstructs it from stored
+		// source information and rebuilds the pair. The recoverable evidence is
+		// the transcript, not the metadata the recovery will rewrite, so confirm
+		// the transcript reads before declaring native discovery failure fatal.
+		if _, err := p.fs.Stat(transcriptPath); err == nil {
 			return true
 		}
 	}

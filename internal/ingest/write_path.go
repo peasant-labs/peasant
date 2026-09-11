@@ -255,38 +255,33 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 
 // removeRelocatedSession clears a session's previous location after its pair
 // has been installed at a new one, which happens when the session's project
-// identity changes. The child subagents subtree is moved to the new location
-// so a filtered child is not lost, then the old session directory is removed.
-// oldDir and newDir are the session directories; both are absolute.
-func (p *Pipeline) removeRelocatedSession(oldDir, newDir, sessionID string) error {
-	oldSubagents := filepath.Join(oldDir, defaults.DirSubagents.String())
-	entries, err := p.fs.ReadDir(oldSubagents)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+// identity changes. Only the parent-owned files are removed from the old
+// directory; the child subagents subtree is left in place, so a child is never
+// lost by the parent's move and is relocated on its own next harvest. oldDir is
+// the session directory the pair moved away from; it is absolute.
+func (p *Pipeline) removeRelocatedSession(oldDir, sessionID string) error {
+	entries, err := p.fs.ReadDir(oldDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	if len(entries) > 0 {
-		newSubagents := filepath.Join(newDir, defaults.DirSubagents.String())
-		if err := p.fs.MkdirAll(newSubagents, defaults.PrivateDirPerm); err != nil {
+	for _, entry := range entries {
+		name := entry.Name()
+		// The subagents subtree is child-owned and stays; every parent-owned
+		// file and the debug directory are the ones the move leaves behind.
+		if name == defaults.DirSubagents.String() {
+			continue
+		}
+		if !strings.HasPrefix(name, sessionID+"--") && name != defaults.DirDebug.String() {
+			continue
+		}
+		if err := p.fs.RemoveAll(filepath.Join(oldDir, name)); err != nil {
 			return err
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			target := filepath.Join(newSubagents, entry.Name())
-			if _, err := p.fs.Stat(target); err == nil {
-				// The child was already re-ingested at the new location; its old
-				// copy is superseded and removed with the old directory below.
-				continue
-			} else if !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			if err := p.fs.Rename(filepath.Join(oldSubagents, entry.Name()), target); err != nil {
-				return err
-			}
-		}
 	}
-	return p.fs.RemoveAll(oldDir)
+	return nil
 }
 
 // reconcileScannedPairs records the database rows for saved pairs the database
@@ -320,7 +315,7 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		if err := ctx.Err(); err != nil {
 			return
 		}
-		if !p.includesManagedSession(target.session.SessionID, target.session.Harness) {
+		if !p.includesIndexTarget(target) {
 			continue
 		}
 		state, err := reader.ReadIndexState(ctx, target.session.SessionID)
@@ -329,6 +324,15 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		}
 		if state != nil && state.ArtifactHash != nil {
 			continue // Already identified; a disagreeing hash is not overwritten here.
+		}
+		// Skip a session this build would refuse: a stored schema or producer
+		// newer than this build is left untouched and reported by the selection,
+		// not read or mirror-refused here (which would duplicate the diagnostic).
+		if p.checkStoredMetadataVersion(ctx, target.session.SessionID) != nil {
+			continue
+		}
+		if state != nil && p.checkIndexProducer(state) != nil {
+			continue
 		}
 		metadataPath := filepath.Join(filepath.Dir(target.transcriptPath), string(target.session.SessionID)+defaults.MetadataSuffix)
 		artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
@@ -341,36 +345,6 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		}
 	}
 	flush()
-}
-
-// bootstrapUnrecordedPair records a selected session's saved pair in the
-// database when the row does not yet identify it (a null artifact hash on a
-// legacy or logs-only row). It reads only that session's pair, never the tree,
-// and does nothing when the row already records an artifact hash or a valid
-// pair is not present. A present hash that disagrees is left untouched.
-func (p *Pipeline) bootstrapUnrecordedPair(ctx context.Context, session DiscoveredSession, transcriptPath string) {
-	if transcriptPath == "" || p.config.DryRun {
-		return
-	}
-	reader, ok := p.metricsStore.(SessionIndexStateReader)
-	mirror, mirrorErr := p.mirrorArtifactStore()
-	if !ok || mirrorErr != nil || mirror == nil {
-		return
-	}
-	state, err := reader.ReadIndexState(ctx, session.SessionID)
-	if err != nil || (state != nil && state.ArtifactHash != nil) {
-		return
-	}
-	metadataPath := filepath.Join(filepath.Dir(transcriptPath), string(session.SessionID)+defaults.MetadataSuffix)
-	artifact, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, session.SessionID)
-	if err != nil {
-		return
-	}
-	for _, result := range mirror.MirrorArtifacts(ctx, []ArtifactMirrorRequest{{Artifact: artifact}}) {
-		if result.Err != nil {
-			p.reportMetadataRefusal(string(result.SessionID), fmt.Errorf("record saved session %s from its files: %w", result.SessionID, result.Err))
-		}
-	}
 }
 
 // mirrorRequestFor builds the database mirror request for one installed pair.

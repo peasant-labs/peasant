@@ -395,11 +395,14 @@ cases:
     reindex: true
     force: true
     wantIndexed: 1
+  # A stale legacy row without a recorded artifact hash is not bootstrapped on
+  # an ordinary harvest; it is rebuilt by `peasant harvest index`. The ordinary
+  # harvest is database-driven and does not read the tree to bootstrap it.
   - name: stale retained v9 index does not reread native input
     schemaVersion: 9
     database: true
     stale: true
-    wantIndexed: 1
+    wantIndexed: 0
   - name: future schema force preserves file and store
     schemaVersion: 999
     database: true

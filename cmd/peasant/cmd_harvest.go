@@ -125,7 +125,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Short: "Populate database from existing peasant-sync/ files",
 		Long: "Read transcripts already in peasant-sync/ and populate the SQLite analytics database (indexing, metrics, annotations).\n" +
 			"By default, select sessions with stale indexer revisions. Use --source-harness, --session, and --since to narrow the selection, or --force to re-process matching current sessions.\n" +
-			"--all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.",
+			"Use --all to rebuild a lost or damaged database from the files in peasant-sync/. --all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHarvest(cmd, harvestIndexOnly, &flags)
 		},
@@ -154,7 +154,11 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	// Common flags for all modes.
 	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "Show what would be processed without writing")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Force re-process sessions that match current filters")
-	cmd.Flags().BoolVar(&flags.all, "all", false, "Process ALL sessions (clears filters, implies --force)")
+	allHelp := "Process ALL sessions (clears filters, implies --force)"
+	if mode == harvestIndexOnly {
+		allHelp = "Process ALL sessions (clears filters, implies --force; rebuilds a lost database from peasant-sync/)"
+	}
+	cmd.Flags().BoolVar(&flags.all, "all", false, allHelp)
 	cmd.Flags().BoolVar(&flags.verbose, "verbose", false, "Show file-level detail")
 	cmd.Flags().BoolVar(&flags.debug, "debug", false, "Show debug-level logging")
 	_ = cmd.Flags().MarkHidden("debug")
@@ -471,6 +475,17 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 				ingest.WithLogger(db),
 				ingest.WithIndexLogger(db),
 			)
+		}
+		// An empty database beside a peasant-sync/ that already holds saved
+		// sessions means the database was lost. A harvest now would read the
+		// harness sources again and overwrite the saved copies, so point the
+		// user at the rebuild first. Detection counts nothing: one bounded
+		// session count and one bounded tree probe. Never on a fresh install
+		// (no tree), never when the database has rows.
+		if mode == harvestAll && !flags.dryRun {
+			if count, countErr := db.CountSessionsFiltered(ctx, store.SessionListFilter{}); countErr == nil && count == 0 && ingest.RetainedTreeHoldsSessions(fs, string(resolvedOutput)) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.")
+			}
 		}
 	}
 

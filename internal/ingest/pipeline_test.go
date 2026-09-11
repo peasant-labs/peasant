@@ -4348,12 +4348,15 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	parentMeta := makeReindexMeta(t, testSessionID, parentSourcePath)
 	_, parentTranscript := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
 
-	// Set up subagent in nested layout.
+	// Set up subagent in nested layout. Its row is seeded below, after the
+	// parent, as a saved pair with no index evidence: its stored index_version
+	// is behind the target, so the database-driven inventory selects it and the
+	// pipeline reconstructs it from its stored metadata. MirrorArtifacts refuses
+	// a child whose parent is not yet stored, so the seed order is parent first.
 	subagentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testutil.TestSubagentID)
 	subagentMeta := makeReindexMeta(t, testutil.TestSubagentID, subagentSourcePath)
 	parentID := ingest.SessionID(testSessionID)
 	subagentMeta.ParentUUID = &parentID
-	setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
 
 	subSID, _ := ingest.NewSessionID(testutil.TestSubagentID)
 
@@ -4384,6 +4387,8 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 		t.Fatal(err)
 	}
 	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *parentMeta, parentBytes)
+	subagentContent := []byte(`{"type":"user","message":{"role":"user","content":"subagent hello"}}` + "\n")
+	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *subagentMeta, subagentContent)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -4423,18 +4428,19 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
-	// Arrange: write a session to peasant-sync output as if it was previously
-	// indexed at an older version than the harness indexer target.
+	// Arrange: seed a saved pair whose database row is not yet indexed, so its
+	// stored index_version is below the harness indexer target. The ordinary
+	// harvest's database-driven inventory (ListStaleIndexSessions) selects it
+	// without any tree walk, then reconstructs it from its stored metadata.
 	originalSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
 	sid, _ := ingest.NewSessionID(testSessionID)
 
-	// metricsStore returns this session when asked for index_version < currentVersion.
-	// This simulates the DB returning sid because its stored version < the harness indexer target.
+	// metricsStore records the targets ListStaleIndexSessions is called with, so
+	// the version-bump wiring stays observable; the stale row itself comes from
+	// the real store the fixture wraps.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4451,6 +4457,8 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	staleContent := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
+	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *meta, staleContent)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -4489,12 +4497,15 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	}
 }
 
-// TestPipeline_AutoDetect_ReconstructFromSourceInfo verifies that a session
-// that is stale (in StaleIndexSessions) but has NO peasant-sync metadata on disk
-// can still be re-indexed via the reconstructFromSourceInfo fallback path, which
-// reads source_path, source_format, and provider from the DB and constructs the
-// peasant-sync output transcript path using the host_slug from LookupSessionLocation.
-func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
+// TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed verifies that a
+// session known to the database only by its source information, with an intact
+// transcript but no saved metadata file and no mirrored artifact identity, is
+// NOT indexed by an ordinary harvest. The retained pair is the index input and
+// the database is the source of truth for the artifact identity: without a
+// saved pair the session is a lost-metadata case, reported by `harvest index`
+// and repaired by `peasant harvest --force --session <id>`, never silently
+// re-indexed from source information on a plain harvest.
+func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4554,37 +4565,26 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The session should have been indexed via the source-info fallback.
-	if result.Summary.Indexed != 1 {
-		t.Errorf("Summary.Indexed = %d, want 1 (via reconstructFromSourceInfo)", result.Summary.Indexed)
+	// No saved pair, so an ordinary harvest indexes nothing: the session is a
+	// lost-metadata case left for the rebuild command, not silently re-indexed.
+	if result.Summary.Indexed != 0 {
+		t.Errorf("Summary.Indexed = %d, want 0 (a source-info-only session has no saved pair to index)", result.Summary.Indexed)
 	}
-
-	// Verify the indexed session is our session.
-	indexed, ok := metricsStore.IndexedEntries[sid]
-	if !ok {
-		t.Fatal("session was not indexed in MetricsStore (reconstructFromSourceInfo fallback failed)")
+	if _, ok := metricsStore.IndexedEntries[sid]; ok {
+		t.Fatal("a source-info-only session was indexed on an ordinary harvest; it has no saved pair and must be left for harvest index")
 	}
-	if len(indexed) != 1 {
-		t.Errorf("indexed entries for session = %d, want 1", len(indexed))
-	}
-
-	// Verify the indexer received the correct output transcript path (flat layout).
-	called, ok := indexer.CalledWith[sid]
-	if !ok {
-		t.Fatal("indexer was not called for session")
-	}
-	wantPath := fmt.Sprintf("%s/%s/%s/%s--transcript.jsonl",
-		testOutputDir, testutil.TestHostSlug, testSessionID, testSessionID)
-	if got := string(called.SourcePath); got != wantPath {
-		t.Errorf("indexer received SourcePath = %q, want flat output path %q", got, wantPath)
+	if _, ok := indexer.CalledWith[sid]; ok {
+		t.Fatal("the indexer parsed a session with no saved pair")
 	}
 }
 
-// TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent verifies that a
-// subagent session that is stale but has NO peasant-sync metadata on disk is
-// re-indexed via reconstructFromSourceInfo using the subagent directory layout:
-// {outputDir}/{hostSlug}/{parentID}/subagents/{sid}/{sid}--transcript.{ext}
-func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
+// TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed verifies that a
+// subagent known to the database only by its source information, with an intact
+// transcript in the subagent layout but no saved metadata file and no mirrored
+// artifact identity, is NOT indexed by an ordinary harvest. Like a top-level
+// session, a subagent without a saved pair is a lost-metadata case left for
+// `harvest index`, never silently re-indexed from source information.
+func TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4651,30 +4651,16 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The subagent session should have been indexed via the source-info fallback.
-	if result.Summary.Indexed != 1 {
-		t.Errorf("Summary.Indexed = %d, want 1 (subagent via reconstructFromSourceInfo)", result.Summary.Indexed)
+	// No saved pair, so an ordinary harvest indexes nothing: the subagent is a
+	// lost-metadata case left for the rebuild command, not silently re-indexed.
+	if result.Summary.Indexed != 0 {
+		t.Errorf("Summary.Indexed = %d, want 0 (a source-info-only subagent has no saved pair to index)", result.Summary.Indexed)
 	}
-
-	// Verify the indexed session is our subagent session.
-	indexed, ok := metricsStore.IndexedEntries[sid]
-	if !ok {
-		t.Fatal("subagent session was not indexed in MetricsStore (reconstructFromSourceInfo subagent fallback failed)")
+	if _, ok := metricsStore.IndexedEntries[sid]; ok {
+		t.Fatal("a source-info-only subagent was indexed on an ordinary harvest; it has no saved pair and must be left for harvest index")
 	}
-	if len(indexed) != 1 {
-		t.Errorf("indexed entries for subagent session = %d, want 1", len(indexed))
-	}
-
-	// Verify the indexer received the subagent layout output path (not the flat path).
-	called, ok := indexer.CalledWith[sid]
-	if !ok {
-		t.Fatal("indexer was not called for subagent session")
-	}
-	wantPath := fmt.Sprintf("%s/%s/%s/%s/%s/%s--transcript.jsonl",
-		testOutputDir, testutil.TestHostSlug, string(parentSid),
-		defaults.DirSubagents.String(), string(sid), string(sid))
-	if got := string(called.SourcePath); got != wantPath {
-		t.Errorf("indexer received SourcePath = %q, want subagent output path %q", got, wantPath)
+	if _, ok := indexer.CalledWith[sid]; ok {
+		t.Fatal("the indexer parsed a subagent with no saved pair")
 	}
 }
 
@@ -6104,9 +6090,10 @@ func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
 // --- metadata.json as write-through cache (schema v8, derived_at) ---
 
 // TestPipeline_SchemaV8_DerivedAtPopulated verifies that after a full ingest run
-// with a store, the written metadata.json contains a non-nil DerivedAt field.
-// DerivedAt must be populated after DB INSERT (it marks when the file was derived
-// from DB state), so it cannot be present if no store is configured.
+// with a store, the written metadata.json carries a nil DerivedAt field. The
+// saved pair is retained input the parsers read, not a projection of the
+// database: the database is the source of truth for every derived field, so the
+// file is written once as the commit point and never restamped from DB state.
 func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6131,9 +6118,7 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 		t.Fatalf("NewPipeline: %v", err)
 	}
 
-	before := time.Now().UnixMilli()
 	result, err := pipeline.Run(context.Background())
-	after := time.Now().UnixMilli()
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -6158,11 +6143,8 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 		t.Errorf("SchemaVersion = %d, want %d", written.SchemaVersion, ingest.CurrentSchemaVersion)
 	}
 
-	if written.DerivedAt == nil {
-		t.Fatal("DerivedAt is nil; expected non-nil (DB INSERT happened, file should be derived from DB state)")
-	}
-	if *written.DerivedAt < before || *written.DerivedAt > after {
-		t.Errorf("DerivedAt = %d, want in range [%d, %d]", *written.DerivedAt, before, after)
+	if written.DerivedAt != nil {
+		t.Fatalf("DerivedAt = %d; expected nil (the saved pair is retained input, not derived from DB state)", *written.DerivedAt)
 	}
 }
 
@@ -6219,13 +6201,12 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 	}
 }
 
-// TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent verifies that when a store is
-// configured, both the DB INSERT and the DerivedAt field are populated after a
-// successful pipeline run. DerivedAt marks metadata.json as a derived artifact;
-// the DB INSERT records the session in the store.
-//
-// The complete file pair commits before its database mirror; DerivedAt is added
-// only after that mirror succeeds.
+// TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent verifies that when a store
+// is configured, the DB INSERT records the session AND the saved metadata.json
+// stays free of a DerivedAt field. The file is retained input the parsers read,
+// never a projection of committed DB state, so it is written once as the commit
+// point and never restamped afterwards. The DB mirror observes a complete,
+// DerivedAt-free file at insert time, and the file is unchanged after the run.
 func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6289,8 +6270,8 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	if err := json.Unmarshal(data, &written); err != nil {
 		t.Fatalf("Unmarshal metadata: %v", err)
 	}
-	if written.DerivedAt == nil {
-		t.Error("DerivedAt is nil; expected non-nil when store is configured")
+	if written.DerivedAt != nil {
+		t.Errorf("DerivedAt = %d; expected nil: the saved pair is retained input and is never restamped from committed DB state", *written.DerivedAt)
 	}
 }
 

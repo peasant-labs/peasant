@@ -73,11 +73,19 @@ func newIngestArtifact(meta *UnifiedMetadata, metadataJSON, transcript []byte) (
 	if meta.ContentHash == "" {
 		return nil, fmt.Errorf("prepare managed artifact for session %s: the worker did not record the transcript checksum; nothing was written; compute the content hash before building the artifact", meta.SessionID)
 	}
+	// The stored metadata is the encoded bytes, and the row is written from the
+	// decoded form of those exact bytes: decoding here keeps the two consistent
+	// through a JSON round-trip (an empty slice, an absent optional), so the
+	// pre-persistence check sees the same metadata the store will read back.
+	decoded, err := decodeManagedMetadata(metadataJSON, "captured artifact")
+	if err != nil {
+		return nil, fmt.Errorf("prepare managed artifact for session %s: %w", meta.SessionID, err)
+	}
 	semantic, err := artifactSemanticJSON(metadataJSON, meta.ContentHash)
 	if err != nil {
 		return nil, err
 	}
-	return &ManagedArtifact{Metadata: *meta, MetadataJSON: metadataJSON, Transcript: transcript, ArtifactHash: schema.ComputeTranscriptHash(semantic)}, nil
+	return &ManagedArtifact{Metadata: *decoded, MetadataJSON: metadataJSON, Transcript: transcript, ArtifactHash: schema.ComputeTranscriptHash(semantic)}, nil
 }
 
 func checkManagedIdentity(meta *UnifiedMetadata) error {
