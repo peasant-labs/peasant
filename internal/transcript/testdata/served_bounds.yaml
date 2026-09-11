@@ -94,6 +94,8 @@ cases:
       ]
     equalBoundAcrossBoundedFields: true
     allBounded: true
+    everyBoundedFieldShowsBytes: true
+    boundIsLargestThatFits: true
   # One field is far over the shared bound and the other is far under it, so the
   # large one is shortened while the small one is served whole.
   - name: largest_field_gives_up_bytes_before_a_small_one

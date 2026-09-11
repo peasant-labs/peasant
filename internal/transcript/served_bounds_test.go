@@ -39,6 +39,15 @@ type servedBoundsCase struct {
 	Expected                      []servedBoundsExpectation `yaml:"expected,omitempty"`
 	EqualBoundAcrossBoundedFields bool                      `yaml:"equalBoundAcrossBoundedFields,omitempty"`
 	AllBounded                    bool                      `yaml:"allBounded,omitempty"`
+	// EveryBoundedFieldShowsBytes requires that a bounded field still shows the
+	// reader some of the record. A shared bound of zero bytes satisfies
+	// allBounded and equalBoundAcrossBoundedFields while serving every field as
+	// the note alone, so those two alone cannot tell a lowered bound from a
+	// collapsed one.
+	EveryBoundedFieldShowsBytes bool `yaml:"everyBoundedFieldShowsBytes,omitempty"`
+	// BoundIsLargestThatFits requires that the shared bound cannot be raised: a
+	// bound one byte larger must push the encoded document over the budget.
+	BoundIsLargestThatFits bool `yaml:"boundIsLargestThatFits,omitempty"`
 }
 
 type servedBoundsFixture struct {
@@ -92,6 +101,9 @@ func loadServedBoundsFixture(t *testing.T) servedBoundsFixture {
 		}
 		if len(fixtureCase.Expected) != 0 && len(fixtureCase.Expected) != len(fixtureCase.FieldBytes) {
 			t.Fatalf("served bounds fixture case %q states %d expectations for %d fields", fixtureCase.Name, len(fixtureCase.Expected), len(fixtureCase.FieldBytes))
+		}
+		if fixtureCase.BoundIsLargestThatFits && !fixtureCase.EqualBoundAcrossBoundedFields {
+			t.Fatalf("served bounds fixture case %q asks for the largest fitting bound without asking for one shared bound", fixtureCase.Name)
 		}
 		if len(fixtureCase.Expected) == 0 && !fixtureCase.AllBounded {
 			t.Fatalf("served bounds fixture case %q asserts nothing about its fields", fixtureCase.Name)
@@ -171,18 +183,59 @@ func servedBoundsSession(t *testing.T, fixtureCase servedBoundsCase) (*ingest.Se
 	return session, originals
 }
 
+// servedBoundsTarget is the served field of the case's kind at index, as a
+// pointer, so a check can both read it and re-bound it in place.
+func servedBoundsTarget(detail *schema.SessionDetailPayload, kind ServedTextKind, index int) *string {
+	turn := &detail.Turns[index]
+	switch kind {
+	case ServedTextTurnContent:
+		return &turn.Content
+	case ServedTextToolArguments:
+		return &turn.ToolCalls[0].Arguments
+	default:
+		return &turn.ToolCalls[0].Result
+	}
+}
+
 // servedBoundsServed reads back the served value of field index, from the same
 // projection every consumer of the detail reads.
 func servedBoundsServed(t *testing.T, detail *schema.SessionDetailPayload, kind ServedTextKind, index int) string {
 	t.Helper()
-	turn := detail.Turns[index]
-	switch kind {
-	case ServedTextTurnContent:
-		return turn.Content
-	case ServedTextToolArguments:
-		return turn.ToolCalls[0].Arguments
-	default:
-		return turn.ToolCalls[0].Result
+	return *servedBoundsTarget(detail, kind, index)
+}
+
+// assertServedBoundIsLargestThatFits proves the shared bound is not merely a
+// bound that fits but the largest one: raising it by a single byte per field
+// must push the encoded document over the served budget. The raise goes through
+// the production bounding function and the real encoder, so the claim is
+// measured on a document rather than read back out of the search arithmetic.
+//
+// It mutates detail, so a caller runs it after every other assertion.
+func assertServedBoundIsLargestThatFits(t *testing.T, detail *schema.SessionDetailPayload, kind ServedTextKind, originals []string, boundLengths map[int]struct{}) {
+	t.Helper()
+	if len(boundLengths) != 1 {
+		t.Fatalf("bounded fields show %d distinct sizes, so the case has no single shared bound to raise", len(boundLengths))
+	}
+	applied := 0
+	for shown := range boundLengths {
+		applied = shown
+	}
+	if applied <= 0 {
+		t.Fatalf("the shared bound is %d bytes, so every bounded field is served as its note alone", applied)
+	}
+	if applied >= defaults.ServedTextFieldBudgetBytes {
+		t.Fatalf("the shared bound equals the per-field budget of %d bytes, so this case never reaches document pressure", defaults.ServedTextFieldBudgetBytes)
+	}
+	for index, original := range originals {
+		*servedBoundsTarget(detail, kind, index) = boundServedText(kind, original, applied+1)
+	}
+	encoded, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("marshal the detail at one byte above the shared bound: %v", err)
+	}
+	if len(encoded) <= defaults.ServedDetailDocumentBudgetBytes {
+		t.Errorf("a shared bound of %d bytes also fits (document %d bytes of the %d-byte budget), so the chosen bound of %d bytes is not the largest that fits",
+			applied+1, len(encoded), defaults.ServedDetailDocumentBudgetBytes, applied)
 	}
 }
 
@@ -234,6 +287,9 @@ func TestServedBoundsProductionPath(t *testing.T) {
 					if !strings.HasPrefix(original, served[:shown]) {
 						t.Errorf("field %d served text is not the leading bytes of the record", index)
 					}
+					if fixtureCase.EveryBoundedFieldShowsBytes && shown <= 0 {
+						t.Errorf("field %d is bounded and shows %d bytes of the record, so the reader is served the note alone", index, shown)
+					}
 				}
 				if fixtureCase.AllBounded && !bounded {
 					t.Errorf("field %d was served whole, but every field of this case must be bounded", index)
@@ -260,6 +316,9 @@ func TestServedBoundsProductionPath(t *testing.T) {
 			}
 			if fixtureCase.EqualBoundAcrossBoundedFields && len(boundLengths) != 1 {
 				t.Errorf("bounded fields show %d distinct sizes, want one shared bound", len(boundLengths))
+			}
+			if fixtureCase.BoundIsLargestThatFits {
+				assertServedBoundIsLargestThatFits(t, detail, kind, originals, boundLengths)
 			}
 		})
 	}

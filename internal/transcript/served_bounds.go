@@ -3,7 +3,6 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"unicode/utf8"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -195,46 +194,60 @@ func servedDocumentBaseSize(detail *schema.SessionDetailPayload, fields []served
 	return len(encoded) - 2*len(fields), true
 }
 
+// servedBoundSearchDipBytes is how far the search looks above a bound that fits
+// before it accepts that bound as the largest one. The document size rises with
+// the bound by one byte per field still being shortened, and falls only when a
+// note's human-readable size crosses a unit boundary and renders a byte or two
+// shorter. That dip is smaller than a single step for any field count, so a
+// handful of bytes of look-ahead covers it.
+const servedBoundSearchDipBytes = 8
+
 // servedFittingBound is the largest display bound at or below the budget's
 // per-field bound whose document still fits. Because the bound is shared, the
 // largest fields give up bytes first and equally sized fields give up equally.
+//
+// The bound is searched as an INTEGER number of bytes, not picked from the
+// recorded field sizes. The largest bound that fits normally lies BETWEEN two
+// field sizes, so a search over the field sizes alone collapses under document
+// pressure: with 64 recorded results of 256 KiB under a 7 MiB document budget
+// the only sizes on offer are 0 and 262144, the second does not fit, and the
+// first serves every result as its note alone. A bound near 110 KiB fits and
+// shows the reader the leading part of every result.
 func servedFittingBound(fields []servedTextField, base int, budget ServedDocumentBudget) (int, bool) {
 	if servedDocumentSize(fields, base, budget.perField) <= budget.document {
 		return budget.perField, true
 	}
-	// Candidate bounds are the field sizes plus zero: between two adjacent field
-	// sizes the document size only grows with the bound, so the answer is one of
-	// them.
-	candidates := make([]int, 0, len(fields)+1)
-	candidates = append(candidates, 0)
-	for _, field := range fields {
-		candidates = append(candidates, len(field.original))
+	if servedDocumentSize(fields, base, 0) > budget.document {
+		// Not even a note-only document fits: text this projection does not
+		// bound already fills the budget. Bound everything to the note and say
+		// the document did not fit, rather than pretend it did.
+		return 0, false
 	}
-	sort.Ints(candidates)
-	low, high := 0, len(candidates)-1
-	best := -1
+	low, high, best := 1, budget.perField, 0
 	for low <= high {
-		middle := (low + high) / 2
-		if servedDocumentSize(fields, base, candidates[middle]) <= budget.document {
+		middle := low + (high-low)/2
+		if servedDocumentSize(fields, base, middle) <= budget.document {
 			best = middle
 			low = middle + 1
 		} else {
 			high = middle - 1
 		}
 	}
-	// The note names the shown size in human units, so a one-byte rise in the
-	// bound can shorten the note by a byte or two. The search is verified rather
-	// than assumed: step down until the chosen bound really fits.
-	for best >= 0 && servedDocumentSize(fields, base, candidates[best]) > budget.document {
+	// The note names the shown size in human units, so the document size is not
+	// strictly increasing in the bound and the halving search can stop on either
+	// side of a dip. The answer is verified rather than assumed: step down until
+	// the chosen bound really fits, then step up over any dip so the bound that
+	// is served is the largest that fits.
+	for best > 0 && servedDocumentSize(fields, base, best) > budget.document {
 		best--
 	}
-	if best < 0 {
-		// Not even a note-only document fits: text this projection does not
-		// bound already fills the budget. Bound everything to the note and say
-		// the document did not fit, rather than pretend it did.
-		return 0, false
+	for step := 0; step < servedBoundSearchDipBytes && best < budget.perField; step++ {
+		if servedDocumentSize(fields, base, best+1) > budget.document {
+			break
+		}
+		best++
 	}
-	return candidates[best], true
+	return best, true
 }
 
 // servedDocumentSize is the encoded document size when every field is bound to
