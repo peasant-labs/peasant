@@ -2966,6 +2966,17 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
 		p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_cleanup", Location: tmpDir, Message: cleanupErr.Error(), Remediation: "Inspect the retained temporary extraction directory; the saved session was installed."})
 	}
+	// The session's project identity may have changed since it was last saved,
+	// which moves its pair to a new directory. Clear the previous location so a
+	// session never claims two projects; its child subtree moves with it.
+	if metadataPath != "" {
+		oldDir := filepath.Dir(metadataPath)
+		if filepath.Clean(oldDir) != filepath.Clean(sessionDir) {
+			if relocateErr := p.removeRelocatedSession(oldDir, sessionDir, string(session.SessionID)); relocateErr != nil {
+				p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_relocation", Location: oldDir, Message: relocateErr.Error(), Remediation: "Remove the session's previous project directory by hand; its current pair is saved under its new project."})
+			}
+		}
+	}
 
 	result.OutputPath = sessionDir
 

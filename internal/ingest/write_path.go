@@ -253,6 +253,42 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 	return failed
 }
 
+// removeRelocatedSession clears a session's previous location after its pair
+// has been installed at a new one, which happens when the session's project
+// identity changes. The child subagents subtree is moved to the new location
+// so a filtered child is not lost, then the old session directory is removed.
+// oldDir and newDir are the session directories; both are absolute.
+func (p *Pipeline) removeRelocatedSession(oldDir, newDir, sessionID string) error {
+	oldSubagents := filepath.Join(oldDir, defaults.DirSubagents.String())
+	entries, err := p.fs.ReadDir(oldSubagents)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if len(entries) > 0 {
+		newSubagents := filepath.Join(newDir, defaults.DirSubagents.String())
+		if err := p.fs.MkdirAll(newSubagents, defaults.PrivateDirPerm); err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			target := filepath.Join(newSubagents, entry.Name())
+			if _, err := p.fs.Stat(target); err == nil {
+				// The child was already re-ingested at the new location; its old
+				// copy is superseded and removed with the old directory below.
+				continue
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			if err := p.fs.Rename(filepath.Join(oldSubagents, entry.Name()), target); err != nil {
+				return err
+			}
+		}
+	}
+	return p.fs.RemoveAll(oldDir)
+}
+
 // mirrorRequestFor builds the database mirror request for one installed pair.
 func mirrorRequestFor(wr *workerResult) ArtifactMirrorRequest {
 	return ArtifactMirrorRequest{
