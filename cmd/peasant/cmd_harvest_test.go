@@ -909,6 +909,97 @@ func TestHarvestCmd_AllImpliesIncludeActive(t *testing.T) {
 	}
 }
 
+// TestHarvestCmd_DryRunWithRetainedArtifactsAndNoDatabase pins the forecast, and
+// the notice that goes with it, in the state where the two can contradict each
+// other: the output tree still holds the artifacts of an earlier harvest while
+// the analytics database is gone (deleted, or a fresh data directory).
+//
+// With no stored row the pipeline classifies each session from the retained
+// sidecar, so the forecast reports it UNCHANGED. A notice that promised every
+// discovered session would be reported as new would then be contradicted by the
+// report printed under it, in the one state a user is most likely to be
+// confused by.
+func TestHarvestCmd_DryRunWithRetainedArtifactsAndNoDatabase(t *testing.T) {
+	t.Parallel()
+	sourceDir := t.TempDir()
+	outputDir := t.TempDir()
+
+	sessions, _ := LoadHarvestIndexSelectionFixtures(t)
+	session := sessions[0]
+	project := filepath.Join(sourceDir, "-fixture-project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatalf("prepare the project directory the harvest discovers: %v", err)
+	}
+	transcript := filepath.Join(project, string(session.ID)+".jsonl")
+	if err := os.WriteFile(transcript, []byte(session.Transcript), 0o600); err != nil {
+		t.Fatalf("write the native transcript: %v", err)
+	}
+	settled := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(transcript, settled, settled); err != nil {
+		t.Fatalf("settle the native transcript so it is not debounced as active: %v", err)
+	}
+
+	// A real harvest first, so the output tree holds the retained artifacts and
+	// their sidecars.
+	recorded, err := executeHarvestCmd(t, t.TempDir(), []string{
+		"--source-harness=claude-code",
+		"--source-path=" + sourceDir,
+		"--output=" + outputDir,
+	})
+	if err != nil {
+		t.Fatalf("the harvest that records the artifacts failed: %v\noutput: %s", err, recorded)
+	}
+
+	// The forecast, with a data directory that holds no database, against the
+	// output tree that does hold the artifacts.
+	output, err := executeHarvestCmd(t, t.TempDir(), []string{
+		"--source-harness=claude-code",
+		"--source-path=" + sourceDir,
+		"--output=" + outputDir,
+		"--dry-run",
+	})
+	if err != nil {
+		t.Fatalf("the forecast refused where it must report: %v\noutput: %s", err, output)
+	}
+
+	if !strings.Contains(output, "no analytics database exists yet") {
+		t.Fatalf("the forecast does not say the database is missing, so this case is not in the state it tests; got: %s", output)
+	}
+	// What the forecast actually reports here: the classification comes from the
+	// retained sidecar, so the session is not new. Which of the other rows it
+	// lands in depends on what the sidecar records, and either one contradicts a
+	// notice that promises "new".
+	if !strings.Contains(output, "0     new") {
+		t.Fatalf("the forecast does not classify the session from the retained artifacts, so the notice cannot be tested against it; got: %s", output)
+	}
+	if !strings.Contains(output, "1     unchanged") && !strings.Contains(output, "1     updated") {
+		t.Fatalf("the forecast reports neither an unchanged nor an updated session, so this case is not in the state it tests; got: %s", output)
+	}
+	// The notice must not predict a classification the report contradicts.
+	for _, forbidden := range []string{
+		"reports every discovered session as new",
+		"every discovered session as new",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Errorf("the notice says %q while the report under it does not classify the session as new; got: %s", forbidden, output)
+		}
+	}
+	// What it must say instead: how the forecast decides, without predicting the
+	// answer.
+	for _, want := range []string{
+		"This dry run creates none",
+		"compared against the retained artifacts on disk",
+		"reported as new when there are none",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the notice does not say %q; got: %s", want, output)
+		}
+	}
+	if strings.ContainsRune(output, '\u2014') {
+		t.Errorf("the notice printed an em dash; user-facing text uses plain punctuation: %s", output)
+	}
+}
+
 // TestHarvestCmd_DryRun_DoesNotCreateDB pins the forecast a user gets on a fresh
 // install: `peasant harvest --dry-run` with no analytics database REPORTS what a
 // normal harvest would do and creates nothing at all.
