@@ -42,6 +42,20 @@ func (p *ArtifactPublisher) ReconcileStored(ctx context.Context, sid SessionID, 
 	if include != nil && !include(meta) {
 		return nil, false, nil
 	}
+	// Decide the work from small evidence FIRST. A settled session is the
+	// common case on a retained tree, and establishing that by locking it and
+	// reading its whole transcript costs the tree's entire size in reads, and
+	// one durable lock file per session, on every single harvest. The metadata
+	// file is small and already read; the database answer is three columns.
+	decision, err := p.decideStored(ctx, sid, meta, data)
+	if err != nil {
+		return nil, false, err
+	}
+	if decision == ReconcileUnchanged {
+		// No lock, no transcript read, no intent: there is nothing to reconcile
+		// and nothing to report as changed.
+		return nil, false, nil
+	}
 	key := artifactKey(sid)
 	root, lock, err := p.lockedRoot(ctx, key, ArtifactLockWrite, true)
 	if err != nil {
@@ -87,6 +101,33 @@ func (p *ArtifactPublisher) ReconcileStored(ctx context.Context, sid SessionID, 
 	}
 	reconciled, err := p.reconcileArtifactIntent(ctx, root, key, intent)
 	return reconciled, err == nil && reconciled != nil, err
+}
+
+// decideStored asks for the reconciliation decision without opening a
+// transcript or taking ownership of the session. A mirror that cannot report
+// its capture identity yields the full path, which is what this build did for
+// every session before the cheap decision existed.
+func (p *ArtifactPublisher) decideStored(ctx context.Context, sid SessionID, meta *UnifiedMetadata, metadataJSON []byte) (ReconcileDecision, error) {
+	digests, ok := p.mirror.(PublicationCaptureDigestReader)
+	if !ok {
+		return ReconcileBootstrap, nil
+	}
+	digest, err := digests.ReadPublicationCaptureDigest(ctx, sid)
+	if err != nil {
+		return 0, err
+	}
+	if digest == nil {
+		return ReconcileBootstrap, nil
+	}
+	reader, ok := p.mirror.(SessionIndexStateReader)
+	if !ok {
+		return ReconcileBootstrap, nil
+	}
+	state, err := reader.ReadIndexState(ctx, sid)
+	if err != nil {
+		return 0, err
+	}
+	return DecideReconcile(meta, metadataJSON, digest, state)
 }
 
 func intentCandidateMetadata(root ArtifactRoot, key string, intent *artifactIntent) (*UnifiedMetadata, error) {

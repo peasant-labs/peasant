@@ -408,11 +408,19 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if c.ReindexChangeManaged {
 				// A managed pair whose transcript no longer matches its committed
 				// metadata is refused, not re-indexed: the refusal is a warning
-				// naming the session, the run has no error, the last-good index is
-				// untouched, and the verified capture is still served.
+				// naming the session AND the checksum that failed, the run has no
+				// error, the last-good index is untouched, and the verified
+				// capture is still served.
+				//
+				// Either strict reader of the committed pair may be the one that
+				// meets it: the reconciliation walk, which reads a pair only when
+				// the session's small evidence says it changed, or the index
+				// capture, which verifies the pair of every session it evaluates.
 				warned := false
 				for _, diagnostic := range manualResult.Diagnostics {
-					if diagnostic.ErrorType == "artifact_recovery_incomplete" && strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != "" {
+					reportedBy := diagnostic.ErrorType == "artifact_recovery_incomplete" || diagnostic.ErrorType == "index_refused"
+					if reportedBy && strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != "" &&
+						strings.Contains(diagnostic.Message, "transcript checksum does not match committed metadata") {
 						warned = true
 					}
 				}

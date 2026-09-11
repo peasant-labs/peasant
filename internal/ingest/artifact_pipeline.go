@@ -46,6 +46,14 @@ func (s *serializedArtifactMirror) ReadIndexState(ctx context.Context, sid Sessi
 	return reader.ReadIndexState(ctx, sid)
 }
 
+func (s *serializedArtifactMirror) ReadPublicationCaptureDigest(ctx context.Context, sid SessionID) (*PublicationCaptureDigest, error) {
+	reader, ok := s.store.(PublicationCaptureDigestReader)
+	if !ok {
+		return nil, fmt.Errorf("inspect retained session %s: configured mirror cannot report its mirrored capture identity; no artifact was changed; configure the production store", sid)
+	}
+	return reader.ReadPublicationCaptureDigest(ctx, sid)
+}
+
 // reportPendingRecoveryFailure reports what recoverPending could not finish.
 //
 // The failures are joined across independent intents, so each leaf is reported
