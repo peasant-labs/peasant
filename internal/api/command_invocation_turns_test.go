@@ -11,9 +11,11 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// commandInvocationEntries builds one stored entry per corpus row. Every
-// recorded command sits on a stored user-role entry: both indexers leave the
-// role alone when they write command_name.
+// commandInvocationEntries builds one stored entry per corpus row. Each row
+// carries its own stored role because the three indexers differ: the Claude
+// Code and Cursor indexers record a command only on a user entry, while the
+// OpenCode indexer also records one on an assistant message that called a
+// skill.
 func commandInvocationEntries(sessionID schema.SessionID, cases []testutil.CommandInvocationTurnCase) []schema.SessionEntry {
 	entries := make([]schema.SessionEntry, len(cases))
 	for index, testCase := range cases {
@@ -24,7 +26,7 @@ func commandInvocationEntries(sessionID schema.SessionID, cases []testutil.Comma
 			EntryIndex:  index,
 			Harness:     testCase.Harness,
 			EntryType:   schema.EntryTypeText,
-			Role:        schema.RoleUser,
+			Role:        testCase.SourceRole,
 			TimestampMs: &timestamp,
 			Extra:       &extra,
 		}

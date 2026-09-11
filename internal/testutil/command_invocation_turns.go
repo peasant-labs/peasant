@@ -35,6 +35,11 @@ type CommandInvocationTurnFixture struct {
 type CommandInvocationTurnCase struct {
 	Name    string         `yaml:"name"`
 	Harness schema.Harness `yaml:"harness"`
+	// SourceRole is the role the indexer stored on the entry. It is required
+	// because the harnesses differ: two record a command only on a user entry,
+	// while one also records a skill call on the assistant message that made
+	// it, and the projection must not move that turn off its author.
+	SourceRole schema.Role `yaml:"sourceRole"`
 	// Content is the stored ContentPreview. It is empty for a harness shape that
 	// records the invocation and no text.
 	Content string `yaml:"content"`
@@ -97,6 +102,9 @@ func decodeCommandInvocationTurnFixture(source []byte) (CommandInvocationTurnFix
 		seenNames[testCase.Name] = true
 		if !testCase.Harness.IsKnown() {
 			return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q has unknown harness %q; use a schema harness value", CommandInvocationTurnFixturePath, testCase.Name, testCase.Harness)
+		}
+		if !testCase.SourceRole.IsValid() {
+			return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q has unknown source role %q; use a schema role value", CommandInvocationTurnFixturePath, testCase.Name, testCase.SourceRole)
 		}
 		if !testCase.ExpectedRole.IsValid() {
 			return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q has unknown expected role %q; use a schema role value", CommandInvocationTurnFixturePath, testCase.Name, testCase.ExpectedRole)

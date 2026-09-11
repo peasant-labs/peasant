@@ -14,9 +14,11 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// seedCommandInvocationSession writes one stored entry per corpus row. Every
-// recorded command sits on a stored user-role entry: both indexers leave the
-// role alone when they write command_name.
+// seedCommandInvocationSession writes one stored entry per corpus row. Each row
+// carries its own stored role because the three indexers differ: the Claude
+// Code and Cursor indexers record a command only on a user entry, while the
+// OpenCode indexer also records one on an assistant message that called a
+// skill.
 func seedCommandInvocationSession(t *testing.T, db *store.Store, sessionID string, cases []testutil.CommandInvocationTurnCase) {
 	t.Helper()
 	storetest.SeedSession(t, db, sessionID)
@@ -30,7 +32,7 @@ func seedCommandInvocationSession(t *testing.T, db *store.Store, sessionID strin
 			EntryIndex:  index,
 			Harness:     testCase.Harness,
 			EntryType:   schema.EntryTypeText,
-			Role:        schema.RoleUser,
+			Role:        testCase.SourceRole,
 			TimestampMs: &timestamp,
 			Extra:       &extra,
 		}
@@ -116,6 +118,11 @@ func TestExportSession_CommandInvocationMatchesWebSocketPath(t *testing.T) {
 		t.Fatalf("exported payload has %d turns, websocket payload has %d", len(exported.Turns), len(served.Turns))
 	}
 	for index := range exported.Turns {
+		// Role travels with the invocation: the projection may move a turn off
+		// its stored role, and the two surfaces must make that call identically.
+		if exported.Turns[index].Role != served.Turns[index].Role {
+			t.Errorf("turn %d role differs: export=%q websocket=%q", index, exported.Turns[index].Role, served.Turns[index].Role)
+		}
 		exportedCommand := exported.Turns[index].Command
 		servedCommand := served.Turns[index].Command
 		if (exportedCommand == nil) != (servedCommand == nil) {

@@ -7,31 +7,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
-func TestLoadCommandInvocationTurnFixture_AcceptsTheCorpus(t *testing.T) {
-	t.Parallel()
-	fixture, err := testutil.LoadCommandInvocationTurnFixture()
-	if err != nil {
-		t.Fatalf("LoadCommandInvocationTurnFixture: %v", err)
-	}
-	if len(fixture.Cases) < len(fixture.RequiredNames) {
-		t.Fatalf("corpus has %d cases for %d required names", len(fixture.Cases), len(fixture.RequiredNames))
-	}
-	for _, testCase := range fixture.Cases {
-		if testCase.StoredName == "" {
-			t.Errorf("case %q has no stored command name", testCase.Name)
-		}
-		if !strings.Contains(testCase.StoredExtra, "command_name") {
-			t.Errorf("case %q stored extra %q carries no command_name key", testCase.Name, testCase.StoredExtra)
-		}
-		if testCase.ExpectedCommand && testCase.ExpectedName == "" {
-			t.Errorf("case %q expects a command but names none", testCase.Name)
-		}
-		if !testCase.ExpectedCommand && (testCase.ExpectedName != "" || testCase.ExpectedArgs != "") {
-			t.Errorf("case %q expects no command but declares one", testCase.Name)
-		}
-	}
-}
-
+// TestCommandInvocationTurnFixture_StoredExtraOmitsAbsentArguments asserts the
+// one transformation the loader performs for callers: the Extra JSON every
+// surface sends through production must omit command_args entirely when the
+// harness recorded none, exactly as the indexers write it.
 func TestCommandInvocationTurnFixture_StoredExtraOmitsAbsentArguments(t *testing.T) {
 	t.Parallel()
 	fixture, err := testutil.LoadCommandInvocationTurnFixture()
@@ -43,23 +22,6 @@ func TestCommandInvocationTurnFixture_StoredExtraOmitsAbsentArguments(t *testing
 		if hasArgsKey != (testCase.StoredArgs != "") {
 			t.Errorf("case %q stored extra %q command_args presence = %v, want %v",
 				testCase.Name, testCase.StoredExtra, hasArgsKey, testCase.StoredArgs != "")
-		}
-	}
-}
-
-func TestCommandInvocationTurnFixture_RequiredNamesAreAllPresent(t *testing.T) {
-	t.Parallel()
-	fixture, err := testutil.LoadCommandInvocationTurnFixture()
-	if err != nil {
-		t.Fatalf("LoadCommandInvocationTurnFixture: %v", err)
-	}
-	present := make(map[string]bool, len(fixture.Cases))
-	for _, testCase := range fixture.Cases {
-		present[testCase.Name] = true
-	}
-	for _, required := range fixture.RequiredNames {
-		if !present[required] {
-			t.Errorf("required case %q is missing from the corpus", required)
 		}
 	}
 }

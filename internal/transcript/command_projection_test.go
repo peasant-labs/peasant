@@ -9,9 +9,11 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// commandFixtureEntry builds the one stored entry a corpus row describes. Every
-// recorded command sits on a stored user-role entry: both indexers leave the
-// role alone when they write command_name.
+// commandFixtureEntry builds the one stored entry a corpus row describes. The
+// row carries its own stored role because the three indexers differ: the Claude
+// Code and Cursor indexers record a command only on a user entry, while the
+// OpenCode indexer also records one on an assistant message that called a
+// skill.
 func commandFixtureEntry(sessionID schema.SessionID, index int, testCase testutil.CommandInvocationTurnCase) schema.SessionEntry {
 	timestamp := int64(1705276800000)
 	extra := testCase.StoredExtra
@@ -20,7 +22,7 @@ func commandFixtureEntry(sessionID schema.SessionID, index int, testCase testuti
 		EntryIndex:  index,
 		Harness:     testCase.Harness,
 		EntryType:   schema.EntryTypeText,
-		Role:        schema.RoleUser,
+		Role:        testCase.SourceRole,
 		TimestampMs: &timestamp,
 		Extra:       &extra,
 	}
@@ -111,5 +113,61 @@ func TestSessionToDetail_CarriesCommandInvocationOntoTheWire(t *testing.T) {
 		if turn.Command.Name != testCase.ExpectedName || turn.Command.Args != testCase.ExpectedArgs {
 			t.Errorf("case %q wire command = %+v, want name %q args %q", testCase.Name, *turn.Command, testCase.ExpectedName, testCase.ExpectedArgs)
 		}
+	}
+}
+
+// TestSessionToDetailValidated_AssistantSkillTurnKeepsModelEvidence pins the
+// producer boundary against re-roling an assistant's own skill call. One
+// OpenCode shape records the invocation on an assistant message that also
+// carries a model observation; observedModel is only valid on an assistant
+// turn, so moving that turn to any other role makes the whole session fail
+// validation and takes the WebSocket, the export, and the push body with it.
+func TestSessionToDetailValidated_AssistantSkillTurnKeepsModelEvidence(t *testing.T) {
+	t.Parallel()
+	const observedModel = "anthropic/claude-fable-5"
+	const commandName = "/project:summarize"
+
+	sessionID := schema.SessionID("45454545-4545-4545-4545-45454545454e")
+	timestamp := int64(1705276800000)
+	extra := `{"command_name":"` + commandName + `","model_id":"` + observedModel + `"}`
+	entry := schema.SessionEntry{
+		SessionID:   sessionID,
+		EntryIndex:  0,
+		Harness:     schema.HarnessOpenCode,
+		EntryType:   schema.EntryTypeText,
+		Role:        schema.RoleAssistant,
+		TimestampMs: &timestamp,
+		Extra:       &extra,
+	}
+
+	turns := transcript.EntriesToTurns([]schema.SessionEntry{entry})
+	if len(turns) != 1 {
+		t.Fatalf("EntriesToTurns returned %d turns, want 1", len(turns))
+	}
+
+	payload, err := transcript.SessionToDetailValidated(&ingest.Session{
+		ID:      sessionID,
+		Harness: schema.HarnessOpenCode,
+		Turns:   turns,
+	})
+	if err != nil {
+		t.Fatalf("SessionToDetailValidated returned an error for an assistant skill turn carrying model evidence: %v", err)
+	}
+	if len(payload.Turns) != 1 {
+		t.Fatalf("session detail has %d turns, want 1", len(payload.Turns))
+	}
+
+	turn := payload.Turns[0]
+	if turn.Role != schema.RoleAssistant {
+		t.Errorf("role = %q, want %q", turn.Role, schema.RoleAssistant)
+	}
+	if turn.ObservedModel.String() != observedModel {
+		t.Errorf("observedModel = %q, want %q", turn.ObservedModel.String(), observedModel)
+	}
+	if turn.Command == nil {
+		t.Fatalf("command is absent, want %q", commandName)
+	}
+	if turn.Command.Name != commandName {
+		t.Errorf("command name = %q, want %q", turn.Command.Name, commandName)
 	}
 }

@@ -333,11 +333,16 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 
 		command := commandInvocationFromEntry(e)
 		role := injectedCommandRole(e, content)
-		// A turn whose only content is the invocation is harness-injected markup
-		// too, exactly like the command wrappers the gate above recognizes. A
-		// harness that records the invocation structurally leaves no text for
-		// that gate to match, so the role is settled here instead.
-		if command != nil && strings.TrimSpace(content) == "" {
+		// A USER turn whose only content is the invocation is harness-injected
+		// markup too, exactly like the command wrappers the gate above
+		// recognizes. A harness that records the invocation structurally leaves
+		// no text for that gate to match, so the role is settled here instead.
+		// The stored role is part of the condition because not every harness
+		// records a command on a user entry: one records a skill call on the
+		// ASSISTANT message that made it, and that turn is already correctly
+		// attributed to its author, so it keeps the assistant role (and with it
+		// the only role on which its model observation is valid evidence).
+		if command != nil && e.Role == schema.RoleUser && strings.TrimSpace(content) == "" {
 			role = schema.RoleSystem
 		}
 

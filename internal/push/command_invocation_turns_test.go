@@ -12,7 +12,10 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-func TestBuildTranscriptContent_CarriesCommandInvocation(t *testing.T) {
+// TestBuildTranscriptContentValidated_CarriesCommandInvocation exercises the
+// builder production pushes through, so an attribution failure surfaces as the
+// error the pipeline would return rather than as an empty payload.
+func TestBuildTranscriptContentValidated_CarriesCommandInvocation(t *testing.T) {
 	t.Parallel()
 	fixture, err := testutil.LoadCommandInvocationTurnFixture()
 	if err != nil {
@@ -29,7 +32,7 @@ func TestBuildTranscriptContent_CarriesCommandInvocation(t *testing.T) {
 			EntryIndex:  index,
 			Harness:     testCase.Harness,
 			EntryType:   schema.EntryTypeText,
-			Role:        schema.RoleUser,
+			Role:        testCase.SourceRole,
 			TimestampMs: &timestamp,
 			Extra:       &extra,
 		}
@@ -39,7 +42,7 @@ func TestBuildTranscriptContent_CarriesCommandInvocation(t *testing.T) {
 		}
 	}
 
-	result := push.BuildTranscriptContent(
+	result, err := push.BuildTranscriptContentValidated(
 		&ingest.UnifiedMetadata{
 			SessionID:    sessionID,
 			ModelHarness: defaults.HarnessClaudeCode,
@@ -49,8 +52,11 @@ func TestBuildTranscriptContent_CarriesCommandInvocation(t *testing.T) {
 		config.DefaultPushFieldVisibility(),
 		sessionorigin.User,
 	)
+	if err != nil {
+		t.Fatalf("BuildTranscriptContentValidated: %v", err)
+	}
 	if result.SessionDetail == nil {
-		t.Fatal("BuildTranscriptContent returned no session detail payload")
+		t.Fatal("BuildTranscriptContentValidated returned no session detail payload")
 	}
 	if len(result.SessionDetail.Turns) != len(fixture.Cases) {
 		t.Fatalf("push body has %d turns, want %d fixture rows", len(result.SessionDetail.Turns), len(fixture.Cases))
