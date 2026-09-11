@@ -1008,7 +1008,6 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 		hasFirst       bool
 		firstTimestamp string // earliest non-empty timestamp across all lines
 		lastTimestamp  string // latest non-empty timestamp across all lines
-		lineNum        int
 		turnCount      int
 		toolCount      int
 		tokensIn       int
@@ -1021,7 +1020,11 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
-		lineNum++
+		// The reader is the one source of the line number. A counter kept here
+		// would count only the records handed back, so every diagnostic after a
+		// record the reader passed over would name an earlier line than the one
+		// at fault.
+		lineNum := scanner.Line()
 		raw := scanner.Bytes()
 		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
@@ -1099,7 +1102,7 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 	if err := scanner.Err(); err != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
 			Message:     fmt.Sprintf("scanner error reading transcript: %v", err),
 			Remediation: "Verify the transcript file is not corrupted or truncated.",
 		})

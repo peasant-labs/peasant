@@ -302,7 +302,6 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 
 func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, int64) {
 	var (
-		lineNum        int
 		firstTimestamp json.RawMessage
 		lastTimestamp  json.RawMessage
 		turnCount      int
@@ -313,7 +312,9 @@ func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, i
 
 	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 	for scanner.Scan() {
-		lineNum++
+		// The reader is the one source of the line number, so a diagnostic after
+		// a record the reader passed over still names the physical line.
+		lineNum := scanner.Line()
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
 			continue
@@ -356,7 +357,7 @@ func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, i
 	if err := scanner.Err(); err != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
 			Message:     fmt.Sprintf("scanner error reading Cursor transcript: %v", err),
 			Remediation: "Verify the transcript file is not corrupted or truncated.",
 		})

@@ -450,7 +450,6 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 		lastTotalUsage *codexTokenUsage
 		turnCount      int
 		toolCount      int
-		lineNum        int
 		gotSessionMeta bool
 	)
 
@@ -460,7 +459,9 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		lineNum++
+		// The reader is the one source of the line number, so a diagnostic after
+		// a record the reader passed over still names the physical line.
+		lineNum := scanner.Line()
 		raw := scanner.Bytes()
 		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
@@ -535,7 +536,7 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 	if err := scanner.Err(); err != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
 			Message:     fmt.Sprintf("scanner error reading rollout: %v", err),
 			Remediation: "Verify the rollout file is not corrupted or truncated.",
 		})
