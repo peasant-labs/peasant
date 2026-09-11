@@ -45,6 +45,12 @@ type Turn struct {
 	// derive sticky state without mutating this raw observation.
 	ObservedModel ObservedModelID
 
+	// Command is the skill or user-defined slash command this turn invoked, as
+	// recorded at index time. It is nil when the turn invoked none. The rendered
+	// Role is settled separately: harness-injected command markup renders as a
+	// system turn and still carries its invocation.
+	Command *schema.CommandInvocation
+
 	// Enrichment fields — propagated from session_entries for the detail view.
 	EntryType   schema.EntryType   // text, tool_use, tool_result, thinking, system, error, result
 	HasThinking bool               // whether the turn contains thinking/reasoning blocks
