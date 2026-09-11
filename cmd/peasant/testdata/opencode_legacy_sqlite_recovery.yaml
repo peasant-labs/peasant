@@ -58,24 +58,29 @@ required_recovery_cases:
   - wrong-version-fails-closed
   - wrong-kind-fails-closed
 recovery_cases:
+  # The database-to-file metadata rebuild is dropped: a lost or corrupt metadata
+  # beside an intact transcript is not rebuilt from the database during a routine
+  # harvest. It is reported and healed by `peasant harvest --force --session`,
+  # so a source-info recovery run over it recovers nothing and never touches the
+  # mounted source.
   - name: missing-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: none
-    expected_recovery: true
-    expected_entries: 5
-    expected_turns: 2
-    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
+    expected_recovery: false
+    expected_entries: 0
+    expected_turns: 0
+    expected_tool_call: null
   - name: corrupt-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: corrupt
     envelope_mutation: none
-    expected_recovery: true
-    expected_entries: 5
-    expected_turns: 2
-    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
+    expected_recovery: false
+    expected_entries: 0
+    expected_turns: 0
+    expected_tool_call: null
   - name: arbitrary-json-fails-closed
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5

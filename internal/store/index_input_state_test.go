@@ -265,7 +265,25 @@ func TestIndexInputStateConditionalWritesAndInvalidation(t *testing.T) {
 				}
 				return
 			}
-			if row.Operation == indexInputMetadata || row.Operation == indexInputCommits || row.Operation == indexInputEmptyCommits || row.Operation == indexInputMirror {
+			if row.Operation == indexInputMirror {
+				// Mirroring a changed pair records the new artifact hash AND
+				// clears the index input proof: the proof described the previous
+				// bytes, so the repair predicate re-selects the session. The
+				// last-good OUTPUT (entries, producer, index version) is kept.
+				if !reflect.DeepEqual(afterState.ArtifactHash, mirroredHash) {
+					t.Fatal("mirror did not record the changed pair's artifact hash")
+				}
+				if afterState.IndexedInputHash != nil {
+					t.Fatal("mirror of a changed pair did not clear the index input proof")
+				}
+				beforeState.ArtifactHash = mirroredHash
+				beforeState.IndexedInputHash = nil
+				if !reflect.DeepEqual(beforeState, afterState) || !reflect.DeepEqual(beforeRows, afterRows) {
+					t.Fatal("mirror changed index history beyond the artifact hash and input proof")
+				}
+				return
+			}
+			if row.Operation == indexInputMetadata || row.Operation == indexInputCommits || row.Operation == indexInputEmptyCommits {
 				if !reflect.DeepEqual(afterState.ArtifactHash, mirroredHash) {
 					t.Fatal("unverified metadata retained artifact proof")
 				}

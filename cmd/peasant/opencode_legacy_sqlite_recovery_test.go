@@ -190,11 +190,16 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 		default:
 			return document, errors.New("legacy SQLite recovery fixture contains an unknown envelope mutation")
 		}
-		if testCase.ExpectedRecovery != (testCase.EnvelopeMutation == legacySQLiteEnvelopeNone) {
-			return document, errors.New("legacy SQLite recovery fixture does not distinguish valid and invalid managed envelopes")
+		// The database-to-file metadata rebuild is dropped: a lost or corrupt
+		// metadata beside an intact transcript is not rebuilt during a routine
+		// harvest, whatever the envelope. Every recovery case therefore recovers
+		// nothing; the mutations still exercise that the source and envelope are
+		// left untouched.
+		if testCase.ExpectedRecovery {
+			return document, errors.New("legacy SQLite recovery fixture must not expect a routine metadata rebuild; it is dropped and healed by peasant harvest --force --session")
 		}
-		if testCase.ExpectedRecovery != (testCase.ExpectedToolCall != nil) {
-			return document, errors.New("legacy SQLite recovery fixture tool expectation does not match recovery outcome")
+		if testCase.ExpectedToolCall != nil {
+			return document, errors.New("legacy SQLite recovery fixture must not expect a recovered tool call; nothing is rebuilt")
 		}
 	}
 	for label, required := range map[string][]string{
