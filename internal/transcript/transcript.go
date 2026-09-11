@@ -664,11 +664,15 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	}
 	// Every served detail leaves this one producer bounded for display. A stored
 	// record may be far larger than the contract's document policy allows the
-	// served document to be, and a session is never refused for size: the
-	// oversized text is shortened here, with a visible note, and the store keeps
-	// the whole record. Every consumer of this projection — the session_detail
-	// WebSocket, the kickstart preview, `peasant export` and the publication
-	// content — inherits the same bound because they all come through here.
+	// served document to be, and a session is never refused for the size of its
+	// tool outputs: the oversized text is shortened here, with a visible note,
+	// and the store keeps the whole record. A session whose turn structure alone
+	// exceeds the document budget is still refused by the contract's decoder;
+	// that case is bounded by the hard document cap on purpose, and paged
+	// serving is the planned answer to it. Every consumer of this projection,
+	// the session_detail WebSocket, the kickstart preview, `peasant export` and
+	// the publication content, inherits the same bound because they all come
+	// through here.
 	BoundServedDetail(detail, DefaultServedDocumentBudget())
 	return detail
 }

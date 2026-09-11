@@ -23,8 +23,8 @@ no placeholder, so it stays a bounded preview. What decides is the stored entrie
 ## Bounded tool results on served reads
 
 A stored record may be much larger than the wire contract lets a served session detail document
-be. No session is refused for size. On the read path each served tool result, tool argument
-document and turn body is bounded for display, and a shortened value carries a plain note saying
+be. No session is refused for the size of its tool outputs. On the read path each served tool
+result, tool argument document and turn body is bounded for display, and a shortened value carries a plain note saying
 how much is shown, how much was recorded, and that the whole record is still held by the peasant
 store that recorded the session. That wording is deliberate: the same note travels into a published
 transcript, which is read on another machine where nothing about the record is local. The
@@ -38,6 +38,11 @@ replaces, so bounding can only make the document smaller and a short value is ne
 save nothing. The note that stands where a source record was omitted is shorter than any bound
 note, so the floor leaves it whole under every pressure: a reader always sees why that tool
 output is missing, and a bound note never replaces it.
+
+The bound applies to text. A session whose turn structure alone, with every text field empty,
+exceeds the document budget is still refused for the full detail by the contract's document cap.
+The cap is a deliberate memory bound, and the store keeps the session whole. Serving such a session
+in pages is planned work, not a promise of this release.
 
 Indexing first attempts recovery of database-listed incomplete captures. It parses retained
 root and subagent artifacts first. `peasant harvest index --force` also reprocesses other
