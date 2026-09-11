@@ -17,11 +17,16 @@ const (
 	StageFilter    Stage = "FILTER"
 	StageExtract   Stage = "EXTRACT+WRITE"
 	StageDBInsert  Stage = "DB INSERT"
-	StageIndex     Stage = "INDEX"
-	StageCompute   Stage = "COMPUTE"
-	StageAnnotate  Stage = "ANNOTATE"
-	StageCleanup   Stage = "CLEANUP"
-	StageReport    Stage = "REPORT"
+	// StageContent covers the one-time full-content capture: the bounded pass
+	// that stores the whole text of sessions whose stored capture is still a
+	// preview. It runs after DB INSERT and before INDEX, and on an ordinary
+	// harvest it stops on a byte budget, continuing on the next run.
+	StageContent  Stage = "CONTENT"
+	StageIndex    Stage = "INDEX"
+	StageCompute  Stage = "COMPUTE"
+	StageAnnotate Stage = "ANNOTATE"
+	StageCleanup  Stage = "CLEANUP"
+	StageReport   Stage = "REPORT"
 )
 
 // StageOrder is the canonical display order of pipeline stages.
@@ -32,6 +37,7 @@ var StageOrder = []Stage{
 	StageFilter,
 	StageExtract,
 	StageDBInsert,
+	StageContent,
 	StageIndex,
 	StageCompute,
 	StageAnnotate,

@@ -38,6 +38,7 @@ var IndexProfileStageOrder = []Stage{
 	StageFilter,
 	StageExtract,
 	StageDBInsert,
+	StageContent,
 	StageIndex,
 	StageIndexLog,
 	StageCompute,

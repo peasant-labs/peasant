@@ -416,13 +416,18 @@ cases:
     schemaVersion: 999
     database: true
     stale: true
+  # An ordinary --force harvest re-ingests discovered native sources; a future
+  # adapter refuses the native rewrite, and the ordinary harvest is database
+  # driven, so it does not re-index a current retained session on force. That
+  # retained re-index is `peasant harvest index --force`, covered by the
+  # sibling case below. The producer and files are preserved either way.
   - name: future adapter force does not rewrite
     schemaVersion: 10
     adapterVersion: 999
     database: true
     reconciled: true
     force: true
-    wantIndexed: 1
+    wantIndexed: 0
   - name: future adapter index preserves producer
     schemaVersion: 10
     adapterVersion: 999

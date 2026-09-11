@@ -60,6 +60,13 @@ const ContentPreviewLimit = 2000
 // A single oversized session may occupy a batch without truncation.
 const FullContentWriteBatchBytes int64 = 32 << 20
 
+// OrdinaryHarvestContentBudgetBytes bounds how many input bytes one ordinary
+// `peasant harvest` charges to the one-time full-content capture. The capture
+// is resumable across runs with no cursor, so a large backlog is worked down a
+// bounded slice at a time instead of stalling a single harvest. `peasant
+// harvest index` runs it to the end with no budget.
+const OrdinaryHarvestContentBudgetBytes int64 = 1 << 30 // 1 GiB
+
 // OpenCodeManagedProjectionMaxBytes is the size at which an OpenCode session's
 // payload stops being small. It bounds the kickstart PREVIEW, which shows a
 // prefix and says how much it left out.

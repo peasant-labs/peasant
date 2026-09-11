@@ -25,6 +25,10 @@ type ContentCaptureResult struct {
 	// InputHash is the index input digest over the retained bytes actually
 	// parsed, so a later run can tell whether the same input was consumed.
 	InputHash string
+	// InputBytes is how many source bytes this capture read. The one-time
+	// content pass charges it against the run's budget, so a read that then
+	// fails still charges what it consumed.
+	InputBytes int64
 }
 
 // RetainedContentCapturer is implemented by an indexer whose retained capture
@@ -84,6 +88,9 @@ type contentRecovery struct {
 	session     DiscoveredSession
 	entries     int
 	recoveredAt int64
+	// charged is the source bytes this recovery read, counted against the run's
+	// content budget.
+	charged int64
 }
 
 // backfillIncompleteContent traverses by key, not by offset or a repeated first
@@ -94,11 +101,11 @@ type contentRecovery struct {
 // or write, and a session whose stored producer or index format is newer than
 // this build is refused before recovery, never downgraded. Out-of-scope rows
 // receive no read, no write and no diagnostic.
-func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID]contentRecovery, error) {
-	recovered := make(map[SessionID]contentRecovery)
+func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes int64) (recovered map[SessionID]contentRecovery, stoppedOnBudget bool, remaining int, retErr error) {
+	recovered = make(map[SessionID]contentRecovery)
 	store, ok := p.metricsStore.(ContentBackfillTargetStore)
 	if !ok || p.config.DryRun {
-		return recovered, nil
+		return recovered, false, 0, nil
 	}
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
@@ -107,32 +114,41 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			Message:     "the configured store cannot read stored producer state, so retained-content recovery was not attempted; stored entries and producer evidence were preserved",
 			Remediation: "Use a store that reports index state (SessionIndexStateReader) and retry harvest.",
 		})
-		return recovered, nil
+		return recovered, false, 0, nil
 	}
+	var charged int64
 	var after SessionID
 	for {
 		if err := ctx.Err(); err != nil {
-			return recovered, err
+			return recovered, stoppedOnBudget, remaining, err
 		}
 		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
-			return recovered, cancelErr
+			return recovered, stoppedOnBudget, remaining, cancelErr
 		}
 		if err != nil {
-			return recovered, err
+			return recovered, stoppedOnBudget, remaining, err
 		}
 		if len(targets) == 0 {
-			return recovered, nil
+			return recovered, stoppedOnBudget, remaining, nil
 		}
 		for _, target := range targets {
 			if err := ctx.Err(); err != nil {
-				return recovered, err
+				return recovered, stoppedOnBudget, remaining, err
 			}
 			id := target.SessionID
 			after = id
 			scope := reindexTarget{session: DiscoveredSession{SessionID: id, Harness: target.Harness}, startMs: target.StartMs}
 			if !p.includesIndexTarget(scope) {
 				continue
+			}
+			// Stop once the run has charged its budget, but process one session
+			// larger than the whole budget if nothing has been charged yet, so a
+			// single large session cannot stall the pass forever. A budget of 0
+			// is unbounded (peasant harvest index runs to the end).
+			if budgetBytes > 0 && charged >= budgetBytes && len(recovered) > 0 {
+				stoppedOnBudget = true
+				return recovered, stoppedOnBudget, remaining, nil
 			}
 			// The same stored-metadata compatibility check the index selection
 			// applies, reported the same way: EVERY failure of it goes to the
@@ -154,7 +170,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			}
 			if err != nil {
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
-					return recovered, cancelErr
+					return recovered, stoppedOnBudget, remaining, cancelErr
 				}
 				p.reportDiagnostic(DiagnosticEntry{
 					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s retained-content recovery", id),
@@ -174,7 +190,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 			recovery, err := p.backfillContentSession(ctx, store, id, state)
 			if err != nil {
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
-					return recovered, cancelErr
+					return recovered, stoppedOnBudget, remaining, cancelErr
 				}
 				if isMetadataCompatibilityError(err) {
 					p.reportMetadataRefusal(string(id), err)
@@ -197,6 +213,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context) (map[SessionID
 				continue
 			}
 			recovered[id] = recovery
+			charged += recovery.charged
 		}
 	}
 }
@@ -322,7 +339,7 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	}
 	// The run-level recovery entry (contentRecoveryLogEntries) is the one
 	// index-log row for this repair; it is persisted once by the finalize stage.
-	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now}, nil
+	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now, charged: capture.InputBytes}, nil
 }
 
 // captureRetainedContent produces the ContentCaptureResult for one retained
@@ -350,7 +367,7 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: true, InputHash: indexInputDigest(session, data, nil)}, nil
+	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: true, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
 }
 
 func captureHarness(raw string) (Harness, error) {

@@ -85,7 +85,7 @@ func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session Disc
 	if !session.ContentOmitted {
 		capture, err := i.IndexTranscriptBytesForCapture(ctx, session, data)
 		if err == nil {
-			return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash}, nil
+			return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash, InputBytes: int64(len(data))}, nil
 		}
 		var unrepresented *UnrepresentedRecordError
 		if ctx.Err() != nil || !errors.As(err, &unrepresented) {
@@ -103,7 +103,7 @@ func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session Disc
 	if v1, ok := result.(indexformat.V1); ok {
 		entries = v1.Entries
 	}
-	return ContentCaptureResult{Entries: entries, Complete: false, InputHash: inputHash}, nil
+	return ContentCaptureResult{Entries: entries, Complete: false, InputHash: inputHash, InputBytes: int64(len(data))}, nil
 }
 
 // IndexTranscriptResult verifies completion before authorizing persistent replacement.

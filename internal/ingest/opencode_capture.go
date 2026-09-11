@@ -39,7 +39,7 @@ func (idx *OpenCodeIndexer) CaptureRetainedContent(ctx context.Context, s Discov
 		if err != nil {
 			return ContentCaptureResult{}, err
 		}
-		return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: indexInputDigest(s, data, nil)}, nil
+		return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: indexInputDigest(s, data, nil), InputBytes: int64(len(data))}, nil
 	}
 	tree, err := idx.captureJSONInput(ctx, s)
 	if err != nil {
@@ -48,10 +48,11 @@ func (idx *OpenCodeIndexer) CaptureRetainedContent(ctx context.Context, s Discov
 	inputHash := indexInputDigest(s, nil, tree)
 	for _, message := range tree.Messages {
 		if message.PartsMissing {
-			return ContentCaptureResult{Complete: false, InputHash: inputHash}, nil
+			return ContentCaptureResult{Complete: false, InputHash: inputHash, InputBytes: openCodeTreeBytes(tree)}, nil
 		}
 	}
 	messages, err := parseOpenCodeJSONInput(tree, &indexCompletion{ctx: ctx, session: s})
+	treeBytes := openCodeTreeBytes(tree)
 	if err != nil {
 		return ContentCaptureResult{}, captureFailure(s, 0, err)
 	}
@@ -59,7 +60,7 @@ func (idx *OpenCodeIndexer) CaptureRetainedContent(ctx context.Context, s Discov
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash}, nil
+	return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash, InputBytes: treeBytes}, nil
 }
 
 func (idx *OpenCodeIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
@@ -310,4 +311,20 @@ func refuseOpenCodeProviderDatabase(filesystem FileSystem, session DiscoveredSes
 		return fmt.Errorf("read the managed OpenCode projection for session %q: %q is an OpenCode SQLite database, not the Peasant-owned projection this path must hold; the file was not read into memory and no entry rows were stored; rerun harvest to regenerate the managed projection, and never point the reader at the provider database", session.SessionID, path)
 	}
 	return nil
+}
+
+// openCodeTreeBytes sums the message and part bytes of a captured native tree,
+// so the one-time content pass can charge what it read against its budget.
+func openCodeTreeBytes(tree *openCodeJSONInput) int64 {
+	if tree == nil {
+		return 0
+	}
+	var total int64
+	for _, message := range tree.Messages {
+		total += int64(len(message.File.Data))
+		for _, part := range message.Parts {
+			total += int64(len(part.Data))
+		}
+	}
+	return total
 }

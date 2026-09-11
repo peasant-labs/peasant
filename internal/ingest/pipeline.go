@@ -112,6 +112,10 @@ type PipelineSummary struct {
 	// continues: an unjudged row keeps the visible fail-safe value and is listed
 	// again next time, so a failure here delays a verdict rather than losing one.
 	OriginResolveError error
+	// ContentCaptureRemaining is how many in-scope sessions still lack their
+	// full stored text after this run stopped the content pass on its budget.
+	// Zero when the pass finished. The next harvest continues without a cursor.
+	ContentCaptureRemaining int `json:"content_remaining,omitempty"`
 }
 
 // SessionResult records the outcome of processing a single session.
@@ -241,6 +245,12 @@ type Pipeline struct {
 	// contentRecoveries holds this run's completed retained-content repairs,
 	// keyed by session, so the index log and summary can report them.
 	contentRecoveries map[SessionID]contentRecovery
+	// contentCaptureStoppedOnBudget reports that the one-time full-content pass
+	// stopped this run on its byte budget, with sessions still to capture.
+	contentCaptureStoppedOnBudget bool
+	// contentCaptureRemaining is how many in-scope sessions still lack a full
+	// capture after a budget-stopped run; zero otherwise.
+	contentCaptureRemaining int
 
 	// locationCache is pre-populated before the DIFF stage via BulkLookupSessionLocations.
 	// It maps SessionID → SessionLocation (host_slug + parent_id) for sessions already
@@ -1007,11 +1017,20 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// Newly reconciled and older-producer sessions are checked first; the managed
 	// inventory also covers missing proofs and failures at an unchanged revision.
 	if p.metricsStore != nil {
-		backfilled, backfillErr := p.backfillIncompleteContent(ctx)
+		contentProfileStart := time.Now()
+		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageContent})
+		backfilled, stoppedOnBudget, remaining, backfillErr := p.backfillIncompleteContent(ctx, defaults.OrdinaryHarvestContentBudgetBytes)
 		if backfillErr != nil {
 			slog.Warn("pipeline: incomplete content recovery", "error", backfillErr)
 		}
 		p.contentRecoveries = backfilled
+		p.contentCaptureStoppedOnBudget = stoppedOnBudget
+		p.contentCaptureRemaining = remaining
+		// The stage ends short (Done < Total) when the budget stopped it, so the
+		// renderer shows the backlog it left; Total is what this run could still
+		// have captured.
+		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageContent, Done: len(backfilled), Total: len(backfilled) + remaining})
+		p.recordIndexProfileStage(StageContent, contentProfileStart, len(backfilled), len(backfilled)+remaining)
 		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
@@ -1065,6 +1084,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				}
 			}
 			queued[sid] = true
+			// A selected session whose row does not yet record its saved pair (a
+			// legacy or logs-only row with a null artifact hash) is recorded from
+			// its own pair before indexing, so its stale index can be refreshed
+			// without re-reading the native source. Only the selected session's
+			// pair is read, never the tree.
+			p.bootstrapUnrecordedPair(ctx, *reconstructed, transcriptPath)
 			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
 			}
@@ -3746,6 +3771,9 @@ func (p *Pipeline) indexComputeAndFinalize(
 	pipelineResult.Summary.ReminedEvidenceRecords = p.reminedEvidence
 	pipelineResult.Summary.OriginResolve = p.originResolve
 	pipelineResult.Summary.OriginResolveError = p.originResolveErr
+	if p.contentCaptureStoppedOnBudget {
+		pipelineResult.Summary.ContentCaptureRemaining = p.contentCaptureRemaining
+	}
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
 			pipelineResult.Summary.Errors++
@@ -4146,7 +4174,8 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 //  4. Write index_log entries, populate PipelineResult.IndexLog
 func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineResult, error) {
 	prog := p.config.Progress
-	backfilled, err := p.backfillIncompleteContent(ctx)
+	// harvest index runs the content pass to the end with no budget.
+	backfilled, _, _, err := p.backfillIncompleteContent(ctx, 0)
 	if err != nil {
 		return nil, fmt.Errorf("reindex content recovery: %w", err)
 	}
@@ -4158,6 +4187,16 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Content recovery repairs the stored capture only. Every scanned target,
 	// recovered or not, still receives the adapter/indexer evaluation below.
 	scanned := p.scanPeasantSyncSessions(ctx)
+	if err := ctx.Err(); err != nil {
+		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
+		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
+	}
+	// Record the database rows for saved pairs the database does not yet
+	// identify: a session whose row is absent, or present without a recorded
+	// artifact hash (a logs-only or legacy session). This is the rebuild the
+	// ordinary harvest no longer does; a present pair whose recorded hash
+	// disagrees is left for the crash-row-3 report, never overwritten.
+	p.reconcileScannedPairs(ctx, scanned)
 	if err := ctx.Err(); err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)

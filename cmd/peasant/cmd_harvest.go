@@ -567,6 +567,9 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		return printJSON(cmd.OutOrStdout(), result)
 	}
 	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
+	if remaining := result.Summary.ContentCaptureRemaining; remaining > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d sessions do not have their full text stored yet. The next harvest continues this. Run `peasant harvest index` to finish it now.\n", remaining)
+	}
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
 	if result.Summary.Errors > 0 {

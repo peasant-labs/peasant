@@ -289,6 +289,90 @@ func (p *Pipeline) removeRelocatedSession(oldDir, newDir, sessionID string) erro
 	return p.fs.RemoveAll(oldDir)
 }
 
+// reconcileScannedPairs records the database rows for saved pairs the database
+// does not yet identify, so harvest index rebuilds a lost or incomplete
+// database from the files. It reads a pair only for a session whose row is
+// absent or carries no artifact hash; a present row whose recorded hash
+// disagrees with a valid pair is a crash-row-3 state and is left untouched,
+// reported by the ordinary readers, never overwritten from its backup. Parents
+// are recorded before children, and the mirror refuses a child whose parent is
+// not stored, so the next scan settles it.
+func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexTarget) {
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	mirror, mirrorErr := p.mirrorArtifactStore()
+	if !ok || mirrorErr != nil || mirror == nil || p.config.DryRun {
+		return
+	}
+	output := string(p.config.OutputDir)
+	var page []ArtifactMirrorRequest
+	flush := func() {
+		if len(page) == 0 {
+			return
+		}
+		for _, result := range mirror.MirrorArtifacts(ctx, page) {
+			if result.Err != nil {
+				p.reportMetadataRefusal(string(result.SessionID), fmt.Errorf("record saved session %s from its files: %w", result.SessionID, result.Err))
+			}
+		}
+		page = page[:0]
+	}
+	for _, target := range scanned {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		if !p.includesManagedSession(target.session.SessionID, target.session.Harness) {
+			continue
+		}
+		state, err := reader.ReadIndexState(ctx, target.session.SessionID)
+		if err != nil {
+			continue
+		}
+		if state != nil && state.ArtifactHash != nil {
+			continue // Already identified; a disagreeing hash is not overwritten here.
+		}
+		metadataPath := filepath.Join(filepath.Dir(target.transcriptPath), string(target.session.SessionID)+defaults.MetadataSuffix)
+		artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
+		if err != nil {
+			continue // A torn or unreadable pair is reported by the ordinary readers.
+		}
+		page = append(page, ArtifactMirrorRequest{Artifact: artifact})
+		if len(page) == MirrorPageSize {
+			flush()
+		}
+	}
+	flush()
+}
+
+// bootstrapUnrecordedPair records a selected session's saved pair in the
+// database when the row does not yet identify it (a null artifact hash on a
+// legacy or logs-only row). It reads only that session's pair, never the tree,
+// and does nothing when the row already records an artifact hash or a valid
+// pair is not present. A present hash that disagrees is left untouched.
+func (p *Pipeline) bootstrapUnrecordedPair(ctx context.Context, session DiscoveredSession, transcriptPath string) {
+	if transcriptPath == "" || p.config.DryRun {
+		return
+	}
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	mirror, mirrorErr := p.mirrorArtifactStore()
+	if !ok || mirrorErr != nil || mirror == nil {
+		return
+	}
+	state, err := reader.ReadIndexState(ctx, session.SessionID)
+	if err != nil || (state != nil && state.ArtifactHash != nil) {
+		return
+	}
+	metadataPath := filepath.Join(filepath.Dir(transcriptPath), string(session.SessionID)+defaults.MetadataSuffix)
+	artifact, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, session.SessionID)
+	if err != nil {
+		return
+	}
+	for _, result := range mirror.MirrorArtifacts(ctx, []ArtifactMirrorRequest{{Artifact: artifact}}) {
+		if result.Err != nil {
+			p.reportMetadataRefusal(string(result.SessionID), fmt.Errorf("record saved session %s from its files: %w", result.SessionID, result.Err))
+		}
+	}
+}
+
 // mirrorRequestFor builds the database mirror request for one installed pair.
 func mirrorRequestFor(wr *workerResult) ArtifactMirrorRequest {
 	return ArtifactMirrorRequest{
