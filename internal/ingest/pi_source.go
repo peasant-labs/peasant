@@ -163,13 +163,14 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	}
 	entries := make(map[string]piEntry)
 	var order []string
-	offset := 0
 
 	// takeOmissions records the records this read left out, at the position
-	// they held, before the next accepted record is processed.
+	// they held, before the next accepted record is processed. It keeps no byte
+	// accounting of its own: the reader reports the bytes it passed, and an
+	// omitted record's own size is not the size of the line the read met, which
+	// on a filtered artifact is a one-line stand-in.
 	takeOmissions := func() error {
 		for _, at := range scanner.TakeOmissions() {
-			offset += int(at.Record.Bytes) + 1
 			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
 			doc.warnings = append(doc.warnings, OversizedRecordDiagnostic("Pi recording", at.Record))
 		}
@@ -185,11 +186,12 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 		}
 		physical := scanner.Bytes()
 		line := scanner.Line() - 1
-		lineStart := offset
-		offset += len(physical) + 1
+		lineStart := scanner.RecordStart()
 		// The record is the document's last when nothing follows it, whether
-		// or not the source ended with a newline.
-		isLast := lineStart+len(physical)+1 >= len(data)
+		// or not the source ended with a newline. Both the offset and the end
+		// come from the reader, so a line it passed over counts as the bytes it
+		// really held.
+		isLast := scanner.Consumed() >= len(data)
 		raw := bytes.TrimSpace(physical)
 		if len(raw) == 0 {
 			continue

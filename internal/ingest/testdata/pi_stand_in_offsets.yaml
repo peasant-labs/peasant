@@ -1,0 +1,38 @@
+# Pi reads of a FILTERED artifact: a stand-in line stands where an over-limit
+# record was, and every record after it must still be placed correctly.
+#
+# The stand-in's physical line is about 150 bytes while the record it replaces
+# may be hundreds of megabytes. A reader that advances its byte offset by the
+# omitted record's recorded size therefore loses its place for every later
+# record, and a later record that fails raw validation with a truncation-shaped
+# error is mistaken for the incomplete final line: the session then imports a
+# truncated prefix with a warning instead of being refused.
+requiredNames:
+  - stand_in_then_a_truncated_middle_record_is_refused
+  - stand_in_then_whole_records_consume_the_document
+  - stand_in_then_a_truncated_final_record_is_a_tail_warning
+cases:
+  - name: stand_in_then_a_truncated_middle_record_is_refused
+    lines:
+      - text: '{"type":"session","version":3,"id":"7f3a1c52-9b84-4d61-8f20-5c6d7e8f9a0b","cwd":"/tmp/pi"}'
+      - oversized: true
+      - text: '{"type":"message","id":"e1","parentId":null,"timestamp":"2026-09-10T12:00:00Z"}'
+      - text: '{"type":"message","id":"e2","parentId":"e1"'
+      - text: '{"type":"message","id":"e3","parentId":"e1","timestamp":"2026-09-10T12:00:02Z"}'
+    refused: true
+    refusedMessageContains: physical line 4
+  - name: stand_in_then_whole_records_consume_the_document
+    lines:
+      - text: '{"type":"session","version":3,"id":"7f3a1c52-9b84-4d61-8f20-5c6d7e8f9a0b","cwd":"/tmp/pi"}'
+      - oversized: true
+      - text: '{"type":"message","id":"e1","parentId":null,"timestamp":"2026-09-10T12:00:00Z"}'
+      - text: '{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-09-10T12:00:01Z"}'
+    consumesWholeDocument: true
+  - name: stand_in_then_a_truncated_final_record_is_a_tail_warning
+    lines:
+      - text: '{"type":"session","version":3,"id":"7f3a1c52-9b84-4d61-8f20-5c6d7e8f9a0b","cwd":"/tmp/pi"}'
+      - oversized: true
+      - text: '{"type":"message","id":"e1","parentId":null,"timestamp":"2026-09-10T12:00:00Z"}'
+      - text: '{"type":"message","id":"e2","parentId":"e1"'
+    noFinalNewline: true
+    incompleteTail: true

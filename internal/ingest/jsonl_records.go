@@ -150,10 +150,19 @@ const omittedRecordPrefixBytes = 4 << 10
 // Bytes() is valid only until the next call to Scan(), exactly as with
 // bufio.Scanner.
 type jsonlRecordScanner struct {
-	reader    *bufio.Reader
-	limit     int
-	record    []byte
-	line      int
+	reader *bufio.Reader
+	limit  int
+	record []byte
+	line   int
+	// start and consumed are the PHYSICAL byte offsets of the source, newlines
+	// included, and they count every line the reader passed over as well as
+	// every record it handed back. A caller that must place a record in the
+	// source bytes reads them instead of adding up record lengths of its own: a
+	// line the reader skipped (an over-limit record, or the one-line stand-in a
+	// filtered artifact holds in its place) is nothing like the size of the
+	// record it stands for.
+	start     int
+	consumed  int
 	oversized []OversizedRecord
 	omissions []OmittedRecordAt
 	err       error
@@ -221,6 +230,12 @@ func (s *jsonlRecordScanner) Scan() bool {
 			return false
 		}
 		s.line++
+		s.start = s.consumed
+		s.consumed += size
+		if more {
+			// The line's newline byte belongs to the line the reader just read.
+			s.consumed++
+		}
 		if !more {
 			s.done = true
 		}
@@ -268,6 +283,14 @@ func (s *jsonlRecordScanner) Bytes() []byte { return s.record }
 // Line is the 1-based physical line of the current record in the source,
 // counting the records that were skipped for being too large.
 func (s *jsonlRecordScanner) Line() int { return s.line }
+
+// RecordStart is the byte offset in the source where the current line begins.
+func (s *jsonlRecordScanner) RecordStart() int { return s.start }
+
+// Consumed is the number of source bytes the reader has passed, through the
+// current line's newline. It equals the length of the source once the reader
+// has read the last line, whether or not that line ended with a newline.
+func (s *jsonlRecordScanner) Consumed() int { return s.consumed }
 
 // Oversized lists every record skipped so far, in source order.
 func (s *jsonlRecordScanner) Oversized() []OversizedRecord { return s.oversized }
