@@ -181,12 +181,9 @@ func (f *OSFileSystem) CopyFile(src, dst string, perm os.FileMode) error {
 		return fmt.Errorf("copy %q -> %q: copy data: %w", src, dst, err)
 	}
 
-	if err := out.Sync(); err != nil {
-		out.Close()
-		os.Remove(dst)
-		return fmt.Errorf("copy %q -> %q: sync: %w", src, dst, err)
-	}
-
+	// No fsync: the write path relies on the database transaction for
+	// durability and on rename for atomicity, so a copied debug file left torn
+	// by a power loss is re-copied on the next ingest, not fsync'd here.
 	if err := out.Close(); err != nil {
 		os.Remove(dst)
 		return fmt.Errorf("copy %q -> %q: close dst: %w", src, dst, err)

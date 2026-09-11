@@ -25,6 +25,12 @@ callSites:
     # A pair read back from disk is validated by hashing it once.
     - {name: pair-read-from-disk-hash, file: artifact.go, function: NewManagedArtifact, symbol: schema.ComputeTranscriptHash}
     - {name: pair-read-from-disk-clone, file: artifact.go, function: NewManagedArtifact, symbol: bytes.Clone}
+    # The worker-path artifact identity is the hash of the metadata's semantic
+    # JSON, not a second hash of the transcript bytes.
+    - {name: worker-artifact-identity, file: artifact.go, function: newIngestArtifact, symbol: schema.ComputeTranscriptHash}
+    # The saved identity for the stale-input check is the metadata's semantic
+    # JSON hash, so a moved transcript does not invalidate a verified parse.
+    - {name: committed-identity-hash, file: index_input_pipeline.go, function: Pipeline.committedArtifactIdentity, symbol: schema.ComputeTranscriptHash}
     # An adapter refresh from the retained pair stamps its content hash.
     - {name: retained-extraction-content-hash, file: retained_extraction.go, function: Pipeline.processRetainedSession, symbol: schema.ComputeTranscriptHash}
     # The explicit rebuild proves a retained transcript against its snapshot.
@@ -39,6 +45,8 @@ callSites:
     - store-free-diff-content-hash
     - pair-read-from-disk-hash
     - pair-read-from-disk-clone
+    - worker-artifact-identity
+    - committed-identity-hash
     - retained-extraction-content-hash
     - reindex-fallback-proof-hash
     - metric-input-hash
