@@ -11,6 +11,35 @@ func (p *Pipeline) includesIndexTarget(target reindexTarget) bool {
 		(p.config.Since == nil || !time.UnixMilli(target.startMs).Before(*p.config.Since))
 }
 
+// nativeRefreshSchemaVersions is the exact set of stored schema versions this
+// build re-extracts from native input. The database adapter-refresh predicate
+// binds this list, so it and metadataNeedsNativeRefresh cannot drift.
+func (p *Pipeline) nativeRefreshSchemaVersions() []int {
+	var versions []int
+	for version := 1; version <= int(CurrentSchemaVersion); version++ {
+		if metadataNeedsNativeRefresh(version) {
+			versions = append(versions, version)
+		}
+	}
+	return versions
+}
+
+// repairSessions returns the sessions the repair predicate selects: those a
+// crash between the two write commits can leave. A store that cannot answer
+// contributes nothing; the sessions are re-selected on the next harvest.
+func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
+	lister, ok := p.metricsStore.(RepairSessionLister)
+	if !ok {
+		return nil
+	}
+	ids, err := lister.ListSessionsNeedingRepair(ctx, p.indexerTargets())
+	if err != nil {
+		p.reportMetadataRefusal("repair selection", err)
+		return nil
+	}
+	return ids
+}
+
 // capturedInputNeedsWork decides whether a captured input still has pending
 // indexer work. A current parser and an equal input hash are not enough on
 // their own: the stored index must also be bound to the current publication
@@ -109,16 +138,14 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	return p.capturedInputNeedsWork(input)
 }
 
-// scanPeasantSyncSessions consumes the publisher's bounded metadata inventory;
-// it does not recover or reconcile files. Capture later verifies each chosen pair.
+// scanPeasantSyncSessions walks the retained tree and returns one target per
+// session it holds. It is the whole-tree reader, and only `harvest index`
+// runs it: the ordinary harvest selects its work from the database. It opens
+// no transcript and takes no lock; the pair is read only when a chosen target
+// is indexed.
 func (p *Pipeline) scanPeasantSyncSessions(ctx context.Context) []reindexTarget {
-	publisher, err := NewArtifactPublisher(p.fs, string(p.config.OutputDir), ArtifactPublisherOptions{Versions: p.versionTargets()})
-	if err != nil {
-		p.reportMetadataRefusal(string(p.config.OutputDir), err)
-		return nil
-	}
 	var targets []reindexTarget
-	err = publisher.WalkMetadata(ctx, func(sid SessionID, path string) error {
+	err := walkManagedMetadata(ctx, p.fs, string(p.config.OutputDir), func(sid SessionID, path string) error {
 		metadata, err := p.readSessionMetadata(filepath.Dir(filepath.Dir(path)), sid, "index inventory")
 		if err != nil || metadata == nil {
 			return nil // The metadata reader reports refusal; independent peers continue.
@@ -130,4 +157,19 @@ func (p *Pipeline) scanPeasantSyncSessions(ctx context.Context) []reindexTarget 
 		p.reportMetadataRefusal(string(p.config.OutputDir), err)
 	}
 	return targets
+}
+
+// includesManagedSession applies the run's explicit harness and session
+// filters to a stored session. It is the scope test every database-driven
+// inventory shares.
+func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
+	return (p.config.Harness == nil || harness == *p.config.Harness) &&
+		(p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid])
+}
+
+// includesManagedArtifact adds the age filter to includesManagedSession, for a
+// session whose start time the caller already knows from its metadata.
+func (p *Pipeline) includesManagedArtifact(meta *UnifiedMetadata) bool {
+	return p.includesManagedSession(meta.SessionID, meta.ModelHarness) &&
+		(p.config.Since == nil || !time.UnixMilli(meta.Timestamp.Start).Before(*p.config.Since))
 }

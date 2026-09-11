@@ -965,10 +965,7 @@ func prepareIndexParallelInputs(t testing.TB, pipeline *Pipeline, metas []indexe
 	t.Helper()
 	pipeline.fs = &OSFileSystem{}
 	pipeline.config.OutputDir = ResolvedPath(t.TempDir())
-	publisher, err := pipeline.artifactPublisher(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mirror := pipeline.metricsStore.(ArtifactMirrorStore)
 	for i := range metas {
 		im := &metas[i]
 		directory := SessionDir(string(pipeline.config.OutputDir), "index-parallel", string(im.session.SessionID), "")
@@ -982,16 +979,20 @@ func prepareIndexParallelInputs(t testing.TB, pipeline *Pipeline, metas []indexe
 		if err != nil {
 			t.Fatal(err)
 		}
-		observed, err := publisher.Observe(t.Context(), im.session, metadataPath)
-		if err != nil {
+		// Install the saved pair by writing its files, then record the row with
+		// the mirror, exactly as the write path does: transcript then metadata.
+		if err := pipeline.fs.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		committed, err := publisher.Publish(t.Context(), ArtifactPublication{Artifact: artifact, Observation: observed})
-		if err != nil {
+		if err := pipeline.fs.WriteFile(im.outputTranscriptPath, im.transcriptData, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := publisher.Reconcile(t.Context(), committed); err != nil {
+		if err := pipeline.fs.WriteFile(metadataPath, metadata, 0o600); err != nil {
 			t.Fatal(err)
+		}
+		results := mirror.MirrorArtifacts(t.Context(), []ArtifactMirrorRequest{{Artifact: artifact}})
+		if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+			t.Fatalf("fixture mirror did not record the saved pair: %+v", results)
 		}
 		state, err := pipeline.metricsStore.(SessionIndexStateReader).ReadIndexState(t.Context(), im.session.SessionID)
 		if err != nil || state == nil || state.ArtifactHash == nil || *state.ArtifactHash != artifact.ArtifactHash || state.IndexedInputHash != nil || state.IndexerVersion != 0 {

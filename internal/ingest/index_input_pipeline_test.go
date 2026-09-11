@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
+	"fmt"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -113,18 +115,25 @@ func (indexer *capturedInputIndexer) IndexTranscriptBytesResult(ctx context.Cont
 	return result, err
 }
 
-func publishIndexInputFixture(ctx context.Context, publisher *ingest.ArtifactPublisher, artifact *ingest.ManagedArtifact, metadataPath string) error {
-	session := ingest.DiscoveredSession{SessionID: artifact.Metadata.SessionID, Harness: artifact.Metadata.ModelHarness}
-	observation, err := publisher.Observe(ctx, session, metadataPath)
-	if err != nil {
+// publishIndexInputFixture installs a saved pair by writing its files, then
+// records the row with the mirror, exactly as the write path does.
+func publishIndexInputFixture(ctx context.Context, database *store.Store, filesystem ingest.FileSystem, output string, artifact *ingest.ManagedArtifact, metadataPath string) error {
+	sessionDir := filepath.Dir(metadataPath)
+	if err := filesystem.MkdirAll(sessionDir, 0o700); err != nil {
 		return err
 	}
-	committed, err := publisher.Publish(ctx, ingest.ArtifactPublication{Artifact: artifact, Observation: observation})
-	if err != nil {
+	transcriptPath := filepath.Join(sessionDir, string(artifact.Metadata.SessionID)+"--transcript."+string(artifact.Metadata.Source.Format))
+	if err := filesystem.WriteFile(transcriptPath, artifact.Transcript, 0o600); err != nil {
 		return err
 	}
-	_, err = publisher.Reconcile(ctx, committed)
-	return err
+	if err := filesystem.WriteFile(metadataPath, artifact.MetadataJSON, 0o600); err != nil {
+		return err
+	}
+	results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}})
+	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+		return fmt.Errorf("mirror saved pair for %s: %+v", artifact.Metadata.SessionID, results)
+	}
+	return nil
 }
 
 func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
@@ -140,10 +149,6 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer database.Close()
-			publisher, err := ingest.NewArtifactPublisher(filesystem, output, ingest.ArtifactPublisherOptions{Mirror: database})
-			if err != nil {
-				t.Fatal(err)
-			}
 			transcript := fixture.Transcript
 			if row.Empty {
 				transcript = ""
@@ -153,7 +158,7 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: artifact.Metadata.ModelHarness}
 			metadataPath := ingest.SessionMetadataPath(output, string(artifact.Metadata.HostSlug), string(sid), "")
 			publish := func(candidate *ingest.ManagedArtifact) error {
-				return publishIndexInputFixture(ctx, publisher, candidate, metadataPath)
+				return publishIndexInputFixture(ctx, database, filesystem, output, candidate, metadataPath)
 			}
 			if err := publish(artifact); err != nil {
 				t.Fatal(err)
@@ -235,14 +240,10 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer database.Close()
-			publisher, err := ingest.NewArtifactPublisher(filesystem, output, ingest.ArtifactPublisherOptions{Mirror: database})
-			if err != nil {
-				t.Fatal(err)
-			}
 			artifact := publicationTestArtifact(t, fixture.Transcript)
 			sid, harness := artifact.Metadata.SessionID, artifact.Metadata.ModelHarness
 			metadataPath := ingest.SessionMetadataPath(output, string(artifact.Metadata.HostSlug), string(sid), "")
-			if err := publishIndexInputFixture(ctx, publisher, artifact, metadataPath); err != nil {
+			if err := publishIndexInputFixture(ctx, database, filesystem, output, artifact, metadataPath); err != nil {
 				t.Fatal(err)
 			}
 			oldEntries := []schema.SessionEntry{{SessionID: sid, Harness: harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &fixture.PreviousPreview}}
@@ -270,7 +271,7 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			if err != nil || readErr != nil || second.Summary.Indexed != 0 || indexer.byteParses != 1 || !reflect.DeepEqual(state, after) {
 				t.Fatalf("unchanged proven input reran: %+v parses=%d err=%v", second, indexer.byteParses, err)
 			}
-			if err := publishIndexInputFixture(ctx, publisher, publicationTestArtifact(t, fixture.Malformed), metadataPath); err != nil {
+			if err := publishIndexInputFixture(ctx, database, filesystem, output, publicationTestArtifact(t, fixture.Malformed), metadataPath); err != nil {
 				t.Fatal(err)
 			}
 			lastGood, err := database.ReadIndexState(ctx, sid)
@@ -287,7 +288,7 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			if err != nil || readErr != nil || retry.Summary.Indexed != 0 || indexer.byteParses != 3 || !reflect.DeepEqual(lastGood, after) {
 				t.Fatalf("next invocation did not retry changed input: %+v parses=%d err=%v", retry, indexer.byteParses, err)
 			}
-			if err := publishIndexInputFixture(ctx, publisher, publicationTestArtifact(t, fixture.Replacement), metadataPath); err != nil {
+			if err := publishIndexInputFixture(ctx, database, filesystem, output, publicationTestArtifact(t, fixture.Replacement), metadataPath); err != nil {
 				t.Fatal(err)
 			}
 			repaired, err := pipeline.Run(ctx)
@@ -297,4 +298,31 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func publicationTestArtifact(t *testing.T, transcript string) *ingest.ManagedArtifact {
+	t.Helper()
+	var fixture struct {
+		Metadata string `yaml:"metadata"`
+	}
+	if err := yaml.Unmarshal(artifactCaptureYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var meta ingest.UnifiedMetadata
+	if err := json.Unmarshal([]byte(fixture.Metadata), &meta); err != nil {
+		t.Fatal(err)
+	}
+	version := 1
+	meta.AdapterVersion = &version
+	meta.ContentHash = schema.ComputeTranscriptHash([]byte(transcript))
+	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := ingest.NewManagedArtifact(data, []byte(transcript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
 }

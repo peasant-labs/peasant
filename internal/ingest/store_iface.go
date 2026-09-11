@@ -978,3 +978,20 @@ type AnnotationPushRow struct {
 	Provenance           *schema.Provenance
 	ContentHash          *string // Pre-computed if available, nil otherwise.
 }
+
+// StaleAdapterSessionLister is the database-driven inventory of sessions whose
+// stored adapter revision is behind this build, or whose stored schema this
+// build re-extracts from native input. It replaces the retained-tree walk the
+// ordinary harvest used to run to find adapter-refresh work. The production
+// store implements it; a store that does not is treated as having no such work.
+type StaleAdapterSessionLister interface {
+	ListStaleAdapterSessions(ctx context.Context, targets map[Harness]HarvesterVersions, nativeRefreshVersions []int) ([]SessionID, error)
+}
+
+// RepairSessionLister is the database-driven inventory of sessions a crash
+// between the two write commits can leave: a saved pair whose index input
+// proof was cleared, or a current publication capture the index is not bound
+// to. Both settle in one ordinary harvest. The production store implements it.
+type RepairSessionLister interface {
+	ListSessionsNeedingRepair(ctx context.Context, targets map[Harness]HarvesterVersions) ([]SessionID, error)
+}

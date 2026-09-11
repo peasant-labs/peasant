@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -73,15 +74,9 @@ func TestMetadataChildCompatibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			if fixture.ChildSchema <= ingest.CurrentSchemaVersion {
-				publisher, err := ingest.NewArtifactPublisher(filesystem, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: database})
-				if err != nil {
-					t.Fatal(err)
-				}
-				// Reconcile the readable child independently of its refused
+				// Record the readable child's row independently of its refused
 				// parent's metadata before recording the preservation baseline.
-				if _, _, err := publisher.ReconcileStored(ctx, fixtures.ChildID, childPath, nil); err != nil {
-					t.Fatal(err)
-				}
+				storetest.MirrorRetainedPair(t, database, filesystem, testOutputDir, childPath, fixtures.ChildID)
 			}
 			beforeFiles := make(map[string][]byte)
 			for _, path := range []string{parentPath, childPath, parentTranscript, childTranscript} {

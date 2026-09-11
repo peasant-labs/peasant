@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"path/filepath"
 )
 
 type changedCandidateOriginStore struct{ *store.Store }
@@ -88,27 +89,26 @@ func TestPushRequiresCoherentDatabaseInput(t *testing.T) {
 	if err != nil || before == nil {
 		t.Fatalf("coherent publication receipt missing: %v", err)
 	}
-	// A file-only publication does not replace the authoritative database
-	// capture. It must not prevent a forecast of the stored content.
-	publisher, err := ingest.NewArtifactPublisher(fs, "/sync", ingest.ArtifactPublisherOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	observation, err := publisher.Observe(t.Context(), ingest.DiscoveredSession{SessionID: sid, Harness: meta.ModelHarness}, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	meta.ContentHash = ""
-	meta.MetadataHash = ""
+	// A file-only rewrite of the saved pair does not replace the authoritative
+	// database capture. It must not prevent a forecast of the stored content.
+	// Write the replacement pair straight to disk, the state a file-only tool
+	// would leave; no database row is recorded.
+	replacementTranscript := append(data, '\n')
+	meta.ContentHash = schema.ComputeTranscriptHash(replacementTranscript)
+	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 	raw, err = json.Marshal(meta)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := ingest.NewManagedArtifact(raw, append(data, '\n'))
+	replacement, err := ingest.NewManagedArtifact(raw, replacementTranscript)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := publisher.Publish(t.Context(), ingest.ArtifactPublication{Artifact: replacement, Observation: observation}); err != nil {
+	sessionDir := filepath.Dir(path)
+	if err := fs.WriteFile(filepath.Join(sessionDir, string(sid)+"--transcript."+string(replacement.Metadata.Source.Format)), replacement.Transcript, defaults.PrivateFilePerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(path, replacement.MetadataJSON, defaults.PrivateFilePerm); err != nil {
 		t.Fatal(err)
 	}
 	if result := run(true); result.Errors != 0 || result.Updated == 0 {

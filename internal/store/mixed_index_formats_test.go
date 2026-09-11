@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
@@ -551,15 +552,9 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 			// First establish real file/SQL mirrors and the unrelated parser's
 			// actual input proof. Unknown historical input requires verification;
 			// this case starts after that work, before Codex adopts its new format.
-			publisher, err := ingest.NewArtifactPublisher(fs, "/managed", ingest.ArtifactPublisherOptions{Mirror: db})
-			if err != nil {
-				t.Fatal(err)
-			}
 			for _, meta := range []*schema.UnifiedMetadata{legacyMeta, targetMeta} {
 				path := ingest.SessionMetadataPath("/managed", string(meta.HostSlug), string(meta.SessionID), "")
-				if _, _, err := publisher.ReconcileStored(t.Context(), meta.SessionID, path, nil); err != nil {
-					t.Fatal(err)
-				}
+				storetest.MirrorRetainedPair(t, db, fs, "/managed", path, meta.SessionID)
 			}
 			legacyHarness := schema.HarnessClaudeCode
 			prepare, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, Force: true, Harness: &legacyHarness, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions))

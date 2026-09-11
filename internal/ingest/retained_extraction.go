@@ -22,17 +22,9 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 	if err := p.checkStoredRewriteVersion(ctx, session.SessionID, session.Harness); err != nil {
 		return fail(err)
 	}
-	publisher, err := p.artifactPublisher(nil)
-	if err != nil {
-		return fail(err)
-	}
 	// Native debug files are not metadata extraction inputs or replacement targets.
 	session.DebugPaths = nil
-	observation, err := publisher.Observe(ctx, session, metadataPath)
-	if err != nil {
-		return fail(err)
-	}
-	original, err := publisher.Capture(ctx, session.SessionID, metadataPath)
+	original, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, session.SessionID)
 	if err != nil {
 		return fail(err)
 	}
@@ -71,24 +63,33 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 	if err != nil {
 		return fail(err)
 	}
-	candidate, err := NewManagedArtifact(metadataJSON, original.Transcript)
+	candidate, err := newIngestArtifact(metadata, metadataJSON, original.Transcript)
 	if err != nil {
 		return fail(err)
 	}
-	// Extracting from retained bytes acquires no native cursor or origin evidence. Nil values preserve
-	// the previously acquired evidence when the committed pair is mirrored.
-	committed, err := publisher.Publish(ctx, ArtifactPublication{Artifact: candidate, Observation: observation})
-	if err != nil {
+	// Re-install the same transcript with the refreshed metadata by rename,
+	// metadata last. Extracting from retained bytes acquires no native cursor
+	// or origin evidence, so the mirror preserves the previously acquired
+	// evidence; the drain records the pair.
+	sessionDir := filepath.Dir(metadataPath)
+	metaFilename := string(session.SessionID) + defaults.MetadataSuffix
+	pair := installedPair{
+		transcriptName: string(session.SessionID) + "--transcript." + string(candidate.Metadata.Source.Format),
+		transcript:     candidate.Transcript,
+		metadataName:   metaFilename,
+		metadata:       candidate.MetadataJSON,
+	}
+	if err := p.installManagedPair(ctx, sessionDir, string(session.SessionID), pair, session); err != nil {
 		return fail(err)
 	}
-	result.OutputPath = filepath.Dir(metadataPath)
+	result.OutputPath = sessionDir
 	return workerResult{
-		result: result, meta: &committed.Metadata, artifact: committed,
-		transcriptData:       committed.Transcript,
-		outputTranscriptPath: filepath.Join(result.OutputPath, string(session.SessionID)+"--transcript."+string(committed.Metadata.Source.Format)),
+		result: result, meta: &candidate.Metadata, artifact: candidate,
+		transcriptData:       candidate.Transcript,
+		outputTranscriptPath: filepath.Join(result.OutputPath, string(session.SessionID)+"--transcript."+string(candidate.Metadata.Source.Format)),
 		originalRoot:         session.OriginalRoot, transcriptOrigin: session.TranscriptOrigin,
-		startMs:      committed.Metadata.Timestamp.Start,
-		metaFilename: string(session.SessionID) + defaults.MetadataSuffix, sessionDir: result.OutputPath,
+		startMs:      candidate.Metadata.Timestamp.Start,
+		metaFilename: metaFilename, sessionDir: result.OutputPath,
 	}
 }
 

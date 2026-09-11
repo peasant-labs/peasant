@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -192,13 +193,7 @@ func seedCompletionPeer(t *testing.T, filesystem *testutil.MemFS, database *stor
 	}
 	// Establish the real retained-artifact mirror before recording an immutable
 	// baseline. Its first reconciliation legitimately adds the DerivedAt cache.
-	publisher, err := ingest.NewArtifactPublisher(filesystem, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: database})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := publisher.ReconcileStored(t.Context(), sessionID, metadataPath, nil); err != nil {
-		t.Fatal(err)
-	}
+	storetest.MirrorRetainedPair(t, database, filesystem, testOutputDir, metadataPath, sessionID)
 	data, err := filesystem.ReadFile(metadataPath)
 	if err != nil {
 		t.Fatal(err)

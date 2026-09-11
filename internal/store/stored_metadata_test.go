@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -58,23 +57,14 @@ func TestStoredMetadataRecoveryPreservesSparseEvidence(t *testing.T) {
 		!reflect.DeepEqual(artifact.Metadata.Git.Commits, []ingest.CommitInfo{{Hash: fixture.OriginalCommit}}) {
 		t.Fatalf("recorded context changed during recovery: %+v", artifact.Metadata)
 	}
-	output := filepath.Join(t.TempDir(), "managed")
-	publisher, err := ingest.NewArtifactPublisher(&ingest.OSFileSystem{}, output, ingest.ArtifactPublisherOptions{Mirror: db})
-	if err != nil {
-		t.Fatal(err)
+	// Record the recovered artifact through the write path: the mirror is the
+	// database durability point and never rewrites the metadata file, so the
+	// recorded input is exactly the recovered bytes.
+	results := db.MirrorArtifacts(t.Context(), []ingest.ArtifactMirrorRequest{{Artifact: artifact}})
+	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+		t.Fatalf("mirror recovered artifact: %+v", results)
 	}
-	observation, err := publisher.Observe(t.Context(), entry.Session, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	committed, err := publisher.Publish(t.Context(), ingest.ArtifactPublication{Artifact: artifact, Observation: observation})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reconciled, err := publisher.Reconcile(t.Context(), committed)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reconciled := artifact
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(reconciled.MetadataJSON, &fields); err != nil {
 		t.Fatal(err)

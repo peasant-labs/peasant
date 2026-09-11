@@ -76,7 +76,21 @@ func (p *Pipeline) nativeSessionForTarget(target reindexTarget, metadata *Unifie
 
 // Saved discovery selection does not suppress maintenance of retained sessions.
 // Explicit harness/session/age filters still apply through adapterTargetMetadata.
+//
+// The inventory is database-driven: ListStaleAdapterSessions returns exactly
+// the sessions whose stored adapter revision is behind this build, or whose
+// stored schema this build re-extracts, reading no file. Each hit reconstructs
+// its session from its stored location and its own retained pair.
 func (p *Pipeline) appendStoredAdapterWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
+	lister, ok := p.metricsStore.(StaleAdapterSessionLister)
+	if !ok {
+		return entries
+	}
+	staleIDs, err := lister.ListStaleAdapterSessions(ctx, p.indexerTargets(), p.nativeRefreshSchemaVersions())
+	if err != nil {
+		p.reportMetadataRefusal("adapter refresh selection", err)
+		return entries
+	}
 	queued := make(map[SessionID]bool, len(entries))
 	for _, entry := range entries {
 		queued[entry.Session.SessionID] = true
@@ -85,15 +99,24 @@ func (p *Pipeline) appendStoredAdapterWork(ctx context.Context, entries []DiffEn
 	for _, session := range discovered {
 		native[session.SessionID] = session
 	}
-	for _, target := range p.scanPeasantSyncSessions(ctx) {
-		if queued[target.session.SessionID] {
+	for _, sid := range staleIDs {
+		if queued[sid] {
 			continue
 		}
+		reconstructed, startMs, transcriptPath, metadataErr := p.reconstructFromMetadata(ctx, sid)
+		if metadataErr != nil {
+			p.reportMetadataRefusal(string(sid), metadataErr)
+			continue
+		}
+		if reconstructed == nil {
+			continue
+		}
+		target := reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}
 		metadata := p.adapterTargetMetadata(ctx, target)
 		if !p.adapterNeedsRefresh(metadata) {
 			continue
 		}
-		session, found := native[target.session.SessionID]
+		session, found := native[sid]
 		if !found {
 			session = p.nativeSessionForTarget(target, metadata)
 		}
@@ -161,13 +184,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	})
 	result.result.Error = nil
 	result.result.Status = DiffUnchanged
-	publisher, err := p.artifactPublisher(nil)
+	retained, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, entry.Session.SessionID)
 	if err != nil {
-		return result
-	}
-	retained, err := publisher.Capture(ctx, entry.Session.SessionID, metadataPath)
-	if err != nil {
-		p.reportDiagnostic(artifactRecoveryDiagnostic(metadataPath, err))
+		p.reportMetadataRefusal(p.managedRelativePath(metadataPath), managedInputIOError(p.managedRelativePath(metadataPath), err))
 		return result
 	}
 	// No new file commit or DB success is claimed. The normal index capture
@@ -182,35 +201,43 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	return result
 }
 
+// hasUsableRetainedSession decides, only when native discovery FAILED, whether
+// the harvest can still maintain a session it saved earlier. It is the one
+// place the retained tree is read on the ordinary path, and only on a
+// discovery failure: it walks the saved sessions and returns true as soon as
+// one pair reads and validates. A missing or corrupt pair is skipped, and the
+// stored recovery candidates are then given their guarded read before native
+// discovery failure is declared fatal.
 func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
-	publisher, err := p.artifactPublisher(nil)
-	if err != nil {
-		return false
-	}
-	for _, target := range p.scanPeasantSyncSessions(ctx) {
-		if !p.includesManagedSession(target.session.SessionID, target.session.Harness) || p.config.Since != nil && time.UnixMilli(target.startMs).Before(*p.config.Since) {
-			continue
+	output := string(p.config.OutputDir)
+	usable := false
+	_ = walkManagedMetadata(ctx, p.fs, output, func(sid SessionID, path string) error {
+		if usable {
+			return nil
 		}
-		path := adapterTargetMetadataPath(target)
-		if _, err := publisher.Capture(ctx, target.session.SessionID, path); err == nil {
-			return true
+		// Harness and start are read from the pair, so scope is applied after
+		// the pair reads and an unreadable pair is simply skipped.
+		artifact, err := readArtifactPair(p.fs, output, path, sid)
+		if err != nil {
+			return nil
 		}
-		// Historic file-only artifacts may predate coordination files. Ordinary
-		// harvest can establish ownership; dry-run must report the prerequisite.
-		if !p.config.DryRun {
-			if _, err := publisher.Observe(ctx, target.session, path); err != nil {
-				continue
-			}
+		if !p.includesManagedSession(sid, artifact.Metadata.ModelHarness) {
+			return nil
 		}
-		if _, err := publisher.Capture(ctx, target.session.SessionID, path); err == nil {
-			return true
+		if p.config.Since != nil && time.UnixMilli(artifact.Metadata.Timestamp.Start).Before(*p.config.Since) {
+			return nil
 		}
+		usable = true
+		return nil
+	})
+	if usable {
+		return true
 	}
 	if p.config.DryRun || p.metricsStore == nil {
 		return false
 	}
 	// Missing/corrupt metadata is absent from the file inventory. Give the
-	// same stored candidates used by normal maintenance their guarded recovery
+	// same stored candidates used by normal maintenance their guarded read
 	// before declaring native discovery failure fatal.
 	staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 	if err != nil {
@@ -223,7 +250,7 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 			continue
 		}
 		path := adapterTargetMetadataPath(reindexTarget{session: *session, transcriptPath: transcriptPath})
-		if _, err := publisher.Capture(ctx, sid, path); err == nil {
+		if _, err := readArtifactPair(p.fs, output, path, sid); err == nil {
 			return true
 		}
 	}

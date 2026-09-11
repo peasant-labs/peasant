@@ -35,31 +35,26 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	publisher, err := pipeline.artifactPublisher(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	session := DiscoveredSession{SessionID: artifact.Metadata.SessionID, Harness: artifact.Metadata.ModelHarness, SourceFormat: artifact.Metadata.Source.Format}
-	observation, err := publisher.Observe(t.Context(), session, "")
-	if err != nil {
+	// Seed the saved pair by writing its files, the state a completed harvest
+	// leaves. The adapter refresh below reads it, extracts fresh metadata and
+	// re-installs the pair by rename.
+	sessionDir := SessionDir(output, string(artifact.Metadata.HostSlug), string(session.SessionID), "")
+	if err := filesystem.MkdirAll(sessionDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	seeded, err := publisher.Publish(t.Context(), ArtifactPublication{Artifact: artifact, Observation: observation})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := publisher.Reconcile(t.Context(), seeded); err != nil {
+	if err := filesystem.WriteFile(filepath.Join(sessionDir, string(session.SessionID)+"--transcript."+string(artifact.Metadata.Source.Format)), artifact.Transcript, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	path := SessionMetadataPath(output, string(artifact.Metadata.HostSlug), string(session.SessionID), "")
+	if err := filesystem.WriteFile(path, artifact.MetadataJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	result := pipeline.processRetainedSession(t.Context(), session, path)
 	if result.result.Error != nil {
 		t.Fatal(result.result.Error)
 	}
-	if _, err := publisher.Reconcile(t.Context(), result.artifact); err != nil {
-		t.Fatal(err)
-	}
-	current, err := publisher.Capture(t.Context(), session.SessionID, path)
+	current, err := readArtifactPair(filesystem, output, path, session.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}

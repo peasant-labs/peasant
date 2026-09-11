@@ -152,16 +152,6 @@ func captureSyntheticIndexInput(t *testing.T, ctx context.Context, pipeline *Pip
 	if err := os.WriteFile(transcriptPath, transcript, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A published artifact has its coordination lock beside it; a read-only
-	// capture takes that lock and never creates one. This arrangement stands in
-	// for a completed publish, so it creates the same file the publish would.
-	lockPath := filepath.Join(output, artifactLockPath(artifactKey(sessionID)))
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	artifact, err := NewManagedArtifact(metaJSON, transcript)
 	if err != nil {
 		t.Fatalf("publish a synthetic managed artifact: %v", err)
@@ -391,13 +381,6 @@ func publishSyntheticArtifact(t *testing.T, output string, index int) (indexedMe
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(transcriptPath, transcript, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	lockPath := filepath.Join(output, artifactLockPath(artifactKey(sessionID)))
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := NewManagedArtifact(metaJSON, transcript)

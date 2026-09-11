@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -228,13 +229,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			}
 			// These cases test index output, not first-time file reconciliation.
 			// Establish the actual mirror before asserting immutable input bytes.
-			publisher, err := ingest.NewArtifactPublisher(fs, testOutputDir, ingest.ArtifactPublisherOptions{Mirror: db})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := publisher.ReconcileStored(ctx, sid, metadataPath, nil); err != nil {
-				t.Fatal(err)
-			}
+			storetest.MirrorRetainedPair(t, db, fs, testOutputDir, metadataPath, sid)
 			beforeMetadata, err := fs.ReadFile(metadataPath)
 			if err != nil {
 				t.Fatal(err)

@@ -321,10 +321,11 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 		// successfully parse identical output without replacing entry rows.
 		storetest.SeedManagedInput(t, db, &ingest.OSFileSystem{}, output, meta, []byte(fixture.Transcript))
 		for _, path := range []string{metaPath, transcriptPath} {
-			files[path], err = os.ReadFile(path)
+			data, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
+			files[path] = data
 		}
 		return
 	}
@@ -349,15 +350,10 @@ func seedHarvestIndexSession(t *testing.T, db *store.Store, output string, fixtu
 
 func reconcileHarvestIndexMetadata(t *testing.T, db *store.Store, output string, sid ingest.SessionID, path string, files map[string][]byte) {
 	t.Helper()
-	publisher, err := ingest.NewArtifactPublisher(&ingest.OSFileSystem{}, output, ingest.ArtifactPublisherOptions{Mirror: db})
+	storetest.MirrorRetainedPair(t, db, &ingest.OSFileSystem{}, output, path, sid)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := publisher.ReconcileStored(t.Context(), sid, path, nil); err != nil {
-		t.Fatal(err)
-	}
-	files[path], err = os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	files[path] = data
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
@@ -278,9 +279,6 @@ type Pipeline struct {
 	// when no time column moved, closing the in-place-rewrite blind spot. Nil when
 	// the store does not record the cursor, which keeps the clock-only behaviour.
 	seqCursorCache map[SessionID]int64
-	// Retained artifacts reconciled during this invocation are candidates for
-	// input-based work selection, not unconditional requests to run an indexer.
-	reconciledArtifacts []SessionID
 
 	// discoveryDiagnostics accumulates per-location discovery failures reported
 	// by adapters during discover(), copied into every PipelineResult so a
@@ -493,7 +491,6 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.resetDiagnostics()
 	p.locationCache = nil
 	p.seqCursorCache = nil
-	p.reconciledArtifacts = nil
 	defer func() {
 		if result != nil {
 			result.Diagnostics = p.snapshotDiagnostics()
@@ -505,11 +502,6 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	start := time.Now()
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("pipeline start: %w", err)
-	}
-	if !p.config.DryRun {
-		p.reconcileManagedArtifacts(ctx)
-	} else {
-		p.inspectDryRunArtifacts(ctx)
 	}
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
@@ -1042,8 +1034,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				queued[result.SessionID] = true
 			}
 		}
-		candidates := append([]SessionID(nil), p.reconciledArtifacts...)
-		candidates = append(candidates, staleIDs...)
+		// The ordinary index inventory is database-driven only: stale producer
+		// revisions, plus the sessions a crash between the two write commits can
+		// leave (the repair predicate). Neither reads the tree; each hit reads
+		// only its own pair when it is indexed.
+		candidates := append([]SessionID(nil), staleIDs...)
+		candidates = append(candidates, p.repairSessions(ctx)...)
 		// A recovered session is content-repaired, not complete: it still gets
 		// the same adapter/indexer evaluation as every other eligible target. An
 		// already-current session sees an equal input hash and writes nothing.
@@ -1071,18 +1067,6 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			queued[sid] = true
 			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
-			}
-		}
-		// An earlier invocation may have mirrored files but failed indexing at
-		// the same producer revision. Inspect retained inputs, not artifact/index
-		// hash domains against one another or only this run's changed-file list.
-		for _, target := range p.scanPeasantSyncSessions(ctx) {
-			if queued[target.session.SessionID] {
-				continue
-			}
-			queued[target.session.SessionID] = true
-			if p.indexTargetNeedsWork(ctx, target) {
-				indexSessions = append(indexSessions, indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath})
 			}
 		}
 	}
@@ -1184,37 +1168,10 @@ func (p *Pipeline) drainLoop(
 		if len(batch.Results) > 0 {
 			var batchMetas []indexedMeta
 			var committedIDs []SessionID
+			mirrorFailed := p.mirrorDrainedBatch(ctx, batch.Results, writeLane, errCh)
 			for index := range batch.Results {
 				wr := &batch.Results[index]
-				indexReady := wr.result.Error == nil
-				if wr.result.Error == nil && wr.artifact != nil {
-					publisher, err := p.artifactPublisher(writeLane)
-					if err == nil {
-						var reconciled *ManagedArtifact
-						reconciled, err = publisher.Reconcile(ctx, wr.artifact)
-						if err == nil && reconciled == nil {
-							err = fmt.Errorf("artifact reconciliation for %s restored prior files instead of this worker's candidate", wr.result.SessionID)
-						}
-						if err == nil {
-							wr.artifact = reconciled
-							wr.meta = &reconciled.Metadata
-						}
-					}
-					if err != nil {
-						indexReady = false
-						wr.result.mirrorPending = true
-						failure := fmt.Errorf("reconcile committed session %s: %w; recovery state was retained for a later harvest", wr.result.SessionID, err)
-						p.reportDiagnostic(artifactRecoveryDiagnostic(string(wr.result.SessionID), failure))
-						var mirrorFailure *artifactMirrorError
-						if errors.As(err, &mirrorFailure) {
-							// Complete file publication still succeeded. Preserve its
-							// counts, but do not authorize indexing on a failed mirror.
-							errCh <- failure
-						} else {
-							wr.result.Error = failure
-						}
-					}
-				}
+				indexReady := wr.result.Error == nil && !mirrorFailed[wr.result.SessionID]
 				if indexReady && wr.result.OutputPath != "" && wr.meta != nil {
 					batchMetas = append(batchMetas, indexedMeta{
 						session:              sessionFromWorkerResult(*wr),
@@ -2689,17 +2646,22 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		result.Status = DiffUnchanged
 		return workerResult{result: result}
 	}
-	publisher, publishErr := p.artifactPublisher(nil)
-	if publishErr != nil {
-		return fail(publishErr)
-	}
+	// Refuse to overwrite a pair a newer adapter than this build produced,
+	// before the capture spends any work: the check reads the header of the
+	// existing metadata only. installManagedPair checks it again against the
+	// final destination.
 	metadataPath, pathErr := p.findMetadataPath(ctx, session)
 	if pathErr != nil {
 		return fail(pathErr)
 	}
-	observation, observeErr := publisher.Observe(ctx, session, metadataPath)
-	if observeErr != nil {
-		return fail(observeErr)
+	if metadataPath != "" {
+		if existing, err := p.fs.ReadFile(metadataPath); err == nil {
+			if headerErr := checkReplacementHeader(existing, session, p.versionTargets()); headerErr != nil {
+				return fail(headerErr)
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fail(managedInputIOError(metadataPath, err))
+		}
 	}
 
 	captured, err := p.captureSession(ctx, session)
@@ -2962,51 +2924,48 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		meta.Redaction = RedactionInfo{Applied: false}
 	}
 
-	// Compute MetadataHash after all content-bearing fields are set.
-	// DerivedAt stays absent when the complete file pair commits. The drain loop
-	// adds it only after a successful transactional mirror of this same artifact.
+	// DerivedAt is absent on the saved pair: the database is the source of
+	// truth for it, and the file is retained input the parsers read. Compute
+	// MetadataHash after every content-bearing field is set.
+	meta.DerivedAt = nil
 	meta.MetadataHash = schema.ComputeMetadataHash(meta)
 
 	metaJSON, marshalErr := json.Marshal(meta)
 	if marshalErr != nil {
 		return fail(errors.Join(marshalErr, p.fs.RemoveAll(tmpDir)))
 	}
-	artifact, captureErr := NewManagedArtifact(metaJSON, writeData)
+	// The worker already hashed the transcript into meta.ContentHash and
+	// encoded meta as metaJSON; the artifact reuses both without a second hash
+	// or a copy. The transcript slice is the one just written and then handed
+	// to the index arena.
+	artifact, captureErr := newIngestArtifact(meta, metaJSON, writeData)
 	if captureErr != nil {
 		return fail(errors.Join(captureErr, p.fs.RemoveAll(tmpDir)))
 	}
-	debugFiles := make(map[string][]byte)
-	debugDir := filepath.Join(tmpDir, defaults.DirDebug.String())
-	debugEntries, debugErr := p.fs.ReadDir(debugDir)
-	if debugErr != nil && !errors.Is(debugErr, fs.ErrNotExist) {
-		return fail(errors.Join(debugErr, p.fs.RemoveAll(tmpDir)))
-	}
-	for _, entry := range debugEntries {
-		if entry.IsDir() {
-			return fail(errors.Join(fmt.Errorf("prepare debug publication for session %s: unexpected nested directory", session.SessionID), p.fs.RemoveAll(tmpDir)))
+	// The file-only source-capture marker is written beside the metadata in a
+	// database-free harvest, so a later file-only run can tell the source was
+	// already read. With a store the database holds the fingerprint and no
+	// marker is written; the install prunes any stale one.
+	if len(captureEvidence) > 0 {
+		digest := sha256.Sum256(metaJSON)
+		marker := append(append([]byte(nil), captureEvidence...), digest[:]...)
+		if err := p.fs.WriteFile(filepath.Join(tmpDir, fileCaptureEvidenceName(session.SessionID)), marker, defaults.PrivateFilePerm); err != nil {
+			return fail(errors.Join(fmt.Errorf("write source-capture marker for %s: %w", session.SessionID, err), p.fs.RemoveAll(tmpDir)))
 		}
-		data, readErr := p.fs.ReadFile(filepath.Join(debugDir, entry.Name()))
-		if readErr != nil {
-			return fail(errors.Join(readErr, p.fs.RemoveAll(tmpDir)))
-		}
-		debugFiles[entry.Name()] = data
 	}
-	publication := ArtifactPublication{Artifact: artifact, Observation: observation, DebugFiles: debugFiles, EventSeq: acquiredEventSeq, CWDProvenance: publicationCWDProvenance(meta, session), SourceFingerprint: sourceFingerprint, CommitCaptureComplete: commitCaptureComplete, SourceEvidence: captureEvidence}
-	if session.Origin != "" {
-		origin := session.Origin
-		publication.Origin = &origin
+	// Write metadata into the temporary directory so it installs LAST, then
+	// install the pair by rename with no sync and no lock: the database
+	// transaction the drain runs is the durability point, and a torn or mixed
+	// pair is refused on the next read by its hash.
+	if err := p.fs.WriteFile(filepath.Join(tmpDir, metaFilename), metaJSON, defaults.PrivateFilePerm); err != nil {
+		return fail(errors.Join(fmt.Errorf("write metadata for %s: %w", session.SessionID, err), p.fs.RemoveAll(tmpDir)))
 	}
-	// Event cursor evidence is supplied only by a materialization path that
-	// proves acquisition; discovery's optional clock hint is not a success stamp.
-	committed, commitErr := publisher.Publish(ctx, publication)
-	cleanupErr := p.fs.RemoveAll(tmpDir)
-	if commitErr != nil {
-		return fail(errors.Join(commitErr, cleanupErr))
+	if err := p.replaceSessionDir(tmpDir, sessionDir, string(session.SessionID), metaFilename); err != nil {
+		return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
 	}
-	if cleanupErr != nil {
-		p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_cleanup", Location: tmpDir, Message: cleanupErr.Error(), Remediation: "Inspect the retained temporary extraction directory; the complete committed artifact was preserved."})
+	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
+		p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_cleanup", Location: tmpDir, Message: cleanupErr.Error(), Remediation: "Inspect the retained temporary extraction directory; the saved session was installed."})
 	}
-	meta = &committed.Metadata
 
 	result.OutputPath = sessionDir
 
@@ -3020,6 +2979,13 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		// Only OpenCode's directory indexer needs the detached extraction tree.
 		capturedSource = nil
 	}
+	// Event cursor evidence is supplied only by a materialization path that
+	// proves acquisition; discovery's optional clock hint is not a success stamp.
+	var origin *sessionorigin.Origin
+	if session.Origin != "" {
+		value := session.Origin
+		origin = &value
+	}
 
 	return workerResult{
 		commitCaptureComplete: commitCaptureComplete,
@@ -3027,12 +2993,14 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		capturedSource:        capturedSource,
 		cwdProvenance:         publicationCWDProvenance(meta, session),
 		eventSeq:              session.EventSeq,
+		acquiredEventSeq:      acquiredEventSeq,
+		origin:                origin,
 		meta:                  meta,
 		sourceFingerprint:     sourceFingerprint,
 		fileCaptureEvidence:   captureEvidence,
 		transcriptData:        transcriptData,
 		outputTranscriptPath:  outputTranscriptPath,
-		artifact:              committed,
+		artifact:              artifact,
 		// Carried from the DISCOVERED session, which is the only place it exists.
 		// The index step's session is rebuilt from this result and its source path
 		// is replaced with the written copy's, so a directory-based harness has no
@@ -3043,77 +3011,6 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		metaFilename:     metaFilename,
 		sessionDir:       sessionDir,
 	}
-}
-
-// replaceSessionDir replaces parent-owned output while preserving the child-owned
-// subagents subtree. Files are installed with same-filesystem atomic Rename, not
-// a copy/delete move. There is intentionally no directory swap or rollback: an
-// interruption can leave a mixture of complete old/new parent files for normal
-// ingest to refresh, but never displaces children into disposable staging. The
-// caller may always discard src. Root-owns-subtree scheduling excludes writers.
-func (p *Pipeline) replaceSessionDir(src, dst, sessionID string) error {
-	wanted := make(map[string]bool)
-	err := p.fs.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == defaults.DirSubagents.String() {
-			return fmt.Errorf("staged parent output unexpectedly contains child directory %s", path)
-		}
-		wanted[rel] = true
-		target := filepath.Join(dst, rel)
-		if entry.IsDir() {
-			return p.fs.MkdirAll(target, defaults.PrivateDirPerm)
-		}
-		return p.fs.Rename(path, target)
-	})
-	if err != nil {
-		return fmt.Errorf("install parent files at %s: %w; existing child output remains in place; fix filesystem access or free disk space and rerun ingest", dst, err)
-	}
-
-	// Only prune obsolete parent-owned files after every new file is installed.
-	// Skip the entire child-owned tree, including children excluded by FILTER.
-	var stale []string
-	err = p.fs.WalkDir(dst, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(dst, path)
-		if err != nil {
-			return err
-		}
-		if rel == defaults.DirSubagents.String() {
-			return fs.SkipDir
-		}
-		if rel != "." && !strings.HasPrefix(rel, sessionID+"--") && rel != defaults.DirDebug.String() && !strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !wanted[rel] {
-			stale = append(stale, path)
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-		}
-		return nil
-	})
-	if err == nil {
-		for _, path := range stale {
-			if err = p.fs.RemoveAll(path); err != nil {
-				break
-			}
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("prune obsolete parent files at %s: %w; installed files and child output remain in place; fix filesystem access and rerun ingest", dst, err)
-	}
-	return p.fs.RemoveAll(src)
 }
 
 // indexTargetSession is the session handed to an indexer at the INDEX stage.
@@ -4212,19 +4109,11 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 		Harness:          provider,
 		TranscriptOrigin: transcriptOrigin,
 	}
-	if sourceFormat == SourceFormatJSONL || transcriptOrigin == TranscriptOriginOpenCodeLegacySQLite || transcriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
-		artifact, err := p.recoverRetainedMetadata(ctx, *session, outputTranscriptPath)
-		if err != nil {
-			p.reportMetadataRefusal(string(sid), err)
-			slog.Warn("reconstructFromSourceInfo: retained metadata recovery refused", "session_id", sid, "error", err)
-			return nil, 0, ""
-		}
-		if artifact == nil {
-			return nil, 0, ""
-		}
-		session.ParentUUID = artifact.Metadata.ParentUUID
-		return session, artifact.Metadata.Timestamp.Start, outputTranscriptPath
-	}
+	// A session whose metadata file is present is reconstructed by
+	// reconstructFromMetadata; this fallback runs only for a session with no
+	// metadata file. The database-to-file metadata rebuild is dropped: a lost
+	// metadata beside an intact transcript is reported by `harvest index`, not
+	// silently rebuilt here, so the pair is left for that command to name.
 	return session, 0, outputTranscriptPath
 }
 

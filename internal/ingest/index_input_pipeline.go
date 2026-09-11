@@ -1,13 +1,13 @@
 package ingest
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/schema"
 )
 
 // CapturedIndexInput owns the exact bytes and consumed context for one parse.
@@ -40,44 +40,55 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	if !ok {
 		return nil, fmt.Errorf("capture index input for session %s: configured index writer cannot read its complete SQL state; indexing was refused without replacing entries; use a store with SessionIndexStateReader and atomic entry writes", im.session.SessionID)
 	}
-	publisher, err := p.artifactPublisher(nil)
-	if err != nil {
-		return nil, err
-	}
 	metadataPath := filepath.Join(filepath.Dir(im.outputTranscriptPath), string(im.session.SessionID)+defaults.MetadataSuffix)
-	var input *CapturedIndexInput
-	// Bytes the caller already read are the bytes it verified; the committed
-	// transcript is not read again behind them. A retained fallback that
-	// verified its input against the publication snapshot parses exactly that
-	// input, and an artifact this run wrote parses the bytes it wrote.
-	var verified []byte
-	if len(im.transcriptData) > 0 {
-		verified = im.transcriptData
-	}
-	err = publisher.WithVerifiedCapture(ctx, im.session.SessionID, metadataPath, verified, func(artifact *ManagedArtifact) error {
-		state, err := reader.ReadIndexState(ctx, im.session.SessionID)
-		if err != nil {
-			return err
-		}
-		if state == nil || state.SessionID != artifact.Metadata.SessionID || state.ArtifactHash == nil || *state.ArtifactHash != artifact.ArtifactHash || state.Harness != artifact.Metadata.ModelHarness || artifact.Metadata.ModelHarness != im.session.Harness {
-			return fmt.Errorf("capture index input for session %s: committed files and stored metadata do not identify the same artifact; no parser ran or entries changed; run harvest to reconcile the committed files before retrying indexing", im.session.SessionID)
-		}
-		if err := p.checkIndexProducer(state); err != nil {
-			return err
-		}
-		session := im.session
-		session.SourcePath = ResolvedPath(im.outputTranscriptPath)
-		input, err = CaptureIndexInput(ctx, indexer, session, artifact)
-		if err != nil {
-			return err
-		}
-		input.expected, input.metadataPath, input.published = state, metadataPath, im.published
-		return nil
-	})
+	// Bytes the caller already read are the bytes it verified; the transcript
+	// file is not read again behind them. A retained target reads its pair
+	// from disk, validated by the hash the metadata carries, so a torn or
+	// stale pair is refused here.
+	artifact, err := p.captureArtifactForIndex(metadataPath, im)
 	if err != nil {
 		return nil, err
 	}
+	state, err := reader.ReadIndexState(ctx, im.session.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil || state.SessionID != artifact.Metadata.SessionID || state.ArtifactHash == nil || *state.ArtifactHash != artifact.ArtifactHash || state.Harness != artifact.Metadata.ModelHarness || artifact.Metadata.ModelHarness != im.session.Harness {
+		return nil, fmt.Errorf("capture index input for session %s: saved files and stored metadata do not identify the same artifact; no parser ran or entries changed; run harvest to save the session again before retrying indexing", im.session.SessionID)
+	}
+	if err := p.checkIndexProducer(state); err != nil {
+		return nil, err
+	}
+	session := im.session
+	session.SourcePath = ResolvedPath(im.outputTranscriptPath)
+	input, err := CaptureIndexInput(ctx, indexer, session, artifact)
+	if err != nil {
+		return nil, err
+	}
+	input.expected, input.metadataPath, input.published = state, metadataPath, im.published
 	return input, nil
+}
+
+// captureArtifactForIndex pairs the session's committed metadata with the
+// bytes the index step will parse. When the worker handed over the transcript
+// bytes it just wrote, those are used directly; otherwise the pair is read
+// from disk and validated by the metadata's own content hash.
+func (p *Pipeline) captureArtifactForIndex(metadataPath string, im indexedMeta) (*ManagedArtifact, error) {
+	if len(im.transcriptData) == 0 {
+		return readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, im.session.SessionID)
+	}
+	data, err := p.fs.ReadFile(metadataPath)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := decodeManagedMetadata(data, metadataPath)
+	if err != nil {
+		return nil, err
+	}
+	if meta.SessionID != im.session.SessionID {
+		return nil, fmt.Errorf("capture index input for session %s: metadata names different session %s; no parser ran; run harvest to save the session again", im.session.SessionID, meta.SessionID)
+	}
+	return NewManagedArtifact(data, im.transcriptData)
 }
 
 func (p *Pipeline) checkIndexProducer(state *SessionIndexState) error {
@@ -105,7 +116,7 @@ func CaptureIndexInput(ctx context.Context, indexer TranscriptIndexer, session D
 	if indexer == nil || session.SessionID != artifact.Metadata.SessionID || session.Harness != artifact.Metadata.ModelHarness {
 		return nil, fmt.Errorf("capture index input: parser/session does not match the managed artifact; retain stored previews and reconcile before retrying")
 	}
-	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: bytes.Clone(artifact.Transcript)}
+	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: artifact.Transcript}
 	input.session.SourceFormat = artifact.Metadata.Source.Format
 	input.session.ParentUUID = artifact.Metadata.ParentUUID
 	if session.Harness == HarnessOpenCode {
@@ -232,32 +243,62 @@ func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, inp
 }
 
 func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *CapturedIndexInput, use func() error) error {
-	publisher, err := p.artifactPublisher(nil)
-	if err != nil {
-		return err
-	}
-	// The committed identity is what the write must still describe. It is read
-	// from the committed metadata, not by hashing the transcript file again: a
+	// The saved identity is what the write must still describe. It is read from
+	// the committed metadata, not by hashing the transcript file again: a
 	// replaced pair rewrites its metadata and is caught; a transcript that
 	// moved on disk after the input was verified does not invalidate the
 	// verified parse.
-	return publisher.WithCommittedIdentity(ctx, input.session.SessionID, input.metadataPath, func(current string) error {
-		if current != input.artifactHash {
+	current, err := p.committedArtifactIdentity(input.metadataPath, input.session.SessionID)
+	if err != nil {
+		return err
+	}
+	if current != input.artifactHash {
+		return &StaleIndexWorkError{SessionID: input.session.SessionID}
+	}
+	if input.kind == TranscriptSourceDirectory {
+		native, ok := p.indexers[input.session.Harness].(openCodeInputIndexer)
+		if !ok {
+			return fmt.Errorf("revalidate native index input for %s: captured-tree indexer is unavailable; entries were preserved; restore the registered indexer and retry", input.session.SessionID)
+		}
+		tree, err := native.captureJSONInput(ctx, input.session)
+		if err != nil {
+			return err
+		}
+		if indexInputDigest(input.session, nil, tree) != input.inputHash {
 			return &StaleIndexWorkError{SessionID: input.session.SessionID}
 		}
-		if input.kind == TranscriptSourceDirectory {
-			native, ok := p.indexers[input.session.Harness].(openCodeInputIndexer)
-			if !ok {
-				return fmt.Errorf("revalidate native index input for %s: captured-tree indexer is unavailable; entries were preserved; restore the registered indexer and retry", input.session.SessionID)
-			}
-			tree, err := native.captureJSONInput(ctx, input.session)
-			if err != nil {
-				return err
-			}
-			if indexInputDigest(input.session, nil, tree) != input.inputHash {
-				return &StaleIndexWorkError{SessionID: input.session.SessionID}
-			}
+	}
+	return use()
+}
+
+// committedArtifactIdentity is the artifact hash the metadata at metadataPath
+// declares. The metadata's own content checksum stands in for hashing the
+// transcript file, so a transcript that moved on disk after a verified read
+// leaves the identity as it was, while a replaced pair, whose metadata is
+// rewritten, changes it. Metadata that carries no content checksum is
+// identified by reading the pair.
+func (p *Pipeline) committedArtifactIdentity(metadataPath string, sid SessionID) (string, error) {
+	data, err := p.fs.ReadFile(metadataPath)
+	if err != nil {
+		return "", err
+	}
+	meta, err := decodeManagedMetadata(data, metadataPath)
+	if err != nil {
+		return "", err
+	}
+	if meta.SessionID != sid {
+		return "", fmt.Errorf("identify session %s: metadata names different session %s; preserve the files and restore the correct locator", sid, meta.SessionID)
+	}
+	if meta.ContentHash == "" {
+		artifact, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, sid)
+		if err != nil {
+			return "", err
 		}
-		return use()
-	})
+		return artifact.ArtifactHash, nil
+	}
+	semantic, err := artifactSemanticJSON(data, meta.ContentHash)
+	if err != nil {
+		return "", err
+	}
+	return schema.ComputeTranscriptHash(semantic), nil
 }

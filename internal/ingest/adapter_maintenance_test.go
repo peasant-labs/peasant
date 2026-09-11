@@ -137,22 +137,20 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 			}
 			sid := metadata.SessionID
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: metadata.ModelHarness, SourcePath: ingest.ResolvedPath(native), SourceFormat: ingest.SourceFormatJSONL}
-			publisher, err := ingest.NewArtifactPublisher(filesystem, output, ingest.ArtifactPublisherOptions{Mirror: database})
-			if err != nil {
-				t.Fatal(err)
-			}
 			path := ingest.SessionMetadataPath(output, string(metadata.HostSlug), string(sid), "")
 			if !row.NoSeed {
-				observation, err := publisher.Observe(t.Context(), session, "")
-				if err != nil {
+				sessionDir := ingest.SessionDir(output, string(metadata.HostSlug), string(sid), "")
+				if err := filesystem.MkdirAll(sessionDir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				committed, err := publisher.Publish(t.Context(), ingest.ArtifactPublication{Artifact: artifact, Observation: observation})
-				if err != nil {
+				if err := filesystem.WriteFile(filepath.Join(sessionDir, string(sid)+"--transcript.jsonl"), artifact.Transcript, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := publisher.Reconcile(t.Context(), committed); err != nil {
+				if err := filesystem.WriteFile(path, artifact.MetadataJSON, 0o600); err != nil {
 					t.Fatal(err)
+				}
+				if results := database.MirrorArtifacts(t.Context(), []ingest.ArtifactMirrorRequest{{Artifact: artifact}}); len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+					t.Fatalf("seed mirror: %+v", results)
 				}
 				// A real initial index makes adapter-only maintenance observable.
 				baselineConfig := makePipelineConfig(output)
@@ -244,7 +242,7 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 			}
 			location := locations[sid]
 			path = ingest.SessionMetadataPath(output, string(location.HostSlug), string(sid), "")
-			current, err := publisher.Capture(t.Context(), sid, path)
+			current, err := ingest.ReadManagedPair(filesystem, output, path, sid)
 			if err != nil {
 				t.Fatal(err)
 			}
