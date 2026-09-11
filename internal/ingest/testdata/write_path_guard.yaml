@@ -1,0 +1,46 @@
+# Source guards over the non-test Go files of this package.
+#
+# forbidden: byte patterns no production file of the package may contain. The
+# session write path has no file sync and no file lock by construction; these
+# names are how a sync or a lock would have to be spelled to come back.
+#
+# callSites: every call of a listed symbol must be one of the allowed sites,
+# named by file and enclosing function, and every allowed site must still
+# exist. A transcript is hashed at exactly one place on the ingest path and
+# cloned nowhere on the index path, so a new call is a review finding and a
+# vanished one is a deleted-protection failure, not a silent pass.
+forbidden:
+  - {name: file-sync, pattern: ".Sync("}
+  - {name: fsync, pattern: "Fsync"}
+  - {name: fdatasync, pattern: "Fdatasync"}
+  - {name: flock, pattern: "Flock"}
+requiredForbiddenNames: [file-sync, fsync, fdatasync, flock]
+callSites:
+  symbols: ["schema.ComputeTranscriptHash", "bytes.Clone"]
+  allowed:
+    # The one hash of the transcript bytes on the ingest path.
+    - {name: worker-content-hash, file: pipeline.go, function: Pipeline.processNativeSession, symbol: schema.ComputeTranscriptHash}
+    # Store-free harvest compares the retained file with its metadata.
+    - {name: store-free-diff-content-hash, file: pipeline.go, function: Pipeline.classifyCapturedSession, symbol: schema.ComputeTranscriptHash}
+    # A pair read back from disk is validated by hashing it once.
+    - {name: pair-read-from-disk-hash, file: artifact.go, function: NewManagedArtifact, symbol: schema.ComputeTranscriptHash}
+    - {name: pair-read-from-disk-clone, file: artifact.go, function: NewManagedArtifact, symbol: bytes.Clone}
+    # An adapter refresh from the retained pair stamps its content hash.
+    - {name: retained-extraction-content-hash, file: retained_extraction.go, function: Pipeline.processRetainedSession, symbol: schema.ComputeTranscriptHash}
+    # The explicit rebuild proves a retained transcript against its snapshot.
+    - {name: reindex-fallback-proof-hash, file: publication_capture.go, function: Pipeline.prepareReindexFallback, symbol: schema.ComputeTranscriptHash}
+    # Metric identities hash small JSON documents, never a transcript.
+    - {name: metric-input-hash, file: metric_input.go, function: MetricInput.Hash, symbol: schema.ComputeTranscriptHash}
+    - {name: metric-output-hash, file: metric_input.go, function: MetricOutputHash, symbol: schema.ComputeTranscriptHash}
+    # The OpenCode directory capture detaches its message and part files.
+    - {name: opencode-tree-capture-clone, file: opencode_index_input.go, function: OpenCodeIndexer.captureJSONInput, symbol: bytes.Clone}
+  requiredNames:
+    - worker-content-hash
+    - store-free-diff-content-hash
+    - pair-read-from-disk-hash
+    - pair-read-from-disk-clone
+    - retained-extraction-content-hash
+    - reindex-fallback-proof-hash
+    - metric-input-hash
+    - metric-output-hash
+    - opencode-tree-capture-clone
