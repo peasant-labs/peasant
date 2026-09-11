@@ -152,9 +152,18 @@ const OpenCodePreviewSliceMaxBytes = 8 << 20 // 8 MiB
 // ScannerInitBuf is the starting read buffer. Readers grow from it on demand
 // up to MaxJSONLRecordBytes, so an ordinary transcript never allocates the
 // maximum.
+//
+// RedactScannerMaxLineBytes is the line limit the redact stage runs with. The
+// redaction engine reads a record as a LINE, through a bufio.Scanner, and a
+// Scanner refuses a line it cannot hold WITH its newline terminator. The
+// largest record Peasant keeps is exactly MaxJSONLRecordBytes long, so its line
+// is one byte longer, and a scanner limit equal to the record limit would
+// refuse the very record the filter kept and fail the whole session. It is
+// derived here, once, so the two limits cannot drift apart.
 const (
-	MaxJSONLRecordBytes = 256 << 20 // 256 MiB
-	ScannerInitBuf      = 64 << 10  // 64 KiB
+	MaxJSONLRecordBytes       = 256 << 20 // 256 MiB
+	ScannerInitBuf            = 64 << 10  // 64 KiB
+	RedactScannerMaxLineBytes = MaxJSONLRecordBytes + 1
 )
 
 // WebAssetsSubdir is the embedded filesystem subdirectory for web assets.

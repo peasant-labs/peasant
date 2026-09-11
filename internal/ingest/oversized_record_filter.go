@@ -203,7 +203,11 @@ func productionJSONLRecordLimit(injected int) int {
 // jsonlRecordTooLarge reports whether a record is over the per-record limit
 // this build reads whole. A record exactly at the limit is within it: the
 // shared record reader needs no headroom beyond the record itself, unlike the
-// bufio.Scanner this replaced.
+// bufio.Scanner this replaced. The redact stage behind the filter still reads a
+// LINE through a scanner, so it is given the record limit plus the newline byte
+// through defaults.RedactScannerMaxLineBytes; keeping a record here that the
+// redact stage then refused would fail the session at the one size this filter
+// promises to keep.
 func jsonlRecordTooLarge(record []byte, maxRecordBytes int) bool {
 	return len(record) > productionJSONLRecordLimit(maxRecordBytes)
 }

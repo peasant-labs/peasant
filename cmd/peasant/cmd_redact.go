@@ -369,7 +369,7 @@ func findTranscriptFile(sessionDir, sessionID string) (string, schema.SourceForm
 
 // redactJSONLBytes delegates to redact.RedactJSONLBytes (shared utility).
 func redactJSONLBytes(r redact.Redactor, data []byte) ([]byte, error) {
-	return redact.RedactJSONLBytes(r, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
+	return redact.RedactJSONLBytes(r, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.RedactScannerMaxLineBytes))
 }
 
 // redactJSONDocBytes delegates to redact.RedactJSONDocBytes (shared utility).

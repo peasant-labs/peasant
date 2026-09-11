@@ -10,6 +10,13 @@
 # token. The shared record reader needs no headroom, and the user requirement of
 # 2026-09-10 is that "a JSONL record up to 256 MiB is read, redacted and indexed
 # in full on every harness", so a record exactly at the limit is within it.
+#
+# The redact stage behind this filter does still read a LINE through a scanner,
+# so it runs with the record limit plus the newline byte
+# (defaults.RedactScannerMaxLineBytes). Without that byte the record this case
+# keeps would be refused there and the whole session would fail to store; the
+# pairing is pinned by
+# TestKeptRecordLimitLeavesTheRedactStageRoomForItsNewline.
 requiredNames: [below-limit, at-limit, above-limit, far-above-limit]
 cases:
   - name: below-limit

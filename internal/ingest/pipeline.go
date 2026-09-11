@@ -2823,7 +2823,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if p.redactor != nil {
 		switch session.SourceFormat {
 		case SourceFormatJSONL:
-			redacted, redactErr := redact.RedactJSONLBytes(p.redactor, rawData, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
+			redacted, redactErr := redact.RedactJSONLBytes(p.redactor, rawData, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.RedactScannerMaxLineBytes))
 			if redactErr != nil {
 				result.Error = errors.Join(
 					fmt.Errorf("redact transcript for %s: %w", session.SessionID, redactErr),
@@ -4710,7 +4710,7 @@ func (p *Pipeline) redactTranscript(path string, format SourceFormat) error {
 	switch format {
 	case SourceFormatJSONL:
 		var redactErr error
-		out, redactErr = redact.RedactJSONLBytes(p.redactor, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
+		out, redactErr = redact.RedactJSONLBytes(p.redactor, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.RedactScannerMaxLineBytes))
 		if redactErr != nil {
 			return fmt.Errorf("redactTranscript JSONL %s: %w", path, redactErr)
 		}

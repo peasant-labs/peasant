@@ -228,6 +228,33 @@ func assertOmissionPlaceholder(t *testing.T, entry schema.SessionEntry, want Omi
 	}
 }
 
+// TestKeptRecordLimitLeavesTheRedactStageRoomForItsNewline pairs the two limits
+// that decide whether the largest kept record survives ingestion. The filter
+// keeps a record of exactly the limit and omits one byte more. The redact stage
+// behind the filter reads that record as a LINE and refuses a line it cannot
+// hold with its newline, so its limit must exceed the filter's by at least that
+// byte; otherwise the session fails at the one size the filter promises to keep.
+func TestKeptRecordLimitLeavesTheRedactStageRoomForItsNewline(t *testing.T) {
+	t.Parallel()
+	// The boundary of the filter's promise, at an injected limit so the case
+	// costs no memory. The production limit is the same predicate.
+	const probe = 4096
+	if jsonlRecordTooLarge(make([]byte, probe), probe) {
+		t.Fatalf("a record of exactly the %d-byte limit is omitted; a record up to the limit is read whole", probe)
+	}
+	if !jsonlRecordTooLarge(make([]byte, probe+1), probe) {
+		t.Fatalf("a record one byte over the %d-byte limit is kept; a record over the limit is omitted", probe)
+	}
+	limit := productionJSONLRecordLimit(0)
+	if limit != defaults.MaxJSONLRecordBytes {
+		t.Fatalf("the production per-record limit is %d bytes, not the declared %d", limit, defaults.MaxJSONLRecordBytes)
+	}
+	if defaults.RedactScannerMaxLineBytes < limit+1 {
+		t.Fatalf("the redact stage reads lines of at most %d bytes while records of up to %d bytes are kept; the largest kept record's line is %d bytes, so that record would fail the whole session",
+			defaults.RedactScannerMaxLineBytes, limit, limit+1)
+	}
+}
+
 // TestOmissionPlaceholderNoteIsTheReadersLine pins the EXACT sentence a reader is
 // shown where a tool output was left out, at the per-record limit production
 // runs with. Every viewer the placeholder reaches shows this string, and the
