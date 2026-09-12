@@ -12,6 +12,7 @@ required_names:
   - crash_between_install_and_mirror_restart
   - crash_between_mirror_and_entries_restart
   - crash_between_mirror_and_entries_restart_replaced_with_provenance
+  - crash_between_mirror_and_entries_restart_opencode_legacy
   - parent_mirror_fails_child_refused_next_drain
   - torn_pair_no_row_reingested
   - torn_pair_row_present_detected_on_read
@@ -37,6 +38,10 @@ cases:
   - name: crash_between_mirror_and_entries_restart_replaced_with_provenance
     scenario: crash_mirror_entries
     variant: replaced_provenance
+  # The same crash on an OpenCode legacy directory row, a different kind: the
+  # predicate is harness- and kind-independent and heals it in one run too.
+  - name: crash_between_mirror_and_entries_restart_opencode_legacy
+    scenario: crash_mirror_entries_opencode_legacy
 
   # A parent whose row fails to record does not starve its subtree. The child is
   # held until the parent is committed, then drained in a later transaction where

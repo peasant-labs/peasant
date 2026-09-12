@@ -92,6 +92,8 @@ func TestWritePathDurability(t *testing.T) {
 				runCrashInstallMirror(t)
 			case "crash_mirror_entries":
 				runCrashMirrorEntries(t, fixture.Variant)
+			case "crash_mirror_entries_opencode_legacy":
+				runCrashMirrorEntriesOpenCodeLegacy(t)
 			case "torn_no_row":
 				runTornNoRow(t)
 			case "torn_row_present":
@@ -256,6 +258,97 @@ func runCrashMirrorEntries(t *testing.T, variant string) {
 	}
 	if containsSession(settled, sid) {
 		t.Fatalf("the healed session must not be selected again; got %v", settled)
+	}
+}
+
+// runCrashMirrorEntriesOpenCodeLegacy proves the repair predicate is
+// harness- and kind-independent: it heals an OpenCode legacy directory session,
+// whose row is a different kind than a JSONL harness, exactly as it heals a
+// claude-code row. The crash fails the entry commit; the next harvest selects
+// the row and recovers its entries; the one after selects nothing.
+func runCrashMirrorEntriesOpenCodeLegacy(t *testing.T) {
+	ctx := context.Background()
+	mfs := testutil.NewMemFS()
+	const projectHash = "openprojecthash"
+	session := setupOpenCodeFixture(t, mfs, testutil.TestSessionUUID, projectHash)
+	addOpenCodeMessage(t, mfs, testutil.TestSessionUUID, "msg_one", string(ingest.RoleUser), 10, 0)
+	addOpenCodePart(t, mfs, "msg_one", "prt_one")
+	addOpenCodeMessage(t, mfs, testutil.TestSessionUUID, "msg_two", string(ingest.RoleAssistant), 0, 20)
+	addOpenCodePart(t, mfs, "msg_two", "prt_two")
+	sid := session.SessionID
+	session.ModTime = time.Now().Add(-2 * time.Hour)
+
+	meta := makeMinimalMeta(t, string(sid))
+	meta.Source.FilePath = session.SourcePath.String()
+	meta.Source.Format = ingest.SourceFormatJSON
+	meta.ModelHarness = ingest.HarnessOpenCode
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessOpenCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta}),
+	}
+	cfg := makePipelineConfig(testOutputDir)
+	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
+		ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{session.OriginalRoot}},
+	}
+	newOpenCodePipeline := func(ds *durabilityStore) *ingest.Pipeline {
+		pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, cfg,
+			ingest.WithStore(ds), ingest.WithMetricsStore(ds),
+			ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(mfs)}))
+		if err != nil {
+			t.Fatalf("build opencode pipeline: %v", err)
+		}
+		return pipeline
+	}
+	dbPath := storetest.CopyGoldenDB(t)
+
+	// Run 1: the crash after the row committed. The entries never commit.
+	crashed := newDurabilityStore(t, dbPath)
+	crashed.FailEntries(errors.New("simulated crash before the entries committed"))
+	if _, err := newOpenCodePipeline(crashed).Run(ctx); err != nil {
+		t.Fatalf("crash run: %v", err)
+	}
+	state, err := crashed.ReadIndexState(ctx, sid)
+	if err != nil || state == nil || state.ArtifactHash == nil {
+		t.Fatalf("the opencode row and its pair hash should be recorded after the crash; got %+v, %v", state, err)
+	}
+	if state.IndexedInputHash != nil {
+		t.Fatalf("the entries never committed, so the indexed-input hash must be null; got %q", *state.IndexedInputHash)
+	}
+	needing, err := crashed.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry)
+	if err != nil {
+		t.Fatalf("list repair sessions: %v", err)
+	}
+	if !containsSession(needing, sid) {
+		t.Fatalf("the repair predicate must select the crashed opencode-legacy row; got %v", needing)
+	}
+	crashed.Shutdown()
+
+	// Run 2: the restart heals it, recovering the entries and setting the
+	// indexed-input hash the crash left null.
+	restarted := newDurabilityStore(t, dbPath)
+	healResult, err := newOpenCodePipeline(restarted).Run(ctx)
+	if err != nil {
+		t.Fatalf("restart run: %v", err)
+	}
+	if healResult.Summary.Indexed != 1 {
+		t.Fatalf("the restart should index the recovered opencode session once; summary = %+v", healResult.Summary)
+	}
+	healed, err := restarted.ReadIndexState(ctx, sid)
+	if err != nil || healed == nil || healed.IndexedInputHash == nil {
+		t.Fatalf("the restart must set the indexed-input hash for the opencode row; got %+v, %v", healed, err)
+	}
+	restarted.Shutdown()
+
+	// Run 3: the steady state does no indexing work. A legacy directory kind is
+	// unbindable, so the database repair query still lists it on its publication
+	// half; the pipeline's own pending-work check filters that out and re-indexes
+	// nothing, which is the observable "settled" for every kind.
+	steady := newDurabilityStore(t, dbPath)
+	steadyResult, err := newOpenCodePipeline(steady).Run(ctx)
+	if err != nil {
+		t.Fatalf("steady run: %v", err)
+	}
+	if steadyResult.Summary.Indexed != 0 {
+		t.Fatalf("the healed opencode row must not be indexed again; summary = %+v", steadyResult.Summary)
 	}
 }
 
