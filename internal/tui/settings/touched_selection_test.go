@@ -120,7 +120,9 @@ type touchedFieldKey string
 
 const (
 	touchedFieldDown        touchedFieldKey = "down"
+	touchedFieldUp          touchedFieldKey = "up"
 	touchedFieldToggle      touchedFieldKey = "toggle"
+	touchedFieldSelectAll   touchedFieldKey = "select-all"
 	touchedFieldSelectUnder touchedFieldKey = "select-under"
 	touchedFieldFilter      touchedFieldKey = "filter"
 	touchedFieldCollapse    touchedFieldKey = "collapse"
@@ -140,9 +142,13 @@ type touchedFieldCase struct {
 	Branch          string                 `yaml:"branch"`
 	SessionID       string                 `yaml:"sessionId"`
 	SecondSessionID string                 `yaml:"secondSessionId"`
-	LinkedSessionID string                 `yaml:"linkedSessionId"`
-	SecondProject   *touchedSecondProject  `yaml:"secondProject"`
-	Keys            []touchedFieldKey      `yaml:"keys"`
+	// SecondBranch adds a second named branch to the primary project, with its
+	// own session, so a case can exercise manual all-branch toggles.
+	SecondBranch          string                `yaml:"secondBranch"`
+	SecondBranchSessionID string                `yaml:"secondBranchSessionId"`
+	LinkedSessionID       string                `yaml:"linkedSessionId"`
+	SecondProject         *touchedSecondProject `yaml:"secondProject"`
+	Keys                  []touchedFieldKey     `yaml:"keys"`
 	// Flat builds the primary project's children as session rows directly under
 	// the project (a flattened project), instead of project -> branch -> session.
 	Flat                       bool   `yaml:"flat"`
@@ -226,7 +232,7 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 			t.Fatalf("fieldCase[%d] name=%q, manifest=%q", index, testCase.Name, document.ExpectedFieldNames[index])
 		}
 		for _, key := range testCase.Keys {
-			if key != touchedFieldDown && key != touchedFieldToggle && key != touchedFieldSelectUnder &&
+			if key != touchedFieldDown && key != touchedFieldUp && key != touchedFieldToggle && key != touchedFieldSelectAll && key != touchedFieldSelectUnder &&
 				key != touchedFieldFilter && key != touchedFieldCollapse && key != touchedFieldSpinner && key != touchedFieldRefresh {
 				t.Fatalf("field case %q has unknown key %q", testCase.Name, key)
 			}
@@ -243,6 +249,9 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 		if testCase.SecondSessionID != "" && testCase.SecondSessionID == testCase.SessionID {
 			t.Fatalf("field case %q repeats its primary session as the second session", testCase.Name)
 		}
+		if (testCase.SecondBranch == "") != (testCase.SecondBranchSessionID == "") {
+			t.Fatalf("field case %q must set secondBranch and secondBranchSessionId together", testCase.Name)
+		}
 		if testCase.Flat && (testCase.Branch != "" || testCase.LinkedClonePath != "" || testCase.LinkedSessionID != "") {
 			t.Fatalf("flat field case %q cannot declare a branch level or linked worktree", testCase.Name)
 		}
@@ -255,8 +264,8 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 				{Key: "secondProject.sessionId", Value: testCase.SecondProject.SessionID},
 			})
 		}
-		if (testCase.SecondProject == nil) != (testCase.ExpectedSecondSessionState == "") {
-			t.Fatalf("field case %q must set secondProject and expectedSecondSessionState together", testCase.Name)
+		if (testCase.SecondProject == nil && testCase.SecondBranch == "") != (testCase.ExpectedSecondSessionState == "") {
+			t.Fatalf("field case %q must set a second project or branch together with expectedSecondSessionState", testCase.Name)
 		}
 	}
 	for index, testCase := range document.DerivationCases {
@@ -488,13 +497,13 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			after := TreeSelection{Mode: draft.Working().Selection.Mode, Harnesses: draft.Working().Selection.Harnesses}
 			for harness, configured := range after.Harnesses {
 				for _, project := range configured.Projects {
-					if containsUnknownBranchPlaceholder(project.Branches) {
-						t.Fatalf("field case %q persisted the unknown-branch placeholder in harness %q: %#v", testCase.Name, harness, project)
+					if containsBranchlessPlaceholder(project.Branches) {
+						t.Fatalf("field case %q persisted the branchless placeholder in harness %q: %#v", testCase.Name, harness, project)
 					}
 				}
 				for _, exclusion := range configured.Exclusions.Branches {
-					if containsUnknownBranchPlaceholder(exclusion.Branches) {
-						t.Fatalf("field case %q persisted the unknown-branch placeholder in harness %q: %#v", testCase.Name, harness, exclusion)
+					if containsBranchlessPlaceholder(exclusion.Branches) {
+						t.Fatalf("field case %q persisted the branchless placeholder in harness %q: %#v", testCase.Name, harness, exclusion)
 					}
 				}
 			}
@@ -525,10 +534,16 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			if !ok || sessions[testCase.SessionID] == nil || sessions[testCase.SessionID].State != state {
 				t.Fatalf("session state=%v, want %s", sessions[testCase.SessionID], testCase.ExpectedSessionState)
 			}
+			secondSessionID := ""
 			if testCase.SecondProject != nil {
+				secondSessionID = testCase.SecondProject.SessionID
+			} else if testCase.SecondBranch != "" {
+				secondSessionID = testCase.SecondBranchSessionID
+			}
+			if secondSessionID != "" {
 				secondState, ok := touchedTriState(testCase.ExpectedSecondSessionState)
-				if !ok || sessions[testCase.SecondProject.SessionID] == nil || sessions[testCase.SecondProject.SessionID].State != secondState {
-					t.Fatalf("second session state=%v, want %s", sessions[testCase.SecondProject.SessionID], testCase.ExpectedSecondSessionState)
+				if !ok || sessions[secondSessionID] == nil || sessions[secondSessionID].State != secondState {
+					t.Fatalf("second session state=%v, want %s", sessions[secondSessionID], testCase.ExpectedSecondSessionState)
 				}
 			}
 		})
@@ -625,6 +640,15 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 			Meta: sessionMeta(),
 		})
 	}
+	if testCase.SecondBranch != "" {
+		root.Children = append(root.Children, &kit.TreeNode{
+			ID: testCase.SecondBranch, Label: testCase.SecondBranch, Meta: map[string]string{MetaBranch: testCase.SecondBranch},
+			Children: []*kit.TreeNode{{
+				ID:   testCase.SecondBranchSessionID,
+				Meta: sessionMeta(),
+			}},
+		})
+	}
 	return root
 }
 
@@ -643,13 +667,13 @@ func TestFromTreeNodesUnknownBranchDerivationFixture(t *testing.T) {
 			}
 			for harness, configured := range got.Harnesses {
 				for _, project := range configured.Projects {
-					if containsUnknownBranchPlaceholder(project.Branches) {
-						t.Fatalf("harness %q project %#v persists the unknown-branch placeholder", harness, project)
+					if containsBranchlessPlaceholder(project.Branches) {
+						t.Fatalf("harness %q project %#v persists the branchless placeholder", harness, project)
 					}
 				}
 				for _, exclusion := range configured.Exclusions.Branches {
-					if containsUnknownBranchPlaceholder(exclusion.Branches) {
-						t.Fatalf("harness %q exclusion %#v persists the unknown-branch placeholder", harness, exclusion)
+					if containsBranchlessPlaceholder(exclusion.Branches) {
+						t.Fatalf("harness %q exclusion %#v persists the branchless placeholder", harness, exclusion)
 					}
 				}
 			}
@@ -676,13 +700,13 @@ func TestSanitizePlaceholderSelectionFixture(t *testing.T) {
 			}
 			for harness, configured := range got.Harnesses {
 				for _, project := range configured.Projects {
-					if containsUnknownBranchPlaceholder(project.Branches) {
-						t.Fatalf("harness %q project %#v persists the unknown-branch placeholder", harness, project)
+					if containsBranchlessPlaceholder(project.Branches) {
+						t.Fatalf("harness %q project %#v persists the branchless placeholder", harness, project)
 					}
 				}
 				for _, exclusion := range configured.Exclusions.Branches {
-					if containsUnknownBranchPlaceholder(exclusion.Branches) {
-						t.Fatalf("harness %q exclusion %#v persists the unknown-branch placeholder", harness, exclusion)
+					if containsBranchlessPlaceholder(exclusion.Branches) {
+						t.Fatalf("harness %q exclusion %#v persists the branchless placeholder", harness, exclusion)
 					}
 				}
 			}
@@ -814,8 +838,12 @@ func touchedFieldKeyPress(key touchedFieldKey) string {
 	switch key {
 	case touchedFieldDown:
 		return "j"
+	case touchedFieldUp:
+		return "k"
 	case touchedFieldToggle:
 		return "space"
+	case touchedFieldSelectAll:
+		return "a"
 	case touchedFieldSelectUnder:
 		return "A"
 	case touchedFieldFilter:

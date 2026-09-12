@@ -290,11 +290,12 @@ func prepareSessionListings(
 	return cohort
 }
 
-// unknownBranchPlaceholder labels the session group discovery could not resolve
-// a Git branch for. It is display-only: settings recognizes the literal
-// byte-for-byte and never persists it, and a project whose ONLY branch group is
-// this one renders its sessions directly under the project row.
-const unknownBranchPlaceholder = "(unknown branch)"
+// branchlessPlaceholder labels the session group discovery could not resolve
+// a Git branch for. It is display-only: settings recognizes this label and the
+// legacy label earlier versions rendered, never persists either, and a project
+// whose ONLY branch group is this one renders its sessions directly under the
+// project row.
+const branchlessPlaceholder = "(no branch detected)"
 
 // buildForest folds a fully resolved and annotated scanner cohort into the ordered
 // PROJECT -> BRANCH -> SESSION forest, matching the original FTUE
@@ -308,10 +309,10 @@ const unknownBranchPlaceholder = "(unknown branch)"
 //     root. Remote/name/multiplicity metadata is carried separately for the
 //     canonical matcher and config round-trip. A remote label never becomes an
 //     identity key.
-//   - branch node: keyed by branch (or "(unknown branch)" when discovery could
-//     not resolve one) with the branch carried in Meta. A project whose ONLY
-//     branch group is the unresolved one omits the branch level entirely: its
-//     sessions become direct children of the project node, because a
+//   - branch node: keyed by branch (or "(no branch detected)" when discovery
+//     could not resolve one) with the branch carried in Meta. A project whose
+//     ONLY branch group is the unresolved one omits the branch level entirely:
+//     its sessions become direct children of the project node, because a
 //     placeholder level that separates nothing is noise.
 //   - session node: keyed by the raw session ID, carrying its harness in Meta so
 //     settings.FromTreeNodes can rebuild the harness-keyed SelectionConfig.
@@ -404,7 +405,7 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, rela
 
 		bKey := sess.Branch
 		if bKey == "" {
-			bKey = unknownBranchPlaceholder
+			bKey = branchlessPlaceholder
 		}
 		b, ok := p.branches[bKey]
 		if !ok {
@@ -432,7 +433,7 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, rela
 			Meta:  scannerProjectMeta(representative, p.identity, p.rows),
 		}
 		sort.Strings(p.order)
-		if len(p.order) == 1 && p.order[0] == unknownBranchPlaceholder {
+		if len(p.order) == 1 && p.order[0] == branchlessPlaceholder {
 			// The only branch group is the unresolved one: attach its sessions
 			// directly to the project so the placeholder level, which separates
 			// nothing, is not rendered. Ordering is the same as inside a branch.

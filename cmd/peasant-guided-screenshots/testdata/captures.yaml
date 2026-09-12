@@ -156,9 +156,10 @@ selectionStates:
     # is the relative resolved suffix, and the placeholder is forbidden. Its
     # sessions are the project's only branch group, so they render directly
     # under the project row - the capture expands the project to show them and
-    # forbids any branch row for it.
+    # forbids any branch row for it, under either the current or the legacy
+    # branchless label.
     wantContains: ["[✓] projects/notes", "[✓] remote-less notes"]
-    wantAbsent: ["(unknown project)", "(unknown branch)"]
+    wantAbsent: ["(unknown project)", "(no branch detected)", "(unknown branch)"]
 
 ingestProgressStates:
   - key: running

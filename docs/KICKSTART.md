@@ -185,22 +185,26 @@ kickstart never writes it to a saved selection. See the
 A harness recording can omit the branch. When such sessions are a project's ONLY sessions, the
 selection tree omits the branch level: they render directly under the project row. A project that
 also records a real branch keeps the branch level, and its branchless sessions stay under the
-`(unknown branch)` row beside the named branches. That label is display text only: the matcher
+`(no branch detected)` row beside the named branches. That label is display text only: the matcher
 compares recorded branch names, so the placeholder can never match one.
 
 `space` applies at every visible row grain:
 
 - On the project row, Peasant saves a project rule for that exact clone path. The rule carries no
   branch list, so it admits the project's named branches and its branchless sessions together.
+- On a branch row, Peasant adds that branch to the project's branch list. Checking the last branch
+  row by hand keeps the branch-level rule; it does not turn into a project rule that also admits
+  future branches.
 - On a session row, Peasant saves that one session ID, or an exact session exclusion when the
   session was already admitted.
-- On a mixed project's `(unknown branch)` row, Peasant expands the row into one explicit session
+- On a mixed project's `(no branch detected)` row, Peasant expands the row into one explicit session
   rule per changed session. A selection adds the session IDs; a clear adds exact session exclusions.
 
-Kickstart never saves `(unknown branch)` as a branch name or a branch exclusion. A selected
-`(unknown branch)` row becomes explicit per-session rules in `sessions`; a cleared one becomes
+Kickstart never saves `(no branch detected)` as a branch name or a branch exclusion. A selected
+`(no branch detected)` row becomes explicit per-session rules in `sessions`; a cleared one becomes
 per-session rules in `exclusions.sessions`. A saved file that still names the placeholder is resolved
-into the explicit session IDs, or exclusions, of the sessions it covers when kickstart loads it.
+into the explicit session IDs, or exclusions, of the sessions it covers when kickstart loads it; an
+older file that carries the previous `(unknown branch)` label is recognized the same way.
 
 ## Exact exclusions
 

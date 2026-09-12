@@ -229,7 +229,9 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 			}
 			assertExactMountedTouchedSelection(t, reloaded.Selection, want, "after commit")
 			committed := string(mustReadFile(t, configPath))
-			if strings.Contains(committed, "(unknown project)") || strings.Contains(committed, "(unknown branch)") {
+			if strings.Contains(committed, "(unknown project)") ||
+				strings.Contains(committed, "(no branch detected)") ||
+				strings.Contains(committed, "(unknown branch)") {
 				t.Fatalf("mounted touched-selection commit named a display placeholder:\n%s", committed)
 			}
 		})

@@ -32,10 +32,11 @@ import (
 //     Checked sessions to Harnesses[h].Sessions instead
 //   - a session leaf Checked whose worktree is not wholly Checked -> the
 //     session id is added to Harnesses[h].Sessions
-//   - the scanner's "(unknown branch)" placeholder -> display-only: it is never
-//     persisted as a branch rule, a branch toggle over it expands to explicit
-//     session scopes, and a saved policy that names it is rewritten to the
-//     explicit session IDs (or exclusions) of the available sessions it covers
+//   - a branchless session group -> display-only: its label ("(no branch
+//     detected)") is never persisted as a branch rule, a branch toggle over it
+//     expands to explicit session scopes, and a saved policy that names either
+//     label is rewritten to the explicit session IDs (or exclusions) of the
+//     available sessions it covers
 //   - a Conflict node               -> DISPLAY ONLY: never persisted, and it
 //     fails Validate so Commit is blocked fail-closed
 //   - an Unchecked node             -> omitted everywhere
@@ -154,25 +155,30 @@ const (
 	metaBranch = MetaBranch
 )
 
-// unknownBranchPlaceholder is the scanner's display label for a session group
+// branchlessPlaceholder is the scanner's display label for a session group
 // whose Git branch could not be resolved. It is a row label only: the canonical
 // matcher compares real branch names, so a discovered session with no branch
 // carries the empty string and this placeholder can never match. The scanner
 // writes the same literal; it is recognized here byte-for-byte and must never
 // reach a persisted branch rule or exclusion.
-const unknownBranchPlaceholder = "(unknown branch)"
+const branchlessPlaceholder = "(no branch detected)"
 
-// isUnknownBranchPlaceholder reports whether name is the display-only
-// unknown-branch placeholder.
-func isUnknownBranchPlaceholder(name string) bool {
-	return name == unknownBranchPlaceholder
+// legacyBranchlessPlaceholder is the label earlier versions rendered for the
+// same group. Saved configurations can still carry it literally, so recognition
+// accepts it exactly as the current label and sanitization rewrites it away.
+const legacyBranchlessPlaceholder = "(unknown branch)"
+
+// isBranchlessPlaceholder reports whether name is a display-only branchless
+// placeholder: the current label or the legacy label a saved file may carry.
+func isBranchlessPlaceholder(name string) bool {
+	return name == branchlessPlaceholder || name == legacyBranchlessPlaceholder
 }
 
 // semanticBranchName maps a scanner branch label to the branch identity the
 // matcher and every persisted rule use: the resolved branch name, or the empty
 // (unknown) branch when the row only carries the display placeholder.
 func semanticBranchName(name string) string {
-	if isUnknownBranchPlaceholder(name) {
+	if isBranchlessPlaceholder(name) {
 		return ""
 	}
 	return name
@@ -909,13 +915,13 @@ func sanitizePlaceholderSelection(sel config.SelectionConfig, projects []availab
 		var allowed []ingest.DiscoveryCandidate
 		var denied []ingest.DiscoveryCandidate
 		for _, project := range configured.Projects {
-			if !containsUnknownBranchPlaceholder(project.Branches) {
+			if !containsBranchlessPlaceholder(project.Branches) {
 				next.Projects = append(next.Projects, cloneProjectSelection(project))
 				continue
 			}
 			changed = true
 			allowed = append(allowed, placeholderProjectCandidates(harness, project, projects)...)
-			branches := removeUnknownBranchPlaceholder(project.Branches)
+			branches := removeBranchlessPlaceholder(project.Branches)
 			if len(branches) == 0 {
 				continue
 			}
@@ -925,13 +931,13 @@ func sanitizePlaceholderSelection(sel config.SelectionConfig, projects []availab
 		}
 		var exclusions []config.BranchExclusion
 		for _, exclusion := range next.Exclusions.Branches {
-			if !containsUnknownBranchPlaceholder(exclusion.Branches) {
+			if !containsBranchlessPlaceholder(exclusion.Branches) {
 				exclusions = append(exclusions, exclusion)
 				continue
 			}
 			changed = true
 			denied = append(denied, placeholderExclusionCandidates(harness, exclusion.ClonePath, projects)...)
-			branches := removeUnknownBranchPlaceholder(exclusion.Branches)
+			branches := removeBranchlessPlaceholder(exclusion.Branches)
 			if len(branches) > 0 {
 				exclusions = append(exclusions, config.BranchExclusion{ClonePath: exclusion.ClonePath, Branches: branches})
 			}
@@ -980,21 +986,21 @@ func sanitizeTreeSelectionPlaceholders(sel TreeSelection, roots []*kit.TreeNode)
 	return TreeSelection{Mode: sanitized.Mode, Harnesses: sanitized.Harnesses}, true
 }
 
-func containsUnknownBranchPlaceholder(branches []string) bool {
+func containsBranchlessPlaceholder(branches []string) bool {
 	for _, branch := range branches {
-		if isUnknownBranchPlaceholder(branch) {
+		if isBranchlessPlaceholder(branch) {
 			return true
 		}
 	}
 	return false
 }
 
-// removeUnknownBranchPlaceholder returns branches without the display
+// removeBranchlessPlaceholder returns branches without the display
 // placeholder; an empty result is nil so an emptied policy is unambiguous.
-func removeUnknownBranchPlaceholder(branches []string) []string {
+func removeBranchlessPlaceholder(branches []string) []string {
 	var kept []string
 	for _, branch := range branches {
-		if isUnknownBranchPlaceholder(branch) {
+		if isBranchlessPlaceholder(branch) {
 			continue
 		}
 		kept = append(kept, branch)
@@ -1731,9 +1737,9 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 	if metaOf(scope.root, MetaProjectIdentity) != scope.projectIdentity {
 		return fmt.Errorf("exact scope %q no longer matches its full-forest repository node", scope.projectIdentity)
 	}
-	if isUnknownBranchPlaceholder(scope.branch) {
+	if isBranchlessPlaceholder(scope.branch) {
 		return fmt.Errorf(
-			"exact scope for project %q names the unknown-branch display placeholder, which has no matchable branch identity and can never be persisted as a branch rule or exclusion; apply the unknown-branch row as explicit session scopes instead",
+			"exact scope for project %q names the branchless display placeholder, which has no matchable branch identity and can never be persisted as a branch rule or exclusion; apply the branchless row as explicit session scopes instead",
 			scope.projectIdentity)
 	}
 	if next.Harnesses == nil {
@@ -1788,9 +1794,30 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 			return fmt.Errorf("branch scope for project %q has an empty branch", scope.projectIdentity)
 		}
 		if scope.selected {
-			replacement := projectReplacement(configured.Projects, scope, []string{scope.branch}, false)
-			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
 			configured.Exclusions.Branches = removeBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), scope.branch)
+			_, branchlessTemplate := exactProjectTemplate(configured.Projects, scope.clonePath.String())
+			replacement := projectReplacement(configured.Projects, scope, []string{scope.branch}, false)
+			if branchlessTemplate && len(replacement.Branches) == 0 {
+				// A manual branch toggle states branch-level intent. The
+				// branchless template admits every branch, so replacing it with
+				// an explicit list must reproduce the current selection: every
+				// named branch it still admits, plus the branchless group's
+				// admitted sessions as explicit IDs. A later full derivation
+				// then keeps the branch-level representation because the
+				// re-marked provenance marks the sessions.
+				branches, sessions := branchlessTemplatePositives(configured, scope)
+				replacement.Branches = branches
+				for _, sessionID := range sessions {
+					configured.Sessions = appendUniqueString(configured.Sessions, sessionID)
+				}
+			}
+			if len(replacement.Branches) > 1 {
+				// The persisted branch list is canonical (sorted), matching the
+				// full-derivation round-trip, so a later no-op save cannot
+				// reorder it.
+				sort.Strings(replacement.Branches)
+			}
+			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
 			for _, candidate := range candidates {
 				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
 				configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, string(candidate.SessionID))
@@ -1933,6 +1960,68 @@ func exactProjectTemplate(projects []config.ProjectSelection, clonePath string) 
 		}
 	}
 	return config.ProjectSelection{}, false
+}
+
+// branchlessTemplatePositives builds the branch-level positive policy that
+// reproduces the live selection of a project currently governed by a branchless
+// (all-branches) rule when a manual branch toggle replaces it: every named
+// branch the rule still admits, in tree order, plus the admitted sessions of
+// the branchless group or of a flattened project's direct session children as
+// explicit IDs. Exact branch and session denials stay untouched, so the result
+// selects exactly what the branchless rule plus those denials selected.
+func branchlessTemplatePositives(configured config.SelectionHarnessConfig, scope selectionScope) ([]string, []string) {
+	deniedBranches := map[string]bool{}
+	for _, exclusion := range configured.Exclusions.Branches {
+		if exclusion.ClonePath != scope.clonePath.String() {
+			continue
+		}
+		for _, branch := range exclusion.Branches {
+			deniedBranches[branch] = true
+		}
+	}
+	deniedSessions := map[string]bool{}
+	for _, sessionID := range configured.Exclusions.Sessions {
+		deniedSessions[sessionID] = true
+	}
+	var branches []string
+	var sessions []string
+	for _, child := range scope.root.Children {
+		if harnessOf(child) != "" {
+			// A flattened project's direct session child.
+			if !deniedSessions[child.ID] {
+				sessions = appendUniqueString(sessions, child.ID)
+			}
+			continue
+		}
+		branch := semanticBranchName(branchOf(child))
+		if branch == "" {
+			// The branchless group: its rule-level admission must survive as
+			// explicit session IDs once the branchless rule is replaced.
+			for _, session := range child.Children {
+				if !deniedSessions[session.ID] {
+					sessions = appendUniqueString(sessions, session.ID)
+				}
+			}
+			continue
+		}
+		if deniedBranches[branch] {
+			continue
+		}
+		// The toggled branch is admitted by this action: its own exclusions are
+		// cleared below, so it belongs in the list even when every session it
+		// holds was previously denied individually.
+		if branch == scope.branch {
+			branches = appendUniqueString(branches, branch)
+			continue
+		}
+		for _, session := range child.Children {
+			if !deniedSessions[session.ID] {
+				branches = appendUniqueString(branches, branch)
+				break
+			}
+		}
+	}
+	return branches, sessions
 }
 
 func spliceExactProjectPath(projects []config.ProjectSelection, clonePath string, replacement *config.ProjectSelection) []config.ProjectSelection {

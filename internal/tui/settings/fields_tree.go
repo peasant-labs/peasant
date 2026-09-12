@@ -803,11 +803,11 @@ func exactBranchName(branch *kit.TreeNode) (string, error) {
 	if strings.TrimSpace(name) != name {
 		return "", fmt.Errorf("branch node %q carries non-normalized branch %q", branch.ID, name)
 	}
-	// The unknown-branch display placeholder is accepted so the rollback
-	// snapshot can cover the rows a press will touch, but it is not a matchable
-	// branch identity. changedSelectionScopes maps it to the empty semantic
-	// branch and expands a branch toggle into explicit session scopes, so the
-	// placeholder itself never reaches reconcileSelectionScope or the config.
+	// The branchless display placeholder is accepted so the rollback snapshot
+	// can cover the rows a press will touch, but it is not a matchable branch
+	// identity. changedSelectionScopes maps it to the empty semantic branch and
+	// expands a branch toggle into explicit session scopes, so the placeholder
+	// itself never reaches reconcileSelectionScope or the config.
 	return name, nil
 }
 
@@ -896,13 +896,13 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 		sortSelectableNodeKeys(targetKeys)
 		var scopes []selectionScope
 		for _, targetKey := range targetKeys {
-			if isUnknownBranchPlaceholder(targetKey.branch) {
+			if isBranchlessPlaceholder(targetKey.branch) {
 				// The placeholder has no persistable branch identity: expand the
 				// branch toggle into one explicit session scope per changed
 				// session, so a select persists session IDs and a clear persists
 				// session exclusions. Each session's post-action state decides
 				// its own direction, so a Conflict bystander is never swept in.
-				for _, sessionKey := range changedUnknownBranchSessions(targetKey, changed) {
+				for _, sessionKey := range changedBranchlessSessions(targetKey, changed) {
 					scope, err := makeScope(sessionKey, selectionScopeSession, after[sessionKey].state == kit.Checked)
 					if err != nil {
 						return nil, err
@@ -1039,13 +1039,13 @@ func sortSelectableNodeKeys(keys []selectableNodeKey) {
 	})
 }
 
-// changedUnknownBranchSessions returns the changed session identities under one
+// changedBranchlessSessions returns the changed session identities under one
 // placeholder branch node, sorted so the generated session scopes are
 // deterministic.
-func changedUnknownBranchSessions(target selectableNodeKey, changed map[selectableNodeKey]bool) []selectableNodeKey {
+func changedBranchlessSessions(target selectableNodeKey, changed map[selectableNodeKey]bool) []selectableNodeKey {
 	var keys []selectableNodeKey
 	for key := range changed {
-		if key.sessionID == "" || !isUnknownBranchPlaceholder(key.branch) {
+		if key.sessionID == "" || !isBranchlessPlaceholder(key.branch) {
 			continue
 		}
 		if key.projectIdentity != target.projectIdentity ||
