@@ -1805,7 +1805,10 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 				// admitted sessions as explicit IDs. A later full derivation
 				// then keeps the branch-level representation because the
 				// re-marked provenance marks the sessions.
-				branches, sessions := branchlessTemplatePositives(configured, scope)
+				branches, sessions, err := branchlessTemplatePositives(configured, scope)
+				if err != nil {
+					return err
+				}
 				replacement.Branches = branches
 				for _, sessionID := range sessions {
 					configured.Sessions = appendUniqueString(configured.Sessions, sessionID)
@@ -1963,13 +1966,24 @@ func exactProjectTemplate(projects []config.ProjectSelection, clonePath string) 
 }
 
 // branchlessTemplatePositives builds the branch-level positive policy that
-// reproduces the live selection of a project currently governed by a branchless
-// (all-branches) rule when a manual branch toggle replaces it: every named
-// branch the rule still admits, in tree order, plus the admitted sessions of
-// the branchless group or of a flattened project's direct session children as
-// explicit IDs. Exact branch and session denials stay untouched, so the result
-// selects exactly what the branchless rule plus those denials selected.
-func branchlessTemplatePositives(configured config.SelectionHarnessConfig, scope selectionScope) ([]string, []string) {
+// reproduces the selection a branchless (all-branches) rule plus its exact
+// denials gives the scope's exact project when a manual branch toggle replaces
+// it: every named branch of that harness and clone path the rule still admits,
+// plus the admitted branchless sessions of that same project as explicit IDs.
+// The inputs come from the canonical exact-candidate boundary restricted to the
+// scope's harness and clone path, so a sibling worktree or another harness
+// under the same repository root is never imported.
+func branchlessTemplatePositives(configured config.SelectionHarnessConfig, scope selectionScope) ([]string, []string, error) {
+	candidates, err := candidatesForSelectionScope(selectionScope{
+		kind:            selectionScopeProject,
+		root:            scope.root,
+		projectIdentity: scope.projectIdentity,
+		harness:         scope.harness,
+		clonePath:       scope.clonePath,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
 	deniedBranches := map[string]bool{}
 	for _, exclusion := range configured.Exclusions.Branches {
 		if exclusion.ClonePath != scope.clonePath.String() {
@@ -1983,45 +1997,33 @@ func branchlessTemplatePositives(configured config.SelectionHarnessConfig, scope
 	for _, sessionID := range configured.Exclusions.Sessions {
 		deniedSessions[sessionID] = true
 	}
-	var branches []string
+	admittedBranches := map[string]bool{}
 	var sessions []string
-	for _, child := range scope.root.Children {
-		if harnessOf(child) != "" {
-			// A flattened project's direct session child.
-			if !deniedSessions[child.ID] {
-				sessions = appendUniqueString(sessions, child.ID)
+	for _, candidate := range candidates {
+		sessionID := string(candidate.SessionID)
+		if deniedSessions[sessionID] {
+			continue
+		}
+		if branch := semanticBranchName(candidate.Branch); branch != "" {
+			if !deniedBranches[branch] {
+				admittedBranches[branch] = true
 			}
 			continue
 		}
-		branch := semanticBranchName(branchOf(child))
-		if branch == "" {
-			// The branchless group: its rule-level admission must survive as
-			// explicit session IDs once the branchless rule is replaced.
-			for _, session := range child.Children {
-				if !deniedSessions[session.ID] {
-					sessions = appendUniqueString(sessions, session.ID)
-				}
-			}
-			continue
-		}
-		if deniedBranches[branch] {
-			continue
-		}
-		// The toggled branch is admitted by this action: its own exclusions are
-		// cleared below, so it belongs in the list even when every session it
-		// holds was previously denied individually.
-		if branch == scope.branch {
-			branches = appendUniqueString(branches, branch)
-			continue
-		}
-		for _, session := range child.Children {
-			if !deniedSessions[session.ID] {
-				branches = appendUniqueString(branches, branch)
-				break
-			}
-		}
+		// The branchless group: its rule-level admission must survive as an
+		// explicit session ID once the branchless rule is replaced.
+		sessions = appendUniqueString(sessions, sessionID)
 	}
-	return branches, sessions
+	// The toggled branch is admitted by this action: its own exclusions are
+	// cleared by the caller, so it belongs in the list even when every session
+	// it holds was previously denied individually.
+	admittedBranches[scope.branch] = true
+	branches := make([]string, 0, len(admittedBranches))
+	for branch := range admittedBranches {
+		branches = append(branches, branch)
+	}
+	sort.Strings(branches)
+	return branches, sessions, nil
 }
 
 func spliceExactProjectPath(projects []config.ProjectSelection, clonePath string, replacement *config.ProjectSelection) []config.ProjectSelection {

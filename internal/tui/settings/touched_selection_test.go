@@ -143,9 +143,13 @@ type touchedFieldCase struct {
 	SessionID       string                 `yaml:"sessionId"`
 	SecondSessionID string                 `yaml:"secondSessionId"`
 	// SecondBranch adds a second named branch to the primary project, with its
-	// own session, so a case can exercise manual all-branch toggles.
+	// own session, so a case can exercise manual all-branch toggles. The
+	// optional clone path and harness place that session in a different linked
+	// worktree or harness under the same repository root.
 	SecondBranch          string                `yaml:"secondBranch"`
 	SecondBranchSessionID string                `yaml:"secondBranchSessionId"`
+	SecondBranchClonePath string                `yaml:"secondBranchClonePath"`
+	SecondBranchHarness   string                `yaml:"secondBranchHarness"`
 	LinkedSessionID       string                `yaml:"linkedSessionId"`
 	SecondProject         *touchedSecondProject `yaml:"secondProject"`
 	Keys                  []touchedFieldKey     `yaml:"keys"`
@@ -251,6 +255,9 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 		}
 		if (testCase.SecondBranch == "") != (testCase.SecondBranchSessionID == "") {
 			t.Fatalf("field case %q must set secondBranch and secondBranchSessionId together", testCase.Name)
+		}
+		if testCase.SecondBranch == "" && (testCase.SecondBranchClonePath != "" || testCase.SecondBranchHarness != "") {
+			t.Fatalf("field case %q sets a second-branch clone path or harness without a second branch", testCase.Name)
 		}
 		if testCase.Flat && (testCase.Branch != "" || testCase.LinkedClonePath != "" || testCase.LinkedSessionID != "") {
 			t.Fatalf("flat field case %q cannot declare a branch level or linked worktree", testCase.Name)
@@ -594,13 +601,16 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 	if testCase.LinkedHarness == "" || testCase.LinkedHarness == testCase.Harness {
 		root.Meta[MetaProjectHarness] = testCase.Harness
 	}
-	sessionMeta := func() map[string]string {
+	sessionMetaFor := func(harness, clonePath string) map[string]string {
 		return map[string]string{
-			MetaHarness:         testCase.Harness,
+			MetaHarness:         harness,
 			MetaProjectIdentity: testCase.ProjectIdentity,
-			MetaClonePath:       testCase.ClonePath,
+			MetaClonePath:       clonePath,
 			MetaRemote:          testCase.GitRemote,
 		}
+	}
+	sessionMeta := func() map[string]string {
+		return sessionMetaFor(testCase.Harness, testCase.ClonePath)
 	}
 	if testCase.Flat {
 		// A flattened project's children are session rows: the branchless group
@@ -641,11 +651,24 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 		})
 	}
 	if testCase.SecondBranch != "" {
+		secondHarness := testCase.SecondBranchHarness
+		if secondHarness == "" {
+			secondHarness = testCase.Harness
+		}
+		secondClonePath := testCase.SecondBranchClonePath
+		if secondClonePath == "" {
+			secondClonePath = testCase.ClonePath
+		}
+		if secondClonePath != testCase.ClonePath {
+			// A shared repository root with linked worktrees: the root carries no
+			// single clone path and each session keeps its exact worktree.
+			delete(root.Meta, MetaClonePath)
+		}
 		root.Children = append(root.Children, &kit.TreeNode{
 			ID: testCase.SecondBranch, Label: testCase.SecondBranch, Meta: map[string]string{MetaBranch: testCase.SecondBranch},
 			Children: []*kit.TreeNode{{
 				ID:   testCase.SecondBranchSessionID,
-				Meta: sessionMeta(),
+				Meta: sessionMetaFor(secondHarness, secondClonePath),
 			}},
 		})
 	}

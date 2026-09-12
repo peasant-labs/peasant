@@ -1,5 +1,5 @@
 expectedCaseCount: 16
-expectedFieldCaseCount: 29
+expectedFieldCaseCount: 32
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -38,6 +38,9 @@ expectedFieldNames:
   - manual-project-toggle-saves-branchless-project-rule
   - manual-select-all-keeps-project-level-rule
   - manual-branch-recheck-keeps-branchless-sessions-explicit
+  - manual-branch-recheck-ignores-linked-worktree-branchless-session
+  - manual-branch-recheck-ignores-linked-worktree-branch-name
+  - manual-branch-recheck-ignores-other-harness-branchless-session
   - unrestricted-project-clear-denies-branchless-sessions
   - unrestricted-project-clear-then-reselect-keeps-siblings
   - unrestricted-project-clear-then-select-under-keeps-siblings
@@ -534,6 +537,109 @@ fieldCases:
           projects:
             - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
           sessions: [11111111-1111-4111-8111-111111111111]
+
+  # A repository root with linked worktrees or mixed harnesses: materializing
+  # branch-level intent for one exact worktree must never import a sibling
+  # worktree's or harness's sessions or branch names.
+  - name: manual-branch-recheck-ignores-linked-worktree-branchless-session
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [main]}
+    projectIdentity: linked-project-a
+    harness: claude-code
+    clonePath: /fixtures/b
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: (no branch detected)
+    sessionId: 22222222-2222-4222-8222-222222222222
+    secondBranch: main
+    secondBranchSessionId: 11111111-1111-4111-8111-111111111111
+    secondBranchClonePath: /fixtures/a
+    keys: [down, down, down, toggle]
+    expectedSessionState: unchecked
+    expectedSecondSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+
+  - name: manual-branch-recheck-ignores-linked-worktree-branch-name
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [main]}
+    projectIdentity: linked-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondBranch: release
+    secondBranchSessionId: 22222222-2222-4222-8222-222222222222
+    secondBranchClonePath: /fixtures/b
+    keys: [down, toggle]
+    expectedSessionState: checked
+    expectedSecondSessionState: unchecked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+
+  - name: manual-branch-recheck-ignores-other-harness-branchless-session
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [main]}
+    projectIdentity: linked-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondBranch: (no branch detected)
+    secondBranchSessionId: 22222222-2222-4222-8222-222222222222
+    secondBranchClonePath: /fixtures/b
+    secondBranchHarness: codex
+    keys: [down, toggle]
+    expectedSessionState: checked
+    expectedSecondSessionState: unchecked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
 
   - name: unrestricted-project-clear-denies-branchless-sessions
     current:
