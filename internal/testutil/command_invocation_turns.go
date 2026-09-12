@@ -53,8 +53,10 @@ type CommandInvocationTurnCase struct {
 	// JSON written verbatim as the command_args value. A row sets at most one
 	// of StoredArgs and StoredArgsJSON.
 	StoredArgsJSON string `yaml:"storedArgsJSON,omitempty"`
-	// ExpectedRole is the rendered role, which the ratified wrapper gate may
-	// have moved away from the stored user role.
+	// ExpectedRole is the rendered role. The ratified wrapper gate may move a
+	// stored user turn to system either because its content is harness command
+	// markup or because the stored entry carries the invocation and no text
+	// at all; an assistant-sourced invocation keeps the assistant role.
 	ExpectedRole schema.Role `yaml:"expectedRole"`
 	// ExpectedCommand says whether the wire must carry an invocation at all.
 	ExpectedCommand bool   `yaml:"expectedCommand"`
