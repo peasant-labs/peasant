@@ -5,7 +5,12 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -14,21 +19,18 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// seedCommandInvocationSession writes one stored entry per corpus row. Each row
-// carries its own stored role because the three indexers differ: the Claude
-// Code and Cursor indexers record a command only on a user entry, while the
-// OpenCode indexer also records one on an assistant message that called a
+// commandInvocationSessionEntries builds one stored entry per corpus row. Each
+// row carries its own stored role because the three indexers differ: the
+// Claude Code and Cursor indexers record a command only on a user entry, while
+// the OpenCode indexer also records one on an assistant message that called a
 // skill.
-func seedCommandInvocationSession(t *testing.T, db *store.Store, sessionID string, cases []testutil.CommandInvocationTurnCase) {
-	t.Helper()
-	storetest.SeedSession(t, db, sessionID)
-	sid := schema.SessionID(sessionID)
+func commandInvocationSessionEntries(sessionID schema.SessionID, cases []testutil.CommandInvocationTurnCase) []schema.SessionEntry {
 	entries := make([]schema.SessionEntry, len(cases))
 	for index, testCase := range cases {
 		timestamp := int64(1705276800000) + int64(index)
 		extra := testCase.StoredExtra
 		entries[index] = schema.SessionEntry{
-			SessionID:   sid,
+			SessionID:   sessionID,
 			EntryIndex:  index,
 			Harness:     testCase.Harness,
 			EntryType:   schema.EntryTypeText,
@@ -41,6 +43,15 @@ func seedCommandInvocationSession(t *testing.T, db *store.Store, sessionID strin
 			entries[index].ContentPreview = &content
 		}
 	}
+	return entries
+}
+
+// seedCommandInvocationSession writes one stored entry per corpus row into db.
+func seedCommandInvocationSession(t *testing.T, db *store.Store, sessionID string, cases []testutil.CommandInvocationTurnCase) {
+	t.Helper()
+	storetest.SeedSession(t, db, sessionID)
+	sid := schema.SessionID(sessionID)
+	entries := commandInvocationSessionEntries(sid, cases)
 	if err := testutil.WriteFullEntries(context.Background(), db, sid, entries); err != nil {
 		t.Fatalf("WriteFullEntries: %v", err)
 	}
@@ -114,25 +125,46 @@ func TestExportSession_CommandInvocationMatchesWebSocketPath(t *testing.T) {
 		t.Fatalf("SessionToDetailValidated: %v", err)
 	}
 
-	if len(exported.Turns) != len(served.Turns) {
-		t.Fatalf("exported payload has %d turns, websocket payload has %d", len(exported.Turns), len(served.Turns))
+	pushed, err := push.BuildTranscriptContentValidated(
+		&ingest.UnifiedMetadata{
+			SessionID:    schema.SessionID(sessionID),
+			ModelHarness: defaults.HarnessClaudeCode,
+		},
+		commandInvocationSessionEntries(schema.SessionID(sessionID), fixture.Cases),
+		defaults.PublishSchemaVersion,
+		config.DefaultPushFieldVisibility(),
+		sessionorigin.User,
+	)
+	if err != nil {
+		t.Fatalf("BuildTranscriptContentValidated: %v", err)
+	}
+	if pushed.SessionDetail == nil {
+		t.Fatal("BuildTranscriptContentValidated returned no session detail payload")
+	}
+
+	if len(exported.Turns) != len(served.Turns) || len(exported.Turns) != len(pushed.SessionDetail.Turns) {
+		t.Fatalf("turn counts differ: export=%d websocket=%d push=%d", len(exported.Turns), len(served.Turns), len(pushed.SessionDetail.Turns))
 	}
 	for index := range exported.Turns {
 		// Role travels with the invocation: the projection may move a turn off
-		// its stored role, and the two surfaces must make that call identically.
-		if exported.Turns[index].Role != served.Turns[index].Role {
-			t.Errorf("turn %d role differs: export=%q websocket=%q", index, exported.Turns[index].Role, served.Turns[index].Role)
+		// its stored role, and all three surfaces must make that call identically.
+		exportRole := exported.Turns[index].Role
+		servedRole := served.Turns[index].Role
+		pushedRole := pushed.SessionDetail.Turns[index].Role
+		if exportRole != servedRole || exportRole != pushedRole {
+			t.Errorf("turn %d role differs: export=%q websocket=%q push=%q", index, exportRole, servedRole, pushedRole)
 		}
 		exportedCommand := exported.Turns[index].Command
 		servedCommand := served.Turns[index].Command
-		if (exportedCommand == nil) != (servedCommand == nil) {
-			t.Fatalf("turn %d command presence differs: export=%v websocket=%v", index, exportedCommand != nil, servedCommand != nil)
+		pushedCommand := pushed.SessionDetail.Turns[index].Command
+		if (exportedCommand == nil) != (servedCommand == nil) || (exportedCommand == nil) != (pushedCommand == nil) {
+			t.Fatalf("turn %d command presence differs: export=%v websocket=%v push=%v", index, exportedCommand != nil, servedCommand != nil, pushedCommand != nil)
 		}
 		if exportedCommand == nil {
 			continue
 		}
-		if *exportedCommand != *servedCommand {
-			t.Errorf("turn %d command differs: export=%+v websocket=%+v", index, *exportedCommand, *servedCommand)
+		if *exportedCommand != *servedCommand || *exportedCommand != *pushedCommand {
+			t.Errorf("turn %d command differs: export=%+v websocket=%+v push=%+v", index, *exportedCommand, *servedCommand, *pushedCommand)
 		}
 	}
 }
