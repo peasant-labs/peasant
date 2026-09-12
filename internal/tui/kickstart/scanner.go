@@ -619,34 +619,54 @@ func multiplicityText(value ingest.DiscoveryIdentityMultiplicity) string {
 	}
 }
 
-// scannerProjectLabels keeps identity and row text separate. Git projects use
-// their canonical remote label. Non-Git projects use the shortest path suffix
-// that distinguishes equal names in this load, so common duplicate names remain
-// clear without rendering an absolute physical path by default.
+// scannerProjectLabels keeps identity and row text separate. A remote that
+// yields a canonical label always names the project. Otherwise a named project
+// keeps "name (short path)" for a non-Git project and the bare name for an
+// unparseable remote, while an unnamed project renders only the shortest path
+// suffix that distinguishes it from the other unnamed projects in this load.
+// Path suffixes widen within a group, so equal project names and unnamed path
+// collisions stay distinct without rendering an absolute physical path by
+// default.
 func scannerProjectLabels(order []string, projects map[string]*scannerProjectAgg) map[string]string {
 	labels := make(map[string]string, len(order))
-	nonGitByName := map[string][]string{}
+	// Named non-Git projects widen per name; unnamed projects share one group
+	// so their suffixes widen against each other.
+	pathGroups := map[string][]string{}
 	for _, key := range order {
 		representative := projectRepresentative(projects[key].rows)
-		if representative.Listing.GitRemote != "" {
-			labels[key] = projectlabel.Label(representative.Listing.GitRemote, projectFallbackName(representative.Listing))
+		remote := representative.Listing.GitRemote
+		if label, ok := projectlabel.FromRemote(remote); ok {
+			labels[key] = label
 			continue
 		}
-		name := projectFallbackName(representative.Listing)
-		nonGitByName[name] = append(nonGitByName[name], key)
+		name := normalizedProjectName(representative.Listing)
+		if remote != "" && name != "" {
+			// An unparseable remote still names the project when discovery
+			// resolved a name; there is no canonical label to add.
+			labels[key] = name
+			continue
+		}
+		pathGroups[name] = append(pathGroups[name], key)
 	}
-	for name, keys := range nonGitByName {
+	for name, keys := range pathGroups {
 		paths := make([]ingest.ClonePath, len(keys))
 		for index, key := range keys {
 			paths[index] = representativeClonePath(projects[key].rows, projects[key].identity.GitDirectory)
 		}
 		for index, key := range keys {
 			shortPath := selectionprojection.ShortestDistinctCloneSuffix(paths[index], paths)
-			if shortPath == "" {
+			switch {
+			case name == "" && shortPath == "":
+				// A resolved path with no relative suffix (for example a
+				// filesystem root) is itself the only displayable identity.
+				labels[key] = paths[index].String()
+			case name == "":
+				labels[key] = shortPath
+			case shortPath == "":
 				labels[key] = name
-				continue
+			default:
+				labels[key] = fmt.Sprintf("%s (%s)", name, shortPath)
 			}
-			labels[key] = fmt.Sprintf("%s (%s)", name, shortPath)
 		}
 	}
 	return labels
@@ -661,12 +681,11 @@ func representativeClonePath(rows []PreparedSessionListing, fallback ingest.Repo
 	return ingest.ClonePath(fallback.String())
 }
 
-func projectFallbackName(sess ftue.SessionListing) string {
-	fallback := ingest.NormalizeProjectNameForMatch(sess.ProjectName)
-	if fallback == "" {
-		fallback = "(unknown project)"
-	}
-	return fallback
+// normalizedProjectName returns the discovery project name in the canonical
+// match form, or "" when discovery resolved none. Callers choose the display
+// fallback; an absent name is never replaced by a placeholder here.
+func normalizedProjectName(sess ftue.SessionListing) string {
+	return ingest.NormalizeProjectNameForMatch(sess.ProjectName)
 }
 
 // sortListings orders a branch's sessions by date (oldest first), then by ID
