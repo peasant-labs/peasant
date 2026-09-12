@@ -43,6 +43,9 @@ required_names:
   - checksum-less-pair-refuses-establishment
   - codex-empty-event-discriminator-refused
   - claude-corruption-after-refusal-refused
+  - claude-unknown-block-before-corrupt-block-refused
+  - claude-unknown-block-before-corrupt-tool-result-refused
+  - codex-unknown-block-before-missing-text-refused
 transcripts:
   claude-certifiable: |
     {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
@@ -79,6 +82,13 @@ transcripts:
     {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
     {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
     {"type":"event_msg","payload":{}}
+  claude-unknown-block-before-corrupt-block: |
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"image","data":"a content block no shipped build represents"},{"type":"tool_use","name":"missing-id","input":{"path":"."}}]}}
+  claude-unknown-block-before-corrupt-tool-result: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"image","data":"a content block no shipped build represents"},{"type":"text"}]}]}}
+  codex-unknown-block-before-missing-text: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"image","data":"a content block no shipped build represents"},{"type":"input_text"}]}}
 cases:
   - name: claude-null-identity-certifies
     harness: claude-code
@@ -167,4 +177,19 @@ cases:
   - name: claude-corruption-after-refusal-refused
     harness: claude-code
     transcript: claude-corruption-after-refusal
+    refused: true
+  # The same rule WITHIN a content-block array, including recursive
+  # tool_result content and the Codex message-block list: an unrepresented
+  # block must not mask a malformed known block after it.
+  - name: claude-unknown-block-before-corrupt-block-refused
+    harness: claude-code
+    transcript: claude-unknown-block-before-corrupt-block
+    refused: true
+  - name: claude-unknown-block-before-corrupt-tool-result-refused
+    harness: claude-code
+    transcript: claude-unknown-block-before-corrupt-tool-result
+    refused: true
+  - name: codex-unknown-block-before-missing-text-refused
+    harness: codex
+    transcript: codex-unknown-block-before-missing-text
     refused: true

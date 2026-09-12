@@ -32,6 +32,9 @@ func validateIndexInputClaim(write ingest.SessionEntryWrite) error {
 	// state whenever that state records an identity; both are checked with or
 	// without an input proof, because the claim is a fact about the pair the
 	// write consumed.
+	if write.ArtifactIdentity != nil && write.ExpectedState == nil {
+		return fmt.Errorf("store: artifact identity claim for session %s has no captured SQL state; replacement was refused before changing rows; capture the current state before claiming the pair identity", write.SessionID)
+	}
 	if write.ArtifactIdentity != nil && !validIndexInputHash(*write.ArtifactIdentity) {
 		return fmt.Errorf("store: artifact identity claim for session %s is not a valid digest; replacement was refused before changing rows; supply the actual consumed pair identity or omit the claim", write.SessionID)
 	}

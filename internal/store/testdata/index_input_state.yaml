@@ -61,6 +61,7 @@ requiredNames:
   - invalid-claimed-identity-refused
   - claimed-identity-without-proof-establishes
   - claimed-identity-stale-after-snapshot
+  - claimed-identity-without-state-refused
   - claimed-identity-identity-write-failure
   - claimed-identity-input-stamp-failure
   - content-status-changed
@@ -152,6 +153,9 @@ cases:
     claimIdentity: true
     mutationSQL: UPDATE sessions SET artifact_hash = printf('%064d', 1) WHERE session_id = ?
     stale: true
+  # A claim is a comparison against captured SQL state; without a captured
+  # state there is nothing to compare and the claim is refused.
+  - {name: claimed-identity-without-state-refused, noArtifact: true, noExpected: true, noProof: true, claimIdentity: true, wantError: true}
   - {name: claimed-identity-identity-write-failure, noArtifact: true, claimIdentity: true, failColumn: artifact_hash, wantError: true}
   - {name: claimed-identity-input-stamp-failure, noArtifact: true, claimIdentity: true, failColumn: indexed_input_hash, wantError: true}
   # The two fields the conditional write added. Each isolates its own field:

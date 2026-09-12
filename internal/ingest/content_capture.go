@@ -154,6 +154,13 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
+	// The same corruption-wins rule as validateCaptureJSONL applies WITHIN a
+	// content-block array: one unrepresented block must not mask a malformed
+	// known block after it. The first refusal is remembered, every remaining
+	// block is still validated (including recursive tool_result content), an
+	// ordinary error is returned wherever it appears, and the refusal is
+	// returned only when the whole array is otherwise valid.
+	var refusal *UnrepresentedRecordError
 	for i, block := range blocks {
 		switch block.Type {
 		case "text":
@@ -175,15 +182,28 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 			if block.ToolUseID == "" || len(block.Content) == 0 {
 				return fmt.Errorf("tool_result requires tool_use_id and content")
 			}
-			if err := validateCaptureContent(harness, block.Content, requireToolID); err != nil {
+			err := validateCaptureContent(harness, block.Content, requireToolID)
+			if err == nil {
+				continue
+			}
+			var unrepresented *UnrepresentedRecordError
+			if !errors.As(err, &unrepresented) {
 				return err
+			}
+			if refusal == nil {
+				refusal = unrepresented
 			}
 		default:
 			if block.Type == "" {
 				return fmt.Errorf("content block lacks its type")
 			}
-			return &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
+			if refusal == nil {
+				refusal = &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
+			}
 		}
+	}
+	if refusal != nil {
+		return refusal
 	}
 	return nil
 }
@@ -360,41 +380,52 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 						return nil, err
 					}
 				}
-				for _, block := range payload.Content {
-					if block.Type == "" {
-						return nil, fmt.Errorf("message block lacks its type")
-					}
-					if block.Type != "input_text" && block.Type != "output_text" {
-						return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
-					}
-				}
 				var fields struct {
 					Content []map[string]json.RawMessage `json:"content"`
 				}
 				if err := json.Unmarshal(env.Payload, &fields); err != nil {
 					return nil, err
 				}
-				for _, block := range fields.Content {
-					if block["text"] == nil {
+				// Corruption wins inside the block array too: an unknown block
+				// must not mask a known text block missing its text later.
+				var refusal *UnrepresentedRecordError
+				for i, block := range payload.Content {
+					if block.Type == "" {
+						return nil, fmt.Errorf("message block lacks its type")
+					}
+					if block.Type != "input_text" && block.Type != "output_text" {
+						if refusal == nil {
+							refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
+						}
+						continue
+					}
+					if i >= len(fields.Content) || fields.Content[i]["text"] == nil {
 						return nil, fmt.Errorf("message text block requires text")
 					}
 				}
+				if refusal != nil {
+					return nil, refusal
+				}
 			case codexResponseReasoning:
+				var refusal *UnrepresentedRecordError
 				for _, block := range payload.Summary {
 					if block.Type == "" {
 						return nil, fmt.Errorf("reasoning summary block lacks its type")
 					}
-					if block.Type != "summary_text" {
-						return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
+					if block.Type != "summary_text" && refusal == nil {
+						refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
 				}
 				for _, block := range payload.Content {
 					if block.Type == "" {
 						return nil, fmt.Errorf("reasoning block lacks its type")
 					}
-					if block.Type != "reasoning_text" && block.Type != "text" {
-						return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
+					if block.Type != "reasoning_text" && block.Type != "text" && refusal == nil {
+						refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
+				}
+				if refusal != nil {
+					return nil, refusal
 				}
 			case codexResponseFunctionCall, codexResponseCustomCall:
 				if payload.CallID == "" || payload.Name == "" || (len(payload.Arguments) == 0 && len(payload.Input) == 0) {
