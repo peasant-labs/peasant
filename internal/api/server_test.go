@@ -3,11 +3,16 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
 func TestServer_DynamicPort_Health(t *testing.T) {
@@ -134,6 +139,63 @@ func TestServer_MockConfig_ReturnsConfig(t *testing.T) {
 	}
 	if len(result.API) != 1 || result.API[0] != "dashboard" {
 		t.Errorf("API = %v, want [dashboard]", result.API)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Errorf("shutdown: %v", err)
+	}
+}
+
+// TestServer_TranscriptDownload_MissingFileNames404sWithPathAndCommand proves
+// the transcript-download handler, when the database has a session row but
+// the retained pair is gone from OutputDir, returns 404 naming BOTH the exact
+// directory it looked in AND the `peasant harvest --force --session <id>`
+// command the user must run to save the session again (design record
+// section 6, "API transcript download").
+func TestServer_TranscriptDownload_MissingFileNames404sWithPathAndCommand(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		sessionID = "99999999-9999-9999-9999-999999999999"
+		hostSlug  = "github.com-user-repo1"
+	)
+
+	output := t.TempDir()
+	s := openTestStore(t)
+	entry := makeStoreEntry(t, sessionID, hash1, hostSlug,
+		defaults.HarnessClaudeCode, day1Ms, 100, 50, "project-missing", 1, 0, 60000)
+	seedStore(t, s, []ingest.StoreEntry{entry})
+
+	srv := api.NewServer(api.ServerConfig{Port: 0, Store: s, OutputDir: output})
+	if err := srv.Listen(ctx); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	baseURL := "http://" + srv.Addr().String()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx) }()
+
+	resp, err := http.Get(baseURL + "/api/v1/sessions/" + sessionID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET transcript: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	wantDir := filepath.Join(output, hostSlug, sessionID)
+	wantCommand := fmt.Sprintf("peasant harvest --force --session %s", sessionID)
+	if got := string(body); !strings.Contains(got, wantDir) {
+		t.Errorf("404 body = %q, want it to name the looked-in directory %q", got, wantDir)
+	}
+	if got := string(body); !strings.Contains(got, wantCommand) {
+		t.Errorf("404 body = %q, want it to name the command %q", got, wantCommand)
 	}
 
 	cancel()
