@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -94,6 +95,12 @@ func TestWritePathDurability(t *testing.T) {
 				runTornNoRow(t)
 			case "torn_row_present":
 				runTornRowPresent(t, fixture.ExpectDiagnostic)
+			case "parent_mirror_fails":
+				runParentMirrorFails(t, fixture.ExpectDiagnostic)
+			case "mixed_transcript_new_metadata_old":
+				runMixedTranscriptNewMetadataOld(t, fixture.ExpectDiagnostic)
+			case "mixed_torn_write":
+				runMixedTornWrite(t, fixture.ExpectDiagnostic)
 			default:
 				t.Fatalf("unhandled durability scenario %q", fixture.Scenario)
 			}
@@ -336,6 +343,169 @@ func runTornRowPresent(t *testing.T, expectDiagnostic string) {
 	if state, err := ds.ReadIndexState(ctx, sid); err != nil || state == nil || state.ArtifactHash == nil || *state.ArtifactHash != rowHash {
 		t.Fatalf("the damaged copy must never overwrite the row; got %+v, %v", state, err)
 	}
+}
+
+// runParentMirrorFails plants a mirror failure on the parent only. The child
+// is held until the parent commits, then drained in a later transaction where
+// the store refuses it because the parent is not stored. Neither row is
+// recorded and a restart re-ingests both.
+func runParentMirrorFails(t *testing.T, expectDiagnostic string) {
+	if expectDiagnostic == "" {
+		t.Fatal("parent_mirror_fails fixture must carry the expected diagnostic text")
+	}
+	ctx := context.Background()
+	mfs := testutil.NewMemFS()
+	parentID, _ := ingest.NewSessionID(testSessionID)
+	childID, _ := ingest.NewSessionID(testSessionID2)
+	parentSource := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	childSource := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID2)
+	modTime := time.Now().Add(-2 * time.Hour)
+	setupSourceFile(t, mfs, parentSource)
+	setupSourceFile(t, mfs, childSource)
+	mfs.ModTimes[parentSource], mfs.ModTimes[childSource] = modTime, modTime
+
+	parent := makeDiscoveredSession(t, testSessionID, parentSource, modTime)
+	child := makeDiscoveredSession(t, testSessionID2, childSource, modTime)
+	child.ParentUUID = &parentID
+	parentMeta := makeMinimalMeta(t, testSessionID)
+	childMeta := makeMinimalMeta(t, testSessionID2)
+	childMeta.ParentUUID = &parentID
+	metas := map[ingest.SessionID]*ingest.UnifiedMetadata{parentID: parentMeta, childID: childMeta}
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{parent, child}, metas),
+	}
+	indexerEntries := durabilityStubEntries(parentID)
+	for id, entries := range durabilityStubEntries(childID) {
+		indexerEntries[id] = entries
+	}
+	indexer := &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile, Entries: indexerEntries}
+	dbPath := storetest.CopyGoldenDB(t)
+
+	// Run 1: the parent's row fails. The child is refused as its parent is not
+	// stored, in a later transaction than the parent's own failed mirror.
+	crashed := newDurabilityStore(t, dbPath)
+	crashed.FailMirrorFor(parentID, errors.New("simulated crash before the parent row committed"))
+	result, err := newDurabilityPipeline(t, mfs, crashed, adapters, indexer, makePipelineConfig(testOutputDir)).Run(ctx)
+	if err != nil {
+		t.Fatalf("parent-fail run: %v", err)
+	}
+	if !hasDiagnosticContaining(result.Diagnostics, expectDiagnostic) {
+		t.Fatalf("the child must be refused because its parent is not stored; diagnostics = %+v", result.Diagnostics)
+	}
+	if state, err := crashed.ReadIndexState(ctx, parentID); err != nil || state != nil {
+		t.Fatalf("the failed parent must leave no row; got %+v, %v", state, err)
+	}
+	if state, err := crashed.ReadIndexState(ctx, childID); err != nil || state != nil {
+		t.Fatalf("the refused child must leave no row; got %+v, %v", state, err)
+	}
+	crashed.Shutdown()
+
+	// Run 2: the restart re-ingests both, parent before child.
+	restarted := newDurabilityStore(t, dbPath)
+	if _, err := newDurabilityPipeline(t, mfs, restarted, adapters, indexer, makePipelineConfig(testOutputDir)).Run(ctx); err != nil {
+		t.Fatalf("restart run: %v", err)
+	}
+	for _, id := range []ingest.SessionID{parentID, childID} {
+		state, err := restarted.ReadIndexState(ctx, id)
+		if err != nil || state == nil || state.ArtifactHash == nil {
+			t.Fatalf("the restart must record %s; got %+v, %v", id, state, err)
+		}
+	}
+}
+
+// seedValidPairWithRow writes a valid saved pair and records its row at that
+// pair's hash, the starting point for a power-loss case where the row is
+// durable but the saved copy is later left torn or mixed.
+func seedValidPairWithRow(t *testing.T, ctx context.Context, mfs *testutil.MemFS, ds *durabilityStore, output, idStr string) (ingest.SessionID, string) {
+	t.Helper()
+	sid, artifact := writeRebuildPair(t, mfs, output, idStr, "", rebuildTranscript)
+	if results := ds.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}}); len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("seed row: %+v", results)
+	}
+	return sid, artifact.ArtifactHash
+}
+
+// rebuildReportsDamaged runs the rebuild read and asserts it reports the saved
+// copy as damaged by its exact diagnostic and never overwrites the row.
+func rebuildReportsDamaged(t *testing.T, ctx context.Context, mfs *testutil.MemFS, ds *durabilityStore, output string, sid ingest.SessionID, rowHash, expectDiagnostic string) {
+	t.Helper()
+	rebuild := makePipelineConfig(output, func(c *ingest.PipelineConfig) {
+		c.Reindex = true
+		c.RebuildAll = true
+		c.Force = true
+	})
+	result, err := newDurabilityPipeline(t, mfs, ds, map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
+	}, &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile}, rebuild).Run(ctx)
+	if err != nil {
+		t.Fatalf("rebuild read: %v", err)
+	}
+	if len(result.Summary.RebuildSkipped) != 1 || result.Summary.RebuildSkipped[0] != sid {
+		t.Fatalf("the rebuild must report the damaged saved copy; skipped = %v", result.Summary.RebuildSkipped)
+	}
+	if !hasDiagnosticContaining(result.Diagnostics, expectDiagnostic) {
+		t.Fatalf("the rebuild must print the damaged-pair diagnostic %q; got %+v", expectDiagnostic, result.Diagnostics)
+	}
+	if state, err := ds.ReadIndexState(ctx, sid); err != nil || state == nil || state.ArtifactHash == nil || *state.ArtifactHash != rowHash {
+		t.Fatalf("the damaged copy must never overwrite the row; got %+v, %v", state, err)
+	}
+}
+
+// runMixedTranscriptNewMetadataOld builds the crash-reachable mixed ordering:
+// the transcript is the new content while the metadata is still the old file
+// naming the old transcript hash. The pair is refused by hash on a direct read
+// and reported as damaged by the rebuild.
+func runMixedTranscriptNewMetadataOld(t *testing.T, expectDiagnostic string) {
+	ctx := context.Background()
+	mfs := testutil.NewMemFS()
+	output := testOutputDir
+	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
+	sid, rowHash := seedValidPairWithRow(t, ctx, mfs, ds, output, "11111111-1111-4111-8111-111111111111")
+
+	sessionDir := ingest.SessionDir(output, testutil.TestHostSlug, sid.String(), "")
+	metadataPath := ingest.SessionMetadataPath(output, testutil.TestHostSlug, sid.String(), "")
+	transcriptPath := fmt.Sprintf("%s/%s--transcript.jsonl", sessionDir, sid.String())
+	// The metadata is the old file that names the old transcript hash: capture
+	// it, then install the new transcript without rewriting the metadata, which
+	// is exactly the ordering a crash before the metadata-last rename leaves.
+	oldMetadata, err := mfs.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mfs.WriteFile(transcriptPath, []byte(rebuildChangedTranscript), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := mfs.ReadFile(metadataPath); err != nil || !bytes.Equal(current, oldMetadata) {
+		t.Fatalf("the metadata must still be the old file after the transcript changed; err=%v", err)
+	}
+	// A direct read refuses the mixed pair by its hash: it is never served.
+	if _, err := ingest.ReadManagedPair(mfs, output, metadataPath, sid); err == nil {
+		t.Fatal("a mixed pair whose metadata names a different hash must be refused on read")
+	}
+	rebuildReportsDamaged(t, ctx, mfs, ds, output, sid, rowHash, expectDiagnostic)
+}
+
+// runMixedTornWrite leaves the transcript truncated mid-write while the row and
+// metadata name a whole-file hash. The pair is refused by hash on a direct read
+// and reported as damaged by the rebuild.
+func runMixedTornWrite(t *testing.T, expectDiagnostic string) {
+	ctx := context.Background()
+	mfs := testutil.NewMemFS()
+	output := testOutputDir
+	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
+	sid, rowHash := seedValidPairWithRow(t, ctx, mfs, ds, output, "11111111-1111-4111-8111-111111111111")
+
+	sessionDir := ingest.SessionDir(output, testutil.TestHostSlug, sid.String(), "")
+	metadataPath := ingest.SessionMetadataPath(output, testutil.TestHostSlug, sid.String(), "")
+	transcriptPath := fmt.Sprintf("%s/%s--transcript.jsonl", sessionDir, sid.String())
+	// A torn write: the transcript is truncated to a partial line.
+	if err := mfs.WriteFile(transcriptPath, []byte(rebuildTranscript[:len(rebuildTranscript)/2]), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ingest.ReadManagedPair(mfs, output, metadataPath, sid); err == nil {
+		t.Fatal("a torn transcript must be refused on read against the metadata hash")
+	}
+	rebuildReportsDamaged(t, ctx, mfs, ds, output, sid, rowHash, expectDiagnostic)
 }
 
 func containsSession(ids []ingest.SessionID, want ingest.SessionID) bool {
