@@ -189,6 +189,22 @@ func TestWritePathColumns(t *testing.T) {
 				if result.Summary.New != 0 || result.Summary.Updated != 0 {
 					t.Errorf("a future-schema row was ingested: %+v", result.Summary)
 				}
+				// The refusal must be SURFACED as a diagnostic, not silently
+				// classified unchanged. Without this assertion the case passes
+				// whether the version guard fires or the row is merely treated
+				// as up to date, since both leave New/Updated and the pair reads
+				// at zero. Requiring the metadata_refused diagnostic is what ties
+				// the observable to the guard: drop the refusal report and this
+				// reddens while the counts stay green.
+				refused := false
+				for _, d := range result.Diagnostics {
+					if d.ErrorType == "metadata_refused" {
+						refused = true
+					}
+				}
+				if !refused {
+					t.Errorf("future-schema row was not refused with a metadata_refused diagnostic: %+v", result.Diagnostics)
+				}
 			}
 
 			if got := mfs.Count(testutil.FSOpReadFile, metadataPath) + mfs.Count(testutil.FSOpReadFile, transcriptPath); got != c.PairReadFile {
