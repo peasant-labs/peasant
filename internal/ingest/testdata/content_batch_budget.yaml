@@ -13,16 +13,16 @@
 # seeded with identifiers that descend as parsing advances. The commit ORDER
 # therefore changes whenever the grouping changes.
 budget: defaults.FullContentWriteBatchBytes
-required_names: [byte-budget-splits, oversized-session-progress, under-budget-sessions-share-one-flush]
+required_names: [index_batch_by_bytes, oversized_session_alone, under-budget-sessions-share-one-flush]
 cases:
   # Two sessions that cannot share the budget, then a small one that can join the
   # second: the split happens where the budget is crossed, not per session.
-  - name: byte-budget-splits
+  - name: index_batch_by_bytes
     session_budget_fractions: [0.6, 0.6, 0.000001]
     expected_flush_groups: [[0], [1, 2]]
   # A session larger than the whole budget still makes progress on its own, and
   # does not drag the next session into its flush.
-  - name: oversized-session-progress
+  - name: oversized_session_alone
     session_budget_fractions: [1.1, 0.000001]
     expected_flush_groups: [[0], [1]]
   # Under the budget, sessions travel together: this is the case a lost split
