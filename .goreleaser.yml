@@ -45,6 +45,9 @@ archives:
     files:
       - LICENSE
       - README.md
+      # Dependency license notices required for binary redistribution; generated
+      # by scripts/gen-third-party-notices.sh (kept fresh by tests.yml).
+      - THIRD_PARTY_NOTICES
 
 checksum:
   name_template: "checksums.txt"
@@ -94,6 +97,13 @@ nfpms:
         packager: deb
       - src: ./LICENSE
         dst: /usr/share/licenses/peasant/LICENSE
+        packager: rpm
+      # Dependency license notices, next to each packager's own LICENSE.
+      - src: ./THIRD_PARTY_NOTICES
+        dst: /usr/share/doc/peasant/THIRD_PARTY_NOTICES
+        packager: deb
+      - src: ./THIRD_PARTY_NOTICES
+        dst: /usr/share/licenses/peasant/THIRD_PARTY_NOTICES
         packager: rpm
     deb:
       lintian_overrides:

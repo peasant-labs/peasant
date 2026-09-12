@@ -179,6 +179,20 @@ build: web
 nix-vendor-hash:
 	./scripts/update-nix-vendor-hash.sh
 
+# Regenerate the dependency license notices shipped with the binary. web-stub
+# satisfies the //go:embed all:web/out requirement so `go list` can load
+# ./cmd/peasant; the embedded web content does not affect the Go module set.
+third-party-notices: web-stub
+	./scripts/gen-third-party-notices.sh
+
+# CI gate: fail if the committed notices drift from the deps, and fail on any
+# copyleft (forbidden/restricted) license entering the binary's module set.
+third-party-notices-check: web-stub
+	./scripts/gen-third-party-notices.sh
+	git diff --exit-code -- THIRD_PARTY_NOTICES
+	go run github.com/google/go-licenses@v1.6.0 check ./cmd/peasant \
+		--disallowed_types=forbidden,restricted
+
 go:
 	@$(build_peasant_cli)
 

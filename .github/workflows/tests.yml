@@ -45,6 +45,8 @@ on:
       - "scripts/install-goreleaser"
       - "scripts/goreleaser-v2.17.1-homebrew.patch"
       - "scripts/update-nix-vendor-hash.sh"
+      - "scripts/gen-third-party-notices.sh"
+      - "THIRD_PARTY_NOTICES"
       - "scripts/release-e2e/**"
   push:
     branches: [develop, main]
@@ -73,6 +75,8 @@ on:
       - "scripts/install-goreleaser"
       - "scripts/goreleaser-v2.17.1-homebrew.patch"
       - "scripts/update-nix-vendor-hash.sh"
+      - "scripts/gen-third-party-notices.sh"
+      - "THIRD_PARTY_NOTICES"
       - "scripts/release-e2e/**"
   # Reusable entry point: release-pr.yml calls this on a release(...) PR so the
   # quality gate runs even when the release marker commit touches none of the
@@ -208,6 +212,33 @@ jobs:
             CGO_ENABLED=0 go build -buildvcs=false ./cmd/peasant
             echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
           '
+
+  # Dependency-license gate. Two invariants on the third-party Go modules
+  # compiled into the binary:
+  #   1. THIRD_PARTY_NOTICES is fresh — regenerating it from the pinned module
+  #      set produces no diff (the file that ships with the binary matches the
+  #      deps).
+  #   2. No copyleft (forbidden/restricted) license has entered the module set.
+  # Both run via `make third-party-notices-check`. web-stub satisfies the
+  # //go:embed all:web/out directive so `go list ./cmd/peasant` can load.
+  third-party-notices:
+    name: third-party license notices
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Notices are fresh + no copyleft dependency
+        run: make third-party-notices-check
 
   # ---------------------------------------------------------------------------
   # web/ package-manager gates. web/ carries one dependency graph in
