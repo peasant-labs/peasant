@@ -1,0 +1,26 @@
+requiredNames: [acquired-evidence, judged-origin-outranks-adapter-evidence, retained-preserves-evidence, explicit-zero-cursor, association-failure-rolls-back, orphan-refused, parent-first, future-stored-adapter-refused, missing-stats-stay-unknown]
+sessionID: 11111111-1111-4111-8111-111111111111
+parentID: 22222222-2222-4222-8222-222222222222
+projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hostSlug: github.com-artifact-fixture
+startedAt: 1700000000000
+transcript: '{"type":"user","message":{"role":"user","content":"retained fixture"}}'
+originalCursor: 40
+originalOrigin: user
+originalCommit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+replacementCommit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+cases:
+  - {name: acquired-evidence, eventSeq: 41, origin: agent, wantCursor: 41, wantOrigin: agent}
+  # A resolver already judged this row and recorded the rule version it judged
+  # at. session_origin and origin_version are one verdict moved by one
+  # statement, so adapter evidence may not replace half of it: doing so would
+  # leave the row above the resolver's watermark carrying an unjudged origin,
+  # where the pass that exists to correct it can never revisit it.
+  - {name: judged-origin-outranks-adapter-evidence, judgedOrigin: agent, origin: user, eventSeq: 41, wantCursor: 41, wantOrigin: agent}
+  - {name: retained-preserves-evidence, wantCursor: 40, wantOrigin: user}
+  - {name: explicit-zero-cursor, eventSeq: 0, origin: unknown, wantCursor: 0, wantOrigin: unknown}
+  - {name: association-failure-rolls-back, eventSeq: 41, origin: agent, invalidCommit: true, wantError: true, wantCursor: 40, wantOrigin: user}
+  - {name: orphan-refused, orphan: true, wantError: true}
+  - {name: parent-first, parentFirst: true}
+  - {name: future-stored-adapter-refused, storedAdapter: 999, wantError: true, wantCursor: 40, wantOrigin: user}
+  - {name: missing-stats-stay-unknown, missingStats: true}

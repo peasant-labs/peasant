@@ -6,7 +6,23 @@
 # below decodes to no directory on any machine, so the only directory a scan can
 # ask git about is the session's own working directory - one directory per row,
 # which is what makes "this session cost zero git lookups" countable per row.
-declared_rows: 6
+#
+# RENAMED CASE, recorded so the change is not silent: the required name
+# "recorded session still being written keeps its record" named the OLD verdict
+# for an active source. Capturing active sources consistently made a scan resolve
+# such a session again rather than reuse its record, and the case below was
+# renamed with its verdict to "recorded active session is refreshed". The
+# coverage was never removed, so the required name follows the case instead of
+# the old verdict being restored, which would now assert behaviour the product
+# deliberately left behind.
+required_names:
+  - recorded session with a settled source reuses the record
+  - recorded session whose source changed after ingest is resolved again
+  - recorded active session is refreshed
+  - session recorded under an older metadata version is resolved again
+  - session the store never recorded is resolved
+  - recorded session whose metrics row is gone is still known
+  - compatible v9 session with a settled source reuses the record
 claude_slug: "-peasant-rescan-fixture-acme-tool"
 # What the injected git resolver answers for any directory it is asked about.
 # A row that expects these values proves the scan walked git; a row that expects
@@ -14,6 +30,20 @@ claude_slug: "-peasant-rescan-fixture-acme-tool"
 resolved_remote: "git@github.com:acme/resolved-by-git.git"
 resolved_branch: "resolved-by-git"
 cases:
+  - name: compatible v9 session with a settled source reuses the record
+    session_id: "77777777-7777-7777-7777-777777777777"
+    session_cwd: "/peasant-rescan/compatible"
+    record: complete
+    recorded_remote: "git@github.com:acme/recorded-compatible.git"
+    recorded_branch: "recorded-compatible"
+    recorded_title: "recorded compatible title"
+    recorded_schema_version: compatible-v9
+    source_age: settled
+    want_resolution: reused
+    want_remote: "git@github.com:acme/recorded-compatible.git"
+    want_branch: "recorded-compatible"
+    want_title: "recorded compatible title"
+
   - name: recorded session with a settled source reuses the record
     session_id: "11111111-1111-1111-1111-111111111111"
     session_cwd: "/peasant-rescan/settled"

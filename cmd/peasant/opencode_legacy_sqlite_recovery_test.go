@@ -190,11 +190,16 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 		default:
 			return document, errors.New("legacy SQLite recovery fixture contains an unknown envelope mutation")
 		}
-		if testCase.ExpectedRecovery != (testCase.EnvelopeMutation == legacySQLiteEnvelopeNone) {
-			return document, errors.New("legacy SQLite recovery fixture does not distinguish valid and invalid managed envelopes")
-		}
-		if testCase.ExpectedRecovery != (testCase.ExpectedToolCall != nil) {
-			return document, errors.New("legacy SQLite recovery fixture tool expectation does not match recovery outcome")
+		// A missing or damaged pair is repaired by re-ingesting the native
+		// provider source during the routine harvest (URD ruling 2026-09-12).
+		// A case that expects the recovery must declare its evidence, and a
+		// case that expects none must not.
+		if testCase.ExpectedRecovery {
+			if testCase.ExpectedEntries == 0 || testCase.ExpectedTurns == 0 || testCase.ExpectedToolCall == nil {
+				return document, errors.New("legacy SQLite recovery fixture expects a recovery but declares no entries, turns or tool call")
+			}
+		} else if testCase.ExpectedEntries != 0 || testCase.ExpectedTurns != 0 || testCase.ExpectedToolCall != nil {
+			return document, errors.New("legacy SQLite recovery fixture declares recovery evidence without expecting a recovery")
 		}
 	}
 	for label, required := range map[string][]string{
@@ -233,7 +238,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 
 	commandRoot := t.TempDir()
 	outputRoot := filepath.Join(commandRoot, "managed")
-	args := []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
+	args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 	initialArgs := append(append([]string(nil), args...), "--force", "--include-active")
 	if output, err := executeHarvestCmd(t, commandRoot, initialArgs); err != nil {
 		t.Fatalf("initial mounted WAL harvest: %v\n%s", err, output)
@@ -359,7 +364,7 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
+			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 			if err != nil {
 				t.Fatalf("harvest canonical eligible candidates: %v\n%s", err, output)
 			}
@@ -396,7 +401,7 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			setSyntheticSQLiteContentModTime(t, materialized.Path, time.UnixMilli(1_700_000_000_000))
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			args := []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
+			args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 			initialArgs := append(append([]string(nil), args...), "--force", "--include-active")
 			if output, err := executeHarvestCmd(t, commandRoot, initialArgs); err != nil {
 				t.Fatalf("initial mounted recovery harvest: %v\n%s", err, output)
@@ -450,11 +455,21 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			}
 			if testCase.ExpectedRecovery {
 				if metrics == nil || metrics.TurnCount == nil || *metrics.TurnCount != testCase.ExpectedTurns {
-					t.Fatalf("source-info recovery metrics=%+v, want %d turns", metrics, testCase.ExpectedTurns)
+					got := -1
+					if metrics != nil && metrics.TurnCount != nil {
+						got = *metrics.TurnCount
+					}
+					t.Fatalf("source-info recovery turns=%d, want %d", got, testCase.ExpectedTurns)
 				}
 				assertLegacySQLiteToolFold(t, entries, testCase.ExpectedToolCall)
+				if _, statErr := os.Stat(metadataPath); statErr != nil {
+					t.Fatalf("repair did not restore the managed metadata sidecar: %v", statErr)
+				}
+				// The native source did not change, so the repaired projection
+				// is the same bytes the initial ingest wrote; a mutated managed
+				// envelope is replaced rather than interpreted.
 				if !bytes.Equal(mustReadFile(t, managedPath), managedBefore) {
-					t.Fatal("source-info recovery rewrote intact managed projection bytes")
+					t.Fatal("repair did not restore the managed projection from the native source")
 				}
 			} else if metrics != nil {
 				t.Fatalf("invalid managed envelope unexpectedly recomputed metrics: %+v", metrics)

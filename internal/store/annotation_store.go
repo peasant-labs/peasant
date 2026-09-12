@@ -268,6 +268,7 @@ ORDER BY v.created_at DESC`
 	// rejects unknown or user-defined type_ids.
 	sqlListSystemAnnotations = annotationPushRowBase + `
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
   AND COALESCE(ata.state, 'resolved') = 'resolved'` + annotationPushRowQueryTail
 
 	// sqlListSupersededAnnotations returns system-origin retraction candidates.
@@ -276,7 +277,8 @@ ORDER BY v.created_at DESC`
 	// target-loss path relies on the persisted content hash to retract the exact
 	// annotation Village already stored.
 	sqlListSupersededAnnotations = annotationPushRowBase + `
-  AND (v.superseded_by IS NOT NULL OR ata.state = 'superseded')` + annotationPushRowQueryTail
+  AND (v.superseded_by IS NOT NULL OR ata.state = 'superseded'
+       OR EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL))` + annotationPushRowQueryTail
 
 	// sqlFindExistingSessionAnnotation finds the most recent non-superseded annotation
 	// for a given (annotation_type_id, annotator_id, session_id) triple.
@@ -288,6 +290,7 @@ WHERE a.annotation_type_id = ?
   AND a.annotator_id = ?
   AND ts.session_id = ?
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC
 LIMIT 1`
 
@@ -302,6 +305,7 @@ WHERE a.annotation_type_id = ?
   AND te.session_id = ?
   AND te.entry_index = ?
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC
 LIMIT 1`
 
@@ -313,6 +317,7 @@ WHERE ts.session_id IN (%s)
   AND a.annotation_type_id IN (%s)
   AND a.annotator_id IN (%s)
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC`
 
 	sqlPrefetchExistingEntryAnnotationsFmt = `SELECT a.annotation_type_id, a.annotator_id, te.session_id, te.entry_index,
@@ -323,6 +328,7 @@ WHERE te.session_id IN (%s)
   AND a.annotation_type_id IN (%s)
   AND a.annotator_id IN (%s)
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC`
 
 	// sqlSupersedeAnnotation marks an annotation as superseded by another.
@@ -364,6 +370,7 @@ WHERE id = ?`
 FROM annotations_with_target v
 WHERE v.target_session_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetAssociationAnnotationsForSession resolves a normalized association
@@ -376,6 +383,7 @@ JOIN annotation_target_associations ata ON ata.annotation_id = v.id
 JOIN session_commit_associations sca ON sca.association_id = ata.association_id
 WHERE sca.session_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetAllSessionAnnotations returns every non-superseded session-level
@@ -386,6 +394,7 @@ ORDER BY v.created_at DESC`
 FROM annotations_with_target v
 WHERE v.target_session_id IS NOT NULL
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetEntryAnnotationsForSession returns every non-superseded entry-level
@@ -396,6 +405,7 @@ ORDER BY v.created_at DESC`
 FROM annotations_with_target v
 WHERE v.target_entry_session_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	sqlGetAnnotationsForEntry = `SELECT ` + sqlAnnotationViewCols + `
@@ -403,6 +413,7 @@ FROM annotations_with_target v
 WHERE v.target_entry_session_id = ?
   AND v.target_entry_index = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetAnnotationsForProject returns all non-superseded annotations targeting
@@ -411,6 +422,7 @@ ORDER BY v.created_at DESC`
 FROM annotations_with_target v
 WHERE v.target_project_hash = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetEffectiveAnnotation uses priority_override ordering:
@@ -421,6 +433,7 @@ JOIN annotation_types t ON t.id = v.annotation_type_id
 WHERE v.target_session_id = ?
   AND v.type_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY
   COALESCE(t.priority_override,
     CASE v.annotator_kind
@@ -654,6 +667,11 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	// Transaction: parent + TPT child must succeed or fail together.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	if params.EntryTarget != nil {
+		if err := s.validateIndexFormatIDsOnConn(conn, []string{params.EntryTarget.SessionID}); err != nil {
+			return "", err
+		}
+	}
 
 	// Insert parent annotation row.
 	if err = sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
@@ -802,12 +820,17 @@ func (s *Store) GetSessionAnnotationsBulk(ctx context.Context) (map[string][]Ann
 // GetAnnotationsForSession (which returns only session-level annotations) so the
 // REST endpoint can surface per-turn labels — including ingest-generated rule
 // labels — to the viewer.
-func (s *Store) GetEntryAnnotationsForSession(ctx context.Context, sessionID string) ([]AnnotationRow, error) {
+func (s *Store) GetEntryAnnotationsForSession(ctx context.Context, sessionID string) (_ []AnnotationRow, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var rows []AnnotationRow
 	if err := sqlitex.ExecuteTransient(conn, sqlGetEntryAnnotationsForSession, &sqlitex.ExecOptions{
@@ -854,12 +877,17 @@ func (s *Store) GetAnnotationsForProject(ctx context.Context, projectHash string
 
 // GetAnnotationsForEntry returns all non-superseded annotations targeting the given
 // entry (sessionID + entryIndex), ordered by created_at DESC.
-func (s *Store) GetAnnotationsForEntry(ctx context.Context, sessionID string, entryIndex int) ([]AnnotationRow, error) {
+func (s *Store) GetAnnotationsForEntry(ctx context.Context, sessionID string, entryIndex int) (_ []AnnotationRow, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var rows []AnnotationRow
 	if err := sqlitex.ExecuteTransient(conn, sqlGetAnnotationsForEntry, &sqlitex.ExecOptions{
@@ -997,6 +1025,10 @@ func (s *Store) listAnnotationPushRows(ctx context.Context, query, label string)
 	}
 	defer s.pool.Put(conn)
 
+	return listAnnotationPushRowsOnConn(conn, query, label)
+}
+
+func listAnnotationPushRowsOnConn(conn *sqlite.Conn, query, label string) ([]ingest.AnnotationPushRow, error) {
 	var rows []ingest.AnnotationPushRow
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -1260,6 +1292,11 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 	// so the transaction closes before the connection returns to the pool.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	if p.EntryTarget != nil {
+		if err := s.validateIndexFormatIDsOnConn(conn, []string{p.EntryTarget.SessionID}); err != nil {
+			return "", err
+		}
+	}
 
 	// 1. Insert new annotation parent row (is_primary=0 for import-originated annotations).
 	if err = sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
@@ -1365,7 +1402,7 @@ func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.
 	}()
 
 	var fatalErr error
-	results, fatalErr = applyClassifierAnnotationWritesOnConn(conn, writes, stats)
+	results, fatalErr = s.applyClassifierAnnotationWritesOnConn(conn, writes, stats)
 	if fatalErr != nil {
 		txnErr = fatalErr
 	}
@@ -1423,7 +1460,13 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	defer s.pool.Put(conn)
 
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
 	txnOpen := true
 	defer func() {
 		if txnOpen {
@@ -1439,8 +1482,28 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	}
 
 	for i, batch := range batches {
+		if batch.Skipped {
+			continue
+		}
+		if batch.Input != nil {
+			results[i].Results, results[i].Err = s.applyCapturedClassifierBatch(conn, batch, stats)
+			if results[i].Err != nil {
+				results[i].Results = classifierAnnotationFailedResults(len(batch.Writes), results[i].Err)
+			}
+			// A captured pass can retire cached rows or roll back its savepoint.
+			// Subsequent batches must resolve dedup against the resulting database.
+			dedupCache = nil
+			continue
+		}
+		if batch.RunState != nil {
+			if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{batch.SessionID}); err != nil {
+				results[i].Err = err
+				results[i].Results = classifierAnnotationFailedResults(len(batch.Writes), err)
+				continue
+			}
+		}
 		storeWrites := sessionAnnotationBatchStoreWrites(batch.Writes)
-		writeResults, fatalErr := applyClassifierAnnotationWritesOnConnWithCache(conn, storeWrites, stats, dedupCache)
+		writeResults, fatalErr := s.applyClassifierAnnotationWritesOnConnWithCache(conn, storeWrites, stats, dedupCache)
 		results[i].Results = writeResults
 		if fatalErr != nil {
 			results[i].Err = fatalErr
@@ -1482,14 +1545,14 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	return results
 }
 
-func applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) ([]ingest.ClassifierAnnotationWriteResult, error) {
-	return applyClassifierAnnotationWritesOnConnWithCache(conn, writes, stats, nil)
+func (s *Store) applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) ([]ingest.ClassifierAnnotationWriteResult, error) {
+	return s.applyClassifierAnnotationWritesOnConnWithCache(conn, writes, stats, nil)
 }
 
-func applyClassifierAnnotationWritesOnConnWithCache(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) ([]ingest.ClassifierAnnotationWriteResult, error) {
+func (s *Store) applyClassifierAnnotationWritesOnConnWithCache(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) ([]ingest.ClassifierAnnotationWriteResult, error) {
 	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
 	for i := range writes {
-		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats, dedupCache)
+		outcome, err, fatal := s.applyClassifierAnnotationSavepoint(conn, writes[i], stats, dedupCache)
 		results[i] = outcome
 		if err != nil {
 			results[i].Err = err
@@ -1776,7 +1839,7 @@ func classifierAnnotationFailedResults(count int, err error) []ingest.Classifier
 	return results
 }
 
-func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) (ingest.ClassifierAnnotationWriteResult, error, bool) {
+func (s *Store) applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) (ingest.ClassifierAnnotationWriteResult, error, bool) {
 	const savepointName = "classifier_annotation_batch_item"
 	result := ingest.ClassifierAnnotationWriteResult{}
 	savepointStarted := annotationBatchProfileStart(stats)
@@ -1786,6 +1849,12 @@ func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.Classifi
 	}
 	recordBatchSavepointProfile(stats, &result.Profile, time.Since(savepointStarted))
 
+	if write.Create.EntryTarget != nil {
+		if err := s.validateIndexFormatIDsOnConn(conn, []string{write.Create.EntryTarget.SessionID}); err != nil {
+			rollbackErr, fatal := rollbackClassifierAnnotationSavepoint(conn, savepointName, err, stats, &result.Profile)
+			return result, rollbackErr, fatal
+		}
+	}
 	applied, err := applyClassifierAnnotationOnConn(conn, write, stats, dedupCache)
 	applied.Profile.Add(result.Profile)
 	result = applied
@@ -2887,6 +2956,11 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 		if validationErr := validateCreateAnnotationTarget(p); validationErr != nil {
 			err = fmt.Errorf("store: BatchCreateAnnotations[%d]: %w", i, validationErr)
 			return nil, err
+		}
+		if p.EntryTarget != nil {
+			if err = s.validateIndexFormatIDsOnConn(conn, []string{p.EntryTarget.SessionID}); err != nil {
+				return nil, err
+			}
 		}
 		newID := uuid.New().String()
 		ids[i] = newID

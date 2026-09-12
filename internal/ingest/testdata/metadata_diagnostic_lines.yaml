@@ -1,0 +1,43 @@
+# Physical-line cases for the metadata extractors of the JSONL harnesses
+# (internal/ingest/claude.go, cursor.go, codex.go).
+#
+# Each case builds a NATIVE source from its lines, filters it with an injected
+# per-record limit so the over-limit record becomes a one-line stand-in, and then
+# extracts metadata from that filtered artifact, which is the read every reindex
+# and every retained-input fallback performs.
+#
+# The line a diagnostic names must be the PHYSICAL line of the source, counting
+# the lines the reader passed over. A counter kept beside the reader names a
+# line that holds a valid record, and the user who opens it finds nothing wrong.
+requiredNames:
+  - claude_parse_error_after_an_omitted_record
+  - cursor_parse_error_after_an_omitted_record
+  - codex_parse_error_after_an_omitted_record
+cases:
+  - name: claude_parse_error_after_an_omitted_record
+    harness: claude-code
+    lines:
+      - text: '{"type":"user","message":{"role":"user","content":"first"},"timestamp":"2026-09-10T12:00:00Z"}'
+      - oversized: true
+      - text: '{"type":"assistant","message":{"role":"assistant","content":"second"},"timestamp":"2026-09-10T12:00:01Z"}'
+      - text: '{"type":"user","message":'
+    expectedLocation: line 4
+    expectedMessageContains: failed to parse JSONL line
+  - name: cursor_parse_error_after_an_omitted_record
+    harness: cursor
+    lines:
+      - text: '{"type":"user","message":{"role":"user","content":"first"},"timestamp":"2026-09-10T12:00:00Z"}'
+      - oversized: true
+      - text: '{"type":"assistant","message":{"role":"assistant","content":"second"},"timestamp":"2026-09-10T12:00:01Z"}'
+      - text: '{"type":"user","message":'
+    expectedLocation: line 4
+    expectedMessageContains: failed to parse Cursor JSONL line
+  - name: codex_parse_error_after_an_omitted_record
+    harness: codex
+    lines:
+      - text: '{"timestamp":"2026-09-10T12:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}'
+      - oversized: true
+      - text: '{"timestamp":"2026-09-10T12:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]}}'
+      - text: '{"timestamp":"2026-09-10T12:00:02Z","type":'
+    expectedLocation: line 4
+    expectedMessageContains: failed to parse rollout line

@@ -105,7 +105,7 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			setSyntheticSQLiteContentModTime(t, materialized.Path, oldModTime)
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			args := []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
+			args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 
 			output, err := executeHarvestCmd(t, commandRoot, args)
 			if err != nil {

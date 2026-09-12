@@ -314,7 +314,7 @@ func readRecordedSlug(t *testing.T, world harvestWorld) recordedSlug {
 	}
 	var directories []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() && entry.Name() != ".peasant-state" {
 			directories = append(directories, entry.Name())
 		}
 	}

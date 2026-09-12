@@ -2,8 +2,10 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -25,12 +27,26 @@ type SessionLocation struct {
 	GitRemote               *string
 	PublicationReadiness    PublicationReadiness
 	CaptureRevision         int64
+	AdapterVersion          *int
 	HostSlug                string
 	ParentID                string // empty string if the session has no parent
 	IngestedMs              *int64 // nil if unknown; populated from DB ingested_ms column
 	SchemaVersion           int    // 0 if unknown; populated from DB schema_version column
 	SourceFingerprint       []byte // nil for rows created before captured-source evidence
 	SourceEvidenceSupported bool   // true when the backing schema carries source_fingerprint
+}
+
+// MetricSeedStore reads retained adapter statistics independently of computed
+// results. A nil seed means no retained input has been reconciled yet.
+type MetricSeedStore interface {
+	GetMetricSeed(ctx context.Context, sessionID SessionID) (*StatsInfo, error)
+}
+
+// StoredMetadataReader recovers only recorded metadata from one SQL snapshot.
+// Sparse JSON preserves absent historical fields, especially adapter statistics;
+// computed metrics are not a substitute for missing extraction evidence.
+type StoredMetadataReader interface {
+	ReadStoredMetadata(ctx context.Context, sessionID SessionID) ([]byte, error)
 }
 
 // SessionLocationLookup is satisfied by anything that can answer where a
@@ -88,6 +104,8 @@ type SessionStore interface {
 
 // StoreEntry pairs extracted metadata with its discovered session.
 type StoreEntry struct {
+	CommitCaptureComplete bool
+	ArtifactHash          *string
 	// PublicationCapture explicitly opts into a source-inspected snapshot.
 	// Legacy callers leave it false and cannot accidentally establish readiness.
 	PublicationCapture bool
@@ -95,7 +113,15 @@ type StoreEntry struct {
 	Metadata           *UnifiedMetadata
 	Session            DiscoveredSession
 	SourceFingerprint  []byte
-	EventSeq           int64
+	// EventSeq is the OpenCode event cursor this write ACQUIRED, or nil when
+	// the materialization observed none.
+	//
+	// The distinction has to be representable: the cursor is a monotonic
+	// per-session sequence, so a stored zero asserts "no events ever", which
+	// is a claim, not an absence. A nil cursor preserves whatever is stored,
+	// and a caller that simply never learned one cannot overwrite a cursor an
+	// earlier harvest acquired.
+	EventSeq *int64
 }
 
 // MetricsStore abstracts the analytics read/write path for session entries
@@ -125,9 +151,10 @@ type MetricsStore interface {
 	// UpdateIndexState sets the index_version and indexed_at for a session
 	// after successful indexing. indexed_at is in Unix milliseconds.
 	UpdateIndexState(ctx context.Context, sessionID SessionID, version int, indexedAtMs int64) error
-	// ListStaleIndexSessions returns session IDs where index_version < currentVersion.
-	// Used by the post-FILTER auto-detect step to find sessions needing re-indexing.
-	ListStaleIndexSessions(ctx context.Context, currentVersion int) ([]SessionID, error)
+	// ListStaleIndexSessions compares each session's historical index_version
+	// (the producing indexer revision) against its harness target. Harnesses absent
+	// from targets are excluded; an empty map selects nothing.
+	ListStaleIndexSessions(ctx context.Context, targets map[Harness]HarvesterVersions) ([]SessionID, error)
 	// LookupSessionLocation returns the host_slug and parent_id for a session.
 	// Returns ("", "", nil) if the session is not found in the DB.
 	// Used by reconstructFromMetadata to avoid scanning all host directories.
@@ -139,9 +166,10 @@ type MetricsStore interface {
 }
 
 // SessionEntryWrite is one session's replacement entry set for the INDEX stage.
-// IndexVersion zero means entries are written without updating the session's
-// index state. Non-zero IndexVersion updates sessions.index_version and
-// sessions.indexed_at inside the same per-session atomic write.
+// Result is the sole payload; IndexVersion must match its concrete format.
+// IndexerVersion zero preserves the producing parser and its timestamp while
+// still recording the representation actually written. A non-zero revision
+// commits the producer and timestamp in the same atomic write.
 type SessionEntryWrite struct {
 	// CaptureRevision binds this index write to the captured publication metadata.
 	CaptureRevision    int64
@@ -149,25 +177,101 @@ type SessionEntryWrite struct {
 	RequireFullContent bool
 	ContentCapture     SessionContentCaptureWrite
 	SessionID          SessionID
-	Entries            []schema.SessionEntry
+	Result             indexformat.Result
 	IndexVersion       int
+	IndexerVersion     int
 	IndexedAtMs        int64
+	// ExpectedState is the SQL snapshot captured before parsing. A nil value
+	// selects an unproven legacy write, which cannot retain an input proof.
+	ExpectedState *SessionIndexState
+	// IndexedInputHash identifies the input actually consumed by this parser run.
+	// Supplying it requires an artifact identity: either the expected state
+	// records one, or this write establishes it from the pair it consumed.
+	IndexedInputHash *string
+	// ArtifactIdentity is the artifact hash of the pair this parser consumed.
+	// A row written before the artifact-hash column existed has no identity to
+	// check the pair against; the ordinary index write establishes it here, in
+	// the same commit that records the entries and the input proof, so the
+	// session settles instead of being re-selected forever. A stored identity
+	// is never overwritten by this field: the mirror owns live pair changes.
+	// When establishing a missing identity the caller must verify the consumed
+	// transcript against the pair's non-empty metadata content checksum first;
+	// captureIndexInput performs that validation for ordinary indexing, and a
+	// checksum-less pair must not be established.
+	ArtifactIdentity *string
+}
+
+// SessionIndexState is the complete stored state used to condition an index
+// replacement. Nil fields mean SQL NULL, never an empty string or a target value.
+// IndexerVersion maps to the historical sessions.index_version column.
+type SessionIndexState struct {
+	PublicationCaptureRevision int64
+	SessionID                  SessionID
+	Harness                    Harness
+	ArtifactHash               *string
+	IndexerVersion             int
+	IndexVersion               *int
+	IndexedAt                  *int64
+	IndexedInputHash           *string
+	SessionEntriesHash         *string
+	// PublicationBound reports that the stored index write is bound to the
+	// current publication metadata capture. It is read in the same snapshot as
+	// the fields above, and it is the revision half of publication readiness:
+	// readiness ANDs a current metadata schema version on top of it, because
+	// binding and schema currency are different facts. The store owns the one
+	// predicate both sides use (store.publicationBindingSQL).
+	PublicationBound bool
+	// ContentStatus is the stored session_content_captures.status for this
+	// session. A session with no capture row reads as ContentCaptureIncomplete:
+	// absent content is never evidence of a complete capture.
+	ContentStatus ContentCaptureStatus
+	// ContentFailureCode is the stored session_content_captures.failure_code.
+	// It separates a capture that has not been certified yet from one this
+	// build's parser already refused, which is what lets the selector give a
+	// refusal a steady state instead of re-parsing it every harvest.
+	ContentFailureCode ContentCaptureFailureCode
+}
+
+// StaleIndexWorkError means the captured SQL state changed before the index
+// replacement. The caller must capture current input and plan a new parser run.
+type StaleIndexWorkError struct {
+	SessionID SessionID
+}
+
+var _ error = (*StaleIndexWorkError)(nil)
+
+func (e *StaleIndexWorkError) Error() string {
+	return fmt.Sprintf("store: captured index state for session %s changed before replacement; this parser result was refused and current entries and producer evidence were preserved; capture current input and retry indexing", e.SessionID)
+}
+
+// SessionIndexStateReader captures SQL evidence only. The indexing caller must
+// separately bind this snapshot to the captured files before claiming coherence.
+type SessionIndexStateReader interface {
+	ReadIndexState(context.Context, SessionID) (*SessionIndexState, error)
 }
 
 // SessionEntryWriteResult reports the outcome for one SessionEntryWrite.
 type SessionEntryWriteResult struct {
-	SessionID SessionID
-	Written   bool // true when the write request completed, including an unchanged-row skip
-	Skipped   bool // true when existing entry projections already matched and no entry rows were replaced
-	Stats     SessionEntryWriteStats
-	Err       error
+	SessionID    SessionID
+	EntriesCount int  // canonical projection rows committed by the format handler
+	Written      bool // true when the write request completed, including an unchanged-row skip
+	Skipped      bool // true when existing entry projections already matched and no entry rows were replaced
+	Stats        SessionEntryWriteStats
+	Err          error
 }
 
-// SessionEntryBatchStore is an optional MetricsStore capability. A store that
-// implements it can commit multiple session entry replacements in one outer
-// transaction while preserving per-session rollback with savepoints.
+// SessionEntryBatchStore is required to persist pipeline index results. Metrics
+// consumers may omit it, but indexing then refuses before modifying entries.
+// It commits replacements and producer stamps in one outer transaction while
+// preserving per-session rollback with savepoints, including single-item batches.
 type SessionEntryBatchStore interface {
 	IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult
+}
+
+// IndexFormatSupport describes the formats the actual writer can persist and
+// read. A declaration in HarvesterVersionRegistry alone does not supply support.
+type IndexFormatSupport interface {
+	SupportsIndexFormat(version int) bool
 }
 
 // AnnotationRunState records the exact inputs used by the last completed
@@ -176,21 +280,22 @@ type SessionEntryBatchStore interface {
 type AnnotationRunState struct {
 	SessionID          SessionID
 	SessionEntriesHash string
+	MetricsOutputHash  string
 	ComputeVersion     int
 	ClassifierVersion  int
 	AnnotatedAt        time.Time
 }
 
 // AnnotationRunInputs carries the bounded session state needed to decide
-// whether a classifier annotation pass is current. The full metrics row is not
-// included because the skip path only needs the compute version; callers load
-// full metrics only when they must run classifiers.
+// whether a classifier annotation pass is current. MetricsOutputHash reflects
+// actual metric values, not merely the stored producer version or proof column.
 type AnnotationRunInputs struct {
 	SessionID             SessionID
 	SessionEntriesHash    string
 	HasSessionEntriesHash bool
 	ComputeVersion        int
 	HasComputeVersion     bool
+	MetricsOutputHash     string
 	State                 *AnnotationRunState
 }
 
@@ -298,6 +403,15 @@ type TranscriptIndexer interface {
 	IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error)
 }
 
+// VersionedTranscriptIndexer supplies a concrete representation when a harness
+// adopts a format other than V1. Existing slice-returning indexers remain V1;
+// callers never relabel those slices as a different representation.
+type VersionedTranscriptIndexer interface {
+	TranscriptIndexer
+	IndexTranscriptResult(context.Context, DiscoveredSession) (indexformat.Result, error)
+	IndexTranscriptBytesResult(context.Context, DiscoveredSession, []byte) (indexformat.Result, error)
+}
+
 // SessionTranscriptSourceResolver lets an indexer select its typed source per
 // discovered session when one harness has more than one physical
 // representation. The generic pipeline owns dispatch; provider indexers own the
@@ -310,6 +424,29 @@ type SessionTranscriptSourceResolver interface {
 // that were actually (re)computed.
 type MetricsComputer interface {
 	ComputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error)
+}
+
+// MetricsRecomputer refreshes metrics after a successful index operation in
+// this invocation. Last-good values remain stored until the new save succeeds.
+type MetricsRecomputer interface {
+	RecomputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error)
+}
+
+// SessionMetricsEnsurer proves current metrics for one session after either a
+// successful conditional save or reuse of matching captured inputs and output.
+type SessionMetricsEnsurer interface {
+	EnsureSessionMetrics(context.Context, SessionID) (computed, current bool, err error)
+}
+
+// MetricSession is the bounded metadata needed to scope downstream maintenance.
+type MetricSession struct {
+	SessionID SessionID
+	Harness   Harness
+	StartMS   int64
+}
+
+type MetricSessionReader interface {
+	ListMetricSessions(context.Context, SessionID, int) ([]MetricSession, error)
 }
 
 // InsightsComputer recomputes daily_summary aggregations for the given days.
@@ -551,7 +688,15 @@ type SessionAnnotationBatch struct {
 	SessionID SessionID
 	Writes    []SessionAnnotationWrite
 	RunState  *AnnotationRunState
+	Input     *MetricInput
+	Owners    []ClassifierAnnotationOwner
 	Skipped   bool
+}
+
+// ClassifierAnnotationOwner declares output responsibility even for empty results.
+type ClassifierAnnotationOwner struct {
+	AnnotatorID      string
+	AnnotationTypeID string
 }
 
 // SessionAnnotationBatchResult reports the best-effort outcome for one prepared
@@ -777,6 +922,10 @@ type PublishResult struct {
 // Defined in ingest (not store) to maintain the DI direction:
 // store implements this interface; the annotation push function depends on it.
 type AnnotationQueryStore interface {
+	// ReadAnnotationPushSnapshot selects active records and validates their
+	// entry-coordinate formats in one database snapshot. Historical diagnostics
+	// and hash-only retractions do not need the current index to be readable.
+	ReadAnnotationPushSnapshot(context.Context, AnnotationReadSelection, bool) (AnnotationPushSnapshot, error)
 	// ListSystemAnnotations returns all non-superseded annotations whose type has
 	// system origin (OriginSystem). Used by the push pipeline to collect annotations
 	// that the village can accept; push rejects unknown or user-defined type_ids.
@@ -793,6 +942,22 @@ type AnnotationQueryStore interface {
 	// durable target repair state is unresolved. An empty sessionID means all
 	// sessions. Push uses this trust-boundary check before building wire payloads.
 	ListUnresolvedAnnotationTargetAnchors(ctx context.Context, sessionID string) ([]AnnotationTargetAnchorRow, error)
+}
+
+// AnnotationReadSelection keeps the existing publication selection policy with
+// its caller. These predicates inspect only the supplied metadata, perform no
+// I/O, and must not attempt a second Store read while the snapshot is held.
+type AnnotationReadSelection interface {
+	IncludesAnnotation(AnnotationPushRow) bool
+	IncludesUnresolvedAnchor(AnnotationTargetAnchorRow) bool
+	IncludesRetraction(AnnotationPushRow) bool
+}
+
+// AnnotationPushSnapshot is local read state, not a public wire payload.
+type AnnotationPushSnapshot struct {
+	Annotations []AnnotationPushRow
+	Unresolved  []AnnotationTargetAnchorRow
+	Retractions []AnnotationPushRow
 }
 
 type AnnotationTargetAnchorRow struct {
@@ -824,4 +989,21 @@ type AnnotationPushRow struct {
 	AnnotatorName        string
 	Provenance           *schema.Provenance
 	ContentHash          *string // Pre-computed if available, nil otherwise.
+}
+
+// StaleAdapterSessionLister is the database-driven inventory of sessions whose
+// stored adapter revision is behind this build, or whose stored schema this
+// build re-extracts from native input. It replaces the retained-tree walk the
+// ordinary harvest used to run to find adapter-refresh work. The production
+// store implements it; a store that does not is treated as having no such work.
+type StaleAdapterSessionLister interface {
+	ListStaleAdapterSessions(ctx context.Context, targets map[Harness]HarvesterVersions, nativeRefreshVersions []int) ([]SessionID, error)
+}
+
+// RepairSessionLister is the database-driven inventory of sessions a crash
+// between the two write commits can leave: a saved pair whose index input
+// proof was cleared, or a current publication capture the index is not bound
+// to. Both settle in one ordinary harvest. The production store implements it.
+type RepairSessionLister interface {
+	ListSessionsNeedingRepair(ctx context.Context, targets map[Harness]HarvesterVersions) ([]SessionID, error)
 }

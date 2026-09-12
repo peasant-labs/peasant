@@ -24,15 +24,17 @@ const (
 	sheetSelection   sheetName = "selection"
 	sheetPush        sheetName = "push"
 	sheetIngest      sheetName = "ingest-progress"
+	sheetCompletion  sheetName = "ingest-completion"
 )
 
 type sheetKind string
 
 const (
-	sheetKindGuided    sheetKind = "guided"
-	sheetKindSelection sheetKind = "selection"
-	sheetKindPush      sheetKind = "push"
-	sheetKindIngest    sheetKind = "ingest-progress"
+	sheetKindGuided     sheetKind = "guided"
+	sheetKindSelection  sheetKind = "selection"
+	sheetKindPush       sheetKind = "push"
+	sheetKindIngest     sheetKind = "ingest-progress"
+	sheetKindCompletion sheetKind = "ingest-completion"
 )
 
 type captureTheme string
@@ -315,6 +317,7 @@ type selectionTurnFixture struct {
 }
 
 type captureDocument struct {
+	Completion completionFixture `yaml:"completion"`
 	// RequiredPushSessionNames is a deletion-protection manifest: every
 	// listed session id must be present in Push.Sessions. It does not bound
 	// how many push sessions exist.
@@ -368,6 +371,9 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 		return document, err
 	}
 	if err := validateIngestProgressMatrix(document.IngestProgressStates, document.IngestProgressCaptures); err != nil {
+		return document, err
+	}
+	if err := validateCompletionMatrix(document.Completion); err != nil {
 		return document, err
 	}
 	return document, nil
@@ -530,6 +536,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 10440},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
+		sheetCompletion:  {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {

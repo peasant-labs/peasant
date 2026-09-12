@@ -210,6 +210,15 @@ func BuildRedactCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStderr(), "  error: %s: %s\n", r.SessionID, r.Reason)
 				}
 			}
+			// A failed redact must exit non-zero: no success stamp certifies a
+			// step that did not complete. The per-session diagnostics above name
+			// what failed and how to repair it (a mirror failure after the
+			// rename prints the two-command remedy); SilenceUsage keeps cobra
+			// from appending its usage block over those actionable lines.
+			if errorCount > 0 {
+				cmd.SilenceUsage = true
+				return fmt.Errorf("%d session(s) failed to redact", errorCount)
+			}
 			return nil
 		},
 	}
@@ -262,7 +271,7 @@ func processRedactSession(
 	metaBytes, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return redactSessionResult{SessionID: string(sid), Status: RedactStatus.NotIngested, Reason: "not yet ingested — run 'peasant ingest' first"}
+			return redactSessionResult{SessionID: string(sid), Status: RedactStatus.NotIngested, Reason: "not yet ingested: run 'peasant harvest' first"}
 		}
 		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("read metadata: %v", err)}
 	}
@@ -348,7 +357,26 @@ func processRedactSession(
 		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("write metadata: %v", err)}
 	}
 
-	return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Redacted}
+	// Record the redacted pair through the write path. The mirror updates the
+	// stored artifact hash and clears the index input proof, so the repair
+	// predicate re-indexes the redacted content on the next harvest. There is
+	// no in-command reindex: a failed mirror leaves the files redacted and the
+	// database serving the previous content, and names the command that repairs
+	// it, so no success stamp certifies a step that did not complete.
+	artifact, err := ingest.NewManagedArtifact(newMetaBytes, redactedTranscript)
+	if err != nil {
+		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("build redacted artifact: %v", err)}
+	}
+	results := db.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}})
+	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+		reason := "files redacted; the database still serves the previous content for " + string(sid) + "; run `peasant harvest --force --session " + string(sid) + "` (which redacts again at the configured level), then `peasant redact` again if a different level is wanted"
+		if len(results) == 1 && results[0].Err != nil {
+			reason = fmt.Sprintf("%s: %v", reason, results[0].Err)
+		}
+		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: reason}
+	}
+
+	return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Redacted, Reason: "The stored transcript of session " + string(sid) + " is updated on the next `peasant harvest`."}
 }
 
 // findTranscriptFile locates the transcript file for a session and returns
@@ -369,7 +397,7 @@ func findTranscriptFile(sessionDir, sessionID string) (string, schema.SourceForm
 
 // redactJSONLBytes delegates to redact.RedactJSONLBytes (shared utility).
 func redactJSONLBytes(r redact.Redactor, data []byte) ([]byte, error) {
-	return redact.RedactJSONLBytes(r, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.ScannerMaxLine))
+	return redact.RedactJSONLBytes(r, data, redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.RedactScannerMaxLineBytes))
 }
 
 // redactJSONDocBytes delegates to redact.RedactJSONDocBytes (shared utility).

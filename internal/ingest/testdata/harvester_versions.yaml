@@ -1,0 +1,44 @@
+cases:
+  - name: canonical_registry
+    harnesses: [claude-code, opencode, codex, cursor, strike, pi]
+    adapter: 1
+    indexer: 15
+    indexerOverrides: {claude-code: 16, codex: 16, cursor: 16, strike: 16, opencode: 16, pi: 16}
+    index: 1
+  - name: injected_subset_without_indexers
+    harnesses: [claude-code]
+    adapter: 1
+    indexer: 16
+    index: 1
+  - name: missing_adapter_target
+    harnesses: []
+    error: has no version declaration
+  - name: nonpositive_adapter
+    harnesses: [claude-code]
+    adapter: 0
+    indexer: 15
+    index: 1
+    error: nonpositive versions
+  - name: nonpositive_indexer
+    harnesses: [claude-code]
+    adapter: 1
+    indexer: -1
+    index: 1
+    error: nonpositive versions
+  - name: nonpositive_index
+    harnesses: [claude-code]
+    adapter: 1
+    indexer: 15
+    index: 0
+    error: nonpositive versions
+  - name: unused_output_format_without_indexers
+    harnesses: [claude-code]
+    adapter: 1
+    indexer: 15
+    index: 2
+  - name: unimplemented_harness
+    harnesses: [gemini]
+    adapter: 1
+    indexer: 15
+    index: 1
+    error: has no registered adapter

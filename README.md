@@ -164,7 +164,7 @@ are replayed once through the ordinary push candidate path.
 | `--include-active` | Also ingest sessions still being written |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
 | `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
-| `--source-provider <p>` | Override source provider (`claude`, `opencode`) |
+| `--source-harness <h>` | Override source harness (`claude-code`, `opencode`, `codex`, `cursor`, `strike`) |
 | `--source-path <path>` | Override source path for the provider (replaces config, not additive) |
 | `--output <path>` | Override output base path |
 | `--json` | Output as JSON instead of human-readable |
@@ -319,6 +319,14 @@ All paths respect their corresponding `XDG_*` environment variable if set.
             └── {sessionId}--metadata.json
 ```
 
+The database is the source of truth; `peasant-sync/` keeps the input files as a
+backup, so the database can be rebuilt if it is ever lost or corrupted. Run
+`peasant harvest index --all` to rebuild a lost or damaged database from those
+files. A rebuild restores transcripts and metadata only: it does not restore
+annotations, Village publication records, session origin attribution, or a
+session's readiness to be shared, so a rebuilt session cannot be shared until the
+next harvest reads it from its source.
+
 See [docs/pipeline.md](docs/pipeline.md) for the ingest write flow, staging
 directory behavior, and the distinction between on-disk transcripts and the
 canonical `SessionDetailPayload` representation.
@@ -463,7 +471,7 @@ $XDG_CONFIG_HOME/peasant/config.yaml   # if XDG_CONFIG_HOME is set
 ```
 
 If no config file exists, Peasant uses built-in defaults and prints a notice directing you to
-`peasant kickstart`. CLI flags (`--source-provider`, `--source-path`, `--output`) override the
+`peasant kickstart`. CLI flags (`--source-harness`, `--source-path`, `--output`) override the
 config file for a single run.
 
 ### Selection index

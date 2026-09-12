@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -14,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -42,6 +46,7 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	indexer := &blockingParallelIndexer{entries: entries, release: releaseParses}
 	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
 	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 2}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer}, metricsStore: store}
+	prepareIndexParallelInputs(t, pipeline, metas)
 	progress := NewProgressState()
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	staging := NewStagingBuffer(len(metas)+1, 1024*1024)
@@ -110,6 +115,7 @@ func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T)
 	indexer := &selectiveBlockingIndexer{entries: entries, blocked: metas[1].session.SessionID, release: releaseBlocked}
 	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry), wrote: make(chan SessionID, len(metas))}
 	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 2}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer}, metricsStore: store}
+	prepareIndexParallelInputs(t, pipeline, metas)
 	progress := NewProgressState()
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	indexCh := make(chan streamedIndexWork, len(metas))
@@ -153,6 +159,7 @@ func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
 	metas, entries := buildIndexParallelMetas(t, fixture)
 	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
 	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 1}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}}, metricsStore: store}
+	prepareIndexParallelInputs(t, pipeline, metas)
 	indexCh := make(chan streamedIndexWork, len(metas))
 	indexDoneCh := make(chan DrainBatch, 1)
 	done := make(chan struct{})
@@ -178,6 +185,10 @@ func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
 		if store.writeOrder[i] != im.session.SessionID {
 			t.Fatalf("write order[%d] = %s, want %s", i, store.writeOrder[i], im.session.SessionID)
 		}
+		input, err := pipeline.captureIndexInput(t.Context(), im, pipeline.indexers[im.session.Harness])
+		if err != nil || input.expected.IndexedInputHash == nil || *input.expected.IndexedInputHash != input.inputHash {
+			t.Fatalf("stored proof does not identify captured fixture input for %s: %v", im.session.SessionID, err)
+		}
 	}
 }
 
@@ -185,13 +196,14 @@ func TestIndexBatch_UsesStoreBatchWriterAndProfilesWriteShape(t *testing.T) {
 	fixture := loadIndexParallelFixture(t)
 	metas, entries := buildIndexParallelMetas(t, fixture)
 	profiler := &IndexProfiler{}
-	store := &batchIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
+	store := &batchIndexStore{serialIndexStore: serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}}
 	pipeline := &Pipeline{
 		config:       PipelineConfig{Parallelism: 1, IndexProfiler: profiler},
 		indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}},
 		metricsStore: store,
 	}
 
+	prepareIndexParallelInputs(t, pipeline, metas)
 	indexed, logs := pipeline.indexBatch(context.Background(), metas, IndexOutcomeIndexed, "test")
 	if len(indexed) != len(metas) {
 		t.Fatalf("indexed result count = %d, want %d", len(indexed), len(metas))
@@ -202,19 +214,24 @@ func TestIndexBatch_UsesStoreBatchWriterAndProfilesWriteShape(t *testing.T) {
 	if got := store.singleWrites.Load(); got != 0 {
 		t.Fatalf("single-session writes = %d, want 0", got)
 	}
-	if len(store.batchSizes) != 1 || store.batchSizes[0] != len(metas) {
-		t.Fatalf("batch sizes = %v, want one batch of %d", store.batchSizes, len(metas))
+	for _, size := range store.batchSizes {
+		if size != 1 {
+			t.Fatalf("Store batch size = %d, want one atomic session", size)
+		}
 	}
 	snapshot := profiler.Snapshot()
-	if len(snapshot.Batches) != 1 {
-		t.Fatalf("profile batches = %d, want 1", len(snapshot.Batches))
+	var transactions, savepoints int
+	var stats SessionEntryWriteStats
+	for _, batch := range snapshot.Batches {
+		transactions += batch.WriteTxs
+		savepoints += batch.WriteSavepoints
+		stats.Add(batch.WriteStats)
 	}
-	batch := snapshot.Batches[0]
-	if batch.WriteTxs != 1 || batch.WriteSavepoints != len(metas) {
-		t.Fatalf("profile write shape = %d txs, %d savepoints; want 1 tx and %d savepoints", batch.WriteTxs, batch.WriteSavepoints, len(metas))
+	if transactions != len(store.batchSizes) || savepoints != transactions {
+		t.Fatalf("profile shape = %d transactions/%d savepoints, recorded one-item Store calls=%v", transactions, savepoints, store.batchSizes)
 	}
-	if batch.WriteStats.HashMatches != len(metas) || batch.WriteStats.AnnotationTargetsCarried != len(metas)*2 {
-		t.Fatalf("profile write stats = %+v, want hash matches %d and annotation targets carried %d", batch.WriteStats, len(metas), len(metas)*2)
+	if stats.HashMatches != len(metas) || stats.AnnotationTargetsCarried != len(metas)*2 {
+		t.Fatalf("profile write stats = %+v, want hash matches %d and annotation targets carried %d", stats, len(metas), len(metas)*2)
 	}
 }
 
@@ -236,6 +253,7 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 		analyzer:     analyzer,
 		classifier:   classifier,
 	}
+	prepareIndexParallelInputs(t, pipeline, metas)
 	progress := NewProgressState()
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	indexCh := make(chan streamedIndexWork, len(metas))
@@ -328,6 +346,7 @@ func TestStreamingIndex_StoreWriteLaneSerializesDownstreamWrites(t *testing.T) {
 		analyzer:     analyzer,
 		classifier:   classifier,
 	}
+	prepareIndexParallelInputs(t, pipeline, metas)
 	progress := NewProgressState()
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
 	indexCh := make(chan streamedIndexWork, len(metas))
@@ -541,6 +560,7 @@ type serialIndexStore struct {
 	MetricsStore
 	mu         sync.Mutex
 	entries    map[SessionID][]schema.SessionEntry
+	states     map[SessionID]*SessionIndexState
 	writeOrder []SessionID
 	wrote      chan SessionID
 	active     atomic.Int64
@@ -563,15 +583,15 @@ type trackedIndexStore struct {
 	tracker *writeOverlapTracker
 }
 
-func (store *trackedIndexStore) IndexSessionEntries(ctx context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
+func (store *trackedIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	done := store.tracker.enter()
 	defer done()
 	select {
 	case <-time.After(10 * time.Millisecond):
 	case <-ctx.Done():
-		return ctx.Err()
+		return []SessionEntryWriteResult{{SessionID: writes[0].SessionID, Err: ctx.Err()}}
 	}
-	return store.serialIndexStore.IndexSessionEntries(ctx, sessionID, entries)
+	return store.serialIndexStore.IndexSessionEntryBatch(ctx, writes)
 }
 
 type blockingTrackedAnalyzer struct {
@@ -641,15 +661,15 @@ type blockingSecondIndexStore struct {
 	release <-chan struct{}
 }
 
-func (store *blockingSecondIndexStore) IndexSessionEntries(ctx context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
-	if sessionID == store.blocked {
+func (store *blockingSecondIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+	if len(writes) == 1 && writes[0].SessionID == store.blocked {
 		select {
 		case <-store.release:
 		case <-ctx.Done():
-			return ctx.Err()
+			return []SessionEntryWriteResult{{SessionID: writes[0].SessionID, Err: ctx.Err()}}
 		}
 	}
-	return store.serialIndexStore.IndexSessionEntries(ctx, sessionID, entries)
+	return store.serialIndexStore.IndexSessionEntryBatch(ctx, writes)
 }
 
 type recordingStreamAnalyzer struct {
@@ -734,55 +754,151 @@ func (c *recordingStreamBufferedClassifier) FlushAnnotationBatches(_ context.Con
 	return results
 }
 
-func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
+func (*serialIndexStore) IndexSessionEntries(context.Context, SessionID, []schema.SessionEntry) error {
+	return fmt.Errorf("streaming fixture requires conditional batch writes")
+}
+
+func (*serialIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error {
+	return fmt.Errorf("streaming fixture requires producer state in the conditional write")
+}
+func (*serialIndexStore) SupportsIndexFormat(version int) bool { return version == 1 }
+
+func (store *serialIndexStore) ReadIndexState(_ context.Context, sid SessionID) (*SessionIndexState, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return cloneParallelIndexState(store.states[sid]), nil
+}
+
+// Local because importing Store from package ingest creates a cycle. Artifact
+// identity comes only from the real publisher's validated bytes, never a target.
+func (store *serialIndexStore) MirrorArtifacts(ctx context.Context, requests []ArtifactMirrorRequest) []ArtifactMirrorResult {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.states == nil {
+		store.states = make(map[SessionID]*SessionIndexState)
+	}
+	results := make([]ArtifactMirrorResult, len(requests))
+	for i, request := range requests {
+		if request.Artifact != nil {
+			results[i].SessionID = request.Artifact.Metadata.SessionID
+		}
+		if err := ctx.Err(); err != nil {
+			results[i].Err = err
+			continue
+		}
+		if err := request.Artifact.Validate(); err != nil {
+			results[i].Err = err
+			continue
+		}
+		sid := request.Artifact.Metadata.SessionID
+		state := cloneParallelIndexState(store.states[sid])
+		if state == nil {
+			state = &SessionIndexState{SessionID: sid}
+		}
+		state.Harness = request.Artifact.Metadata.ModelHarness
+		hash := request.Artifact.ArtifactHash
+		state.ArtifactHash = &hash
+		store.states[sid] = state
+		results[i].Mirrored = true
+	}
+	return results
+}
+
+func (store *serialIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	active := store.active.Add(1)
 	defer store.active.Add(-1)
 	recordMax(&store.maxActive, active)
+	results := make([]SessionEntryWriteResult, len(writes))
 	store.mu.Lock()
-	store.entries[sessionID] = append([]schema.SessionEntry(nil), entries...)
-	store.writeOrder = append(store.writeOrder, sessionID)
-	store.mu.Unlock()
-	if store.wrote != nil {
-		store.wrote <- sessionID
+	defer store.mu.Unlock()
+	for i, write := range writes {
+		results[i].SessionID = write.SessionID
+		if err := ctx.Err(); err != nil {
+			results[i].Err = err
+			continue
+		}
+		current := store.states[write.SessionID]
+		if len(writes) != 1 || current == nil || write.ExpectedState == nil || write.ExpectedState.SessionID != write.SessionID || !reflect.DeepEqual(current, write.ExpectedState) {
+			results[i].Err = &StaleIndexWorkError{SessionID: write.SessionID}
+			continue
+		}
+		output, ok := write.Result.(indexformat.V1)
+		if !ok || write.IndexVersion != 1 || write.IndexerVersion < current.IndexerVersion || current.ArtifactHash == nil || write.IndexedInputHash == nil || *write.IndexedInputHash == "" {
+			results[i].Err = fmt.Errorf("streaming fixture received an unproven or incompatible index write")
+			continue
+		}
+		next := cloneParallelIndexState(current)
+		hash, format, at := *write.IndexedInputHash, write.IndexVersion, write.IndexedAtMs
+		next.IndexedInputHash, next.IndexVersion, next.IndexedAt = &hash, &format, &at
+		next.IndexerVersion = write.IndexerVersion
+		next.SessionEntriesHash = nil // This scheduling double does not compute row hashes.
+		store.entries[write.SessionID] = append([]schema.SessionEntry(nil), output.Entries...)
+		store.states[write.SessionID] = next
+		store.writeOrder = append(store.writeOrder, write.SessionID)
+		results[i].EntriesCount, results[i].Written = len(output.Entries), true
+		if store.wrote != nil {
+			store.wrote <- write.SessionID
+		}
 	}
-	return nil
+	return results
 }
 
-func (*serialIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error { return nil }
-
 type batchIndexStore struct {
-	MetricsStore
-	mu           sync.Mutex
-	entries      map[SessionID][]schema.SessionEntry
+	serialIndexStore
 	batchSizes   []int
 	singleWrites atomic.Int64
 }
 
+func (*batchIndexStore) SupportsIndexFormat(version int) bool { return version == 1 }
+
 func (store *batchIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
 	store.singleWrites.Add(1)
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.entries[sessionID] = append([]schema.SessionEntry(nil), entries...)
-	return nil
+	return fmt.Errorf("unexpected non-atomic write for %s", sessionID)
 }
 
-func (store *batchIndexStore) IndexSessionEntryBatch(_ context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+func (store *batchIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	store.mu.Lock()
-	defer store.mu.Unlock()
 	store.batchSizes = append(store.batchSizes, len(writes))
-	results := make([]SessionEntryWriteResult, len(writes))
-	for i, write := range writes {
-		store.entries[write.SessionID] = append([]schema.SessionEntry(nil), write.Entries...)
-		results[i] = SessionEntryWriteResult{
-			SessionID: write.SessionID,
-			Written:   true,
-			Stats: SessionEntryWriteStats{
+	store.mu.Unlock()
+	results := store.serialIndexStore.IndexSessionEntryBatch(ctx, writes)
+	for i := range results {
+		if results[i].Written {
+			// Fixed profile observations test counter propagation, not proof.
+			results[i].Stats = SessionEntryWriteStats{
 				HashMatches:              1,
 				AnnotationTargetsCarried: 2,
-			},
+			}
 		}
 	}
 	return results
+}
+
+func cloneParallelIndexState(state *SessionIndexState) *SessionIndexState {
+	if state == nil {
+		return nil
+	}
+	copy := *state
+	if state.ArtifactHash != nil {
+		value := *state.ArtifactHash
+		copy.ArtifactHash = &value
+	}
+	if state.IndexedInputHash != nil {
+		value := *state.IndexedInputHash
+		copy.IndexedInputHash = &value
+	}
+	if state.SessionEntriesHash != nil {
+		value := *state.SessionEntriesHash
+		copy.SessionEntriesHash = &value
+	}
+	if state.IndexVersion != nil {
+		value := *state.IndexVersion
+		copy.IndexVersion = &value
+	}
+	if state.IndexedAt != nil {
+		value := *state.IndexedAt
+		copy.IndexedAt = &value
+	}
+	return &copy
 }
 
 func recordMax(max *atomic.Int64, value int64) {
@@ -843,10 +959,54 @@ func buildIndexParallelMetas(t *testing.T, fixture indexParallelFixture) ([]inde
 	return metas, entries
 }
 
+// Prepare actual owned files and a validated artifact-only mirror. Parser input
+// proof is deliberately absent until the production capture/write path runs.
+func prepareIndexParallelInputs(t testing.TB, pipeline *Pipeline, metas []indexedMeta) {
+	t.Helper()
+	pipeline.fs = &OSFileSystem{}
+	pipeline.config.OutputDir = ResolvedPath(t.TempDir())
+	mirror := pipeline.metricsStore.(ArtifactMirrorStore)
+	for i := range metas {
+		im := &metas[i]
+		directory := SessionDir(string(pipeline.config.OutputDir), "index-parallel", string(im.session.SessionID), "")
+		im.outputTranscriptPath = filepath.Join(directory, string(im.session.SessionID)+"--transcript.jsonl")
+		metadataPath := SessionMetadataPath(string(pipeline.config.OutputDir), "index-parallel", string(im.session.SessionID), "")
+		metadata, err := json.Marshal(indexWorkerResult(*im).meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := NewManagedArtifact(metadata, im.transcriptData)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Install the saved pair by writing its files, then record the row with
+		// the mirror, exactly as the write path does: transcript then metadata.
+		if err := pipeline.fs.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := pipeline.fs.WriteFile(im.outputTranscriptPath, im.transcriptData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := pipeline.fs.WriteFile(metadataPath, metadata, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		results := mirror.MirrorArtifacts(t.Context(), []ArtifactMirrorRequest{{Artifact: artifact}})
+		if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+			t.Fatalf("fixture mirror did not record the saved pair: %+v", results)
+		}
+		state, err := pipeline.metricsStore.(SessionIndexStateReader).ReadIndexState(t.Context(), im.session.SessionID)
+		if err != nil || state == nil || state.ArtifactHash == nil || *state.ArtifactHash != artifact.ArtifactHash || state.IndexedInputHash != nil || state.IndexerVersion != 0 {
+			t.Fatalf("fixture publication did not establish artifact-only state: %+v %v", state, err)
+		}
+	}
+}
+
 func indexWorkerResult(im indexedMeta) workerResult {
 	meta := NewUnifiedMetadata()
 	meta.SessionID = im.session.SessionID
 	meta.ModelHarness = im.session.Harness
+	meta.HostSlug = "index-parallel"
+	meta.ContentHash = schema.ComputeTranscriptHash(im.transcriptData)
 	meta.Source = SourceInfo{FilePath: im.session.SourcePath.String(), Format: im.session.SourceFormat}
 	return workerResult{
 		result: SessionResult{
@@ -854,7 +1014,7 @@ func indexWorkerResult(im indexedMeta) workerResult {
 			Harness:    im.session.Harness,
 			ParentUUID: im.session.ParentUUID,
 			Status:     DiffNew,
-			OutputPath: "/stored/" + string(im.session.SessionID),
+			OutputPath: filepath.Dir(im.outputTranscriptPath),
 		},
 		meta:                 &meta,
 		outputTranscriptPath: im.outputTranscriptPath,
@@ -918,7 +1078,8 @@ func BenchmarkIndexLoopParallelParse(b *testing.B) {
 	}
 	for _, workers := range []int{1, max(2, runtime.NumCPU())} {
 		b.Run(fmt.Sprintf("workers-%d", workers), func(b *testing.B) {
-			pipeline := &Pipeline{config: PipelineConfig{Parallelism: workers}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: &cpuIndexBenchmarkIndexer{entries: entries}}, metricsStore: &benchmarkIndexStore{}}
+			pipeline := &Pipeline{config: PipelineConfig{Parallelism: workers, Force: true}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: &cpuIndexBenchmarkIndexer{entries: entries}}, metricsStore: &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}}
+			prepareIndexParallelInputs(b, pipeline, metas)
 			b.ResetTimer()
 			for range b.N {
 				indexCh := make(chan streamedIndexWork, len(metas))
@@ -951,14 +1112,4 @@ func (idx *cpuIndexBenchmarkIndexer) IndexTranscriptBytes(ctx context.Context, s
 		return nil, fmt.Errorf("unreachable")
 	}
 	return idx.entries[session.SessionID], nil
-}
-
-type benchmarkIndexStore struct{ MetricsStore }
-
-func (*benchmarkIndexStore) IndexSessionEntries(context.Context, SessionID, []schema.SessionEntry) error {
-	return nil
-}
-
-func (*benchmarkIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error {
-	return nil
 }

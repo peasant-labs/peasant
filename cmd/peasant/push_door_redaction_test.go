@@ -41,20 +41,43 @@ func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview := push.NewPublishedTurns(storedSessionEntries(t.Context(), db), redactor)
-	turns, err := preview(sessionID)
+	published, err := preview(sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	turns := published.Turns
 	if len(turns) != 1 || !strings.Contains(turns[0].Content, "FULL-PREVIEW-TAIL") || strings.Contains(turns[0].Content, doorSecret) || !strings.Contains(turns[0].Content, "ANTHROPIC_KEY") {
 		t.Fatal("publication preview lost full tail or late redaction")
 	}
-	// Replacing the capture with a legacy preview must make the same mounted
-	// reader fail closed, rather than label its preview as publishable text.
+	// A verified complete capture is the whole session, so this preview must not
+	// carry the partial line. The seeded session is the mounted producer of that
+	// state, read through the real store.
+	if published.PartialNotice {
+		t.Fatal("a complete capture reached the pane labelled partial, which would put the partial line on every session")
+	}
+	// Replacing the capture with a legacy preview must NOT silence the same
+	// mounted reader. A capture that can no longer publish is still readable, and
+	// refusing here removed the transcript from exactly the sessions a user opens
+	// the previewer to inspect. Publication readiness is enforced at the publish
+	// action instead.
+	//
+	// What must never change is the redaction above: this reader is the only thing
+	// between a recorded secret and the screen, and the assertion that proves it
+	// runs on the full capture, where there is content to inspect. Asserting the
+	// absence of the secret again here would pass on an empty result and prove
+	// nothing; the bounded-projection content belongs to the available-content
+	// store read.
 	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := preview(sessionID); err == nil || !strings.Contains(err.Error(), "run peasant ingest") {
-		t.Fatalf("incomplete preview did not fail with remediation: %v", err)
+	legacy, err := preview(sessionID)
+	if err != nil {
+		t.Fatalf("the preview refused a session it must still be able to show: %v", err)
+	}
+	// The capture that replaced it can no longer prove the whole session, so the
+	// pane is told to say the preview is partial.
+	if !legacy.PartialNotice {
+		t.Fatal("a capture that can no longer prove the whole session was offered to the pane as complete")
 	}
 }
 

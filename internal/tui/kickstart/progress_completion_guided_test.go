@@ -831,7 +831,7 @@ func TestProgramProgressShowsSharedIngestAnimationBeforeProgressEvents(t *testin
 	program, _, _ := newProgressProgram(t, progress, clock, func(context.Context) (*ftue.IngestResult, error) {
 		return &ftue.IngestResult{New: 1}, nil
 	}, nil, &tick)
-	program.SetSize(80, 24)
+	program.SetSize(80, 30)
 	if tick == nil {
 		t.Fatal("starting local ingest did not schedule the injected animation tick")
 	}
@@ -1099,7 +1099,9 @@ func validateRenderedCompletionPreamble(view string) error {
 
 func exactRenderedLineIndex(lines []string, want string) int {
 	for index, line := range lines {
-		if line == want {
+		// The kit fills the mounted terminal with background-bearing cells.
+		// Ignore only those trailing spaces; the complete text remains exact.
+		if strings.TrimRight(line, " ") == want {
 			return index
 		}
 	}

@@ -1,0 +1,11 @@
+sessionID: ses_3cd91f52effeXd3QAJ54jOyzv5
+message: '{"role":"user","content":"captured message"}'
+part: '{"type":"tool_use","name":"Read","id":"captured-call"}'
+replacement: '{"role":"assistant","content":"later message"}'
+laterFile: malformed later input
+expectedContent: captured message
+expectedCallID: captured-call
+requiredNames: [captured-empty-file, captured-native-tree]
+cases:
+  - {name: captured-empty-file, kind: file}
+  - {name: captured-native-tree, kind: tree}

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/schema"
 )
 
@@ -134,10 +135,17 @@ type workerResult struct {
 	capturedSource        *captureFileSystem
 	cwdProvenance         CWDProvenanceKind
 	eventSeq              int64
-	result                SessionResult
-	meta                  *UnifiedMetadata
-	sourceFingerprint     []byte
-	fileCaptureEvidence   []byte
+	// acquiredEventSeq is the OpenCode change cursor a materialization actually
+	// observed for this session; nil preserves the stored cursor. origin is the
+	// session origin an adapter mined; nil preserves the stored verdict. The
+	// drain carries both into the mirror request, where the row is recorded.
+	acquiredEventSeq    *int64
+	origin              *sessionorigin.Origin
+	result              SessionResult
+	meta                *UnifiedMetadata
+	sourceFingerprint   []byte
+	fileCaptureEvidence []byte
+	artifact            *ManagedArtifact
 	// transcriptData holds the already-read bytes for the in-memory index path.
 	// Nil on error or skip.
 	//
@@ -590,6 +598,11 @@ func (b *StagingBuffer) Add(r workerResult) bool {
 	if aLen > 0 {
 		physStart := aStart % int64(len(b.arena))
 		r.transcriptData = b.arena[physStart : physStart+aLen]
+		if r.artifact != nil {
+			// Publication evidence shares the same bounded payload lifetime as
+			// indexing. Do not retain one extra heap transcript in every run slot.
+			r.artifact.Transcript = r.transcriptData
+		}
 	}
 
 	// CAS loop: claim exactly one slot index. Each index is claimed by at most

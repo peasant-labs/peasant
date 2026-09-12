@@ -58,6 +58,13 @@ required_recovery_cases:
   - wrong-version-fails-closed
   - wrong-kind-fails-closed
 recovery_cases:
+  # A missing or corrupt managed metadata sidecar, or a mutated managed
+  # envelope, is repaired by RE-INGESTING the native provider source during the
+  # routine harvest: the pair is rebuilt, the represented entries are indexed,
+  # and the mounted source is never touched. The database-to-file metadata
+  # rebuild stays dropped; this repair reads the native source, not the
+  # database. URD ruling 2026-09-12 supersedes the report-and-run---force
+  # behavior these cases used to pin.
   - name: missing-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
@@ -81,25 +88,25 @@ recovery_cases:
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: arbitrary_json
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: wrong-version-fails-closed
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: wrong_version
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: wrong-kind-fails-closed
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: wrong_kind
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}

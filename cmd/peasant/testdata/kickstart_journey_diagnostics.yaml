@@ -1,0 +1,35 @@
+requiredNames: [first-attempt-refusal, retry-other-stage, partial-ingest-retry, repeated-warning-deduplicated]
+priorWarning: &prior
+  location: previously-refused-session
+  message: retained metadata requires a newer Peasant
+  remediation: upgrade Peasant before retrying
+cases:
+  - name: first-attempt-refusal
+    retryStage: ingest
+    currentWarnings: [*prior]
+    wantWarnings: [*prior]
+    wantIngestCalls: 1
+    wantAggregateOnly: true
+  - name: retry-other-stage
+    retryStage: publication
+    priorWarnings: [*prior]
+    wantWarnings: [*prior]
+    wantIngestCalls: 0
+  - name: partial-ingest-retry
+    retryStage: ingest
+    priorWarnings: [*prior]
+    currentWarnings:
+      - &current
+        location: retried-session
+        message: retained metadata could not be read
+        remediation: restore read access before retrying
+    wantWarnings: [*prior, *current]
+    wantIngestCalls: 1
+    wantAggregateOnly: true
+  - name: repeated-warning-deduplicated
+    retryStage: ingest
+    priorWarnings: [*prior]
+    currentWarnings: [*prior]
+    wantWarnings: [*prior]
+    wantIngestCalls: 1
+    wantAggregateOnly: true

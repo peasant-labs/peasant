@@ -1,0 +1,32 @@
+requiredNames: [middle-item-rolls-back-outer, commit-failure-rolls-back-all, item-abort-preserves-peers, panic-rolls-back-all]
+sessions:
+  - 11111111-1111-4111-8111-111111111111
+  - 22222222-2222-4222-8222-222222222222
+  - 33333333-3333-4333-8333-333333333333
+cases:
+  - name: middle-item-rolls-back-outer
+    setup: >-
+      CREATE TRIGGER fail_artifact_mirror BEFORE UPDATE OF artifact_hash ON sessions
+      WHEN NEW.session_id = '22222222-2222-4222-8222-222222222222'
+      BEGIN SELECT RAISE(ROLLBACK, 'synthetic outer transaction rollback'); END;
+    mirrored: []
+  - name: commit-failure-rolls-back-all
+    setup: >-
+      CREATE TABLE deferred_artifact_failure (parent TEXT REFERENCES sessions(session_id) DEFERRABLE INITIALLY DEFERRED);
+      CREATE TRIGGER fail_artifact_mirror AFTER UPDATE OF artifact_hash ON sessions
+      WHEN NEW.session_id = '22222222-2222-4222-8222-222222222222'
+      BEGIN INSERT INTO deferred_artifact_failure(parent) VALUES ('missing-parent'); END;
+    mirrored: []
+  - name: item-abort-preserves-peers
+    setup: >-
+      CREATE TRIGGER fail_artifact_mirror BEFORE UPDATE OF artifact_hash ON sessions
+      WHEN NEW.session_id = '22222222-2222-4222-8222-222222222222'
+      BEGIN SELECT RAISE(ABORT, 'synthetic isolated item failure'); END;
+    mirrored: [11111111-1111-4111-8111-111111111111, 33333333-3333-4333-8333-333333333333]
+  - name: panic-rolls-back-all
+    panic: synthetic artifact mirror panic
+    setup: >-
+      CREATE TRIGGER fail_artifact_mirror BEFORE UPDATE OF artifact_hash ON sessions
+      WHEN NEW.session_id = '22222222-2222-4222-8222-222222222222'
+      BEGIN SELECT artifact_mirror_panic(); END;
+    mirrored: []

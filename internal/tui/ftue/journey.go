@@ -159,17 +159,21 @@ type PersistedEffect struct {
 // JourneyRequest is the complete consent snapshot handed to the production
 // orchestrator. FTUE does not implement any authority represented here.
 type JourneyRequest struct {
-	Answers       WizardAnswers
-	PriorEffects  []PersistedEffect
-	RetryTargets  []RetryTarget
-	SessionFilter []string
-	HookFilter    *RetryTarget
+	Answers          WizardAnswers
+	PriorEffects     []PersistedEffect
+	RetryTargets     []RetryTarget
+	SessionFilter    []string
+	HookFilter       *RetryTarget
+	PriorDiagnostics []schema.DiagnosticEntry
 }
 
 // JourneyResult is an exact, partial-safe execution receipt.
 type JourneyResult struct {
 	Effects []PersistedEffect
 	Retry   []RetryTarget
+	// Diagnostics preserve warnings recorded across this setup's attempts.
+	// A retained warning may have been resolved by a later targeted retry.
+	Diagnostics []schema.DiagnosticEntry
 }
 
 func (r JourneyResult) Validate() error {

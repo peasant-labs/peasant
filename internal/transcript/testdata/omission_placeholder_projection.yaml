@@ -1,0 +1,29 @@
+# How an omission placeholder, the entry that stands where ingest left a source
+# record out, must reach a reader on the served projection, for each way the
+# placeholder can relate to a tool call.
+#
+# The projection is harness-agnostic, so these three relations cover every
+# harness: a Claude Code tool_result opens with its tool_use_id and pairs; a Pi
+# record, an oversized assistant message, and a Cursor or Strike record whose id
+# key sits outside the read prefix carry no id at all; and a tool call that was
+# itself the omitted record leaves an id nothing answers.
+#
+# The note must be visible exactly once in every case. Showing it twice tells
+# the reader about two missing records; showing it zero times is a conversation
+# that silently jumps.
+cases:
+  - name: placeholder_without_a_tool_call_id_is_a_turn_of_its_own
+    toolCallId: ""
+    toolCallPresent: false
+    noteOnItsOwnTurn: true
+    noteOnAToolCallResult: false
+  - name: placeholder_whose_own_tool_call_was_omitted_is_a_turn_of_its_own
+    toolCallId: call-that-was-omitted
+    toolCallPresent: false
+    noteOnItsOwnTurn: true
+    noteOnAToolCallResult: false
+  - name: placeholder_paired_with_its_tool_call_is_that_call_result
+    toolCallId: call-large
+    toolCallPresent: true
+    noteOnItsOwnTurn: false
+    noteOnAToolCallResult: true

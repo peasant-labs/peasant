@@ -41,7 +41,7 @@ func BuildPushCommand() *cobra.Command {
 	var (
 		dryRun             bool
 		force              bool
-		sourceProvider     string
+		sourceHarness      string
 		visibility         string
 		license            string
 		jsonOutput         bool
@@ -182,7 +182,7 @@ func BuildPushCommand() *cobra.Command {
 					return fmt.Errorf("village URL is not set — run 'peasant village login' to re-link your account")
 				}
 
-				cfg, err := loadConfig(cfgPath)
+				cfg, err := loadRunConfig(cfgPath, dryRun)
 				if err != nil {
 					return fmt.Errorf("load config: %w", err)
 				}
@@ -241,12 +241,7 @@ func BuildPushCommand() *cobra.Command {
 						noteCfgPath, noteCfgPath)
 				}
 
-				dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
-				dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-				if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-					return fmt.Errorf("create data directory: %w", err)
-				}
-				db, err := store.Open(dbPath)
+				db, err := openRunStore(cmd, dryRun)
 				if err != nil {
 					return fmt.Errorf("open analytics store: %w", err)
 				}
@@ -276,7 +271,7 @@ func BuildPushCommand() *cobra.Command {
 				runCfg := push.PipelineConfig{
 					DryRun:         dryRun,
 					Force:          force,
-					SourceProvider: sourceProvider,
+					SourceProvider: sourceHarness,
 					Visibility:     schema.Visibility(visibility),
 					License:        schema.License(license),
 					JSONOutput:     jsonOutput,
@@ -308,7 +303,7 @@ func BuildPushCommand() *cobra.Command {
 				}
 				// Branch-aware selection filter. When selection.mode=selected,
 				// push honors the configured projects/branches (composing with
-				// --source-provider and the wizard). mode != selected => nil (no
+				// --source-harness and the wizard). mode != selected => nil (no
 				// filter; push everything otherwise eligible).
 				if cfg.Selection.Mode == config.SelectionModeSelected {
 					matcher := cfg.SelectionMatcher()
@@ -351,7 +346,7 @@ func BuildPushCommand() *cobra.Command {
 				if !dryRun && !jsonOutput && isTTY && !nonInteractive {
 					wizQuery := push.PushCandidateQuery{
 						Force:          force,
-						SourceProvider: sourceProvider,
+						SourceProvider: sourceHarness,
 						Method:         cfg.Push.Method,
 						Sources:        cfg.Push.Sources,
 					}
@@ -389,7 +384,7 @@ func BuildPushCommand() *cobra.Command {
 				// suppresses it (errors + final result line only), and a dry run
 				// publishes nothing to keep a record of.
 				if !dryRun && !jsonOutput && level != outputQuiet {
-					reportSessions, queryErr := pushCandidates(ctx, db, force, sourceProvider)
+					reportSessions, queryErr := pushCandidates(ctx, db, force, sourceHarness)
 					if queryErr != nil {
 						// The record is informational: losing it must not fail a push
 						// that would otherwise publish. Saying so is the honest form.
@@ -596,10 +591,12 @@ func BuildPushCommand() *cobra.Command {
 					if rollupErr := perf.WriteRollup(cmd.ErrOrStderr(), timingCollector.Rollup()); rollupErr != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing rollup: %v\n", rollupErr)
 					}
-					if logPath, logErr := writeTimingLog(timingCollector, stateDirOverride(cmd)); logErr != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing log: %v\n", logErr)
-					} else if logPath != "" {
-						fmt.Fprintf(cmd.ErrOrStderr(), "timing log written to %s\n", logPath)
+					if !dryRun {
+						if logPath, logErr := writeTimingLog(timingCollector, stateDirOverride(cmd)); logErr != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing log: %v\n", logErr)
+						} else if logPath != "" {
+							fmt.Fprintf(cmd.ErrOrStderr(), "timing log written to %s\n", logPath)
+						}
 					}
 				}
 
@@ -721,7 +718,7 @@ func BuildPushCommand() *cobra.Command {
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
-	cmd.Flags().StringVar(&sourceProvider, "source-provider", "", sourceProviderHelp())
+	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
 	cmd.Flags().StringVar(&visibility, "visibility", "", "Override visibility for this run (public, private, group)")
 	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s)", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
@@ -1273,17 +1270,17 @@ func firstPushStageError(transcriptErr, annotationErr error) error {
 	return annotationErr
 }
 
-// sourceProviderHelp builds the --source-provider flag help text by deriving
+// sourceHarnessHelp builds the --source-harness flag help text by deriving
 // the provider list from schema.AllHarnesses (the canonical ingestion-supported
 // harness set). Deriving — rather than hardcoding — means adding a new harness
 // to AllHarnesses updates this help string automatically, so it can never drift
 // out of sync with the providers peasant actually supports.
-func sourceProviderHelp() string {
+func sourceHarnessHelp() string {
 	names := make([]string, len(schema.AllHarnesses))
 	for i, h := range schema.AllHarnesses {
 		names[i] = h.String()
 	}
-	return fmt.Sprintf("Filter to a specific provider (%s)", strings.Join(names, ", "))
+	return fmt.Sprintf("Filter to a specific harness (%s)", strings.Join(names, ", "))
 }
 
 // buildAnnotationSelection assembles a push.AnnotationSelection from the
@@ -2004,24 +2001,46 @@ func runPushWizard(
 	return result.SelectedSessionIDs(), nil
 }
 
-// storedSessionEntries reads one session's indexed entries from the local store:
-// the SAME read the pipeline publishes from. The wizard preview redacts them and
-// renders the result, so the pane shows the transcript the push will send rather
-// than a second reading of the recorded text.
-func storedSessionEntries(ctx context.Context, db *store.Store) push.StoredEntriesFunc {
-	return func(sessionID string) ([]schema.SessionEntry, error) {
+// availableContentReader is the one store read the share preview needs: the
+// content a session ACTUALLY has, full when its capture is complete and the
+// bounded projection otherwise, never gated on completeness or publication
+// readiness.
+//
+// It is declared here, where it is consumed, so the preview depends on the read
+// it needs rather than on everything a Store can do.
+type availableContentReader interface {
+	ReadSessionAvailable(ctx context.Context, sessionID ingest.SessionID) (*store.SessionContentSnapshot, error)
+}
+
+// storedSessionEntries reads one session's AVAILABLE stored entries. The wizard
+// preview redacts them and renders the result, so the pane shows the text a push
+// would send rather than a second reading of the recorded file.
+//
+// It does not ask whether the session is ready to publish. The readiness gate
+// lives at the publish action, in push.Pipeline.preflight: a preview that first
+// demanded a complete capture showed nothing at all for exactly the sessions a
+// user opens the previewer to inspect. Nothing here certifies completeness, and
+// nothing here writes, recovers, or reads a native source.
+func storedSessionEntries(ctx context.Context, reader availableContentReader) push.StoredEntriesFunc {
+	return func(sessionID string) (push.StoredContent, error) {
 		id, err := ingest.NewSessionID(sessionID)
 		if err != nil {
-			return nil, fmt.Errorf("preview session %q: %w", sessionID, err)
+			return push.StoredContent{}, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		input, err := push.LoadPublicationInput(ctx, db, string(id))
+		snapshot, err := reader.ReadSessionAvailable(ctx, id)
 		if err != nil {
-			return nil, err
+			return push.StoredContent{}, err
 		}
-		if err := push.ValidatePublicationInput(input); err != nil {
-			return nil, err
+		if snapshot == nil {
+			return push.StoredContent{}, nil
 		}
-		return input.Entries, nil
+		// The snapshot already proves what the entries stand for, so the preview
+		// reports completeness from the SAME read that produced them rather than
+		// asking the store a second, separately-timed question.
+		return push.StoredContent{
+			Entries:       snapshot.Entries,
+			PartialNotice: store.PartialPreviewNeeded(snapshot.Capture),
+		}, nil
 	}
 }
 
@@ -2069,13 +2088,13 @@ func preparePushSelection(
 // pushCandidates reads the sessions this run would publish, using the same query
 // the pipeline uses for the same flags.
 func pushCandidates(
-	ctx context.Context, db *store.Store, force bool, sourceProvider string,
+	ctx context.Context, db *store.Store, force bool, sourceHarness string,
 ) ([]ingest.PushSessionRow, error) {
 	switch {
 	case force:
 		return db.AllPushableSessions(ctx)
-	case sourceProvider != "":
-		return db.UnpushedSessionsByProvider(ctx, sourceProvider)
+	case sourceHarness != "":
+		return db.UnpushedSessionsByProvider(ctx, sourceHarness)
 	default:
 		return db.UnpushedSessions(ctx)
 	}

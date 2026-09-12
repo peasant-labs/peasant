@@ -12,6 +12,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/peasant/internal/tui/mdrender"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 )
 
@@ -97,6 +99,8 @@ type IngestResult struct {
 	Duration  time.Duration
 	// ProviderCounts holds per-provider breakdown of new + updated counts.
 	ProviderCounts []ProviderIngestCount
+	// Diagnostics are nonfatal pipeline warnings, kept separate from errors.
+	Diagnostics []ingest.DiagnosticEntry
 }
 
 // IngestRunnerFunc runs the ingestion pipeline given the wizard's collected answers.
@@ -266,6 +270,7 @@ type WizardModel struct {
 	journeyRunner         JourneyRunner
 	journeyContext        context.Context
 	journeyResult         *JourneyResult
+	completionOffset      int
 	journeyErr            error
 	executing             bool
 	journeyCancel         context.CancelFunc
@@ -324,6 +329,7 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.executing = false
 		m.journeyProgressToken++
 		m.journeyResult = &msg.result
+		m.completionOffset = 0
 		m.journeyErr = msg.err
 		m.cancellationRequested = false
 		return m, nil
@@ -365,6 +371,12 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.journeyErr = nil
 			return m, m.startJourneyExecution(m.journeyResult.Retry, m.journeyResult.Effects)
+		}
+		if m.journeyResult != nil && len(m.journeyResult.Diagnostics) > 0 {
+			if offset, handled := m.journeyCompletion().Scroll(msg, m.completionOffset); handled {
+				m.completionOffset = offset
+				return m, nil
+			}
 		}
 
 		// Skip other global shortcuts when the current page is capturing text input
@@ -480,7 +492,11 @@ func (m WizardModel) viewString() string {
 
 	// Current page
 	if m.current < len(m.pages) {
-		b.WriteString(m.pages[m.current].View(pageWidth, m.height))
+		pageHeight := m.height
+		if page, ok := m.pages[m.current].(*IngestPage); ok && page.result != nil && len(page.result.Diagnostics) > 0 {
+			pageHeight = max(1, m.height-WizardBorder.GetVerticalFrameSize()-3)
+		}
+		b.WriteString(m.pages[m.current].View(pageWidth, pageHeight))
 	}
 
 	content := b.String()
@@ -692,10 +708,14 @@ func (m *WizardModel) storeAnswer(pageIndex int) {
 
 func (m *WizardModel) startJourney(targets []RetryTarget, prior []PersistedEffect) tea.Cmd {
 	answers := *m.answers
+	var priorDiagnostics []ingest.DiagnosticEntry
+	if m.journeyResult != nil {
+		priorDiagnostics = append(priorDiagnostics, m.journeyResult.Diagnostics...)
+	}
 	ctx, cancel := context.WithCancel(m.journeyContext)
 	m.journeyCancel = cancel
 	return func() tea.Msg {
-		result, err := m.journeyRunner.Run(ctx, JourneyRequest{Answers: answers, RetryTargets: append([]RetryTarget(nil), targets...), PriorEffects: append([]PersistedEffect(nil), prior...)})
+		result, err := m.journeyRunner.Run(ctx, JourneyRequest{Answers: answers, RetryTargets: append([]RetryTarget(nil), targets...), PriorEffects: append([]PersistedEffect(nil), prior...), PriorDiagnostics: priorDiagnostics})
 		return journeyFinishedMsg{result: result, err: err}
 	}
 }
@@ -707,6 +727,21 @@ func (m *WizardModel) startJourneyExecution(targets []RetryTarget, prior []Persi
 }
 
 func (m WizardModel) renderJourneyResult() string {
+	if len(m.journeyResult.Diagnostics) > 0 {
+		return m.journeyCompletion().View(m.completionOffset)
+	}
+	return WizardBorder.Render(DescriptionStyle.Render(m.journeyResultContent()))
+}
+
+func (m WizardModel) journeyCompletion() IngestCompletion {
+	footer := "PgUp/PgDn: scroll · enter: finish · ctrl+c: quit"
+	if len(m.journeyResult.Retry) > 0 {
+		footer = "PgUp/PgDn: scroll · enter: retry failed targets · ctrl+c: quit"
+	}
+	return NewIngestCompletion(theme.New(theme.ModeDark), "setup results", mdrender.Sanitize(m.journeyResultContent()), footer, m.width, m.height)
+}
+
+func (m WizardModel) journeyResultContent() string {
 	const namedEffectDisplayLimit = 5
 	var b strings.Builder
 	b.WriteString("Setup results\n\n")
@@ -727,6 +762,13 @@ func (m WizardModel) renderJourneyResult() string {
 			}
 		}
 		b.WriteByte('\n')
+		if stage == StageIngest {
+			for _, effect := range m.journeyResult.Effects {
+				if effect.Stage == StageIngest && effect.SessionID == "" && effect.Detail != "" {
+					fmt.Fprintf(&b, "  %s\n", effect.Detail)
+				}
+			}
+		}
 	}
 	named := 0
 	for _, effect := range m.journeyResult.Effects {
@@ -754,12 +796,16 @@ func (m WizardModel) renderJourneyResult() string {
 	if m.journeyErr != nil {
 		fmt.Fprintf(&b, "\nStopped: %v\nCompleted stages above were not rolled back.\n", m.journeyErr)
 	}
+	if len(m.journeyResult.Diagnostics) > 0 {
+		b.WriteString("\nwarnings recorded during this setup; earlier warnings may now be resolved\n\n")
+		b.WriteString(IngestDiagnosticsText(m.journeyResult.Diagnostics))
+	}
 	if len(m.journeyResult.Retry) > 0 {
 		fmt.Fprintf(&b, "\nPress Enter to retry all %d exact failed target(s).\n", len(m.journeyResult.Retry))
 	} else {
 		b.WriteString("\nPress Enter to finish.\n")
 	}
-	return WizardBorder.Render(DescriptionStyle.Render(b.String()))
+	return b.String()
 }
 
 func countNamedEffects(effects []PersistedEffect) int {

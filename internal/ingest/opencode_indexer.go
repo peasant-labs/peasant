@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -40,7 +41,44 @@ func WithOpenCodeFullContent(enabled bool) OpenCodeIndexerOption {
 }
 
 var _ TranscriptIndexer = (*OpenCodeIndexer)(nil)
+var _ VersionedTranscriptIndexer = (*OpenCodeIndexer)(nil)
 var _ SessionTranscriptSourceResolver = (*OpenCodeIndexer)(nil)
+
+// IndexTranscriptResult refuses incomplete native trees and validates managed
+// projections through their existing bounded, strict decoder.
+func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	switch session.TranscriptOrigin {
+	case TranscriptOriginFile:
+		input, err := idx.captureJSONInput(ctx, session)
+		if err != nil {
+			return completion.result(nil, err)
+		}
+		return idx.indexJSONInput(ctx, session, input)
+	case TranscriptOriginOpenCodeLegacySQLite, TranscriptOriginOpenCodeCurrentSQLite:
+		entries, err := idx.IndexTranscript(ctx, session)
+		return completion.result(entries, err)
+	default:
+		return completion.result(nil, fmt.Errorf("unsupported transcript origin %d", session.TranscriptOrigin))
+	}
+}
+
+// IndexTranscriptBytesResult verifies managed projection bytes; directory
+// origins still require their actual message/part tree, never a session JSON substitute.
+func (idx *OpenCodeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		return idx.IndexTranscriptResult(ctx, session)
+	}
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	entries, err := idx.indexManagedProjection(session, data)
+	return completion.result(entries, err)
+}
 
 // SourceKind reports the default legacy JSON representation. TranscriptSourceKindFor
 // selects managed projection files for SQLite-backed sessions.
@@ -176,12 +214,11 @@ func isKnownOpenCodeSemanticPartType(partType string) bool {
 func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
 	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
 		projectionPath := session.SourcePath.String()
-		info, statErr := idx.fs.Stat(projectionPath)
-		if statErr != nil {
-			return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while sizing %q: %w; no entry rows were stored, so re-run harvest to restore the managed artifact", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, projectionPath, statErr)
-		}
-		if info.Size() > defaults.OpenCodeManagedProjectionMaxBytes {
-			return nil, fmt.Errorf("index %s OpenCode projection for session %q refused %q because it is %d bytes, past the %d byte managed-projection bound; no entry rows were stored and the file was never read into memory; this path must hold the small per-session managed projection, so run harvest to regenerate the projection and never point the reader at the OpenCode database", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, projectionPath, info.Size(), int64(defaults.OpenCodeManagedProjectionMaxBytes))
+		// One rule for both readers: a projection is refused for holding the
+		// provider database, never for its size. A long session's projection is
+		// large and must still index.
+		if err := refuseOpenCodeProviderDatabase(idx.fs, session, projectionPath); err != nil {
+			return nil, err
 		}
 		data, err := idx.fs.ReadFile(projectionPath)
 		if err != nil {
@@ -194,6 +231,7 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 }
 
 func loadOpenCodeJSONSemanticMessages(filesystem FileSystem, session DiscoveredSession) []openCodeSemanticMessage {
+	// Adapter metadata and legacy preview APIs retain their tolerant policy.
 	storageRoot := resolveStorageRoot(session)
 	msgDir := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), string(session.SessionID))
 
@@ -225,7 +263,8 @@ func loadOpenCodeJSONSemanticMessages(filesystem FileSystem, session DiscoveredS
 			continue
 		}
 		partDir := filepath.Join(storageRoot, defaults.OpenCodeDirPart.String(), messageID)
-		for _, partName := range listPartFilenames(filesystem, storageRoot, messageID) {
+		partNames, _ := listPartFilenamesWithError(filesystem, storageRoot, messageID)
+		for _, partName := range partNames {
 			partData, readErr := filesystem.ReadFile(filepath.Join(partDir, partName))
 			if readErr != nil {
 				continue
@@ -522,8 +561,14 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 		if !idx.fullDepth {
 			continue
 		}
+		// Deduplication is structural: truncating a preview must never change
+		// whether a part exists, or every later entry coordinate can shift.
+		parentContent := extractOpenCodePreview(message.Data.Content)
+		if parentContent == "" {
+			parentContent = firstOpenCodeSemanticText(message.Parts)
+		}
 		for _, part := range message.Parts {
-			partEntry, include := idx.openCodePartEntry(sessionID, part, parentIndex, entryIndex, entry.Role, entry.ContentPreview)
+			partEntry, include := idx.openCodePartEntry(sessionID, part, parentIndex, entryIndex, entry.Role, &parentContent)
 			if !include {
 				continue
 			}
@@ -908,10 +953,13 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		}
 	case "text":
 		entry.EntryType, entry.Role = EntryTypeText, parentRole
-		// A text part that repeats its message's own preview would render the
-		// same prose twice: once on the message turn and once on the part turn.
-		// The message turn already carries it, so drop the part.
-		if parentContent != nil && *parentContent != "" && part.Data.Text == truncateString(*parentContent, defaults.ContentPreviewLimit) {
+		// A text part that repeats its message's own text would render the same
+		// prose twice: once on the message turn and once on the part turn. The
+		// message turn already carries it, so drop the part. Both sides are the
+		// recorded text, never a preview: comparing a bounded preview would keep
+		// the duplicate whenever the prose is longer than the preview limit,
+		// which is exactly when reading it twice costs the reader most.
+		if parentContent != nil && *parentContent != "" && part.Data.Text == *parentContent {
 			return schema.SessionEntry{}, false
 		}
 		if part.Data.Text != "" {
@@ -1137,10 +1185,15 @@ func extractOpenCodePreview(raw json.RawMessage) string {
 // This is the package-level variant of (*OpenCodeIndexer).listPartFiles for use
 // by types that do not embed OpenCodeIndexer.
 func listPartFilenames(fs FileSystem, storageRoot, msgID string) []string {
+	files, _ := listPartFilenamesWithError(fs, storageRoot, msgID)
+	return files
+}
+
+func listPartFilenamesWithError(fs FileSystem, storageRoot, msgID string) ([]string, error) {
 	partDir := filepath.Join(storageRoot, defaults.OpenCodeDirPart.String(), msgID)
 	dirEntries, err := fs.ReadDir(partDir)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var partFiles []string
 	for _, de := range dirEntries {
@@ -1151,7 +1204,7 @@ func listPartFilenames(fs FileSystem, storageRoot, msgID string) []string {
 		partFiles = append(partFiles, name)
 	}
 	sort.Strings(partFiles)
-	return partFiles
+	return partFiles, nil
 }
 
 // listPartFiles returns sorted JSON filenames under {storageRoot}/part/{msgID}/.

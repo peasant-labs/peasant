@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
@@ -363,18 +364,25 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	// Nothing leaks in that case, which is why it is a shape check and not a
 	// second redaction; a body the village stores as a transcript should still be
 	// one.
-	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
+	if err := schema.ScanRawJSONDocument(redacted, schema.RawJSONPathPolicy{MaxDocumentBytes: defaults.SessionDetailDocumentCapBytes, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/sessionDetail/nativeMetadata/*/data"}}); err != nil {
 		return nil, err
 	}
 	var check schema.TranscriptContent
-	if err := json.Unmarshal(redacted, &check); err != nil || check.Kind != content.Kind {
+	// The cause is wrapped, never flattened: a caller that wants to tell a
+	// malformed-JSON redaction from a reshaped-but-valid one reads the chain.
+	decodeErr := json.Unmarshal(redacted, &check)
+	if decodeErr != nil || check.Kind != content.Kind {
+		cause := decodeErr
+		if cause == nil {
+			cause = fmt.Errorf("the document decoded cleanly but its kind is %q rather than %q", check.Kind, content.Kind)
+		}
 		return nil, fmt.Errorf(
 			"redact the transcript content for publication: the redacted document is no longer a transcript envelope "+
-				"(kind %q, unmarshal error %v). This ran in internal/push.marshalTranscriptContent, between redaction and "+
+				"(kind %q, cause: %w). This ran in internal/push.marshalTranscriptContent, between redaction and "+
 				"upload, so nothing was published. It means a redaction rule reshaped the document rather than rewriting "+
 				"values inside it, and the village would otherwise have stored that as this session's transcript. Report "+
 				"this with the session id printed above; retrying will fail the same way until the rule is corrected",
-			check.Kind, err)
+			check.Kind, cause)
 	}
 	if (content.SessionDetail == nil) != (check.SessionDetail == nil) {
 		return nil, transcriptShapeRedactionError("sessionDetail presence changed")

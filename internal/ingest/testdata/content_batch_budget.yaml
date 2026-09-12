@@ -1,0 +1,90 @@
+# The byte budget that bounds ONE write wave, asserted at the grouping boundary
+# that applies it.
+#
+# Sizes are a fraction of the shipped budget, never a byte count, so the corpus
+# keeps describing the same situations if the budget moves. The sessions here
+# write a few hundred bytes each to disk: the boundary measures PARSE OUTPUT, so a
+# case crosses the budget through the parser seam instead of through 32 MiB of
+# synthetic transcript.
+#
+# HOW THE GROUPING IS OBSERVED: a flush commits each of its sessions separately,
+# so counting commits cannot show the grouping. Each flush sorts its own sessions
+# by identifier, while the flushes run in parse order, and these sessions are
+# seeded with identifiers that descend as parsing advances. The commit ORDER
+# therefore changes whenever the grouping changes.
+budget: defaults.FullContentWriteBatchBytes
+required_names: [index_batch_by_bytes, oversized_session_alone, under-budget-sessions-share-one-flush]
+cases:
+  # Two sessions that cannot share the budget, then a small one that can join the
+  # second: the split happens where the budget is crossed, not per session.
+  - name: index_batch_by_bytes
+    session_budget_fractions: [0.6, 0.6, 0.000001]
+    expected_flush_groups: [[0], [1, 2]]
+  # A session larger than the whole budget still makes progress on its own, and
+  # does not drag the next session into its flush.
+  - name: oversized_session_alone
+    session_budget_fractions: [1.1, 0.000001]
+    expected_flush_groups: [[0], [1]]
+  # Under the budget, sessions travel together: this is the case a lost split
+  # would make look correct, so it is stated separately.
+  - name: under-budget-sessions-share-one-flush
+    session_budget_fractions: [0.2, 0.2, 0.2]
+    expected_flush_groups: [[0, 1, 2]]
+
+# THE SAME BUDGET AT THE STREAMING DRAIN.
+#
+# indexBatch above groups the stale-session waves. The drain below is the
+# boundary EVERY parsed session crosses on an ordinary harvest and on a
+# reindex, so it is where the memory bound actually earns its keep. Both now
+# ask exceedsIndexWriteBudget, and both are asserted: the predicate on its own
+# inputs, and the drain over a channel, so a call site that stopped asking is
+# visible as well as a predicate that stopped answering.
+#
+# The drain absorbs whatever has already arrived, which in a live pipeline
+# depends on parser timing. Here the channel is filled and CLOSED before the
+# drain reads it, so its receive is always ready, the select never takes its
+# default, and the grouping is a property of the budget alone.
+predicate_required_names:
+  - empty-batch-admits-any-single-result
+  - full-batch-flushes-before-counting-bytes
+  - crossing-the-budget-flushes
+  - staying-under-the-budget-does-not
+predicate_cases:
+  # An oversized result must still be written, so an empty batch never flushes.
+  - name: empty-batch-admits-any-single-result
+    pending_count: 0
+    pending_budget_fraction: 0.0
+    next_budget_fraction: 1.5
+    want_flush: false
+  # The session count bounds the batch even when the bytes are negligible.
+  - name: full-batch-flushes-before-counting-bytes
+    pending_count: 64
+    pending_budget_fraction: 0.0
+    next_budget_fraction: 0.000001
+    want_flush: true
+  - name: crossing-the-budget-flushes
+    pending_count: 1
+    pending_budget_fraction: 0.6
+    next_budget_fraction: 0.6
+    want_flush: true
+  - name: staying-under-the-budget-does-not
+    pending_count: 1
+    pending_budget_fraction: 0.2
+    next_budget_fraction: 0.2
+    want_flush: false
+# The drain cases mirror the indexBatch cases above, so the two boundaries are
+# shown to group the same corpus the same way.
+drain_required_names:
+  - drain-byte-budget-splits
+  - drain-oversized-session-progress
+  - drain-under-budget-sessions-share-one-flush
+drain_cases:
+  - name: drain-byte-budget-splits
+    session_budget_fractions: [0.6, 0.6, 0.000001]
+    expected_flush_groups: [[0], [1, 2]]
+  - name: drain-oversized-session-progress
+    session_budget_fractions: [1.1, 0.000001]
+    expected_flush_groups: [[0], [1]]
+  - name: drain-under-budget-sessions-share-one-flush
+    session_budget_fractions: [0.2, 0.2, 0.2]
+    expected_flush_groups: [[0, 1, 2]]

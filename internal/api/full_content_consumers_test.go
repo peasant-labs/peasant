@@ -37,12 +37,24 @@ type fullConsumerFixture struct {
 	NativeSource, SessionID                 string
 	ToolFile                                string
 	Backfill                                bool
-	StructuredOutput                        bool
-	IncompleteTail                          bool
-	Mismatch                                bool
-	Annotation, Commit                      string
-	Roles                                   []schema.Role
-	Repetitions                             int
+	// Previewable marks a session whose capture is merely UNFINISHED. Its
+	// stored rows are intact, so every mounted previewer must still show them;
+	// export, the redaction scan and publication still refuse.
+	Previewable bool
+	// WantRemedy is the recovery a refused publication must name. It differs by
+	// CAUSE: damaged stored content is recovered by re-indexing from retained
+	// artifacts, while an unfinished capture is completed by ingesting the
+	// source again. Telling a person the wrong one wastes their time.
+	WantRemedy string
+	// PreviewsTail marks a previewable case whose rows WERE recorded, so the
+	// preview has to carry them. A case without it recorded nothing to show.
+	PreviewsTail       bool
+	StructuredOutput   bool
+	IncompleteTail     bool
+	Mismatch           bool
+	Annotation, Commit string
+	Roles              []schema.Role
+	Repetitions        int
 }
 
 func loadFullConsumerFixtures(t *testing.T) []fullConsumerFixture {
@@ -64,6 +76,15 @@ func loadFullConsumerFixtures(t *testing.T) []fullConsumerFixture {
 	for _, c := range fixture.Cases {
 		if c.Name == "" || seen[c.Name] || c.Repetitions <= 0 || c.Tail == "" || c.Secret == "" {
 			t.Fatal("invalid full consumer fixture")
+		}
+		if (c.Damage != "none") != (c.WantRemedy != "") {
+			t.Fatalf("fixture %q must name the recovery it expects exactly when it refuses publication", c.Name)
+		}
+		if c.Previewable && c.Damage == "none" {
+			t.Fatalf("fixture %q marks an undamaged capture previewable, which says nothing", c.Name)
+		}
+		if c.PreviewsTail && !c.Previewable {
+			t.Fatalf("fixture %q expects preview content from a refused preview", c.Name)
 		}
 		seen[c.Name] = true
 	}
@@ -179,6 +200,11 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			if fixture.ToolFile != "" {
 				assertFullToolSemantics(t, db, sid, fixture.ToolFile, text)
 			}
+			// Damaged data refuses every consumer. An unfinished capture refuses
+			// only the consumers that CERTIFY content; the previewer shows what
+			// the database holds, which is the whole point of a preview.
+			strictRefused := fixture.Damage != "none"
+			previewRefused := strictRefused && !fixture.Previewable
 			denied := &deniedTranscriptFS{MemFS: testutil.NewMemFS()}
 			provider := NewStoreDataProviderWithFS(db, sessionvisibility.All(), denied)
 			session, detailErr := provider.SessionByID(t.Context(), id)
@@ -211,16 +237,31 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
 			parts := captured.snapshot()
-			if fixture.Damage != "none" {
-				if detailErr == nil || exportErr == nil || scan.Code == http.StatusOK || len(parts) != 0 {
-					t.Fatalf("damaged capture escaped: detail=%v export=%v scan=%d uploads=%d", detailErr, exportErr, scan.Code, len(parts))
+			if (detailErr != nil) != previewRefused {
+				t.Fatalf("mounted previewer outcome=%v, want refused=%t", detailErr, previewRefused)
+			}
+			if strictRefused {
+				if exportErr == nil || scan.Code == http.StatusOK || len(parts) != 0 {
+					t.Fatalf("uncertified capture escaped: export=%v scan=%d uploads=%d", exportErr, scan.Code, len(parts))
 				}
-				if !strings.Contains(response.Body.String(), "harvest index --force") {
-					t.Fatalf("push failure lacks remediation: %s", response.Body.String())
+				if !strings.Contains(response.Body.String(), fixture.WantRemedy) {
+					t.Fatalf("push failure does not name %q as the recovery: %s", fixture.WantRemedy, response.Body.String())
+				}
+				if fixture.PreviewsTail {
+					// The preview is not merely "not an error": where rows were
+					// recorded it has to carry the conversation the previewer
+					// exists to show.
+					if len(session.Turns) == 0 {
+						t.Fatal("an unfinished capture previewed no turns at all")
+					}
+					viewerJSON, _ := json.Marshal(session)
+					if !bytes.Contains(viewerJSON, []byte(fixture.Tail)) {
+						t.Fatal("the previewer lost the stored content of an unfinished capture")
+					}
 				}
 			} else {
-				if detailErr != nil || exportErr != nil {
-					t.Fatalf("detail=%v export=%v", detailErr, exportErr)
+				if exportErr != nil {
+					t.Fatalf("export=%v", exportErr)
 				}
 				if fixture.Harness == schema.HarnessPi.String() {
 					assertFullPiWebSocket(t, provider, detail)

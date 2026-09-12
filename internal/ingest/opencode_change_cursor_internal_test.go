@@ -55,7 +55,8 @@ func TestOpenCodeChangeCursorTriggersReingest(t *testing.T) {
 		t.Run(testCase.Name, func(t *testing.T) {
 			ingested := testCase.IngestedMs
 			pipeline := &Pipeline{
-				config: PipelineConfig{StalenessThreshold: 0},
+				fs:     &OSFileSystem{},
+				config: PipelineConfig{StalenessThreshold: 0, OutputDir: ResolvedPath(t.TempDir())},
 				locationCache: map[SessionID]SessionLocation{
 					sessionID: {IngestedMs: &ingested, SchemaVersion: CurrentSchemaVersion},
 				},

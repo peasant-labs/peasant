@@ -360,7 +360,7 @@ func TestOpenCodeCurrentSQLiteEntersMountedProductionThroughManagedProjection(t 
 	commandRoot := t.TempDir()
 	outputRoot := filepath.Join(commandRoot, "managed")
 	output, err := executeHarvestCmd(t, commandRoot, []string{
-		"--source-provider=" + defaults.HarnessOpenCode.String(),
+		"--source-harness=" + defaults.HarnessOpenCode.String(),
 		"--source-path=" + sourceRoot,
 		"--output=" + outputRoot,
 		"--force",

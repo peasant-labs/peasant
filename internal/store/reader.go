@@ -426,9 +426,12 @@ func (s *Store) SessionDetailByID(ctx context.Context, sessionID string) (*Sessi
 		return nil, fmt.Errorf("store: session detail by id take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return sessionDetailByIDOnConn(conn, sessionID)
+}
 
+func sessionDetailByIDOnConn(conn *sqlite.Conn, sessionID string) (*SessionDetailRow, error) {
 	var row *SessionDetailRow
-	err = sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			r := scanSessionDetailRow(stmt)
@@ -637,13 +640,14 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
+	// Readiness is the publication binding plus a current metadata schema
+	// version. The binding half is shared, so it cannot drift from the binding
+	// that captured index state reports.
 	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version,
 s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
-CASE WHEN p.capture_revision > 0 AND p.capture_revision=s.publication_capture_revision
- AND p.capture_revision=s.indexed_publication_capture_revision AND p.schema_version=?
- AND s.cwd_provenance_kind!='not_recovered' THEN 1 ELSE 0 END,
+CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
 p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
-c.status,c.full_capture_sha256,c.publication_capture_revision
+c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
@@ -670,6 +674,11 @@ WHERE s.session_id IN (` +
 			}
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
+			var adapterVersion *int
+			if stmt.ColumnType(21) != sqlite.TypeNull {
+				value := stmt.ColumnInt(21)
+				adapterVersion = &value
+			}
 			var sourceFingerprint []byte
 			if stmt.ColumnType(15) != sqlite.TypeNull {
 				sourceFingerprint = make([]byte, stmt.ColumnLen(15))
@@ -684,6 +693,7 @@ WHERE s.session_id IN (` +
 				HostSlug:                stmt.ColumnText(1),
 				ParentID:                stmt.ColumnText(2),
 				IngestedMs:              &ingestedMs,
+				AdapterVersion:          adapterVersion,
 				SchemaVersion:           schemaVersion,
 				SourceFingerprint:       sourceFingerprint,
 				SourceEvidenceSupported: true,
@@ -860,12 +870,17 @@ func sortFieldToColumn(f defaults.SessionSortField) string {
 // FirstUserMessage returns the content_preview of the first user message (depth=0)
 // in a session, truncated to SessionPreviewMaxChars Unicode runes. Returns "" if
 // no user entries exist or the session does not exist.
-func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (string, error) {
+func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (_ string, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return "", fmt.Errorf("store: FirstUserMessage take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return "", err
+	}
 
 	const q = `SELECT content_preview FROM session_entries
 WHERE session_id = ? AND role = 'user' AND depth = 0
@@ -889,13 +904,13 @@ ORDER BY entry_index ASC LIMIT 1`
 }
 
 // FirstUserMessageBulk returns the content_preview of the first user message (depth=0)
-// for each session in sessionIDs, using a single IN(...) query. Sessions that have no
+// for each session in sessionIDs, using bounded IN(...) queries. Sessions that have no
 // user entry are OMITTED from the returned map (the caller should treat a missing key as
 // an empty preview — this matches the current behavior of FirstUserMessage returning "").
 //
 // All previews are truncated to SessionPreviewMaxChars runes for parity with
 // the single-row FirstUserMessage.
-func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error) {
+func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (_ map[string]string, retErr error) {
 	if len(sessionIDs) == 0 {
 		return map[string]string{}, nil
 	}
@@ -905,16 +920,24 @@ func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (
 		return nil, fmt.Errorf("store: FirstUserMessageBulk take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-
-	// Build a single IN(...) query so we pay one round-trip regardless of session count.
-	// The subquery per-session MIN(entry_index) picks the first user message per session.
-	placeholders := make([]string, len(sessionIDs))
-	args := make([]any, len(sessionIDs))
-	for i, id := range sessionIDs {
-		placeholders[i] = "?"
-		args[i] = id
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, sessionIDs); err != nil {
+		return nil, err
 	}
-	q := `SELECT session_id, content_preview FROM session_entries
+
+	result := make(map[string]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		// Keep every projection query below SQLite's variable limit.
+		// The subquery per-session MIN(entry_index) picks the first user message per session.
+		placeholders := make([]string, len(selectedIDs))
+		args := make([]any, len(selectedIDs))
+		for i, id := range selectedIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		q := `SELECT session_id, content_preview FROM session_entries
 WHERE role = 'user' AND depth = 0
   AND (session_id, entry_index) IN (
     SELECT session_id, MIN(entry_index)
@@ -923,21 +946,21 @@ WHERE role = 'user' AND depth = 0
     GROUP BY session_id
   )`
 
-	result := make(map[string]string, len(sessionIDs))
-	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: args,
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			sid := stmt.ColumnText(0)
-			var preview string
-			if stmt.ColumnType(1) != sqlite.TypeNull {
-				preview = stmt.ColumnText(1)
-			}
-			result[sid] = TruncateToRunes(preview, defaults.SessionPreviewMaxChars)
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				sid := stmt.ColumnText(0)
+				var preview string
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					preview = stmt.ColumnText(1)
+				}
+				result[sid] = TruncateToRunes(preview, defaults.SessionPreviewMaxChars)
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		}
 	}
 	return result, nil
 }

@@ -360,7 +360,8 @@ func validateMountedRenderedCompletionPreamble(view, firstCommand string) error 
 
 func mountedExactRenderedLineIndex(lines []string, want string) int {
 	for index, line := range lines {
-		if line == want {
+		// Kit background fill adds terminal cells, not additional copy.
+		if strings.TrimRight(line, " ") == want {
 			return index
 		}
 	}

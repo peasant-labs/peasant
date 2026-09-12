@@ -14,20 +14,20 @@ peasant harvest [flags]
 ### Options
 
 ```
-      --all                      Process ALL sessions (clears filters, implies --force)
-      --detect-commits           Detect and store git commits linked to each session
-      --dry-run                  Show what would be processed without writing
-      --force                    Force re-process sessions that match current filters
-  -h, --help                     help for harvest
-      --include-active           Deprecated compatibility flag; active sessions are processed by default (default true)
-      --json                     Output as JSON instead of human-readable
-      --output string            Override output base path
-      --profile-index            Print INDEX parse/write timing diagnostics
-      --session strings          Filter to specific session IDs (repeatable, comma-separated)
-      --since string             Filter to sessions from the last N period (e.g. 2w, 3m, 7d)
-      --source-path string       Override source paths for the provider (replaces config, not additive)
-      --source-provider string   Override source provider (claude-code, opencode, codex, cursor, strike, pi)
-      --verbose                  Show file-level detail
+      --all                     Process ALL sessions (clears filters, implies --force)
+      --detect-commits          Detect and store git commits linked to each session
+      --dry-run                 Show what would be processed without writing
+      --force                   Force re-process sessions that match current filters
+  -h, --help                    help for harvest
+      --include-active          Deprecated compatibility flag; active sessions are processed by default (default true)
+      --json                    Output as JSON instead of human-readable
+      --output string           Override output base path
+      --profile-index           Print INDEX parse/write timing diagnostics
+      --session strings         Filter to specific session IDs (repeatable, comma-separated)
+      --since string            Filter to sessions from the last N period (e.g. 2w, 3m, 7d)
+      --source-harness string   Override source harness (claude-code, opencode, codex, cursor, strike, pi)
+      --source-path string      Override source paths for the harness (replaces config, not additive)
+      --verbose                 Show file-level detail
 ```
 
 ### Options inherited from parent commands

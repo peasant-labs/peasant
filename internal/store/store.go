@@ -258,6 +258,8 @@ var (
 // and manages the database lifecycle.
 type Store struct {
 	pool              *sqlitex.Pool
+	indexFormats      map[int]IndexFormat
+	indexConversions  map[indexConversionKey]IndexFormatConversion
 	salt              salt.Salt
 	annotationWriteMu sync.Mutex
 	closed            atomic.Bool
@@ -284,9 +286,15 @@ var pragmas = []string{
 type OpenOption func(*openOptions)
 
 type openOptions struct {
+	indexFormats     []IndexFormat
+	indexConversions []IndexFormatConversion
 	migrationConsent MigrationConsent
 	poolSize         int
 	skipMigrations   bool
+	// walAutocheckpointDisabled keeps every committed frame in the write-ahead
+	// log for the life of the pool. It exists so a test can count commits by
+	// reading the log, and is never set on a production open.
+	walAutocheckpointDisabled bool
 }
 
 // WithSkipMigrations skips the migration-state check on Open. The caller MUST
@@ -306,6 +314,15 @@ func WithPoolSize(n int) OpenOption {
 	return func(o *openOptions) { o.poolSize = n }
 }
 
+// WithWALAutocheckpointDisabled sets PRAGMA wal_autocheckpoint=0 on every
+// connection of this Open, so the write-ahead log keeps one frame per written
+// page until the pool closes. It is a measurement aid for tests that count
+// database commits from the log's commit frames; production opens never use
+// it, because a log that is never checkpointed grows without bound.
+func WithWALAutocheckpointDisabled() OpenOption {
+	return func(o *openOptions) { o.walAutocheckpointDisabled = true }
+}
+
 // WithMigrationConsent supplies a callback that gates running the V33 harness
 // rename migration on a database that already contains session data. The
 // callback may prompt the user. If nil or omitted, the migration runs without
@@ -321,6 +338,14 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	formats, err := newIndexFormats(o.indexFormats)
+	if err != nil {
+		return nil, err
+	}
+	conversions, err := newIndexFormatConversions(o.indexConversions, formats)
+	if err != nil {
+		return nil, err
+	}
 
 	// V33 is a breaking migration (renames harness identifiers in sessions).
 	// If a consent callback was supplied AND the DB already has data,
@@ -329,9 +354,18 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, err
 	}
 
+	prepare := preparePragmas
+	if o.walAutocheckpointDisabled {
+		prepare = func(conn *sqlite.Conn) error {
+			if err := preparePragmas(conn); err != nil {
+				return err
+			}
+			return sqlitex.ExecuteTransient(conn, "PRAGMA wal_autocheckpoint = 0;", nil)
+		}
+	}
 	pool, err := sqlitex.NewPool(dbPath, sqlitex.PoolOptions{
 		PoolSize:    resolvePoolSize(o.poolSize),
-		PrepareConn: preparePragmas,
+		PrepareConn: prepare,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: open pool: %w", err)
@@ -346,6 +380,11 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		if err != nil {
 			_ = pool.Close()
 			return nil, fmt.Errorf("store: take connection for migration: %w", err)
+		}
+		if err := refuseUnmappableCaptureFormats(conn); err != nil {
+			pool.Put(conn)
+			_ = pool.Close()
+			return nil, err
 		}
 		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 			pool.Put(conn)
@@ -371,7 +410,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	return &Store{pool: pool, salt: s}, nil
+	return &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions}, nil
 }
 
 // readUserVersion returns the PRAGMA user_version value from the pool.

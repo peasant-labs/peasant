@@ -20,7 +20,7 @@ import (
 )
 
 // testConfigYAML is a minimal config that disables all source providers.
-// Tests that need a specific provider use --source-provider + --source-path
+// Tests that need a specific provider use --source-harness + --source-path
 // flags to enable it with a temp dir, preventing accidental ingestion of
 // real session data from the developer's home directory.
 const testConfigYAML = `version: 1
@@ -61,7 +61,7 @@ func writeTestConfigFile(t *testing.T, dir string) string {
 //
 // The config written under dir disables all source providers, so tests never
 // load ambient local configuration or ingest local session data. Tests that need
-// a provider re-enable it via --source-provider
+// a provider re-enable it via --source-harness
 // + --source-path; tests that need a bespoke config pass their own --config.
 func executeHarvestCmd(t *testing.T, dir string, args []string) (string, error) {
 	t.Helper()
@@ -97,7 +97,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 	}
 
 	stringFlags := []flagCheck{
-		{"source-provider", ""},
+		{"source-harness", ""},
 		{"source-path", ""},
 		{"output", ""},
 		{"since", ""},
@@ -153,14 +153,14 @@ func TestHarvestCmd_Flags(t *testing.T) {
 }
 
 // TestHarvestCmd_InvalidProvider checks that providing an unrecognized
-// --source-provider value produces an appropriate error message.
+// --source-harness value produces an appropriate error message.
 func TestHarvestCmd_InvalidProvider(t *testing.T) {
 	t.Parallel()
 	// We need a real path for --source-path to pass the NewResolvedPath check,
 	// and a real directory for --output so the pipeline can resolve paths.
 	tmpDir := t.TempDir()
 	output, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-provider=bogus",
+		"--source-harness=bogus",
 		"--source-path=" + tmpDir,
 		"--output=" + tmpDir,
 		"--dry-run",
@@ -181,9 +181,12 @@ func TestHarvestCmd_DryRun(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -213,9 +216,12 @@ func TestHarvestCmd_JSONOutput(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -244,9 +250,12 @@ func TestHarvestCmd_VerboseOutput(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -270,9 +279,12 @@ func TestHarvestCmd_SourcePathReplaces(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -284,7 +296,7 @@ func TestHarvestCmd_SourcePathReplaces(t *testing.T) {
 }
 
 // TestHarvestCmd_SourcePathWithoutProvider verifies that passing --source-path
-// without --source-provider returns a clear error.
+// without --source-harness returns a clear error.
 func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
@@ -293,28 +305,28 @@ func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 		"--dry-run",
 	})
 	if err == nil {
-		t.Fatal("expected error when --source-path given without --source-provider, got nil")
+		t.Fatal("expected error when --source-path given without --source-harness, got nil")
 	}
-	if !strings.Contains(err.Error(), "--source-path requires --source-provider") {
-		t.Errorf("error should mention '--source-path requires --source-provider', got: %v", err)
+	if !strings.Contains(err.Error(), "--source-path requires --source-harness") {
+		t.Errorf("error should mention '--source-path requires --source-harness', got: %v", err)
 	}
 }
 
-// TestHarvestCmd_SourceProviderWithoutPath verifies that passing --source-provider
+// TestHarvestCmd_SourceHarnessWithoutPath verifies that passing --source-harness
 // without --source-path returns a clear error.
-func TestHarvestCmd_SourceProviderWithoutPath(t *testing.T) {
+func TestHarvestCmd_SourceHarnessWithoutPath(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	_, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--output=" + tmpDir,
 		"--dry-run",
 	})
 	if err == nil {
-		t.Fatal("expected error when --source-provider given without --source-path, got nil")
+		t.Fatal("expected error when --source-harness given without --source-path, got nil")
 	}
-	if !strings.Contains(err.Error(), "--source-provider requires --source-path") {
-		t.Errorf("error should mention '--source-provider requires --source-path', got: %v", err)
+	if !strings.Contains(err.Error(), "--source-harness requires --source-path") {
+		t.Errorf("error should mention '--source-harness requires --source-path', got: %v", err)
 	}
 }
 
@@ -819,6 +831,9 @@ func TestHarvestCmd_DryRun_CustomPatternCount(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	configYAML := fmt.Sprintf(`version: 1
 redaction:
@@ -868,10 +883,13 @@ func TestHarvestCmd_AllImpliesIncludeActive(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	// Run with --all (which should imply --include-active and --force).
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -891,28 +909,176 @@ func TestHarvestCmd_AllImpliesIncludeActive(t *testing.T) {
 	}
 }
 
-// TestHarvestCmd_DryRun_DoesNotCreateDB verifies that --dry-run does NOT create
-// the analytics database file. Uses --data-dir (via the helper) so we can assert
-// on a known path without touching the real data directory.
+// TestHarvestCmd_DryRunWithRetainedArtifactsAndNoDatabase pins the forecast, and
+// the notice that goes with it, in the state where the two can contradict each
+// other: the output tree still holds the artifacts of an earlier harvest while
+// the analytics database is gone (deleted, or a fresh data directory).
+//
+// With no stored row the pipeline classifies each session from the retained
+// sidecar, so the forecast reports it UNCHANGED. A notice that promised every
+// discovered session would be reported as new would then be contradicted by the
+// report printed under it, in the one state a user is most likely to be
+// confused by.
+func TestHarvestCmd_DryRunWithRetainedArtifactsAndNoDatabase(t *testing.T) {
+	t.Parallel()
+	sourceDir := t.TempDir()
+	outputDir := t.TempDir()
+
+	sessions, _ := LoadHarvestIndexSelectionFixtures(t)
+	session := sessions[0]
+	project := filepath.Join(sourceDir, "-fixture-project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatalf("prepare the project directory the harvest discovers: %v", err)
+	}
+	transcript := filepath.Join(project, string(session.ID)+".jsonl")
+	if err := os.WriteFile(transcript, []byte(session.Transcript), 0o600); err != nil {
+		t.Fatalf("write the native transcript: %v", err)
+	}
+	settled := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(transcript, settled, settled); err != nil {
+		t.Fatalf("settle the native transcript so it is not debounced as active: %v", err)
+	}
+
+	// A real harvest first, so the output tree holds the retained artifacts and
+	// their sidecars.
+	recorded, err := executeHarvestCmd(t, t.TempDir(), []string{
+		"--source-harness=claude-code",
+		"--source-path=" + sourceDir,
+		"--output=" + outputDir,
+	})
+	if err != nil {
+		t.Fatalf("the harvest that records the artifacts failed: %v\noutput: %s", err, recorded)
+	}
+
+	// The forecast, with a data directory that holds no database, against the
+	// output tree that does hold the artifacts.
+	output, err := executeHarvestCmd(t, t.TempDir(), []string{
+		"--source-harness=claude-code",
+		"--source-path=" + sourceDir,
+		"--output=" + outputDir,
+		"--dry-run",
+	})
+	if err != nil {
+		t.Fatalf("the forecast refused where it must report: %v\noutput: %s", err, output)
+	}
+
+	if !strings.Contains(output, "no analytics database exists yet") {
+		t.Fatalf("the forecast does not say the database is missing, so this case is not in the state it tests; got: %s", output)
+	}
+	// What the forecast actually reports here: the classification comes from the
+	// retained sidecar, so the session is not new. Which of the other rows it
+	// lands in depends on what the sidecar records, and either one contradicts a
+	// notice that promises "new".
+	if !strings.Contains(output, "0     new") {
+		t.Fatalf("the forecast does not classify the session from the retained artifacts, so the notice cannot be tested against it; got: %s", output)
+	}
+	if !strings.Contains(output, "1     unchanged") && !strings.Contains(output, "1     updated") {
+		t.Fatalf("the forecast reports neither an unchanged nor an updated session, so this case is not in the state it tests; got: %s", output)
+	}
+	// The notice must not predict a classification the report contradicts.
+	for _, forbidden := range []string{
+		"reports every discovered session as new",
+		"every discovered session as new",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Errorf("the notice says %q while the report under it does not classify the session as new; got: %s", forbidden, output)
+		}
+	}
+	// What it must say instead: how the forecast decides, without predicting the
+	// answer.
+	for _, want := range []string{
+		"This dry run creates none",
+		"compared against the retained artifacts on disk",
+		"reported as new when there are none",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the notice does not say %q; got: %s", want, output)
+		}
+	}
+	if strings.ContainsRune(output, '\u2014') {
+		t.Errorf("the notice printed an em dash; user-facing text uses plain punctuation: %s", output)
+	}
+}
+
+// TestHarvestCmd_DryRun_DoesNotCreateDB pins the forecast a user gets on a fresh
+// install: `peasant harvest --dry-run` with no analytics database REPORTS what a
+// normal harvest would do and creates nothing at all.
+//
+// It is the harvest side of the forecast contract, and it is deliberately the
+// opposite of the push side. `peasant push --dry-run` forecasts an upload of
+// sessions that were already recorded, so with no database it has nothing to
+// describe and refuses (TestPushCmd_DryRunRefusesAMissingDatabase). A harvest
+// forecast describes the sessions on disk, which exist whether or not the
+// database does, so refusing would withhold the answer on exactly the install
+// where the user asks the question first.
+//
+// The failure this guards, on both sides, is a forecast that CREATES the
+// database, the data directory or a write-ahead log as the side effect of a
+// command the user ran only to be told what would happen. So the assertions are
+// success plus a real forecast plus an untouched filesystem, never success alone.
 func TestHarvestCmd_DryRun_DoesNotCreateDB(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
 
+	// One settled native session, so the forecast has something to report and
+	// "0 sessions" cannot pass as a report of what would be done.
+	sessions, _ := LoadHarvestIndexSelectionFixtures(t)
+	session := sessions[0]
+	project := filepath.Join(sourceDir, "-fixture-project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatalf("prepare the project directory the forecast discovers: %v", err)
+	}
+	transcript := filepath.Join(project, string(session.ID)+".jsonl")
+	if err := os.WriteFile(transcript, []byte(session.Transcript), 0o600); err != nil {
+		t.Fatalf("write the native transcript the forecast reads: %v", err)
+	}
+	settled := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(transcript, settled, settled); err != nil {
+		t.Fatalf("settle the native transcript so it is not debounced as active: %v", err)
+	}
+
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
 	})
 	if err != nil {
-		t.Fatalf("dry-run should succeed; got error: %v\noutput: %s", err, output)
+		t.Fatalf("a forecast on a fresh install must report what a harvest would do, not refuse: %v\noutput: %s", err, output)
 	}
 
+	// The report: the same summary a normal run prints, with the discovered
+	// session counted as new because no database has recorded it yet.
+	for _, want := range []string{"peasant harvest: 1 sessions", "1     new", string(session.ID)} {
+		if !strings.Contains(output, want) {
+			t.Errorf("the forecast must report what would be done, including %q; got: %s", want, output)
+		}
+	}
+
+	// The notice: without it, a reader cannot tell a first harvest apart from a
+	// harvest that has already recorded everything and found nothing new.
+	if !strings.Contains(output, "no analytics database exists yet") {
+		t.Errorf("the forecast must say no database exists yet, so 'new' is understood as a first harvest; got: %s", output)
+	}
+	// House style for anything printed to a user: plain punctuation only. An
+	// em dash also renders as a box in a terminal with no glyph for it.
+	if strings.ContainsRune(output, '\u2014') {
+		t.Errorf("the forecast printed an em dash; user-facing text uses plain punctuation: %s", output)
+	}
+
+	// Nothing created: not the database, not its sidecars, not the directory
+	// that would hold them.
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	if _, err := os.Stat(dbPath); err == nil {
-		t.Errorf("dry-run should NOT create DB file at %s", dbPath)
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if _, statErr := os.Stat(dbPath + suffix); !os.IsNotExist(statErr) {
+			t.Errorf("the forecast created %s, which it was never asked to write: %v", dbPath+suffix, statErr)
+		}
+	}
+	dataDir := string(defaults.ResolveDataDirPathWith(dir))
+	if _, statErr := os.Stat(dataDir); !os.IsNotExist(statErr) {
+		t.Errorf("the forecast created the data directory %s: %v", dataDir, statErr)
 	}
 }
 
@@ -926,7 +1092,7 @@ func TestHarvestCmd_NonDryRun_CreatesDB(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -958,7 +1124,7 @@ func TestHarvestVerify_AnnotationEngineSection(t *testing.T) {
 
 	// Step 1: Non-dry-run ingest creates DB with migrations + seed data.
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -1041,7 +1207,7 @@ func TestHarvestVerify_AnnotationEngineSection_Verbose(t *testing.T) {
 
 	// Create DB with seed data.
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -1108,7 +1274,7 @@ func TestHarvestCmd_NonDryRun_WiresV2Stages(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--json",
@@ -1235,7 +1401,7 @@ func TestHarvestCmd_SessionFlag_InvalidID(t *testing.T) {
 	outputDir := t.TempDir()
 
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -1257,7 +1423,7 @@ func TestHarvestCmd_SinceFlag_InvalidDuration(t *testing.T) {
 	outputDir := t.TempDir()
 
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -1277,9 +1443,12 @@ func TestHarvestCmd_SinceFlag_ValidDuration(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := t.TempDir()
 	outputDir := t.TempDir()
+	// A dry run inspects an existing, checkpointed database and creates none, so
+	// the state it reads has to exist before the command runs.
+	seedClosedStore(t, dir)
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -1638,7 +1807,7 @@ func TestHarvestVerify_AnnotationEngineSection_SeedFail(t *testing.T) {
 
 	// Step 1: Create DB with seed data via a non-dry-run ingest.
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -1676,11 +1845,11 @@ func TestHarvestVerify_AnnotationEngineSection_SeedFail(t *testing.T) {
 	}
 }
 
-// TestIsolateSourceProvider verifies that --source-path scoping
+// TestIsolateSourceHarness verifies that --source-path scoping
 // makes the NAMED provider the sole active source: it enables that provider and
 // disables default discovery of the others, so a path-scoped ingest never reads
 // the other providers' real default dirs (~/.claude, opencode, codex).
-func TestIsolateSourceProvider(t *testing.T) {
+func TestIsolateSourceHarness(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		named   defaults.Harness
@@ -1699,12 +1868,12 @@ func TestIsolateSourceProvider(t *testing.T) {
 		cfg.Sources.OpenCode.Enabled = true
 		cfg.Sources.Codex.Enabled = true
 
-		isolateSourceProvider(cfg, tc.named)
+		isolateSourceHarness(cfg, tc.named)
 
 		if cfg.Sources.ClaudeCode.Enabled != tc.wantCC ||
 			cfg.Sources.OpenCode.Enabled != tc.wantOC ||
 			cfg.Sources.Codex.Enabled != tc.wantCdx {
-			t.Errorf("isolateSourceProvider(%s): enabled = {cc:%v oc:%v codex:%v}, want {cc:%v oc:%v codex:%v} — only the named provider must stay active",
+			t.Errorf("isolateSourceHarness(%s): enabled = {cc:%v oc:%v codex:%v}, want {cc:%v oc:%v codex:%v} — only the named provider must stay active",
 				tc.named,
 				cfg.Sources.ClaudeCode.Enabled, cfg.Sources.OpenCode.Enabled, cfg.Sources.Codex.Enabled,
 				tc.wantCC, tc.wantOC, tc.wantCdx)
@@ -1715,7 +1884,7 @@ func TestIsolateSourceProvider(t *testing.T) {
 // TestHarvestCmd_SourcePathIsolatesProvider is the end-to-end proof that
 // 0mp4l: with defaults that enable ALL providers, a seeded codex session at the
 // codex DEFAULT dir is discovered by a bare harvest, but
-// `harvest --source-provider claude-code --source-path <dir>` scopes the run to
+// `harvest --source-harness claude-code --source-path <dir>` scopes the run to
 // claude-code only — the codex default is NOT read (its session is absent from
 // the output), while the claude session at the scoped path IS discovered.
 func TestHarvestCmd_SourcePathIsolatesProvider(t *testing.T) {
@@ -1748,13 +1917,17 @@ func TestHarvestCmd_SourcePathIsolatesProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The forecast reads an existing checkpointed database and creates none, so
+	// seed one at the path this environment resolves to.
+	seedClosedStoreAt(t, string(defaults.ResolveDBFilePath()))
+
 	// Sanity: a bare (unscoped) harvest DOES discover the codex default session.
 	if out := runHarvestNoTestConfig(t); !strings.Contains(out, codexID) {
 		t.Fatalf("precondition: bare harvest did not discover the seeded codex session %s — test would be vacuous:\n%s", codexID, out)
 	}
 
 	// Scoped: --source-path claude-code must isolate → codex default NOT read.
-	out := runHarvestNoTestConfig(t, "--source-provider", string(defaults.HarnessClaudeCode), "--source-path", claudeDir)
+	out := runHarvestNoTestConfig(t, "--source-harness", string(defaults.HarnessClaudeCode), "--source-path", claudeDir)
 	if !strings.Contains(out, claudeID) {
 		t.Errorf("scoped harvest did not discover the claude session %s:\n%s", claudeID, out)
 	}

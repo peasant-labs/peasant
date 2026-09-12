@@ -67,6 +67,24 @@ classifiers always see current metrics.
 Profile-only timings include `PREPARE`, `INDEX LOG`, and `AUDIT`. They appear in
 index profile output, but they are not normal progress-renderer stages.
 
+`processSession` installs the metadata/transcript pair by writing both files to
+a temporary directory and renaming them into place, transcript first and
+metadata last, with no file sync and no lock. The drain loop mirrors metadata,
+retained statistics, associations and acquired source evidence to the database
+in one batched transaction per page, and the index writer commits entries per
+byte budget; the database is the durability point. Nothing at ingest reads a
+saved pair except a session the database itself selected as work. `harvest
+index` is the only reader that walks the saved tree.
+
+Native OpenCode materialization can carry an acquired event sequence from the
+same private read-only SQLite snapshot as its transcript. Targeted session and
+project reads verify the normalized discovery attribution consumed by metadata;
+a changed required input preserves the prior artifact for rediscovery. Missing
+optional cursor evidence remains nil and reports a runtime diagnostic, without
+altering committed metadata or erasing previous progress. Explicit zero remains
+distinct from absence. Bounded detached cleanup releases the source transaction
+even when the caller is cancelled; no raw transaction API is exposed.
+
 ---
 
 ## Stage Reference

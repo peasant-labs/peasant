@@ -1,0 +1,4 @@
+requiredNames:
+  - maps_every_shipped_capture_value
+  - unmapped_capture_value_fails_migration
+  - unmapped_capture_value_below_the_predecessor_schema_is_refused

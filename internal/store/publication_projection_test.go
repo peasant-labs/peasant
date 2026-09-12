@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -92,7 +93,7 @@ func BenchmarkPublicationLibrary(b *testing.B) {
 		for j := range entries {
 			entries[j] = schema.SessionEntry{SessionID: id, EntryIndex: j, Harness: defaults.HarnessClaudeCode, Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &text}
 		}
-		writes = append(writes, ingest.SessionEntryWrite{SessionID: id, Entries: entries, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: ingested})
+		writes = append(writes, ingest.SessionEntryWrite{SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: ingested})
 		ids = append(ids, id)
 	}
 	revisions, err := s.InsertSessionsWithRevisions(context.Background(), captures)

@@ -230,9 +230,12 @@ everything each part actually carries.
 
 Two consequences worth knowing before you rely on any of this:
 
-- `peasant redact` rewrites the stored transcript and metadata **files**, but does
-  NOT re-index `session_entries`. Push publishes from those entries, so running it
-  alone does not change what a later push sends.
+- `peasant redact` rewrites the stored transcript and metadata **files** and
+  records the change in the database, which marks the session for re-indexing on
+  the next `peasant harvest`. It does not re-index `session_entries` in the same
+  command, so the database keeps serving the previous content until that harvest
+  runs; push publishes from those entries, so run a harvest before a push if the
+  redacted content must be the content that is sent.
 - Maximum is the only level that anonymizes code identifiers, and the parser it
   needs is linked in only when Peasant is built with cgo. Rather than let one
   configuration behave differently depending on how the binary was compiled, this

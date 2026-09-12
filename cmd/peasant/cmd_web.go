@@ -152,7 +152,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	} else {
 		dbCloser = db.Close
 		analyticsStore = db
-		realProvider = api.NewStoreDataProvider(db, visibility)
+		realProvider = api.NewStoreDataProvider(db, visibility, cfg.Output.BasePath)
 	}
 	if dbCloser != nil {
 		defer dbCloser()
@@ -178,6 +178,15 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		}
 	}
 
+	// The saved transcripts a download serves live under the same output tree
+	// the harvest wrote: the configured base path when set, else this data
+	// directory's peasant-sync. Resolving it here honors --data-dir, so a
+	// server started with one serves the tree its harvest wrote.
+	outputDir := cfg.Output.BasePath
+	if outputDir == "" {
+		outputDir = filepath.Join(dataDir, "peasant-sync")
+	}
+
 	srv := api.NewServer(api.ServerConfig{
 		Port:         port,
 		Provider:     provider,
@@ -189,6 +198,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		Experimental: experimental,
 		Store:        analyticsStore,
 		Config:       cfg,
+		OutputDir:    outputDir,
 	})
 
 	return srv.ListenAndServe(ctx)

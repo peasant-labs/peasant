@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // BuildAnnotateResearchCommands adds research-specific subcommands to the annotate command.
@@ -50,7 +51,7 @@ func readSessionIDsFromFile(path string) ([]string, error) {
 	return ids, nil
 }
 
-func runAnnotateSample(cmd *cobra.Command, _ []string) error {
+func runAnnotateSample(cmd *cobra.Command, _ []string) (retErr error) {
 	count, _ := cmd.Flags().GetInt("count")
 	minUserTurns, _ := cmd.Flags().GetInt("min-user-turns")
 	maxTotalTurns, _ := cmd.Flags().GetInt("max-total-turns")
@@ -83,20 +84,22 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) error {
 	// Build query with filters
 	var conditions []string
 	var args []any
+	var entryConditions []string
+	var entryArgs []any
 
 	// Filter on depth-0 user turns from session_entries (our indexed schema, correct roles).
 	if minUserTurns > 0 {
-		conditions = append(conditions,
+		entryConditions = append(entryConditions,
 			`(SELECT COUNT(*) FROM session_entries se
 			  WHERE se.session_id = s.session_id AND se.role = 'user' AND se.depth = 0) >= ?`)
-		args = append(args, minUserTurns)
+		entryArgs = append(entryArgs, minUserTurns)
 	}
 	// Filter on total indexed turns from session_entries (all roles, all depths).
 	if maxTotalTurns > 0 {
-		conditions = append(conditions,
+		entryConditions = append(entryConditions,
 			`(SELECT COUNT(*) FROM session_entries se
 			  WHERE se.session_id = s.session_id) <= ?`)
-		args = append(args, maxTotalTurns)
+		entryArgs = append(entryArgs, maxTotalTurns)
 	}
 	if project != "" {
 		conditions = append(conditions, "COALESCE(p.canonical_cwd, p.project_hash) LIKE '%' || ? || '%'")
@@ -128,6 +131,13 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) error {
 			fmt.Sprintf("s.session_id NOT IN (%s)", strings.Join(placeholders, ",")))
 	}
 
+	metadataWhere := ""
+	if len(conditions) > 0 {
+		metadataWhere = "WHERE " + strings.Join(conditions, " AND ")
+	}
+	metadataArgs := append([]any(nil), args...)
+	conditions = append(conditions, entryConditions...)
+	args = append(args, entryArgs...)
 	where := ""
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")
@@ -163,6 +173,14 @@ func runAnnotateSample(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("take connection: %w", connErr)
 	}
 	defer pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := validateIndexQueryScope(db, conn, "SELECT s.session_id "+joinClause+" "+metadataWhere, metadataArgs); err != nil {
+		return fmt.Errorf("sample annotations: verify candidate index formats before turn filters and sampling: %w", err)
+	}
+	if err := validateIndexStringIDsOnConn(db, conn, existingIDs); err != nil {
+		return err
+	}
 
 	type sessionInfo struct {
 		ID         string

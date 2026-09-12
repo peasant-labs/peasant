@@ -80,7 +80,9 @@ func executeHarvest(ctx context.Context, pipeline harvestPipeline, progress *ing
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return harvestExecution{kind: harvestCompletionCanceled, ctxErr: ctxErr, at: time.Now(), snapshot: progress.Snapshot()}
 	}
-	go program.Run(ctx)
+	// The caller starts the renderer before this call so pre-store work (the
+	// upgrade pass, the store open) is already visible; this stage only runs the
+	// pipeline and then finishes the renderer.
 	result, runErr := pipeline.Run(ctx)
 	completedAt := time.Now()
 	ctxErr := ctx.Err()

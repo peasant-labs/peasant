@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -26,13 +27,33 @@ func nullString(s string) any {
 	}
 	return s
 }
+
+// ErrContentCaptureIncomplete is the category of every refusal that is caused
+// only by a missing or unfinished full capture, and never by damaged data.
+// Export and publication wrap it so their callers keep that category through
+// errors.Is; previews must not consult it at all, because available stored
+// content is shown without a completeness gate.
+var ErrContentCaptureIncomplete = errors.New("session capture is incomplete; bounded previews are not authoritative")
+
 func contentIntegrityError() error {
 	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from retained artifacts to repair")
 }
 
+// readCapture returns the stored capture, or NOTHING.
+//
+// Every typed column is parsed as it is read, and a value this build cannot
+// name refuses the whole row: callers act on these values, so half a capture
+// with its unreadable field silently zeroed is worse than no capture at all.
+// A refused read therefore reports no capture as well as the error, so a
+// caller that checks presence first cannot use one.
 func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionContentCapture, found bool, err error) {
+	defer func() {
+		if err != nil {
+			c, found = ingest.SessionContentCapture{}, false
+		}
+	}()
 	c.SessionID = id
-	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_revision,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
 		var e error
 		c.Status, e = ingest.NewContentCaptureStatus(st.ColumnText(0))
@@ -47,12 +68,21 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 		if e != nil {
 			return e
 		}
-		c.CaptureRevision = st.ColumnText(3)
+		c.CaptureFormat, e = ingest.NewContentCaptureFormat(st.ColumnText(3))
+		if e != nil {
+			return e
+		}
 		c.EntryCount = st.ColumnInt(4)
 		c.ContentRowCount = st.ColumnInt(5)
 		c.FullCaptureSHA256 = st.ColumnText(6)
 		c.CapturedAtMs = st.ColumnInt64(7)
-		c.FailureCode = st.ColumnText(8)
+		// An unknown stored failure code fails closed: the selector acts on this
+		// value, so a code it cannot name must never read as "no failure".
+		failureCode, codeErr := ingest.NewContentCaptureFailureCode(st.ColumnText(8))
+		if codeErr != nil {
+			return fmt.Errorf("read stored content capture for session %s: %w; the capture was not returned; restore valid capture state or use a Peasant build that knows this code", id, codeErr)
+		}
+		c.FailureCode = failureCode
 		c.FailureMessage = st.ColumnText(9)
 		c.PublicationCaptureRevision = st.ColumnInt64(10)
 		return nil
@@ -67,12 +97,9 @@ func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionI
 	defer s.pool.Put(conn)
 	return readCapture(conn, id)
 }
-func (s *Store) ListContentCaptureIncompleteSessions(ctx context.Context, limit int) ([]ingest.SessionID, error) {
-	return s.ListContentCaptureIncompleteSessionsAfter(ctx, "", limit)
-}
 
 // After is an exclusive keyset cursor. Failed targets cannot starve later ones.
-func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int) ([]ingest.SessionID, error) {
+func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int) ([]ingest.ContentCaptureIncompleteSession, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -81,16 +108,39 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 		return nil, err
 	}
 	defer s.pool.Put(conn)
-	var ids []ingest.SessionID
-	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: []any{string(after), limit}, ResultFunc: func(st *sqlite.Stmt) error {
+	// Ineligible rows are excluded by the QUERY, not after it: a row this build
+	// cannot harness-parse must not consume a LIMIT slot, or a page made only of
+	// such rows would come back empty and read as the end of the table, ending
+	// the recovery walk before the sessions behind it are ever visited.
+	placeholders := make([]string, 0, len(ingest.AllHarnesses))
+	args := make([]any, 0, len(ingest.AllHarnesses)+2)
+	args = append(args, string(after))
+	for _, known := range ingest.AllHarnesses {
+		placeholders = append(placeholders, "?")
+		args = append(args, string(known))
+	}
+	args = append(args, limit)
+	var targets []ingest.ContentCaptureIncompleteSession
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id,s.model_harness,s.start_ms FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND s.model_harness IN (`+strings.Join(placeholders, ",")+`) AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: args, ResultFunc: func(st *sqlite.Stmt) error {
 		id, e := ingest.NewSessionID(st.ColumnText(0))
 		if e != nil {
 			return e
 		}
-		ids = append(ids, id)
+		var harness schema.Harness
+		if e := harness.UnmarshalText([]byte(st.ColumnText(1))); e != nil || !harness.IsKnown() {
+			// The WHERE clause binds ingest.AllHarnesses, so every selected row
+			// is parseable. That list is a SUBSET of what this parser accepts,
+			// not the same set, and it must not be widened here: a harness this
+			// build recognises but does not bind is one it does not recover
+			// content for. Reaching this branch means a BOUND harness cannot be
+			// parsed at all, which no stored data can express and which
+			// silently skipping would hide.
+			return fmt.Errorf("store content recovery targets: session %s passed the bound known-harness filter but its harness %q cannot be parsed; the bound harness list and the harness parser disagree inside this build, so no target list can be trusted; upgrade Peasant to a build whose harness list and parser agree", id, st.ColumnText(1))
+		}
+		targets = append(targets, ingest.ContentCaptureIncompleteSession{SessionID: id, Harness: harness, StartMs: st.ColumnInt64(2)})
 		return nil
 	}})
-	return ids, err
+	return targets, err
 }
 
 type contentManifest struct {
@@ -232,14 +282,33 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 	defer s.pool.Put(conn)
 	end := sqlitex.Transaction(conn)
 	defer end(&err)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
+		return page, err
+	}
 	c, found, err := readCapture(conn, id)
 	if err != nil {
 		return page, err
 	}
 	page.Capture = c
+	// The available mode resolves here, on the same snapshot that read the
+	// capture: complete content is served whole, anything else is served as the
+	// bounded projection that is actually stored. It never refuses for
+	// incompleteness alone.
+	if mode == ingest.SessionEntryReadAvailable {
+		if found && PublishableWithOmissions(c) {
+			mode = ingest.SessionEntryReadFullContent
+		} else {
+			mode = ingest.SessionEntryReadPreview
+		}
+		opts.Mode = mode
+	}
 	if mode == ingest.SessionEntryReadFullContent {
-		if !found || c.Status != ingest.ContentCaptureComplete {
-			return page, fmt.Errorf("store full content read: session capture is incomplete; previews are not authoritative; run harvest index --force with retained artifacts before viewing, exporting or publishing full content")
+		// A capture incomplete ONLY because oversized source records were
+		// omitted still holds every entry, with a placeholder in each omitted
+		// record's place, so it is read whole here. Every other incompleteness
+		// is refused exactly as before.
+		if !found || !PublishableWithOmissions(c) {
+			return page, fmt.Errorf("store full content read: %w; run harvest index --force with retained artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
 		}
 		// Validate even a standalone nonzero cursor: callers need not have read
 		// an earlier page, and persisted semantic columns may have been damaged.
@@ -336,6 +405,9 @@ func (s *Store) LoadFullSessionEntries(ctx context.Context, id ingest.SessionID,
 			entries = nil
 		}
 	}()
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
+		return nil, capture, err
+	}
 	return loadFullSessionEntriesOnConn(ctx, conn, id, softMaxBytes)
 }
 
@@ -359,8 +431,10 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 	if err != nil {
 		return fail(err)
 	}
-	if !found || capture.Status != ingest.ContentCaptureComplete || capture.FullCaptureSHA256 == "" || capture.SessionID != id {
-		return fail(fmt.Errorf("session capture is incomplete; bounded previews are not authoritative"))
+	// The omitted-record capture is read whole here too: it carries the same
+	// full-capture proof, and its placeholders are entries like any other.
+	if !found || !PublishableWithOmissions(capture) || capture.FullCaptureSHA256 == "" || capture.SessionID != id {
+		return fail(ErrContentCaptureIncomplete)
 	}
 	if err := verifyCaptureProjection(ctx, conn, id, capture, false); err != nil {
 		return fail(err)
@@ -385,6 +459,31 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		}
 		from = *page.NextIndex
 	}
+}
+
+// loadAvailableSessionEntriesOnConn returns the content that is actually
+// stored, with no completeness, publication-readiness, recovery or native-source
+// gate: the verified full text when the capture is complete, and the bounded
+// projection SQLite already holds otherwise. A damaged complete capture still
+// fails, because a preview may show less than the session, never something the
+// database cannot prove it stored. The caller validates the stored index format
+// on the same connection before calling this.
+func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
+	capture, found, err := readCapture(conn, id)
+	if err != nil {
+		return nil, capture, err
+	}
+	// A capture the full readers may serve is served whole here as well, so a
+	// preview of an omitted-record session shows the placeholders in place
+	// rather than the bounded projection.
+	if found && PublishableWithOmissions(capture) {
+		return loadFullSessionEntriesOnConn(ctx, conn, id, 0)
+	}
+	entries, err = listEntriesOnConn(conn, id)
+	if err != nil {
+		return nil, capture, err
+	}
+	return entries, capture, nil
 }
 
 func entryStringBytes(e schema.SessionEntry) int64 {

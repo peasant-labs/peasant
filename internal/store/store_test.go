@@ -525,11 +525,11 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("first InsertSessions: %v", err)
 	}
-	if err := s.UpdateIndexState(ctx, entry.Metadata.SessionID, ingest.CurrentIndexVersion, 1700000000001); err != nil {
+	if err := s.UpdateIndexState(ctx, entry.Metadata.SessionID, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000000001); err != nil {
 		t.Fatal(err)
 	}
 
-	// Modify tokens and re-insert (INSERT OR REPLACE should upsert, not duplicate).
+	// Modify retained token seeds and re-insert without duplicating session rows.
 	entry.Metadata.Stats.TokensIn = 2000
 	entry.Metadata.Stats.TokensOut = 900
 	entry.SourceFingerprint = []byte("later captured source")
@@ -537,14 +537,28 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 		t.Fatalf("second InsertSessions: %v", err)
 	}
 	// Metadata persistence must leave indexing retryable until the separate
-	// streamed index transaction acknowledges this source's entries.
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
-	if err != nil || len(stale) != 1 || stale[0] != entry.Metadata.SessionID {
-		t.Fatalf("changed captured source did not invalidate old index: %v, %v", stale, err)
+	// streamed index transaction acknowledges THIS source's entries. Input
+	// freshness is what changed here, so it is what the assertion reads: the
+	// session now carries the later captured source and NO indexed input proof,
+	// so no build may treat its stored index as current for that source.
+	state, err := s.ReadIndexState(ctx, entry.Metadata.SessionID)
+	if err != nil || state == nil || state.IndexedInputHash != nil {
+		t.Fatalf("changed captured source kept an indexed input proof: %+v, %v", state, err)
+	}
+	// The version-only selector cannot see it, and must not pretend to: the
+	// stamped indexer revision IS the current target, and inventing staleness
+	// there would re-index every unchanged session on every harvest.
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("a current indexer revision was reported stale: %v, %v", stale, err)
 	}
 
 	conn := takeConn(t, s.PoolForTest())
 	defer s.PoolForTest().Put(conn)
+
+	if got := queryText(t, conn, `SELECT CAST(source_fingerprint AS TEXT) FROM sessions`); got != "later captured source" {
+		t.Fatalf("stored captured source = %q, want the later capture", got)
+	}
 
 	sessCount := queryInt(t, conn, `SELECT COUNT(*) FROM sessions`)
 	if sessCount != 1 {
@@ -567,12 +581,12 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 		t.Errorf("host_slugs: expected 1 row after double insert, got %d", hostCount)
 	}
 
-	// Verify upsert updated field values to the second insert's values.
-	tokIn := queryInt(t, conn, `SELECT input_tokens FROM session_metrics WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
+	// Updated adapter inputs are separate from the prior metrics result.
+	tokIn := queryInt(t, conn, `SELECT json_extract(metric_seed_json, '$.tokensIn') FROM sessions WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
 	if tokIn != 2000 {
 		t.Errorf("input_tokens after upsert: expected 2000, got %d", tokIn)
 	}
-	tokOut := queryInt(t, conn, `SELECT output_tokens FROM session_metrics WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
+	tokOut := queryInt(t, conn, `SELECT json_extract(metric_seed_json, '$.tokensOut') FROM sessions WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
 	if tokOut != 900 {
 		t.Errorf("output_tokens after upsert: expected 900, got %d", tokOut)
 	}
@@ -633,7 +647,7 @@ func TestStore_InsertSessions_PreservesSessionEntriesHashOnUpsert(t *testing.T) 
 		t.Errorf("source_path after metadata upsert: expected %q, got %q", entry.Metadata.Source.FilePath, gotSourcePath)
 	}
 
-	tokIn := queryInt(t, conn, `SELECT input_tokens FROM session_metrics WHERE session_id = ?`, sid)
+	tokIn := queryInt(t, conn, `SELECT json_extract(metric_seed_json, '$.tokensIn') FROM sessions WHERE session_id = ?`, sid)
 	if tokIn != 2000 {
 		t.Errorf("input_tokens after upsert: expected 2000, got %d", tokIn)
 	}
@@ -777,7 +791,7 @@ func TestStore_UpdateDailySummary_MultiDay(t *testing.T) {
 	}
 }
 
-func TestStore_UpdateDailySummary_RecomputeOnReinsert(t *testing.T) {
+func TestStore_UpdateDailySummary_RecomputeAfterMetricSave(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -809,11 +823,16 @@ func TestStore_UpdateDailySummary_RecomputeOnReinsert(t *testing.T) {
 		}
 	}()
 
-	// Re-insert with different metrics (INSERT OR REPLACE updates).
+	// Re-insert with different retained seeds, then save the completed metrics.
 	entry.Metadata.Stats.TokensIn = 9999
 	entry.Metadata.Stats.TokensOut = 8888
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("second InsertSessions: %v", err)
+	}
+	if err := s.SaveMetrics(ctx, &ingest.SessionMetrics{SessionID: entry.Metadata.SessionID, QualityMetrics: schema.QualityMetrics{
+		InputTokens: &entry.Metadata.Stats.TokensIn, OutputTokens: &entry.Metadata.Stats.TokensOut,
+	}}); err != nil {
+		t.Fatalf("save updated metrics: %v", err)
 	}
 	if err := s.UpdateDailySummary(ctx, []string{"2024-01-15"}); err != nil {
 		t.Fatalf("second UpdateDailySummary: %v", err)
@@ -2106,17 +2125,17 @@ func TestStore_LogIndexEntry_RoundTrip(t *testing.T) {
 
 	// Entry 1: fully populated.
 	entry1 := ingest.IndexLogEntry{
-		SessionID:    sessionID,
-		Harness:      defaults.HarnessClaudeCode,
-		Outcome:      ingest.IndexOutcomeIndexed,
-		IndexVersion: 2,
-		EntriesCount: 15,
-		SourcePath:   &srcPath,
-		OriginalRoot: &origRoot,
-		Reason:       nil,
-		StartedAt:    1705276800000,
-		FinishedAt:   &finishedAt,
-		ErrorMessage: nil,
+		SessionID:      sessionID,
+		Harness:        defaults.HarnessClaudeCode,
+		Outcome:        ingest.IndexOutcomeIndexed,
+		IndexerVersion: 2,
+		EntriesCount:   15,
+		SourcePath:     &srcPath,
+		OriginalRoot:   &origRoot,
+		Reason:         nil,
+		StartedAt:      1705276800000,
+		FinishedAt:     &finishedAt,
+		ErrorMessage:   nil,
 	}
 
 	if err := s.LogIndexEntry(ctx, entry1); err != nil {
@@ -2193,17 +2212,17 @@ func TestStore_LogIndexEntry_RoundTrip(t *testing.T) {
 	errMsg := "file not found"
 
 	entry2 := ingest.IndexLogEntry{
-		SessionID:    sessionID2,
-		Harness:      defaults.HarnessOpenCode,
-		Outcome:      ingest.IndexOutcomeError,
-		IndexVersion: 1,
-		EntriesCount: 0,
-		SourcePath:   nil,
-		OriginalRoot: nil,
-		Reason:       &reason,
-		StartedAt:    1705276900000,
-		FinishedAt:   nil,
-		ErrorMessage: &errMsg,
+		SessionID:      sessionID2,
+		Harness:        defaults.HarnessOpenCode,
+		Outcome:        ingest.IndexOutcomeError,
+		IndexerVersion: 1,
+		EntriesCount:   0,
+		SourcePath:     nil,
+		OriginalRoot:   nil,
+		Reason:         &reason,
+		StartedAt:      1705276900000,
+		FinishedAt:     nil,
+		ErrorMessage:   &errMsg,
 	}
 
 	if err := s.LogIndexEntry(ctx, entry2); err != nil {
@@ -2321,7 +2340,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=2): sessions with version < 2.
 	// Session 2 (v=1) and Session 3 (v=0) should be returned.
-	stale2, err := s.ListStaleIndexSessions(ctx, 2)
+	stale2, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 2}})
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(2): %v", err)
 	}
@@ -2344,7 +2363,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=1): sessions with version < 1.
 	// Only Session 3 (v=0) should be returned.
-	stale1, err := s.ListStaleIndexSessions(ctx, 1)
+	stale1, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 1}})
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(1): %v", err)
 	}
@@ -2403,7 +2422,7 @@ func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int,
 		t.Fatalf("UpdateIndexState(opencode, %s): %v", versionLabel, err)
 	}
 
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(current): %v", err)
 	}
@@ -2414,6 +2433,6 @@ func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int,
 		}
 	}
 	if !found {
-		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", storedVersion, ingest.CurrentIndexVersion)
+		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", storedVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 }

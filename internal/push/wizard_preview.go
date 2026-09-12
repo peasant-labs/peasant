@@ -20,9 +20,38 @@ import (
 // lets the preview show the transcript the push will send rather than a second
 // approximation of it.
 //
-// It returns no entries for a verified empty capture. Missing, incomplete, or
-// corrupt captures return errors; a bounded preview is not publication input.
-type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
+// It returns the AVAILABLE stored content: no entries for a verified empty
+// capture, and the bounded projection when the full capture is missing or
+// incomplete. Readiness is not its question — publication readiness is enforced
+// at the publish action, in Pipeline.preflight, because a preview that first
+// demands a complete capture cannot show the session the user has to repair.
+// An unreadable or unknown-format projection still returns an error: available
+// content can be partial, never invented.
+type StoredEntriesFunc func(sessionID string) (StoredContent, error)
+
+// StoredContent is one preview read's answer: the available stored entries, and
+// whether the pane must warn that they stand for only part of the session.
+//
+// The warning is carried BESIDE the entries because it cannot be derived from
+// them. A bounded projection of a long session and a complete short session both
+// come back as "some entries", so a pane handed entries alone can only guess, and
+// it guessed "this is the whole session" every time. The store already proves the
+// difference through the session's capture state; this is that proof, reaching
+// the one screen that has to state it.
+//
+// It stays inside the TUI: no wire, JSON or WebSocket payload reports it.
+type StoredContent struct {
+	// Entries is the available stored content, empty for a session the store
+	// holds nothing for.
+	Entries []schema.SessionEntry
+	// PartialNotice is store.PartialPreviewNeeded for this session's capture: the
+	// entries above are missing content that nothing in the transcript accounts
+	// for. It is deliberately NOT "the capture is incomplete": a capture whose
+	// only incompleteness is recorded omissions holds every entry, each omitted
+	// record carries its own note at its own position, and a session-level line
+	// over such a transcript would claim a gap the reader cannot find.
+	PartialNotice bool
+}
 
 // PublishedTurnsFunc returns one session's turns AS THEY WILL BE PUBLISHED:
 // read from the local store and redacted by the same redactor, over the same
@@ -31,7 +60,16 @@ type StoredEntriesFunc func(sessionID string) ([]schema.SessionEntry, error)
 // It is the read seam the selection preview binds to. The mounted command fills
 // it from the store and the push redactor; a test fills it with recorded turns
 // directly.
-type PublishedTurnsFunc func(sessionID string) ([]ingest.Turn, error)
+type PublishedTurnsFunc func(sessionID string) (PublishedTranscript, error)
+
+// PublishedTranscript is one session's turns as they will be published, with the
+// same notice flag the stored read reported. The pane needs both in one answer:
+// it draws the turns and, above them, the line that says the turns are only part
+// of the session.
+type PublishedTranscript struct {
+	Turns         []ingest.Turn
+	PartialNotice bool
+}
 
 // NewPublishedTurns builds the preview read over a stored-entry reader and the
 // redactor the push runs with.
@@ -41,9 +79,9 @@ type PublishedTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 // screen that promises the published text. This fails closed instead: the pane
 // reports that it cannot show the published transcript, and shows nothing.
 func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) PublishedTurnsFunc {
-	return func(sessionID string) ([]ingest.Turn, error) {
+	return func(sessionID string) (PublishedTranscript, error) {
 		if entries == nil || redactor == nil {
-			return nil, fmt.Errorf(
+			return PublishedTranscript{}, fmt.Errorf(
 				"push preview: the transcript of session %s cannot be shown as it will be published.\n"+
 					"What went wrong: the preview was mounted without a stored-entry reader or without the push redactor.\n"+
 					"Where: push.NewPublishedTurns, drawing the selection page of the push wizard.\n"+
@@ -54,16 +92,23 @@ func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) 
 		}
 		stored, err := entries(sessionID)
 		if err != nil {
-			return nil, err
+			return PublishedTranscript{}, err
 		}
-		if len(stored) == 0 {
-			return nil, nil
+		// The notice survives an empty read: a session whose capture broke
+		// before any entry was stored is still a partial session, and the pane
+		// says so rather than calling it simply unrecorded.
+		if len(stored.Entries) == 0 {
+			return PublishedTranscript{PartialNotice: stored.PartialNotice}, nil
 		}
-		redacted, err := RedactEntries(redactor, stored)
+		redacted, err := RedactEntries(redactor, stored.Entries)
 		if err != nil {
-			return nil, err
+			return PublishedTranscript{}, err
 		}
-		return transcript.EntriesToTurnsValidated(redacted)
+		turns, err := transcript.EntriesToTurnsValidated(redacted)
+		if err != nil {
+			return PublishedTranscript{}, err
+		}
+		return PublishedTranscript{Turns: turns, PartialNotice: stored.PartialNotice}, nil
 	}
 }
 
@@ -76,6 +121,10 @@ const (
 	previewUnselectedNote = "not selected: this session stays on your machine."
 	previewWithheldNote   = "withheld: this branch matches more than one project, so peasant cannot tell which one records it. this session stays out of the push."
 	previewProjectHint    = "press space to select every session in this project."
+	// previewNeedsIngestNote sits ABOVE the available transcript rather than
+	// replacing it: it states what publication still needs, and never claims the
+	// stored content cannot be shown.
+	previewNeedsIngestNote = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
 )
 
 // wizardPreview is the split's right pane: for the highlighted session, a short
@@ -118,25 +167,49 @@ func (p wizardPreview) Body(id string) (kit.PreviewBody, error) {
 		}
 		body := previewBody{th: p.th, header: sessionHeaderLines(s)}
 		if s.NeedsIngest {
-			body.note = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
-			return body, nil
+			// A session that cannot be published can still be READ. Gating the
+			// pane on publication readiness took away half of what the previewer
+			// is for: the user could not see the transcript they were being asked
+			// to repair. The note says what publishing still needs; the
+			// transcript below it is the available stored content.
+			body.note = previewNeedsIngestNote
 		}
 		if p.turns == nil {
-			body.note = previewNoTranscript
+			if body.note == "" {
+				body.note = previewNoTranscript
+			}
 			return body, nil
 		}
 		recorded, err := p.turns(id)
 		if err != nil {
 			return nil, err
 		}
-		if len(recorded) == 0 {
-			body.note = previewNoTranscript
+		if recorded.PartialNotice {
+			// Said LAST, so it sits directly above the transcript it describes.
+			// The publication note above it answers a different question - what
+			// this session still needs before it can be pushed - and a reader
+			// needs both when both are true.
+			body.note = joinNotes(body.note, transcriptview.PartialPreviewNote)
+		}
+		if len(recorded.Turns) == 0 {
+			if body.note == "" {
+				body.note = previewNoTranscript
+			}
 			return body, nil
 		}
-		body.transcript = p.renderer.Document(recorded)
+		body.transcript = p.renderer.Document(recorded.Turns)
 		return body, nil
 	}
 	return previewBody{th: p.th, note: previewNoSessionNote}, nil
+}
+
+// joinNotes stacks the pane's notes in the order they were added, so adding a
+// second note never silently replaces the first.
+func joinNotes(existing, added string) string {
+	if existing == "" {
+		return added
+	}
+	return existing + "\n\n" + added
 }
 
 // projectLines describes one project group.
@@ -219,13 +292,14 @@ func (b previewBody) Render(width int) string {
 		}
 		parts = append(parts, strings.Join(head, "\n"))
 	}
-	if body := b.transcript.Render(width); body != "" {
-		parts = append(parts, body)
-	} else if b.note != "" {
+	if b.note != "" {
 		// The pane hands its body lines to the viewport UNSTYLED, so a body that
 		// does not color itself is drawn in whatever the terminal's default ink
 		// happens to be rather than the theme's.
 		parts = append(parts, styles.Base.Render(ansi.Wrap(b.note, width, "")))
+	}
+	if body := b.transcript.Render(width); body != "" {
+		parts = append(parts, body)
 	}
 	return strings.Join(parts, previewSeparator)
 }
@@ -237,10 +311,11 @@ func (b previewBody) plain() string {
 	if len(b.header) > 0 {
 		parts = append(parts, strings.Join(b.header, "\n"))
 	}
+	if b.note != "" {
+		parts = append(parts, b.note)
+	}
 	if body := b.transcript.Render(0); body != "" {
 		parts = append(parts, body)
-	} else if b.note != "" {
-		parts = append(parts, b.note)
 	}
 	return strings.Join(parts, previewSeparator)
 }

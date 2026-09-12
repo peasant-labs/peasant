@@ -18,6 +18,7 @@ import (
 const (
 	openCodeEnableQueryOnlyStatement         = "PRAGMA query_only=ON"
 	openCodeReadQueryOnlyStatement           = "PRAGMA query_only"
+	openCodeBeginReadSnapshotStatement       = "BEGIN DEFERRED"
 	openCodeCatalogTablesStatement           = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
 	openCodeCatalogColumnsStatement          = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
 	openCodeSessionCatalogColumnsStatement   = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 65"
@@ -247,6 +248,14 @@ func (s *zombiezenOpenCodeSQLiteSource) initialize(parent context.Context) error
 
 	if err := sqlitex.ExecuteTransient(s.conn, openCodeEnableQueryOnlyStatement, nil); err != nil {
 		return fmt.Errorf("open OpenCode SQLite source %q failed while enabling PRAGMA query_only=ON before the first schema or data read: %w; the connection will be closed and the source will not be queried; verify that the database is readable and retry without changing the OpenCode-owned files", s.path.String(), err)
+	}
+	if s.options.readSnapshot {
+		// The connection is already mode=ro and query_only. Begin before the
+		// restrictive authorizer is installed; callers never gain transaction
+		// execution capability. Close releases the read transaction.
+		if err := sqlitex.ExecuteTransient(s.conn, openCodeBeginReadSnapshotStatement, nil); err != nil {
+			return fmt.Errorf("open read-only materialization snapshot for %q: %w; no source data was changed; retry with a readable native database", s.path.String(), err)
+		}
 	}
 	if err := s.conn.SetAuthorizer(sqlite.AuthorizeFunc(s.authorizeRead)); err != nil {
 		return fmt.Errorf("open OpenCode SQLite source %q failed after query_only setup while installing the read-only statement authorizer: %w; the connection will be closed before any schema or data read; retry after resolving the SQLite initialization error", s.path.String(), err)
@@ -592,104 +601,14 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// the rest of the row is dropped, so pagination makes progress.
 	decode := func(stmt *sqlite.Stmt) error {
 		bounded.observe()
-		if stmt.ColumnType(0) != sqlite.TypeText {
-			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id has SQLite type %s instead of text", stmt.ColumnType(0))})
+		record, presentID, decodeErr := decodeOpenCodeSessionRecord(stmt, support)
+		if presentID != nil {
+			cursorID = presentID
+			present = append(present, *presentID)
+		}
+		if decodeErr != nil {
+			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: decodeErr.Error()})
 			return nil
-		}
-		rawID := stmt.ColumnText(0)
-		sessionID, err := NewOpenCodeSessionLinkID(rawID)
-		if err != nil {
-			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id %q is not a valid identifier: %v", rawID, err)})
-			return nil
-		}
-		linkID := sessionID
-		cursorID = &linkID
-		// The row exists, so record its identifier before any column-level drop.
-		// A session whose row is present is not deleted, even when its parent
-		// link or clock cannot be decoded.
-		present = append(present, sessionID)
-		record := OpenCodeSessionRecord{SessionID: sessionID}
-		// The parent link is column 1 whenever it is selected. The clock is the
-		// last selected column: column 2 when both are present, otherwise
-		// column 1.
-		if hasParent {
-			if stmt.ColumnType(1) == sqlite.TypeText && stmt.ColumnText(1) != "" {
-				parentID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(1))
-				if err != nil {
-					skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("session row %q was dropped because parent_id is not a valid identifier: %v", rawID, err)})
-					return nil
-				}
-				record.ParentID = parentID
-			}
-		}
-		if hasClock {
-			clockColumn := 1
-			if hasParent {
-				clockColumn = 2
-			}
-			switch stmt.ColumnType(clockColumn) {
-			case sqlite.TypeNull:
-			case sqlite.TypeInteger:
-				record.TimeUpdated = stmt.ColumnInt64(clockColumn)
-			default:
-				skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("session row %q was dropped because time_updated has SQLite type %s instead of integer", rawID, stmt.ColumnType(clockColumn))})
-				return nil
-			}
-		}
-		if readAttribution {
-			// The attribution statement selects directory, title, and time_created
-			// as columns 3, 4, and 5 after id, parent_id, and time_updated.
-			// Attribution is best effort: a null or non-text directory or title
-			// yields an empty field, and a null or non-integer time_created yields
-			// zero, so a bad attribution column never drops a row whose parent link
-			// and clock are usable.
-			if stmt.ColumnType(3) == sqlite.TypeText {
-				record.Directory = stmt.ColumnText(3)
-			}
-			if stmt.ColumnType(4) == sqlite.TypeText {
-				record.Title = stmt.ColumnText(4)
-			}
-			if stmt.ColumnType(5) == sqlite.TypeInteger {
-				record.TimeCreated = stmt.ColumnInt64(5)
-			}
-		}
-		if readExtended {
-			// The extended statement appends agent, the five token aggregates,
-			// cost, version, slug, and revert as columns 6 through 15. Each column
-			// is best effort: a null or type-mismatched value yields the zero field
-			// so a bad extended column never drops a row whose parent link, clock,
-			// and attribution are usable.
-			if stmt.ColumnType(6) == sqlite.TypeText {
-				record.Agent = stmt.ColumnText(6)
-			}
-			if stmt.ColumnType(7) == sqlite.TypeInteger {
-				record.TokensInput = stmt.ColumnInt64(7)
-			}
-			if stmt.ColumnType(8) == sqlite.TypeInteger {
-				record.TokensOutput = stmt.ColumnInt64(8)
-			}
-			if stmt.ColumnType(9) == sqlite.TypeInteger {
-				record.TokensReasoning = stmt.ColumnInt64(9)
-			}
-			if stmt.ColumnType(10) == sqlite.TypeInteger {
-				record.TokensCacheRead = stmt.ColumnInt64(10)
-			}
-			if stmt.ColumnType(11) == sqlite.TypeInteger {
-				record.TokensCacheWrite = stmt.ColumnInt64(11)
-			}
-			switch stmt.ColumnType(12) {
-			case sqlite.TypeFloat, sqlite.TypeInteger:
-				record.Cost = stmt.ColumnFloat(12)
-			}
-			if stmt.ColumnType(13) == sqlite.TypeText {
-				record.Version = stmt.ColumnText(13)
-			}
-			if stmt.ColumnType(14) == sqlite.TypeText {
-				record.Slug = stmt.ColumnText(14)
-			}
-			if stmt.ColumnType(15) == sqlite.TypeText {
-				record.Revert = stmt.ColumnText(15)
-			}
 		}
 		bounded.keep(record)
 		return nil
@@ -1129,13 +1048,17 @@ func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, session
 		return OpenCodeSessionSeq{}, err
 	}
 	defer lease.release()
-	sequenceColumns, err := s.columnsLocked(lease.ctx, "event_sequence")
+	return s.maxEventSeqLocked(lease.ctx, sessionID)
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) maxEventSeqLocked(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
+	sequenceColumns, err := s.columnsLocked(ctx, "event_sequence")
 	if err != nil {
 		return OpenCodeSessionSeq{}, err
 	}
 	if projectColumnsPresent(sequenceColumns, "aggregate_id", "seq") {
 		result := OpenCodeSessionSeq{}
-		err = s.executeRowsLocked(lease.ctx, "SELECT seq FROM event_sequence WHERE aggregate_id = ?1", []any{sessionID.value}, func(stmt *sqlite.Stmt) error {
+		err = s.executeRowsLocked(ctx, "SELECT seq FROM event_sequence WHERE aggregate_id = ?1", []any{sessionID.value}, func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) == sqlite.TypeInteger {
 				result.Present = true
 				result.Seq = stmt.ColumnInt64(0)
@@ -1144,9 +1067,9 @@ func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, session
 		})
 		return result, err
 	}
-	columns, err := s.columnsLocked(lease.ctx, "event")
+	columns, err := s.columnsLocked(ctx, "event")
 	if err != nil {
-		return OpenCodeSessionSeq{}, s.sourceReadError(lease.ctx, "read event columns", err, "pragma_table_info(event)", "supported OpenCode event")
+		return OpenCodeSessionSeq{}, s.sourceReadError(ctx, "read event columns", err, "pragma_table_info(event)", "supported OpenCode event")
 	}
 	if !projectColumnsPresent(columns, "aggregate_id", "seq") {
 		// No event table to seek, so the session keeps its clock-only signal.
@@ -1160,8 +1083,8 @@ func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, session
 		}
 		return nil
 	}
-	if err := s.executeRowsLocked(lease.ctx, openCodeEventMaxSeqStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
-		return OpenCodeSessionSeq{}, s.sourceReadError(lease.ctx, "read max event sequence", err, "event(seq) where aggregate_id", "supported OpenCode event")
+	if err := s.executeRowsLocked(ctx, openCodeEventMaxSeqStatement, []any{sessionID.value}, decode); err != nil || ctx.Err() != nil {
+		return OpenCodeSessionSeq{}, s.sourceReadError(ctx, "read max event sequence", err, "event(seq) where aggregate_id", "supported OpenCode event")
 	}
 	return result, nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/peasant-labs/schema"
@@ -36,8 +37,6 @@ type AuthoritativeTranscriptIndexer interface {
 	IndexTranscriptBytesForCapture(context.Context, DiscoveredSession, []byte) (TranscriptCaptureResult, error)
 }
 
-const ContentCaptureRevision = "full-source-v1"
-
 func validateCaptureRole(role string) error {
 	switch role {
 	case "user", "assistant", "system", "tool":
@@ -63,11 +62,21 @@ func captureTranscriptFile(ctx context.Context, fs FileSystem, idx Authoritative
 
 // validateCaptureJSONL examines every record before invoking the compatibility
 // assembly kernel; no partial parse escapes this boundary.
+//
+// A well-formed record kind this build does not represent is a REFUSAL that a
+// later build might lift; any other validation failure is corruption the user
+// can act on. One refusal must not MASK corruption later in the file, so
+// validation continues past it: an ordinary error wins wherever it appears,
+// and the first refusal is returned only when the whole transcript is
+// otherwise valid. A transcript whose records are all unrepresented still
+// refuses, so nothing is silently certified from an empty projection.
 func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data []byte, validate func([]byte) (*IgnoredSourceRecord, error)) ([]IgnoredSourceRecord, error) {
 	if session.ContentOmitted {
-		return nil, captureFailure(session, 0, fmt.Errorf("retained transcript omitted oversized source records; regenerate harvest from a supported complete source before retrying"))
+		return nil, captureFailure(session, 0, fmt.Errorf("the retained transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
 	}
 	var ignored []IgnoredSourceRecord
+	var refusal *UnrepresentedRecordError
+	refusalLine := 0
 	for line := 1; len(data) > 0; line++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -86,11 +95,21 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 		}
 		record, err := validate(raw)
 		if err != nil {
+			var unrepresented *UnrepresentedRecordError
+			if errors.As(err, &unrepresented) {
+				if refusal == nil {
+					refusal, refusalLine = unrepresented, line
+				}
+				continue
+			}
 			return nil, captureFailure(session, line, err)
 		}
 		if record != nil {
 			ignored = append(ignored, *record)
 		}
+	}
+	if refusal != nil {
+		return nil, captureFailure(session, refusalLine, refusal)
 	}
 	return ignored, nil
 }
@@ -107,13 +126,19 @@ func captureContentOmitted(meta *UnifiedMetadata) bool {
 	return false
 }
 
-func validateMessageContent(raw json.RawMessage) error {
-	return validateCaptureContent(raw, true)
+func validateMessageContent(harness Harness, raw json.RawMessage) error {
+	return validateCaptureContent(harness, raw, true)
 }
 
 // Cursor's recorded tool blocks can omit IDs; their name and complete input
 // still carry meaningful traces. Claude's tool IDs remain required.
-func validateCaptureContent(raw json.RawMessage, requireToolID bool) error {
+//
+// A content block of a kind this build does not represent is a REFUSAL this
+// build cannot lift (UnrepresentedRecordError), not corruption: the tolerant
+// projection still stores the rest of the session, and the refusal records why
+// the capture stays incomplete so the session settles until a newer build can
+// represent the block.
+func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID bool) error {
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return fmt.Errorf("required message content missing")
 	}
@@ -129,6 +154,13 @@ func validateCaptureContent(raw json.RawMessage, requireToolID bool) error {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
+	// The same corruption-wins rule as validateCaptureJSONL applies WITHIN a
+	// content-block array: one unrepresented block must not mask a malformed
+	// known block after it. The first refusal is remembered, every remaining
+	// block is still validated (including recursive tool_result content), an
+	// ordinary error is returned wherever it appears, and the refusal is
+	// returned only when the whole array is otherwise valid.
+	var refusal *UnrepresentedRecordError
 	for i, block := range blocks {
 		switch block.Type {
 		case "text":
@@ -150,12 +182,28 @@ func validateCaptureContent(raw json.RawMessage, requireToolID bool) error {
 			if block.ToolUseID == "" || len(block.Content) == 0 {
 				return fmt.Errorf("tool_result requires tool_use_id and content")
 			}
-			if err := validateCaptureContent(block.Content, requireToolID); err != nil {
+			err := validateCaptureContent(harness, block.Content, requireToolID)
+			if err == nil {
+				continue
+			}
+			var unrepresented *UnrepresentedRecordError
+			if !errors.As(err, &unrepresented) {
 				return err
 			}
+			if refusal == nil {
+				refusal = unrepresented
+			}
 		default:
-			return fmt.Errorf("unrepresented content block %q", block.Type)
+			if block.Type == "" {
+				return fmt.Errorf("content block lacks its type")
+			}
+			if refusal == nil {
+				refusal = &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
+			}
 		}
+	}
+	if refusal != nil {
+		return refusal
 	}
 	return nil
 }
@@ -181,7 +229,7 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 					return nil, err
 				}
 			}
-			return nil, validateMessageContent(line.Message.Content)
+			return nil, validateMessageContent(HarnessClaudeCode, line.Message.Content)
 		case "system":
 			content := line.Content
 			if len(content) == 0 {
@@ -198,21 +246,30 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 					return nil, nil
 				}
 			}
-			return nil, validateMessageContent(content)
+			return nil, validateMessageContent(HarnessClaudeCode, content)
 		case "summary":
 			if line.Summary == nil {
 				return nil, fmt.Errorf("summary requires text")
 			}
 			return nil, nil
 		case "result":
-			return nil, validateMessageContent(line.Result)
+			return nil, validateMessageContent(HarnessClaudeCode, line.Result)
 		case "progress", "queue-operation", "file-history-snapshot":
 			if len(line.Message.Content) > 0 || len(line.Content) > 0 {
-				return nil, fmt.Errorf("control record carries unrepresented content")
+				return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
 			}
 			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
 		default:
-			return nil, fmt.Errorf("unrepresented Claude record %q", line.Type)
+			if line.Type == "" {
+				// A missing discriminator is corruption, not vocabulary:
+				// settling it would hide an actionable malformed record.
+				return nil, fmt.Errorf("record lacks its type")
+			}
+			// A well-formed record kind this build does not represent. The
+			// refusal is typed so the ordinary index path can store the
+			// represented entries as an incomplete capture with a terminal
+			// code, bump the producer and settle (see permanentRefusalCode).
+			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
 		}
 	})
 	if err != nil {
@@ -252,7 +309,7 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 				return nil, err
 			}
 		}
-		return nil, validateCaptureContent(line.content(), false)
+		return nil, validateCaptureContent(HarnessCursor, line.content(), false)
 	})
 	if err != nil {
 		return TranscriptCaptureResult{}, err
@@ -300,15 +357,18 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 				mirrors = append(mirrors, text)
 				return &IgnoredSourceRecord{Kind: event.Type, Reason: IgnoredRecordMirror}, nil
 			default:
-				return nil, fmt.Errorf("unrepresented Codex event message %q", event.Type)
+				if event.Type == "" {
+					return nil, fmt.Errorf("event message lacks its type")
+				}
+				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: event.Type}
 			}
 		case codexTypeResponse:
 			var payload codexResponseItemPayload
 			if err := json.Unmarshal(env.Payload, &payload); err != nil {
 				return nil, err
 			}
-			if _, ok := parseCodexResponseItem(s.SessionID, 0, env, len(raw), true); !ok {
-				return nil, fmt.Errorf("unrepresented response item")
+			if _, ok := codexResponseItemEntry(s.SessionID, 0, env, len(raw), true, payload, nil); !ok {
+				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: "response_item"}
 			}
 			switch payload.Type {
 			case codexResponseMessage:
@@ -320,32 +380,52 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 						return nil, err
 					}
 				}
-				for _, block := range payload.Content {
-					if block.Type != "input_text" && block.Type != "output_text" {
-						return nil, fmt.Errorf("unrepresented message block %q", block.Type)
-					}
-				}
 				var fields struct {
 					Content []map[string]json.RawMessage `json:"content"`
 				}
 				if err := json.Unmarshal(env.Payload, &fields); err != nil {
 					return nil, err
 				}
-				for _, block := range fields.Content {
-					if block["text"] == nil {
+				// Corruption wins inside the block array too: an unknown block
+				// must not mask a known text block missing its text later.
+				var refusal *UnrepresentedRecordError
+				for i, block := range payload.Content {
+					if block.Type == "" {
+						return nil, fmt.Errorf("message block lacks its type")
+					}
+					if block.Type != "input_text" && block.Type != "output_text" {
+						if refusal == nil {
+							refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
+						}
+						continue
+					}
+					if i >= len(fields.Content) || fields.Content[i]["text"] == nil {
 						return nil, fmt.Errorf("message text block requires text")
 					}
 				}
+				if refusal != nil {
+					return nil, refusal
+				}
 			case codexResponseReasoning:
+				var refusal *UnrepresentedRecordError
 				for _, block := range payload.Summary {
-					if block.Type != "summary_text" {
-						return nil, fmt.Errorf("unrepresented reasoning summary block %q", block.Type)
+					if block.Type == "" {
+						return nil, fmt.Errorf("reasoning summary block lacks its type")
+					}
+					if block.Type != "summary_text" && refusal == nil {
+						refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
 				}
 				for _, block := range payload.Content {
-					if block.Type != "reasoning_text" && block.Type != "text" {
-						return nil, fmt.Errorf("unrepresented reasoning block %q", block.Type)
+					if block.Type == "" {
+						return nil, fmt.Errorf("reasoning block lacks its type")
 					}
+					if block.Type != "reasoning_text" && block.Type != "text" && refusal == nil {
+						refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
+					}
+				}
+				if refusal != nil {
+					return nil, refusal
 				}
 			case codexResponseFunctionCall, codexResponseCustomCall:
 				if payload.CallID == "" || payload.Name == "" || (len(payload.Arguments) == 0 && len(payload.Input) == 0) {
@@ -358,7 +438,10 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			}
 			return nil, nil
 		default:
-			return nil, fmt.Errorf("unrepresented Codex record %q", env.Type)
+			if env.Type == "" {
+				return nil, fmt.Errorf("rollout record lacks its type")
+			}
+			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
 		}
 	})
 	if err != nil {
@@ -393,7 +476,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	processes := make(map[string]string)
 	pending := make(map[string]bool)
 	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
-		if strikeRecordTooLarge(raw) {
+		if strikeRecordTooLarge(raw, 0) {
 			return nil, fmt.Errorf("record exceeds Strike format limit")
 		}
 		var env strikeEnvelope
@@ -401,7 +484,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			return nil, err
 		}
 		if !isKnownStrikeEvent(env.Type) {
-			return nil, fmt.Errorf("unrepresented Strike event %q", env.Type)
+			return nil, &UnrepresentedRecordError{Harness: HarnessStrike, Kind: string(env.Type)}
 		}
 		if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
 			return nil, fmt.Errorf("event requires data object")

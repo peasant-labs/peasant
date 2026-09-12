@@ -1,0 +1,211 @@
+package ingest
+
+import (
+	"context"
+	"path/filepath"
+	"time"
+)
+
+func (p *Pipeline) includesIndexTarget(target reindexTarget) bool {
+	return p.includesManagedSession(target.session.SessionID, target.session.Harness) &&
+		(p.config.Since == nil || !time.UnixMilli(target.startMs).Before(*p.config.Since))
+}
+
+// nativeRefreshSchemaVersions is the exact set of stored schema versions this
+// build re-extracts from native input. The database adapter-refresh predicate
+// binds this list, so it and metadataNeedsNativeRefresh cannot drift.
+func (p *Pipeline) nativeRefreshSchemaVersions() []int {
+	var versions []int
+	for version := 1; version <= int(CurrentSchemaVersion); version++ {
+		if metadataNeedsNativeRefresh(version) {
+			versions = append(versions, version)
+		}
+	}
+	return versions
+}
+
+// repairSessions returns the sessions the repair predicate selects: those a
+// crash between the two write commits can leave. A store that cannot answer
+// contributes nothing; the sessions are re-selected on the next harvest.
+func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
+	lister, ok := p.metricsStore.(RepairSessionLister)
+	if !ok {
+		return nil
+	}
+	ids, err := lister.ListSessionsNeedingRepair(ctx, p.indexerTargets())
+	if err != nil {
+		p.reportMetadataRefusal("repair selection", err)
+		return nil
+	}
+	return ids
+}
+
+// capturedInputNeedsWork decides whether a captured input still has pending
+// indexer work. A current parser and an equal input hash are not enough on
+// their own: the stored index must also be bound to the current publication
+// metadata capture, and a harness whose strict parser can certify complete
+// content must have done so. Both are settled by the ordinary index write, so
+// a repair completes in one harvest and the next unchanged harvest does no
+// parser work.
+func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
+	target := p.versionTargets()[input.session.Harness]
+	expected := input.expected
+	return p.config.Force ||
+		expected.IndexerVersion < target.IndexerVersion ||
+		expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash ||
+		// A current metadata capture exists (revision > 0) but the index is not
+		// bound to it: bytes match, publication proof does not. Only an input
+		// the capture can vouch for is pending on that account.
+		expected.PublicationCaptureRevision > 0 && !expected.PublicationBound && input.bindsPublication() ||
+		// The capture is incomplete and this build can certify it: the strict
+		// format-1 parser is the only path that produces complete content, so
+		// a harness on another declared format is at its steady state instead.
+		// A refusal this build already recorded for this producer is a steady
+		// state too, and is excluded below.
+		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
+			!permanentRefusalIsSettled(expected, target)
+}
+
+// bindsPublication reports whether an index written from this input may be
+// bound to the current publication metadata capture. A managed transcript's
+// bytes are what the capture hashed, so a file input binds. A directory tree
+// is read beside a header the capture hashed without the tree, so a tree read
+// from retained input has no byte proof against the capture and its index is
+// held unbound; the tree this run captured with the artifact is the tree the
+// capture saw, and binds.
+func (input *CapturedIndexInput) bindsPublication() bool {
+	return input.kind != TranscriptSourceDirectory || input.published
+}
+
+// permanentRefusalIsSettled reports that the incomplete capture is as good as
+// this build can make it, so re-parsing it would fail the same way again.
+//
+// The stored capture records a refusal NOTHING ABOUT THIS BUILD CAN LIFT: the
+// strict parser rejected a record it does not represent, or the retained
+// transcript is known to be missing a record ingest removed for being longer
+// than the scanner's line limit, and re-reading the same source omits it
+// again. The producer that recorded the refusal is the producer this build
+// would use, and the bytes have not moved.
+//
+// Either of the two things that could change the answer lifts the steady state
+// through the terms above: a newer indexer fails the version comparison, and
+// new bytes fail the input hash. Without this, such a session is parsed
+// strictly, parsed tolerantly and re-stamped on every harvest, and warns the
+// user about a condition they cannot act on until Peasant is upgraded.
+func permanentRefusalIsSettled(expected *SessionIndexState, target HarvesterVersions) bool {
+	return permanentCaptureRefusal(expected.ContentFailureCode) &&
+		expected.IndexerVersion >= target.IndexerVersion &&
+		expected.IndexedInputHash != nil
+}
+
+// permanentCaptureRefusal reports whether a recorded failure code is one this
+// build can never clear on its own. A capture nothing refused, and a capture
+// that predates content capture, are both PENDING work rather than settled:
+// they have simply never been tried by a build that could certify them.
+func permanentCaptureRefusal(code ContentCaptureFailureCode) bool {
+	return code == ContentCaptureStrictRefused || code == ContentCaptureSourceRecordsOmitted
+}
+
+// certifiesContent reports whether this build's indexer for the harness can
+// produce a verified complete capture: a strict parser writing the strict
+// stored format. Anything else stores what it parsed without certification.
+func (p *Pipeline) certifiesContent(harness Harness) bool {
+	_, strict := p.indexers[harness].(AuthoritativeTranscriptIndexer)
+	return strict && p.versionTargets()[harness].IndexVersion == strictIndexFormat
+}
+
+func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarget) bool {
+	if !p.includesIndexTarget(target) || p.metricsStore == nil {
+		return false
+	}
+	// A session whose stored metadata schema is newer than this build is
+	// refused here, before it can become a target: the refusal is one
+	// diagnostic on the run, never a structured log line or an index-log entry.
+	if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
+		p.reportMetadataRefusal(string(target.session.SessionID), err)
+		return false
+	}
+	if _, ok := p.indexers[target.session.Harness]; !ok {
+		return false
+	}
+	// Selection is database-first: it decides from the stored index state and
+	// never opens the pair. The pair is read only when a chosen target is
+	// indexed. A pair whose bytes changed through the write path had its
+	// indexed_input_hash NULLed by the mirror, so the hash-absent case IS the
+	// changed-pair case here. A hand-edited or torn pair on an otherwise
+	// settled row leaves no database signal and is not found by this scan: it
+	// is reported as damaged on the next pair read (harvest index --all, the
+	// content stage, or peasant redact), through the pair hash check.
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	if !ok {
+		return true
+	}
+	state, stateErr := reader.ReadIndexState(ctx, target.session.SessionID)
+	if stateErr != nil {
+		return true
+	}
+	return p.stateNeedsIndexWork(state)
+}
+
+// stateNeedsIndexWork decides from stored SQL state alone whether a session has
+// pending indexer work, reading no file. It is the database-first half of
+// capturedInputNeedsWork: it drops the input-hash comparison and the
+// publication byte proof, both of which need the pair. A changed pair reaches
+// this predicate as a NULL indexed_input_hash, because the write path's mirror
+// NULLs the hash when the pair changes; a revision left unbound is selected so
+// the ordinary index write can bind it; and a stored producer or index format
+// newer than this build is selected so the shared parse path reports the
+// refusal once. A session with no stored pair identity is selected so the
+// index path can establish it.
+func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState) bool {
+	if state == nil || state.ArtifactHash == nil {
+		return true
+	}
+	if p.checkIndexProducer(state) != nil {
+		return true
+	}
+	target := p.versionTargets()[state.Harness]
+	return p.config.Force ||
+		state.IndexerVersion < target.IndexerVersion ||
+		state.IndexedInputHash == nil ||
+		(state.PublicationCaptureRevision > 0 && !state.PublicationBound) ||
+		(state.ContentStatus != ContentCaptureComplete &&
+			p.certifiesContent(state.Harness) &&
+			!permanentRefusalIsSettled(state, target))
+}
+
+// scanPeasantSyncSessions walks the retained tree and returns one target per
+// session it holds. It is the whole-tree reader, and only `harvest index`
+// runs it: the ordinary harvest selects its work from the database. It opens
+// no transcript and takes no lock; the pair is read only when a chosen target
+// is indexed.
+func (p *Pipeline) scanPeasantSyncSessions(ctx context.Context) []reindexTarget {
+	var targets []reindexTarget
+	err := walkManagedMetadata(ctx, p.fs, string(p.config.OutputDir), func(sid SessionID, path string) error {
+		metadata, err := p.readSessionMetadata(filepath.Dir(filepath.Dir(path)), sid, "index inventory")
+		if err != nil || metadata == nil {
+			return nil // The metadata reader reports refusal; independent peers continue.
+		}
+		targets = append(targets, reindexTarget{session: metadata.session, startMs: metadata.startMs, transcriptPath: metadata.transcriptPath, originalSourcePath: metadata.originalSourcePath, refreshMetadata: metadata.refreshMetadata})
+		return nil
+	})
+	if err != nil {
+		p.reportMetadataRefusal(string(p.config.OutputDir), err)
+	}
+	return targets
+}
+
+// includesManagedSession applies the run's explicit harness and session
+// filters to a stored session. It is the scope test every database-driven
+// inventory shares.
+func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
+	return (p.config.Harness == nil || harness == *p.config.Harness) &&
+		(p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid])
+}
+
+// includesManagedArtifact adds the age filter to includesManagedSession, for a
+// session whose start time the caller already knows from its metadata.
+func (p *Pipeline) includesManagedArtifact(meta *UnifiedMetadata) bool {
+	return p.includesManagedSession(meta.SessionID, meta.ModelHarness) &&
+		(p.config.Since == nil || !time.UnixMilli(meta.Timestamp.Start).Before(*p.config.Since))
+}

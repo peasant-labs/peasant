@@ -14,7 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
+	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/search"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
@@ -1745,13 +1747,15 @@ var stageLabel = map[string]string{
 type progressTickMsg struct{}
 
 type IngestPage struct {
-	title    string
-	running  bool
-	result   *IngestResult
-	err      error
-	done     bool
-	progress ProgressSnapshot
-	cancelFn context.CancelFunc
+	title            string
+	running          bool
+	result           *IngestResult
+	err              error
+	done             bool
+	progress         ProgressSnapshot
+	cancelFn         context.CancelFunc
+	completionOffset int
+	width, height    int
 }
 
 func NewIngestPage(title string) *IngestPage { return &IngestPage{title: title} }
@@ -1770,6 +1774,7 @@ func (p *IngestPage) Start(runner IngestRunnerFunc, answers *WizardAnswers, prog
 	p.result = nil
 	p.err = nil
 	p.done = false
+	p.completionOffset = 0
 	p.progress = progress
 	a := *answers
 	return tea.Batch(
@@ -1801,7 +1806,15 @@ func (p *IngestPage) Reset() {
 }
 
 func (p *IngestPage) Update(msg tea.Msg) (Page, tea.Cmd) {
+	if p.result != nil && len(p.result.Diagnostics) > 0 {
+		if offset, handled := p.ingestCompletion().Scroll(msg, p.completionOffset); handled {
+			p.completionOffset = offset
+			return p, nil
+		}
+	}
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		p.width, p.height = msg.Width, msg.Height
 	case ingestResultMsg:
 		p.running = false
 		p.result = msg.result
@@ -1821,6 +1834,10 @@ func (p *IngestPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 }
 
 func (p *IngestPage) View(width, height int) string {
+	p.width, p.height = width, height
+	if p.result != nil && len(p.result.Diagnostics) > 0 {
+		return p.ingestCompletion().View(p.completionOffset)
+	}
 	var b strings.Builder
 	b.WriteString(PageTitle.Render(p.title))
 	b.WriteString(TextBg.Render("\n\n"))
@@ -1854,6 +1871,22 @@ func (p *IngestPage) View(width, height int) string {
 		b.WriteString(DescriptionStyle.Render("Preparing ingestion..."))
 	}
 	return b.String()
+}
+
+func (p *IngestPage) ingestCompletion() IngestCompletion {
+	var body strings.Builder
+	if p.err != nil {
+		fmt.Fprintf(&body, "Ingestion failed: %v\n", p.err)
+	} else {
+		body.WriteString("Ingestion complete!\n")
+	}
+	fmt.Fprintf(&body, "%d sessions imported (%d new, %d updated)\n%d sessions skipped (unchanged)\n%d errors\nDuration: %s\n", p.result.New+p.result.Updated, p.result.New, p.result.Updated, p.result.Unchanged, p.result.Errors, p.result.Duration.Round(100*time.Millisecond))
+	for _, count := range p.result.ProviderCounts {
+		fmt.Fprintf(&body, "%s: %d new, %d updated\n", count.Harness, count.New, count.Updated)
+	}
+	body.WriteByte('\n')
+	body.WriteString(IngestDiagnosticsText(p.result.Diagnostics))
+	return NewIngestCompletion(theme.New(theme.ModeDark), p.title, mdrender.Sanitize(body.String()), "PgUp/PgDn: scroll · enter: finish setup", p.width, p.height)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,269 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+
+	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
+)
+
+// IndexFormat persists a concrete representation using the caller's connection
+// and savepoint. Write returns its faithful canonical relational projection;
+// Store alone replaces that projection, repairs anchors, and commits stamps.
+// Implementations must not obtain another connection or commit independently.
+type IndexFormat interface {
+	Version() int
+	Validate(indexformat.Result) error
+	Write(context.Context, *sqlite.Conn, schema.SessionID, indexformat.Result) ([]schema.SessionEntry, error)
+	Delete(context.Context, *sqlite.Conn, schema.SessionID) error
+}
+
+type relationalIndexFormat struct{}
+
+var _ IndexFormat = relationalIndexFormat{}
+
+func (relationalIndexFormat) Version() int { return 1 }
+
+func (relationalIndexFormat) Validate(result indexformat.Result) error {
+	if _, ok := result.(indexformat.V1); !ok {
+		return fmt.Errorf("index format 1 requires an indexformat.V1 result, got %T; no index was replaced; use the matching concrete indexer result", result)
+	}
+	return nil
+}
+
+func (relationalIndexFormat) Write(_ context.Context, _ *sqlite.Conn, _ schema.SessionID, result indexformat.Result) ([]schema.SessionEntry, error) {
+	value, ok := result.(indexformat.V1)
+	if !ok {
+		return nil, relationalIndexFormat{}.Validate(result)
+	}
+	// V1 is the canonical representation itself. The common writer stores these
+	// rows directly, without a second payload table or an extra replacement.
+	return value.Entries, nil
+}
+
+func (relationalIndexFormat) Delete(context.Context, *sqlite.Conn, schema.SessionID) error {
+	// Canonical rows are replaced by the common writer, with annotation repair.
+	return nil
+}
+
+// WithIndexFormats adds concrete format support to one Store instance. Built-in
+// V1 support is always present. Duplicate registrations fail before opening the
+// database, so tests and callers cannot silently replace another handler.
+func WithIndexFormats(formats ...IndexFormat) OpenOption {
+	owned := append([]IndexFormat(nil), formats...)
+	return func(options *openOptions) { options.indexFormats = append(options.indexFormats, owned...) }
+}
+
+func newIndexFormats(extra []IndexFormat) (map[int]IndexFormat, error) {
+	formats := map[int]IndexFormat{1: relationalIndexFormat{}}
+	for _, format := range extra {
+		if nilIndexValue(format) || format.Version() < 1 {
+			return nil, fmt.Errorf("store: invalid index format registration before opening database; register a non-nil handler with a positive format version")
+		}
+		version := format.Version()
+		if _, exists := formats[version]; exists {
+			return nil, fmt.Errorf("store: duplicate index format %d before opening database; each representation must have exactly one handler", version)
+		}
+		formats[version] = format
+	}
+	return formats, nil
+}
+
+// SupportsIndexFormat reports local read/write support, not a harness target or
+// evidence that any session was processed by this build.
+func (s *Store) SupportsIndexFormat(version int) bool {
+	_, supported := s.indexFormats[version]
+	return supported
+}
+
+func nilIndexValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+// UnsupportedIndexFormatError prevents an unknown representation from appearing
+// as a complete but empty transcript, search, or annotation result.
+type UnsupportedIndexFormatError struct {
+	SessionID schema.SessionID
+	Version   int
+}
+
+func (e *UnsupportedIndexFormatError) Error() string {
+	if e.Version == 0 {
+		return fmt.Sprintf("store: session %s has stored entries but no recorded index format; this build cannot verify their representation, so reads and replacement were refused and the index was preserved; restore valid format evidence or use a compatible Peasant build", e.SessionID)
+	}
+	return fmt.Sprintf("store: session %s has unsupported index format %d; before reading or replacing its transcript projection, this build refused the operation and preserved its index; use a Peasant build that supports this format", e.SessionID, e.Version)
+}
+
+// publicationBindingSQL is the revision half of publication readiness: the
+// captured metadata revision is the one the session carries and the one the
+// index write recorded, over recovered working-directory provenance. It binds
+// a session row (aliased s) to its captured metadata row (aliased p). Readiness
+// ANDs a current metadata schema_version on top of it; binding does not.
+// Every statement that decides binding builds its predicate from this constant,
+// so binding cannot drift between readiness and captured index state.
+const publicationBindingSQL = `p.capture_revision > 0 AND p.capture_revision = s.publication_capture_revision
+ AND p.capture_revision = s.indexed_publication_capture_revision
+ AND s.cwd_provenance_kind != 'not_recovered'`
+
+// publicationCaptureRevisionSQL reports the capture revision a real captured
+// metadata row carries, and 0 when none does. The session row holds a counter,
+// which is not the same thing: a session whose captured metadata was never
+// written, or was written at another revision, would otherwise report a
+// revision no publication row can be found at, and every later caller would
+// treat that number as evidence of a capture. Reporting the counter belongs
+// nowhere but here, so no writer has to tolerate a revision that names nothing.
+const publicationCaptureRevisionSQL = `CASE WHEN s.cwd_provenance_kind != 'not_recovered'
+ AND p.capture_revision = s.publication_capture_revision
+ THEN s.publication_capture_revision ELSE 0 END`
+
+func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*ingest.SessionIndexState, error) {
+	var state *ingest.SessionIndexState
+	// One snapshot, one statement: the publication binding and the content
+	// capture status describe the same instant as the index columns.
+	err := sqlitex.ExecuteTransient(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
+s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
+`+publicationCaptureRevisionSQL+`,
+CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
+c.status,c.failure_code
+FROM sessions s
+LEFT JOIN session_publication_metadata p ON p.session_id = s.session_id
+LEFT JOIN session_content_captures c ON c.session_id = s.session_id
+WHERE s.session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			var harness schema.Harness
+			if err := harness.UnmarshalText([]byte(stmt.ColumnText(3))); err != nil || !harness.IsKnown() {
+				return fmt.Errorf("stored harness %q is not recognized; restore valid session metadata before indexing", stmt.ColumnText(3))
+			}
+			// A session with no capture row holds no content, which is the
+			// incomplete state. The default lives here, with the enum.
+			status := ingest.ContentCaptureIncomplete
+			if stmt.ColumnType(9) != sqlite.TypeNull {
+				var statusErr error
+				if status, statusErr = ingest.NewContentCaptureStatus(stmt.ColumnText(9)); statusErr != nil {
+					return fmt.Errorf("stored content capture status for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, statusErr)
+				}
+			}
+			// The failure code says WHY the capture is not complete. It is read
+			// in the same snapshot as the status it explains, and an unknown
+			// code fails closed: the selector acts on this value, so a code
+			// this build cannot name must never read as "no failure".
+			failureCode, codeErr := ingest.NewContentCaptureFailureCode(stmt.ColumnText(10))
+			if codeErr != nil {
+				return fmt.Errorf("stored content capture failure code for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, codeErr)
+			}
+			state = &ingest.SessionIndexState{SessionID: sessionID, IndexerVersion: stmt.ColumnInt(0), Harness: harness}
+			state.ContentFailureCode = failureCode
+			state.PublicationCaptureRevision = stmt.ColumnInt64(7)
+			state.PublicationBound = stmt.ColumnInt(8) == 1
+			state.ContentStatus = status
+			if stmt.ColumnType(1) != sqlite.TypeNull {
+				version := stmt.ColumnInt(1)
+				state.IndexVersion = &version
+			}
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				at := stmt.ColumnInt64(2)
+				state.IndexedAt = &at
+			}
+			if stmt.ColumnType(4) != sqlite.TypeNull {
+				hash := stmt.ColumnText(4)
+				state.ArtifactHash = &hash
+			}
+			if stmt.ColumnType(5) != sqlite.TypeNull {
+				hash := stmt.ColumnText(5)
+				state.IndexedInputHash = &hash
+			}
+			if stmt.ColumnType(6) != sqlite.TypeNull {
+				hash := stmt.ColumnText(6)
+				state.SessionEntriesHash = &hash
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: read index state for %s before accessing its projection: %w; no replacement was authorized; restore database access and retry", sessionID, err)
+	}
+	return state, nil
+}
+
+func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite, conversion *IndexFormatConversion) (IndexFormat, *ingest.SessionIndexState, error) {
+	if err := validateIndexInputClaim(write); err != nil {
+		return nil, nil, err
+	}
+	if nilIndexValue(write.Result) || write.IndexVersion < 1 || write.Result.IndexVersion() != write.IndexVersion {
+		return nil, nil, fmt.Errorf("store: index result for session %s does not match declared format %d; refused before replacement; provide one concrete result matching the indexer's declared output", write.SessionID, write.IndexVersion)
+	}
+	format, supported := s.indexFormats[write.IndexVersion]
+	if !supported {
+		return nil, nil, &UnsupportedIndexFormatError{SessionID: write.SessionID, Version: write.IndexVersion}
+	}
+	if err := format.Validate(write.Result); err != nil {
+		return nil, nil, fmt.Errorf("store: validate index result for %s before replacement: %w", write.SessionID, err)
+	}
+	state, err := readIndexStateOnConn(conn, write.SessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if write.ExpectedState != nil && !sameIndexState(write.ExpectedState, state) {
+		return nil, nil, &ingest.StaleIndexWorkError{SessionID: write.SessionID}
+	}
+	if state == nil {
+		return nil, nil, fmt.Errorf("store: cannot index session %s before its metadata is stored; import the session and retry", write.SessionID)
+	}
+	if state.IndexVersion == nil {
+		hasEntries := false
+		if err := sqlitex.ExecuteTransient(conn, sqlSessionEntriesExist, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}, ResultFunc: func(*sqlite.Stmt) error { hasEntries = true; return nil }}); err != nil {
+			return nil, nil, fmt.Errorf("store: verify absent index format for %s before replacement: %w; existing entries were preserved; restore database access and retry", write.SessionID, err)
+		}
+		if hasEntries {
+			return nil, nil, &UnsupportedIndexFormatError{SessionID: write.SessionID}
+		}
+	}
+	if state.IndexVersion != nil {
+		if !s.SupportsIndexFormat(*state.IndexVersion) {
+			return nil, nil, &UnsupportedIndexFormatError{SessionID: write.SessionID, Version: *state.IndexVersion}
+		}
+		if *state.IndexVersion > write.IndexVersion {
+			return nil, nil, fmt.Errorf("store: session %s has index format %d, newer than output format %d; replacement was refused, including forced indexing; use a compatible newer indexer", write.SessionID, *state.IndexVersion, write.IndexVersion)
+		}
+	}
+	producer := write.IndexerVersion
+	if write.Mode == ingest.SessionEntryWriteFormatConversion && producer != 0 {
+		return nil, nil, fmt.Errorf("store: session %s requested a format conversion that also claims indexer revision %d; the write was refused and the stored index preserved; a conversion changes only the representation, so run the parser through replace_all if a new producer revision actually processed the input", write.SessionID, producer)
+	}
+	if conversion != nil {
+		if state.IndexVersion == nil || *state.IndexVersion != conversion.FromVersion || write.IndexVersion != conversion.ToVersion || producer != 0 {
+			return nil, nil, fmt.Errorf("store: conversion source/target or producer history changed for session %s; replacement was refused; retry the registered upgrade against current stored state", write.SessionID)
+		}
+		// Only the private registered conversion path can bypass the parser
+		// ceiling: no parser ran, and the stored revision/time remain untouched.
+		return format, state, nil
+	}
+	if producer == 0 {
+		// Legacy entry-only callers do not claim a parser run. The current
+		// harness target is only a safety ceiling, never a provenance stamp.
+		target, registered := ingest.HarvesterVersionRegistry[state.Harness]
+		if !registered {
+			return nil, nil, fmt.Errorf("store: session %s harness %q has no current indexer; entry-only replacement was refused; register a compatible indexer before retrying", write.SessionID, state.Harness)
+		}
+		producer = target.IndexerVersion
+	}
+	if producer < 1 || state.IndexerVersion > producer {
+		return nil, nil, fmt.Errorf("store: session %s was indexed by revision %d, newer than this writer's revision %d; use a newer Peasant build to refresh it without losing parser output", write.SessionID, state.IndexerVersion, producer)
+	}
+	return format, state, nil
+}

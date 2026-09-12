@@ -75,8 +75,8 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		"opencode_json_literal_cwd": true, "opencode_legacy_sqlite_capture": true,
 		"opencode_current_sqlite_capture": true, "missing_source_stays_unrecovered": true,
 		"mismatched_internal_identity_refuses": true, "codex_mismatched_internal_identity_refuses": true,
-		"disappeared_source_during_extraction": true, "optional_metadata_write_failure_still_ready": true,
-		"changed_source_updates_metadata_and_entries": true, "opencode_json_index_uses_captured_tree": true,
+		"disappeared_source_during_extraction": true, "metadata_write_failure_needs_reingest": true,
+		"changed_source_updates_metadata_and_entries": true, "opencode_json_index_refuses_changed_source": true,
 		"absent_model_is_not_fabricated": true,
 		"reindex_fresh_source_ready":     true, "reindex_verified_fallback_ready": true,
 		"reindex_changed_fallback_held": true, "reindex_legacy_fallback_held": true,
@@ -92,7 +92,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		}
 		seen[c.Name] = true
 		delete(required, c.Name)
-		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract
+		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar
 		if !unrecoverable && (c.ExpectedManualIndexed == nil || c.ExpectedManualReadiness == "") {
 			t.Fatalf("fixture %s has no expected manual indexing outcome", c.Name)
 		}
@@ -229,13 +229,54 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				return result
 			}
 			result := run()
-			if c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract {
+			if c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar {
 				bundle, err := database.LoadPublicationInput(ctx, id)
 				if err != nil || bundle.Readiness != ingest.PublicationNeedsIngest {
 					t.Fatalf("unrecoverable source = %+v, %v", bundle, err)
 				}
-				if (c.MismatchIdentity || c.DisappearDuringExtract) && result.Summary.Errors == 0 {
-					t.Fatalf("mismatched source accepted: %+v", result)
+				// A failed metadata write no longer recovers within the same run
+				// from a pending publication intent: the write path installs the
+				// pair by rename with no intent, so a metadata write that fails
+				// leaves a torn pair with no row. Per the crash-and-fault model
+				// (torn pair, no row, crash during a first install): "pair
+				// validation refuses it; DIFF finds no row; next harvest
+				// re-ingests from native". So the faulted run reports an error
+				// and leaves the session needing ingest, and a later clean
+				// harvest re-ingests it from its source.
+				if (c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar) && result.Summary.Errors == 0 {
+					t.Fatalf("faulted install accepted: %+v", result)
+				}
+				return
+			}
+			if c.MutateIndexFile != "" {
+				// The native source changed after the worker captured it and
+				// before the index read it. The index re-reads the native to
+				// validate, detects the change and refuses, rather than mixing
+				// the newer source into the capture. Per the crash-and-fault
+				// model (an input changed before the write): the parser result
+				// is refused, current entries and producer evidence are
+				// preserved, and the next harvest reads the session again from
+				// its now-consistent source. No "changed response" reaches the
+				// store, and the session still needs ingest.
+				if result.Summary.Indexed != 0 {
+					t.Fatalf("index applied a changed source: %+v", result)
+				}
+				refused := false
+				for _, d := range result.Diagnostics {
+					if strings.Contains(d.Message, "changed before replacement") {
+						refused = true
+					}
+				}
+				if !refused {
+					t.Fatalf("changed source was not reported as refused: %+v", result.Diagnostics)
+				}
+				bundle, err := database.LoadPublicationInput(ctx, id)
+				if err != nil || bundle.Readiness != ingest.PublicationNeedsIngest {
+					t.Fatalf("changed source left an unexpected state = %+v, %v", bundle, err)
+				}
+				entryJSON, err := json.Marshal(bundle.Entries)
+				if err != nil || bytes.Contains(entryJSON, []byte("changed response")) {
+					t.Fatalf("index mixed a newer source tree into the capture: %s, %v", entryJSON, err)
 				}
 				return
 			}
@@ -269,12 +310,6 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			if got := publicationStoredProvenance(t, dbPath, id); got != c.Provenance {
 				t.Fatalf("provenance = %q want %q", got, c.Provenance)
-			}
-			if c.MutateIndexFile != "" {
-				entryJSON, err := json.Marshal(bundle.Entries)
-				if err != nil || bytes.Contains(entryJSON, []byte("changed response")) || !bytes.Contains(entryJSON, []byte("synthetic response")) {
-					t.Fatalf("index mixed a newer source tree into the capture: %s, %v", entryJSON, err)
-				}
 			}
 			wantProject, wantHost, err := ingest.DeriveProjectIdentifiers(installationSalt, git.Remote, session.CWD)
 			if err != nil {
@@ -390,9 +425,18 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			lastGood, err := database.ListEntries(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cfg.Reindex = true
 			if c.ReindexMutateAfterRead {
 				filesystem.mutateAfterRead = filepath.Join(filepath.Dir(metadataPath), c.ID+"--transcript."+string(session.SourceFormat))
+				// The pair-repair selection reads the pair once before the
+				// fallback read that captures the verified bytes; the racing
+				// change lands after that verified read, so the index must use
+				// the captured bytes rather than read the mutated file again.
+				filesystem.mutateAfterReadAt = 2
 			}
 			manualResult := run()
 			if manualResult.Summary.Errors != 0 || manualResult.Summary.StoreError != nil {
@@ -400,6 +444,37 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			if manualResult.Summary.Indexed != *c.ExpectedManualIndexed {
 				t.Fatalf("manual indexed = %d want %d: %+v", manualResult.Summary.Indexed, *c.ExpectedManualIndexed, manualResult)
+			}
+			if c.ReindexChangeManaged {
+				// A managed pair whose transcript no longer matches its committed
+				// metadata is refused, not re-indexed: the refusal is a warning
+				// naming the session AND the checksum that failed, the run has no
+				// error, the last-good index is untouched, and the verified
+				// capture is still served.
+				//
+				// Either strict reader of the committed pair may be the one that
+				// meets it: the reconciliation walk, which reads a pair only when
+				// the session's small evidence says it changed, or the index
+				// capture, which verifies the pair of every session it evaluates.
+				warned := false
+				for _, diagnostic := range manualResult.Diagnostics {
+					reportedBy := diagnostic.ErrorType == "artifact_recovery_incomplete" || diagnostic.ErrorType == "index_refused"
+					if reportedBy && strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != "" &&
+						strings.Contains(diagnostic.Message, "transcript checksum does not match committed metadata") {
+						warned = true
+					}
+				}
+				if !warned {
+					t.Fatalf("inconsistent managed pair was not reported as a recovery warning: %+v", manualResult.Diagnostics)
+				}
+				untouched, err := database.ListEntries(ctx, id)
+				if err != nil || !reflect.DeepEqual(untouched, lastGood) {
+					t.Fatalf("refused reindex changed the last-good index: %v", err)
+				}
+				snapshot, err := database.ReadSessionAvailable(ctx, id)
+				if err != nil || !reflect.DeepEqual(snapshot.Entries, lastGood) {
+					t.Fatalf("verified capture is no longer served after the refused reindex: %+v %v", snapshot, err)
+				}
 			}
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
@@ -429,7 +504,8 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			if c.ReindexMutateAfterRead {
 				data, err := json.Marshal(manual.Entries)
-				if err != nil || !filesystem.mutatedAfterRead || bytes.Contains(data, []byte("racing response")) || !bytes.Contains(data, []byte("synthetic response")) {
+				mutationFired := filesystem.mutateReadCount >= filesystem.mutateAfterReadAt && filesystem.mutateAfterReadAt > 0
+				if err != nil || !mutationFired || bytes.Contains(data, []byte("racing response")) || !bytes.Contains(data, []byte("synthetic response")) {
 					t.Fatalf("fallback reread input after verification: %s, %v", data, err)
 				}
 			}
@@ -479,11 +555,12 @@ func (s *publicationReindexStore) IndexSessionEntryBatch(ctx context.Context, wr
 
 type publicationCaptureFS struct {
 	*ingest.OSFileSystem
-	disappearPath    string
-	failSidecar      bool
-	mutatePath       string
-	mutateAfterRead  string
-	mutatedAfterRead bool
+	disappearPath     string
+	failSidecar       bool
+	mutatePath        string
+	mutateAfterRead   string
+	mutateAfterReadAt int
+	mutateReadCount   int
 }
 
 var _ ingest.FileSystem = (*publicationCaptureFS)(nil)
@@ -500,11 +577,17 @@ func (fs *publicationCaptureFS) ReadFile(path string) ([]byte, error) {
 		_ = os.Remove(path)
 	}
 	data, err := fs.OSFileSystem.ReadFile(path)
-	if err == nil && path == fs.mutateAfterRead && !fs.mutatedAfterRead {
-		if err := os.WriteFile(path, bytes.ReplaceAll(data, []byte("synthetic response"), []byte("racing response")), 0600); err != nil {
-			return nil, err
+	if err == nil && path == fs.mutateAfterRead {
+		at := fs.mutateAfterReadAt
+		if at == 0 {
+			at = 1
 		}
-		fs.mutatedAfterRead = true
+		fs.mutateReadCount++
+		if fs.mutateReadCount == at {
+			if err := os.WriteFile(path, bytes.ReplaceAll(data, []byte("synthetic response"), []byte("racing response")), 0600); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return data, err
 }

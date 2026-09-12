@@ -1,0 +1,81 @@
+requiredNames:
+  - normal refusal stays nonfatal and keeps last-good state
+  - forced refusal stays nonfatal and keeps last-good state
+  - stored schema refusal stays nonfatal and keeps last-good state
+  - compatible metadata has no false warning
+sessionID: 11111111-1111-1111-1111-111111111111
+transcript: |
+  {"type":"user","sessionId":"11111111-1111-1111-1111-111111111111","message":{"role":"user","content":"synthetic retained session"},"timestamp":"2024-01-01T00:00:00Z"}
+# Keys the document always carries. wantIndexLog adds "indexLog" for the cases
+# that index something.
+expectedRootKeys: [duration, sessions, summary]
+#
+# Every case states BOTH of the two things that are easy to get wrong by
+# inference, rather than leaving them to whatever the run happens to produce:
+#
+#   wantIndexLog      - does the document carry an index log? It records work
+#                       that happened, so a refusal must not grow one.
+#   wantStructuredLog - does the run emit a structured WARN at all? The document
+#                       surface suppresses nothing, so this is a statement about
+#                       the run. Declared per case from what the run emits today;
+#                       a case whose refusal gains a log line flips this field
+#                       deliberately.
+#   wantWarningLines  - the exact multiset of "warning:" lines the command
+#                       prints, named by the EVIDENCE each line read rather
+#                       than by its wording:
+#                         managed-metadata-file  the managed metadata file
+#                         stored-metadata-row    the session's stored row
+#                       One refused session is reported once per piece of
+#                       evidence, so a second reporting path for the same
+#                       evidence shows up here even when it says the same thing
+#                       in other words. Names, not a count: a count cannot say
+#                       WHICH lines it saw, so one line vanishing while another
+#                       arrives would leave it unchanged. A case that warns
+#                       must name at least one line; one that does not must
+#                       name none.
+#
+# Every refusal here reports ONCE. Two earlier duplicates are gone and stay
+# gone because this corpus names lines rather than counting them:
+#   - the managed-metadata scan and the index selection both refuse the same
+#     FILE; they used to spell its path absolute and relative, so dedup by
+#     whole-value equality could not collapse them. Both now name the file by
+#     its path under the managed output directory;
+#   - the retained-content recovery sweep used to add a third line, until the
+#     seed began leaving a COMPLETE content capture as a finished harvest does.
+#     A session with nothing missing is not a recovery target.
+cases:
+  # The managed-metadata scan lives in `harvest index`; the ordinary harvest is
+  # database-driven and no longer reads the tree, so a future-schema managed
+  # file is surfaced here.
+  - name: normal refusal stays nonfatal and keeps last-good state
+    schemaVersion: 999
+    reindex: true
+    wantWarning: true
+    wantIndexLog: false
+    wantStructuredLog: true
+    wantWarningLines: [managed-metadata-file]
+  - name: forced refusal stays nonfatal and keeps last-good state
+    schemaVersion: 999
+    reindex: true
+    force: true
+    wantWarning: true
+    wantIndexLog: false
+    wantStructuredLog: true
+    wantWarningLines: [managed-metadata-file]
+  # This refusal is reported to the user but logs nothing structured today.
+  - name: stored schema refusal stays nonfatal and keeps last-good state
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    reindex: true
+    force: true
+    wantWarning: true
+    wantIndexLog: false
+    wantStructuredLog: false
+    wantWarningLines: [stored-metadata-row]
+  # The only case that indexes anything, so the only one whose document carries
+  # an index log.
+  - name: compatible metadata has no false warning
+    schemaVersion: 9
+    wantWarning: false
+    wantIndexLog: true
+    wantStructuredLog: false

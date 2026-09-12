@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 			Version int    `yaml:"version"`
 			Updated int    `yaml:"updated"`
 			Status  string `yaml:"status"`
+			Refused bool   `yaml:"refused"`
 		} `yaml:"cases"`
 	}
 	d := yaml.NewDecoder(bytes.NewReader(piMetadataCompatibilityYAML))
@@ -78,13 +80,19 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 			if err := json.Unmarshal(raw, &written); err != nil {
 				t.Fatal(err)
 			}
-			written.SchemaVersion = c.Version
-			raw, err = json.Marshal(written)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := fs.WriteFile(metadataPath, raw, 0600); err != nil {
-				t.Fatal(err)
+			// Only a case that actually pins a different schema version rewrites
+			// the sidecar. Rewriting it with the version it already carries
+			// would replace the published file out of band and provoke one
+			// refresh that has nothing to do with the version under test.
+			if written.SchemaVersion != c.Version {
+				written.SchemaVersion = c.Version
+				raw, err = json.Marshal(written)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := fs.WriteFile(metadataPath, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			pipeline, err = ingest.NewPipeline(fs, git, adapters, cfg)
 			if err != nil {
@@ -96,6 +104,16 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 			}
 			if result.Summary.Updated != c.Updated || result.Summary.New != 0 {
 				t.Fatalf("sidecar diff changed: %+v", result.Summary)
+			}
+			// A sidecar this build cannot read is refused out loud, and the
+			// refusal names the version it found, so a user learns to upgrade
+			// instead of finding a silently skipped session.
+			refused := false
+			for _, diagnostic := range result.Diagnostics {
+				refused = refused || strings.Contains(diagnostic.Message, "is newer than supported version")
+			}
+			if refused != c.Refused {
+				t.Fatalf("future-version refusal reported = %t, want %t: %+v", refused, c.Refused, result.Diagnostics)
 			}
 			// Upstream captured-source evidence deliberately refreshes legacy
 			// sidecars once. The compatibility guarantee is that this never

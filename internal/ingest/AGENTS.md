@@ -7,6 +7,23 @@ For detailed diagrams and sequence flows, see [README.md](README.md).
 
 ## Pipeline at a Glance
 
+The ordinary harvest selects its work from the database and walks no saved tree.
+A crash between the pair install and the mirror commit, or between the mirror and
+the entry commit, is repaired by the database-driven repair predicate on the next
+harvest; a one-time upgrade pass finishes writes an earlier build interrupted. The
+saved tree is walked only by `harvest index`; `harvest index --all` records rows
+the database is missing from the saved files and rebuilds a lost database. Explicit
+harness/session/since filters apply independently of saved discovery selection.
+Dry-run and file-only runs open no database.
+
+Adapter refresh is independent of indexer eligibility. Claude, Codex and Cursor
+implement `ExtractMetadataFromTranscript` over captured JSONL and original
+metadata context; publication keeps those transcript bytes. New native input
+takes precedence. Strike and OpenCode require native input when retained context
+is insufficient. Failed native acquisition preserves the prior artifact and
+adapter stamp, reports a diagnostic and permits supported retained indexing.
+Retained extraction preserves the acquired ingest clock, cursor and origin.
+
 ```
 DISCOVER ─▶ DIFF ─▶ FILTER ─┬─▶ EXTRACT+WRITE (N workers) ─▶ StagingBuffer.Add()
                              │                                       │ lock-free CAS
@@ -35,18 +52,19 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 
 | # | Stage | Concurrency | Fatal? | Description |
 |---|-------|-------------|--------|-------------|
-| 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. All-fail is fatal; partial OK. |
-| 2 | DIFF | Sequential | No | Preliminary New / Updated / Unchanged / Active hints. |
-| 3 | FILTER | Sequential | No | Apply selection and resolve FK parent deps; enqueue supported source candidates without payloads. Active sessions are eligible. |
-| 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Capture source and compare consumed evidence/identity; no-op or extract metadata, redact, atomic write (tmp + rename). |
-| 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Best-effort | Drain StagingBuffer → upsert SQLite → stream indexable sessions. Pipelined with INDEX. |
+| 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. If all fail, usable retained sessions still receive maintenance; initial import without usable input fails. |
+| 2 | DIFF | Sequential | No | Classify: New / Updated / Unchanged / Active. |
+| 3 | FILTER | Sequential | No | Skip Unchanged + Active; resolve FK parent deps. |
+| 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, then install the pair by rename, transcript first and metadata last, with no file sync and no lock. |
+| 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Per-session | Mirror the artifact, retained seeds and acquired evidence to the database in one batched transaction per page → add DerivedAt → stream indexable sessions. The database is the durability point; a failure leaves the saved files for the next harvest and does not enqueue that session. |
 | 5 | INDEX | **Concurrent** (parser workers + serial writer) | Best-effort | Parse transcripts in bounded workers → serial `session_entries` writes. Receives streamed work from drainLoop. |
 | 6 | COMPUTE | Sequential | Best-effort | 16 metric functions + daily insights. |
 | 7 | CLEANUP | Sequential | Best-effort | Remove orphan `.tmp-*` dirs. |
 | 8 | REPORT | Sequential | No | Aggregate counts → `PipelineResult`. |
 | 9 | AUDIT | Sequential | Best-effort | Write `ingest_log` row. |
 
-**Best-effort** = cannot fail the pipeline. Logs warning, continues. Only total DISCOVER failure is fatal.
+**Best-effort** = cannot fail the pipeline. Logs warning, continues. Total DISCOVER
+failure is fatal only when no usable retained session can receive maintenance.
 
 For supported append-only and SQLite sources, each bounded root worker makes the authoritative
 freshness decision from captured metadata and bytes, then processes that same capture and
@@ -84,8 +102,8 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 |----|------|------|
 | C1 | Root-Owns-Subtree | One goroutine processes a root + its entire BFS subtree. Prevents directory races on `{hostSlug}/{parentID}/`. |
 | C2 | Parent-Before-Child DB | FK ordering via `StagingBuffer.Commit()`: children invisible to `Drain()` until parent committed. |
-| C3 | Atomic File Writes | Write to `.tmp-*` dir, then `os.Rename()`. CLEANUP removes orphans. |
-| C4 | Schema Version Re-Ingest | `metadataNeedsRefresh(SchemaVersion)` → `DiffUpdated` → re-ingest. Versions behind Current refresh except v9 when Current is v10: optional adapter provenance does not invalidate existing harness recordings. |
+| C3 | Atomic File Writes | The pair is installed by writing both files to a temp directory and renaming them into place, transcript first and metadata last, with no file sync and no lock. Never delete a session subtree; children and unrelated files are not owned. Ownership is decided by NAME, never by location: inside the session `debug/` directory only names whose extension is in the closed set `defaults.DebugArtifactSuffixes()` are peasant's own, so a user file with any other extension survives a write. The database commit, not the file write, is the durability point. |
+| C4 | Metadata Compatibility | Versions below 9 require native refresh. Reading metadata 9/10 alone causes no adapter call or metadata rewrite. An omitted adapter version uses baseline 1 for refresh eligibility but stays unknown in provenance until actual extraction succeeds. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
 | C5 | Arena Concurrent Drain | `Add()` uses bounded exponential backoff (1ms→16ms) when arena full. drainLoop goroutine runs concurrently with workers; arena only recycles via `AckBatch`. |
 | C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. |
 
@@ -98,6 +116,9 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | I3 | CAS Ownership | CAS winner exclusively owns slot data. No locks needed for subsequent read/write. |
 | I4 | Committed Append-Only | `committed` map only grows. Single drainer reads it; `Commit` called between batches. No race. |
 | I5 | Worker Count Bounds | `min(config.Parallelism, len(roots))`. Buffer allocated with `len(toProcess) + 1` slots. |
+| I6 | Whole Records Up To The Limit | Every JSONL harness reads, redacts and indexes a single record up to `defaults.MaxJSONLRecordBytes` (256 MiB) IN FULL. No record size ever fails a session and no record is ever silently dropped. |
+| I7 | Omission Is Recorded, Never Silent | A record over the limit is left out before redaction, without being loaded. It is reported with the `record_too_large` diagnostic naming its size, its line and the limit; the capture is stored incomplete with failure code `source_records_omitted`; and a PLACEHOLDER ENTRY holds its position in the indexed entries (role `tool`, entry type `tool_result`, `rawByteLength` = the record size, the typed `OmittedRecord` under `omittedRecord` in `extra`, and a reader-facing note in `contentPreview`). The rule, the diagnostic and the placeholder are the same for Claude Code, Codex, Cursor, Strike and Pi. OpenCode reads rows and legacy documents rather than lines and has no per-record size limit, so nothing there fails or is dropped at any size and this omission does not apply to it. |
+| I8 | An Accounted Omission Is Full Content | A capture incomplete ONLY because records were omitted is written through the FULL content path (`ContentCaptureFormatFull`, `RequireFullContent`), so previews, export and publication all carry it with its placeholders and `diagnostics.partial`. It is the one incompleteness that may be published. The decision is read from the STORED ENTRIES, never from the failure code alone: `source_records_omitted` is also raised for an OpenCode part this build cannot render and for an orphan graph part, where nothing stands in the gap, and those keep the bounded preview and stay refused. |
 
 ## Assumptions
 
@@ -115,7 +136,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 
 | Stage | Behavior |
 |-------|----------|
-| DISCOVER (all fail) | **Fatal** — pipeline returns error |
+| DISCOVER (all fail) | Continue maintenance of usable retained sessions; **fatal** when no usable retained input exists |
 | DISCOVER (partial) | Continue with available providers |
 | DIFF (corrupt) | Treat as `DiffNew` (re-ingest) |
 | EXTRACT+WRITE | Per-session error in `SessionResult.Error`; continues |
@@ -152,3 +173,6 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | `metadata.go` | | `UnifiedMetadata`, `CurrentSchemaVersion`, extraction |
 | `parallel_test.go` | | Concurrency tests: MPMC, deadlock, race detection |
 | `pipeline_test.go` | | Integration tests: `MemFS` + `StubGitResolver` round-trip |
+| `jsonl_records.go` | | The shared JSONL record reader (`jsonlRecordScanner`, `forEachJSONLRecord`) and the typed `OmittedRecord`. Every JSONL read site uses it; a record over the limit is skipped, never an error |
+| `jsonl_omission.go` | | The omission stand-in line, the placeholder entry and its reader-facing note |
+| `oversized_record_filter.go` | | The one pre-redaction filter every JSONL harness runs (`filterOversizedJSONLRecords`) |

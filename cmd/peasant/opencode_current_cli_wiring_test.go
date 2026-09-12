@@ -67,7 +67,7 @@ func TestCurrentOpenCodeSQLiteNormalCLIAdapterWiring(t *testing.T) {
 			materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot})
+			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot})
 			if err != nil {
 				t.Fatalf("normal OpenCode CLI harvest silently disabled current SQLite discovery: %v\n%s", err, output)
 			}

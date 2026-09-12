@@ -1,0 +1,22 @@
+required_names: [claude-code, opencode, codex, cursor, strike, legacy-claude, legacy-gemini, antigravity-unimplemented, gemini-cli-unimplemented, unknown]
+cases:
+  - {name: claude-code, raw: claude-code, want: claude-code}
+  - {name: opencode, raw: opencode, want: opencode}
+  - {name: codex, raw: codex, want: codex}
+  - {name: cursor, raw: cursor, want: cursor}
+  - {name: strike, raw: strike, want: strike}
+  - name: legacy-claude
+    raw: claude
+    error_contains: [deprecated, renamed, claude-code]
+  - name: legacy-gemini
+    raw: gemini
+    error_contains: [deprecated, renamed, gemini-cli]
+  - name: antigravity-unimplemented
+    raw: antigravity
+    error_contains: [has no registered harvester]
+  - name: gemini-cli-unimplemented
+    raw: gemini-cli
+    error_contains: [has no registered harvester]
+  - name: unknown
+    raw: bogus-harness
+    error_contains: [unknown harness, bogus-harness]

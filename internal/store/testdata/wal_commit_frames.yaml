@@ -1,0 +1,20 @@
+# Baseline for the write-ahead-log commit counter.
+#
+# Each case runs one store operation on a store whose log is never
+# checkpointed and asserts how many commit frames the log gained. The counter
+# is only trusted because these cases pin its behaviour against known
+# operations: a mirror page is one transaction whatever its size, two pages
+# are two, an entry batch is one, and a read is none.
+requiredNames:
+  - mirror-page-of-200-commits-once
+  - two-mirror-pages-commit-twice
+  - entry-batch-commits-once
+  - read-index-state-commits-nothing
+hostSlug: github.com-wal-fixture
+projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+transcript: '{"type":"user","message":{"role":"user","content":"wal commit fixture"}}'
+cases:
+  - {name: mirror-page-of-200-commits-once, action: mirror, sessions: 200, wantCommits: 1}
+  - {name: two-mirror-pages-commit-twice, action: mirror-twice, sessions: 200, wantCommits: 2}
+  - {name: entry-batch-commits-once, action: entry-batch, sessions: 1, wantCommits: 1}
+  - {name: read-index-state-commits-nothing, action: read-index-state, sessions: 1, wantCommits: 0}

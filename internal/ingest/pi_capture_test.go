@@ -46,6 +46,32 @@ func (f *piCaptureTimingFS) ReadSourcePrefix(path string) ([]byte, error) {
 	return f.OSFileSystem.ReadSourcePrefix(path)
 }
 
+// assertStoredCaptureRefusedNonfatally checks the contract for a stored
+// session whose native capture was refused: the session result is unchanged
+// with no error, and the run carries one actionable warning that names the
+// session and says the previous artifact and stamp were preserved.
+func assertStoredCaptureRefusedNonfatally(t *testing.T, result *ingest.PipelineResult, sid ingest.SessionID) {
+	t.Helper()
+	reported := false
+	for _, session := range result.Sessions {
+		if session.SessionID == sid {
+			reported = true
+			if session.Status != ingest.DiffUnchanged || session.Error != nil {
+				t.Fatalf("refused stored capture was not reported unchanged and nonfatal: %+v", session)
+			}
+		}
+	}
+	if !reported {
+		t.Fatalf("refused stored session missing from results: %+v", result.Sessions)
+	}
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, string(sid)) && strings.Contains(diagnostic.Message, "preserved") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+			return
+		}
+	}
+	t.Fatalf("refused stored capture was not reported as an actionable warning: %+v", result.Diagnostics)
+}
+
 func TestPiCapturedAdmission(t *testing.T) {
 	var corpus struct {
 		SessionID      string          `yaml:"session_id"`
@@ -208,8 +234,22 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 		t.Fatal(err)
 	}
 	if c.Reject {
-		if result.Summary.Errors != 1 || result.Summary.New != 1 || result.Summary.Updated != 0 || result.Summary.Indexed != 1 {
+		// A refused capture of a NEW session is that session's error: there
+		// is no retained artifact to keep serving. A refused capture of a
+		// STORED session keeps its last-good artifact and index, is reported
+		// unchanged, and the refusal is a nonfatal warning that names the
+		// session and the preserved state, so one bad appended record does
+		// not turn the harvest into a failing run. Either way the other
+		// session continues and nothing persisted changes.
+		wantErrors, wantUnchanged := 1, 0
+		if seed {
+			wantErrors, wantUnchanged = 0, 1
+		}
+		if result.Summary.Errors != wantErrors || result.Summary.Unchanged != wantUnchanged || result.Summary.New != 1 || result.Summary.Updated != 0 || result.Summary.Indexed != 1 {
 			t.Fatalf("invalid capture admitted: %+v", result.Summary)
+		}
+		if seed {
+			assertStoredCaptureRefusedNonfatally(t, result, sid)
 		}
 		if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeEntries, entries) || !reflect.DeepEqual(beforeFiles, artifacts()) {
 			t.Fatal("rejected capture changed persisted state or managed artifacts")

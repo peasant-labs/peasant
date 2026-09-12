@@ -204,7 +204,7 @@ func runAnnotateExport(cmd *cobra.Command, _ []string) error {
 }
 
 // queryFrictionAnnotations builds and executes the friction episode annotation query.
-func queryFrictionAnnotations(cmd *cobra.Command, annotator, sessionFilter string) ([]frictionExportRow, error) {
+func queryFrictionAnnotations(cmd *cobra.Command, annotator, sessionFilter string) (_ []frictionExportRow, retErr error) {
 	db, cleanup, err := openDB(cmd)
 	if err != nil {
 		return nil, err
@@ -253,6 +253,8 @@ func queryFrictionAnnotations(cmd *cobra.Command, annotator, sessionFilter strin
 		return nil, fmt.Errorf("take connection: %w", connErr)
 	}
 	defer pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
 
 	var rows []frictionExportRow
 	stmt, _, stmtErr := conn.PrepareTransient(query)
@@ -300,6 +302,15 @@ func queryFrictionAnnotations(cmd *cobra.Command, annotator, sessionFilter strin
 		rows = append(rows, row)
 	}
 
+	coordinateSessions := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.StartEntry != nil {
+			coordinateSessions = append(coordinateSessions, row.SessionID)
+		}
+	}
+	if err := validateIndexStringIDsOnConn(db, conn, coordinateSessions); err != nil {
+		return nil, err
+	}
 	return rows, nil
 }
 
@@ -370,7 +381,7 @@ type sessionSummaryRow struct {
 }
 
 // exportSessionSummary aggregates friction episodes per session and outputs as CSV or JSON.
-func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON bool) error {
+func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON bool) (retErr error) {
 	db, cleanup, err := openDB(cmd)
 	if err != nil {
 		return err
@@ -413,12 +424,17 @@ func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON b
 		return fmt.Errorf("take connection: %w", connErr)
 	}
 	defer pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := validateIndexStringIDsOnConn(db, conn, order); err != nil {
+		return fmt.Errorf("export friction summary: verify selected indexes before counting turns: %w", err)
+	}
 
 	for _, sid := range order {
 		s := sessions[sid]
 
 		// Get session metadata.
-		sqlitex.ExecuteTransient(conn, `
+		if err := sqlitex.ExecuteTransient(conn, `
 			SELECT
 				COALESCE(p.canonical_cwd, ''),
 				s.start_ms,
@@ -453,10 +469,12 @@ func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON b
 				}
 				return nil
 			},
-		})
+		}); err != nil {
+			return fmt.Errorf("export friction summary: read metadata for %s: %w", sid, err)
+		}
 
 		// Get turn counts.
-		sqlitex.ExecuteTransient(conn, `
+		if err := sqlitex.ExecuteTransient(conn, `
 			SELECT
 				COUNT(*) FILTER (WHERE role = 'user' AND depth = 0),
 				COUNT(*)
@@ -468,7 +486,9 @@ func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON b
 				s.TotalTurns = stmt.ColumnInt(1)
 				return nil
 			},
-		})
+		}); err != nil {
+			return fmt.Errorf("export friction summary: count entries for %s: %w", sid, err)
+		}
 	}
 
 	// Finalize averages.
@@ -575,8 +595,8 @@ func buildExportSessionsCommand() *cobra.Command {
 		Short: "Export session transcripts as JSON",
 		Long: `Export session transcripts as JSON files with full turn content.
 
-Each session is re-indexed from its original source file with full content
-extraction (no truncation), producing a JSON envelope with metadata and turns.
+Each session uses a coherent snapshot of retained input and indexed coordinates,
+producing a JSON envelope with full content. Stale or unproven inputs are refused.
 
 Requires either --session for a single session or --session-from-file for a batch.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -600,12 +620,16 @@ Requires either --session for a single session or --session-from-file for a batc
 			}
 			defer cleanup()
 
+			cfg, err := loadConfig(resolveConfigPath(cmd))
+			if err != nil {
+				return err
+			}
 			ctx := cmd.Context()
 			fs := &ingest.OSFileSystem{}
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := export.ExportSession(ctx, db, fs, sid)
+				exported, exportErr := export.ExportSession(ctx, db, fs, sid, cfg.Output.BasePath)
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++

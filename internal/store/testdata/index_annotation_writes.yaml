@@ -1,0 +1,8 @@
+requiredNames: [create-entry, supersede-entry, batch-create-entry, classifier-entry, classifier-batch, classifier-run-state]
+cases:
+  - {name: create-entry, operation: create}
+  - {name: supersede-entry, operation: supersede}
+  - {name: batch-create-entry, operation: batch}
+  - {name: classifier-entry, operation: classifier}
+  - {name: classifier-batch, operation: classifier-batch}
+  - {name: classifier-run-state, operation: run-state}

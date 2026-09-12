@@ -222,7 +222,7 @@ func ingestOneSessionAtMaximum(t *testing.T, slug string, redactor ingest.TextRe
 	}
 	var directories []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() && entry.Name() != ".peasant-state" {
 			directories = append(directories, entry.Name())
 		}
 	}

@@ -1,0 +1,77 @@
+# Retained-content recovery obeys the same eligibility boundary as ordinary
+# index maintenance. Each case runs one reindex over a single stored session
+# whose content capture is absent, with one scope filter or one stored
+# producer condition applied, and asserts the observable outcome:
+#   recovered  the capture becomes complete; the retained transcript was read,
+#              the native source was not; exactly one recovery index-log row
+#   untouched  no retained read, no write, no recovery diagnostic
+#   refused    recovery reads nothing, nothing is written, no recovery
+#              index-log entry. expected_diagnostics is the exact multiset of
+#              diagnostic types naming the session: a producer refusal is the
+#              sweep's content_recovery_refused plus the index path's visible
+#              index_refused; a stored-schema refusal is exactly one
+#              metadata_refused with the schema remedy (no_index_log: it grows
+#              no index-log entry at all, matching the index filter).
+#              pre_existing_retained_reads pins a read that happens outside
+#              recovery: the reindex fallback preparation reads the retained
+#              transcript of a target the index path then refuses
+#              (index_selection.go returns needs-work on a capture refusal;
+#              publication_capture.go reads the transcript before parsing). It
+#              goes red when that read is removed, so the fixture is updated
+#              with the change, never silently.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names:
+  - in-scope-recovers
+  - other-harness-untouched
+  - since-after-start-untouched
+  - session-filter-untouched
+  - future-producer-refused
+  - future-stored-schema-refused
+  - unreadable-stored-row-refused
+  - future-stored-schema-refused-second-harvest
+cases:
+  - name: in-scope-recovers
+    expect: recovered
+  - name: other-harness-untouched
+    harness: codex
+    expect: untouched
+  - name: since-after-start-untouched
+    since_after_start: true
+    expect: untouched
+  - name: session-filter-untouched
+    other_session_only: true
+    expect: untouched
+  - name: future-producer-refused
+    future_producer: true
+    expect: refused
+    pre_existing_retained_reads: 1
+    expected_diagnostics: [content_recovery_refused, index_refused]
+  - name: future-stored-schema-refused
+    future_stored_schema: true
+    expect: refused
+    no_index_log: true
+    expected_diagnostics: [metadata_refused]
+  # A compatibility check can fail for a reason that is NOT a newer schema. The
+  # lookup behind it parses each stored row as it reads it, so ONE unreadable
+  # identifier aborts the query; this case injects that failure for the target
+  # session and leaves every other read real. The sweep and the index selection
+  # both meet the session and both report through the refusal funnel, so the two
+  # entries are equal by value and the user sees ONE warning, not one per
+  # reporter. Corrupting the stored row directly does NOT arrange this: the
+  # harvest re-syncs the retained metadata artifact and repairs the row before
+  # any compatibility check reads it.
+  - name: unreadable-stored-row-refused
+    unreadable_stored_row: true
+    expect: refused
+    no_index_log: true
+    expected_diagnostics: [metadata_refused]
+  # The SAME arrangement, harvested twice over one file system and database.
+  # A refusal this build cannot lift must reach a steady state: the second
+  # harvest owes the user exactly what the first did, one warning, and must not
+  # be made noisier by state the first harvest left behind.
+  - name: future-stored-schema-refused-second-harvest
+    future_stored_schema: true
+    runs: 2
+    expect: refused
+    no_index_log: true
+    expected_diagnostics: [metadata_refused]

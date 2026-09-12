@@ -6,11 +6,28 @@ import "sync"
 type Stage string
 
 const (
-	StageDiscover Stage = "DISCOVER"
-	StageDiff     Stage = "DIFF"
-	StageFilter   Stage = "FILTER"
-	StageExtract  Stage = "EXTRACT+WRITE"
-	StageDBInsert Stage = "DB INSERT"
+	// StageRecover covers the one-time pass that finishes writes an earlier
+	// build left half-applied in the retained state directory. It runs before
+	// the store opens and before every other stage. It is displayed but stays
+	// unstarted on a store that carries no such state, which is every store
+	// written by this build.
+	StageRecover Stage = "RECOVER"
+	// StageReconcile covers the reconciliation of the retained tree, which runs
+	// before discovery: it visits every retained session's committed metadata and
+	// repairs the ones whose retained pair and mirrored record disagree. It is a
+	// displayed stage because that walk is proportional to the whole retained
+	// tree, so on a large tree it is the first thing the user waits for.
+	StageReconcile Stage = "RECONCILE"
+	StageDiscover  Stage = "DISCOVER"
+	StageDiff      Stage = "DIFF"
+	StageFilter    Stage = "FILTER"
+	StageExtract   Stage = "EXTRACT+WRITE"
+	StageDBInsert  Stage = "DB INSERT"
+	// StageContent covers the one-time full-content capture: the bounded pass
+	// that stores the whole text of sessions whose stored capture is still a
+	// preview. It runs after DB INSERT and before INDEX, and on an ordinary
+	// harvest it stops on a byte budget, continuing on the next run.
+	StageContent  Stage = "CONTENT"
 	StageIndex    Stage = "INDEX"
 	StageCompute  Stage = "COMPUTE"
 	StageAnnotate Stage = "ANNOTATE"
@@ -20,11 +37,14 @@ const (
 
 // StageOrder is the canonical display order of pipeline stages.
 var StageOrder = []Stage{
+	StageRecover,
+	StageReconcile,
 	StageDiscover,
 	StageDiff,
 	StageFilter,
 	StageExtract,
 	StageDBInsert,
+	StageContent,
 	StageIndex,
 	StageCompute,
 	StageAnnotate,

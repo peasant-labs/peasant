@@ -1,0 +1,64 @@
+# The database-driven inventories that replace the retained-tree walks. Each
+# case seeds session rows in a chosen column state, runs one selector against a
+# real store, and asserts exactly which rows come back by name. No file is read
+# by either selector, so the "zero tree reads" property is inherent: the store
+# has no filesystem.
+#
+# selector "stale_adapter" runs ListStaleAdapterSessions at the given adapter
+# target; selector "repair" runs ListSessionsNeedingRepair for the given harness
+# targets. A row selected by neither at rest is what keeps an unchanged harvest
+# quiet.
+required_names:
+  - adapter_bump_selects_by_row
+  - predicate_ignores_missing_metadata_row
+  - predicate_ignores_unbindable_kind
+cases:
+  # A NULL adapter revision counts as revision 1. At target 1 the row is behind
+  # nothing, so it is not selected and an unchanged harvest re-extracts nothing.
+  # A bump to target 2 selects that same row by its database revision alone,
+  # while a row already ahead of the bump is left untouched. "selects by row"
+  # means the choice is the stored revision, never a file the walk used to read.
+  - name: adapter_bump_selects_by_row
+    selector: stale_adapter
+    adapter_target: 2
+    baseline_target_selects_none: true
+    sessions:
+      - {name: behind_the_bump, id: 'aaaaaaaa-0001-4000-8000-000000000001', harness: claude-code, adapter_version: null}
+      - {name: ahead_of_the_bump, id: 'aaaaaaaa-0002-4000-8000-000000000002', harness: claude-code, adapter_version: 3}
+    expected: [behind_the_bump]
+  # The revision half of the repair predicate fires only when a publication
+  # metadata row exists at the session's current capture revision. Both rows
+  # here have a mismatched indexed revision, and their hash half is settled
+  # (input proof present), so the metadata row is the only thing that can select
+  # them. The row without one is ignored; the identical row with one is repaired.
+  - name: predicate_ignores_missing_metadata_row
+    selector: repair
+    harness_targets: [claude-code]
+    sessions:
+      - name: has_metadata_row
+        id: 'bbbbbbbb-0001-4000-8000-000000000001'
+        harness: claude-code
+        artifact_hash: set
+        indexed_input_hash: set
+        publication_capture_revision: 2
+        indexed_publication_capture_revision: 1
+        metadata_row_at_revision: 2
+      - name: no_metadata_row
+        id: 'bbbbbbbb-0002-4000-8000-000000000002'
+        harness: claude-code
+        artifact_hash: set
+        indexed_input_hash: set
+        publication_capture_revision: 2
+        indexed_publication_capture_revision: 1
+    expected: [has_metadata_row]
+  # The repair predicate is harness-scoped: it selects only rows whose harness is
+  # a registered target. Both rows satisfy the hash half (a saved pair whose
+  # index proof was cleared), but only the targeted harness is returned; a row of
+  # a harness this run does not target is left for a run that does.
+  - name: predicate_ignores_unbindable_kind
+    selector: repair
+    harness_targets: [claude-code]
+    sessions:
+      - {name: targeted_kind, id: 'cccccccc-0001-4000-8000-000000000001', harness: claude-code, artifact_hash: set, indexed_input_hash: clear}
+      - {name: untargeted_kind, id: 'cccccccc-0002-4000-8000-000000000002', harness: cursor, artifact_hash: set, indexed_input_hash: clear}
+    expected: [targeted_kind]

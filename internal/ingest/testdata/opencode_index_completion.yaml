@@ -1,0 +1,86 @@
+requiredNames:
+  - readable-empty-message-directory
+  - missing-message-directory
+  - inline-string-without-part-directory
+  - inline-array-without-part-directory
+  - part-only-missing-directory
+  - readable-empty-part-directory
+  - malformed-message-after-valid
+  - malformed-part-after-valid
+  - null-message
+  - empty-object-message
+  - wrong-inline-content
+  - message-read-error
+  - message-directory-error
+  - part-directory-error
+  - part-read-error
+  - long-duplicate-parent-text-followed-by-tool
+  - managed-current-empty-refused
+  - managed-legacy-empty-refused
+  - managed-current-valid
+  - managed-legacy-unknown-part-tolerated
+cases:
+  - {name: readable-empty-message-directory, directories: [message/SESSION_ID], entries: 0}
+  - {name: missing-message-directory, error: true}
+  - name: inline-string-without-part-directory
+    files: {message/SESSION_ID/msg_1.json: '{"role":"user","content":"inline"}'}
+    entries: 1
+  - name: inline-array-without-part-directory
+    files: {message/SESSION_ID/msg_1.json: '{"role":"user","content":[{"type":"text","text":"inline"}]}'}
+    entries: 1
+  - name: part-only-missing-directory
+    files: {message/SESSION_ID/msg_1.json: '{"role":"assistant"}'}
+    error: true
+  - name: readable-empty-part-directory
+    files: {message/SESSION_ID/msg_1.json: '{"role":"assistant"}'}
+    directories: [part/msg_1]
+    entries: 1
+  - name: malformed-message-after-valid
+    files:
+      message/SESSION_ID/msg_1.json: '{"role":"user","content":"valid"}'
+      message/SESSION_ID/msg_2.json: broken
+    error: true
+    legacyEntries: 1
+  - name: malformed-part-after-valid
+    files:
+      message/SESSION_ID/msg_1.json: '{"role":"user","content":"valid"}'
+      part/msg_1/part_1.json: '{"type":"tool_use","name":"Read"}'
+      part/msg_1/part_2.json: broken
+    error: true
+    legacyEntries: 2
+  - {name: null-message, files: {message/SESSION_ID/msg_1.json: 'null'}, error: true}
+  - {name: empty-object-message, files: {message/SESSION_ID/msg_1.json: '{}'}, error: true}
+  - {name: wrong-inline-content, files: {message/SESSION_ID/msg_1.json: '{"role":"user","content":42}'}, error: true}
+  - {name: message-read-error, files: {message/SESSION_ID/msg_1.json: '{"role":"user","content":"inline"}'}, readError: message/SESSION_ID/msg_1.json, error: true}
+  - {name: message-directory-error, directories: [message/SESSION_ID], dirError: message/SESSION_ID, error: true}
+  - {name: part-directory-error, files: {message/SESSION_ID/msg_1.json: '{"role":"user","content":"inline"}'}, dirError: part/msg_1, error: true}
+  - name: part-read-error
+    files:
+      message/SESSION_ID/msg_1.json: '{"role":"user","content":"valid"}'
+      part/msg_1/part_1.json: '{"type":"tool_use","name":"Read"}'
+    readError: part/msg_1/part_1.json
+    error: true
+  - name: long-duplicate-parent-text-followed-by-tool
+    files:
+      message/SESSION_ID/msg_1.json: '{"role":"user","content":"LONG_CONTENT"}'
+      part/msg_1/part_1.json: '{"type":"text","text":"LONG_CONTENT"}'
+      message/SESSION_ID/msg_2.json: '{"role":"assistant","content":"following message"}'
+      part/msg_2/part_2.json: '{"type":"tool_use","name":"Read","id":"call_2"}'
+    longContent: true
+    entries: 3
+  - name: managed-current-empty-refused
+    origin: current
+    managed: '{"format":"peasant.opencode.current-sqlite","version":2,"session_id":"SESSION_ID","messages":[]}'
+    error: true
+  - name: managed-legacy-empty-refused
+    origin: legacy
+    managed: '{"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"SESSION_ID","messages":[]}'
+    error: true
+  - name: managed-current-valid
+    origin: current
+    managed: '{"format":"peasant.opencode.current-sqlite","version":2,"session_id":"SESSION_ID","messages":[{"id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"role":"user","content":"inline"},"parts":[]}]}'
+    entries: 1
+  - name: managed-legacy-unknown-part-tolerated
+    origin: legacy
+    managed: '{"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"SESSION_ID","messages":[{"id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"role":"user","content":"inline"},"parts":[{"id":"part_1","message_id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"type":"future-note","text":"retained note"}},{"id":"part_2","message_id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"type":"future-empty"}}]}]}'
+    entries: 2

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -43,7 +44,7 @@ func loadPublicationMetadataFixtures(t *testing.T) []publicationMetadataFixture 
 	}
 	required := strings.Fields(`exact-root-reopened exact-child-reopened confirmed-absent workspace-is-not-exact worktree-is-not-exact legacy-seed capture-before-index noop-stamps-new-capture stale-writer-refused stale-noop-refused manual-entry-reindex manual-index-state manual-hashed-index-state zero-revision-noop legacy-upsert-invalidates metrics-are-independent unsupported-snapshot malformed-snapshot corrupt-snapshot-digest conflicting-cwd-column conflicting-snapshot-identity unknown-capture-intent exact-without-literal workspace-with-fake-cwd repaired-project-capture model-absence-is-consumer-policy`)
 	seen := make(map[string]bool)
-	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture equivalent-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped")...)
+	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture equivalent-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped unchanged-recapture-keeps-its-capture-revision")...)
 	for _, c := range cases {
 		if seen[c.Name] {
 			t.Fatalf("duplicate fixture %s", c.Name)
@@ -80,7 +81,7 @@ func capturePublication(t *testing.T, s *store.Store, e ingest.StoreEntry) int64
 
 func indexPublication(t *testing.T, s *store.Store, e ingest.StoreEntry, revision int64, entries []schema.SessionEntry) ingest.SessionEntryWriteResult {
 	t.Helper()
-	results := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: e.Metadata.SessionID, Entries: entries, RequireFullContent: true, CaptureRevision: revision, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000000001}})
+	results := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: e.Metadata.SessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, RequireFullContent: true, CaptureRevision: revision, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000000001}})
 	if len(results) != 1 {
 		t.Fatalf("index results: %v", results)
 	}
@@ -155,7 +156,32 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 			}
 			ctx := context.Background()
 			switch tc.Action {
+			case "unchanged-recapture":
+				// Re-ingesting a session nothing has changed is not a new
+				// capture. Allocating one here would put the metadata a
+				// revision ahead of the index stamp after EVERY harvest, so
+				// the session could never be published again without being
+				// re-indexed first, forever, for no reason.
+				next := capturePublication(t, s, e)
+				if next != revision {
+					t.Fatalf("an unchanged re-ingest allocated a new capture: %d -> %d", revision, next)
+				}
+				// A second unchanged re-ingest must also hold the revision.
+				// The first one's upsert cleared the index binding, so a rule
+				// that asked whether the index had caught up would call this
+				// one "changed" and restart the climb on exactly the sessions
+				// whose index write is held.
+				if again := capturePublication(t, s, e); again != revision {
+					t.Fatalf("a second unchanged re-ingest resumed the revision climb: %d -> %d", revision, again)
+				}
+				// The binding is NOT restored by a metadata write; the
+				// readiness expectation below is what states that.
 			case "recapture-noop", "stale-write", "stale-noop":
+				// A second capture is a NEW capture only when the session
+				// actually changed. Grow it, as a later harvest of a session
+				// that was still being written would find it.
+				e.Metadata.Timestamp.End += 1000
+				e.Metadata.MetadataHash = schema.ComputeMetadataHash(e.Metadata)
 				next := capturePublication(t, s, e)
 				if next != revision+1 {
 					t.Fatalf("revision %d -> %d", revision, next)
@@ -170,12 +196,12 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					if tc.Action == "stale-write" {
 						attempt = batchTestEntries(id, "stale", 1)
 					}
-					result := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: id, Entries: attempt, CaptureRevision: revision, IndexVersion: ingest.CurrentIndexVersion + 17, IndexedAtMs: 1700000000999}})[0]
+					result := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: id, Result: indexformat.V1{Entries: attempt}, IndexVersion: 1, CaptureRevision: revision, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion + 17, IndexedAtMs: 1700000000999}})[0]
 					if result.Err == nil || result.Written {
 						t.Fatal("stale revision accepted")
 					}
 					assertEntryContent(t, s, id, "original-0")
-					assertIndexState(t, s, id, ingest.CurrentIndexVersion, 1700000000001)
+					assertIndexState(t, s, id, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000000001)
 				}
 			case "manual-entries":
 				err = s.IndexSessionEntries(ctx, id, entries)
@@ -192,9 +218,9 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					t.Fatalf("checked manual index failed to restore full capture: %+v", result)
 				}
 			case "manual-state":
-				err = s.UpdateIndexState(ctx, id, ingest.CurrentIndexVersion, 1700000000002)
+				err = s.UpdateIndexState(ctx, id, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000000002)
 			case "manual-hash-state":
-				err = s.UpdateIndexStateWithSessionEntriesHash(ctx, id, ingest.CurrentIndexVersion, 1700000000002, sessionEntriesHash(t, s, id))
+				err = s.UpdateIndexStateWithSessionEntriesHash(ctx, id, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000000002, sessionEntriesHash(t, s, id))
 			case "zero-noop":
 				result := indexPublication(t, s, e, 0, entries)
 				err = result.Err
@@ -423,6 +449,32 @@ func TestPublicationBundleRetainsCurrentDurableAssociations(t *testing.T) {
 	}
 }
 
+// publicationRaceRounds is how many capture/index rounds the writer performs
+// while the reader keeps loading bundles. It decides how much interleaving the
+// test observes, not how long it may take.
+const publicationRaceRounds = 30
+
+// publicationRaceBudget bounds the interleaving loop so a genuine hang fails
+// this test instead of the whole binary. It is taken from the test's OWN
+// deadline rather than fixed: a fixed budget expires under ordinary
+// whole-package contention and interrupts a read that is still making
+// progress, which reads as a failure of the code under test and never
+// reproduces when the test runs alone. A margin is kept so this test reports
+// the hang itself rather than being killed with the binary.
+func publicationRaceBudget(t *testing.T) time.Duration {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		// `go test -timeout 0` sets no deadline. Guard against a hang anyway.
+		return 10 * time.Minute
+	}
+	budget := time.Until(deadline) - 30*time.Second
+	if budget < time.Second {
+		budget = time.Second
+	}
+	return budget
+}
+
 func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
@@ -435,11 +487,11 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	if result := indexPublication(t, s, e, revision, entries); result.Err != nil {
 		t.Fatal(result.Err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), publicationRaceBudget(t))
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		for i := 1; i <= 30; i++ {
+		for i := 1; i <= publicationRaceRounds; i++ {
 			m := *e.Metadata
 			m.Version = fmt.Sprintf("capture-%d", i)
 			m.MetadataHash = schema.ComputeMetadataHash(&m)
@@ -452,7 +504,7 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 			}
 			newEntries := append([]schema.SessionEntry(nil), entries...)
 			newEntries[0].ContentPreview = &m.Version
-			results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: m.SessionID, Entries: newEntries, RequireFullContent: true, CaptureRevision: revisions[m.SessionID]}})
+			results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: m.SessionID, Result: indexformat.V1{Entries: newEntries}, IndexVersion: 1, RequireFullContent: true, CaptureRevision: revisions[m.SessionID]}})
 			if results[0].Err != nil {
 				done <- results[0].Err
 				return
@@ -463,6 +515,9 @@ func TestPublicationBundleNeverReportsMixedRevisionsReady(t *testing.T) {
 	for {
 		bundle, err := s.LoadPublicationInput(ctx, e.Metadata.SessionID)
 		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("the guard budget ran out before the writer finished its %d capture rounds: %v; the budget only exists to stop a hang, so this means the run is genuinely stuck rather than slow", publicationRaceRounds, err)
+			}
 			t.Fatal(err)
 		}
 		if bundle.Readiness == ingest.PublicationReady && (len(bundle.Entries) != 1 || bundle.Entries[0].ContentPreview == nil || *bundle.Entries[0].ContentPreview != bundle.Metadata.Version) {

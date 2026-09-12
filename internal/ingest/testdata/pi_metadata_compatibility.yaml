@@ -2,4 +2,7 @@ cases:
   - {name: legacy_required_refresh_is_retained, version: 8, updated: 1, status: updated}
   - {name: optional_adapter_provenance_does_not_invalidate_existing_harnesses, version: 9, updated: 1, status: unchanged}
   - {name: current_metadata_is_unchanged, version: 10, updated: 0, status: unchanged}
-  - {name: newer_metadata_is_not_downgraded, version: 11, updated: 1, status: unchanged}
+  # A sidecar whose schema version is newer than this build is refused, not
+  # rewritten: the run reports the refusal and leaves the artifact and the index
+  # exactly as they are, which is what "not downgraded" means.
+  - {name: newer_metadata_is_not_downgraded, version: 11, updated: 0, status: unchanged, refused: true}

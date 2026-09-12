@@ -1,0 +1,47 @@
+requiredNames: [single-warning, multiple-long-warnings, terminal-controls, errors-remain-distinct, no-warning]
+viewports:
+  - {width: 80, height: 24}
+  - {width: 120, height: 40}
+cases:
+  - name: single-warning
+    diagnostics:
+      - location: session-future
+        message: metadata schema version 999 is newer than this Peasant supports
+        remediation: upgrade Peasant before retrying this session
+    wantText: [session-future, metadata schema version 999, upgrade Peasant]
+  - name: multiple-long-warnings
+    diagnostics:
+      - location: /fixtures/managed/session-future/session-future.meta.json
+        message: metadata schema version 999 is newer than this Peasant supports
+        remediation: upgrade Peasant before retrying this session
+      - location: /fixtures/managed/session-unreadable/session-unreadable.meta.json
+        message: |
+          permission denied while reading retained metadata
+          the stored index remains available and no source or artifact was replaced
+          inspect the configured managed directory permissions before retrying
+          source histories were not modified
+          this warning does not prevent other compatible sessions from importing
+          diagnostics remain visible until setup is explicitly closed
+          a very long path or explanation must wrap instead of losing its final words
+          last-good session data remains available for local reading
+        remediation: restore read access and run peasant harvest to retry the refused session
+    wantText: [session-future, session-unreadable, source histories were not modified, restore read access and run peasant harvest]
+  - name: terminal-controls
+    diagnostics:
+      - location: "session-\u001b[2Jcontrol\u0007"
+        message: "safe\u001b]0;untrusted-title\u0007 warning\r\nmetadata unavailable\twithout mutation"
+        remediation: "retry\u0008 after restoring access"
+    wantText: [session-control, safe warning, metadata unavailable, without mutation, retry after restoring access]
+    wantAbsent: [untrusted-title]
+    wantRawAbsent: ["\u001b[2J", "\u001b]0;", "\u0007", "\u0008"]
+  - name: errors-remain-distinct
+    errors: 2
+    diagnostics:
+      - location: session-future
+        message: metadata schema version 999 is newer than this Peasant supports
+        remediation: upgrade Peasant before retrying this session
+    wantText: [2 errors, session-future, upgrade Peasant]
+  - name: no-warning
+    diagnostics: []
+    wantText: [kickstart complete, 2 new, 1 updated, 3 unchanged, next steps]
+    wantAbsent: [warnings]

@@ -53,12 +53,12 @@ func TestQueryPushCandidates_Modes(t *testing.T) {
 			want:  []string{"claude-all", "claude-unpushed", "open-unpushed"},
 		},
 		{
-			name:  "force with source-provider filter",
+			name:  "force with source-harness filter",
 			query: push.PushCandidateQuery{Force: true, SourceProvider: string(defaults.HarnessClaudeCode)},
 			want:  []string{"claude-all", "claude-unpushed"},
 		},
 		{
-			name:  "source-provider",
+			name:  "source-harness",
 			query: push.PushCandidateQuery{SourceProvider: string(defaults.HarnessClaudeCode)},
 			want:  []string{"claude-all", "claude-unpushed"},
 		},

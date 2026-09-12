@@ -152,6 +152,27 @@ type AnnotationSelection struct {
 	RepositoryProjectHashes map[string]bool
 }
 
+var _ ingest.AnnotationReadSelection = AnnotationSelection{}
+
+func (s AnnotationSelection) IncludesAnnotation(row ingest.AnnotationPushRow) bool {
+	if !s.sessionMatches(row) {
+		return false
+	}
+	item, err := annotationRowToPushItem(row)
+	if err != nil {
+		return s.storedLabelMatches(row)
+	}
+	return s.labelMatches(row, item.ComputeContentHash())
+}
+
+func (s AnnotationSelection) IncludesUnresolvedAnchor(row ingest.AnnotationTargetAnchorRow) bool {
+	return s.unresolvedAnchorMatches(row)
+}
+
+func (s AnnotationSelection) IncludesRetraction(row ingest.AnnotationPushRow) bool {
+	return s.sessionMatches(row)
+}
+
 // IsEmpty reports whether the LABEL selection (IDs/hashes) imposes no filter.
 // The session-ID gate is independent and checked separately.
 func (s AnnotationSelection) IsEmpty() bool {
@@ -301,15 +322,11 @@ func PushAnnotationsSelected(
 		span.End(outcome, nil)
 	}()
 	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-	rows, err := store.ListSystemAnnotations(ctx)
+	snapshot, err := store.ReadAnnotationPushSnapshot(ctx, selection, !dryRun)
 	if err != nil {
-		return nil, fmt.Errorf("list system annotations: %w", err)
+		return nil, fmt.Errorf("read selected annotation snapshot: %w", err)
 	}
-	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-	unresolved, err := store.ListUnresolvedAnnotationTargetAnchors(ctx, "")
-	if err != nil {
-		return nil, fmt.Errorf("check unresolved annotation targets before publish: %w", err)
-	}
+	rows, unresolved := snapshot.Annotations, snapshot.Unresolved
 	inScopeUnresolved := unresolved[:0]
 	for _, row := range unresolved {
 		if selection.unresolvedAnchorMatches(row) {
@@ -363,11 +380,7 @@ func PushAnnotationsSelected(
 	// The retraction source is the locally-superseded annotations. Queried up
 	// front (cheap local DB read) so that when there is neither anything to push
 	// NOR anything locally retired, we make NO network call at all.
-	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-	superseded, err := store.ListSupersededAnnotations(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list superseded annotations: %w", err)
-	}
+	superseded := snapshot.Retractions
 	// Retraction mutates the village just as publication does. Keep it inside the
 	// same selected-session/repository boundary rather than retracting annotations
 	// from unrelated repositories during a repository-scoped hook run.

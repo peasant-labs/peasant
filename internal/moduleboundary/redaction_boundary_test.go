@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/redact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -277,7 +279,7 @@ func assertScannerCalls(t *testing.T, root string, calls []scannerCallFixture) {
 				}
 				matchedCalls++
 				if !hasScannerOption(call.Args) {
-					t.Errorf("%s function %s calls redact.RedactJSONLBytes without redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.ScannerMaxLine)", want.File, want.Function)
+					t.Errorf("%s function %s calls redact.RedactJSONLBytes without redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.RedactScannerMaxLineBytes)", want.File, want.Function)
 				}
 				return true
 			})
@@ -296,7 +298,10 @@ func hasScannerOption(arguments []ast.Expr) bool {
 		if !ok || !isSelectorCall(call.Fun, "redact", "WithRedactScannerBufSize") || len(call.Args) != 2 {
 			continue
 		}
-		if isSelectorCall(call.Args[0], "defaults", "ScannerInitBuf") && isSelectorCall(call.Args[1], "defaults", "ScannerMaxLine") {
+		// The line limit, not the record limit: a record exactly at the record
+		// limit needs one more byte for its newline (see
+		// TestRedactionScannerHoldsALineAtTheRecordLimit).
+		if isSelectorCall(call.Args[0], "defaults", "ScannerInitBuf") && isSelectorCall(call.Args[1], "defaults", "RedactScannerMaxLineBytes") {
 			return true
 		}
 	}
@@ -328,4 +333,132 @@ func moduleRoot(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+// TestRedactionScannerHoldsALineAtTheRecordLimit proves the pairing the
+// oversized-record filter depends on. The filter KEEPS a record whose length is
+// exactly defaults.MaxJSONLRecordBytes. The redact stage behind it reads that
+// record as a LINE through a bufio.Scanner, and a Scanner refuses a line it
+// cannot hold together with its newline terminator, so a scanner limit equal to
+// the record limit refuses the largest record the filter keeps: the call returns
+// the original bytes with an error, the pipeline treats that as fatal, and the
+// session is not stored at all.
+//
+// The rule is a byte-level one, so it is proven at a short limit instead of at
+// 256 MiB. The scaled pair keeps the production initial buffer, so the record
+// still has to grow the read buffer exactly as a production record does, and the
+// production pair is the same derivation (pinned below).
+func TestRedactionScannerHoldsALineAtTheRecordLimit(t *testing.T) {
+	t.Parallel()
+	// Twice the production initial buffer, so the record cannot be read without
+	// growing it.
+	const recordLimit = 2 * defaults.ScannerInitBuf
+	const secret = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	const laterRecord = `{"type":"session.titled","data":{"title":"kept"}}`
+
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatalf("construct the pinned redaction engine: %v", err)
+	}
+	head := `{"type":"user","message":{"role":"user","content":"` + secret + " "
+	tail := `"}}`
+	record := head + strings.Repeat("p", recordLimit-len(head)-len(tail)) + tail
+	if len(record) != recordLimit {
+		t.Fatalf("the built record is %d bytes; this case only means something at exactly %d", len(record), recordLimit)
+	}
+	// The record is not the file's last line, so the scanner must find its
+	// newline inside the limit.
+	input := []byte(record + "\n" + laterRecord + "\n")
+
+	out, err := redact.RedactJSONLBytes(redactor, input,
+		redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, recordLimit+1))
+	if err != nil {
+		t.Fatalf("the engine refused a record of exactly the %d-byte record limit at a line limit of %d: %v", recordLimit, recordLimit+1, err)
+	}
+	if bytes.Contains(out, []byte(secret)) {
+		t.Fatal("the secret survived redaction; the engine returned the original bytes for the at-limit record")
+	}
+	// The engine re-encodes each record, so the later record is recognized by
+	// its content rather than by its exact bytes.
+	if !bytes.Contains(out, []byte(`"kept"`)) {
+		t.Fatalf("the record after the at-limit one was lost: %q", lastLineOf(out))
+	}
+
+	// Mutation guard: a line limit equal to the record limit, which is what the
+	// call sites passed before this pairing was derived, refuses the same record
+	// and hands back the original bytes, secret included.
+	same, sameErr := redact.RedactJSONLBytes(redactor, input,
+		redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, recordLimit))
+	if sameErr == nil || !bytes.Contains(same, []byte(secret)) {
+		t.Fatalf("a line limit of %d bytes no longer refuses a %d-byte record (err=%v); the case can no longer tell the two pairings apart", recordLimit, recordLimit, sameErr)
+	}
+
+	// The production pair is the same derivation: the largest record the filter
+	// keeps, plus its newline.
+	if defaults.RedactScannerMaxLineBytes < defaults.MaxJSONLRecordBytes+1 {
+		t.Fatalf("the redact stage reads lines of at most %d bytes while records of up to %d bytes are kept; the largest kept record's line is %d bytes",
+			defaults.RedactScannerMaxLineBytes, defaults.MaxJSONLRecordBytes, defaults.MaxJSONLRecordBytes+1)
+	}
+}
+
+// TestRedactionEngineHandlesRecordOverTheOldLimit proves the outcome the
+// mounted scanner-buffer option exists for: a JSONL record far larger than the
+// 10 MiB limit this build replaced is still REDACTED, not returned as its
+// original bytes. Before the limit was raised, the pinned engine refused a
+// record that long, returned the original bytes with an error, and Peasant
+// treated that as fatal, so a session with one long record could not be
+// ingested at all and its secrets never reached the redactor.
+//
+// Cost: the record has to be over the retired 10 MiB limit for the case to
+// mean anything, and redacting that much takes about half a second normally
+// and about six minutes under the race detector. The size is not negotiable,
+// so this is the price of proving the outcome on the real engine.
+func TestRedactionEngineHandlesRecordOverTheOldLimit(t *testing.T) {
+	const oldScannerLimit = 10 << 20
+	const secret = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatalf("construct the pinned redaction engine: %v", err)
+	}
+
+	padding := strings.Repeat("p", oldScannerLimit)
+	record, err := json.Marshal(map[string]any{
+		"type":    "user",
+		"message": map[string]any{"role": "user", "content": padding + " " + secret},
+	})
+	if err != nil {
+		t.Fatalf("build the oversized record: %v", err)
+	}
+	if len(record) <= oldScannerLimit {
+		t.Fatalf("record is %d bytes; the case only means something over the old %d-byte limit", len(record), oldScannerLimit)
+	}
+	input := append(record, '\n')
+
+	out, err := redact.RedactJSONLBytes(redactor, input,
+		redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, defaults.MaxJSONLRecordBytes))
+	if err != nil {
+		t.Fatalf("the engine refused a %d-byte record: %v; a record within %d bytes must be redacted whole", len(record), err, defaults.MaxJSONLRecordBytes)
+	}
+	if bytes.Contains(out, []byte(secret)) {
+		t.Fatal("the secret survived redaction; the engine returned the original bytes for the oversized record")
+	}
+	if !bytes.Contains(out, []byte(padding[:1024])) {
+		t.Fatal("the record's ordinary content did not survive; the engine truncated instead of redacting")
+	}
+
+	// Mutation guard: with the limit this build replaced, the same call fails
+	// and hands back the original bytes, secret included.
+	old, oldErr := redact.RedactJSONLBytes(redactor, input,
+		redact.WithRedactScannerBufSize(defaults.ScannerInitBuf, oldScannerLimit))
+	if oldErr == nil || !bytes.Contains(old, []byte(secret)) {
+		t.Fatalf("the old %d-byte limit no longer refuses this record (err=%v); the case can no longer tell the two limits apart", oldScannerLimit, oldErr)
+	}
+}
+
+// lastLineOf is the final non-empty line of out, for a failure message that
+// shows what the engine actually returned.
+func lastLineOf(out []byte) string {
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	return lines[len(lines)-1]
 }

@@ -15,7 +15,7 @@ commands:
     use: harvest
     aliases: [ingest]
     flags:
-      - { name: source-provider, type: string, default: "" }
+      - { name: source-harness, type: string, default: "" }
       - { name: source-path, type: string, default: "" }
       - { name: output, type: string, default: "" }
       - { name: dry-run, type: bool, default: "false" }
@@ -40,7 +40,7 @@ commands:
           - { name: json, type: bool, default: "false" }
           - { name: session, type: stringSlice, default: "[]" }
           - { name: since, type: string, default: "" }
-          - { name: source-provider, type: string, default: "" }
+          - { name: source-harness, type: string, default: "" }
           - { name: source-path, type: string, default: "" }
           - { name: output, type: string, default: "" }
           - { name: include-active, type: bool, default: "true" }
@@ -57,6 +57,7 @@ commands:
           - { name: output, type: string, default: "" }
           - { name: detect-commits, type: bool, default: "false" }
           - { name: profile-index, type: bool, default: "false" }
+          - { name: source-harness, type: string, default: "" }
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }
@@ -64,9 +65,9 @@ commands:
       - args: ["--help"]
         expect_error: false
         output_contains: ["harvest"]
-      - args: ["--source-provider=nosuchprovider"]
+      - args: ["--source-harness=nosuchprovider"]
         expect_error: true
-        error_contains: ["--source-provider requires --source-path"]
+        error_contains: ["--source-harness requires --source-path"]
 
   - name: Web
     use: web
@@ -89,7 +90,7 @@ commands:
     flags:
       - { name: dry-run, type: bool, default: "false" }
       - { name: force, type: bool, default: "false" }
-      - { name: source-provider, type: string, default: "" }
+      - { name: source-harness, type: string, default: "" }
       - { name: visibility, type: string, default: "" }
       - { name: license, type: string, default: "" }
       - { name: json, type: bool, default: "false" }

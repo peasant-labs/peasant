@@ -172,7 +172,36 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 	if doc.header.ID != session.SessionID.String() {
 		return nil, piSourceError("PiAdapter.ExtractMetadata", 0, fmt.Errorf("header identity changed after discovery"))
 	}
-	rows, err := NewPiIndexer(a.fs).project(doc, session.SessionID)
+	meta, err := piTranscriptMetadata(doc, session)
+	if err != nil {
+		return nil, err
+	}
+	remote, _ := a.git.RemoteURL(ctx, doc.header.CWD)
+	branch, _ := a.git.Branch(ctx, doc.header.CWD)
+	worktree, _ := a.git.Worktree(ctx, doc.header.CWD)
+	if worktree == "" {
+		worktree = doc.header.CWD
+	}
+	if remote != "" {
+		meta.Git.Remote = &remote
+	}
+	if branch != "" {
+		meta.Git.Branch = &branch
+	}
+	meta.Git.Worktree = &worktree
+	hash, host, err := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remote, doc.header.CWD)
+	if err != nil {
+		return nil, piSourceError("PiAdapter.ExtractMetadata project identity", 0, err)
+	}
+	meta.Project = ProjectInfo{Hash: hash, FilePath: doc.header.CWD, Name: filepath.Base(doc.header.CWD)}
+	meta.HostSlug = host
+	return meta, nil
+}
+
+// piTranscriptMetadata reads only the captured document; native project and Git
+// attribution stay in ExtractMetadata and are preserved during retained refresh.
+func piTranscriptMetadata(doc piDocument, session DiscoveredSession) (*UnifiedMetadata, error) {
+	rows, err := NewPiIndexer(nil).project(doc, session.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,24 +265,5 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 			meta.Stats.TokensOut += *row.TokensOut
 		}
 	}
-	remote, _ := a.git.RemoteURL(ctx, doc.header.CWD)
-	branch, _ := a.git.Branch(ctx, doc.header.CWD)
-	worktree, _ := a.git.Worktree(ctx, doc.header.CWD)
-	if worktree == "" {
-		worktree = doc.header.CWD
-	}
-	if remote != "" {
-		meta.Git.Remote = &remote
-	}
-	if branch != "" {
-		meta.Git.Branch = &branch
-	}
-	meta.Git.Worktree = &worktree
-	hash, host, err := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remote, doc.header.CWD)
-	if err != nil {
-		return nil, piSourceError("PiAdapter.ExtractMetadata project identity", 0, err)
-	}
-	meta.Project = ProjectInfo{Hash: hash, FilePath: doc.header.CWD, Name: filepath.Base(doc.header.CWD)}
-	meta.HostSlug = host
 	return &meta, nil
 }

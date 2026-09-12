@@ -1,0 +1,26 @@
+requiredNames:
+  - forced selected child survives future parent refusal
+  - stale selected child survives future parent refusal
+  - refused child preserves both generations
+parentID: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+childID: 11111111-1111-1111-1111-111111111111
+transcript: |
+  {"type":"user","message":{"role":"user","content":"retained child"},"timestamp":"2024-01-01T00:00:00Z"}
+cases:
+  - name: forced selected child survives future parent refusal
+    parentSchema: 999
+    childSchema: 9
+    storedIndexer: 15
+    force: true
+    wantIndexed: 1
+  - name: stale selected child survives future parent refusal
+    parentSchema: 999
+    childSchema: 9
+    storedIndexer: 14
+    wantIndexed: 1
+  - name: refused child preserves both generations
+    parentSchema: 999
+    childSchema: 999
+    storedIndexer: 14
+    force: true
+    wantIndexed: 0

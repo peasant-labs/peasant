@@ -24,7 +24,7 @@ sources:
 To select a different source for one harvest:
 
 ```console
-peasant harvest --source-provider pi --source-path /recordings/project
+peasant harvest --source-harness pi --source-path /recordings/project
 ```
 
 `peasant kickstart` includes Pi in the ordinary project/session selection and previews

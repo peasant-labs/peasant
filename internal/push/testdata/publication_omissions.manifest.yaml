@@ -1,0 +1,7 @@
+requiredNames:
+  - complete_capture_publishes
+  - omitted_records_capture_publishes
+  - strict_refused_capture_stays_refused
+  - legacy_preview_only_capture_stays_refused
+  - failed_capture_stays_refused
+  - omitted_records_preview_capture_stays_refused

@@ -137,6 +137,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		case sheetKindIngest:
 			content, rows, err = composeIngestProgressSheet(sheet, document.IngestProgressStates, document.IngestProgressCaptures, ingestProgressCaptures)
+		case sheetKindCompletion:
+			content, rows, err = renderCompletionSheet(workingDirectory, sheet, document.Completion)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}
@@ -535,8 +537,10 @@ func pushPublishedTurns(fixture pushFixture) (push.PublishedTurnsFunc, error) {
 		}
 		stored[sessionID] = entries
 	}
-	return push.NewPublishedTurns(func(sessionID string) ([]schema.SessionEntry, error) {
-		return stored[sessionID], nil
+	return push.NewPublishedTurns(func(sessionID string) (push.StoredContent, error) {
+		// The captured screens stand for complete recordings, so none of them
+		// carries the partial-preview line.
+		return push.StoredContent{Entries: stored[sessionID]}, nil
 	}, redactor), nil
 }
 

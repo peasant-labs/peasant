@@ -93,6 +93,11 @@ check: fmt lint
 	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
 	go test $(GORACE_FLAG) ./...
 
+# Explicit revisions keep the expensive cross-revision check out of ordinary builds.
+.PHONY: check-harvester-versions
+check-harvester-versions:
+	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.
 # Deliberately OUT of `check` — it needs containers + a cross-repo build and

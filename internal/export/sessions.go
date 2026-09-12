@@ -12,48 +12,18 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ExportSession hydrates verified full database content and uses the canonical
-// EntriesToTurns → SessionToDetail conversion, preserving stored entry anchors.
-// The filesystem argument remains for caller compatibility; no source is read.
-// Missing sessions return ErrSessionNotFound. Incomplete or corrupt captures
-// return an actionable error rather than exporting bounded previews.
-func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string) (*schema.SessionDetailPayload, error) {
-	// Step 1: Look up source info.
-	info, err := db.SessionSourceInfo(ctx, sessionID)
+// ExportSession reads verified full database content and context in one snapshot.
+// Filesystem and managed-root arguments remain for caller compatibility only.
+func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, managedRoots ...string) (*schema.SessionDetailPayload, error) {
+	snapshot, err := db.ReadSessionContent(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"export.ExportSession: query source info for session %q: %w\n"+
-				"What went wrong: database query for session source info failed.\n"+
-				"Where: export.ExportSession → store.SessionSourceInfo.\n"+
-				"Fix: verify the database is accessible and not corrupted.",
-			sessionID, err,
-		)
+		return nil, fmt.Errorf("export session %s: %w", sessionID, err)
 	}
-	if info == nil {
-		return nil, fmt.Errorf(
-			"export.ExportSession: session %q: %w\n"+
-				"What went wrong: no session with this ID exists in the store.\n"+
-				"Where: export.ExportSession → store.SessionSourceInfo returned nil.\n"+
-				"Fix: run 'peasant ingest' to discover sessions, or verify the session ID is correct.",
-			sessionID, ErrSessionNotFound,
-		)
+	if snapshot == nil {
+		return nil, fmt.Errorf("export session %s: %w", sessionID, ErrSessionNotFound)
 	}
-
-	sid, err := ingest.NewSessionID(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	detail, err := db.SessionDetailByID(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"export.ExportSession: query session detail for %q: %w\n"+
-				"What went wrong: database query for session detail failed.\n"+
-				"Where: export.ExportSession → store.SessionDetailByID.\n"+
-				"Fix: verify the database is accessible and not corrupted.",
-			sessionID, err,
-		)
-	}
-
+	detail, dbEntries := snapshot.Detail, snapshot.Entries
+	sid := schema.SessionID(sessionID)
 	// Build an ingest.Session so we can call SessionToDetail.
 	fullSession := &ingest.Session{ID: sid}
 	if detail != nil {
@@ -79,7 +49,11 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		fullSession.PushedAt = detail.PushedAt
 	}
 	// Convert to the standardized detail payload — same as the session viewer.
-	payload, err := transcript.LoadSessionDetail(ctx, db, fullSession, transcript.DetailLoadOptions{})
+	projection, err := transcript.EntriesToProjectionValidated(dbEntries, transcript.ProjectionOptions{Harness: fullSession.Harness})
+	if err != nil {
+		return nil, fmt.Errorf("export session %s: validate captured entries: %w", sessionID, err)
+	}
+	payload, err := transcript.SessionToDetailValidatedWithProjection(fullSession, projection)
 	if err != nil {
 		return nil, fmt.Errorf("export.ExportSession: load full transcript before export: %w", err)
 	}
