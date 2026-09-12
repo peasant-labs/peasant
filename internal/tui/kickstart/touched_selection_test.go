@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -49,6 +50,14 @@ type mountedTouchedCase struct {
 	ExpectedCheckedSessions   []string                `yaml:"expectedCheckedSessions"`
 	ExpectedUncheckedSessions []string                `yaml:"expectedUncheckedSessions"`
 	Expected                  mountedSelectionFixture `yaml:"expected"`
+	// ExpectedProjectLabel optionally pins the rendered root label. A case
+	// whose project has no remote and no discovery name declares the resolved
+	// path suffix here so a regression to a display placeholder, or a leaked
+	// absolute physical path, fails before any action runs. These cases also
+	// carry no declared repository identity, so the same check pins the project
+	// identity to the exact resolved physical path instead of a synthetic Git
+	// cohort.
+	ExpectedProjectLabel string `yaml:"expectedProjectLabel"`
 }
 
 func loadMountedTouchedDocument(t *testing.T) mountedTouchedDocument {
@@ -149,6 +158,24 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 			program.SetSize(120, 28)
 			program = declineOAuth(t, program)
 
+			if testCase.ExpectedProjectLabel != "" {
+				roots := source.latest()
+				if len(roots) != 1 {
+					t.Fatalf("mounted touched-selection label case loaded %d project roots, want 1", len(roots))
+				}
+				label := roots[0].Label
+				if label != testCase.ExpectedProjectLabel {
+					t.Fatalf("mounted touched-selection project label = %q, want %q", label, testCase.ExpectedProjectLabel)
+				}
+				if strings.Contains(label, "(unknown project)") || filepath.IsAbs(label) {
+					t.Fatalf("mounted touched-selection project label %q is a placeholder or an absolute physical path", label)
+				}
+				physicalPath := paths[testCase.Listings[0].PathKey]
+				if identity := roots[0].Meta[settings.MetaProjectIdentity]; identity != physicalPath {
+					t.Fatalf("mounted touched-selection project identity = %q, want the exact physical path %q", identity, physicalPath)
+				}
+			}
+
 			for _, action := range testCase.Actions {
 				program = pressAndDrain(program, mountedTouchedRune(action))
 			}
@@ -171,6 +198,10 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 				t.Fatalf("parse mounted touched-selection commit: %v", err)
 			}
 			assertExactMountedTouchedSelection(t, reloaded.Selection, want, "after commit")
+			committed := string(mustReadFile(t, configPath))
+			if strings.Contains(committed, "(unknown project)") || strings.Contains(committed, "(unknown branch)") {
+				t.Fatalf("mounted touched-selection commit named a display placeholder:\n%s", committed)
+			}
 		})
 	}
 }
@@ -185,22 +216,27 @@ func (r mountedRepositoryIdentityResolver) ResolveRepositoryIdentity(_ context.C
 	return path, nil
 }
 
+// mountedRepositoryResolver models the Git-topology boundary of the real
+// scanner. A fixture that declares a repositoryKey names a Git cohort (linked
+// worktrees or a shared common directory). Every other path has no declared Git
+// identity, so the mounted resolver reports none and the production scanner
+// derives the exact physical path identity for it, exactly as it does for a
+// plain non-Git directory.
 func mountedRepositoryResolver(t *testing.T, fixtures []mountedPathFixture, paths map[string]string) mountedRepositoryIdentityResolver {
 	t.Helper()
 	resolver := ingest.NewPhysicalPathResolver()
 	result := mountedRepositoryIdentityResolver{}
 	for _, fixture := range fixtures {
+		if fixture.RepositoryKey == "" {
+			continue
+		}
 		clonePath, err := resolver.Resolve(paths[fixture.Key])
 		if err != nil {
 			continue
 		}
-		repositoryKey := fixture.RepositoryKey
-		if repositoryKey == "" {
-			repositoryKey = fixture.Key
-		}
-		repositoryPath, err := resolver.Resolve(paths[repositoryKey])
+		repositoryPath, err := resolver.Resolve(paths[fixture.RepositoryKey])
 		if err != nil {
-			t.Fatalf("resolve mounted repository key %q for clone %q: %v", repositoryKey, fixture.Key, err)
+			t.Fatalf("resolve mounted repository key %q for clone %q: %v", fixture.RepositoryKey, fixture.Key, err)
 		}
 		result[clonePath] = ingest.RepositoryIdentity{
 			CohortKey:    ingest.RepositoryCohortKey("fixture:" + repositoryPath.String()),
