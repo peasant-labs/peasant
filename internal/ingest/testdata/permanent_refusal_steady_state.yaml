@@ -44,11 +44,13 @@ cases:
   - name: a-newer-indexer-lifts-the-refusal
     bump_indexer: true
     second_harvest_diagnostics: 2
-    # Three reads: the recovery sweep reads the pair once to verify it is not a
-    # torn copy before recovering, then once more to capture it, and the index
-    # path reads it once. The integrity read is the content stage's damaged-pair
-    # check; a settled refusal never reaches it, so those cases still read zero.
-    second_harvest_retained_reads: 3
+    # Four reads: the pair-repair selection reads the pair once to decide whether
+    # it is missing or damaged before any parser work; the recovery sweep reads
+    # it once to verify it is not a torn copy before recovering, then once more
+    # to capture it; and the index path reads it once. The integrity read is the
+    # content stage's damaged-pair check; a settled refusal never reaches it, so
+    # those cases still read zero.
+    second_harvest_retained_reads: 4
   # New bytes are new evidence, whatever the previous refusal said.
   # Only the index path acts. The producer has not moved, so the sweep would be
   # refused the same way again; the index path reads the new bytes, and one read
@@ -62,9 +64,10 @@ cases:
     # permanent condition reported again.
     append_record: true
     second_harvest_diagnostics: 2
-    # As above: the sweep verifies the pair is intact before recovering it, then
-    # captures it, and the index path reads the new bytes.
-    second_harvest_retained_reads: 3
+    # As above: the pair-repair selection reads the new bytes to decide whether
+    # the pair is damaged, the sweep verifies the pair is intact before
+    # recovering it, then captures it, and the index path reads them again.
+    second_harvest_retained_reads: 4
   # The distinction the failure code exists for. An older build stored what it
   # could read and marked it incomplete without ever trying to certify it, so
   # there is no recorded refusal. This build can certify the same transcript,

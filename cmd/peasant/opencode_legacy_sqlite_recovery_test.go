@@ -190,16 +190,16 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 		default:
 			return document, errors.New("legacy SQLite recovery fixture contains an unknown envelope mutation")
 		}
-		// The database-to-file metadata rebuild is dropped: a lost or corrupt
-		// metadata beside an intact transcript is not rebuilt during a routine
-		// harvest, whatever the envelope. Every recovery case therefore recovers
-		// nothing; the mutations still exercise that the source and envelope are
-		// left untouched.
+		// A missing or damaged pair is repaired by re-ingesting the native
+		// provider source during the routine harvest (URD ruling 2026-09-12).
+		// A case that expects the recovery must declare its evidence, and a
+		// case that expects none must not.
 		if testCase.ExpectedRecovery {
-			return document, errors.New("legacy SQLite recovery fixture must not expect a routine metadata rebuild; it is dropped and healed by peasant harvest --force --session")
-		}
-		if testCase.ExpectedToolCall != nil {
-			return document, errors.New("legacy SQLite recovery fixture must not expect a recovered tool call; nothing is rebuilt")
+			if testCase.ExpectedEntries == 0 || testCase.ExpectedTurns == 0 || testCase.ExpectedToolCall == nil {
+				return document, errors.New("legacy SQLite recovery fixture expects a recovery but declares no entries, turns or tool call")
+			}
+		} else if testCase.ExpectedEntries != 0 || testCase.ExpectedTurns != 0 || testCase.ExpectedToolCall != nil {
+			return document, errors.New("legacy SQLite recovery fixture declares recovery evidence without expecting a recovery")
 		}
 	}
 	for label, required := range map[string][]string{
@@ -455,11 +455,21 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			}
 			if testCase.ExpectedRecovery {
 				if metrics == nil || metrics.TurnCount == nil || *metrics.TurnCount != testCase.ExpectedTurns {
-					t.Fatalf("source-info recovery metrics=%+v, want %d turns", metrics, testCase.ExpectedTurns)
+					got := -1
+					if metrics != nil && metrics.TurnCount != nil {
+						got = *metrics.TurnCount
+					}
+					t.Fatalf("source-info recovery turns=%d, want %d", got, testCase.ExpectedTurns)
 				}
 				assertLegacySQLiteToolFold(t, entries, testCase.ExpectedToolCall)
+				if _, statErr := os.Stat(metadataPath); statErr != nil {
+					t.Fatalf("repair did not restore the managed metadata sidecar: %v", statErr)
+				}
+				// The native source did not change, so the repaired projection
+				// is the same bytes the initial ingest wrote; a mutated managed
+				// envelope is replaced rather than interpreted.
 				if !bytes.Equal(mustReadFile(t, managedPath), managedBefore) {
-					t.Fatal("source-info recovery rewrote intact managed projection bytes")
+					t.Fatal("repair did not restore the managed projection from the native source")
 				}
 			} else if metrics != nil {
 				t.Fatalf("invalid managed envelope unexpectedly recomputed metrics: %+v", metrics)

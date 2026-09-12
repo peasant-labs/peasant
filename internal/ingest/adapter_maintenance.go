@@ -196,6 +196,21 @@ func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
 		return false
 	}
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	if !ok {
+		return false
+	}
+	state, stateErr := reader.ReadIndexState(ctx, sid)
+	if stateErr != nil || state == nil {
+		return false
+	}
+	// A stored producer or index format newer than this build must never be
+	// replaced from native input: the newer build's output is preserved and
+	// the refusal stays with the selection. Checking it here also keeps the
+	// pair unread for a session this run refuses.
+	if err := p.checkIndexProducer(state); err != nil {
+		return false
+	}
 	metadataPath, ok := p.storedMetadataPath(ctx, sid)
 	if !ok {
 		return false // No recorded location: the source-info fallback owns it.
@@ -229,12 +244,7 @@ func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 	// longer matches is repaired from native like a missing half. A row with no
 	// recorded identity is left to the ordinary index write, which establishes
 	// the identity from the pair it parsed.
-	reader, ok := p.metricsStore.(SessionIndexStateReader)
-	if !ok {
-		return false
-	}
-	state, stateErr := reader.ReadIndexState(ctx, sid)
-	if stateErr != nil || state == nil || state.ArtifactHash == nil {
+	if state.ArtifactHash == nil {
 		return false
 	}
 	artifact, artifactErr := NewManagedArtifact(data, transcript)
@@ -465,6 +475,12 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	var acquisition *adapterAcquisitionError
 	if !errors.As(result.result.Error, &acquisition) || metadataPath == "" || pathErr != nil {
+		return result
+	}
+	if entry.pairRepair {
+		// A repair has no usable retained pair by definition: when the native
+		// source cannot be acquired, the failure is the outcome. Falling back
+		// would try to read the missing or damaged pair and hide the error.
 		return result
 	}
 	// The manual index refresh (harvest index --force) names its own

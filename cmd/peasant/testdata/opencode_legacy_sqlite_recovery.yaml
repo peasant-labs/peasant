@@ -58,53 +58,55 @@ required_recovery_cases:
   - wrong-version-fails-closed
   - wrong-kind-fails-closed
 recovery_cases:
-  # The database-to-file metadata rebuild is dropped: a lost or corrupt metadata
-  # beside an intact transcript is not rebuilt from the database during a routine
-  # harvest. It is reported and healed by `peasant harvest --force --session`,
-  # so a source-info recovery run over it recovers nothing and never touches the
-  # mounted source.
+  # A missing or corrupt managed metadata sidecar, or a mutated managed
+  # envelope, is repaired by RE-INGESTING the native provider source during the
+  # routine harvest: the pair is rebuilt, the represented entries are indexed,
+  # and the mounted source is never touched. The database-to-file metadata
+  # rebuild stays dropped; this repair reads the native source, not the
+  # database. URD ruling 2026-09-12 supersedes the report-and-run---force
+  # behavior these cases used to pin.
   - name: missing-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: none
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: corrupt-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: corrupt
     envelope_mutation: none
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: arbitrary-json-fails-closed
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: arbitrary_json
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: wrong-version-fails-closed
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: wrong_version
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: wrong-kind-fails-closed
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     metadata_state: missing
     envelope_mutation: wrong_kind
-    expected_recovery: false
-    expected_entries: 0
-    expected_turns: 0
-    expected_tool_call: null
+    expected_recovery: true
+    expected_entries: 5
+    expected_turns: 2
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}

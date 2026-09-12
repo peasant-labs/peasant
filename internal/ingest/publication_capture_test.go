@@ -432,6 +432,11 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			cfg.Reindex = true
 			if c.ReindexMutateAfterRead {
 				filesystem.mutateAfterRead = filepath.Join(filepath.Dir(metadataPath), c.ID+"--transcript."+string(session.SourceFormat))
+				// The pair-repair selection reads the pair once before the
+				// fallback read that captures the verified bytes; the racing
+				// change lands after that verified read, so the index must use
+				// the captured bytes rather than read the mutated file again.
+				filesystem.mutateAfterReadAt = 2
 			}
 			manualResult := run()
 			if manualResult.Summary.Errors != 0 || manualResult.Summary.StoreError != nil {
@@ -499,7 +504,8 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			if c.ReindexMutateAfterRead {
 				data, err := json.Marshal(manual.Entries)
-				if err != nil || !filesystem.mutatedAfterRead || bytes.Contains(data, []byte("racing response")) || !bytes.Contains(data, []byte("synthetic response")) {
+				mutationFired := filesystem.mutateReadCount >= filesystem.mutateAfterReadAt && filesystem.mutateAfterReadAt > 0
+				if err != nil || !mutationFired || bytes.Contains(data, []byte("racing response")) || !bytes.Contains(data, []byte("synthetic response")) {
 					t.Fatalf("fallback reread input after verification: %s, %v", data, err)
 				}
 			}
@@ -549,11 +555,12 @@ func (s *publicationReindexStore) IndexSessionEntryBatch(ctx context.Context, wr
 
 type publicationCaptureFS struct {
 	*ingest.OSFileSystem
-	disappearPath    string
-	failSidecar      bool
-	mutatePath       string
-	mutateAfterRead  string
-	mutatedAfterRead bool
+	disappearPath     string
+	failSidecar       bool
+	mutatePath        string
+	mutateAfterRead   string
+	mutateAfterReadAt int
+	mutateReadCount   int
 }
 
 var _ ingest.FileSystem = (*publicationCaptureFS)(nil)
@@ -570,11 +577,17 @@ func (fs *publicationCaptureFS) ReadFile(path string) ([]byte, error) {
 		_ = os.Remove(path)
 	}
 	data, err := fs.OSFileSystem.ReadFile(path)
-	if err == nil && path == fs.mutateAfterRead && !fs.mutatedAfterRead {
-		if err := os.WriteFile(path, bytes.ReplaceAll(data, []byte("synthetic response"), []byte("racing response")), 0600); err != nil {
-			return nil, err
+	if err == nil && path == fs.mutateAfterRead {
+		at := fs.mutateAfterReadAt
+		if at == 0 {
+			at = 1
 		}
-		fs.mutatedAfterRead = true
+		fs.mutateReadCount++
+		if fs.mutateReadCount == at {
+			if err := os.WriteFile(path, bytes.ReplaceAll(data, []byte("synthetic response"), []byte("racing response")), 0600); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return data, err
 }

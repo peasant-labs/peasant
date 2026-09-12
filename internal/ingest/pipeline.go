@@ -4445,17 +4445,18 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			}
 			continue
 		}
-		if !t.refreshMetadata && !p.adapterTargetNeedsWork(ctx, t) {
-			// A targeted stale session whose scanned pair is damaged cannot be
-			// indexed from retained input; it is repaired from native like a
-			// missing one. Only selected sessions are checked, so no tree is
-			// walked and no pair is read for work this run does not owe.
-			if p.pairNeedsRepair(ctx, t.session.SessionID) {
-				if !p.routePairRepair(t, sourceSessions, entryByID, inBatch) {
-					fallbackTargets = append(fallbackTargets, t)
-				}
-				continue
+		// A targeted session whose scanned pair is damaged cannot be indexed
+		// from retained input, whatever maintenance path would otherwise run:
+		// the repair is checked before the retained/adapter split. Only
+		// selected sessions are checked, so no tree is walked and no pair is
+		// read for work this run does not owe.
+		if p.pairNeedsRepair(ctx, t.session.SessionID) {
+			if !p.routePairRepair(t, sourceSessions, entryByID, inBatch) {
+				fallbackTargets = append(fallbackTargets, t)
 			}
+			continue
+		}
+		if !t.refreshMetadata && !p.adapterTargetNeedsWork(ctx, t) {
 			// harvest index --force is an explicit manual refresh: use a usable
 			// native capture when the recorded source is still there, and
 			// otherwise warn once and index from the retained input, keeping the
