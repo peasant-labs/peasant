@@ -40,6 +40,9 @@ callSites:
     - {name: metric-output-hash, file: metric_input.go, function: MetricOutputHash, symbol: schema.ComputeTranscriptHash}
     # The OpenCode directory capture detaches its message and part files.
     - {name: opencode-tree-capture-clone, file: opencode_index_input.go, function: OpenCodeIndexer.captureJSONInput, symbol: bytes.Clone}
+    # The one-time upgrade pass verifies a restored backup against the recorded
+    # previous hash before renaming it back into place.
+    - {name: upgrade-pass-backup-hash, file: upgrade_pass.go, function: RunUpgradePass, symbol: schema.ComputeTranscriptHash}
   requiredNames:
     - worker-content-hash
     - store-free-diff-content-hash
@@ -52,3 +55,4 @@ callSites:
     - metric-input-hash
     - metric-output-hash
     - opencode-tree-capture-clone
+    - upgrade-pass-backup-hash

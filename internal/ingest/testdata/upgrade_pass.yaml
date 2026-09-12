@@ -1,0 +1,47 @@
+# The one-time upgrade pass, one case per retired transaction phase. Paths in
+# the seeded intent are ROOT-RELATIVE to the output directory, so an
+# implementation that treats them as absolute fails these cases.
+required_names:
+  - prepared_verifies
+  - files_changing_restores
+  - rolling_back_restores
+  - first_install_left_in_place
+cases:
+  # Nothing changed on disk: the pass verifies the pair and resolves, restoring
+  # nothing. The state directory is removed.
+  - name: prepared_verifies
+    phase: prepared
+    previous_hash_set: true
+    current_matches_transcript: true
+    want_restored: false
+    want_to_ingest: false
+    want_state_removed: true
+  # The metadata write was interrupted: the current metadata does not match the
+  # transcript, the backup holds the previous metadata. The pass restores it,
+  # the pair verifies, and the state directory is removed.
+  - name: files_changing_restores
+    phase: files-changing
+    previous_hash_set: true
+    current_matches_transcript: false
+    want_restored: true
+    want_to_ingest: false
+    want_state_removed: true
+  # A rollback was already in progress: same restore and removal as
+  # files-changing.
+  - name: rolling_back_restores
+    phase: rolling-back
+    previous_hash_set: true
+    current_matches_transcript: false
+    want_restored: true
+    want_to_ingest: false
+    want_state_removed: true
+  # A first install left only a transcript with no previous copy to restore. The
+  # file is left in place, the pair does not verify, the session falls to the
+  # next harvest, and the state directory is kept.
+  - name: first_install_left_in_place
+    phase: files-changing
+    previous_hash_set: false
+    current_matches_transcript: false
+    want_restored: false
+    want_to_ingest: true
+    want_state_removed: false

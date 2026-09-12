@@ -570,6 +570,10 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 			}
 			result := make(chan harvestExecution, 1)
 			startedAt := time.Now()
+			// The caller now starts the renderer; executeHarvest no longer does.
+			if c.CancelAt != harvestCancelStartup {
+				go program.Run(ctx)
+			}
 			go func() { result <- executeHarvest(ctx, pipeline, state, program) }()
 			var final ingestprogress.FinalMsg
 			var commitObservedAt time.Time

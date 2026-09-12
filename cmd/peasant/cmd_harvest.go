@@ -457,6 +457,41 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		}
 	}
 
+	// Build and start the progress renderer before the store opens, so the
+	// one-time upgrade pass and the store open are visible as stage activity
+	// rather than a frozen terminal. The renderer reads progState; every stage,
+	// including RECOVER, reports through it.
+	renderer := newProgressProgram(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
+	renderer.theme = theme.New(themeModeFor(cfg))
+	if flags.jsonOutput {
+		renderer.isTTY = false
+		renderer.input = nil
+	}
+	var restoreLogger func()
+	if renderer.IsTTY() {
+		orig := slog.Default().Handler()
+		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
+	}
+	stopProgress := func() {
+		renderer.Clear()
+		if restoreLogger != nil {
+			restoreLogger()
+			restoreLogger = nil
+		}
+	}
+	defer stopProgress()
+	go renderer.Run(ctx)
+
+	// Finish any writes an earlier build left half-applied, before the store
+	// opens. The pass reads only the filesystem, opens no store, and reports
+	// through the RECOVER stage; its summary line prints after the renderer
+	// clears.
+	var upgradeResult ingest.UpgradeResult
+	if !flags.dryRun {
+		upgradeResult = ingest.RunUpgradePass(fs, string(resolvedOutput), progState)
+	}
+
 	if !skipDB {
 		db, err := openRunStore(cmd, flags.dryRun)
 		if err != nil {
@@ -504,26 +539,6 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
 	}
-	renderer := newProgressProgram(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
-	renderer.theme = theme.New(themeModeFor(cfg))
-	if flags.jsonOutput {
-		renderer.isTTY = false
-		renderer.input = nil
-	}
-	var restoreLogger func()
-	if renderer.IsTTY() {
-		orig := slog.Default().Handler()
-		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
-	}
-	stopProgress := func() {
-		renderer.Clear()
-		if restoreLogger != nil {
-			restoreLogger()
-			restoreLogger = nil
-		}
-	}
-	defer stopProgress()
 	if err := ctx.Err(); err != nil {
 		cmd.SilenceUsage = true
 		return harvestCancellationError(err)
@@ -535,6 +550,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		sources: sources, customPatternCount: customPatternCount,
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
 		rebuildAll: reindex && flags.all,
+		upgrade:    upgradeResult,
 	})
 }
 
@@ -549,6 +565,9 @@ type harvestOutputOptions struct {
 	// rebuildAll is set for `harvest index --all`: the run prints the
 	// not-restored summary line at the end.
 	rebuildAll bool
+	// upgrade carries the one-time upgrade pass result so its summary line
+	// prints after the renderer clears.
+	upgrade ingest.UpgradeResult
 }
 
 // outputHarvest consumes only the committed execution, after terminal and logger
@@ -568,6 +587,9 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 	result := execution.result
 	if options.selectionConflicts != nil {
 		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
+	}
+	if options.upgrade.Ran {
+		fmt.Fprintln(cmd.ErrOrStderr(), options.upgrade.Report())
 	}
 
 	// 10. Output results.

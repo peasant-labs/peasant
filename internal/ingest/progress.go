@@ -6,6 +6,12 @@ import "sync"
 type Stage string
 
 const (
+	// StageRecover covers the one-time pass that finishes writes an earlier
+	// build left half-applied in the retained state directory. It runs before
+	// the store opens and before every other stage. It is displayed but stays
+	// unstarted on a store that carries no such state, which is every store
+	// written by this build.
+	StageRecover Stage = "RECOVER"
 	// StageReconcile covers the reconciliation of the retained tree, which runs
 	// before discovery: it visits every retained session's committed metadata and
 	// repairs the ones whose retained pair and mirrored record disagree. It is a
@@ -31,6 +37,7 @@ const (
 
 // StageOrder is the canonical display order of pipeline stages.
 var StageOrder = []Stage{
+	StageRecover,
 	StageReconcile,
 	StageDiscover,
 	StageDiff,
