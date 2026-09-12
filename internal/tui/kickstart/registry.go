@@ -169,6 +169,7 @@ func BuildRegistry(opts Options) settings.Registry {
 				"choose the default license for a later explicit publish.",
 				"no license is the default unless your loaded config already chose one.",
 				"no license keeps all rights; anyone who wants to reuse the transcript must ask.",
+				"a later push under the chosen license reads on the privacy notice: "+defaults.CommonsNoticeURL(),
 			),
 			Fields: []settings.Field{
 				settings.WithDescription(
