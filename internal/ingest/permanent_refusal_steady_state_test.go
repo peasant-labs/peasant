@@ -105,6 +105,13 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 			if err := fs.WriteFile(path, []byte(transcript), 0600); err != nil {
 				t.Fatal(err)
 			}
+			// Production metadata always records the transcript checksum (the
+			// write path refuses to build an artifact without it), so the
+			// committed-identity check reads the metadata alone and never
+			// re-hashes the transcript. A seed without it is not a shape
+			// production can produce and would charge a read the real store
+			// never pays.
+			meta.ContentHash = schema.ComputeTranscriptHash([]byte(transcript))
 			metadata, err := json.Marshal(meta)
 			if err != nil {
 				t.Fatal(err)
@@ -175,8 +182,32 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 				versions[ingest.HarnessStrike] = bumped
 			}
 			if fixture.AppendRecord {
-				if err := fs.WriteFile(path, []byte(transcript+fixtures.Record+"\n"), 0600); err != nil {
+				// A real change to the retained bytes goes through the write
+				// path, which rewrites the pair and mirrors it; the mirror NULLs
+				// indexed_input_hash, so the repair predicate selects the session
+				// on the next harvest. Model that, not a bare file edit that
+				// leaves the database untouched: a file edit with no mirror is a
+				// torn pair, a different state detected only on a pair read, and
+				// it would never lift a settled refusal.
+				changed := transcript + fixtures.Record + "\n"
+				meta.ContentHash = schema.ComputeTranscriptHash([]byte(changed))
+				changedMeta, err := json.Marshal(meta)
+				if err != nil {
 					t.Fatal(err)
+				}
+				if err := fs.WriteFile(path, []byte(changed), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := fs.WriteFile(filepath.Join(dir, id.String()+"--metadata.json"), changedMeta, 0600); err != nil {
+					t.Fatal(err)
+				}
+				artifact, err := ingest.NewManagedArtifact(changedMeta, []byte(changed))
+				if err != nil {
+					t.Fatal(err)
+				}
+				results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}})
+				if len(results) != 1 || results[0].Err != nil {
+					t.Fatalf("re-mirror the changed pair: %+v", results)
 				}
 			}
 

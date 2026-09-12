@@ -50,9 +50,15 @@ cases:
   # refused the same way again; the index path reads the new bytes, and one read
   # is all the run owes.
   - name: changed-bytes-lift-the-refusal
+    # A real byte change is rewritten and re-mirrored, which NULLs
+    # indexed_input_hash. The session is no longer a settled refusal: the
+    # content pass and the index both re-evaluate the new bytes, exactly as a
+    # newer indexer lifts a refusal, so the read and diagnostic counts match
+    # that case. This is one re-evaluation reported by both subsystems, not a
+    # permanent condition reported again.
     append_record: true
-    second_harvest_diagnostics: 1
-    second_harvest_retained_reads: 1
+    second_harvest_diagnostics: 2
+    second_harvest_retained_reads: 2
   # The distinction the failure code exists for. An older build stored what it
   # could read and marked it incomplete without ever trying to certify it, so
   # there is no recorded refusal. This build can certify the same transcript,

@@ -125,28 +125,53 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 		p.reportMetadataRefusal(string(target.session.SessionID), err)
 		return false
 	}
-	indexer, ok := p.indexers[target.session.Harness]
-	if !ok {
+	if _, ok := p.indexers[target.session.Harness]; !ok {
 		return false
 	}
-	// A stored producer or index format newer than this build is refused from
-	// the database state, before the pair is read: reading it only to refuse it
-	// is a wasted read, and the shared parse path reports the refusal once when
-	// the session reaches it as work.
-	if reader, ok := p.metricsStore.(SessionIndexStateReader); ok {
-		if state, stateErr := reader.ReadIndexState(ctx, target.session.SessionID); stateErr == nil && state != nil {
-			if p.checkIndexProducer(state) != nil {
-				return true
-			}
-		}
-	}
-	input, err := p.captureIndexInput(ctx, indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath}, indexer)
-	if err != nil {
-		// Incomplete capture is not current input. The shared parse path owns
-		// its visible refusal/log, once per invocation, without a success stamp.
+	// Selection is database-first: it decides from the stored index state and
+	// never opens the pair. The pair is read only when a chosen target is
+	// indexed. A pair whose bytes changed through the write path had its
+	// indexed_input_hash NULLed by the mirror, so the hash-absent case IS the
+	// changed-pair case here. A hand-edited or torn pair on an otherwise
+	// settled row leaves no database signal and is not found by this scan: it
+	// is reported as damaged on the next pair read (harvest index --all, the
+	// content stage, or peasant redact), through the pair hash check.
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	if !ok {
 		return true
 	}
-	return p.capturedInputNeedsWork(input)
+	state, stateErr := reader.ReadIndexState(ctx, target.session.SessionID)
+	if stateErr != nil {
+		return true
+	}
+	return p.stateNeedsIndexWork(state)
+}
+
+// stateNeedsIndexWork decides from stored SQL state alone whether a session has
+// pending indexer work, reading no file. It is the database-first half of
+// capturedInputNeedsWork: it drops the input-hash comparison and the
+// publication byte proof, both of which need the pair. A changed pair reaches
+// this predicate as a NULL indexed_input_hash, because the write path's mirror
+// NULLs the hash when the pair changes; a revision left unbound is selected so
+// the ordinary index write can bind it; and a stored producer or index format
+// newer than this build is selected so the shared parse path reports the
+// refusal once. A session with no stored pair identity is selected so the
+// index path can establish it.
+func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState) bool {
+	if state == nil || state.ArtifactHash == nil {
+		return true
+	}
+	if p.checkIndexProducer(state) != nil {
+		return true
+	}
+	target := p.versionTargets()[state.Harness]
+	return p.config.Force ||
+		state.IndexerVersion < target.IndexerVersion ||
+		state.IndexedInputHash == nil ||
+		(state.PublicationCaptureRevision > 0 && !state.PublicationBound) ||
+		(state.ContentStatus != ContentCaptureComplete &&
+			p.certifiesContent(state.Harness) &&
+			!permanentRefusalIsSettled(state, target))
 }
 
 // scanPeasantSyncSessions walks the retained tree and returns one target per

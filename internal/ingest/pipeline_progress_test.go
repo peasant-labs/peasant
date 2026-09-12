@@ -150,6 +150,13 @@ func TestPipelineReindexCancellationDuringDiffLookup(t *testing.T) {
 		t.Fatalf("interrupted reindex DIFF = %+v, want error with no classified sessions", got)
 	}
 	for _, stage := range stagesAfter(t, StageDiff) {
+		// A reindex runs the content pass FIRST, before DISCOVER and DIFF, so
+		// the CONTENT stage has already started and ended by the time DIFF is
+		// cancelled. It sorts after DIFF in the display order but runs before
+		// it here, so it is not a stage that started AFTER the cancellation.
+		if stage == StageContent {
+			continue
+		}
 		if snapshot[stage].Started {
 			t.Errorf("stage %s started after cancellation", stage)
 		}
