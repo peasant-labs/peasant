@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,6 +50,70 @@ func loadPipelineProgressFixtures(t *testing.T) []pipelineProgressCase {
 		}
 	}
 	return fixture.Cases
+}
+
+type progressShortStageCase struct {
+	Name    string `yaml:"name"`
+	Stage   string `yaml:"stage"`
+	Done    int    `yaml:"done"`
+	Total   int    `yaml:"total"`
+	Want    string `yaml:"want"`
+	NotWant string `yaml:"not_want"`
+}
+
+func loadProgressShortStageFixtures(t *testing.T) []progressShortStageCase {
+	t.Helper()
+	var fixture struct {
+		RequiredCases []string                 `yaml:"required_short_stage_cases"`
+		Cases         []progressShortStageCase `yaml:"short_stage_cases"`
+	}
+	if err := yaml.Unmarshal(pipelineProgressYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		present[tc.Name] = true
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("missing required short-stage cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if !present[name] {
+			t.Fatalf("missing required short-stage case %q", name)
+		}
+	}
+	return fixture.Cases
+}
+
+// TestProgressRendererShortStageRendersKOverN pins the renderer count cell for a
+// stage that ends before reaching its total: the ingest ProgressState records
+// the short end (Done < Total, Ended), and the shared progress renderer shows it
+// as "K/N" — the how-far-it-got count — never the "done" sentinel reserved for a
+// stage whose total was never known. The CONTENT stage ends this way when the
+// byte budget stops the one-time full-content pass, and a user must be able to
+// read how much it captured.
+func TestProgressRendererShortStageRendersKOverN(t *testing.T) {
+	for _, tc := range loadProgressShortStageFixtures(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			stage := Stage(tc.Stage)
+			progress := NewProgressState()
+			progress.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: tc.Total})
+			progress.Update(ProgressEvent{Kind: KindEnd, Stage: stage, Done: tc.Done, Total: tc.Total})
+
+			sp := progress.Snapshot()[stage]
+			if !sp.Ended || sp.Done != tc.Done || sp.Total != tc.Total {
+				t.Fatalf("state = %+v, want ended with %d/%d", sp, tc.Done, tc.Total)
+			}
+
+			rendered := kit.ProgressBar(stage.String(), sp.Done, sp.Total, sp.Ended, sp.HasErr)
+			if !strings.Contains(rendered, tc.Want) {
+				t.Errorf("rendered %q, want it to contain the short count %q", rendered, tc.Want)
+			}
+			if strings.Contains(rendered, tc.NotWant) {
+				t.Errorf("rendered %q, want it NOT to contain %q (a short stage must not read as a plain completion)", rendered, tc.NotWant)
+			}
+		})
+	}
 }
 
 func TestPipelineCancellationBeforeDiff(t *testing.T) {
