@@ -117,8 +117,13 @@ cases:
     change_source: true
     expected_manual_indexed: 0
     expected_manual_readiness: ready
+  # The native OpenCode source changes after the worker captured it and before
+  # the index reads it. The index re-reads the native to validate and detects
+  # the change, so it refuses rather than mixing the newer source into the
+  # capture: nothing is indexed, the prior state is preserved, and the next
+  # harvest reads the session again from its now-consistent source.
   - <<: *opencode_json
-    name: opencode_json_index_uses_captured_tree
+    name: opencode_json_index_refuses_changed_source
     mutate_index_file: storage/message/ses_3cd91f52effeXd3QAJ54jOyzv5/msg_assistant.json
   - <<: *claude
     name: absent_model_is_not_fabricated

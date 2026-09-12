@@ -76,7 +76,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		"opencode_current_sqlite_capture": true, "missing_source_stays_unrecovered": true,
 		"mismatched_internal_identity_refuses": true, "codex_mismatched_internal_identity_refuses": true,
 		"disappeared_source_during_extraction": true, "metadata_write_failure_needs_reingest": true,
-		"changed_source_updates_metadata_and_entries": true, "opencode_json_index_uses_captured_tree": true,
+		"changed_source_updates_metadata_and_entries": true, "opencode_json_index_refuses_changed_source": true,
 		"absent_model_is_not_fabricated": true,
 		"reindex_fresh_source_ready":     true, "reindex_verified_fallback_ready": true,
 		"reindex_changed_fallback_held": true, "reindex_legacy_fallback_held": true,
@@ -248,6 +248,38 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				}
 				return
 			}
+			if c.MutateIndexFile != "" {
+				// The native source changed after the worker captured it and
+				// before the index read it. The index re-reads the native to
+				// validate, detects the change and refuses, rather than mixing
+				// the newer source into the capture. Per the crash-and-fault
+				// model (an input changed before the write): the parser result
+				// is refused, current entries and producer evidence are
+				// preserved, and the next harvest reads the session again from
+				// its now-consistent source. No "changed response" reaches the
+				// store, and the session still needs ingest.
+				if result.Summary.Indexed != 0 {
+					t.Fatalf("index applied a changed source: %+v", result)
+				}
+				refused := false
+				for _, d := range result.Diagnostics {
+					if strings.Contains(d.Message, "changed before replacement") {
+						refused = true
+					}
+				}
+				if !refused {
+					t.Fatalf("changed source was not reported as refused: %+v", result.Diagnostics)
+				}
+				bundle, err := database.LoadPublicationInput(ctx, id)
+				if err != nil || bundle.Readiness != ingest.PublicationNeedsIngest {
+					t.Fatalf("changed source left an unexpected state = %+v, %v", bundle, err)
+				}
+				entryJSON, err := json.Marshal(bundle.Entries)
+				if err != nil || bytes.Contains(entryJSON, []byte("changed response")) {
+					t.Fatalf("index mixed a newer source tree into the capture: %s, %v", entryJSON, err)
+				}
+				return
+			}
 			if result.Summary.Errors != 0 || result.Summary.StoreError != nil || result.Summary.Indexed != 1 {
 				t.Fatalf("recovery failed: %+v", result)
 			}
@@ -278,12 +310,6 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			if got := publicationStoredProvenance(t, dbPath, id); got != c.Provenance {
 				t.Fatalf("provenance = %q want %q", got, c.Provenance)
-			}
-			if c.MutateIndexFile != "" {
-				entryJSON, err := json.Marshal(bundle.Entries)
-				if err != nil || bytes.Contains(entryJSON, []byte("changed response")) || !bytes.Contains(entryJSON, []byte("synthetic response")) {
-					t.Fatalf("index mixed a newer source tree into the capture: %s, %v", entryJSON, err)
-				}
 			}
 			wantProject, wantHost, err := ingest.DeriveProjectIdentifiers(installationSalt, git.Remote, session.CWD)
 			if err != nil {
