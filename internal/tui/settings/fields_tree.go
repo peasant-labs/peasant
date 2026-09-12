@@ -469,6 +469,15 @@ func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cm
 			return cmd
 		} else {
 			f.unmatched = PrepopulateSelection(f.selectionRoots(), selection)
+			// A saved selected-mode value that still carries the display-only
+			// unknown-branch placeholder is normalized at load, so the value a
+			// save persists is placeholder-free even when the user edits no
+			// selection row before committing.
+			if sanitized, placeholdersResolved := sanitizeTreeSelectionPlaceholders(
+				TreeSelection{Mode: selection.Mode, Harnesses: selection.Harnesses}, f.selectionRoots(),
+			); placeholdersResolved {
+				f.setWorkingSelection(d, sanitized, false)
+			}
 			if firstSuccessfulLoad {
 				f.baselineApplied = true
 			}
@@ -509,17 +518,28 @@ func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cm
 			f.reconcileErr = f.actionableReconcileError(intent, err)
 			return cmd
 		}
+		// A saved selection can still carry the display-only unknown-branch
+		// placeholder from an earlier version. Resolve it into explicit session
+		// scopes before the touched scopes are applied, so an edit anywhere in
+		// the tree cannot carry the placeholder into the value a save persists.
+		current := f.acc.Get(d.Working())
+		sanitized, placeholdersResolved := sanitizeTreeSelectionPlaceholders(current, f.selectionRoots())
+		if placeholdersResolved {
+			current = sanitized
+		}
 		if len(scopes) == 0 {
+			if placeholdersResolved {
+				f.setWorkingSelection(d, current, true)
+			}
 			return cmd
 		}
-		current := f.acc.Get(d.Working())
 		next, changed, err := reconcileTouchedSelection(current, f.unmatched, scopes, d.Working().Selection.AutoIngestNewBranches)
 		if err != nil {
 			f.restoreSelectableState(before)
 			f.reconcileErr = f.actionableReconcileError(intent, err)
 			return cmd
 		}
-		if changed {
+		if changed || placeholdersResolved {
 			f.setWorkingSelection(d, next, true)
 		}
 		// Reapply the canonical matcher after the reducer succeeds. This updates
@@ -762,12 +782,14 @@ func exactBranchName(branch *kit.TreeNode) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("branch node %q has no exact branch identity", branch.ID)
 	}
-	if name == "(unknown branch)" {
-		return "", fmt.Errorf("branch node %q is the unknown-branch display placeholder and cannot form an exact denial", branch.ID)
-	}
 	if strings.TrimSpace(name) != name {
 		return "", fmt.Errorf("branch node %q carries non-normalized branch %q", branch.ID, name)
 	}
+	// The unknown-branch display placeholder is accepted so the rollback
+	// snapshot can cover the rows a press will touch, but it is not a matchable
+	// branch identity. changedSelectionScopes maps it to the empty semantic
+	// branch and expands a branch toggle into explicit session scopes, so the
+	// placeholder itself never reaches reconcileSelectionScope or the config.
 	return name, nil
 }
 
@@ -821,7 +843,7 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 			projectIdentity: key.projectIdentity,
 			harness:         key.harness,
 			clonePath:       ingest.ClonePath(key.clonePath),
-			branch:          key.branch,
+			branch:          semanticBranchName(key.branch),
 			sessionID:       key.sessionID,
 			selected:        selected,
 		}, nil
@@ -841,6 +863,21 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 		sortSelectableNodeKeys(targetKeys)
 		var scopes []selectionScope
 		for _, targetKey := range targetKeys {
+			if isUnknownBranchPlaceholder(targetKey.branch) {
+				// The placeholder has no persistable branch identity: expand the
+				// branch toggle into one explicit session scope per changed
+				// session, so a select persists session IDs and a clear persists
+				// session exclusions. Each session's post-action state decides
+				// its own direction, so a Conflict bystander is never swept in.
+				for _, sessionKey := range changedUnknownBranchSessions(targetKey, changed) {
+					scope, err := makeScope(sessionKey, selectionScopeSession, after[sessionKey].state == kit.Checked)
+					if err != nil {
+						return nil, err
+					}
+					scopes = append(scopes, scope)
+				}
+				continue
+			}
 			kind := selectionScopeProject
 			if targetKey.sessionID != "" {
 				kind = selectionScopeSession
@@ -967,6 +1004,27 @@ func sortSelectableNodeKeys(keys []selectableNodeKey) {
 		}
 		return left.sessionID < right.sessionID
 	})
+}
+
+// changedUnknownBranchSessions returns the changed session identities under one
+// placeholder branch node, sorted so the generated session scopes are
+// deterministic.
+func changedUnknownBranchSessions(target selectableNodeKey, changed map[selectableNodeKey]bool) []selectableNodeKey {
+	var keys []selectableNodeKey
+	for key := range changed {
+		if key.sessionID == "" || !isUnknownBranchPlaceholder(key.branch) {
+			continue
+		}
+		if key.projectIdentity != target.projectIdentity ||
+			key.harness != target.harness ||
+			key.clonePath != target.clonePath ||
+			key.branch != target.branch {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sortSelectableNodeKeys(keys)
+	return keys
 }
 
 // uniformSelectAllTarget reports the single Checked/Unchecked direction every
