@@ -245,6 +245,12 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			}
 			meta := makeReindexMeta(t, string(sid), nativePath)
 			meta.SchemaVersion = fixture.SchemaVersion
+			// The transcript the pair carries is the fixture transcript, so
+			// the metadata records its checksum exactly as every production
+			// write path does. A checksum-less pair is not a shape production
+			// produces, and the ordinary index write refuses to establish an
+			// artifact identity from one.
+			meta.ContentHash = schema.ComputeTranscriptHash([]byte(fixtures.Transcript))
 			meta.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			ingested := time.Now().Add(-2 * time.Hour).UnixMilli()
 			meta.Timestamp.Ingested = &ingested
