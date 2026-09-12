@@ -1,0 +1,20 @@
+# The filesystem operation counts of the write path, measured over a whole
+# store-backed harvest. A store run writes no source-capture marker, so a new
+# session writes exactly its two files. The pair is never read or statted while
+# it is installed and indexed: the worker hands its bytes to the index path in
+# memory.
+required_names:
+  - new_session_zero_sync
+cases:
+  # One session, no debug files. Two files written and renamed into place, the
+  # temp tree and the session dir each walked once, the temp tree removed, and
+  # zero reads or stats of the installed pair.
+  - name: new_session_zero_sync
+    scenario: new
+    write_file_total: 2
+    rename_under_session_dir: 2
+    walk_dir_total: 2
+    remove_all_total: 1
+    mkdir_all_min: 1
+    pair_read_file: 0
+    pair_stat: 0
