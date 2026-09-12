@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,6 +223,14 @@ func TestWritePathMirrorsInPagesOf256(t *testing.T) {
 	for _, result := range refusals {
 		if result.Err == nil {
 			t.Fatal("the store must refuse a page larger than MirrorPageSize")
+		}
+		// Pin the refusal to its SIZE reason, not an incidental per-request
+		// error: if the cap were raised, an over-cap page would be admitted and
+		// fail (or succeed) for some other reason, and this size-limit phrasing
+		// would no longer appear. The phrase is the store's contract text, so a
+		// reword is a visible change while the size-refusal behavior is held.
+		if !strings.Contains(result.Err.Error(), "batch exceeds") {
+			t.Fatalf("the refusal must name the page-size limit as its reason; got %q", result.Err)
 		}
 	}
 	oversize.Shutdown()
