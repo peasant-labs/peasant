@@ -11,6 +11,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -197,5 +198,77 @@ func TestWritePathColumns(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWritePathMirrorsInPagesOf256 pins the mirror paging contract: no store
+// transaction records more than MirrorPageSize sessions. The store refuses an
+// oversized page outright, and a harvest of more sessions than one page holds
+// records every row across more than one bounded transaction, none over the
+// cap. The exact transaction count depends on how the concurrent drain batches
+// the work, so the fixture asserts the bound the design guarantees rather than
+// a timing-dependent number.
+func TestWritePathMirrorsInPagesOf256(t *testing.T) {
+	ctx := context.Background()
+
+	// The store refuses a page larger than MirrorPageSize outright; this is why
+	// the write path never hands it more than one page at a time.
+	oversize := newDurabilityStore(t, storetest.CopyGoldenDB(t))
+	refusals := oversize.Store.MirrorArtifacts(ctx, make([]ingest.ArtifactMirrorRequest, ingest.MirrorPageSize+1))
+	if len(refusals) != ingest.MirrorPageSize+1 {
+		t.Fatalf("refusal count = %d, want %d", len(refusals), ingest.MirrorPageSize+1)
+	}
+	for _, result := range refusals {
+		if result.Err == nil {
+			t.Fatal("the store must refuse a page larger than MirrorPageSize")
+		}
+	}
+	oversize.Shutdown()
+
+	// A harvest of more sessions than one page holds records every row without
+	// ever exceeding the page cap, and in more than one transaction.
+	const sessionCount = 300
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+	modTime := time.Now().Add(-2 * time.Hour)
+	discovered := make([]ingest.DiscoveredSession, 0, sessionCount)
+	metas := make(map[ingest.SessionID]*ingest.UnifiedMetadata, sessionCount)
+	ids := make([]ingest.SessionID, 0, sessionCount)
+	for i := 1; i <= sessionCount; i++ {
+		idStr := fmt.Sprintf("%08d-0000-4000-8000-000000000000", i)
+		sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, idStr)
+		setupSourceFile(t, mfs, sourcePath)
+		mfs.ModTimes[sourcePath] = modTime
+		session := makeDiscoveredSession(t, idStr, sourcePath, modTime)
+		discovered = append(discovered, session)
+		metas[session.SessionID] = makeMinimalMeta(t, idStr)
+		ids = append(ids, session.SessionID)
+	}
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(discovered, metas),
+	}
+	indexer := &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile}
+
+	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir),
+		ingest.WithStore(ds), ingest.WithMetricsStore(ds),
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.Run(ctx); err != nil {
+		t.Fatalf("harvest of %d sessions: %v", sessionCount, err)
+	}
+	if got := ds.MaxPage(); got > ingest.MirrorPageSize {
+		t.Errorf("a mirror transaction carried %d sessions, over the %d cap", got, ingest.MirrorPageSize)
+	}
+	if got := ds.MirrorCalls(); got < 2 {
+		t.Errorf("mirror transactions = %d; %d sessions cannot fit one page and must span more than one", got, sessionCount)
+	}
+	for _, id := range ids {
+		state, err := ds.ReadIndexState(ctx, id)
+		if err != nil || state == nil || state.ArtifactHash == nil {
+			t.Fatalf("every session must be recorded; %s is missing (%+v, %v)", id, state, err)
+		}
 	}
 }

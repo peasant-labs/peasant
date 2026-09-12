@@ -147,6 +147,7 @@ type durabilityStore struct {
 	failMirror  map[ingest.SessionID]error
 	failEntries error
 	mirrorCalls int
+	maxPage     int
 	closeOnce   sync.Once
 }
 
@@ -195,10 +196,21 @@ func (s *durabilityStore) MirrorCalls() int {
 	return s.mirrorCalls
 }
 
+// MaxPage returns the largest page any MirrorArtifacts invocation carried, so a
+// test can prove no transaction ever exceeded MirrorPageSize.
+func (s *durabilityStore) MaxPage() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxPage
+}
+
 func (s *durabilityStore) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactMirrorRequest) []ingest.ArtifactMirrorResult {
 	s.mu.Lock()
 	if len(requests) > 0 {
 		s.mirrorCalls++
+	}
+	if len(requests) > s.maxPage {
+		s.maxPage = len(requests)
 	}
 	forward := make([]ingest.ArtifactMirrorRequest, 0, len(requests))
 	forced := make(map[ingest.SessionID]error)
