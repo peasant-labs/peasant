@@ -200,7 +200,7 @@ func projectNameOf(n *kit.TreeNode) string {
 }
 
 func clonePathOf(n *kit.TreeNode) ingest.ClonePath {
-	if n.Meta == nil {
+	if n == nil || n.Meta == nil {
 		return ""
 	}
 	return ingest.ClonePath(n.Meta[MetaClonePath])
@@ -1053,6 +1053,13 @@ func availableProjectsFromForest(roots []*kit.TreeNode) []availableProject {
 			byPath := map[string]*availableProject{}
 			var order []string
 			for _, branchNode := range projectNode.Children {
+				if harnessOf(branchNode) != "" {
+					// A flattened project's child IS a session row: it carries no
+					// branch level, so its semantic branch is the empty
+					// (unresolved) branch.
+					appendAvailableSessionsByPath(&byPath, &order, projectNode, nil, branchNode, "", "")
+					continue
+				}
 				branch := semanticBranchName(branchOf(branchNode))
 				for _, sessionNode := range branchNode.Children {
 					appendAvailableSessionsByPath(&byPath, &order, projectNode, branchNode, sessionNode, branch, "")

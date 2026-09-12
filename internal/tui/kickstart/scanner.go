@@ -290,6 +290,12 @@ func prepareSessionListings(
 	return cohort
 }
 
+// unknownBranchPlaceholder labels the session group discovery could not resolve
+// a Git branch for. It is display-only: settings recognizes the literal
+// byte-for-byte and never persists it, and a project whose ONLY branch group is
+// this one renders its sessions directly under the project row.
+const unknownBranchPlaceholder = "(unknown branch)"
+
 // buildForest folds a fully resolved and annotated scanner cohort into the ordered
 // PROJECT -> BRANCH -> SESSION forest, matching the original FTUE
 // ProjectScopePage hierarchy: project-first, with NO harness grouping axis (the
@@ -303,7 +309,10 @@ func prepareSessionListings(
 //     canonical matcher and config round-trip. A remote label never becomes an
 //     identity key.
 //   - branch node: keyed by branch (or "(unknown branch)" when discovery could
-//     not resolve one) with the branch carried in Meta.
+//     not resolve one) with the branch carried in Meta. A project whose ONLY
+//     branch group is the unresolved one omits the branch level entirely: its
+//     sessions become direct children of the project node, because a
+//     placeholder level that separates nothing is noise.
 //   - session node: keyed by the raw session ID, carrying its harness in Meta so
 //     settings.FromTreeNodes can rebuild the harness-keyed SelectionConfig.
 //
@@ -394,16 +403,14 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, rela
 		p.rows = append(p.rows, row)
 
 		bKey := sess.Branch
-		branchLabel := sess.Branch
 		if bKey == "" {
-			bKey = "(unknown branch)"
-			branchLabel = "(unknown branch)"
+			bKey = unknownBranchPlaceholder
 		}
 		b, ok := p.branches[bKey]
 		if !ok {
 			node := &kit.TreeNode{
 				ID:    scannerBranchID(pKey, bKey),
-				Label: branchLabel,
+				Label: bKey,
 				Meta:  map[string]string{settings.MetaBranch: bKey},
 			}
 			b = &scannerBranchAgg{node: node}
@@ -425,6 +432,18 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, rela
 			Meta:  scannerProjectMeta(representative, p.identity, p.rows),
 		}
 		sort.Strings(p.order)
+		if len(p.order) == 1 && p.order[0] == unknownBranchPlaceholder {
+			// The only branch group is the unresolved one: attach its sessions
+			// directly to the project so the placeholder level, which separates
+			// nothing, is not rendered. Ordering is the same as inside a branch.
+			b := p.branches[p.order[0]]
+			sortListings(b.sessions)
+			for _, row := range groupByImportState(b.sessions, ingested) {
+				pNode.Children = append(pNode.Children, sessionNode(row, counts, ingested))
+			}
+			roots = append(roots, pNode)
+			continue
+		}
 		for _, bKey := range p.order {
 			b := p.branches[bKey]
 			sortListings(b.sessions)
@@ -504,8 +523,13 @@ func scannerPreviewContexts(roots []*kit.TreeNode) map[string]ListingPreviewCont
 	contexts := make(map[string]ListingPreviewContext)
 	for _, root := range roots {
 		contexts[root.ID] = scannerPreviewContext(root, nil)
-		for _, branch := range root.Children {
-			contexts[branch.ID] = scannerPreviewContext(root, branch)
+		for _, child := range root.Children {
+			// A flattened project's direct children are session rows. Only a real
+			// branch row publishes a branch preview context.
+			if child.Meta[settings.MetaBranch] == "" {
+				continue
+			}
+			contexts[child.ID] = scannerPreviewContext(root, child)
 		}
 	}
 	return contexts
@@ -513,11 +537,11 @@ func scannerPreviewContexts(roots []*kit.TreeNode) map[string]ListingPreviewCont
 
 func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewContext {
 	kind := ListingPreviewProject
-	branches := root.Children
+	children := root.Children
 	branchName := ""
 	if selectedBranch != nil {
 		kind = ListingPreviewBranch
-		branches = []*kit.TreeNode{selectedBranch}
+		children = []*kit.TreeNode{selectedBranch}
 		branchName = selectedBranch.Meta[settings.MetaBranch]
 	}
 
@@ -526,21 +550,21 @@ func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewCon
 	clonePathSet := map[string]struct{}{}
 	branchSet := map[string]struct{}{}
 	sessionCount := 0
-	for _, branch := range branches {
-		if name := branch.Meta[settings.MetaBranch]; name != "" {
+	for _, child := range children {
+		if name := child.Meta[settings.MetaBranch]; name != "" {
 			branchSet[name] = struct{}{}
 		}
-		for _, session := range branch.Children {
-			sessionCount++
-			if harness := session.Meta[settings.MetaHarness]; harness != "" {
-				harnessSet[harness] = struct{}{}
-			}
-			if remote := scannerPreviewRemote(session.Meta[settings.MetaRemote]); remote != "" {
-				remoteSet[remote] = struct{}{}
-			}
-			if clonePath := session.Meta[settings.MetaClonePath]; clonePath != "" {
-				clonePathSet[clonePath] = struct{}{}
-			}
+	}
+	for _, session := range scannerPreviewSessions(children) {
+		sessionCount++
+		if harness := session.Meta[settings.MetaHarness]; harness != "" {
+			harnessSet[harness] = struct{}{}
+		}
+		if remote := scannerPreviewRemote(session.Meta[settings.MetaRemote]); remote != "" {
+			remoteSet[remote] = struct{}{}
+		}
+		if clonePath := session.Meta[settings.MetaClonePath]; clonePath != "" {
+			clonePathSet[clonePath] = struct{}{}
 		}
 	}
 	if len(remoteSet) == 0 {
@@ -554,7 +578,7 @@ func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewCon
 		Project:        root.Label,
 		Harnesses:      sortedScannerPreviewValues(harnessSet),
 		Remotes:        sortedScannerPreviewValues(remoteSet),
-		GitDirectories: scannerPreviewGitDirectories(branches),
+		GitDirectories: scannerPreviewGitDirectories(children),
 		ClonePaths:     sortedScannerPreviewValues(clonePathSet),
 		Branches:       sortedScannerPreviewValues(branchSet),
 		Branch:         branchName,
@@ -562,13 +586,26 @@ func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewCon
 	}
 }
 
-func scannerPreviewGitDirectories(branches []*kit.TreeNode) []string {
+// scannerPreviewSessions returns the session rows one project preview or one
+// selected branch covers: a branch row contributes its children, while a direct
+// session child of a flattened project is itself a session row.
+func scannerPreviewSessions(children []*kit.TreeNode) []*kit.TreeNode {
+	var sessions []*kit.TreeNode
+	for _, child := range children {
+		if child.Meta[settings.MetaHarness] != "" {
+			sessions = append(sessions, child)
+			continue
+		}
+		sessions = append(sessions, child.Children...)
+	}
+	return sessions
+}
+
+func scannerPreviewGitDirectories(children []*kit.TreeNode) []string {
 	set := make(map[string]struct{})
-	for _, branch := range branches {
-		for _, session := range branch.Children {
-			if gitDirectory := session.Meta[settings.MetaGitDirectory]; gitDirectory != "" {
-				set[gitDirectory] = struct{}{}
-			}
+	for _, session := range scannerPreviewSessions(children) {
+		if gitDirectory := session.Meta[settings.MetaGitDirectory]; gitDirectory != "" {
+			set[gitDirectory] = struct{}{}
 		}
 	}
 	return sortedScannerPreviewValues(set)

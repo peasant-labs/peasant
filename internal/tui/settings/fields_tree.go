@@ -600,6 +600,11 @@ func (f *treeField) snapshotSelectableState(intent treeSelectionIntent) (selecta
 		if intent.scope == root {
 			return snapshotProjectState(state, root)
 		}
+		if directProjectSession(root, intent.scope) {
+			// A flattened project's direct child is a session row: it has no
+			// branch ancestor and its semantic branch is empty.
+			return snapshotSessionState(state, root, nil, intent.scope)
+		}
 		if branch == nil {
 			return nil, fmt.Errorf("toggle node %q has no branch ancestor", intent.scope.ID)
 		}
@@ -632,10 +637,17 @@ func snapshotProjectState(state selectableState, root *kit.TreeNode) (selectable
 		return nil, err
 	}
 	if len(root.Children) == 0 {
-		return nil, fmt.Errorf("project node %q has no exact branch descendants", root.ID)
+		return nil, fmt.Errorf("project node %q has no exact branch or session descendants", root.ID)
 	}
-	for _, branch := range root.Children {
-		if _, err := snapshotBranchState(state, root, branch); err != nil {
+	for _, child := range root.Children {
+		if harnessOf(child) != "" {
+			// A flattened project's direct session child.
+			if err := snapshotSessionTree(state, root, nil, "", child); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if _, err := snapshotBranchState(state, root, child); err != nil {
 			return nil, err
 		}
 	}
@@ -665,9 +677,13 @@ func snapshotSessionState(state selectableState, root, branch, session *kit.Tree
 	if _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
-	branchName, err := exactBranchName(branch)
-	if err != nil {
-		return nil, err
+	branchName := ""
+	if branch != nil {
+		name, err := exactBranchName(branch)
+		if err != nil {
+			return nil, err
+		}
+		branchName = name
 	}
 	if err := snapshotSessionTree(state, root, branch, branchName, session); err != nil {
 		return nil, err
@@ -683,8 +699,10 @@ func snapshotSessionTree(state selectableState, root, branchNode *kit.TreeNode, 
 	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
 		return err
 	}
-	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branch}, branchNode); err != nil {
-		return err
+	if branchNode != nil {
+		if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branch}, branchNode); err != nil {
+			return err
+		}
 	}
 	if err := snapshotOneSession(state, identity, harness, clonePath, branch, session); err != nil {
 		return err
@@ -800,6 +818,21 @@ func branchContaining(root, target *kit.TreeNode) *kit.TreeNode {
 		}
 	}
 	return nil
+}
+
+// directProjectSession reports whether node is a session row attached directly
+// to the project root (a flattened project), rather than a session under a
+// branch node.
+func directProjectSession(root, node *kit.TreeNode) bool {
+	if root == nil || node == nil || harnessOf(node) == "" {
+		return false
+	}
+	for _, child := range root.Children {
+		if child == node {
+			return true
+		}
+	}
+	return false
 }
 
 func changedSelectionScopes(intent treeSelectionIntent, before, after selectableState, fullRoots []*kit.TreeNode) ([]selectionScope, error) {
