@@ -23,6 +23,8 @@ Discovery runs before the interactive screen. The guided flow then presents:
    this prompt. Connecting only authenticates the machine; publishing stays explicit and opt-in.
 2. **Transcript selection:** choose all recorded sessions or narrow the project-first tree by project,
    branch, or session. The harness facet filters the same tree without redefining the selection.
+   A project with no parseable remote is labeled with its resolved path suffix, and sessions whose
+   harness recorded no branch group under `(unknown branch)`.
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
 4. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
@@ -122,7 +124,9 @@ See [TUI keyboard shortcuts](TUI.md#config-screen) for its controls.
 In the selection tree, use left/right or `h`/`l` to collapse and expand, `f` to cycle the harness view,
 and `/` to start filtering. Type a query and press `enter` to keep the filter or `esc` to clear it.
 The page and jump keys are shown in the footer. `ctrl+l` moves focus to the preview pane and `ctrl+h`
-returns focus to the tree.
+returns focus to the tree. `space` applies to the highlighted row: a project, a branch, and a session
+row each change the selection at their own grain. [Sessions with no recorded branch](#sessions-with-no-recorded-branch)
+describes what the branchless rows save.
 
 ## Reset and standalone boundaries
 
@@ -167,9 +171,34 @@ physical clone with that value. Peasant does not use a remote or name alone to c
 ambiguous clones. An old selection entry without `clonePaths` stays readable and follows the same
 uniqueness rule until kickstart migrates it from stored clone evidence.
 
-For a project with no Git remote, Peasant uses the resolved path as identity. Kickstart shows the
-project name with a short path when it must distinguish equal names. See the
+For a project with no Git remote, Peasant uses the resolved path as identity. When discovery
+resolves a project name, Kickstart shows that name with a short path when it must distinguish equal
+names. When discovery resolves no name either, the project row shows only the shortest trailing path
+segments that keep it distinct from the other path-identified projects in the same scan; two rows
+that share a tail widen together. The label stays relative, and the saved entry keeps the exact
+absolute clone path. The selection tree never renders the `(unknown project)` placeholder, and
+kickstart never writes it to a saved selection. See the
 [Selection index example](../README.md#selection-index) for the saved YAML shape.
+
+## Sessions with no recorded branch
+
+A harness recording can omit the branch. Kickstart groups those sessions under the `(unknown branch)`
+row of their project. That label is display text only: the matcher compares recorded branch names, so
+the placeholder can never match one.
+
+`space` applies at every row grain:
+
+- On the project row, Peasant saves a project rule for that exact clone path. The rule carries no
+  branch list, so it admits the project's named branches and its branchless sessions together.
+- On the `(unknown branch)` row, Peasant expands the row into one explicit session rule per changed
+  session. A selection adds the session IDs; a clear adds exact session exclusions.
+- On a session row, Peasant saves that one session ID, or an exact session exclusion when the
+  session was already admitted.
+
+Kickstart never saves `(unknown branch)` as a branch name or a branch exclusion. A selected
+`(unknown branch)` row becomes explicit per-session rules in `sessions`; a cleared one becomes
+per-session rules in `exclusions.sessions`. A saved file that still names the placeholder is resolved
+into the explicit session IDs, or exclusions, of the sessions it covers when kickstart loads it.
 
 ## Exact exclusions
 
