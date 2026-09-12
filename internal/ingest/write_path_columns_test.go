@@ -272,3 +272,91 @@ func TestWritePathMirrorsInPagesOf256(t *testing.T) {
 		}
 	}
 }
+
+// TestWritePathInstallsMetadataLast proves the install order: the transcript is
+// renamed into place before the metadata, so a failure on the metadata rename
+// leaves the new transcript beside the OLD metadata, which still names the old
+// transcript hash. The pair is then refused on read by its hash. Were the
+// metadata installed first, the same fault would leave both files old and no
+// mixed pair, so this fixture fails if the order regresses.
+func TestWritePathInstallsMetadataLast(t *testing.T) {
+	ctx := context.Background()
+	mfs := testutil.NewCountingFS(testutil.NewMemFS())
+	git := testutil.DefaultGitResolver()
+	sid, _ := ingest.NewSessionID(testSessionID)
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	sessionDir := ingest.SessionDir(testOutputDir, testutil.TestHostSlug, testSessionID, "")
+	metadataPath := ingest.SessionMetadataPath(testOutputDir, testutil.TestHostSlug, testSessionID, "")
+	transcriptPath := filepath.Join(sessionDir, testSessionID+"--transcript.jsonl")
+
+	// First harvest: install the old pair from an old source.
+	oldContent := []byte(`{"sessionId":"test","type":"user","message":{"role":"user","content":"one"},"timestamp":"2024-02-19T00:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, oldContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldMod := time.Now().Add(-3 * time.Hour)
+	mfs.ModTimes[sourcePath] = oldMod
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, oldMod)
+	meta := makeMinimalMeta(t, testSessionID)
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta}),
+	}
+	first, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Run(ctx); err != nil {
+		t.Fatalf("first harvest: %v", err)
+	}
+	oldMetadata, err := mfs.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("old metadata must exist after the first harvest: %v", err)
+	}
+	oldTranscript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second harvest: the source changed. Plant a rename failure on the metadata
+	// file only. The transcript is installed first, so it lands; the metadata
+	// rename fails and the old metadata stays.
+	newContent := []byte(`{"sessionId":"test","type":"user","message":{"role":"user","content":"two, changed"},"timestamp":"2024-02-19T01:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, newContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	newMod := time.Now().Add(-time.Hour)
+	mfs.ModTimes[sourcePath] = newMod
+	session.ModTime = newMod
+	adapters = map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: makeMinimalMeta(t, testSessionID)}),
+	}
+	mfs.Fail(testutil.FSOpRename, metadataPath, fmt.Errorf("simulated crash before the metadata rename"))
+	second, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Run(ctx); err != nil {
+		t.Fatalf("second harvest: %v", err)
+	}
+
+	// The transcript is the new content; the metadata is still the old file.
+	gotTranscript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotTranscript) == string(oldTranscript) {
+		t.Fatal("the transcript should have been installed (renamed first) before the metadata rename failed")
+	}
+	gotMetadata, err := mfs.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotMetadata) != string(oldMetadata) {
+		t.Fatal("the old metadata must remain after its rename failed; metadata is installed last")
+	}
+	// The mixed pair is refused on read by its hash: the old metadata does not
+	// name the new transcript.
+	if _, err := ingest.ReadManagedPair(mfs, testOutputDir, metadataPath, sid); err == nil {
+		t.Fatal("a transcript-new/metadata-old pair must be refused on read")
+	}
+}
