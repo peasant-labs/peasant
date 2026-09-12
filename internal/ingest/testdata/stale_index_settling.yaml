@@ -1,0 +1,85 @@
+# The ordinary harvest must settle a stale session whose stored row has no
+# artifact identity, and a stale session whose strict parser refuses an
+# unrepresented record.
+#
+# Both were impossible before this fix, and the two causes are independent:
+#
+#   - A row written before the artifact-hash column existed records no pair
+#     identity. The index path refused to parse before checking the pair
+#     (there was nothing to check it against), so the session was re-selected
+#     by every harvest and never re-indexed. The ordinary index write now
+#     establishes the identity from the pair it parsed, in the same commit as
+#     the entries and the input proof.
+#
+#   - The strict parser can refuse a WELL-FORMED record kind this build does
+#     not represent. When that refusal is untyped, the ordinary index path
+#     cannot tell it apart from corruption and stores nothing, so the session
+#     never gains an index hash and the content pass re-attempts it forever.
+#     The refusal is typed now, so the tolerant projection is stored as an
+#     incomplete capture with a terminal code, the producer advances, and the
+#     session reaches a steady state.
+#
+# Each case seeds the exact stored state the real store holds for these rows:
+# a v15 producer, an incomplete legacy_preview_only capture, and an artifact
+# identity that is either absent (the row predates the column) or recorded.
+# The first harvest must index to the current producer, record the input
+# proof, and store the represented entries; the second harvest must read no
+# transcript and warn about nothing. The read count is the parser work the
+# run owes: a run that stopped warning while still re-parsing, or one that
+# stopped working while still warning, is visible in one number or the other.
+required_names:
+  - claude-null-identity-certifies
+  - claude-null-identity-strict-refused
+  - claude-stored-identity-strict-refused
+  - codex-null-identity-strict-refused
+  - cursor-null-identity-strict-refused
+transcripts:
+  claude-certifiable: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
+  claude-unrepresented: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
+    {"type":"agent-setting","setting":"a record kind no shipped build represents"}
+  codex-unrepresented: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"event_msg","payload":{"type":"patch_apply_end"}}
+  cursor-unrepresented: |
+    {"type":"user","role":"user","uuid":"u1","content":[{"type":"text","text":"inspect the retained fixture"},{"type":"image","data":"a content block no shipped build represents"}]}
+cases:
+  - name: claude-null-identity-certifies
+    harness: claude-code
+    transcript: claude-certifiable
+    wantCaptureStatus: complete
+    wantCaptureFormat: full
+    wantEntries: 3
+  - name: claude-null-identity-strict-refused
+    harness: claude-code
+    transcript: claude-unrepresented
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 4
+  - name: claude-stored-identity-strict-refused
+    harness: claude-code
+    transcript: claude-unrepresented
+    storedIdentity: true
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 4
+  - name: codex-null-identity-strict-refused
+    harness: codex
+    transcript: codex-unrepresented
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  - name: cursor-null-identity-strict-refused
+    harness: cursor
+    transcript: cursor-unrepresented
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 3
