@@ -318,10 +318,13 @@ func renderSelectionCapture(
 	if state.Key == selectionStateRemoteLess {
 		// The remote-less project is the first root (a resolved path sorts
 		// before the fixture's synthetic submodule cohort). Spacebar on its row
-		// is the state under review: the checked, path-labeled branchless
-		// project. The validation markers then prove the toggle applied.
+		// is the state under review: the checked, path-labeled project whose
+		// sessions render directly beneath it, with no branch row. Expanding
+		// the row makes those flattened session rows part of the capture, and
+		// the validation markers then prove the toggle applied.
 		program = advanceToMarkers(program, []string{selectionRemoteLessPathSuffix})
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: ' '})
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'l', Text: "l"})
 	}
 	// Preview states navigate by their own required markers, so a fixture that
 	// adds or reorders a project root cannot silently leave a capture on the

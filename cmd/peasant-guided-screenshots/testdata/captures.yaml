@@ -153,9 +153,12 @@ selectionStates:
     # project carries no synthetic Git identity at all. The state applies
     # spacebar on its project row, so the checked box beside the short path
     # label is the evidence: the branchless project is selectable, its label
-    # is the relative resolved suffix, and the placeholder is forbidden.
-    wantContains: ["[✓] projects/notes"]
-    wantAbsent: ["(unknown project)"]
+    # is the relative resolved suffix, and the placeholder is forbidden. Its
+    # sessions are the project's only branch group, so they render directly
+    # under the project row - the capture expands the project to show them and
+    # forbids any branch row for it.
+    wantContains: ["[✓] projects/notes", "[✓] remote-less notes"]
+    wantAbsent: ["(unknown project)", "(unknown branch)"]
 
 ingestProgressStates:
   - key: running

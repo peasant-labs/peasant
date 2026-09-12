@@ -105,8 +105,11 @@ const (
 	// selectionStateRemoteLess is the mounted selection tree over a plain
 	// non-Git project directory whose discovery has no project name, no remote,
 	// and no recorded branch. The project row renders its resolved path suffix,
-	// and the state applies the project toggle so the capture proves the
-	// branchless project can be selected without any placeholder appearing.
+	// and the branchless group is the project's only branch group, so its
+	// sessions render directly under the project row with no branch level. The
+	// state applies the project toggle and expands the row, so the capture
+	// proves the flattened tree and that the project can be selected without
+	// any placeholder appearing.
 	selectionStateRemoteLess selectionState = "remote-less-project"
 )
 
