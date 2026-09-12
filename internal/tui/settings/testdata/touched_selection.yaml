@@ -1,5 +1,5 @@
-expectedCaseCount: 13
-expectedFieldCaseCount: 17
+expectedCaseCount: 14
+expectedFieldCaseCount: 20
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -14,6 +14,7 @@ expectedNames:
   - session-under-denied-branch-fails-closed
   - placeholder-branch-scope-fails-closed
   - unrestricted-project-clear-denies-branchless-by-session
+  - unrestricted-project-select-keeps-broader-allowance
 expectedFieldNames:
   - conflict-toggle-is-a-true-no-op
   - satisfied-select-under-is-a-true-no-op
@@ -27,6 +28,9 @@ expectedFieldNames:
   - placeholder-branch-restore-normalizes-to-explicit-sessions
   - placeholder-branch-restore-edit-keeps-sibling-explicit
   - unrestricted-project-clear-denies-branchless-sessions
+  - unrestricted-project-clear-then-reselect-keeps-siblings
+  - unrestricted-project-clear-then-select-under-keeps-siblings
+  - unrestricted-placeholder-denial-select-under-keeps-siblings
   - invalid-session-id-rolls-back
   - load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
   - grouped-satisfied-select-under-is-a-true-no-op
@@ -319,6 +323,105 @@ fieldCases:
         claude-code:
           exclusions:
             sessions: [11111111-1111-4111-8111-111111111111]
+
+  - name: unrestricted-project-clear-then-reselect-keeps-siblings
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: (unknown branch)
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondProject:
+      projectIdentity: exact-project-b
+      clonePath: /fixtures/b
+      gitRemote: "git@github.com:acme/other.git"
+      branch: main
+      sessionId: 22222222-2222-4222-8222-222222222222
+    keys: [toggle, toggle]
+    expectedSessionState: checked
+    expectedSecondSessionState: checked
+    expectedSetCount: 2
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+
+  - name: unrestricted-project-clear-then-select-under-keeps-siblings
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: (unknown branch)
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondProject:
+      projectIdentity: exact-project-b
+      clonePath: /fixtures/b
+      gitRemote: "git@github.com:acme/other.git"
+      branch: main
+      sessionId: 22222222-2222-4222-8222-222222222222
+    keys: [toggle, select-under]
+    expectedSessionState: checked
+    expectedSecondSessionState: checked
+    expectedSetCount: 2
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+
+  - name: unrestricted-placeholder-denial-select-under-keeps-siblings
+    seedWithoutSave: true
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: ["(unknown branch)"]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: (unknown branch)
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondProject:
+      projectIdentity: exact-project-b
+      clonePath: /fixtures/b
+      gitRemote: "git@github.com:acme/other.git"
+      branch: main
+      sessionId: 22222222-2222-4222-8222-222222222222
+    keys: [select-under]
+    expectedSessionState: checked
+    expectedSecondSessionState: checked
+    expectedSetCount: 2
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code: {}
 
   - name: invalid-session-id-rolls-back
     current:
@@ -788,6 +891,28 @@ cases:
         claude-code:
           exclusions:
             sessions: [11111111-1111-4111-8111-111111111111]
+
+  - name: unrestricted-project-select-keeps-broader-allowance
+    operation: project-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [11111111-1111-4111-8111-111111111111]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      visibleSessions:
+        - {branch: (unknown branch), sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code: {}
 
 derivationCases:
   - name: partially-checked-project-unknown-group-becomes-explicit-sessions

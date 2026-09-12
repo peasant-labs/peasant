@@ -127,26 +127,30 @@ const (
 )
 
 type touchedFieldCase struct {
-	Name                       string                  `yaml:"name"`
-	Current                    config.SelectionConfig  `yaml:"current"`
-	ProjectIdentity            string                  `yaml:"projectIdentity"`
-	Harness                    string                  `yaml:"harness"`
-	LinkedHarness              string                  `yaml:"linkedHarness"`
-	ClonePath                  string                  `yaml:"clonePath"`
-	LinkedClonePath            string                  `yaml:"linkedClonePath"`
-	GitRemote                  string                  `yaml:"gitRemote"`
-	Branch                     string                  `yaml:"branch"`
-	SessionID                  string                  `yaml:"sessionId"`
-	SecondSessionID            string                  `yaml:"secondSessionId"`
-	LinkedSessionID            string                  `yaml:"linkedSessionId"`
-	SecondProject              *touchedSecondProject   `yaml:"secondProject"`
-	Keys                       []touchedFieldKey       `yaml:"keys"`
-	ExpectedSessionState       string                  `yaml:"expectedSessionState"`
-	ExpectedSecondSessionState string                  `yaml:"expectedSecondSessionState"`
-	ExpectedSetCount           int                     `yaml:"expectedSetCount"`
-	ExpectReconcileError       bool                    `yaml:"expectReconcileError"`
-	WithPreview                bool                    `yaml:"withPreview"`
-	Expected                   *config.SelectionConfig `yaml:"expected"`
+	Name                       string                 `yaml:"name"`
+	Current                    config.SelectionConfig `yaml:"current"`
+	ProjectIdentity            string                 `yaml:"projectIdentity"`
+	Harness                    string                 `yaml:"harness"`
+	LinkedHarness              string                 `yaml:"linkedHarness"`
+	ClonePath                  string                 `yaml:"clonePath"`
+	LinkedClonePath            string                 `yaml:"linkedClonePath"`
+	GitRemote                  string                 `yaml:"gitRemote"`
+	Branch                     string                 `yaml:"branch"`
+	SessionID                  string                 `yaml:"sessionId"`
+	SecondSessionID            string                 `yaml:"secondSessionId"`
+	LinkedSessionID            string                 `yaml:"linkedSessionId"`
+	SecondProject              *touchedSecondProject  `yaml:"secondProject"`
+	Keys                       []touchedFieldKey      `yaml:"keys"`
+	ExpectedSessionState       string                 `yaml:"expectedSessionState"`
+	ExpectedSecondSessionState string                 `yaml:"expectedSecondSessionState"`
+	ExpectedSetCount           int                    `yaml:"expectedSetCount"`
+	ExpectReconcileError       bool                   `yaml:"expectReconcileError"`
+	// SeedWithoutSave opens the draft directly from current, without the disk
+	// round trip, for a legacy selection the config loader rejects but a draft
+	// can still hold (a display-placeholder branch exclusion).
+	SeedWithoutSave bool                    `yaml:"seedWithoutSave"`
+	WithPreview     bool                    `yaml:"withPreview"`
+	Expected        *config.SelectionConfig `yaml:"expected"`
 }
 
 // touchedSecondProject adds one more project root to a field case's forest,
@@ -416,8 +420,10 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			configured := config.BaseConfig()
 			configured.Selection = testCase.Current
 			path := t.TempDir() + "/config.yaml"
-			if err := config.SaveAtomic(path, configured); err != nil {
-				t.Fatalf("save field fixture config: %v", err)
+			if !testCase.SeedWithoutSave {
+				if err := config.SaveAtomic(path, configured); err != nil {
+					t.Fatalf("save field fixture config: %v", err)
+				}
 			}
 			draft, err := NewDraft(path, configured)
 			if err != nil {

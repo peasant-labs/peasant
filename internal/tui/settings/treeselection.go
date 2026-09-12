@@ -1742,8 +1742,16 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 	switch scope.kind {
 	case selectionScopeProject:
 		if scope.selected {
-			replacement := projectReplacement(configured.Projects, scope, nil, true)
-			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
+			// A harness that entered unrestricted (no positive projects or
+			// explicit sessions) must stay unrestricted: installing a positive
+			// project rule for the touched project would narrow every sibling
+			// project out of the selection. Only a restricted harness gains a
+			// positive project rule; an unrestricted one just clears the touched
+			// candidates' denials and keeps its other exclusions.
+			if !wasUnrestricted {
+				replacement := projectReplacement(configured.Projects, scope, nil, true)
+				configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
+			}
 			for _, candidate := range candidates {
 				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
 				configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, string(candidate.SessionID))
