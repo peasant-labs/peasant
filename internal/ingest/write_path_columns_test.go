@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -358,5 +359,111 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 	// name the new transcript.
 	if _, err := ingest.ReadManagedPair(mfs, testOutputDir, metadataPath, sid); err == nil {
 		t.Fatal("a transcript-new/metadata-old pair must be refused on read")
+	}
+}
+
+// TestWritePathReplacedSessionSubagentsSurvive proves what replacing a parent
+// session touches and what it leaves alone. The child subagent subtree survives
+// the parent's re-install untouched; a stale parent-owned file left by an older
+// build is pruned with one RemoveAll; and the only read of the saved pair is the
+// single old-metadata read the replacement-header check makes.
+func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
+	ctx := context.Background()
+	mfs := testutil.NewCountingFS(testutil.NewMemFS())
+	git := testutil.DefaultGitResolver()
+	parentIDStr := testSessionID
+	childIDStr := testSessionID2
+	parentID, _ := ingest.NewSessionID(parentIDStr)
+	childID, _ := ingest.NewSessionID(childIDStr)
+	parentSource := fmt.Sprintf("%s/%s.jsonl", testSourceDir, parentIDStr)
+	childSource := fmt.Sprintf("%s/%s.jsonl", testSourceDir, childIDStr)
+
+	writeSource := func(path, content string, mod time.Time) {
+		if err := mfs.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		mfs.ModTimes[path] = mod
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	writeSource(parentSource, `{"sessionId":"p","type":"user","message":{"role":"user","content":"one"},"timestamp":"2024-02-19T00:00:00Z"}`+"\n", old)
+	writeSource(childSource, `{"sessionId":"c","type":"user","message":{"role":"user","content":"child"},"timestamp":"2024-02-19T00:00:00Z"}`+"\n", old)
+
+	parent := makeDiscoveredSession(t, parentIDStr, parentSource, old)
+	child := makeDiscoveredSession(t, childIDStr, childSource, old)
+	child.ParentUUID = &parentID
+	metas := map[ingest.SessionID]*ingest.UnifiedMetadata{parentID: makeMinimalMeta(t, parentIDStr), childID: makeMinimalMeta(t, childIDStr)}
+	// A store-backed harvest: classification is database-first, so the only read
+	// of a saved pair is the replacement-header read that the install itself
+	// makes, which is what this fixture counts.
+	db, err := store.Open(filepath.Join(t.TempDir(), "replaced.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	runHarvest := func(sessions []ingest.DiscoveredSession) {
+		pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+			ingest.HarnessClaudeCode: makeStubAdapter(sessions, metas),
+		}, makePipelineConfig(testOutputDir),
+			ingest.WithStore(db), ingest.WithMetricsStore(db),
+			ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pipeline.Run(ctx); err != nil {
+			t.Fatalf("harvest: %v", err)
+		}
+	}
+
+	// First harvest: install the parent and its subagent child.
+	runHarvest([]ingest.DiscoveredSession{parent, child})
+
+	parentDir := ingest.SessionDir(testOutputDir, testutil.TestHostSlug, parentIDStr, "")
+	parentMetadataPath := ingest.SessionMetadataPath(testOutputDir, testutil.TestHostSlug, parentIDStr, "")
+	childRoot := fmt.Sprintf("%s/%s/%s", parentDir, defaults.DirSubagents.String(), childIDStr)
+	childTranscript := fmt.Sprintf("%s/%s--transcript.jsonl", childRoot, childIDStr)
+	childMetadata := fmt.Sprintf("%s/%s--metadata.json", childRoot, childIDStr)
+	beforeChildTranscript, err := mfs.ReadFile(childTranscript)
+	if err != nil {
+		t.Fatalf("child transcript must exist after the first harvest: %v", err)
+	}
+	beforeChildMetadata, err := mfs.ReadFile(childMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An older build left a parent-owned file this install no longer writes.
+	stalePath := filepath.Join(parentDir, parentIDStr+"--legacy-extra.json")
+	if err := mfs.WriteFile(stalePath, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second harvest: the parent source changed, so the parent is re-installed.
+	writeSource(parentSource, `{"sessionId":"p","type":"user","message":{"role":"user","content":"one, changed"},"timestamp":"2024-02-19T01:00:00Z"}`+"\n", time.Now().Add(-time.Hour))
+	parent.ModTime = time.Now().Add(-time.Hour)
+	mfs.ResetCounts()
+	runHarvest([]ingest.DiscoveredSession{parent, child})
+
+	// The subagent subtree is untouched by the parent replacement.
+	if got, err := mfs.ReadFile(childTranscript); err != nil || string(got) != string(beforeChildTranscript) {
+		t.Fatalf("the subagent transcript must survive the parent replacement; err=%v", err)
+	}
+	if got, err := mfs.ReadFile(childMetadata); err != nil || string(got) != string(beforeChildMetadata) {
+		t.Fatalf("the subagent metadata must survive the parent replacement; err=%v", err)
+	}
+	// The stale parent-owned file is pruned with exactly one RemoveAll.
+	if _, err := mfs.ReadFile(stalePath); err == nil {
+		t.Fatal("the stale parent-owned file must be pruned")
+	}
+	if got := mfs.Count(testutil.FSOpRemoveAll, stalePath); got != 1 {
+		t.Errorf("RemoveAll of the stale member = %d, want 1", got)
+	}
+	// The only read of the parent's saved pair is the single replacement-header
+	// read of the old metadata; the transcript is never read back.
+	if got := mfs.Count(testutil.FSOpReadFile, parentMetadataPath); got != 1 {
+		t.Errorf("old parent metadata reads = %d, want 1 (the replacement-header check)", got)
+	}
+	parentTranscriptPath := filepath.Join(parentDir, parentIDStr+"--transcript.jsonl")
+	if got := mfs.Count(testutil.FSOpReadFile, parentTranscriptPath); got != 0 {
+		t.Errorf("saved parent transcript reads = %d, want 0", got)
 	}
 }
