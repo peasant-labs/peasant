@@ -1,10 +1,14 @@
 # The filesystem operation counts of the write path, measured over a whole
 # store-backed harvest. A store run writes no source-capture marker, so a new
 # session writes exactly its two files. The pair is never read or statted while
-# it is installed and indexed: the worker hands its bytes to the index path in
-# memory.
+# it is installed and indexed, and an unchanged second harvest opens nothing
+# under the output tree: the worker hands its bytes to the index path in memory
+# and classification is database-first. A row whose recorded version this build
+# cannot use is refused straight from the database, still without a file read.
 required_names:
   - new_session_zero_sync
+  - unchanged_session_zero_reads
+  - future_schema_refused_without_read
 cases:
   # One session, no debug files. Two files written and renamed into place, the
   # temp tree and the session dir each walked once, the temp tree removed, and
@@ -18,3 +22,17 @@ cases:
     mkdir_all_min: 1
     pair_read_file: 0
     pair_stat: 0
+  # The second harvest of an unchanged session selects its work from the
+  # database and opens nothing under the output tree: no walk, no pair read, no
+  # session-directory stat. The saved pair is present on disk, so zero reads is
+  # a real claim, not a vacuous one.
+  - name: unchanged_session_zero_reads
+    scenario: unchanged
+    pair_read_file: 0
+    pair_stat: 0
+  # A row whose stored schema is newer than this build is refused straight from
+  # the database version check, with zero reads of the metadata file: the guard
+  # stays armed after the file read moved to a legacy-only fallback.
+  - name: future_schema_refused_without_read
+    scenario: future_schema
+    pair_read_file: 0

@@ -227,6 +227,21 @@ func (p *Pipeline) metadataForRewrite(ctx context.Context, session DiscoveredSes
 			return nil, &AdapterVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: *loc.AdapterVersion, Target: target}
 		}
 	}
+	// Database-first: when the row already reports a supported schema, an
+	// adapter revision this build accepts, and the ingested clock the freshness
+	// decision needs, the metadata file would only re-derive what the row
+	// already carries. Skip reading it and let the caller's DB-first freshness
+	// branch classify from the row. A version skew between the file and its row
+	// is a torn or mixed pair, which is detected on an actual pair read
+	// (harvest index, the content stage, redact), not on this classify. The
+	// file read below stays as the fallback for a legacy row the database
+	// cannot answer for.
+	if loc, ok := p.locationCache[session.SessionID]; ok &&
+		loc.SchemaVersion >= 1 && loc.SchemaVersion <= CurrentSchemaVersion &&
+		loc.AdapterVersion != nil && *loc.AdapterVersion <= p.versionTargets()[session.Harness].AdapterVersion &&
+		loc.IngestedMs != nil && *loc.IngestedMs > 0 {
+		return nil, nil
+	}
 	path, err := p.findMetadataPath(ctx, session)
 	if err != nil {
 		return nil, err
