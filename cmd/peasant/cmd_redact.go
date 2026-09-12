@@ -210,6 +210,15 @@ func BuildRedactCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStderr(), "  error: %s: %s\n", r.SessionID, r.Reason)
 				}
 			}
+			// A failed redact must exit non-zero: no success stamp certifies a
+			// step that did not complete. The per-session diagnostics above name
+			// what failed and how to repair it (a mirror failure after the
+			// rename prints the two-command remedy); SilenceUsage keeps cobra
+			// from appending its usage block over those actionable lines.
+			if errorCount > 0 {
+				cmd.SilenceUsage = true
+				return fmt.Errorf("%d session(s) failed to redact", errorCount)
+			}
 			return nil
 		},
 	}
