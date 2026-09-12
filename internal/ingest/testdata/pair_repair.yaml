@@ -16,7 +16,10 @@ required_names:
   - ordinary-missing-transcript-repairs
   - ordinary-damaged-pair-repairs
   - ordinary-source-unavailable-reports
+  - ordinary-reconstructed-source-repairs
+  - ordinary-transcript-read-fault-not-repaired
   - reindex-missing-metadata-repairs
+  - reindex-damaged-pair-repairs
 native_transcript: |
   {"type":"user","message":{"role":"user","content":"inspect the native fixture"},"uuid":"u1"}
   {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]},"uuid":"a1"}
@@ -39,8 +42,29 @@ cases:
     pairState: missing-metadata-source-unavailable
     discovered: false
     wantRepaired: false
+    wantSourceReport: true
+  # The stored source locator alone is enough to repair a session native
+  # discovery did not offer.
+  - name: ordinary-reconstructed-source-repairs
+    pairState: missing-metadata
+    discovered: false
+    wantRepaired: true
+  # A transcript that cannot be READ is a fault to restore, not damage to
+  # overwrite: the pair and the stale state must survive untouched.
+  - name: ordinary-transcript-read-fault-not-repaired
+    pairState: damaged
+    discovered: true
+    transcriptReadFault: true
+    wantRepaired: false
   - name: reindex-missing-metadata-repairs
     pairState: missing-metadata
+    discovered: true
+    reindex: true
+    wantRepaired: true
+  # A damaged pair whose metadata the tree scan DOES find must still be
+  # repaired from native: retained indexing cannot read it.
+  - name: reindex-damaged-pair-repairs
+    pairState: damaged
     discovered: true
     reindex: true
     wantRepaired: true

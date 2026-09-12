@@ -1,8 +1,10 @@
 package ingest_test
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,17 +27,21 @@ type pairRepairDocument struct {
 }
 
 type pairRepairCase struct {
-	Name         string `yaml:"name"`
-	PairState    string `yaml:"pairState"`
-	Discovered   bool   `yaml:"discovered"`
-	Reindex      bool   `yaml:"reindex"`
-	WantRepaired bool   `yaml:"wantRepaired"`
+	Name                string `yaml:"name"`
+	PairState           string `yaml:"pairState"`
+	Discovered          bool   `yaml:"discovered"`
+	Reindex             bool   `yaml:"reindex"`
+	TranscriptReadFault bool   `yaml:"transcriptReadFault"`
+	WantRepaired        bool   `yaml:"wantRepaired"`
+	WantSourceReport    bool   `yaml:"wantSourceReport"`
 }
 
 func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 	t.Helper()
 	var document pairRepairDocument
-	if err := yaml.Unmarshal(pairRepairFixtureData, &document); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(pairRepairFixtureData))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -65,7 +71,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 	for _, fixture := range document.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
-			fs := testutil.NewMemFS()
+			memfs := testutil.NewMemFS()
 			database, err := store.Open(filepath.Join(t.TempDir(), "pair-repair.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -78,7 +84,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 			nativeTranscript := []byte(document.NativeTranscript)
 			nativePath := "/synthetic/native/" + id.String() + ".jsonl"
-			if err := fs.WriteFile(nativePath, nativeTranscript, 0600); err != nil {
+			if err := memfs.WriteFile(nativePath, nativeTranscript, 0600); err != nil {
 				t.Fatal(err)
 			}
 			meta := makeMinimalMeta(t, id.String())
@@ -97,18 +103,18 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			transcriptPath := filepath.Join(dir, id.String()+"--transcript.jsonl")
 			switch fixture.PairState {
 			case "missing-metadata", "missing-metadata-source-unavailable":
-				if err := fs.WriteFile(transcriptPath, nativeTranscript, 0600); err != nil {
+				if err := memfs.WriteFile(transcriptPath, nativeTranscript, 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "missing-transcript":
-				if err := fs.WriteFile(metadataPath, encoded, 0600); err != nil {
+				if err := memfs.WriteFile(metadataPath, encoded, 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "damaged":
-				if err := fs.WriteFile(metadataPath, encoded, 0600); err != nil {
+				if err := memfs.WriteFile(metadataPath, encoded, 0600); err != nil {
 					t.Fatal(err)
 				}
-				if err := fs.WriteFile(transcriptPath, nativeTranscript, 0600); err != nil {
+				if err := memfs.WriteFile(transcriptPath, nativeTranscript, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -126,31 +132,39 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
 					t.Fatalf("seed pair identity: %+v", results)
 				}
-				if err := fs.WriteFile(transcriptPath, []byte(document.DamagedTranscript), 0600); err != nil {
+				if err := memfs.WriteFile(transcriptPath, []byte(document.DamagedTranscript), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			seedStalePreviewCapture(t, ctx, database, id)
 
-			adapters := map[ingest.Harness]ingest.AdapterFactory{
-				ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
+			var fs ingest.FileSystem = memfs
+			if fixture.TranscriptReadFault {
+				fs = &pairRepairFaultFS{MemFS: memfs, failReadPath: transcriptPath}
 			}
+
+			// Discovery decides what the run is offered; extraction always has
+			// the metadata a native re-ingest needs, so a reconstructed repair
+			// is exercised independently of discovery.
+			var discoveredSessions []ingest.DiscoveredSession
 			if fixture.Discovered {
-				session := ingest.DiscoveredSession{
+				discoveredSessions = []ingest.DiscoveredSession{{
 					SessionID:    id,
 					Harness:      ingest.HarnessClaudeCode,
 					SourcePath:   ingest.ResolvedPath(nativePath),
 					SourceFormat: ingest.SourceFormatJSONL,
-				}
-				fresh := makeMinimalMeta(t, id.String())
-				fresh.ModelHarness = ingest.HarnessClaudeCode
-				fresh.Source.FilePath = nativePath
-				fresh.Source.Format = ingest.SourceFormatJSONL
-				fresh.ContentHash = schema.ComputeTranscriptHash(nativeTranscript)
-				adapters[ingest.HarnessClaudeCode] = makeStubAdapter(
-					[]ingest.DiscoveredSession{session},
+				}}
+			}
+			fresh := makeMinimalMeta(t, id.String())
+			fresh.ModelHarness = ingest.HarnessClaudeCode
+			fresh.Source.FilePath = nativePath
+			fresh.Source.Format = ingest.SourceFormatJSONL
+			fresh.ContentHash = schema.ComputeTranscriptHash(nativeTranscript)
+			adapters := map[ingest.Harness]ingest.AdapterFactory{
+				ingest.HarnessClaudeCode: makeStubAdapter(
+					discoveredSessions,
 					map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh},
-				)
+				),
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex = fixture.Reindex
@@ -172,14 +186,25 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 
 			result := run()
 			if !fixture.WantRepaired {
-				found := false
-				for _, diagnostic := range result.Diagnostics {
-					if strings.Contains(diagnostic.Message, "could not be re-ingested") {
+				if result.Summary.Indexed != 0 {
+					t.Fatalf("a refused repair indexed %d session(s)", result.Summary.Indexed)
+				}
+				if fixture.WantSourceReport {
+					found := false
+					for _, diagnostic := range result.Diagnostics {
+						if diagnostic.ErrorType != "pair_repair_unavailable" ||
+							!strings.Contains(diagnostic.Location, id.String()) ||
+							!strings.Contains(diagnostic.Message, "could not be re-ingested") ||
+							diagnostic.Remediation == "" {
+							continue
+						}
 						found = true
 					}
-				}
-				if !found {
-					t.Fatalf("the unavailable source was not reported: %+v", result.Diagnostics)
+					if !found {
+						t.Fatalf("the unavailable source was not reported with an actionable diagnostic: %+v", result.Diagnostics)
+					}
+				} else if len(result.Diagnostics) == 0 {
+					t.Fatalf("a refused repair reported nothing")
 				}
 				state, err := database.ReadIndexState(ctx, id)
 				if err != nil {
@@ -188,13 +213,24 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				if state == nil || state.IndexerVersion != 15 || state.IndexedInputHash != nil {
 					t.Fatalf("a refused repair changed the stored state: %+v", state)
 				}
+				// The pair must survive untouched. The fault case seeds a
+				// damaged transcript that must still hold the damaged bytes.
+				if fixture.PairState == "damaged" {
+					kept, err := memfs.ReadFile(transcriptPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if string(kept) != document.DamagedTranscript {
+						t.Fatalf("a refused repair overwrote the unreadable transcript: %q", kept)
+					}
+				}
 				return
 			}
 
-			if _, err := fs.Stat(metadataPath); err != nil {
+			if _, err := memfs.Stat(metadataPath); err != nil {
 				t.Fatalf("the metadata sidecar was not restored: %v", err)
 			}
-			restored, err := fs.ReadFile(transcriptPath)
+			restored, err := memfs.ReadFile(transcriptPath)
 			if err != nil {
 				t.Fatalf("the transcript was not restored: %v", err)
 			}
@@ -212,6 +248,19 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			if state.IndexedInputHash == nil || state.ArtifactHash == nil {
 				t.Fatalf("the repair recorded no input proof or artifact identity: %+v", state)
 			}
+			// The recorded identity must name the restored pair, not the
+			// damaged bytes or an earlier copy.
+			restoredMeta, err := memfs.ReadFile(metadataPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			restoredArtifact, err := ingest.NewManagedArtifact(restoredMeta, restored)
+			if err != nil {
+				t.Fatalf("the restored pair is not a valid artifact: %v", err)
+			}
+			if *state.ArtifactHash != restoredArtifact.ArtifactHash {
+				t.Fatalf("stored artifact identity = %s, want the restored pair identity %s", *state.ArtifactHash, restoredArtifact.ArtifactHash)
+			}
 			entries, err := database.ListEntries(ctx, id)
 			if err != nil {
 				t.Fatal(err)
@@ -226,4 +275,18 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pairRepairFaultFS fails reads of one path, modelling a transient I/O fault on
+// an otherwise present pair half.
+type pairRepairFaultFS struct {
+	*testutil.MemFS
+	failReadPath string
+}
+
+func (faults *pairRepairFaultFS) ReadFile(path string) ([]byte, error) {
+	if path == faults.failReadPath {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrPermission}
+	}
+	return faults.MemFS.ReadFile(path)
 }

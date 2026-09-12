@@ -173,11 +173,22 @@ func (p *Pipeline) pairRepairCandidateIDs(ctx context.Context) ([]SessionID, err
 	return ids, nil
 }
 
-// pairNeedsRepair reports whether a stored session's saved pair is missing,
-// unreadable, or no longer matches the identity the row records. It reads only
-// the session's recorded location: no tree is walked and no session this run
-// did not select is touched. A stored metadata or schema this build refuses is
-// not a damaged pair and stays with the existing refusal paths.
+// storedMetadataPath returns the metadata locator the database records for a
+// session, and whether it has one.
+func (p *Pipeline) storedMetadataPath(ctx context.Context, sid SessionID) (string, bool) {
+	hostSlug, parentID, err := p.metricsStore.LookupSessionLocation(ctx, sid)
+	if err != nil || hostSlug == "" {
+		return "", false
+	}
+	return SessionMetadataPath(string(p.config.OutputDir), hostSlug, string(sid), parentID), true
+}
+
+// pairNeedsRepair reports whether a stored session's saved pair is missing or
+// damaged (content that no longer matches the identity the row records). It
+// reads only the session's recorded location: no tree is walked and no session
+// this run did not select is touched. An unreadable file is a fault to restore,
+// not a pair to overwrite, and a stored metadata or schema this build refuses
+// is not damage; both stay with the existing refusal paths.
 func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 	if p.metricsStore == nil {
 		return false
@@ -185,19 +196,15 @@ func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
 		return false
 	}
-	hostSlug, parentID, err := p.metricsStore.LookupSessionLocation(ctx, sid)
-	if err != nil || hostSlug == "" {
+	metadataPath, ok := p.storedMetadataPath(ctx, sid)
+	if !ok {
 		return false // No recorded location: the source-info fallback owns it.
 	}
-	output := string(p.config.OutputDir)
-	metadataPath := SessionMetadataPath(output, hostSlug, string(sid), parentID)
 	data, err := p.fs.ReadFile(metadataPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return true
 		}
-		// An unreadable file is a fault to restore, not a pair to overwrite:
-		// the existing I/O refusal stays in charge.
 		return false
 	}
 	meta, decodeErr := decodeManagedMetadata(data, p.managedRelativePath(metadataPath))
@@ -211,16 +218,17 @@ func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 		return true
 	}
 	transcriptPath := filepath.Join(filepath.Dir(metadataPath), string(sid)+"--transcript."+string(meta.Source.Format))
-	if _, statErr := p.fs.Stat(transcriptPath); statErr != nil {
-		if errors.Is(statErr, fs.ErrNotExist) {
+	transcript, readErr := p.fs.ReadFile(transcriptPath)
+	if readErr != nil {
+		if errors.Is(readErr, fs.ErrNotExist) {
 			return true
 		}
 		return false
 	}
-	// A present pair is compared against the recorded identity: a torn or mixed
-	// pair is repaired from native like a missing one. A row with no recorded
-	// identity is left to the ordinary index write, which establishes the
-	// identity from the pair it parsed.
+	// A present pair is compared against the recorded identity: content that no
+	// longer matches is repaired from native like a missing half. A row with no
+	// recorded identity is left to the ordinary index write, which establishes
+	// the identity from the pair it parsed.
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
 		return false
@@ -229,8 +237,11 @@ func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
 	if stateErr != nil || state == nil || state.ArtifactHash == nil {
 		return false
 	}
-	artifact, artifactErr := readArtifactPair(p.fs, output, metadataPath, sid)
+	artifact, artifactErr := NewManagedArtifact(data, transcript)
 	if artifactErr != nil {
+		if isMetadataCompatibilityError(artifactErr) {
+			return false
+		}
 		return true
 	}
 	return artifact.ArtifactHash != *state.ArtifactHash
@@ -261,10 +272,52 @@ func (p *Pipeline) reportPairRepairUnavailable(sid SessionID, source string) {
 	})
 }
 
+// pairRepairInScope applies the run's explicit harness, session and age filters
+// to a repair candidate. A session whose start is unknown is excluded when
+// --since is set, matching how the index selection treats a reconstructed
+// target without a recorded start.
+func (p *Pipeline) pairRepairInScope(session DiscoveredSession, startMs int64) bool {
+	if !p.includesManagedSession(session.SessionID, session.Harness) {
+		return false
+	}
+	if p.config.Since == nil {
+		return true
+	}
+	if startMs <= 0 && !session.CreatedAt.IsZero() {
+		startMs = session.CreatedAt.UnixMilli()
+	}
+	if startMs <= 0 && !session.ModTime.IsZero() {
+		startMs = session.ModTime.UnixMilli()
+	}
+	return startMs > 0 && !time.UnixMilli(startMs).Before(*p.config.Since)
+}
+
+// cacheRepairLocations makes the repair candidates answerable from the bulk
+// location cache, so the native write path resolves their owned locator with
+// one stat instead of falling through to a whole-tree lookup.
+func (p *Pipeline) cacheRepairLocations(ctx context.Context, ids []SessionID) {
+	if p.store == nil || len(ids) == 0 {
+		return
+	}
+	locations, err := p.store.BulkLookupSessionLocations(ctx, ids)
+	if err != nil {
+		return
+	}
+	if p.locationCache == nil {
+		p.locationCache = locations
+		return
+	}
+	for sid, location := range locations {
+		p.locationCache[sid] = location
+	}
+}
+
 // appendPairRepairWork appends the stored sessions whose saved pair is missing
 // or damaged as native re-ingest work. The repair used to be an explicit
 // `--force --session` action; a session with no usable retained input has
-// nothing to protect, so the ordinary harvest performs it automatically.
+// nothing to protect, so the ordinary harvest performs it automatically. A
+// session already queued for other work is marked for repair in place, so a
+// database-first "unchanged" verdict cannot leave the damaged pair behind.
 func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
 	if p.metricsStore == nil {
 		return entries
@@ -274,37 +327,52 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 		p.reportMetadataRefusal("pair repair selection", err)
 		return entries
 	}
-	queued := make(map[SessionID]bool, len(entries))
-	for _, entry := range entries {
-		queued[entry.Session.SessionID] = true
+	entryIndex := make(map[SessionID]int, len(entries))
+	for i := range entries {
+		entryIndex[entries[i].Session.SessionID] = i
 	}
 	native := make(map[SessionID]DiscoveredSession, len(discovered))
 	for _, session := range discovered {
 		native[session.SessionID] = session
 	}
+	var repaired []SessionID
 	for _, sid := range ids {
-		if queued[sid] || !p.pairNeedsRepair(ctx, sid) {
+		if !p.pairNeedsRepair(ctx, sid) {
+			continue
+		}
+		metadataPath, _ := p.storedMetadataPath(ctx, sid)
+		if i, ok := entryIndex[sid]; ok {
+			// Already queued for other work: carry the repair verdict onto the
+			// existing entry instead of skipping it.
+			entries[i].pairRepair = true
+			entries[i].repairMetadataPath = metadataPath
+			repaired = append(repaired, sid)
 			continue
 		}
 		session, found := native[sid]
 		if !found {
-			reconstructed, _, _ := p.reconstructFromSourceInfo(ctx, sid)
+			reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
 			if reconstructed == nil {
 				p.reportPairRepairUnavailable(sid, "")
 				continue
 			}
 			session = *reconstructed
-		}
-		if !p.includesManagedSession(session.SessionID, session.Harness) {
+			if !p.pairRepairInScope(session, startMs) {
+				continue
+			}
+		} else if !p.pairRepairInScope(session, 0) {
 			continue
 		}
 		if !p.pairSourceAvailable(session) {
 			p.reportPairRepairUnavailable(sid, session.SourcePath.String())
 			continue
 		}
-		entries = append(entries, DiffEntry{Session: session, Status: DiffUpdated, pairRepair: true})
-		queued[sid] = true
+		entries = append(entries, DiffEntry{
+			Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
+		})
+		repaired = append(repaired, sid)
 	}
+	p.cacheRepairLocations(ctx, repaired)
 	return entries
 }
 
@@ -335,7 +403,7 @@ func (p *Pipeline) pairRepairTargets(ctx context.Context, scanned []reindexTarge
 			p.reportPairRepairUnavailable(sid, "")
 			continue
 		}
-		if !p.includesManagedSession(session.SessionID, session.Harness) {
+		if !p.pairRepairInScope(*session, startMs) {
 			continue
 		}
 		targets = append(targets, reindexTarget{
@@ -365,11 +433,23 @@ func (e *adapterAcquisitionError) Unwrap() error { return e.cause }
 // processSession keeps adapter preparation separate from publication failure.
 // Only failed native acquisition permits the last-good retained index fallback.
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
-	metadata, metadataErr := p.metadataForRewrite(ctx, entry.Session)
-	metadataPath, pathErr := p.findMetadataPath(ctx, entry.Session)
+	var metadata *UnifiedMetadata
+	var metadataErr error
+	var metadataPath string
+	var pathErr error
+	if entry.pairRepair {
+		// The repair already resolved the session's owned locator, and a pair
+		// that cannot be read has no retained-first path to prefer. Both
+		// lookups are skipped so a missing sidecar cannot fall through to a
+		// whole-tree lookup.
+		metadataPath = entry.repairMetadataPath
+	} else {
+		metadata, metadataErr = p.metadataForRewrite(ctx, entry.Session)
+		metadataPath, pathErr = p.findMetadataPath(ctx, entry.Session)
+	}
 	// A forced run is an explicit manual refresh and tries native input first;
 	// routine version-driven maintenance prefers sufficient retained input.
-	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !p.config.Force && !p.nativeInputChanged(entry.Session, metadata) {
+	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !p.config.Force && !entry.pairRepair && !p.nativeInputChanged(entry.Session, metadata) {
 		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath)
 		var insufficient *InsufficientRetainedInputError
 		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {

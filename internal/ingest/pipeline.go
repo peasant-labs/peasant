@@ -75,6 +75,10 @@ type DiffEntry struct {
 	// re-ingested from its native source regardless of the database-first
 	// freshness verdict: there is no usable retained input to prefer.
 	pairRepair bool
+	// repairMetadataPath is the owned metadata locator the repair already
+	// resolved. The native write path stops there instead of falling back to a
+	// whole-tree lookup for a sidecar the database already knows is missing.
+	repairMetadataPath string
 }
 
 // PipelineResult summarizes a pipeline run.
@@ -2714,18 +2718,33 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		result.Status = DiffUnchanged
 		return workerResult{result: result}
 	}
-	if _, err := p.metadataForRewrite(ctx, session); err != nil {
-		p.reportMetadataRefusal(string(session.SessionID), err)
-		result.Status = DiffUnchanged
-		return workerResult{result: result}
+	if !entry.pairRepair {
+		if _, err := p.metadataForRewrite(ctx, session); err != nil {
+			p.reportMetadataRefusal(string(session.SessionID), err)
+			result.Status = DiffUnchanged
+			return workerResult{result: result}
+		}
 	}
 	// Refuse to overwrite a pair a newer adapter than this build produced,
 	// before the capture spends any work: the check reads the header of the
 	// existing metadata only. installManagedPair checks it again against the
 	// final destination.
-	metadataPath, pathErr := p.findMetadataPath(ctx, session)
-	if pathErr != nil {
-		return fail(pathErr)
+	var metadataPath string
+	if entry.repairMetadataPath != "" {
+		// The repair already resolved this session's owned locator; stopping at
+		// it keeps the repair database-driven end to end. A missing sidecar is
+		// absent by definition and must not trigger a whole-tree lookup.
+		if _, statErr := p.fs.Stat(entry.repairMetadataPath); statErr == nil {
+			metadataPath = entry.repairMetadataPath
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return fail(managedInputIOError(entry.repairMetadataPath, statErr))
+		}
+	} else {
+		var pathErr error
+		metadataPath, pathErr = p.findMetadataPath(ctx, session)
+		if pathErr != nil {
+			return fail(pathErr)
+		}
 	}
 	if metadataPath != "" {
 		if existing, err := p.fs.ReadFile(metadataPath); err == nil {
@@ -4418,28 +4437,25 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	for _, t := range targeted {
 		if t.pairRepair {
 			// Native re-ingestion is the repair: prefer the session as
-			// discovery saw it (workspace, worktree, commit context), and fall
-			// back to the stored source locator when discovery did not offer
-			// it. A source that is gone is reported, not silently dropped.
-			discovered, found := sourceSessions[t.session.SessionID]
-			if found {
-				entryByID[discovered.SessionID] = DiffEntry{Session: discovered, Status: DiffUpdated, pairRepair: true}
-				inBatch[discovered.SessionID] = true
-				continue
+			// discovery saw it, and fall back to the stored source locator
+			// when discovery did not offer it. A source that is gone is
+			// reported, not silently dropped.
+			if !p.routePairRepair(t, sourceSessions, entryByID, inBatch) {
+				fallbackTargets = append(fallbackTargets, t)
 			}
-			if t.originalSourcePath != "" {
-				if _, statErr := p.fs.Stat(t.originalSourcePath); statErr == nil {
-					session := p.nativeSessionForTarget(t, nil)
-					entryByID[session.SessionID] = DiffEntry{Session: session, Status: DiffUpdated, pairRepair: true}
-					inBatch[session.SessionID] = true
-					continue
-				}
-			}
-			p.reportPairRepairUnavailable(t.session.SessionID, t.originalSourcePath)
-			fallbackTargets = append(fallbackTargets, t)
 			continue
 		}
 		if !t.refreshMetadata && !p.adapterTargetNeedsWork(ctx, t) {
+			// A targeted stale session whose scanned pair is damaged cannot be
+			// indexed from retained input; it is repaired from native like a
+			// missing one. Only selected sessions are checked, so no tree is
+			// walked and no pair is read for work this run does not owe.
+			if p.pairNeedsRepair(ctx, t.session.SessionID) {
+				if !p.routePairRepair(t, sourceSessions, entryByID, inBatch) {
+					fallbackTargets = append(fallbackTargets, t)
+				}
+				continue
+			}
 			// harvest index --force is an explicit manual refresh: use a usable
 			// native capture when the recorded source is still there, and
 			// otherwise warn once and index from the retained input, keeping the
@@ -4713,6 +4729,39 @@ type reindexTarget struct {
 	// the tree scan cannot find it, and it is re-ingested from its native
 	// source without requiring --force.
 	pairRepair bool
+}
+
+// repairMetadataPath names the metadata half of the target's saved pair. It is
+// carried into the repair entry so the native write path stops at the owned
+// locator instead of walking the tree.
+func (t reindexTarget) repairMetadataPath() string {
+	if t.transcriptPath == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(t.transcriptPath), string(t.session.SessionID)+defaults.MetadataSuffix)
+}
+
+// routePairRepair sends one stored session whose pair needs repair to native
+// re-ingestion. The session as discovery saw it is preferred (workspace,
+// worktree, commit context); the stored source locator is the fallback. It
+// reports and returns false when no source is reachable.
+func (p *Pipeline) routePairRepair(target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool) bool {
+	sid := target.session.SessionID
+	if discovered, found := sourceSessions[sid]; found {
+		entryByID[sid] = DiffEntry{Session: discovered, Status: DiffUpdated, pairRepair: true, repairMetadataPath: target.repairMetadataPath()}
+		inBatch[sid] = true
+		return true
+	}
+	if target.originalSourcePath != "" {
+		if _, statErr := p.fs.Stat(target.originalSourcePath); statErr == nil {
+			session := p.nativeSessionForTarget(target, nil)
+			entryByID[sid] = DiffEntry{Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: target.repairMetadataPath()}
+			inBatch[sid] = true
+			return true
+		}
+	}
+	p.reportPairRepairUnavailable(sid, target.originalSourcePath)
+	return false
 }
 
 func (p *Pipeline) reindexFallbackLog(target reindexTarget) IndexLogEntry {
