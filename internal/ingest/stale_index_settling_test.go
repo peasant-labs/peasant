@@ -76,11 +76,13 @@ func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 }
 
 // TestOrdinaryHarvestSettlesStaleIndexSessions drives the ORDINARY harvest
-// (no reindex mode, no native discovery) over one seeded stored row per case
-// and asserts the two-run contract the fixture declares: the first harvest
-// advances the producer, records the input proof, establishes a missing
-// artifact identity and stores the represented entries; the second reads no
-// transcript and reports nothing.
+// (no reindex mode, no native discovery) over one seeded stored row per case.
+// Settling cases assert the two-run contract the fixture declares: the first
+// harvest advances the producer, records the input proof, establishes a
+// missing artifact identity and stores the represented entries; the second
+// reads no transcript and reports nothing. Refused cases assert the opposite
+// for input this build must not settle: the stale state is unchanged and the
+// refusal is reported.
 func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 	document := loadStaleIndexSettlingFixtures(t)
 	for _, fixture := range document.Cases {

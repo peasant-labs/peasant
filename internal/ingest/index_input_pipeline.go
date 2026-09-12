@@ -75,7 +75,8 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	// interrupted earlier write is indistinguishable from a whole one, and
 	// establishing it would make the mixed bytes authoritative. A pair that
 	// carries its checksum was verified by NewManagedArtifact above; a pair
-	// without one is re-saved from its source instead.
+	// without one is refused and must be re-saved from its source through a
+	// forced harvest.
 	if state.ArtifactHash == nil && artifact.Metadata.ContentHash == "" {
 		return nil, fmt.Errorf("capture index input for session %s: the saved metadata records no transcript checksum, so a pair the database never identified cannot establish its artifact; no parser ran or entries changed; run harvest --force --session %s to save the session again from its source", im.session.SessionID, im.session.SessionID)
 	}

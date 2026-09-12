@@ -194,6 +194,10 @@ type SessionEntryWrite struct {
 	// the same commit that records the entries and the input proof, so the
 	// session settles instead of being re-selected forever. A stored identity
 	// is never overwritten by this field: the mirror owns live pair changes.
+	// When establishing a missing identity the caller must verify the consumed
+	// transcript against the pair's non-empty metadata content checksum first;
+	// captureIndexInput performs that validation for ordinary indexing, and a
+	// checksum-less pair must not be established.
 	ArtifactIdentity *string
 }
 

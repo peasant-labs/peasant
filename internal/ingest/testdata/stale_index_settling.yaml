@@ -22,11 +22,14 @@
 # Each case seeds the exact stored state the real store holds for these rows:
 # a v15 producer, an incomplete legacy_preview_only capture, and an artifact
 # identity that is either absent (the row predates the column) or recorded.
-# The first harvest must index to the current producer, record the input
-# proof, and store the represented entries; the second harvest must read no
-# transcript and warn about nothing. The read count is the parser work the
-# run owes: a run that stopped warning while still re-parsing, or one that
+# A settling case's first harvest must index to the current producer, record
+# the input proof, and store the represented entries; its second harvest must
+# read no transcript and warn about nothing. The read count is the parser work
+# the run owes: a run that stopped warning while still re-parsing, or one that
 # stopped working while still warning, is visible in one number or the other.
+# A case marked `refused` asserts the opposite contract for input this build
+# must not settle: the stale state is unchanged (no producer advance, no input
+# proof, no established identity) and the refusal is reported.
 required_names:
   - claude-null-identity-certifies
   - claude-null-identity-strict-refused
@@ -146,7 +149,8 @@ cases:
   # The refusals that must NOT settle. A pair the database never identified
   # and whose metadata records no transcript checksum cannot be established:
   # a mixed transcript-new/metadata-old pair is indistinguishable from a whole
-  # one, so the session stays stale and is re-saved from its source instead.
+  # one, so the session stays stale and must be re-saved from its source
+  # through a forced harvest.
   - name: checksum-less-pair-refuses-establishment
     harness: claude-code
     transcript: claude-certifiable
