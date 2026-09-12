@@ -11,8 +11,8 @@ Dry-run reports that prerequisite instead of checkpointing or ignoring a journal
 It reads a stable checkpointed database into a private in-memory view, so memory
 usage includes the database image. It never creates or migrates the source database.
 
-Legacy configuration migration and pending artifact recovery must be completed by
-a normal command before planning can determine the affected work. Harvest planning
+Legacy configuration migration must be completed by a normal command before
+planning can determine the affected work. Harvest planning
 uses recorded metadata and index evidence; it does not parse full transcripts or
 certify new successful input. Push forecasts additionally require coherent full
 content through the same validation used before upload.

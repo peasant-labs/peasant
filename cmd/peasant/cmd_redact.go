@@ -262,7 +262,7 @@ func processRedactSession(
 	metaBytes, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return redactSessionResult{SessionID: string(sid), Status: RedactStatus.NotIngested, Reason: "not yet ingested — run 'peasant ingest' first"}
+			return redactSessionResult{SessionID: string(sid), Status: RedactStatus.NotIngested, Reason: "not yet ingested: run 'peasant harvest' first"}
 		}
 		return redactSessionResult{SessionID: string(sid), Status: RedactStatus.Error, Reason: fmt.Sprintf("read metadata: %v", err)}
 	}

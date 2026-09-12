@@ -67,24 +67,14 @@ classifiers always see current metrics.
 Profile-only timings include `PREPARE`, `INDEX LOG`, and `AUDIT`. They appear in
 index profile output, but they are not normal progress-renderer stages.
 
-`processSession` commits a validated metadata/transcript pair under a root-confined
-OS advisory lock. Its temporary intent retains only this session's owned file
-backups; child sessions and unrelated files are never removed. The complete
-metadata is the last file commit. The drain loop then takes the same file lock,
-enters the serial database lane, and mirrors metadata, retained statistics,
-associations and actually acquired source evidence in one transaction. Only
-verified success permits a `DerivedAt` refresh and downstream index work. A
-database failure leaves committed files and recovery evidence intact. File
-ownership must always precede database-lane acquisition to avoid lock inversion.
-
-Persistent startup performs recovery and retained-artifact reconciliation before
-either native discovery or retained index selection. Its bounded locator walk
-visits parents before children. A validated file pair with missing/different
-database artifact identity is mirrored using the same temporary intent protocol,
-with metadata-only recovery state and no second transcript copy. An equal
-identity does not rewrite metadata or advance `DerivedAt`. Native cursor and
-adapter evidence are preserved, not inferred during replay. Dry-run does not
-enter this mutating boundary, and logs-only recovery opens no database.
+`processSession` installs the metadata/transcript pair by writing both files to
+a temporary directory and renaming them into place, transcript first and
+metadata last, with no file sync and no lock. The drain loop mirrors metadata,
+retained statistics, associations and acquired source evidence to the database
+in one batched transaction per page, and the index writer commits entries per
+byte budget; the database is the durability point. Nothing at ingest reads a
+saved pair except a session the database itself selected as work. `harvest
+index` is the only reader that walks the saved tree.
 
 Native OpenCode materialization can carry an acquired event sequence from the
 same private read-only SQLite snapshot as its transcript. Targeted session and
