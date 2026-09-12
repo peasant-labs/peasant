@@ -23,8 +23,8 @@ Discovery runs before the interactive screen. The guided flow then presents:
    this prompt. Connecting only authenticates the machine; publishing stays explicit and opt-in.
 2. **Transcript selection:** choose all recorded sessions or narrow the project-first tree by project,
    branch, or session. The harness facet filters the same tree without redefining the selection.
-   A project with no parseable remote is labeled with its resolved path suffix, and sessions whose
-   harness recorded no branch group under `(unknown branch)`.
+   A project with no parseable remote is labeled with its resolved path suffix. A project whose only
+   sessions are branchless shows them directly under the project row.
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
 4. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
@@ -182,18 +182,20 @@ kickstart never writes it to a saved selection. See the
 
 ## Sessions with no recorded branch
 
-A harness recording can omit the branch. Kickstart groups those sessions under the `(unknown branch)`
-row of their project. That label is display text only: the matcher compares recorded branch names, so
-the placeholder can never match one.
+A harness recording can omit the branch. When such sessions are a project's ONLY sessions, the
+selection tree omits the branch level: they render directly under the project row. A project that
+also records a real branch keeps the branch level, and its branchless sessions stay under the
+`(unknown branch)` row beside the named branches. That label is display text only: the matcher
+compares recorded branch names, so the placeholder can never match one.
 
-`space` applies at every row grain:
+`space` applies at every visible row grain:
 
 - On the project row, Peasant saves a project rule for that exact clone path. The rule carries no
   branch list, so it admits the project's named branches and its branchless sessions together.
-- On the `(unknown branch)` row, Peasant expands the row into one explicit session rule per changed
-  session. A selection adds the session IDs; a clear adds exact session exclusions.
 - On a session row, Peasant saves that one session ID, or an exact session exclusion when the
   session was already admitted.
+- On a mixed project's `(unknown branch)` row, Peasant expands the row into one explicit session
+  rule per changed session. A selection adds the session IDs; a clear adds exact session exclusions.
 
 Kickstart never saves `(unknown branch)` as a branch name or a branch exclusion. A selected
 `(unknown branch)` row becomes explicit per-session rules in `sessions`; a cleared one becomes
