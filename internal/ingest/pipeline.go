@@ -4234,6 +4234,13 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 		Harness:          provider,
 		TranscriptOrigin: transcriptOrigin,
 	}
+	// The database records the parent for a subagent. Carrying it keeps the
+	// parent-before-child ordering correct for a session reconstructed without
+	// discovery, including a pair repair.
+	if parentID != "" {
+		parent := SessionID(parentID)
+		session.ParentUUID = &parent
+	}
 	// A session whose metadata file is present is reconstructed by
 	// reconstructFromMetadata; this fallback runs only for a session with no
 	// metadata file. The database-to-file metadata rebuild is dropped: a lost
@@ -4502,8 +4509,12 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		inBatch[sourceSession.SessionID] = true
 	}
 
-	// Identify root vs child entries for the extract batch.
+	// Identify root vs child entries for the extract batch. A parent outside
+	// the batch is committed for staging order before the workers start, so a
+	// child whose parent is already stored can be drained; without it the
+	// child's committed pair waits forever on a parent that never drains.
 	var rootEntries []DiffEntry
+	externalParents := make(map[SessionID]struct{})
 	for _, e := range entryByID {
 		if e.Session.ParentUUID != nil {
 			pid := *e.Session.ParentUUID
@@ -4511,6 +4522,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 				childrenOf[pid] = append(childrenOf[pid], e.Session.SessionID)
 				continue // child: will be processed by its root's goroutine
 			}
+			externalParents[pid] = struct{}{}
 		}
 		rootEntries = append(rootEntries, e)
 	}
@@ -4529,6 +4541,11 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	if len(rootEntries) > 0 {
 		staging := NewStagingBuffer(extractTotal+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
+		for parentID := range externalParents {
+			// The parent is outside this batch; DB insertion already stored it,
+			// so staging commits it for ordering only.
+			staging.Commit(parentID)
+		}
 
 		var reindexWorkersDone atomic.Bool
 		// Reserve every possible per-session reconciliation failure, as in Run.

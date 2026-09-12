@@ -20,6 +20,7 @@ required_names:
   - ordinary-transcript-read-fault-not-repaired
   - reindex-missing-metadata-repairs
   - reindex-damaged-pair-repairs
+  - reindex-nested-missing-metadata-repairs
 native_transcript: |
   {"type":"user","message":{"role":"user","content":"inspect the native fixture"},"uuid":"u1"}
   {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]},"uuid":"a1"}
@@ -67,4 +68,13 @@ cases:
     pairState: damaged
     discovered: true
     reindex: true
+    wantRepaired: true
+  # A subagent whose parent is outside the run scope: the reconstructed
+  # session must carry its recorded parent so the repaired pair is drained,
+  # mirrored and indexed, and lands in the subagents layout.
+  - name: reindex-nested-missing-metadata-repairs
+    pairState: missing-metadata
+    discovered: false
+    reindex: true
+    nested: true
     wantRepaired: true

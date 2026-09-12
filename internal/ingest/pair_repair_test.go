@@ -31,6 +31,7 @@ type pairRepairCase struct {
 	PairState           string `yaml:"pairState"`
 	Discovered          bool   `yaml:"discovered"`
 	Reindex             bool   `yaml:"reindex"`
+	Nested              bool   `yaml:"nested"`
 	TranscriptReadFault bool   `yaml:"transcriptReadFault"`
 	WantRepaired        bool   `yaml:"wantRepaired"`
 	WantSourceReport    bool   `yaml:"wantSourceReport"`
@@ -94,11 +95,23 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			if fixture.PairState == "missing-metadata-source-unavailable" {
 				meta.Source.FilePath = "/synthetic/native/missing-" + id.String() + ".jsonl"
 			}
+			var parentID *ingest.SessionID
+			if fixture.Nested {
+				parent, err := ingest.NewSessionID(testutil.TestSessionUUID2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parentID = &parent
+				meta.ParentUUID = parentID
+			}
 			encoded, err := json.Marshal(meta)
 			if err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String())
+			if parentID != nil {
+				dir = filepath.Join(testOutputDir, testutil.TestHostSlug, string(*parentID), "subagents", id.String())
+			}
 			metadataPath := filepath.Join(dir, id.String()+"--metadata.json")
 			transcriptPath := filepath.Join(dir, id.String()+"--transcript.jsonl")
 			switch fixture.PairState {
@@ -118,7 +131,14 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+			storeEntries := []ingest.StoreEntry{}
+			if parentID != nil {
+				parentMeta := makeMinimalMeta(t, string(*parentID))
+				parentMeta.ModelHarness = ingest.HarnessClaudeCode
+				storeEntries = append(storeEntries, ingest.StoreEntry{Metadata: parentMeta})
+			}
+			storeEntries = append(storeEntries, ingest.StoreEntry{Metadata: meta})
+			if err := database.InsertSessions(ctx, storeEntries); err != nil {
 				t.Fatal(err)
 			}
 			if fixture.PairState == "damaged" {
@@ -160,6 +180,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			fresh.Source.FilePath = nativePath
 			fresh.Source.Format = ingest.SourceFormatJSONL
 			fresh.ContentHash = schema.ComputeTranscriptHash(nativeTranscript)
+			fresh.ParentUUID = parentID
 			adapters := map[ingest.Harness]ingest.AdapterFactory{
 				ingest.HarnessClaudeCode: makeStubAdapter(
 					discoveredSessions,
@@ -229,6 +250,12 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 
 			if _, err := memfs.Stat(metadataPath); err != nil {
 				t.Fatalf("the metadata sidecar was not restored: %v", err)
+			}
+			if parentID != nil {
+				topLevel := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String(), id.String()+"--metadata.json")
+				if _, err := memfs.Stat(topLevel); err == nil {
+					t.Fatal("a nested repair wrote the pair in the top-level layout")
+				}
 			}
 			restored, err := memfs.ReadFile(transcriptPath)
 			if err != nil {
