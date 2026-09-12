@@ -117,6 +117,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc(defaults.RouteWS.String(), s.handleWebSocket)
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
 	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
+	mux.HandleFunc("GET "+defaults.RouteConfigPublish.String(), s.handlePublishConfig)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
 	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
