@@ -348,6 +348,15 @@ func BuildPushCommand() *cobra.Command {
 				// Run the push wizard for interactive confirmation.
 				// Skipped for --dry-run, --json, non-TTY, or --non-interactive/--yes.
 				isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+
+				// The license the user consents to is the same one the pipeline will
+				// apply: the --license flag when set, otherwise the stored push default
+				// (empty means no license). Both the wizard notice and the plain
+				// consent prompt name it, so it is resolved once here.
+				effectiveLicense := config.License(license)
+				if effectiveLicense == "" {
+					effectiveLicense = cfg.Push.License
+				}
 				if !dryRun && !jsonOutput && isTTY && !nonInteractive {
 					wizQuery := push.PushCandidateQuery{
 						Force:          force,
@@ -359,6 +368,7 @@ func BuildPushCommand() *cobra.Command {
 						ctx, db, theme.New(themeModeFor(cfg)),
 						wizQuery, runCfg.Selection,
 						push.NewPublishedTurns(storedSessionEntries(ctx, db), pushRedactor),
+						effectiveLicense,
 					)
 					if wizErr != nil {
 						return wizErr
@@ -422,7 +432,7 @@ func BuildPushCommand() *cobra.Command {
 				// requested public state. Do NOT move the redaction record inside this
 				// condition: the record belongs to every push.
 				if !dryRun && !jsonOutput && effectiveVisibility == config.VisibilityPublic {
-					consented, promptErr := promptPublicConsent(cmd.InOrStdin(), cmd.ErrOrStderr(), nonInteractive, isTTY)
+					consented, promptErr := promptPublicConsent(cmd.InOrStdin(), cmd.ErrOrStderr(), nonInteractive, isTTY, effectiveLicense)
 					if promptErr != nil {
 						return fmt.Errorf("consent prompt: %w", promptErr)
 					}
@@ -1979,6 +1989,7 @@ func runPushWizard(
 	q push.PushCandidateQuery,
 	selection *push.SessionSelection,
 	turns push.PublishedTurnsFunc,
+	license config.License,
 ) ([]string, error) {
 	wizSessions, err := buildPushWizardSessions(ctx, db, q, selection)
 	if err != nil {
@@ -1989,7 +2000,7 @@ func runPushWizard(
 		return []string{}, nil
 	}
 
-	model := push.NewPushWizard(th, wizSessions, turns)
+	model := push.NewPushWizard(th, wizSessions, turns, license)
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -2244,7 +2255,7 @@ func printRedactionReport(w io.Writer, record redactionRecord) {
 // Returns (false, nil) when the user declines or the environment is non-TTY
 // without autoConfirm.
 // Returns (false, err) only on unexpected I/O errors.
-func promptPublicConsent(r io.Reader, w io.Writer, autoConfirm bool, isTTY bool) (bool, error) {
+func promptPublicConsent(r io.Reader, w io.Writer, autoConfirm bool, isTTY bool, license config.License) (bool, error) {
 	if autoConfirm {
 		return true, nil
 	}
@@ -2254,6 +2265,11 @@ func promptPublicConsent(r io.Reader, w io.Writer, autoConfirm bool, isTTY bool)
 		return false, nil
 	}
 
+	// Name the license the push will apply and point at the notice that
+	// states what that grant is, so the consent is informed at the moment it
+	// is given rather than assumed from an earlier flag.
+	fmt.Fprintf(w, "This push will %s. Read the privacy notice at %s before you continue.\n",
+		config.PublishConsentPhrase(license), defaults.CommonsNoticeURL())
 	fmt.Fprint(w, "Continue? [y/N] ")
 	scanner := bufio.NewScanner(r)
 	if !scanner.Scan() {
