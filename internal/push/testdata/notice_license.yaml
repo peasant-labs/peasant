@@ -1,0 +1,17 @@
+# The four license choices a push can apply and the exact consent phrase the
+# wizard notice must render for each. Guarded by a required-NAME manifest in the
+# loader (not a count): a deleted or renamed row fails loudly. "none" is the
+# empty license (no license attached).
+cases:
+  - name: cc-by
+    license: "CC-BY-4.0"
+    phrase: "this push will publish under CC BY 4.0."
+  - name: cc-by-sa
+    license: "CC-BY-SA-4.0"
+    phrase: "this push will publish under CC BY-SA 4.0."
+  - name: cc0
+    license: "CC0-1.0"
+    phrase: "this push will publish under CC0 1.0."
+  - name: none
+    license: ""
+    phrase: "this push will publish without a license."

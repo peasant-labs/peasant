@@ -80,7 +80,7 @@ func mountWizard(sessions []PushWizardSession) PushWizardModel {
 
 // mountWizardSize mounts the wizard into an exact terminal region.
 func mountWizardSize(sessions []PushWizardSession, width, height int) PushWizardModel {
-	m := NewPushWizard(testTheme(), sessions, testPublishedTurns())
+	m := NewPushWizard(testTheme(), sessions, testPublishedTurns(), "")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	return updated.(PushWizardModel)
 }

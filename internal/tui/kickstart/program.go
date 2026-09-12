@@ -13,6 +13,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
@@ -625,6 +626,12 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 		} else {
 			values = append(values, "later publish license: "+string(cfg.Push.License))
 		}
+		// Kickstart publishes nothing; it records a default. Name the phrase a
+		// FUTURE `peasant village push` will show at consent, and point at the
+		// notice that states the grant, so the choice is not made blind.
+		values = append(values,
+			"a later push under this default reads \""+config.PublishConsentPhrase(cfg.Push.License)+
+				"\"; terms: "+defaults.CommonsNoticeURL())
 	}
 	if ctx.HasVisibleField(SectionDestination, FieldVisibility) {
 		values = append(values, "default visibility after a later publish: "+string(cfg.Push.Visibility))

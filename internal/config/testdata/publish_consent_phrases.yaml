@@ -1,0 +1,28 @@
+# The consent-control phrase for each license choice, as a person reads it at
+# the moment they authorize a publish. These are the exact strings the CLI push
+# prompt, the push wizard notice, and the kickstart consent summary render, and
+# the phrasing the privacy notice page quotes.
+#
+# The set is a required-NAME manifest, not a count: each row's `name` is asserted
+# present, so deleting one fails loudly by a missing name rather than a shrunk
+# tally. Coverage is held to the contract: the loader requires the license id of
+# every schema.AllLicenses member to appear here, plus the no-license row, and
+# no others. A license added to the contract therefore fails this fixture until a
+# row (and the switch in publishnotice.go) covers it.
+#
+# license   the wire license id, or "" for the no-license choice.
+# phrase    the exact consent-control phrase (lowercase terminal chrome).
+
+cases:
+  - name: cc-by
+    license: CC-BY-4.0
+    phrase: publish under CC BY 4.0
+  - name: cc-by-sa
+    license: CC-BY-SA-4.0
+    phrase: publish under CC BY-SA 4.0
+  - name: cc0
+    license: CC0-1.0
+    phrase: publish under CC0 1.0
+  - name: no-license
+    license: ""
+    phrase: publish without a license

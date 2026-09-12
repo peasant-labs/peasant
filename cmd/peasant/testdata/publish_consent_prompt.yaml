@@ -1,0 +1,17 @@
+# The four license choices `peasant village push` can apply and the exact
+# sentence the interactive public-consent prompt must print for each, before the
+# "Continue?" line. Guarded by a required-NAME manifest (not a count). "none" is
+# the empty license.
+cases:
+  - name: cc-by
+    license: "CC-BY-4.0"
+    sentence: "This push will publish under CC BY 4.0."
+  - name: cc-by-sa
+    license: "CC-BY-SA-4.0"
+    sentence: "This push will publish under CC BY-SA 4.0."
+  - name: cc0
+    license: "CC0-1.0"
+    sentence: "This push will publish under CC0 1.0."
+  - name: none
+    license: ""
+    sentence: "This push will publish without a license."

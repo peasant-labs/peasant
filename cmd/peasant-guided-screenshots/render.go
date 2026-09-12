@@ -423,7 +423,9 @@ func renderPushCapture(fixture pushFixture, capture pushCaptureFixture) (string,
 	if err != nil {
 		return "", fmt.Errorf("render push capture %q: %w", capture.Name, err)
 	}
-	model := push.NewPushWizard(captureThemeValue(capture.Theme), pushWizardSessions(fixture), turns)
+	// A representative license so the consent screen shows the license line the
+	// real wizard renders; CC BY matches the wizard render goldens.
+	model := push.NewPushWizard(captureThemeValue(capture.Theme), pushWizardSessions(fixture), turns, config.LicenseCCBY)
 	current := sendPushMessage(model, tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	switch capture.State {
 	case pushStateStart:
