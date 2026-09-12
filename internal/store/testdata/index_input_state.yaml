@@ -60,6 +60,9 @@ requiredNames:
   - claimed-identity-contradicts-stored-refused
   - invalid-claimed-identity-refused
   - claimed-identity-without-proof-establishes
+  - claimed-identity-stale-after-snapshot
+  - claimed-identity-identity-write-failure
+  - claimed-identity-input-stamp-failure
   - content-status-changed
   - publication-binding-changed
 cases:
@@ -140,6 +143,17 @@ cases:
   - {name: claimed-identity-contradicts-stored-refused, claimIdentity: true, wantError: true}
   - {name: invalid-claimed-identity-refused, noArtifact: true, claimIdentity: true, invalidClaim: true, wantError: true}
   - {name: claimed-identity-without-proof-establishes, noArtifact: true, noProof: true, claimIdentity: true}
+  # The established identity is written inside the same savepoint as the
+  # entries and the input proof: a concurrent identity established after the
+  # snapshot is stale work, and a failure of either update rolls the whole
+  # write back, identity included.
+  - name: claimed-identity-stale-after-snapshot
+    noArtifact: true
+    claimIdentity: true
+    mutationSQL: UPDATE sessions SET artifact_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - {name: claimed-identity-identity-write-failure, noArtifact: true, claimIdentity: true, failColumn: artifact_hash, wantError: true}
+  - {name: claimed-identity-input-stamp-failure, noArtifact: true, claimIdentity: true, failColumn: indexed_input_hash, wantError: true}
   # The two fields the conditional write added. Each isolates its own field:
   # the content case leaves every revision untouched, and the binding case
   # keeps PublicationCaptureRevision at 1 before and after, so only

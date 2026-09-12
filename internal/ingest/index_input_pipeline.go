@@ -70,6 +70,15 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	if state.ArtifactHash != nil && *state.ArtifactHash != artifact.ArtifactHash {
 		return nil, fmt.Errorf("capture index input for session %s: the saved pair does not match the stored artifact identity; no parser ran or entries changed; run harvest to save the session again before retrying indexing", im.session.SessionID)
 	}
+	// Establishing a missing identity needs the pair's own transcript
+	// checksum. Without one, a transcript-new/metadata-old pair left by an
+	// interrupted earlier write is indistinguishable from a whole one, and
+	// establishing it would make the mixed bytes authoritative. A pair that
+	// carries its checksum was verified by NewManagedArtifact above; a pair
+	// without one is re-saved from its source instead.
+	if state.ArtifactHash == nil && artifact.Metadata.ContentHash == "" {
+		return nil, fmt.Errorf("capture index input for session %s: the saved metadata records no transcript checksum, so a pair the database never identified cannot establish its artifact; no parser ran or entries changed; run harvest --force --session %s to save the session again from its source", im.session.SessionID, im.session.SessionID)
+	}
 	if err := p.checkIndexProducer(state); err != nil {
 		return nil, err
 	}

@@ -29,6 +29,8 @@ type staleIndexSettlingFixture struct {
 	Harness           string `yaml:"harness"`
 	Transcript        string `yaml:"transcript"`
 	StoredIdentity    bool   `yaml:"storedIdentity"`
+	OmitContentHash   bool   `yaml:"omitContentHash"`
+	Refused           bool   `yaml:"refused"`
 	WantCaptureStatus string `yaml:"wantCaptureStatus"`
 	WantCaptureFormat string `yaml:"wantCaptureFormat"`
 	WantFailureCode   string `yaml:"wantFailureCode"`
@@ -48,6 +50,13 @@ func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 		}
 		if _, ok := document.Transcripts[fixture.Transcript]; !ok {
 			t.Fatalf("stale index settling fixture %s names unknown transcript %q", fixture.Name, fixture.Transcript)
+		}
+		if fixture.Refused {
+			if fixture.WantCaptureStatus != "" || fixture.WantCaptureFormat != "" || fixture.WantFailureCode != "" || fixture.WantEntries != 0 {
+				t.Fatalf("fixture %s is refused and must not declare a settled outcome", fixture.Name)
+			}
+			names[fixture.Name] = true
+			continue
 		}
 		if _, err := ingest.NewContentCaptureStatus(fixture.WantCaptureStatus); err != nil {
 			t.Fatalf("fixture %s: %v", fixture.Name, err)
@@ -95,7 +104,9 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 			transcript := []byte(document.Transcripts[fixture.Transcript])
 			meta := makeMinimalMeta(t, id.String())
 			meta.ModelHarness = harness
-			meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+			if !fixture.OmitContentHash {
+				meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+			}
 			dir := filepath.Join(testOutputDir, testutil.TestHostSlug, id.String())
 			path := filepath.Join(dir, id.String()+"--transcript.jsonl")
 			if err := fs.WriteFile(path, transcript, 0600); err != nil {
@@ -144,6 +155,25 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 			}
 
 			first := run()
+			if fixture.Refused {
+				// The refusal contract: nothing is indexed, the stale state is
+				// untouched (no producer advance, no input proof, no established
+				// artifact identity), and the user is told why.
+				if first.Summary.Indexed != 0 {
+					t.Fatalf("a corrupt or unidentifiable session was indexed; diagnostics: %+v", first.Diagnostics)
+				}
+				state, err := database.ReadIndexState(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if state == nil || state.IndexerVersion != 15 || state.IndexedInputHash != nil || state.ArtifactHash != nil {
+					t.Fatalf("refused session changed its stored index state: %+v", state)
+				}
+				if namesSession(first, id) == 0 {
+					t.Fatalf("the refusal was not reported: %+v", first.Diagnostics)
+				}
+				return
+			}
 			if first.Summary.Indexed == 0 {
 				t.Fatalf("the first harvest indexed nothing; diagnostics: %+v", first.Diagnostics)
 			}

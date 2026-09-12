@@ -33,6 +33,13 @@ required_names:
   - claude-stored-identity-strict-refused
   - codex-null-identity-strict-refused
   - cursor-null-identity-strict-refused
+  - claude-control-record-content-settles
+  - codex-unknown-record-settles
+  - codex-unknown-response-item-settles
+  - codex-message-block-settles
+  - checksum-less-pair-refuses-establishment
+  - codex-empty-event-discriminator-refused
+  - claude-corruption-after-refusal-refused
 transcripts:
   claude-certifiable: |
     {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
@@ -47,6 +54,28 @@ transcripts:
     {"type":"event_msg","payload":{"type":"patch_apply_end"}}
   cursor-unrepresented: |
     {"type":"user","role":"user","uuid":"u1","content":[{"type":"text","text":"inspect the retained fixture"},{"type":"image","data":"a content block no shipped build represents"}]}
+  claude-control-record-content: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
+    {"type":"progress","message":{"content":"a control record carrying unrepresented content"}}
+  claude-corruption-after-refusal: |
+    {"type":"agent-setting","setting":"a record kind no shipped build represents"}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"missing-id","input":{"path":"."}}]}}
+  codex-unknown-record: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"future_record","payload":{"payload":"a record kind no shipped build represents"}}
+  codex-unknown-response-item: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"response_item","payload":{"type":"future_item"}}
+  codex-message-block: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"image","data":"a content block no shipped build represents"}]}}
+  codex-empty-event: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"event_msg","payload":{}}
 cases:
   - name: claude-null-identity-certifies
     harness: claude-code
@@ -83,3 +112,55 @@ cases:
     wantCaptureFormat: preview_only
     wantFailureCode: strict_capture_refused
     wantEntries: 3
+  # The same steady state for the refusal branches beyond the first observed
+  # one: a Claude control record carrying content, and Codex unknown top-level
+  # records, unknown response items and unrepresented message blocks.
+  - name: claude-control-record-content-settles
+    harness: claude-code
+    transcript: claude-control-record-content
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 4
+  - name: codex-unknown-record-settles
+    harness: codex
+    transcript: codex-unknown-record
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  - name: codex-unknown-response-item-settles
+    harness: codex
+    transcript: codex-unknown-response-item
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  - name: codex-message-block-settles
+    harness: codex
+    transcript: codex-message-block
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  # The refusals that must NOT settle. A pair the database never identified
+  # and whose metadata records no transcript checksum cannot be established:
+  # a mixed transcript-new/metadata-old pair is indistinguishable from a whole
+  # one, so the session stays stale and is re-saved from its source instead.
+  - name: checksum-less-pair-refuses-establishment
+    harness: claude-code
+    transcript: claude-certifiable
+    omitContentHash: true
+    refused: true
+  # A missing discriminator is corruption, not vocabulary: it must stay a
+  # visible error instead of becoming a terminal refusal.
+  - name: codex-empty-event-discriminator-refused
+    harness: codex
+    transcript: codex-empty-event
+    refused: true
+  # Corruption AFTER an unrepresented record wins: one refusal must not mask a
+  # malformed record later in the same transcript.
+  - name: claude-corruption-after-refusal-refused
+    harness: claude-code
+    transcript: claude-corruption-after-refusal
+    refused: true

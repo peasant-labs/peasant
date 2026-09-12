@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/peasant-labs/schema"
@@ -61,11 +62,21 @@ func captureTranscriptFile(ctx context.Context, fs FileSystem, idx Authoritative
 
 // validateCaptureJSONL examines every record before invoking the compatibility
 // assembly kernel; no partial parse escapes this boundary.
+//
+// A well-formed record kind this build does not represent is a REFUSAL that a
+// later build might lift; any other validation failure is corruption the user
+// can act on. One refusal must not MASK corruption later in the file, so
+// validation continues past it: an ordinary error wins wherever it appears,
+// and the first refusal is returned only when the whole transcript is
+// otherwise valid. A transcript whose records are all unrepresented still
+// refuses, so nothing is silently certified from an empty projection.
 func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data []byte, validate func([]byte) (*IgnoredSourceRecord, error)) ([]IgnoredSourceRecord, error) {
 	if session.ContentOmitted {
 		return nil, captureFailure(session, 0, fmt.Errorf("the retained transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
 	}
 	var ignored []IgnoredSourceRecord
+	var refusal *UnrepresentedRecordError
+	refusalLine := 0
 	for line := 1; len(data) > 0; line++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -84,11 +95,21 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 		}
 		record, err := validate(raw)
 		if err != nil {
+			var unrepresented *UnrepresentedRecordError
+			if errors.As(err, &unrepresented) {
+				if refusal == nil {
+					refusal, refusalLine = unrepresented, line
+				}
+				continue
+			}
 			return nil, captureFailure(session, line, err)
 		}
 		if record != nil {
 			ignored = append(ignored, *record)
 		}
+	}
+	if refusal != nil {
+		return nil, captureFailure(session, refusalLine, refusal)
 	}
 	return ignored, nil
 }
@@ -158,6 +179,9 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 				return err
 			}
 		default:
+			if block.Type == "" {
+				return fmt.Errorf("content block lacks its type")
+			}
 			return &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
 		}
 	}
@@ -216,6 +240,11 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			}
 			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
 		default:
+			if line.Type == "" {
+				// A missing discriminator is corruption, not vocabulary:
+				// settling it would hide an actionable malformed record.
+				return nil, fmt.Errorf("record lacks its type")
+			}
 			// A well-formed record kind this build does not represent. The
 			// refusal is typed so the ordinary index path can store the
 			// represented entries as an incomplete capture with a terminal
@@ -308,6 +337,9 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 				mirrors = append(mirrors, text)
 				return &IgnoredSourceRecord{Kind: event.Type, Reason: IgnoredRecordMirror}, nil
 			default:
+				if event.Type == "" {
+					return nil, fmt.Errorf("event message lacks its type")
+				}
 				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: event.Type}
 			}
 		case codexTypeResponse:
@@ -329,6 +361,9 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 					}
 				}
 				for _, block := range payload.Content {
+					if block.Type == "" {
+						return nil, fmt.Errorf("message block lacks its type")
+					}
 					if block.Type != "input_text" && block.Type != "output_text" {
 						return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
@@ -346,11 +381,17 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 				}
 			case codexResponseReasoning:
 				for _, block := range payload.Summary {
+					if block.Type == "" {
+						return nil, fmt.Errorf("reasoning summary block lacks its type")
+					}
 					if block.Type != "summary_text" {
 						return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
 				}
 				for _, block := range payload.Content {
+					if block.Type == "" {
+						return nil, fmt.Errorf("reasoning block lacks its type")
+					}
 					if block.Type != "reasoning_text" && block.Type != "text" {
 						return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
@@ -366,6 +407,9 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			}
 			return nil, nil
 		default:
+			if env.Type == "" {
+				return nil, fmt.Errorf("rollout record lacks its type")
+			}
 			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
 		}
 	})
