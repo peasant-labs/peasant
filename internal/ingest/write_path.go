@@ -307,7 +307,9 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		for _, result := range mirror.MirrorArtifacts(ctx, page) {
 			if result.Err != nil {
 				p.reportMetadataRefusal(string(result.SessionID), fmt.Errorf("record saved session %s from its files: %w", result.SessionID, result.Err))
+				continue
 			}
+			p.rebuiltFromFiles++
 		}
 		page = page[:0]
 	}
@@ -322,9 +324,6 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		if err != nil {
 			continue
 		}
-		if state != nil && state.ArtifactHash != nil {
-			continue // Already identified; a disagreeing hash is not overwritten here.
-		}
 		// Skip a session this build would refuse: a stored schema or producer
 		// newer than this build is left untouched and reported by the selection,
 		// not read or mirror-refused here (which would duplicate the diagnostic).
@@ -335,9 +334,38 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			continue
 		}
 		metadataPath := filepath.Join(filepath.Dir(target.transcriptPath), string(target.session.SessionID)+defaults.MetadataSuffix)
+		if state != nil && state.ArtifactHash != nil {
+			// The row already identifies a pair. A plain harvest index never
+			// reads it again; only the full rebuild pass does, and only to
+			// report a saved copy whose bytes no longer match the row. Such a
+			// pair is NEVER mirrored: overwriting the database with the file's
+			// backup after a power loss would fire the identity trigger. The
+			// database still serves the session; the file is what needs repair.
+			if !p.config.RebuildAll {
+				continue
+			}
+			artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
+			if err != nil {
+				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
+				continue
+			}
+			if artifact.ArtifactHash != *state.ArtifactHash {
+				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
+			}
+			continue
+		}
 		artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
 		if err != nil {
-			continue // A torn or unreadable pair is reported by the ordinary readers.
+			// A torn or unreadable pair with no row cannot be recorded. The
+			// rebuild names it as a skipped saved copy; a plain index leaves it
+			// to the ordinary readers.
+			if p.config.RebuildAll {
+				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
+			}
+			continue
 		}
 		page = append(page, ArtifactMirrorRequest{Artifact: artifact})
 		if len(page) == MirrorPageSize {

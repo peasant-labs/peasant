@@ -1,0 +1,35 @@
+# What `peasant harvest index --all` rebuilds from the saved files, and when the
+# empty-database hint fires. The rebuild records rows the database does not yet
+# hold and, as the one full hash pass over the tree, reports a saved copy whose
+# bytes no longer match its row without ever overwriting the row from the file.
+required_names:
+  - rebuild_empty_database
+  - rebuild_reports_stale_pair_keeps_row
+  - empty_database_hint_only_with_tree
+cases:
+  # An empty database beside a saved tree that holds a parent and its child.
+  # The rebuild records both rows (parents before children, so the child's
+  # mirror is not refused) and the same run indexes both.
+  - name: rebuild_empty_database
+    kind: rebuild
+    seed_row: false
+    change_pair: false
+    with_child: true
+    want_rebuilt: 2
+    want_skipped: 0
+    want_indexed: 2
+  # A row already identifies the session (hash H1) but the saved pair on disk
+  # now hashes to H2. The rebuild reports the saved copy as damaged and stale
+  # and skips it; the row and its entries are left exactly as they were.
+  - name: rebuild_reports_stale_pair_keeps_row
+    kind: rebuild
+    seed_row: true
+    change_pair: true
+    with_child: false
+    want_rebuilt: 0
+    want_skipped: 1
+    want_indexed: 0
+  # The hint that points a user with a saved tree but an empty database at the
+  # rebuild fires only when the tree holds sessions; a fresh install has none.
+  - name: empty_database_hint_only_with_tree
+    kind: hint

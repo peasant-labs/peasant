@@ -381,6 +381,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		StalenessThreshold: staleness,
 		DryRun:             flags.dryRun,
 		Reindex:            reindex,
+		RebuildAll:         reindex && flags.all,
 		Harness:            indexHarness,
 		Parallelism:        0, // 0 = auto (runtime.NumCPU())
 		IndexProfiler:      indexProfiler,
@@ -533,6 +534,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
 		sources: sources, customPatternCount: customPatternCount,
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
+		rebuildAll: reindex && flags.all,
 	})
 }
 
@@ -544,6 +546,9 @@ type harvestOutputOptions struct {
 	customPatternCount int
 	selectionConflicts *selectionConflictRecorder
 	indexProfiler      *ingest.IndexProfiler
+	// rebuildAll is set for `harvest index --all`: the run prints the
+	// not-restored summary line at the end.
+	rebuildAll bool
 }
 
 // outputHarvest consumes only the committed execution, after terminal and logger
@@ -584,6 +589,17 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
 	if remaining := result.Summary.ContentCaptureRemaining; remaining > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d sessions do not have their full text stored yet. The next harvest continues this. Run `peasant harvest index` to finish it now.\n", remaining)
+	}
+	if options.rebuildAll {
+		skipped := "0 saved copies were damaged or stale and skipped."
+		if len(result.Summary.RebuildSkipped) > 0 {
+			ids := make([]string, len(result.Summary.RebuildSkipped))
+			for i, sid := range result.Summary.RebuildSkipped {
+				ids[i] = string(sid)
+			}
+			skipped = fmt.Sprintf("%d saved copies were damaged or stale and skipped: %s.", len(ids), strings.Join(ids, ", "))
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, Village publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
 	}
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.

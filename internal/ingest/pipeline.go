@@ -116,6 +116,13 @@ type PipelineSummary struct {
 	// full stored text after this run stopped the content pass on its budget.
 	// Zero when the pass finished. The next harvest continues without a cursor.
 	ContentCaptureRemaining int `json:"content_remaining,omitempty"`
+	// RebuiltFromFiles is how many sessions `harvest index --all` recorded in
+	// the database from their saved files this run (rows that were absent).
+	RebuiltFromFiles int `json:"rebuilt_from_files,omitempty"`
+	// RebuildSkipped names the sessions whose saved copy was damaged or stale
+	// and was skipped by the rebuild: a torn pair, or a valid pair whose bytes
+	// no longer match the recorded row. Their database rows are left untouched.
+	RebuildSkipped []SessionID `json:"rebuild_skipped,omitempty"`
 }
 
 // SessionResult records the outcome of processing a single session.
@@ -140,6 +147,13 @@ type PipelineConfig struct {
 	StalenessThreshold time.Duration
 	DryRun             bool
 	Reindex            bool // scan peasant-sync output and re-process sessions with stale or missing index data
+	// RebuildAll is set by `harvest index --all`: the whole-tree rebuild. It
+	// records saved pairs the database does not yet identify, and it is the one
+	// by-design full hash pass over the tree, so it also reads each already
+	// recorded pair to report a saved copy whose bytes no longer match its row.
+	// A plain `harvest index` (RebuildAll false) records absent rows only and
+	// never reads an already recorded pair.
+	RebuildAll bool
 	// Harness restricts stored-session maintenance independently from discovery
 	// source paths. Nil allows all registered harnesses.
 	Harness *Harness
@@ -251,6 +265,11 @@ type Pipeline struct {
 	// contentCaptureRemaining is how many in-scope sessions still lack a full
 	// capture after a budget-stopped run; zero otherwise.
 	contentCaptureRemaining int
+	// rebuiltFromFiles counts the rows `harvest index --all` recorded from saved
+	// files this run; rebuildStale names the saved copies it skipped as damaged
+	// or stale. Both are reported once at the end of the rebuild.
+	rebuiltFromFiles int
+	rebuildStale     []SessionID
 
 	// locationCache is pre-populated before the DIFF stage via BulkLookupSessionLocations.
 	// It maps SessionID → SessionLocation (host_slug + parent_id) for sessions already
@@ -3779,6 +3798,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if p.contentCaptureStoppedOnBudget {
 		pipelineResult.Summary.ContentCaptureRemaining = p.contentCaptureRemaining
 	}
+	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
+	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
 			pipelineResult.Summary.Errors++
