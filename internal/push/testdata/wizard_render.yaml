@@ -137,6 +137,11 @@ assertions:
       # scroll (shift+g / G, "go to bottom") here rather than required of
       # the top-of-page capture above.
       - "deselect it"
+      # The license this push applies and the notice that states the grant,
+      # named at the last screen before the confirm. This case renders with
+      # the CC BY default, so the phrase is fixed here.
+      - "this push will publish under CC BY 4.0."
+      - "read the privacy notice: https://village.peasantlabs.org/privacy"
     wantMissing:
       - "No raw data will leave your machine"
   - state: receipt
