@@ -1,5 +1,5 @@
-expectedCaseCount: 12
-expectedFieldCaseCount: 16
+expectedCaseCount: 13
+expectedFieldCaseCount: 17
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -13,6 +13,7 @@ expectedNames:
   - project-select-clears-visible-denies
   - session-under-denied-branch-fails-closed
   - placeholder-branch-scope-fails-closed
+  - unrestricted-project-clear-denies-branchless-by-session
 expectedFieldNames:
   - conflict-toggle-is-a-true-no-op
   - satisfied-select-under-is-a-true-no-op
@@ -25,6 +26,7 @@ expectedFieldNames:
   - unknown-branch-session-clear-uses-session-exclusion
   - placeholder-branch-restore-normalizes-to-explicit-sessions
   - placeholder-branch-restore-edit-keeps-sibling-explicit
+  - unrestricted-project-clear-denies-branchless-sessions
   - invalid-session-id-rolls-back
   - load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
   - grouped-satisfied-select-under-is-a-true-no-op
@@ -37,7 +39,7 @@ expectedDerivationNames:
   - checked-named-and-unknown-groups-become-branch-plus-explicit-sessions
   - unchecked-unknown-group-contributes-no-branch
   - harness-first-placeholder-worktree-becomes-explicit-sessions
-expectedSanitizeCaseCount: 6
+expectedSanitizeCaseCount: 9
 expectedSanitizeNames:
   - placeholder-only-project-selects-its-unknown-sessions
   - named-branch-survives-while-unknown-sessions-become-explicit
@@ -45,6 +47,9 @@ expectedSanitizeNames:
   - placeholder-branch-exclusion-becomes-session-exclusion
   - placeholder-entry-without-matching-project-is-dropped
   - selection-without-placeholder-is-unchanged
+  - absent-placeholder-project-with-surviving-exclusion-drops-harness
+  - unrestricted-placeholder-exclusion-resolves-branchless-denials
+  - unrestricted-placeholder-exclusion-keeps-surviving-denial
 fieldCases:
   - name: conflict-toggle-is-a-true-no-op
     current:
@@ -283,6 +288,37 @@ fieldCases:
       harnesses:
         claude-code:
           sessions: [11111111-1111-4111-8111-111111111111]
+
+  - name: unrestricted-project-clear-denies-branchless-sessions
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code: {}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: (unknown branch)
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondProject:
+      projectIdentity: exact-project-b
+      clonePath: /fixtures/b
+      gitRemote: "git@github.com:acme/other.git"
+      branch: main
+      sessionId: 22222222-2222-4222-8222-222222222222
+    keys: [toggle]
+    expectedSessionState: unchecked
+    expectedSecondSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [11111111-1111-4111-8111-111111111111]
 
   - name: invalid-session-id-rolls-back
     current:
@@ -731,6 +767,28 @@ cases:
         - {branch: (unknown branch), sessionId: 11111111-1111-4111-8111-111111111111}
     expectErrorContains: unknown-branch display placeholder
 
+  - name: unrestricted-project-clear-denies-branchless-by-session
+    operation: project-off
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code: {}
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      visibleSessions:
+        - {branch: (unknown branch), sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [11111111-1111-4111-8111-111111111111]
+
 derivationCases:
   - name: partially-checked-project-unknown-group-becomes-explicit-sessions
     harness: claude-code
@@ -1011,3 +1069,92 @@ sanitizeCases:
         claude-code:
           projects:
             - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+
+  - name: absent-placeholder-project-with-surviving-exclusion-drops-harness
+    forest:
+      harness: claude-code
+      projectIdentity: exact-project-a
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      branches:
+        - branch: (unknown branch)
+          sessions:
+            - {id: 11111111-1111-4111-8111-111111111111, state: checked}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/absent.git", clonePaths: [/fixtures/absent], branches: ["(unknown branch)"]}
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+    expectChanged: true
+    expectUnchecked: [11111111-1111-4111-8111-111111111111]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+
+  - name: unrestricted-placeholder-exclusion-resolves-branchless-denials
+    forest:
+      harness: claude-code
+      projectIdentity: exact-project-a
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      branches:
+        - branch: (unknown branch)
+          sessions:
+            - {id: 11111111-1111-4111-8111-111111111111, state: checked}
+        - branch: main
+          sessions:
+            - {id: 22222222-2222-4222-8222-222222222222, state: checked}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: ["(unknown branch)"]}
+    expectChanged: true
+    expectChecked: [22222222-2222-4222-8222-222222222222]
+    expectUnchecked: [11111111-1111-4111-8111-111111111111]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [11111111-1111-4111-8111-111111111111]
+
+  - name: unrestricted-placeholder-exclusion-keeps-surviving-denial
+    forest:
+      harness: claude-code
+      projectIdentity: exact-project-a
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      branches:
+        - branch: (unknown branch)
+          sessions:
+            - {id: 11111111-1111-4111-8111-111111111111, state: checked}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: ["(unknown branch)"]}
+            sessions: [33333333-3333-4333-8333-333333333333]
+    expectChanged: true
+    expectUnchecked: [11111111-1111-4111-8111-111111111111]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [11111111-1111-4111-8111-111111111111, 33333333-3333-4333-8333-333333333333]

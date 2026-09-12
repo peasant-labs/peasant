@@ -101,13 +101,17 @@ type touchedDerivationSession struct {
 }
 
 // touchedSanitizeCase pins the rewrite of display-only placeholder policies
-// into explicit session rules against one available forest.
+// into explicit session rules against one available forest. expectChecked and
+// expectUnchecked optionally assert what the canonical matcher selects once the
+// sanitized value is applied to that forest.
 type touchedSanitizeCase struct {
-	Name          string                 `yaml:"name"`
-	Forest        touchedDerivationCase  `yaml:"forest"`
-	Saved         config.SelectionConfig `yaml:"saved"`
-	ExpectChanged bool                   `yaml:"expectChanged"`
-	Expected      config.SelectionConfig `yaml:"expected"`
+	Name            string                 `yaml:"name"`
+	Forest          touchedDerivationCase  `yaml:"forest"`
+	Saved           config.SelectionConfig `yaml:"saved"`
+	ExpectChanged   bool                   `yaml:"expectChanged"`
+	Expected        config.SelectionConfig `yaml:"expected"`
+	ExpectChecked   []string               `yaml:"expectChecked"`
+	ExpectUnchecked []string               `yaml:"expectUnchecked"`
 }
 
 type touchedFieldKey string
@@ -123,24 +127,37 @@ const (
 )
 
 type touchedFieldCase struct {
-	Name                 string                  `yaml:"name"`
-	Current              config.SelectionConfig  `yaml:"current"`
-	ProjectIdentity      string                  `yaml:"projectIdentity"`
-	Harness              string                  `yaml:"harness"`
-	LinkedHarness        string                  `yaml:"linkedHarness"`
-	ClonePath            string                  `yaml:"clonePath"`
-	LinkedClonePath      string                  `yaml:"linkedClonePath"`
-	GitRemote            string                  `yaml:"gitRemote"`
-	Branch               string                  `yaml:"branch"`
-	SessionID            string                  `yaml:"sessionId"`
-	SecondSessionID      string                  `yaml:"secondSessionId"`
-	LinkedSessionID      string                  `yaml:"linkedSessionId"`
-	Keys                 []touchedFieldKey       `yaml:"keys"`
-	ExpectedSessionState string                  `yaml:"expectedSessionState"`
-	ExpectedSetCount     int                     `yaml:"expectedSetCount"`
-	ExpectReconcileError bool                    `yaml:"expectReconcileError"`
-	WithPreview          bool                    `yaml:"withPreview"`
-	Expected             *config.SelectionConfig `yaml:"expected"`
+	Name                       string                  `yaml:"name"`
+	Current                    config.SelectionConfig  `yaml:"current"`
+	ProjectIdentity            string                  `yaml:"projectIdentity"`
+	Harness                    string                  `yaml:"harness"`
+	LinkedHarness              string                  `yaml:"linkedHarness"`
+	ClonePath                  string                  `yaml:"clonePath"`
+	LinkedClonePath            string                  `yaml:"linkedClonePath"`
+	GitRemote                  string                  `yaml:"gitRemote"`
+	Branch                     string                  `yaml:"branch"`
+	SessionID                  string                  `yaml:"sessionId"`
+	SecondSessionID            string                  `yaml:"secondSessionId"`
+	LinkedSessionID            string                  `yaml:"linkedSessionId"`
+	SecondProject              *touchedSecondProject   `yaml:"secondProject"`
+	Keys                       []touchedFieldKey       `yaml:"keys"`
+	ExpectedSessionState       string                  `yaml:"expectedSessionState"`
+	ExpectedSecondSessionState string                  `yaml:"expectedSecondSessionState"`
+	ExpectedSetCount           int                     `yaml:"expectedSetCount"`
+	ExpectReconcileError       bool                    `yaml:"expectReconcileError"`
+	WithPreview                bool                    `yaml:"withPreview"`
+	Expected                   *config.SelectionConfig `yaml:"expected"`
+}
+
+// touchedSecondProject adds one more project root to a field case's forest,
+// carrying the same harness, so a case can assert what survives in the harness
+// while the primary project is edited.
+type touchedSecondProject struct {
+	ProjectIdentity string `yaml:"projectIdentity"`
+	ClonePath       string `yaml:"clonePath"`
+	GitRemote       string `yaml:"gitRemote"`
+	Branch          string `yaml:"branch"`
+	SessionID       string `yaml:"sessionId"`
 }
 
 func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
@@ -216,6 +233,18 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 		}
 		if testCase.SecondSessionID != "" && testCase.SecondSessionID == testCase.SessionID {
 			t.Fatalf("field case %q repeats its primary session as the second session", testCase.Name)
+		}
+		if testCase.SecondProject != nil {
+			testutil.RequireFixtureFields(t, "touched tree field second project", testCase.Name, []testutil.FixtureField{
+				{Key: "secondProject.projectIdentity", Value: testCase.SecondProject.ProjectIdentity},
+				{Key: "secondProject.clonePath", Value: testCase.SecondProject.ClonePath},
+				{Key: "secondProject.gitRemote", Value: testCase.SecondProject.GitRemote},
+				{Key: "secondProject.branch", Value: testCase.SecondProject.Branch},
+				{Key: "secondProject.sessionId", Value: testCase.SecondProject.SessionID},
+			})
+		}
+		if (testCase.SecondProject == nil) != (testCase.ExpectedSecondSessionState == "") {
+			t.Fatalf("field case %q must set secondProject and expectedSecondSessionState together", testCase.Name)
 		}
 	}
 	for index, testCase := range document.DerivationCases {
@@ -353,11 +382,15 @@ func touchedScope(testCase touchedSelectionCase) selectionScope {
 }
 
 type touchedStaticTreeSource struct {
-	root *kit.TreeNode
+	roots []*kit.TreeNode
 }
 
 func (source touchedStaticTreeSource) Load(context.Context) ([]*kit.TreeNode, error) {
-	return []*kit.TreeNode{cloneTouchedNode(source.root)}, nil
+	roots := make([]*kit.TreeNode, 0, len(source.roots))
+	for _, root := range source.roots {
+		roots = append(roots, cloneTouchedNode(root))
+	}
+	return roots, nil
 }
 
 func cloneTouchedNode(node *kit.TreeNode) *kit.TreeNode {
@@ -390,7 +423,7 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			if err != nil {
 				t.Fatalf("open field fixture draft: %v", err)
 			}
-			root := touchedFieldRoot(testCase)
+			root := touchedFieldRoots(testCase)
 			setCount := 0
 			accessor := Accessor[TreeSelection]{
 				Get: func(current *config.Config) TreeSelection {
@@ -408,7 +441,7 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			}
 			registry := Registry{Sections: []Section{{
 				Key: "transcripts", Title: "select transcripts",
-				Fields: []Field{Tree("selection", "transcripts", accessor, touchedStaticTreeSource{root: root}, options...)},
+				Fields: []Field{Tree("selection", "transcripts", accessor, touchedStaticTreeSource{roots: root}, options...)},
 			}}}
 			field := registry.Sections[0].Fields[0].(*treeField)
 			flow := NewFlow(theme.New(theme.ModeDark), registry, draft)
@@ -478,8 +511,46 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			if !ok || sessions[testCase.SessionID] == nil || sessions[testCase.SessionID].State != state {
 				t.Fatalf("session state=%v, want %s", sessions[testCase.SessionID], testCase.ExpectedSessionState)
 			}
+			if testCase.SecondProject != nil {
+				secondState, ok := touchedTriState(testCase.ExpectedSecondSessionState)
+				if !ok || sessions[testCase.SecondProject.SessionID] == nil || sessions[testCase.SecondProject.SessionID].State != secondState {
+					t.Fatalf("second session state=%v, want %s", sessions[testCase.SecondProject.SessionID], testCase.ExpectedSecondSessionState)
+				}
+			}
 		})
 	}
+}
+
+// touchedFieldRoots builds the field case's forest: the primary project root
+// plus the optional second project root that shares the case's harness.
+func touchedFieldRoots(testCase touchedFieldCase) []*kit.TreeNode {
+	roots := []*kit.TreeNode{touchedFieldRoot(testCase)}
+	second := testCase.SecondProject
+	if second == nil {
+		return roots
+	}
+	roots = append(roots, &kit.TreeNode{
+		ID: second.ProjectIdentity,
+		Meta: map[string]string{
+			MetaProjectIdentity: second.ProjectIdentity,
+			MetaClonePath:       second.ClonePath,
+			MetaRemote:          second.GitRemote,
+			MetaProjectHarness:  testCase.Harness,
+		},
+		Children: []*kit.TreeNode{{
+			ID: second.Branch, Label: second.Branch, Meta: map[string]string{MetaBranch: second.Branch},
+			Children: []*kit.TreeNode{{
+				ID: second.SessionID,
+				Meta: map[string]string{
+					MetaHarness:         testCase.Harness,
+					MetaProjectIdentity: second.ProjectIdentity,
+					MetaClonePath:       second.ClonePath,
+					MetaRemote:          second.GitRemote,
+				},
+			}},
+		}},
+	})
+	return roots
 }
 
 func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
@@ -591,6 +662,21 @@ func TestSanitizePlaceholderSelectionFixture(t *testing.T) {
 				for _, exclusion := range configured.Exclusions.Branches {
 					if containsUnknownBranchPlaceholder(exclusion.Branches) {
 						t.Fatalf("harness %q exclusion %#v persists the unknown-branch placeholder", harness, exclusion)
+					}
+				}
+			}
+			if len(testCase.ExpectChecked) > 0 || len(testCase.ExpectUnchecked) > 0 {
+				roots := touchedDerivationRoots(t, testCase.Forest)
+				PrepopulateSelection(roots, got)
+				states := sessionNodes(roots)
+				for _, sessionID := range testCase.ExpectChecked {
+					if node := states[sessionID]; node == nil || node.State != kit.Checked {
+						t.Fatalf("session %q state=%v, want checked", sessionID, node)
+					}
+				}
+				for _, sessionID := range testCase.ExpectUnchecked {
+					if node := states[sessionID]; node == nil || node.State != kit.Unchecked {
+						t.Fatalf("session %q state=%v, want unchecked", sessionID, node)
 					}
 				}
 			}
