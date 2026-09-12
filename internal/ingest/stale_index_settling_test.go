@@ -224,8 +224,11 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 			if reads := fs.ReadCount(path); reads != 0 {
 				t.Fatalf("the second harvest read the retained transcript %d time(s), want 0", reads)
 			}
-			if got := namesSession(second, id); got != 0 {
-				t.Fatalf("the second harvest reported %d diagnostic(s) naming the session, want 0: %+v", got, second.Diagnostics)
+			// This case carries one session and nothing else, so a settled
+			// second harvest owes no diagnostic at all, not merely none that
+			// names the session.
+			if len(second.Diagnostics) != 0 {
+				t.Fatalf("the second harvest reported %d diagnostic(s), want 0: %+v", len(second.Diagnostics), second.Diagnostics)
 			}
 		})
 	}
