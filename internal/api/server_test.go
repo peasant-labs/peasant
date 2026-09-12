@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -190,6 +191,77 @@ func TestServer_TranscriptDownload_MissingFileNames404sWithPathAndCommand(t *tes
 
 	body, _ := io.ReadAll(resp.Body)
 	wantDir := filepath.Join(output, hostSlug, sessionID)
+	wantCommand := fmt.Sprintf("peasant harvest --force --session %s", sessionID)
+	if got := string(body); !strings.Contains(got, wantDir) {
+		t.Errorf("404 body = %q, want it to name the looked-in directory %q", got, wantDir)
+	}
+	if got := string(body); !strings.Contains(got, wantCommand) {
+		t.Errorf("404 body = %q, want it to name the command %q", got, wantCommand)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Errorf("shutdown: %v", err)
+	}
+}
+
+// TestServer_TranscriptDownload_PartialPairMissingFileNamesCommand pins the
+// row-present, saved-file-gone case where the session directory itself survives
+// with its metadata but the transcript file is gone (crash-table row 5: a lost
+// file beside the row, the database still the source of truth). The download
+// handler stats the pair, finds no transcript, and returns 404 naming BOTH the
+// exact directory it looked in AND the `peasant harvest --force --session <id>`
+// command that saves the session again — the same diagnostic as a wholly-absent
+// directory, so a partial loss is never a silent or bare 404 (design record
+// section 6 "API transcript download"; section 3, "file missing, row present").
+func TestServer_TranscriptDownload_PartialPairMissingFileNamesCommand(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		sessionID = "88888888-8888-8888-8888-888888888888"
+		hostSlug  = "github.com-user-repo2"
+	)
+
+	output := t.TempDir()
+	s := openTestStore(t)
+	entry := makeStoreEntry(t, sessionID, hash1, hostSlug,
+		defaults.HarnessClaudeCode, day1Ms, 100, 50, "project-partial", 1, 0, 60000)
+	seedStore(t, s, []ingest.StoreEntry{entry})
+
+	// The session directory and its metadata survive; only the transcript is
+	// gone. The handler must still reach the missing-transcript 404 branch.
+	sessionDir := filepath.Join(output, hostSlug, sessionID)
+	if err := os.MkdirAll(sessionDir, defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+	metadataPath := filepath.Join(sessionDir, sessionID+defaults.MetadataSuffix)
+	if err := os.WriteFile(metadataPath, []byte("{}"), defaults.PrivateFilePerm); err != nil {
+		t.Fatalf("write surviving metadata: %v", err)
+	}
+
+	srv := api.NewServer(api.ServerConfig{Port: 0, Store: s, OutputDir: output})
+	if err := srv.Listen(ctx); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	baseURL := "http://" + srv.Addr().String()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx) }()
+
+	resp, err := http.Get(baseURL + "/api/v1/sessions/" + sessionID + "/transcript")
+	if err != nil {
+		t.Fatalf("GET transcript: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	wantDir := sessionDir
 	wantCommand := fmt.Sprintf("peasant harvest --force --session %s", sessionID)
 	if got := string(body); !strings.Contains(got, wantDir) {
 		t.Errorf("404 body = %q, want it to name the looked-in directory %q", got, wantDir)
