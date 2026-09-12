@@ -104,14 +104,14 @@ cases:
   - <<: *claude
     name: disappeared_source_during_extraction
     disappear_during_extract: true
-  # The interrupted metadata write leaves a pending publication that the next
-  # invocation recovers from its intent, so the forced reindex has a retained
-  # pair to index; the verified capture keeps the session ready throughout.
+  # The metadata write fails during the install. The write path installs the
+  # pair by rename with no publication intent, so nothing recovers it within
+  # the same run: it is a torn pair with no row, which the next harvest
+  # re-ingests from the native source. The faulted run reports an error and
+  # leaves the session needing ingest.
   - <<: *claude
-    name: optional_metadata_write_failure_still_ready
+    name: metadata_write_failure_needs_reingest
     fail_sidecar: true
-    expected_manual_indexed: 1
-    expected_manual_readiness: ready
   - <<: *claude
     name: changed_source_updates_metadata_and_entries
     change_source: true

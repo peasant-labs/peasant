@@ -75,7 +75,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		"opencode_json_literal_cwd": true, "opencode_legacy_sqlite_capture": true,
 		"opencode_current_sqlite_capture": true, "missing_source_stays_unrecovered": true,
 		"mismatched_internal_identity_refuses": true, "codex_mismatched_internal_identity_refuses": true,
-		"disappeared_source_during_extraction": true, "optional_metadata_write_failure_still_ready": true,
+		"disappeared_source_during_extraction": true, "metadata_write_failure_needs_reingest": true,
 		"changed_source_updates_metadata_and_entries": true, "opencode_json_index_uses_captured_tree": true,
 		"absent_model_is_not_fabricated": true,
 		"reindex_fresh_source_ready":     true, "reindex_verified_fallback_ready": true,
@@ -92,7 +92,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		}
 		seen[c.Name] = true
 		delete(required, c.Name)
-		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract
+		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar
 		if !unrecoverable && (c.ExpectedManualIndexed == nil || c.ExpectedManualReadiness == "") {
 			t.Fatalf("fixture %s has no expected manual indexing outcome", c.Name)
 		}
@@ -229,13 +229,22 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				return result
 			}
 			result := run()
-			if c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract {
+			if c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar {
 				bundle, err := database.LoadPublicationInput(ctx, id)
 				if err != nil || bundle.Readiness != ingest.PublicationNeedsIngest {
 					t.Fatalf("unrecoverable source = %+v, %v", bundle, err)
 				}
-				if (c.MismatchIdentity || c.DisappearDuringExtract) && result.Summary.Errors == 0 {
-					t.Fatalf("mismatched source accepted: %+v", result)
+				// A failed metadata write no longer recovers within the same run
+				// from a pending publication intent: the write path installs the
+				// pair by rename with no intent, so a metadata write that fails
+				// leaves a torn pair with no row. Per the crash-and-fault model
+				// (torn pair, no row, crash during a first install): "pair
+				// validation refuses it; DIFF finds no row; next harvest
+				// re-ingests from native". So the faulted run reports an error
+				// and leaves the session needing ingest, and a later clean
+				// harvest re-ingests it from its source.
+				if (c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar) && result.Summary.Errors == 0 {
+					t.Fatalf("faulted install accepted: %+v", result)
 				}
 				return
 			}
