@@ -131,3 +131,107 @@ func (s *pipelineFixtureStore) ListStaleIndexSessions(ctx context.Context, targe
 	}
 	return s.Store.ListStaleIndexSessions(ctx, targets)
 }
+
+// durabilityStore wraps a real *store.Store opened at a persistent path so that
+// a crash between two write commits is modeled as a fault on one write and a
+// restart as a fresh Store + Pipeline over the same database file. It injects
+// the two seams the design's crash table names: a per-session MIRROR failure
+// (the row is never recorded and the installed files are left on disk) and an
+// ENTRY-BATCH failure (the row is recorded but its entries are not committed).
+// Everything not faulted goes to the real store, so a child whose parent's
+// mirror was faulted is refused by the store's own "parent not stored" rule in
+// a later transaction rather than by the decorator.
+type durabilityStore struct {
+	*store.Store
+	mu          sync.Mutex
+	failMirror  map[ingest.SessionID]error
+	failEntries error
+	mirrorCalls int
+	closeOnce   sync.Once
+}
+
+// newDurabilityStore opens a real store at dbPath (already migrated by a
+// storetest golden copy) and registers Close. A restart opens a second one on
+// the same path after the first is shut down.
+func newDurabilityStore(t *testing.T, dbPath string) *durabilityStore {
+	t.Helper()
+	s, err := store.Open(dbPath, store.WithSkipMigrations())
+	if err != nil {
+		t.Fatalf("open durability store at %s: %v", dbPath, err)
+	}
+	ds := &durabilityStore{Store: s, failMirror: make(map[ingest.SessionID]error)}
+	t.Cleanup(ds.Shutdown)
+	return ds
+}
+
+// Shutdown closes the store once, so a restart can close run 1 explicitly and
+// the registered cleanup is a no-op.
+func (s *durabilityStore) Shutdown() {
+	s.closeOnce.Do(func() { _ = s.Store.Close() })
+}
+
+// FailMirrorFor forces the MirrorArtifacts result for one session to fail; its
+// row is never recorded. Other sessions in the same page still reach the store.
+func (s *durabilityStore) FailMirrorFor(sid ingest.SessionID, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failMirror[sid] = err
+}
+
+// FailEntries forces every IndexSessionEntryBatch write to fail, modeling a
+// crash after the row is mirrored but before its entries commit.
+func (s *durabilityStore) FailEntries(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failEntries = err
+}
+
+// MirrorCalls returns how many MirrorArtifacts invocations carried a non-empty
+// page; with pages of at most MirrorPageSize this is the store-level mirror
+// transaction count.
+func (s *durabilityStore) MirrorCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mirrorCalls
+}
+
+func (s *durabilityStore) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactMirrorRequest) []ingest.ArtifactMirrorResult {
+	s.mu.Lock()
+	if len(requests) > 0 {
+		s.mirrorCalls++
+	}
+	forward := make([]ingest.ArtifactMirrorRequest, 0, len(requests))
+	forced := make(map[ingest.SessionID]error)
+	for _, request := range requests {
+		sid := request.Artifact.Metadata.SessionID
+		if err, ok := s.failMirror[sid]; ok {
+			forced[sid] = err
+			continue
+		}
+		forward = append(forward, request)
+	}
+	s.mu.Unlock()
+
+	var results []ingest.ArtifactMirrorResult
+	if len(forward) > 0 {
+		results = s.Store.MirrorArtifacts(ctx, forward)
+	}
+	for sid, err := range forced {
+		results = append(results, ingest.ArtifactMirrorResult{SessionID: sid, Err: err})
+	}
+	return results
+}
+
+func (s *durabilityStore) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
+	s.mu.Lock()
+	failEntries := s.failEntries
+	s.mu.Unlock()
+	if failEntries != nil {
+		results := make([]ingest.SessionEntryWriteResult, len(writes))
+		for i, write := range writes {
+			results[i] = ingest.SessionEntryWriteResult{SessionID: write.SessionID, Err: failEntries}
+		}
+		return results
+	}
+	return s.Store.IndexSessionEntryBatch(ctx, writes)
+}

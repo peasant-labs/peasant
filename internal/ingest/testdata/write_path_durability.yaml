@@ -1,0 +1,43 @@
+# The crash and fault semantics of the database-first write path. Each case
+# leaves a database and a saved pair out of step the way one interruption can,
+# then proves how the next run heals it. The write path installs the pair by
+# rename before it records the row, so a fault on the row leaves files with no
+# row; the row is recorded before its entries, so a fault on the entries leaves
+# a row a later harvest repairs. A restart is a new Store and a new Pipeline
+# over the same database file.
+#
+# The expected diagnostic text is the design contract, stated here rather than
+# read back from the code under test, so a reworded message is a visible change.
+required_names:
+  - crash_between_install_and_mirror_restart
+  - crash_between_mirror_and_entries_restart
+  - torn_pair_no_row_reingested
+  - torn_pair_row_present_detected_on_read
+cases:
+  # A crash after the worker installed the pair but before its row committed:
+  # the transcript and metadata are on disk with no row. The next harvest is
+  # database-first, finds no row, and re-ingests the session from its source as
+  # new; the row and a valid pair exist afterward.
+  - name: crash_between_install_and_mirror_restart
+    scenario: crash_install_mirror
+
+  # A crash after the row committed but before its entries did: the row carries
+  # an artifact hash and a null indexed-input hash. The repair predicate selects
+  # exactly this session on the next harvest and not on the one after, so the
+  # entries are recovered in one run and the steady state is quiet.
+  - name: crash_between_mirror_and_entries_restart
+    scenario: crash_mirror_entries
+
+  # A torn pair with no row is a first install interrupted mid-write. The next
+  # harvest ignores the unusable saved copy, re-ingests from the source, and
+  # leaves a valid pair whose hash matches the freshly recorded row.
+  - name: torn_pair_no_row_reingested
+    scenario: torn_no_row
+
+  # A torn or mixed pair with a row present is a power loss after the row was
+  # durable: a plain harvest is database-first and never touches it, so the
+  # stored session keeps serving. The rebuild read is the one that reports the
+  # damaged saved copy by its exact diagnostic, and it never overwrites the row.
+  - name: torn_pair_row_present_detected_on_read
+    scenario: torn_row_present
+    expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"
