@@ -102,13 +102,20 @@ const (
 	// hidden, its user-origin control visible, and a visible parent's child
 	// badge reading correctly.
 	selectionStateOriginHidden selectionState = "origin-hidden"
+	// selectionStateRemoteLess is the mounted selection tree over a plain
+	// non-Git project directory whose discovery has no project name, no remote,
+	// and no recorded branch. The project row renders its resolved path suffix,
+	// and the state applies the project toggle so the capture proves the
+	// branchless project can be selected without any placeholder appearing.
+	selectionStateRemoteLess selectionState = "remote-less-project"
 )
 
 func (s selectionState) valid() bool {
 	switch s {
 	case selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
-		selectionStateBudgetPreview, selectionStateOriginHidden, selectionStatePiPreview, selectionStateDiscoveryNotes:
+		selectionStateBudgetPreview, selectionStateOriginHidden, selectionStatePiPreview, selectionStateDiscoveryNotes,
+		selectionStateRemoteLess:
 		return true
 	default:
 		return false
@@ -118,8 +125,16 @@ func (s selectionState) valid() bool {
 func (s selectionState) requiresBothThemes() bool {
 	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
 		s == selectionStateSessionPreview || s == selectionStateSourcePreview ||
-		s == selectionStateBudgetPreview || s == selectionStateOriginHidden || s == selectionStatePiPreview || s == selectionStateDiscoveryNotes
+		s == selectionStateBudgetPreview || s == selectionStateOriginHidden || s == selectionStatePiPreview || s == selectionStateDiscoveryNotes ||
+		s == selectionStateRemoteLess
 }
+
+// selectionRemoteLessPathSuffix is the rendered project label of the
+// remote-less fixture directory: the shortest distinct resolved path suffix.
+// The capture drives the cursor onto the row with it and then asserts the
+// checked row text, so a placeholder or an absolute physical path fails the
+// capture instead of passing as an unrelated row.
+const selectionRemoteLessPathSuffix = "projects/notes"
 
 // pushState is the closed set of push-wizard screens the harness captures: the
 // consent prompt that opens the wizard, the selection tree over a project row,
@@ -533,7 +548,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 10440},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 		sheetCompletion:  {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
@@ -613,6 +628,7 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
 		selectionStateBudgetPreview, selectionStateOriginHidden,
 		selectionStatePiPreview, selectionStateDiscoveryNotes,
+		selectionStateRemoteLess,
 	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
@@ -664,8 +680,17 @@ func validateSelectionData(selection selectionFixture) error {
 	}
 	repositories := make(map[string]selectionRepositoryFixture, len(selection.Repositories))
 	for _, repository := range selection.Repositories {
-		if strings.TrimSpace(repository.ClonePath) == "" || strings.TrimSpace(repository.CohortKey) == "" || strings.TrimSpace(repository.GitDirectory) == "" || repositories[repository.ClonePath].ClonePath != "" {
+		if strings.TrimSpace(repository.ClonePath) == "" || repositories[repository.ClonePath].ClonePath != "" {
 			return fmt.Errorf("screenshot fixture has an incomplete or duplicate selection repository: %#v", repository)
+		}
+		// A repository entry with no cohort key and no Git directory declares
+		// a path with no Git identity, so the mounted scanner derives the exact
+		// physical path identity for it, exactly as it does for a non-Git
+		// directory. A partial Git identity is still rejected: it would let a
+		// capture group or label rows in a way production never would.
+		gitBound := strings.TrimSpace(repository.CohortKey) != "" || strings.TrimSpace(repository.GitDirectory) != ""
+		if gitBound && (strings.TrimSpace(repository.CohortKey) == "" || strings.TrimSpace(repository.GitDirectory) == "") {
+			return fmt.Errorf("screenshot fixture selection repository %q declares a partial Git identity: %#v", repository.ClonePath, repository)
 		}
 		repositories[repository.ClonePath] = repository
 	}

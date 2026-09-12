@@ -17,9 +17,9 @@ sheets:
     viewport: {width: 1800, height: 3420}
   - name: selection
     kind: selection
-    title: "mounted selection: linked submodule project, branch, and session previews"
+    title: "mounted selection: linked submodule and remote-less project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 10440}
+    viewport: {width: 1800, height: 11170}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
@@ -146,6 +146,16 @@ selectionStates:
     # resolving the discovered subagent relation.
     wantContains: ["user driv", "parent se", "+ 2 child"]
     wantAbsent: ["agent driven session"]
+  - key: remote-less-project
+    query: ""
+    # The remote-less project is the FIRST root in this fixture: a resolved
+    # physical path sorts before the synthetic submodule cohort, and this
+    # project carries no synthetic Git identity at all. The state applies
+    # spacebar on its project row, so the checked box beside the short path
+    # label is the evidence: the branchless project is selectable, its label
+    # is the relative resolved suffix, and the placeholder is forbidden.
+    wantContains: ["[✓] projects/notes"]
+    wantAbsent: ["(unknown project)"]
 
 ingestProgressStates:
   - key: running
@@ -161,6 +171,11 @@ selection:
   repositories:
     - {clonePath: /fixtures/worktrees/pasture-a, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-a}
     - {clonePath: /fixtures/worktrees/pasture-b, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-b}
+    # A clonePath with no cohort key and no Git directory declares a directory
+    # with no Git identity. The mounted scanner derives the exact physical path
+    # identity for it instead of joining a synthetic Git cohort, which is how a
+    # plain non-Git directory reaches the selection tree.
+    - {clonePath: /fixtures/projects/notes}
   listings:
     - harness: pi
       projectName: acme/tool
@@ -227,6 +242,14 @@ selection:
       workingDir: /fixtures/worktrees/pasture-a
       sessionId: origin-user-visible
       origin: user
+    # A plain non-Git directory: no discovery project name, no Git remote, no
+    # recorded branch, and no synthetic repository identity. The scanner labels
+    # the project row with its short resolved path suffix and never with a
+    # placeholder.
+    - harness: claude-code
+      title: remote-less notes session
+      workingDir: /fixtures/projects/notes
+      sessionId: remote-less-notes
   # The parent-to-subagent relation over the whole DISCOVERED set, which is
   # what production discovery hands the picker beside the ROOTS-ONLY listing
   # above. Naming a session here does NOT put it in the picker: cc-child and
@@ -245,6 +268,7 @@ selection:
     - {sessionId: ses_sourceBudgetVisible}
     - {sessionId: origin-agent-hidden}
     - {sessionId: origin-user-visible}
+    - {sessionId: remote-less-notes}
   transcripts:
     cc-parent:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
@@ -271,6 +295,7 @@ selection:
     - origin-agent-hidden
     - origin-user-visible
     - ses_sourceBudgetVisible
+    - remote-less-notes
   requiredHarnessNames:
     - pi
     - claude-code
@@ -347,6 +372,10 @@ selectionCaptures:
   - {name: selection-origin-hidden-dark-120x40, state: origin-hidden, theme: dark, width: 120, height: 40}
   - {name: selection-origin-hidden-light-80x24, state: origin-hidden, theme: light, width: 80, height: 24}
   - {name: selection-origin-hidden-light-120x40, state: origin-hidden, theme: light, width: 120, height: 40}
+  - {name: selection-remote-less-project-dark-80x24, state: remote-less-project, theme: dark, width: 80, height: 24}
+  - {name: selection-remote-less-project-dark-120x40, state: remote-less-project, theme: dark, width: 120, height: 40}
+  - {name: selection-remote-less-project-light-80x24, state: remote-less-project, theme: light, width: 80, height: 24}
+  - {name: selection-remote-less-project-light-120x40, state: remote-less-project, theme: light, width: 120, height: 40}
 
 pushStates:
   - key: needs-ingest

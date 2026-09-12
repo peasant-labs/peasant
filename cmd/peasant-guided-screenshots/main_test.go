@@ -306,6 +306,44 @@ func TestCaptureFixtureRendersOriginHiddenViewActuallyHidesAgentRow(t *testing.T
 	}
 }
 
+// TestCaptureFixtureRendersRemoteLessProjectSelection is a production render
+// (not just decode validation): it mounts the real selection tree over the
+// fixture listings, applies the remote-less project toggle, and asserts the
+// checked box is rendered beside the relative path label while the sibling Git
+// project stays untouched, at both terminal widths.
+func TestCaptureFixtureRendersRemoteLessProjectSelection(t *testing.T) {
+	document, err := decodeCaptureDocument(captureFixtureData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state selectionStateFixture
+	for _, candidate := range document.SelectionStates {
+		if candidate.Key == selectionStateRemoteLess {
+			state = candidate
+		}
+	}
+	if state.Key == "" {
+		t.Fatal("remote-less selection state not found in fixture")
+	}
+	workingDirectory := t.TempDir()
+	for _, size := range []struct{ width, height int }{{80, 24}, {120, 40}} {
+		capture := selectionCaptureFixture{
+			Name: "mutation-check", State: selectionStateRemoteLess, Theme: captureThemeDark,
+			Width: size.width, Height: size.height,
+		}
+		view, err := renderSelectionCapture(workingDirectory, 0, document.Selection, capture, state)
+		if err != nil {
+			t.Fatalf("render selection capture at %dx%d: %v", size.width, size.height, err)
+		}
+		if err := validateTerminalCapture(capture.Name, view, size.width, size.height, state.WantContains, state.WantAbsent); err != nil {
+			t.Errorf("%dx%d: %v", size.width, size.height, err)
+		}
+		if plain := ansi.Strip(view); strings.Contains(plain, "[✓] github.com:acme/tool") {
+			t.Errorf("%dx%d: the remote-less project toggle also checked the sibling Git project", size.width, size.height)
+		}
+	}
+}
+
 func TestCaptureFixturePinsTheGuidedCrossProduct(t *testing.T) {
 	row := []byte("  - {name: retention-light-120x40, section: retention, theme: light, width: 120, height: 40}\n")
 	if count := bytes.Count(captureFixtureData, row); count != 1 {
