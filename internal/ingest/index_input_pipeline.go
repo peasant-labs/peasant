@@ -20,6 +20,9 @@ type CapturedIndexInput struct {
 	// publication capture saw.
 	published    bool
 	metadataPath string
+	// metadataData carries the committed metadata bytes when this run wrote them,
+	// so the write-time identity check reads no file. Nil means read from disk.
+	metadataData []byte
 	artifactHash string
 	inputHash    string
 	expected     *SessionIndexState
@@ -66,6 +69,7 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 		return nil, err
 	}
 	input.expected, input.metadataPath, input.published = state, metadataPath, im.published
+	input.metadataData = im.metadataData
 	return input, nil
 }
 
@@ -77,9 +81,15 @@ func (p *Pipeline) captureArtifactForIndex(metadataPath string, im indexedMeta) 
 	if len(im.transcriptData) == 0 {
 		return readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, im.session.SessionID)
 	}
-	data, err := p.fs.ReadFile(metadataPath)
-	if err != nil {
-		return nil, err
+	// The worker handed over the bytes it just wrote for both halves of the
+	// pair. Use the in-memory metadata directly rather than reading the file
+	// back: a newly ingested session's index costs no read of its own pair.
+	data := im.metadataData
+	if len(data) == 0 {
+		var err error
+		if data, err = p.fs.ReadFile(metadataPath); err != nil {
+			return nil, err
+		}
 	}
 	meta, err := decodeManagedMetadata(data, metadataPath)
 	if err != nil {
@@ -248,7 +258,7 @@ func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *CapturedInd
 	// replaced pair rewrites its metadata and is caught; a transcript that
 	// moved on disk after the input was verified does not invalidate the
 	// verified parse.
-	current, err := p.committedArtifactIdentity(input.metadataPath, input.session.SessionID)
+	current, err := p.committedArtifactIdentity(input.metadataData, input.metadataPath, input.session.SessionID)
 	if err != nil {
 		return err
 	}
@@ -277,10 +287,15 @@ func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *CapturedInd
 // leaves the identity as it was, while a replaced pair, whose metadata is
 // rewritten, changes it. Metadata that carries no content checksum is
 // identified by reading the pair.
-func (p *Pipeline) committedArtifactIdentity(metadataPath string, sid SessionID) (string, error) {
-	data, err := p.fs.ReadFile(metadataPath)
-	if err != nil {
-		return "", err
+func (p *Pipeline) committedArtifactIdentity(metadataData []byte, metadataPath string, sid SessionID) (string, error) {
+	// Use the committed bytes this run wrote when they are in hand; otherwise
+	// read the metadata file. A newly ingested session pays no pair read here.
+	data := metadataData
+	if len(data) == 0 {
+		var err error
+		if data, err = p.fs.ReadFile(metadataPath); err != nil {
+			return "", err
+		}
 	}
 	meta, err := decodeManagedMetadata(data, metadataPath)
 	if err != nil {

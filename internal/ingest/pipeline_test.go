@@ -5381,9 +5381,15 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify every stage reached the Ended state.
+	// Verify every stage reached the Ended state. RECOVER is the one-time
+	// upgrade pass, which the harvest command runs before the pipeline and the
+	// store open; the pipeline itself never emits it, so a pipeline-only run
+	// leaves it unstarted.
 	snap := progState.Snapshot()
 	for _, stage := range ingest.StageOrder {
+		if stage == ingest.StageRecover {
+			continue
+		}
 		sp, ok := snap[stage]
 		if !ok {
 			t.Errorf("stage %s: missing from snapshot", stage)

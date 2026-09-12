@@ -243,6 +243,7 @@ type indexedMeta struct {
 	startMs              int64
 	outputTranscriptPath string // final on-disk path: {sessionDir}/{sessionId}--transcript.{ext}
 	transcriptData       []byte // nil = read from outputTranscriptPath; non-nil = use directly
+	metadataData         []byte // nil = read from disk; non-nil = the worker's committed metadata bytes, used directly
 	indexed              bool   // true if already indexed in the drain loop (skip INDEX, include in COMPUTE)
 }
 
@@ -1216,6 +1217,7 @@ func (p *Pipeline) drainLoop(
 						startMs:              wr.startMs,
 						outputTranscriptPath: wr.outputTranscriptPath,
 						transcriptData:       wr.transcriptData,
+						metadataData:         workerMetadataJSON(wr),
 						capturedSource:       wr.capturedSource,
 						published:            wr.artifact != nil,
 					})
@@ -3195,6 +3197,16 @@ func indexWithSourceKind(
 // sessionFromWorkerResult reconstructs the DiscoveredSession carried by a workerResult.
 // The session fields needed downstream (SessionID, Harness, ParentUUID, SourceFormat,
 // SourcePath) are preserved on result and meta; we recover them here.
+// workerMetadataJSON returns the metadata bytes the worker committed for this
+// session, when it published a pair this run. The index path uses them directly
+// instead of reading the metadata file back.
+func workerMetadataJSON(wr *workerResult) []byte {
+	if wr.artifact != nil {
+		return wr.artifact.MetadataJSON
+	}
+	return nil
+}
+
 func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 	var parentUUID *SessionID
 	if wr.result.ParentUUID != nil {
