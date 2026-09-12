@@ -138,8 +138,8 @@ func commandInvocationFromEntry(entry schema.SessionEntry) *schema.CommandInvoca
 		return nil
 	}
 	var stored struct {
-		Name string `json:"command_name"`
-		Args string `json:"command_args"`
+		Name string          `json:"command_name"`
+		Args json.RawMessage `json:"command_args"`
 	}
 	if err := json.Unmarshal([]byte(*entry.Extra), &stored); err != nil || stored.Name == "" {
 		return nil
@@ -148,11 +148,27 @@ func commandInvocationFromEntry(entry schema.SessionEntry) *schema.CommandInvoca
 	if !strings.HasPrefix(name, "/") {
 		name = "/" + name
 	}
-	invocation, err := schema.NewCommandInvocation(name, stored.Args)
+	invocation, err := schema.NewCommandInvocation(name, commandArgsFromRaw(stored.Args))
 	if err != nil {
 		return nil
 	}
 	return &invocation
+}
+
+// commandArgsFromRaw reads a stored command_args value tolerantly: a JSON
+// string becomes the args, and anything else — a number, an object, an array,
+// a boolean, null, or the field being absent — is treated as empty args, so a
+// non-string args value never drops the invocation (the name still reaches the
+// wire).
+func commandArgsFromRaw(raw json.RawMessage) string {
+	var args string
+	if len(raw) == 0 {
+		return args
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return ""
+	}
+	return args
 }
 
 // entriesToTurns converts flat session_entries into the Turn model expected by

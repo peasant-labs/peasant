@@ -47,6 +47,12 @@ type CommandInvocationTurnCase struct {
 	// index time, before the producer adds any missing leading slash.
 	StoredName string `yaml:"storedName"`
 	StoredArgs string `yaml:"storedArgs,omitempty"`
+	// StoredArgsJSON is an alternative to StoredArgs for a row proving the
+	// decode's tolerance for a stored command_args value that is not a JSON
+	// string (a number, an object, an array, a boolean, or null): it is raw
+	// JSON written verbatim as the command_args value. A row sets at most one
+	// of StoredArgs and StoredArgsJSON.
+	StoredArgsJSON string `yaml:"storedArgsJSON,omitempty"`
 	// ExpectedRole is the rendered role, which the ratified wrapper gate may
 	// have moved away from the stored user role.
 	ExpectedRole schema.Role `yaml:"expectedRole"`
@@ -63,9 +69,11 @@ type CommandInvocationTurnCase struct {
 
 // storedCommandExtra mirrors the Extra JSON the indexers write for a recorded
 // command: command_args is absent, not empty, when the harness recorded none.
+// CommandArgs is raw JSON so a fixture case can force a stored value that is
+// not a JSON string.
 type storedCommandExtra struct {
-	CommandName string `json:"command_name"`
-	CommandArgs string `json:"command_args,omitempty"`
+	CommandName string          `json:"command_name"`
+	CommandArgs json.RawMessage `json:"command_args,omitempty"`
 }
 
 // LoadCommandInvocationTurnFixture returns the one embedded, strictly validated
@@ -118,7 +126,24 @@ func decodeCommandInvocationTurnFixture(source []byte) (CommandInvocationTurnFix
 		if !testCase.ExpectedCommand && (testCase.ExpectedName != "" || testCase.ExpectedArgs != "") {
 			return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q expects no invocation but declares one; clear expectedName and expectedArgs", CommandInvocationTurnFixturePath, testCase.Name)
 		}
-		encoded, err := json.Marshal(storedCommandExtra{CommandName: testCase.StoredName, CommandArgs: testCase.StoredArgs})
+		if testCase.StoredArgs != "" && testCase.StoredArgsJSON != "" {
+			return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q sets both storedArgs and storedArgsJSON; use exactly one to represent the stored command_args value", CommandInvocationTurnFixturePath, testCase.Name)
+		}
+		var storedArgs json.RawMessage
+		switch {
+		case testCase.StoredArgsJSON != "":
+			if !json.Valid([]byte(testCase.StoredArgsJSON)) {
+				return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q storedArgsJSON is not valid JSON", CommandInvocationTurnFixturePath, testCase.Name)
+			}
+			storedArgs = json.RawMessage(testCase.StoredArgsJSON)
+		case testCase.StoredArgs != "":
+			encodedArgs, err := json.Marshal(testCase.StoredArgs)
+			if err != nil {
+				return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q stored args cannot be encoded: %w; use plain UTF-8 in storedArgs", CommandInvocationTurnFixturePath, testCase.Name, err)
+			}
+			storedArgs = encodedArgs
+		}
+		encoded, err := json.Marshal(storedCommandExtra{CommandName: testCase.StoredName, CommandArgs: storedArgs})
 		if err != nil {
 			return CommandInvocationTurnFixture{}, fmt.Errorf("decode command invocation turn fixture %s: case %q stored extra cannot be encoded: %w; use plain UTF-8 in storedName and storedArgs", CommandInvocationTurnFixturePath, testCase.Name, err)
 		}

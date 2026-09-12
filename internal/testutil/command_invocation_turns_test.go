@@ -19,9 +19,10 @@ func TestCommandInvocationTurnFixture_StoredExtraOmitsAbsentArguments(t *testing
 	}
 	for _, testCase := range fixture.Cases {
 		hasArgsKey := strings.Contains(testCase.StoredExtra, "command_args")
-		if hasArgsKey != (testCase.StoredArgs != "") {
+		wantArgsKey := testCase.StoredArgs != "" || testCase.StoredArgsJSON != ""
+		if hasArgsKey != wantArgsKey {
 			t.Errorf("case %q stored extra %q command_args presence = %v, want %v",
-				testCase.Name, testCase.StoredExtra, hasArgsKey, testCase.StoredArgs != "")
+				testCase.Name, testCase.StoredExtra, hasArgsKey, wantArgsKey)
 		}
 	}
 }

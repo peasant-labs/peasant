@@ -9,6 +9,7 @@ requiredNames:
   - opencode_skill_invocation_without_text
   - opencode_assistant_skill_invocation
   - claude_builtin_never_surfaces
+  - non_string_command_args_kept_empty
 cases:
   # The harness recorded a bare name. The producer adds the slash the wire
   # requires. User prose around the markup keeps the turn the author's own.
@@ -75,3 +76,20 @@ cases:
     storedName: /compact
     expectedRole: system
     expectedCommand: false
+
+  # The stored command_args value is a JSON number, not a string — a shape the
+  # store never intentionally writes but a decode must not be fragile against.
+  # The tolerant decode treats a non-string command_args as empty args rather
+  # than dropping the whole invocation, name included. User prose around the
+  # markup keeps the turn the author's own, matching bare_stored_name_gains_slash.
+  - name: non_string_command_args_kept_empty
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      Please continue with the plan.
+      <command-name>project:continue</command-name>
+    storedName: project:continue
+    storedArgsJSON: "42"
+    expectedRole: user
+    expectedCommand: true
+    expectedName: /project:continue
