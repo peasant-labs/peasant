@@ -284,10 +284,14 @@ func damagedPairText(sid SessionID) string {
 	return fmt.Sprintf("The saved copy of session %s is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session %s` to save it again from the source.", sid, sid)
 }
 
-// missingPairText is printed once by `harvest index` for a stored session
-// whose saved copy is absent.
-func missingPairText(sid SessionID) string {
-	return fmt.Sprintf("Session %s has no saved copy in peasant-sync/. Run `peasant harvest --force --session %s` to save it again.", sid, sid)
+// missingPairText names a session whose saved pair is missing or damaged and
+// whose native source could not be reached to re-ingest it. The repair itself
+// is automatic when the source exists; this is the remaining actionable report.
+func missingPairText(sid SessionID, source string) string {
+	if source == "" {
+		return fmt.Sprintf("session %s has no usable saved copy in peasant-sync/ and no recorded original source, so it could not be re-ingested", sid)
+	}
+	return fmt.Sprintf("session %s has no usable saved copy in peasant-sync/ and its original source %q is unavailable, so it could not be re-ingested", sid, source)
 }
 
 // artifactOwnedKind names the families of file peasant's own artifact naming

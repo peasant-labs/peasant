@@ -71,6 +71,10 @@ type DiffEntry struct {
 	Session      DiscoveredSession
 	Status       DiffStatus
 	retainedOnly bool // No current native discovery context accompanies this stored session.
+	// pairRepair marks a session whose saved pair is missing or damaged. It is
+	// re-ingested from its native source regardless of the database-first
+	// freshness verdict: there is no usable retained input to prefer.
+	pairRepair bool
 }
 
 // PipelineResult summarizes a pipeline run.
@@ -807,20 +811,26 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	}
 	priorEntries := len(toProcessEntries)
 	toProcessEntries = p.appendStoredAdapterWork(ctx, toProcessEntries, allSessions)
-	adapterQueued := make(map[SessionID]bool, len(toProcessEntries)-priorEntries)
+	// A stored session whose saved pair is missing or damaged is re-ingested
+	// from its native source here. The repair no longer waits for an explicit
+	// --force --session: a session with no usable retained input has nothing to
+	// protect. The inventory is database-driven and reads only the selected
+	// sessions' own locators.
+	toProcessEntries = p.appendPairRepairWork(ctx, toProcessEntries, allSessions)
+	maintenanceQueued := make(map[SessionID]bool, len(toProcessEntries)-priorEntries)
 	for _, entry := range toProcessEntries[priorEntries:] {
-		adapterQueued[entry.Session.SessionID] = true
+		maintenanceQueued[entry.Session.SessionID] = true
 	}
 	keptResults := sessionResults[:0]
 	for _, result := range sessionResults {
-		if !adapterQueued[result.SessionID] {
+		if !maintenanceQueued[result.SessionID] {
 			keptResults = append(keptResults, result)
 		}
 	}
 	sessionResults = keptResults
 	keptDryRun := dryRunSessions[:0]
 	for _, result := range dryRunSessions {
-		if !adapterQueued[result.SessionID] {
+		if !maintenanceQueued[result.SessionID] {
 			keptDryRun = append(keptDryRun, result)
 		}
 	}
@@ -2742,7 +2752,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		session = *captured.Session
 		result.ParentUUID = session.ParentUUID
 	}
-	if supportsSessionCapture(session) && !p.config.Reindex {
+	if supportsSessionCapture(session) && !p.config.Reindex && !entry.pairRepair {
 		result.Status, err = p.classifyCapturedSession(ctx, session, captured)
 		if err != nil {
 			return fail(err)
@@ -4271,6 +4281,11 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageReconcile, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageReconcile, reconcileProfileStart, len(scanned), len(scanned))
+	// Stored sessions whose saved pair is missing or damaged cannot be found by
+	// the tree scan: the metadata locator is what is gone. They are enumerated
+	// from the database and appended as native re-ingest targets, so
+	// `harvest index` repairs them instead of reporting a command to run.
+	scanned = append(scanned, p.pairRepairTargets(ctx, scanned)...)
 	prepareProfileStart := time.Now()
 	p.recordIndexProfileStage(StagePrepare, prepareProfileStart, len(scanned), len(scanned))
 
@@ -4294,9 +4309,11 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		var needsWork bool
 		if p.config.DryRun {
 			// Plan from recorded SQL evidence without reading full transcripts.
-			needsWork = p.dryRunIndexNeedsWork(ctx, target) || p.adapterTargetNeedsWork(ctx, target)
+			needsWork = target.pairRepair || p.dryRunIndexNeedsWork(ctx, target) || p.adapterTargetNeedsWork(ctx, target)
 		} else {
-			needsWork = p.adapterTargetNeedsWork(ctx, target) || p.indexTargetNeedsWork(ctx, target)
+			// A pair-repair target has no usable pair, so the retained-index
+			// selection cannot apply: its repair is the work.
+			needsWork = target.pairRepair || p.adapterTargetNeedsWork(ctx, target) || p.indexTargetNeedsWork(ctx, target)
 		}
 		// A target whose evaluation was interrupted was not classified, so it
 		// does not count as diff work this stage completed.
@@ -4399,6 +4416,29 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	}
 
 	for _, t := range targeted {
+		if t.pairRepair {
+			// Native re-ingestion is the repair: prefer the session as
+			// discovery saw it (workspace, worktree, commit context), and fall
+			// back to the stored source locator when discovery did not offer
+			// it. A source that is gone is reported, not silently dropped.
+			discovered, found := sourceSessions[t.session.SessionID]
+			if found {
+				entryByID[discovered.SessionID] = DiffEntry{Session: discovered, Status: DiffUpdated, pairRepair: true}
+				inBatch[discovered.SessionID] = true
+				continue
+			}
+			if t.originalSourcePath != "" {
+				if _, statErr := p.fs.Stat(t.originalSourcePath); statErr == nil {
+					session := p.nativeSessionForTarget(t, nil)
+					entryByID[session.SessionID] = DiffEntry{Session: session, Status: DiffUpdated, pairRepair: true}
+					inBatch[session.SessionID] = true
+					continue
+				}
+			}
+			p.reportPairRepairUnavailable(t.session.SessionID, t.originalSourcePath)
+			fallbackTargets = append(fallbackTargets, t)
+			continue
+		}
 		if !t.refreshMetadata && !p.adapterTargetNeedsWork(ctx, t) {
 			// harvest index --force is an explicit manual refresh: use a usable
 			// native capture when the recorded source is still there, and
@@ -4669,6 +4709,10 @@ type reindexTarget struct {
 	transcriptPath     string // path to the peasant-sync transcript on disk
 	originalSourcePath string // path to the original source file (may not exist)
 	refreshMetadata    bool   // historical metadata requires native extraction
+	// pairRepair marks a stored session whose saved pair is missing or damaged:
+	// the tree scan cannot find it, and it is re-ingested from its native
+	// source without requiring --force.
+	pairRepair bool
 }
 
 func (p *Pipeline) reindexFallbackLog(target reindexTarget) IndexLogEntry {
