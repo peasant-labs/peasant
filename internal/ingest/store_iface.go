@@ -185,8 +185,16 @@ type SessionEntryWrite struct {
 	// selects an unproven legacy write, which cannot retain an input proof.
 	ExpectedState *SessionIndexState
 	// IndexedInputHash identifies the input actually consumed by this parser run.
-	// Supplying it requires an expected state with a known artifact identity.
+	// Supplying it requires an artifact identity: either the expected state
+	// records one, or this write establishes it from the pair it consumed.
 	IndexedInputHash *string
+	// ArtifactIdentity is the artifact hash of the pair this parser consumed.
+	// A row written before the artifact-hash column existed has no identity to
+	// check the pair against; the ordinary index write establishes it here, in
+	// the same commit that records the entries and the input proof, so the
+	// session settles instead of being re-selected forever. A stored identity
+	// is never overwritten by this field: the mirror owns live pair changes.
+	ArtifactIdentity *string
 }
 
 // SessionIndexState is the complete stored state used to condition an index

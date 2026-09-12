@@ -231,6 +231,17 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			return outcome, rollbackErr, fatal
 		}
 	}
+	if write.ArtifactIdentity != nil {
+		// The pair identity this parse consumed. A row that predates the
+		// artifact-hash column has none; establishing it here is what lets the
+		// input proof and the settled index be recorded in the same commit.
+		// The WHERE clause keeps a stored identity untouched even though the
+		// captured-state check already refused a contradicting claim.
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{Args: []any{*write.ArtifactIdentity, string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	}
 	if write.IndexerVersion > 0 && write.Mode != ingest.SessionEntryWriteContentBackfill {
 		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexerVersion, write.IndexedAtMs, outcome.sessionEntriesHash, write.IndexedInputHash); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)

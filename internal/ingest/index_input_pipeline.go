@@ -56,8 +56,19 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	if err != nil {
 		return nil, err
 	}
-	if state == nil || state.SessionID != artifact.Metadata.SessionID || state.ArtifactHash == nil || *state.ArtifactHash != artifact.ArtifactHash || state.Harness != artifact.Metadata.ModelHarness || artifact.Metadata.ModelHarness != im.session.Harness {
+	// The stored artifact identity is a CONTRADICTION check, not a presence
+	// check. A row that predates the artifact-hash column has no identity to
+	// check, and its retained pair is the only input it has ever had; the
+	// ordinary index write establishes the identity from the pair it parsed
+	// (SessionEntryWrite.ArtifactIdentity), so the next run can check it (see
+	// content_backfill.go's "until an ordinary index run establishes it").
+	// A stored identity that disagrees with the pair stays a refusal: that is
+	// the torn, mixed or stale pair this guard exists for.
+	if state == nil || state.SessionID != artifact.Metadata.SessionID || state.Harness != artifact.Metadata.ModelHarness || artifact.Metadata.ModelHarness != im.session.Harness {
 		return nil, fmt.Errorf("capture index input for session %s: saved files and stored metadata do not identify the same artifact; no parser ran or entries changed; run harvest to save the session again before retrying indexing", im.session.SessionID)
+	}
+	if state.ArtifactHash != nil && *state.ArtifactHash != artifact.ArtifactHash {
+		return nil, fmt.Errorf("capture index input for session %s: the saved pair does not match the stored artifact identity; no parser ran or entries changed; run harvest to save the session again before retrying indexing", im.session.SessionID)
 	}
 	if err := p.checkIndexProducer(state); err != nil {
 		return nil, err

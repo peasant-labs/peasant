@@ -1834,6 +1834,17 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			}
 			capture = SessionContentCaptureWrite{Status: ContentCaptureIncomplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: format, CapturedAtMs: nowMs, FailureCode: result.refusalCode, FailureMessage: result.strictRefusal}
 		}
+		// The pair identity this parse consumed. It establishes the stored
+		// artifact identity only when the captured state has none: a row that
+		// predates the artifact-hash column would otherwise refuse before
+		// parsing forever (no identity to check the pair against). A stored
+		// identity was already checked by captureIndexInput and is never
+		// overwritten here; live pair changes belong to the mirror.
+		var artifactIdentity *string
+		if result.input.expected != nil && result.input.expected.ArtifactHash == nil {
+			identity := result.input.artifactHash
+			artifactIdentity = &identity
+		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
 			RequireFullContent: requireFullContent,
@@ -1845,6 +1856,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			IndexedAtMs:        nowMs,
 			ExpectedState:      result.input.expected,
 			IndexedInputHash:   &result.input.inputHash,
+			ArtifactIdentity:   artifactIdentity,
 		})
 		writePositions = append(writePositions, i)
 	}

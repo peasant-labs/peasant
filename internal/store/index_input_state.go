@@ -27,11 +27,24 @@ func validateIndexInputClaim(write ingest.SessionEntryWrite) error {
 	if write.ExpectedState != nil && write.ExpectedState.SessionID != write.SessionID {
 		return &ingest.StaleIndexWorkError{SessionID: write.SessionID}
 	}
+	// A claimed identity is what the write establishes when the captured state
+	// records none. It must be a digest, and it must agree with the captured
+	// state whenever that state records an identity; both are checked with or
+	// without an input proof, because the claim is a fact about the pair the
+	// write consumed.
+	if write.ArtifactIdentity != nil && !validIndexInputHash(*write.ArtifactIdentity) {
+		return fmt.Errorf("store: artifact identity claim for session %s is not a valid digest; replacement was refused before changing rows; supply the actual consumed pair identity or omit the claim", write.SessionID)
+	}
+	if write.ArtifactIdentity != nil && write.ExpectedState != nil && write.ExpectedState.ArtifactHash != nil && *write.ArtifactIdentity != *write.ExpectedState.ArtifactHash {
+		return fmt.Errorf("store: artifact identity claim for session %s contradicts the captured state; replacement was refused before changing rows; capture the actual current pair identity and retry", write.SessionID)
+	}
 	if write.IndexedInputHash == nil {
 		return nil
 	}
+	storedIdentity := write.ExpectedState != nil && write.ExpectedState.ArtifactHash != nil && validIndexInputHash(*write.ExpectedState.ArtifactHash)
+	claimedIdentity := write.ArtifactIdentity != nil && validIndexInputHash(*write.ArtifactIdentity)
 	if !validIndexInputHash(*write.IndexedInputHash) || write.ExpectedState == nil ||
-		write.ExpectedState.ArtifactHash == nil || !validIndexInputHash(*write.ExpectedState.ArtifactHash) || write.IndexerVersion < 1 {
+		write.IndexerVersion < 1 || (!storedIdentity && !claimedIdentity) {
 		return fmt.Errorf("store: input proof for session %s lacks a valid digest, captured artifact identity or positive producing indexer revision; replacement was refused before changing rows; supply the actual captured SQL state and successfully consumed input, or omit the input proof", write.SessionID)
 	}
 	return nil

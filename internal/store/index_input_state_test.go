@@ -50,6 +50,8 @@ type indexInputCase struct {
 	InvalidHash           *string             `yaml:"invalidHash"`
 	WrongSession          bool                `yaml:"wrongSession"`
 	ExpectedEmptyArtifact bool                `yaml:"expectedEmptyArtifact"`
+	ClaimIdentity         bool                `yaml:"claimIdentity"`
+	InvalidClaim          bool                `yaml:"invalidClaim"`
 	SeedSQL               []string            `yaml:"seedSQL"`
 	MutationSQL           string              `yaml:"mutationSQL"`
 	BeforeMutationSQL     string              `yaml:"beforeMutationSQL"`
@@ -205,6 +207,13 @@ func TestIndexInputStateConditionalWritesAndInvalidation(t *testing.T) {
 			if row.InvalidHash != nil {
 				write.IndexedInputHash = row.InvalidHash
 			}
+			if row.ClaimIdentity {
+				claim := document.NewInputHash
+				if row.InvalidClaim {
+					claim = "not-a-digest"
+				}
+				write.ArtifactIdentity = &claim
+			}
 			var err error
 			var result ingest.SessionEntryWriteResult
 			var mirroredHash *string
@@ -303,7 +312,14 @@ func TestIndexInputStateConditionalWritesAndInvalidation(t *testing.T) {
 			if !reflect.DeepEqual(afterState.IndexedInputHash, wantInput) {
 				t.Fatalf("input proof=%v, want %v", afterState.IndexedInputHash, wantInput)
 			}
-			if !reflect.DeepEqual(beforeState.ArtifactHash, afterState.ArtifactHash) {
+			if row.ClaimIdentity && write.ExpectedState != nil && write.ExpectedState.ArtifactHash == nil {
+				// The repair path: the row had no identity, so the write
+				// establishes the consumed pair's identity in the same commit
+				// as the entries and the input proof.
+				if afterState.ArtifactHash == nil || *afterState.ArtifactHash != *write.ArtifactIdentity {
+					t.Fatalf("artifact identity=%v, want the claimed identity %v; a missing identity must be established by the write", afterState.ArtifactHash, *write.ArtifactIdentity)
+				}
+			} else if !reflect.DeepEqual(beforeState.ArtifactHash, afterState.ArtifactHash) {
 				t.Fatal("index write altered artifact identity")
 			}
 			if row.Operation == indexInputDirect {
