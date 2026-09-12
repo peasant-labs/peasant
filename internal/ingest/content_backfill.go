@@ -161,6 +161,16 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 			// is unbounded (peasant harvest index runs to the end).
 			if budgetBytes > 0 && charged >= budgetBytes && len(recovered) > 0 {
 				stoppedOnBudget = true
+				// Report the backlog this run leaves so the stage ends short
+				// (Done < Total) and content_remaining names what the next run
+				// will take. The sessions just recovered are already complete and
+				// drop out of the incomplete listing, so the count is the work
+				// still owed. It reads only that listing, never a transcript, so
+				// reporting the backlog costs nothing the budget was protecting.
+				remaining, err = p.countIncompleteContentWork(ctx, store)
+				if err != nil {
+					return recovered, stoppedOnBudget, 0, err
+				}
 				return recovered, stoppedOnBudget, remaining, nil
 			}
 			// The same stored-metadata compatibility check the index selection
@@ -235,6 +245,39 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 			}
 			recovered[id] = recovery
 			charged += recovery.charged
+		}
+	}
+}
+
+// countIncompleteContentWork counts the in-scope sessions still awaiting a
+// content capture. It is called after the budget stops the pass, so the
+// sessions this run recovered are already complete and no longer listed; the
+// count is the backlog the next run will take. A harness the run's filters
+// exclude is not counted, matching what the pass would have processed. It reads
+// only the incomplete-session listing, never a transcript.
+func (p *Pipeline) countIncompleteContentWork(ctx context.Context, store ContentBackfillTargetStore) (int, error) {
+	count := 0
+	var after SessionID
+	for {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+			return count, cancelErr
+		}
+		if err != nil {
+			return count, err
+		}
+		if len(targets) == 0 {
+			return count, nil
+		}
+		for _, target := range targets {
+			after = target.SessionID
+			scope := reindexTarget{session: DiscoveredSession{SessionID: target.SessionID, Harness: target.Harness}, startMs: target.StartMs}
+			if p.includesIndexTarget(scope) {
+				count++
+			}
 		}
 	}
 }

@@ -584,3 +584,174 @@ func TestStreamingIndexDrainGroupsByBytes(t *testing.T) {
 		})
 	}
 }
+
+// budgetTargetSession is one row the budget-pass double serves.
+type budgetTargetSession struct {
+	harness  Harness
+	host     string
+	parent   string
+	complete bool
+	state    *SessionIndexState
+}
+
+// budgetTargetStore is the content-recovery store the budget pass reads and
+// writes through. It lists the sessions still awaiting a content capture and,
+// when the pass writes a recovered capture, marks that session complete so it
+// drops out of the next listing, exactly as a real store does. It embeds
+// MetricsStore so it satisfies the field type without being a SessionStore, so
+// the stored-metadata compatibility check treats it as file-only.
+type budgetTargetStore struct {
+	MetricsStore
+	order    []SessionID
+	sessions map[SessionID]*budgetTargetSession
+}
+
+var (
+	_ ContentBackfillTargetStore = (*budgetTargetStore)(nil)
+	_ SessionIndexStateReader    = (*budgetTargetStore)(nil)
+)
+
+func (s *budgetTargetStore) ListContentCaptureIncompleteSessionsAfter(_ context.Context, after SessionID, limit int) ([]ContentCaptureIncompleteSession, error) {
+	var out []ContentCaptureIncompleteSession
+	for _, id := range s.order {
+		if string(id) <= string(after) {
+			continue
+		}
+		session := s.sessions[id]
+		if session.complete {
+			continue
+		}
+		out = append(out, ContentCaptureIncompleteSession{SessionID: id, Harness: session.harness, StartMs: 1700000000000})
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *budgetTargetStore) ReadIndexState(_ context.Context, id SessionID) (*SessionIndexState, error) {
+	return s.sessions[id].state, nil
+}
+
+func (s *budgetTargetStore) LookupSessionLocation(_ context.Context, id SessionID) (string, string, error) {
+	session := s.sessions[id]
+	return session.host, session.parent, nil
+}
+
+func (s *budgetTargetStore) LookupSourceInfo(_ context.Context, id SessionID) (string, SourceFormat, string, error) {
+	// The retained pair is on the filesystem, so the pass reads it through the
+	// snapshot path and never asks for a native source here.
+	return "", "", "", fmt.Errorf("budget double serves the retained pair, not a native source for %s", id)
+}
+
+func (s *budgetTargetStore) IndexSessionEntryBatch(_ context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+	results := make([]SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		s.sessions[write.SessionID].complete = true
+		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: true}
+	}
+	return results
+}
+
+// seedBudgetContentSession writes a valid retained pair to the filesystem and
+// registers the session as an incomplete recovery target in the double.
+func seedBudgetContentSession(t *testing.T, fs FileSystem, store *budgetTargetStore, output string, n int) SessionID {
+	t.Helper()
+	sid, err := NewSessionID(fmt.Sprintf("ses_budget%05d", n))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hostSlug = "github.com--peasant-labs--content-budget"
+	meta := NewUnifiedMetadata()
+	meta.SessionID = sid
+	meta.ModelHarness = HarnessClaudeCode
+	meta.Model = "claude-opus-4-8"
+	meta.HostSlug = hostSlug
+	meta.Timestamp = TimestampInfo{Start: 1700000000000, End: 1700000001000}
+	meta.Project = ProjectInfo{Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "content-budget", FilePath: "/synthetic/content-budget"}
+	sessionDir := SessionDir(output, hostSlug, string(sid), "")
+	transcriptPath := filepath.Join(sessionDir, string(sid)+"--transcript."+string(SourceFormatJSONL))
+	meta.Source = SourceInfo{Format: SourceFormatJSONL, FilePath: transcriptPath}
+	transcript := syntheticClaudeTranscript(string(sid), 256)
+	meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(SessionMetadataPath(output, hostSlug, string(sid), ""), metaJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(transcriptPath, transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store.order = append(store.order, sid)
+	// ArtifactHash stays nil: this is a clean recovery target, not a torn pair,
+	// so the pass recovers it and charges its input bytes.
+	store.sessions[sid] = &budgetTargetSession{harness: HarnessClaudeCode, host: hostSlug, state: &SessionIndexState{SessionID: sid, Harness: HarnessClaudeCode, IndexerVersion: 1}}
+	return sid
+}
+
+// TestContentBudgetStopsAfterK proves the content pass is bounded and reports the
+// backlog it leaves. A one-byte budget processes exactly one session (nothing is
+// charged when the pass starts, so one session runs even though it alone exceeds
+// the budget) and stops, reporting the remaining count so the stage renders short
+// (Done < Total) and content_remaining names the work owed. The next run
+// continues that backlog with no stored cursor because the recovered session is
+// already complete and drops out. A budget of zero (harvest index) is unbounded.
+func TestContentBudgetStopsAfterK(t *testing.T) {
+	t.Run("content_budget_stops_after_K", func(t *testing.T) {
+		ctx := context.Background()
+		output := t.TempDir()
+		fs := &OSFileSystem{}
+		store := &budgetTargetStore{sessions: make(map[SessionID]*budgetTargetSession)}
+
+		const total = 3
+		var ids []SessionID
+		for i := 0; i < total; i++ {
+			ids = append(ids, seedBudgetContentSession(t, fs, store, output, i))
+		}
+
+		pipeline := &Pipeline{
+			fs:           fs,
+			metricsStore: store,
+			indexers:     NewIndexerRegistry(fs, IndexerRegistryOptions{}),
+			config:       PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true},
+		}
+
+		// A one-byte budget stops after the first session and reports two left.
+		recovered, stopped, remaining, err := pipeline.backfillIncompleteContent(ctx, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recovered) != 1 || !stopped {
+			t.Fatalf("a one-byte budget processes exactly one session and stops: recovered=%d stopped=%t", len(recovered), stopped)
+		}
+		if remaining != total-1 {
+			t.Fatalf("a stopped pass reports the backlog it leaves: remaining=%d, want %d", remaining, total-1)
+		}
+
+		// The next run continues the backlog with no cursor: the recovered
+		// session is complete and no longer listed, so it stops after one more
+		// and reports one left.
+		recovered2, stopped2, remaining2, err := pipeline.backfillIncompleteContent(ctx, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recovered2) != 1 || !stopped2 || remaining2 != total-2 {
+			t.Fatalf("the next run continues the backlog without a cursor: recovered=%d stopped=%t remaining=%d want remaining %d", len(recovered2), stopped2, remaining2, total-2)
+		}
+
+		// A budget of zero is unbounded: it clears the rest, does not report
+		// stopping, and leaves no backlog.
+		recovered3, stopped3, remaining3, err := pipeline.backfillIncompleteContent(ctx, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recovered3) != total-2 || stopped3 || remaining3 != 0 {
+			t.Fatalf("an unbounded pass clears the backlog: recovered=%d stopped=%t remaining=%d", len(recovered3), stopped3, remaining3)
+		}
+	})
+}
