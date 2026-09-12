@@ -11,6 +11,7 @@
 required_names:
   - crash_between_install_and_mirror_restart
   - crash_between_mirror_and_entries_restart
+  - crash_between_mirror_and_entries_restart_replaced_with_provenance
   - parent_mirror_fails_child_refused_next_drain
   - torn_pair_no_row_reingested
   - torn_pair_row_present_detected_on_read
@@ -27,9 +28,15 @@ cases:
   # A crash after the row committed but before its entries did: the row carries
   # an artifact hash and a null indexed-input hash. The repair predicate selects
   # exactly this session on the next harvest and not on the one after, so the
-  # entries are recovered in one run and the steady state is quiet.
+  # entries are recovered in one run and the steady state is quiet. The predicate
+  # is independent of the row it lands on, so the crash is proven against a fresh
+  # row and against a complete provenanced row replaced by changed content.
   - name: crash_between_mirror_and_entries_restart
     scenario: crash_mirror_entries
+    variant: fresh
+  - name: crash_between_mirror_and_entries_restart_replaced_with_provenance
+    scenario: crash_mirror_entries
+    variant: replaced_provenance
 
   # A parent whose row fails to record does not starve its subtree. The child is
   # held until the parent is committed, then drained in a later transaction where

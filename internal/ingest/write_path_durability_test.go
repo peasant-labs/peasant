@@ -26,6 +26,7 @@ var writePathDurabilityYAML []byte
 type durabilityFixture struct {
 	Name             string `yaml:"name"`
 	Scenario         string `yaml:"scenario"`
+	Variant          string `yaml:"variant"`
 	ExpectDiagnostic string `yaml:"expect_diagnostic"`
 }
 
@@ -90,7 +91,7 @@ func TestWritePathDurability(t *testing.T) {
 			case "crash_install_mirror":
 				runCrashInstallMirror(t)
 			case "crash_mirror_entries":
-				runCrashMirrorEntries(t)
+				runCrashMirrorEntries(t, fixture.Variant)
 			case "torn_no_row":
 				runTornNoRow(t)
 			case "torn_row_present":
@@ -164,8 +165,10 @@ func runCrashInstallMirror(t *testing.T) {
 
 // runCrashMirrorEntries plants an entry-batch failure so run 1 records the row
 // but no entries, then proves the repair predicate selects the session on the
-// next run and not on the one after: one harvest heals it.
-func runCrashMirrorEntries(t *testing.T) {
+// next run and not on the one after: one harvest heals it. The variant controls
+// the row state the crash lands on, proving the predicate is independent of it:
+// a fresh row, or a complete row with provenance replaced by changed content.
+func runCrashMirrorEntries(t *testing.T, variant string) {
 	ctx := context.Background()
 	mfs := testutil.NewMemFS()
 	sid, _ := ingest.NewSessionID(testSessionID)
@@ -180,6 +183,35 @@ func runCrashMirrorEntries(t *testing.T) {
 	}
 	indexer := &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile, Entries: durabilityStubEntries(sid)}
 	dbPath := storetest.CopyGoldenDB(t)
+
+	switch variant {
+	case "", "fresh":
+		// The crash lands on a fresh row: nothing was stored before.
+	case "replaced_provenance":
+		// Establish a complete row with provenance first, then change the source
+		// so the crash run replaces the pair. The mirror clears the input proof
+		// when the pair changes, so the crash lands on an already-provenanced row.
+		established := newDurabilityStore(t, dbPath)
+		if _, err := newDurabilityPipeline(t, mfs, established, adapters, indexer, makePipelineConfig(testOutputDir)).Run(ctx); err != nil {
+			t.Fatalf("establish run: %v", err)
+		}
+		prior, err := established.ReadIndexState(ctx, sid)
+		if err != nil || prior == nil || prior.ArtifactHash == nil || prior.IndexedInputHash == nil {
+			t.Fatalf("the establish run must leave a complete, provenanced row; got %+v, %v", prior, err)
+		}
+		established.Shutdown()
+		if err := mfs.WriteFile(sourcePath, []byte(`{"sessionId":"test","type":"user","message":{"role":"user","content":"changed"},"timestamp":"2024-02-19T02:00:00Z"}`+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		newer := time.Now().Add(-time.Hour)
+		mfs.ModTimes[sourcePath] = newer
+		session.ModTime = newer
+		adapters = map[ingest.Harness]ingest.AdapterFactory{
+			ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: makeMinimalMeta(t, testSessionID)}),
+		}
+	default:
+		t.Fatalf("unknown crash_mirror_entries variant %q", variant)
+	}
 
 	// Run 1: the crash after the row committed. The entries never commit.
 	crashed := newDurabilityStore(t, dbPath)
