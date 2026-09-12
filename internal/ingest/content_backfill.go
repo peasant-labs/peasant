@@ -80,6 +80,19 @@ func (e *ContentShapeMismatchError) Error() string {
 
 func (e *ContentShapeMismatchError) Unwrap() error { return ContentBackfillShapeMismatch }
 
+// TornRetainedPairError means a retained pair's bytes no longer hash to the
+// identity the row recorded: a torn or mixed pair left by a power loss between
+// the file write and a later change, or a hand edit. The content stage reports
+// it as damaged and preserves the database copy instead of re-capturing corrupt
+// bytes, exactly as the rebuild pass does on the reindex path.
+type TornRetainedPairError struct {
+	SessionID SessionID
+}
+
+func (e *TornRetainedPairError) Error() string {
+	return fmt.Sprintf("content recovery %s: the saved pair no longer matches its stored identity; the database copy is preserved and the saved copy is reported as damaged", e.SessionID)
+}
+
 // contentRecovery is one completed retained-content repair. Recovering content
 // repairs the stored capture only; it does not complete the session, so the
 // pipeline still evaluates the same session for independent adapter and
@@ -204,6 +217,14 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					slog.Debug("content backfill deferred to forced index replacement", "session_id", id)
 					continue
 				}
+				var torn *TornRetainedPairError
+				if errors.As(err, &torn) {
+					// The saved pair no longer matches the row. Report it in the
+					// one damaged-pair text every reader prints and preserve the
+					// database copy; the user re-saves it with harvest --force.
+					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
+					continue
+				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
 				p.reportDiagnostic(DiagnosticEntry{
 					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s retained-content recovery", id),
@@ -286,6 +307,19 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 		}
 		session = DiscoveredSession{SessionID: id, Harness: harness, SourcePath: resolved, SourceFormat: format}
 		authority = ContentSourceProviderSource
+	}
+	// A retained pair is the content source only while its bytes still hash to
+	// the row that names it. Read the pair once and compare its identity to the
+	// recorded hash: a torn or mixed pair, or a hand edit, is reported as damaged
+	// and left for an explicit re-save rather than re-captured from corrupt
+	// bytes. The database still serves the session. The provider-source path has
+	// no retained-pair identity to check, so this guard is scoped to the snapshot
+	// authority.
+	if authority == ContentSourcePeasantSnapshot && state.ArtifactHash != nil {
+		pair, pairErr := ReadManagedPair(p.fs, p.config.OutputDir.String(), metaPath, id)
+		if pairErr != nil || pair.ArtifactHash != *state.ArtifactHash {
+			return contentRecovery{}, &TornRetainedPairError{SessionID: id}
+		}
 	}
 	indexer, ok := p.indexers[session.Harness].(AuthoritativeTranscriptIndexer)
 	if !ok {

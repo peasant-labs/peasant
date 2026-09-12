@@ -255,3 +255,136 @@ func TestRetainedContentBackfill(t *testing.T) {
 		}
 	}
 }
+
+// TestContentStageDetectsTornPair proves the CONTENT stage detects a saved pair
+// whose bytes no longer hash to the identity the row recorded, and reports the
+// one damaged-pair text a user reads, without recovering content from the
+// corrupt bytes. On a plain reindex the write path never reads a present row's
+// pair (it does that only under --all), so the diagnostic here can come from
+// nowhere but the content stage: reverting the content-stage hash compare makes
+// this go silent.
+func TestContentStageDetectsTornPair(t *testing.T) {
+	t.Run("content_stage_detects_torn_pair", func(t *testing.T) {
+		ctx := context.Background()
+		fs := testutil.NewMemFS()
+		database, err := store.Open(filepath.Join(t.TempDir(), "torn.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer database.Close()
+
+		meta := makeMinimalMeta(t, "ses_tornpair00001")
+		meta.Project.Hash = testutil.TestProjectHash
+		meta.Source.FilePath = "/synthetic/missing.jsonl"
+		id := meta.SessionID
+		if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+			t.Fatal(err)
+		}
+
+		// The saved pair as first written: a well-formed transcript whose
+		// identity the mirror records on the row.
+		text := strings.Repeat("safe ", 600) + "RETAINED_TAIL"
+		rawContent, err := json.Marshal(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		correct := []byte(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":%s}}`, rawContent))
+
+		dir := filepath.Join(testOutputDir, testutil.TestHostSlug)
+		sessionDir := filepath.Join(dir, id.String())
+		transcriptPath := filepath.Join(sessionDir, id.String()+"--transcript.jsonl")
+		metadataPath := filepath.Join(sessionDir, id.String()+"--metadata.json")
+		session := ingest.DiscoveredSession{SessionID: id, Harness: ingest.HarnessClaudeCode, SourcePath: ingest.ResolvedPath(transcriptPath), SourceFormat: ingest.SourceFormatJSONL}
+
+		registry := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
+		entries, err := registry[ingest.HarnessClaudeCode].IndexTranscriptBytes(ctx, session, correct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Index the entries without full content, so the session is a content
+		// recovery target the next reindex visits.
+		if err := database.IndexSessionEntries(ctx, id, entries); err != nil {
+			t.Fatal(err)
+		}
+
+		metaJSON, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := ingest.NewManagedArtifact(metaJSON, correct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.MkdirAll(sessionDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.WriteFile(metadataPath, metaJSON, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.WriteFile(transcriptPath, correct, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Record the pair identity on the row, exactly as the write path does.
+		if results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}}); len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+			t.Fatalf("record the saved pair identity: %+v", results)
+		}
+		state, err := database.ReadIndexState(ctx, id)
+		if err != nil || state == nil || state.ArtifactHash == nil {
+			t.Fatalf("the row must carry a recorded pair hash before the pair is torn: state=%+v err=%v", state, err)
+		}
+
+		// Now the saved transcript is changed in place, as a power loss between
+		// the file write and a later change, or a hand edit, leaves it: its bytes
+		// no longer hash to the recorded identity.
+		tampered := []byte(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":%s}}`, mustJSON(t, strings.Repeat("safe ", 600)+"TAMPERED_TAIL")))
+		if err := fs.WriteFile(transcriptPath, tampered, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := makePipelineConfig(testOutputDir)
+		cfg.Reindex = true // a plain reindex: the write path never reads a present row's pair here.
+		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
+		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+			ingest.WithStore(database), ingest.WithMetricsStore(database))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := pipeline.Run(ctx)
+		if err != nil {
+			t.Fatalf("a torn pair must not abort the run: %v", err)
+		}
+
+		reportedDamaged := false
+		for _, diagnostic := range result.Diagnostics {
+			if strings.Contains(diagnostic.Message, id.String()) &&
+				strings.Contains(diagnostic.Message, "is damaged") &&
+				strings.Contains(diagnostic.Message, "--force --session") {
+				reportedDamaged = true
+			}
+		}
+		if !reportedDamaged {
+			t.Fatalf("the content stage did not report the torn pair as damaged; diagnostics=%+v", result.Diagnostics)
+		}
+		// The database copy is preserved: a torn pair is never recovered into a
+		// complete capture from its corrupt bytes.
+		capture, _, err := database.GetSessionContentCapture(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if capture.Status == ingest.ContentCaptureComplete {
+			t.Fatal("a torn pair was recovered into a complete capture; its corrupt bytes must never replace the stored content")
+		}
+	})
+}
+
+// mustJSON marshals a value the test controls, failing the test on the
+// impossible error rather than returning it.
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
