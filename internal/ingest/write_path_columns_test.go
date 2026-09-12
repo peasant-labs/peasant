@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -186,6 +189,22 @@ func TestWritePathColumns(t *testing.T) {
 				if result.Summary.New != 0 || result.Summary.Updated != 0 {
 					t.Errorf("a future-schema row was ingested: %+v", result.Summary)
 				}
+				// The refusal must be SURFACED as a diagnostic, not silently
+				// classified unchanged. Without this assertion the case passes
+				// whether the version guard fires or the row is merely treated
+				// as up to date, since both leave New/Updated and the pair reads
+				// at zero. Requiring the metadata_refused diagnostic is what ties
+				// the observable to the guard: drop the refusal report and this
+				// reddens while the counts stay green.
+				refused := false
+				for _, d := range result.Diagnostics {
+					if d.ErrorType == "metadata_refused" {
+						refused = true
+					}
+				}
+				if !refused {
+					t.Errorf("future-schema row was not refused with a metadata_refused diagnostic: %+v", result.Diagnostics)
+				}
 			}
 
 			if got := mfs.Count(testutil.FSOpReadFile, metadataPath) + mfs.Count(testutil.FSOpReadFile, transcriptPath); got != c.PairReadFile {
@@ -197,5 +216,279 @@ func TestWritePathColumns(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWritePathMirrorsInPagesOf256 pins the mirror paging contract: no store
+// transaction records more than MirrorPageSize sessions. The store refuses an
+// oversized page outright, and a harvest of more sessions than one page holds
+// records every row across more than one bounded transaction, none over the
+// cap. The exact transaction count depends on how the concurrent drain batches
+// the work, so the fixture asserts the bound the design guarantees rather than
+// a timing-dependent number.
+func TestWritePathMirrorsInPagesOf256(t *testing.T) {
+	ctx := context.Background()
+
+	// The store refuses a page larger than MirrorPageSize outright; this is why
+	// the write path never hands it more than one page at a time.
+	oversize := newDurabilityStore(t, storetest.CopyGoldenDB(t))
+	refusals := oversize.Store.MirrorArtifacts(ctx, make([]ingest.ArtifactMirrorRequest, ingest.MirrorPageSize+1))
+	if len(refusals) != ingest.MirrorPageSize+1 {
+		t.Fatalf("refusal count = %d, want %d", len(refusals), ingest.MirrorPageSize+1)
+	}
+	for _, result := range refusals {
+		if result.Err == nil {
+			t.Fatal("the store must refuse a page larger than MirrorPageSize")
+		}
+		// Pin the refusal to its SIZE reason, not an incidental per-request
+		// error: if the cap were raised, an over-cap page would be admitted and
+		// fail (or succeed) for some other reason, and this size-limit phrasing
+		// would no longer appear. The phrase is the store's contract text, so a
+		// reword is a visible change while the size-refusal behavior is held.
+		if !strings.Contains(result.Err.Error(), "batch exceeds") {
+			t.Fatalf("the refusal must name the page-size limit as its reason; got %q", result.Err)
+		}
+	}
+	oversize.Shutdown()
+
+	// A harvest of more sessions than one page holds records every row without
+	// ever exceeding the page cap, and in more than one transaction.
+	const sessionCount = 300
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+	modTime := time.Now().Add(-2 * time.Hour)
+	discovered := make([]ingest.DiscoveredSession, 0, sessionCount)
+	metas := make(map[ingest.SessionID]*ingest.UnifiedMetadata, sessionCount)
+	ids := make([]ingest.SessionID, 0, sessionCount)
+	for i := 1; i <= sessionCount; i++ {
+		idStr := fmt.Sprintf("%08d-0000-4000-8000-000000000000", i)
+		sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, idStr)
+		setupSourceFile(t, mfs, sourcePath)
+		mfs.ModTimes[sourcePath] = modTime
+		session := makeDiscoveredSession(t, idStr, sourcePath, modTime)
+		discovered = append(discovered, session)
+		metas[session.SessionID] = makeMinimalMeta(t, idStr)
+		ids = append(ids, session.SessionID)
+	}
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(discovered, metas),
+	}
+	indexer := &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile}
+
+	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir),
+		ingest.WithStore(ds), ingest.WithMetricsStore(ds),
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.Run(ctx); err != nil {
+		t.Fatalf("harvest of %d sessions: %v", sessionCount, err)
+	}
+	if got := ds.MaxPage(); got > ingest.MirrorPageSize {
+		t.Errorf("a mirror transaction carried %d sessions, over the %d cap", got, ingest.MirrorPageSize)
+	}
+	if got := ds.MirrorCalls(); got < 2 {
+		t.Errorf("mirror transactions = %d; %d sessions cannot fit one page and must span more than one", got, sessionCount)
+	}
+	for _, id := range ids {
+		state, err := ds.ReadIndexState(ctx, id)
+		if err != nil || state == nil || state.ArtifactHash == nil {
+			t.Fatalf("every session must be recorded; %s is missing (%+v, %v)", id, state, err)
+		}
+	}
+}
+
+// TestWritePathInstallsMetadataLast proves the install order: the transcript is
+// renamed into place before the metadata, so a failure on the metadata rename
+// leaves the new transcript beside the OLD metadata, which still names the old
+// transcript hash. The pair is then refused on read by its hash. Were the
+// metadata installed first, the same fault would leave both files old and no
+// mixed pair, so this fixture fails if the order regresses.
+func TestWritePathInstallsMetadataLast(t *testing.T) {
+	ctx := context.Background()
+	mfs := testutil.NewCountingFS(testutil.NewMemFS())
+	git := testutil.DefaultGitResolver()
+	sid, _ := ingest.NewSessionID(testSessionID)
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	sessionDir := ingest.SessionDir(testOutputDir, testutil.TestHostSlug, testSessionID, "")
+	metadataPath := ingest.SessionMetadataPath(testOutputDir, testutil.TestHostSlug, testSessionID, "")
+	transcriptPath := filepath.Join(sessionDir, testSessionID+"--transcript.jsonl")
+
+	// First harvest: install the old pair from an old source.
+	oldContent := []byte(`{"sessionId":"test","type":"user","message":{"role":"user","content":"one"},"timestamp":"2024-02-19T00:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, oldContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldMod := time.Now().Add(-3 * time.Hour)
+	mfs.ModTimes[sourcePath] = oldMod
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, oldMod)
+	meta := makeMinimalMeta(t, testSessionID)
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta}),
+	}
+	first, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Run(ctx); err != nil {
+		t.Fatalf("first harvest: %v", err)
+	}
+	oldMetadata, err := mfs.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("old metadata must exist after the first harvest: %v", err)
+	}
+	oldTranscript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second harvest: the source changed. Plant a rename failure on the metadata
+	// file only. The transcript is installed first, so it lands; the metadata
+	// rename fails and the old metadata stays.
+	newContent := []byte(`{"sessionId":"test","type":"user","message":{"role":"user","content":"two, changed"},"timestamp":"2024-02-19T01:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, newContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	newMod := time.Now().Add(-time.Hour)
+	mfs.ModTimes[sourcePath] = newMod
+	session.ModTime = newMod
+	adapters = map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: makeMinimalMeta(t, testSessionID)}),
+	}
+	mfs.Fail(testutil.FSOpRename, metadataPath, fmt.Errorf("simulated crash before the metadata rename"))
+	second, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Run(ctx); err != nil {
+		t.Fatalf("second harvest: %v", err)
+	}
+
+	// The transcript is the new content; the metadata is still the old file.
+	gotTranscript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotTranscript) == string(oldTranscript) {
+		t.Fatal("the transcript should have been installed (renamed first) before the metadata rename failed")
+	}
+	gotMetadata, err := mfs.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotMetadata) != string(oldMetadata) {
+		t.Fatal("the old metadata must remain after its rename failed; metadata is installed last")
+	}
+	// The mixed pair is refused on read by its hash: the old metadata does not
+	// name the new transcript.
+	if _, err := ingest.ReadManagedPair(mfs, testOutputDir, metadataPath, sid); err == nil {
+		t.Fatal("a transcript-new/metadata-old pair must be refused on read")
+	}
+}
+
+// TestWritePathReplacedSessionSubagentsSurvive proves what replacing a parent
+// session touches and what it leaves alone. The child subagent subtree survives
+// the parent's re-install untouched; a stale parent-owned file left by an older
+// build is pruned with one RemoveAll; and the only read of the saved pair is the
+// single old-metadata read the replacement-header check makes.
+func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
+	ctx := context.Background()
+	mfs := testutil.NewCountingFS(testutil.NewMemFS())
+	git := testutil.DefaultGitResolver()
+	parentIDStr := testSessionID
+	childIDStr := testSessionID2
+	parentID, _ := ingest.NewSessionID(parentIDStr)
+	childID, _ := ingest.NewSessionID(childIDStr)
+	parentSource := fmt.Sprintf("%s/%s.jsonl", testSourceDir, parentIDStr)
+	childSource := fmt.Sprintf("%s/%s.jsonl", testSourceDir, childIDStr)
+
+	writeSource := func(path, content string, mod time.Time) {
+		if err := mfs.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		mfs.ModTimes[path] = mod
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	writeSource(parentSource, `{"sessionId":"p","type":"user","message":{"role":"user","content":"one"},"timestamp":"2024-02-19T00:00:00Z"}`+"\n", old)
+	writeSource(childSource, `{"sessionId":"c","type":"user","message":{"role":"user","content":"child"},"timestamp":"2024-02-19T00:00:00Z"}`+"\n", old)
+
+	parent := makeDiscoveredSession(t, parentIDStr, parentSource, old)
+	child := makeDiscoveredSession(t, childIDStr, childSource, old)
+	child.ParentUUID = &parentID
+	metas := map[ingest.SessionID]*ingest.UnifiedMetadata{parentID: makeMinimalMeta(t, parentIDStr), childID: makeMinimalMeta(t, childIDStr)}
+	// A store-backed harvest: classification is database-first, so the only read
+	// of a saved pair is the replacement-header read that the install itself
+	// makes, which is what this fixture counts.
+	db, err := store.Open(filepath.Join(t.TempDir(), "replaced.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	runHarvest := func(sessions []ingest.DiscoveredSession) {
+		pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+			ingest.HarnessClaudeCode: makeStubAdapter(sessions, metas),
+		}, makePipelineConfig(testOutputDir),
+			ingest.WithStore(db), ingest.WithMetricsStore(db),
+			ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pipeline.Run(ctx); err != nil {
+			t.Fatalf("harvest: %v", err)
+		}
+	}
+
+	// First harvest: install the parent and its subagent child.
+	runHarvest([]ingest.DiscoveredSession{parent, child})
+
+	parentDir := ingest.SessionDir(testOutputDir, testutil.TestHostSlug, parentIDStr, "")
+	parentMetadataPath := ingest.SessionMetadataPath(testOutputDir, testutil.TestHostSlug, parentIDStr, "")
+	childRoot := fmt.Sprintf("%s/%s/%s", parentDir, defaults.DirSubagents.String(), childIDStr)
+	childTranscript := fmt.Sprintf("%s/%s--transcript.jsonl", childRoot, childIDStr)
+	childMetadata := fmt.Sprintf("%s/%s--metadata.json", childRoot, childIDStr)
+	beforeChildTranscript, err := mfs.ReadFile(childTranscript)
+	if err != nil {
+		t.Fatalf("child transcript must exist after the first harvest: %v", err)
+	}
+	beforeChildMetadata, err := mfs.ReadFile(childMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An older build left a parent-owned file this install no longer writes.
+	stalePath := filepath.Join(parentDir, parentIDStr+"--legacy-extra.json")
+	if err := mfs.WriteFile(stalePath, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second harvest: the parent source changed, so the parent is re-installed.
+	writeSource(parentSource, `{"sessionId":"p","type":"user","message":{"role":"user","content":"one, changed"},"timestamp":"2024-02-19T01:00:00Z"}`+"\n", time.Now().Add(-time.Hour))
+	parent.ModTime = time.Now().Add(-time.Hour)
+	mfs.ResetCounts()
+	runHarvest([]ingest.DiscoveredSession{parent, child})
+
+	// The subagent subtree is untouched by the parent replacement.
+	if got, err := mfs.ReadFile(childTranscript); err != nil || string(got) != string(beforeChildTranscript) {
+		t.Fatalf("the subagent transcript must survive the parent replacement; err=%v", err)
+	}
+	if got, err := mfs.ReadFile(childMetadata); err != nil || string(got) != string(beforeChildMetadata) {
+		t.Fatalf("the subagent metadata must survive the parent replacement; err=%v", err)
+	}
+	// The stale parent-owned file is pruned with exactly one RemoveAll.
+	if _, err := mfs.ReadFile(stalePath); err == nil {
+		t.Fatal("the stale parent-owned file must be pruned")
+	}
+	if got := mfs.Count(testutil.FSOpRemoveAll, stalePath); got != 1 {
+		t.Errorf("RemoveAll of the stale member = %d, want 1", got)
+	}
+	// The only read of the parent's saved pair is the single replacement-header
+	// read of the old metadata; the transcript is never read back.
+	if got := mfs.Count(testutil.FSOpReadFile, parentMetadataPath); got != 1 {
+		t.Errorf("old parent metadata reads = %d, want 1 (the replacement-header check)", got)
+	}
+	parentTranscriptPath := filepath.Join(parentDir, parentIDStr+"--transcript.jsonl")
+	if got := mfs.Count(testutil.FSOpReadFile, parentTranscriptPath); got != 0 {
+		t.Errorf("saved parent transcript reads = %d, want 0", got)
 	}
 }

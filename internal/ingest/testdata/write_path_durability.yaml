@@ -1,0 +1,81 @@
+# The crash and fault semantics of the database-first write path. Each case
+# leaves a database and a saved pair out of step the way one interruption can,
+# then proves how the next run heals it. The write path installs the pair by
+# rename before it records the row, so a fault on the row leaves files with no
+# row; the row is recorded before its entries, so a fault on the entries leaves
+# a row a later harvest repairs. A restart is a new Store and a new Pipeline
+# over the same database file.
+#
+# The expected diagnostic text is the design contract, stated here rather than
+# read back from the code under test, so a reworded message is a visible change.
+required_names:
+  - crash_between_install_and_mirror_restart
+  - crash_between_mirror_and_entries_restart
+  - crash_between_mirror_and_entries_restart_replaced_with_provenance
+  - crash_between_mirror_and_entries_restart_opencode_legacy
+  - parent_mirror_fails_child_refused_next_drain
+  - torn_pair_no_row_reingested
+  - torn_pair_row_present_detected_on_read
+  - mixed_pair_transcript_new_metadata_old
+  - mixed_pair_torn_write
+cases:
+  # A crash after the worker installed the pair but before its row committed:
+  # the transcript and metadata are on disk with no row. The next harvest is
+  # database-first, finds no row, and re-ingests the session from its source as
+  # new; the row and a valid pair exist afterward.
+  - name: crash_between_install_and_mirror_restart
+    scenario: crash_install_mirror
+
+  # A crash after the row committed but before its entries did: the row carries
+  # an artifact hash and a null indexed-input hash. The repair predicate selects
+  # exactly this session on the next harvest and not on the one after, so the
+  # entries are recovered in one run and the steady state is quiet. The predicate
+  # is independent of the row it lands on, so the crash is proven against a fresh
+  # row and against a complete provenanced row replaced by changed content.
+  - name: crash_between_mirror_and_entries_restart
+    scenario: crash_mirror_entries
+    variant: fresh
+  - name: crash_between_mirror_and_entries_restart_replaced_with_provenance
+    scenario: crash_mirror_entries
+    variant: replaced_provenance
+  # The same crash on an OpenCode legacy directory row, a different kind: the
+  # predicate is harness- and kind-independent and heals it in one run too.
+  - name: crash_between_mirror_and_entries_restart_opencode_legacy
+    scenario: crash_mirror_entries_opencode_legacy
+
+  # A parent whose row fails to record does not starve its subtree. The child is
+  # held until the parent is committed, then drained in a later transaction where
+  # the store refuses it because the parent is not stored. Both are counted
+  # failed with no rows, and a restart re-ingests both.
+  - name: parent_mirror_fails_child_refused_next_drain
+    scenario: parent_mirror_fails
+    expect_diagnostic: "is not stored"
+
+  # A torn pair with no row is a first install interrupted mid-write. The next
+  # harvest ignores the unusable saved copy, re-ingests from the source, and
+  # leaves a valid pair whose hash matches the freshly recorded row.
+  - name: torn_pair_no_row_reingested
+    scenario: torn_no_row
+
+  # A torn or mixed pair with a row present is a power loss after the row was
+  # durable: a plain harvest is database-first and never touches it, so the
+  # stored session keeps serving. The rebuild read is the one that reports the
+  # damaged saved copy by its exact diagnostic, and it never overwrites the row.
+  - name: torn_pair_row_present_detected_on_read
+    scenario: torn_row_present
+    expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"
+
+  # The crash-reachable mixed ordering: the transcript is the new content while
+  # the metadata is still the old file that names the old transcript hash. The
+  # pair fails its hash check on read, so it is refused, never served as a
+  # matching pair; the row keeps serving and the rebuild reports it as damaged.
+  - name: mixed_pair_transcript_new_metadata_old
+    scenario: mixed_transcript_new_metadata_old
+    expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"
+
+  # The other reachable interruption, a torn write: the transcript bytes are
+  # truncated while the metadata names a whole-file hash. The pair fails its
+  # hash check the same way and is reported as damaged, the row untouched.
+  - name: mixed_pair_torn_write
+    scenario: mixed_torn_write
+    expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"

@@ -31,6 +31,7 @@ func TestUpgradePassEachPhase(t *testing.T) {
 			WantRestored             bool   `yaml:"want_restored"`
 			WantToIngest             bool   `yaml:"want_to_ingest"`
 			WantStateRemoved         bool   `yaml:"want_state_removed"`
+			BackupHashMismatch       bool   `yaml:"backup_hash_mismatch"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(upgradePassFixtureData, &fixtures); err != nil {
@@ -95,7 +96,14 @@ func TestUpgradePassEachPhase(t *testing.T) {
 			if c.PreviousHashSet {
 				h := schema.ComputeTranscriptHash(consistentMeta)
 				previousHash = &h
-				if err := fs.WriteFile(filepath.Join(txKeyDir, "old", "0000"), consistentMeta, 0600); err != nil {
+				backup := consistentMeta
+				if c.BackupHashMismatch {
+					// The backup on disk does not hash to the recorded previous
+					// hash: a torn or wrong backup. The pass must refuse to
+					// rename it over the live file.
+					backup = []byte(`{"corrupt":"backup"}`)
+				}
+				if err := fs.WriteFile(filepath.Join(txKeyDir, "old", "0000"), backup, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -141,6 +149,15 @@ func TestUpgradePassEachPhase(t *testing.T) {
 				onDisk, err := fs.ReadFile(filepath.Join(output, relMetadata))
 				if err != nil || schema.ComputeTranscriptHash(onDisk) != schema.ComputeTranscriptHash(consistentMeta) {
 					t.Errorf("restored metadata does not match the previous copy: %v", err)
+				}
+			}
+			if c.BackupHashMismatch {
+				// The live file must be untouched: a backup that fails its hash
+				// check is never renamed over it. Dropping the backup-hash check
+				// clobbers the live file with the corrupt backup and reddens this.
+				onDisk, err := fs.ReadFile(filepath.Join(output, relMetadata))
+				if err != nil || string(onDisk) != `{"half":"written"}` {
+					t.Errorf("a backup that failed its hash check was renamed over the live file: %q (%v)", onDisk, err)
 				}
 			}
 		})

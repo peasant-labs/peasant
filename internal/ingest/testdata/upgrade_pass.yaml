@@ -6,6 +6,7 @@ required_names:
   - files_changing_restores
   - rolling_back_restores
   - first_install_left_in_place
+  - backup_hash_mismatch_skips_restore
 cases:
   # Nothing changed on disk: the pass verifies the pair and resolves, restoring
   # nothing. The state directory is removed.
@@ -42,6 +43,18 @@ cases:
     phase: files-changing
     previous_hash_set: false
     current_matches_transcript: false
+    want_restored: false
+    want_to_ingest: true
+    want_state_removed: false
+  # The backup at old/0000 does not hash to the recorded previous hash: a torn
+  # or wrong backup. The pass refuses to restore it, does not rename it over the
+  # live file, the pair does not verify, the session falls to the next harvest,
+  # and the state directory is kept.
+  - name: backup_hash_mismatch_skips_restore
+    phase: files-changing
+    previous_hash_set: true
+    current_matches_transcript: false
+    backup_hash_mismatch: true
     want_restored: false
     want_to_ingest: true
     want_state_removed: false
