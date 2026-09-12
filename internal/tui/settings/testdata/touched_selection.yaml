@@ -1,5 +1,5 @@
 expectedCaseCount: 14
-expectedFieldCaseCount: 20
+expectedFieldCaseCount: 24
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -27,6 +27,10 @@ expectedFieldNames:
   - unknown-branch-session-clear-uses-session-exclusion
   - placeholder-branch-restore-normalizes-to-explicit-sessions
   - placeholder-branch-restore-edit-keeps-sibling-explicit
+  - flat-project-toggle-selects-branchless-project
+  - flat-project-clear-removes-harness
+  - flat-session-toggle-selects-explicit-session
+  - flat-session-clear-uses-session-exclusion
   - unrestricted-project-clear-denies-branchless-sessions
   - unrestricted-project-clear-then-reselect-keeps-siblings
   - unrestricted-project-clear-then-select-under-keeps-siblings
@@ -36,13 +40,15 @@ expectedFieldNames:
   - grouped-satisfied-select-under-is-a-true-no-op
   - project-toggle-spans-harnesses
   - branch-toggle-spans-harnesses
-expectedDerivationCaseCount: 5
+expectedDerivationCaseCount: 7
 expectedDerivationNames:
   - partially-checked-project-unknown-group-becomes-explicit-sessions
   - fully-checked-unknown-branch-project-stays-branchless
   - checked-named-and-unknown-groups-become-branch-plus-explicit-sessions
   - unchecked-unknown-group-contributes-no-branch
   - harness-first-placeholder-worktree-becomes-explicit-sessions
+  - flat-fully-checked-project-stays-branchless
+  - flat-partially-checked-project-keeps-explicit-sessions
 expectedSanitizeCaseCount: 9
 expectedSanitizeNames:
   - placeholder-only-project-selects-its-unknown-sessions
@@ -292,6 +298,97 @@ fieldCases:
       harnesses:
         claude-code:
           sessions: [11111111-1111-4111-8111-111111111111]
+
+  # A flattened project whose children ARE session rows: the branch level is
+  # omitted, and every toggle grain still applies without a branch name.
+  - name: flat-project-toggle-selects-branchless-project
+    flat: true
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: flat-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [toggle]
+    expectedSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+
+  - name: flat-project-clear-removes-harness
+    flat: true
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: flat-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [toggle]
+    expectedSessionState: unchecked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+
+  - name: flat-session-toggle-selects-explicit-session
+    flat: true
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: flat-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [down, toggle]
+    expectedSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [11111111-1111-4111-8111-111111111111]
+
+  - name: flat-session-clear-uses-session-exclusion
+    flat: true
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: flat-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [down, toggle]
+    expectedSessionState: unchecked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            sessions: [11111111-1111-4111-8111-111111111111]
 
   - name: unrestricted-project-clear-denies-branchless-sessions
     current:
@@ -1025,6 +1122,39 @@ derivationCases:
           projects:
             - {gitRemote: "git@github.com:acme/tool.git", branches: [develop]}
           sessions: [22222222-2222-4222-8222-222222222222]
+
+  - name: flat-fully-checked-project-stays-branchless
+    harness: claude-code
+    projectIdentity: exact-project-a
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    projectName: tool
+    flatSessions:
+      - {id: 11111111-1111-4111-8111-111111111111, state: checked}
+      - {id: 22222222-2222-4222-8222-222222222222, state: checked}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+
+  - name: flat-partially-checked-project-keeps-explicit-sessions
+    harness: claude-code
+    projectIdentity: exact-project-a
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    projectName: tool
+    flatSessions:
+      - {id: 11111111-1111-4111-8111-111111111111, state: checked}
+      - {id: 22222222-2222-4222-8222-222222222222, state: unchecked}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [11111111-1111-4111-8111-111111111111]
 
 sanitizeCases:
   - name: placeholder-only-project-selects-its-unknown-sessions

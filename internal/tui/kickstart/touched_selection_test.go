@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
@@ -58,6 +59,14 @@ type mountedTouchedCase struct {
 	// identity to the exact resolved physical path instead of a synthetic Git
 	// cohort.
 	ExpectedProjectLabel string `yaml:"expectedProjectLabel"`
+	// ExpectedFlatProject asserts the single root drops the branch level: its
+	// children are session rows, no branch row exists anywhere under it, and
+	// its preview context counts those direct sessions without publishing a
+	// branch context for a session row.
+	ExpectedFlatProject bool `yaml:"expectedFlatProject"`
+	// ExpectedProjectBranches pins the branch row labels under the single root,
+	// in order, for a project that keeps the branch level.
+	ExpectedProjectBranches []string `yaml:"expectedProjectBranches"`
 }
 
 func loadMountedTouchedDocument(t *testing.T) mountedTouchedDocument {
@@ -175,6 +184,27 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 					t.Fatalf("mounted touched-selection project identity = %q, want the exact physical path %q", identity, physicalPath)
 				}
 			}
+			if testCase.ExpectedFlatProject || len(testCase.ExpectedProjectBranches) > 0 {
+				roots := source.latest()
+				if len(roots) != 1 {
+					t.Fatalf("mounted touched-selection shape case loaded %d project roots, want 1", len(roots))
+				}
+				assertMountedProjectShape(t, roots[0], testCase.ExpectedFlatProject, testCase.ExpectedProjectBranches)
+				if testCase.ExpectedFlatProject {
+					context, ok := realScanner.ListingPreviewContext(roots[0].ID)
+					if !ok {
+						t.Fatal("flattened project has no project preview context")
+					}
+					if context.Kind != kickstart.ListingPreviewProject || context.SessionCount != len(testCase.Listings) || len(context.Branches) != 0 {
+						t.Fatalf("flattened project preview = %#v, want a branchless project context over %d sessions", context, len(testCase.Listings))
+					}
+					for _, listing := range testCase.Listings {
+						if _, found := realScanner.ListingPreviewContext(listing.SessionID); found {
+							t.Fatalf("flattened project published a branch preview context for session %q", listing.SessionID)
+						}
+					}
+				}
+			}
 
 			for _, action := range testCase.Actions {
 				program = pressAndDrain(program, mountedTouchedRune(action))
@@ -247,6 +277,41 @@ func mountedRepositoryResolver(t *testing.T, fixtures []mountedPathFixture, path
 }
 
 var _ ingest.RepositoryIdentityResolver = mountedRepositoryIdentityResolver{}
+
+// assertMountedProjectShape pins whether the single project root keeps the
+// branch level. A flattened project must have session children and no branch
+// row anywhere; a branch-level project must show exactly the declared branch
+// rows in order.
+func assertMountedProjectShape(t *testing.T, root *kit.TreeNode, flat bool, branches []string) {
+	t.Helper()
+	if flat {
+		branchRows := 0
+		walkMountedNodes(root, func(node *kit.TreeNode) {
+			if node.Meta[settings.MetaBranch] != "" {
+				branchRows++
+			}
+		})
+		if branchRows != 0 {
+			t.Fatalf("flattened project %q still renders %d branch rows", root.Label, branchRows)
+		}
+		if len(root.Children) == 0 {
+			t.Fatalf("flattened project %q has no session children", root.Label)
+		}
+		for _, child := range root.Children {
+			if child.Meta[settings.MetaHarness] == "" {
+				t.Fatalf("flattened project %q child %q is not a session row", root.Label, child.Label)
+			}
+		}
+		return
+	}
+	got := make([]string, 0, len(root.Children))
+	for _, child := range root.Children {
+		got = append(got, child.Meta[settings.MetaBranch])
+	}
+	if !reflect.DeepEqual(got, branches) {
+		t.Fatalf("project %q branch rows = %q, want %q", root.Label, got, branches)
+	}
+}
 
 func mountedTouchedRune(action mountedTouchedAction) rune {
 	switch action {
