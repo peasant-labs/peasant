@@ -2707,8 +2707,15 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	}
 	if metadataPath != "" {
 		if existing, err := p.fs.ReadFile(metadataPath); err == nil {
+			// A future or skewed saved file beside a current row is a version
+			// skew, not a hard failure: the database row already classified this
+			// session, so preserve the newer producer's pair and surface the
+			// refusal as a warning, exactly as the stored-metadata guards above
+			// do. A hard error here would drop an authoritative unchanged row.
 			if headerErr := checkReplacementHeader(existing, session, p.versionTargets()); headerErr != nil {
-				return fail(headerErr)
+				p.reportMetadataRefusal(string(session.SessionID), headerErr)
+				result.Status = DiffUnchanged
+				return workerResult{result: result}
 			}
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return fail(managedInputIOError(metadataPath, err))
