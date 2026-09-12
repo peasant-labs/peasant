@@ -1840,6 +1840,17 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		for _, i := range order {
 			writeStart := time.Now()
 			writeResults[i].SessionID = writes[i].SessionID
+			// A cancelled run stops after the commit that observed the
+			// cancellation: the sessions behind it are reported as errors, not
+			// written. The write path no longer takes a per-artifact lock, so
+			// the cancellation is observed here rather than as a side effect of
+			// acquiring one.
+			if err := ctx.Err(); err != nil {
+				writeResults[i].Err = err
+				writeResults[i].Written = false
+				writeDurations[i] = time.Since(writeStart)
+				continue
+			}
 			// Hold one session's file ownership before entering the writer lane.
 			// Parent/child ownership is never nested; each item commits atomically.
 			err := p.withCurrentIndexInput(ctx, results[writePositions[i]].input, func() error {
