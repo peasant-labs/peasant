@@ -190,8 +190,7 @@ third-party-notices: web-stub
 third-party-notices-check: web-stub
 	./scripts/gen-third-party-notices.sh
 	git diff --exit-code -- THIRD_PARTY_NOTICES
-	go run github.com/google/go-licenses@v1.6.0 check ./cmd/peasant \
-		--disallowed_types=forbidden,restricted
+	./scripts/check-dep-licenses.sh
 
 go:
 	@$(build_peasant_cli)

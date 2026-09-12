@@ -46,6 +46,7 @@ on:
       - "scripts/goreleaser-v2.17.1-homebrew.patch"
       - "scripts/update-nix-vendor-hash.sh"
       - "scripts/gen-third-party-notices.sh"
+      - "scripts/check-dep-licenses.sh"
       - "THIRD_PARTY_NOTICES"
       - "scripts/release-e2e/**"
   push:
@@ -76,6 +77,7 @@ on:
       - "scripts/goreleaser-v2.17.1-homebrew.patch"
       - "scripts/update-nix-vendor-hash.sh"
       - "scripts/gen-third-party-notices.sh"
+      - "scripts/check-dep-licenses.sh"
       - "THIRD_PARTY_NOTICES"
       - "scripts/release-e2e/**"
   # Reusable entry point: release-pr.yml calls this on a release(...) PR so the

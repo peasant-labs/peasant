@@ -98,6 +98,8 @@ nfpms:
       - src: ./LICENSE
         dst: /usr/share/licenses/peasant/LICENSE
         packager: rpm
+        # Flag as %license so `rpm -qL` lists it and --nodocs cannot strip it.
+        type: license
       # Dependency license notices, next to each packager's own LICENSE.
       - src: ./THIRD_PARTY_NOTICES
         dst: /usr/share/doc/peasant/THIRD_PARTY_NOTICES
@@ -105,6 +107,7 @@ nfpms:
       - src: ./THIRD_PARTY_NOTICES
         dst: /usr/share/licenses/peasant/THIRD_PARTY_NOTICES
         packager: rpm
+        type: license
     deb:
       lintian_overrides:
         - statically-linked-binary
@@ -137,6 +140,7 @@ aurs:
     package: |-
       install -Dm755 ./peasant "${pkgdir}/usr/bin/peasant"
       install -Dm644 ./LICENSE "${pkgdir}/usr/share/licenses/peasant-bin/LICENSE"
+      install -Dm644 ./THIRD_PARTY_NOTICES "${pkgdir}/usr/share/licenses/peasant-bin/THIRD_PARTY_NOTICES"
 
 homebrew_casks:
   - name: peasant

@@ -24,9 +24,20 @@
 # Scope: Go modules only. The embedded web dashboard (web/out) bundles npm
 # packages whose notices are tracked as a separate follow-on.
 #
+# Requirements: run inside the Nix devShell. This uses GNU findutils (find
+# -printf) and bash >= 4 (mapfile), which the devShell provides; the stock
+# macOS bash 3.2 / BSD find do not have them.
+#
 # Usage: scripts/gen-third-party-notices.sh   (or: make third-party-notices)
 set -euo pipefail
 export LC_ALL=C
+
+# Every shipped binary is built CGO_ENABLED=0 (see .goreleaser.yml builds.env
+# and flake.nix). Pin it here so the enumerated module set matches the artifact
+# and does not change with the presence of a C compiler on the host: with cgo
+# on, the tree-sitter stack (behind a //go:build cgo seam) would be pulled in
+# even though it never ships.
+export CGO_ENABLED=0
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_file="${repo_root}/THIRD_PARTY_NOTICES"
@@ -39,7 +50,8 @@ main_module="$(cd "${repo_root}" && go list -m 2>/dev/null | head -n1)"
 # Union of linked modules across every shipped platform. A single GOOS/GOARCH
 # misses platform-specific dependencies (e.g. darwin-only modules).
 mods_tmp="$(mktemp)"
-trap 'rm -f "${mods_tmp}"' EXIT
+buf_tmp="$(mktemp)"
+trap 'rm -f "${mods_tmp}" "${buf_tmp}"' EXIT
 for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
   GOOS="${pair%/*}" GOARCH="${pair#*/}" go list -deps \
     -f '{{if not .Standard}}{{if .Module}}{{.Module.Path}}@{{.Module.Version}}{{end}}{{end}}' \
@@ -47,9 +59,6 @@ for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
 done | sort -u | grep . > "${mods_tmp}"
 
 # Build the file in a temp buffer, then move it into place atomically.
-buf_tmp="$(mktemp)"
-trap 'rm -f "${mods_tmp}" "${buf_tmp}"' EXIT
-
 {
   cat <<'HEADER'
 THIRD-PARTY SOFTWARE NOTICES
@@ -104,7 +113,6 @@ HEADER
 } > "${buf_tmp}"
 
 mv "${buf_tmp}" "${out_file}"
-trap 'rm -f "${mods_tmp}"' EXIT
 
 count="$(grep -c '^Module: ' "${out_file}" || true)"
 echo "wrote ${out_file} (${count} license entries)"
