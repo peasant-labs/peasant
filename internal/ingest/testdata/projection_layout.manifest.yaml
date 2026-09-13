@@ -1,0 +1,17 @@
+requiredNames:
+  - section4-exact
+  - mixed-split-tools
+  - ref-part-reorder
+  - idless-append-reopen
+  - failed-intent-reuses-refs
+  - ambiguous-pair-uncertain-not-doubled
+  - no-content-merge
+  - long-tool-bytes
+  - tool-subtree-partition-closed
+  - earlier-excluded-from-counts
+  - incomplete-new-omits-count
+  - uncertain-in-main-rejected
+  - missing-carrier-rejected
+  - duplicate-native-key-rejected
+  - submission-on-non-input-rejected
+  - invalid-entry-type-rejected
