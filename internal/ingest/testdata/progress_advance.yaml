@@ -1,0 +1,38 @@
+# KindAdvance deltas are additive: the store owns the cumulative Done and adds
+# each delta, so a worker pool that emits advances in completion order can never
+# move the count backwards. Each case seeds one stage with KindStart(Total) and
+# then feeds its deltas in the listed (possibly out-of-order) sequence; every
+# advance carries want_total so a later advance can raise the expected count.
+# want_done is the cumulative sum, which no permutation may change.
+required_cases:
+  - ascending-deltas-sum
+  - descending-deltas-sum
+  - interleaved-zero-deltas
+  - single-batch-delta
+  - total-raised-by-a-later-advance
+cases:
+  - name: ascending-deltas-sum
+    total: 10
+    deltas: [1, 2, 3, 4]
+    want_done: 10
+    want_total: 10
+  - name: descending-deltas-sum
+    total: 10
+    deltas: [4, 3, 2, 1]
+    want_done: 10
+    want_total: 10
+  - name: interleaved-zero-deltas
+    total: 10
+    deltas: [3, 0, 4, 0, 3]
+    want_done: 10
+    want_total: 10
+  - name: single-batch-delta
+    total: 64
+    deltas: [64]
+    want_done: 64
+    want_total: 64
+  - name: total-raised-by-a-later-advance
+    total: 4
+    deltas: [2, 3]
+    want_done: 5
+    want_total: 5

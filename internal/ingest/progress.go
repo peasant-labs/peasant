@@ -61,8 +61,9 @@ const (
 	// KindStart marks the beginning of a stage. Total is the expected item count
 	// (0 if unknown at start time).
 	KindStart EventKind = iota
-	// KindAdvance marks incremental progress within a stage. Done is the new
-	// cumulative count of completed items.
+	// KindAdvance marks incremental progress within a stage. Delta is the
+	// number of items completed since the previous advance; the store adds it
+	// to the stage's cumulative Done.
 	KindAdvance
 	// KindEnd marks the completion of a stage. Done equals Total on success;
 	// Err is non-nil if the stage finished with a fatal error.
@@ -77,7 +78,14 @@ type ProgressEvent struct {
 	// For KindStart it is the initial estimate; for KindEnd it is the final count.
 	// 0 means unknown / not applicable.
 	Total int
-	// Done is the number of items completed so far (KindAdvance, KindEnd).
+	// Delta is the number of items completed since the previous advance. The
+	// store adds it to the stage's cumulative Done; it is never assigned, so
+	// the count cannot move backwards when workers finish out of order. It
+	// applies to KindAdvance only.
+	Delta int
+	// Done is the cumulative count. KindEnd assigns it as the authoritative
+	// final value (the full count on success, the reached count on error).
+	// KindAdvance ignores it; a KindAdvance caller adds through Delta instead.
 	Done int
 	// Err is non-nil only on KindEnd when the stage encountered a fatal error.
 	Err error
@@ -126,7 +134,11 @@ func (ps *ProgressState) Update(ev ProgressEvent) {
 		sp.HasErr = false
 	case KindAdvance:
 		sp.Started = true
-		sp.Done = ev.Done
+		// The store owns the cumulative count: a worker adds the items it
+		// finished, so completion order cannot move Done backwards.
+		if ev.Delta > 0 {
+			sp.Done += ev.Delta
+		}
 		if ev.Total > sp.Total {
 			sp.Total = ev.Total
 		}
@@ -170,4 +182,16 @@ func emitProgress(ps *ProgressState, ev ProgressEvent) {
 		return
 	}
 	ps.Update(ev)
+}
+
+// emitAdvance reports that delta items finished in stage. The store adds delta
+// to the stage's cumulative Done, so workers that finish out of order can never
+// move the count backwards. total raises the stage's expected count when it is
+// larger than the recorded one; 0 leaves it unchanged. Call sites read as
+// additions and cannot pass an absolute count by mistake.
+func emitAdvance(ps *ProgressState, stage Stage, delta, total int) {
+	if ps == nil {
+		return
+	}
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Delta: delta, Total: total})
 }

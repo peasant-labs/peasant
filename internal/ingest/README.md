@@ -9,11 +9,11 @@ reference (constraints, invariants, assumptions), see [AGENTS.md](AGENTS.md).
 ## Pipeline Overview
 
 ```
-                        SEQUENTIAL                          CONCURRENT
+                     MAIN GOROUTINE                        CONCURRENT
                    ┌──────────────────┐         ┌──────────────────────────────────────────┐
                    │                  │         │                                          │
   ┌─────────┐     │  ┌──────┐        │         │  ┌───────────────────┐                  │
-  │DISCOVER │─────┼─▶│ DIFF │        │         │  │  EXTRACT+WRITE    │                  │
+  │DISCOVER │─────┼─▶│DIFF* │        │         │  │  EXTRACT+WRITE    │                  │
   └─────────┘     │  └──┬───┘        │         │  │  (N workers)      │                  │
                   │     │            │         │  │                   │                  │
                   │  ┌──▼───┐        │         │  │  processSession() │                  │
@@ -59,10 +59,12 @@ reference (constraints, invariants, assumptions), see [AGENTS.md](AGENTS.md).
                   └──────────────────┘
 ```
 
-The main controller owns stage ordering. The DB insert and INDEX goroutines run
-at the same time as EXTRACT+WRITE so transcript parsing and SQLite work do not
-wait for the full extraction batch. The ANNOTATE stage starts after COMPUTE so
-classifiers always see current metrics.
+The main controller owns stage ordering. DIFF (*) classifies the discovery slice
+with a bounded classifier pool of N workers; each result is written at its
+discovery index, so FILTER still groups a parent with the children that follow
+it. The DB insert and INDEX goroutines run at the same time as EXTRACT+WRITE so
+transcript parsing and SQLite work do not wait for the full extraction batch. The
+ANNOTATE stage starts after COMPUTE so classifiers always see current metrics.
 
 Profile-only timings include `PREPARE`, `INDEX LOG`, and `AUDIT`. They appear in
 index profile output, but they are not normal progress-renderer stages.
@@ -93,7 +95,7 @@ even when the caller is cancelled; no raw transaction API is exposed.
 |-------|-----------------|-------------|--------|-------------|
 | DISCOVER | Yes | Sequential | Partial | Ask enabled adapters to enumerate sessions. All providers failing is fatal; per-provider failure is partial. |
 | PREPARE | Profile only | Sequential | No | Resolve stored origins and load lookup caches before DIFF. |
-| DIFF | Yes | Sequential | No | Classify sessions as new, updated, unchanged, or active. |
+| DIFF | Yes | **Parallel** (N) | No | Classify sessions as new, updated, unchanged, or active. A bounded classifier pool walks the discovery slice; entries stay at their discovery index so FILTER can group parents with children. |
 | FILTER | Yes | Sequential | No | Apply flags, selection, and FK parent eligibility. |
 | EXTRACT+WRITE | Yes | Parallel workers | Per session | Read provider data, redact when configured, write transcript/debug files through staging. |
 | DB INSERT | Yes | drainLoop goroutine | Best effort | Upsert session rows, current commit projections, durable association rows, and OpenCode sequence cursors. |
@@ -208,10 +210,13 @@ be silently discarded merely because Peasant cannot classify it yet.
 Time ──────────────────────────────────────────────────────────────▶
 
 Main goroutine (pure controller):
-  DISCOVER -> PREPARE(profile) -> DIFF -> FILTER -> spawn goroutines -> wg.Wait()
+  DISCOVER -> PREPARE(profile) -> DIFF (bounded classifier pool) -> FILTER -> spawn goroutines -> wg.Wait()
   -> stale-index sweep -> INDEX LOG(profile) -> COMPUTE -> ANNOTATE -> CLEANUP -> REPORT -> AUDIT(profile)
 
-Worker goroutines (created by runParallel):
+DIFF classifier workers (bounded pool, results kept at their discovery index):
+  classify(session) -> add one advance -> next session
+
+EXTRACT+WRITE worker goroutines (created by runParallel):
   ┌─ worker 1: root A + subtree ─── Add() ─── Add() ──────┐
   ├─ worker 2: root B + subtree ─── Add() ────────────────┤
   ├─ worker 3: root C + subtree ─── Add() ─── Add() ──────┤

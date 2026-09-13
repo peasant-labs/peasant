@@ -687,9 +687,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// can inherit their parent's fate (rejected parent → rejected children).
 	filterPassedParents := make(map[SessionID]bool)
 
-	for index, entry := range diffResult.Sessions {
+	for _, entry := range diffResult.Sessions {
 		advanceFilter := func() {
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageFilter, Done: index + 1, Total: len(diffResult.Sessions)})
+			emitAdvance(prog, StageFilter, 1, len(diffResult.Sessions))
 		}
 		// AllowedSessionIDs filter: skip sessions not in the allowed set.
 		if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[entry.Session.SessionID] {
@@ -968,8 +968,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 			// Process root.
 			wr := p.processSession(ctx, entry)
-			done := int(extractDoneAtomic.Add(1))
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: toProcess})
+			extractDoneAtomic.Add(1)
+			emitAdvance(prog, StageExtract, 1, toProcess)
 			staging.Add(wr)
 			// The root's heap payload must not outlive transfer to the arena,
 			// including while this worker walks a large descendant subtree.
@@ -982,8 +982,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				queue = queue[1:]
 				childEntry := entryByID[childID]
 				cwr := p.processSession(ctx, childEntry)
-				childDone := int(extractDoneAtomic.Add(1))
-				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: childDone, Total: toProcess})
+				extractDoneAtomic.Add(1)
+				emitAdvance(prog, StageExtract, 1, toProcess)
 				staging.Add(cwr)
 				// Enqueue grandchildren (if any).
 				queue = append(queue, childrenOf[childID]...)
@@ -1179,7 +1179,6 @@ func (p *Pipeline) drainLoop(
 	writeLane *storeWriteLane,
 ) (sessionResults []SessionResult) {
 	pendingAckBatches := 0
-	dbInsertDone := 0
 	ackBatch := func(batch DrainBatch) {
 		staging.AckBatch(batch)
 		if pendingAckBatches > 0 {
@@ -1253,8 +1252,7 @@ func (p *Pipeline) drainLoop(
 					sendIndexWork(streamedIndexWork{meta: im, batch: completion})
 				}
 			}
-			dbInsertDone += len(batch.Results)
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDBInsert, Done: dbInsertDone, Total: toProcess})
+			emitAdvance(prog, StageDBInsert, len(batch.Results), toProcess)
 			continue
 		}
 
@@ -1358,7 +1356,6 @@ func (p *Pipeline) indexLoop(
 	profileEnabled := p.config.IndexProfiler != nil && p.indexers != nil && p.metricsStore != nil
 	profileSessions := []IndexProfileSession(nil)
 	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
-	indexDone := 0
 	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
 	flushPending := func(results []indexParseResult) {
 		flush := p.flushIndexParseResults(ctx, results, outcome, logPrefix, writeLane)
@@ -1367,8 +1364,7 @@ func (p *Pipeline) indexLoop(
 			if flush.logEntries[i].SessionID != "" {
 				logEntries = append(logEntries, flush.logEntries[i])
 			}
-			indexDone++
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: indexDone})
+			emitAdvance(prog, StageIndex, 1, 0)
 			if indexedResult.indexed && downstreamCh != nil {
 				select {
 				case downstreamCh <- indexedResult:
@@ -2197,22 +2193,15 @@ func (p *Pipeline) diff(ctx context.Context, sessions []DiscoveredSession, prog 
 		done   bool
 	}
 
-	// One advance per finished session keeps the progress total correct
-	// without a shared lock; the counter, not the completion order, is the
-	// value the renderer reads.
-	var completed atomic.Int64
+	// One advance per finished session; the store adds each delta, so the
+	// count is monotone no matter which worker finishes first.
 	classifications := runParallel(
 		func() error { return ctx.Err() },
 		sessions,
 		parallelWorkers(p.config),
 		func(session DiscoveredSession) classified {
 			status, err := p.classifySession(ctx, session)
-			emitProgress(prog, ProgressEvent{
-				Kind:  KindAdvance,
-				Stage: StageDiff,
-				Done:  int(completed.Add(1)),
-				Total: len(sessions),
-			})
+			emitAdvance(prog, StageDiff, 1, len(sessions))
 			return classified{status: status, err: err, done: true}
 		},
 	)
@@ -3486,7 +3475,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 				"how_to_fix", "re-run peasant harvest index --all; if the error repeats, inspect the named session and database")
 		}
 		result.AnnotateDone++
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: result.AnnotateDone, Total: total})
+		emitAdvance(prog, StageAnnotate, 1, total)
 	}
 	flushBuffered := func() {
 		if len(bufferedPending) == 0 {
@@ -3549,7 +3538,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 			result.Computed += n
 		}
 		result.ComputeDone += len(batch)
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageCompute, Done: result.ComputeDone, Total: total})
+		emitAdvance(prog, StageCompute, len(batch), total)
 
 		if p.classifier != nil {
 			if ctx.Err() != nil {
@@ -3609,7 +3598,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 						"how_to_fix", "re-run peasant harvest index --all; if the error repeats, inspect the named session and database")
 				}
 				result.AnnotateDone++
-				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: result.AnnotateDone, Total: total})
+				emitAdvance(prog, StageAnnotate, 1, total)
 			}
 		}
 		return true
@@ -3698,7 +3687,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	priorDone := len(priorIndexed)
 	indexLogEntries := append([]IndexLogEntry(nil), priorIndexLogEntries...)
 	if len(indexSessions) > 0 {
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: priorDone, Total: priorDone + len(indexSessions)})
+		emitAdvance(prog, StageIndex, 0, priorDone+len(indexSessions))
 	}
 	if p.indexers != nil && p.metricsStore != nil {
 		indexProfileStart := time.Now()
@@ -3712,7 +3701,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 			if batchLogs[i].SessionID != "" {
 				indexLogEntries = append(indexLogEntries, batchLogs[i])
 			}
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: priorDone + i + 1, Total: priorDone + len(indexSessions)})
+			emitAdvance(prog, StageIndex, 1, priorDone+len(indexSessions))
 		}
 		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(batchIndexed), len(indexSessions))
 	}
@@ -3768,7 +3757,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if priorDownstream == nil {
 		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageCompute, Total: len(successfullyIndexed)})
 	} else if len(indexSessions) > 0 {
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageCompute, Done: computeAlreadyDone, Total: computeAlreadyDone + len(indexSessions)})
+		emitAdvance(prog, StageCompute, 0, computeAlreadyDone+len(indexSessions))
 	}
 	if storedRefresh {
 		var n int
@@ -3844,7 +3833,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if priorDownstream == nil {
 		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageAnnotate, Total: len(successfullyIndexed)})
 	} else if annotateTotal > annotateAlreadyDone {
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: annotateAlreadyDone, Total: annotateTotal})
+		emitAdvance(prog, StageAnnotate, 0, annotateTotal)
 	}
 	if !storedRefresh && p.classifier != nil && len(successfullyIndexed) > 0 {
 		annotateTargets := successfullyIndexed
@@ -3865,7 +3854,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 			if priorDownstream != nil {
 				for range annotateTargets {
 					annotateDoneTotal++
-					emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: annotateDoneTotal, Total: annotateTotal})
+					emitAdvance(prog, StageAnnotate, 1, annotateTotal)
 				}
 			}
 		}
@@ -4413,7 +4402,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			targeted = append(targeted, target)
 		}
 		diffDone++
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: diffDone, Total: len(scanned)})
+		emitAdvance(prog, StageDiff, 1, len(scanned))
 	}
 	if err := ctx.Err(); err != nil {
 		return cancelDiff(err)
@@ -4428,7 +4417,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	filterTotal := len(targeted)
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: filterTotal})
 	filtered := targeted[:0]
-	for index, target := range targeted {
+	for _, target := range targeted {
 		allowed := p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[target.session.SessionID]
 		// Retained metadata records the native session start. The managed file's
 		// mtime is publication time, so it cannot establish a session's age.
@@ -4446,7 +4435,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		if allowed {
 			filtered = append(filtered, target)
 		}
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageFilter, Done: index + 1, Total: filterTotal})
+		emitAdvance(prog, StageFilter, 1, filterTotal)
 	}
 	targeted = filtered
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: filterTotal, Total: filterTotal})
@@ -4636,8 +4625,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			extractProfileStart := time.Now()
 			runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 				wr := p.processSession(ctx, entry)
-				done := int(extractDoneAtomic.Add(1))
-				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: extractTotal + len(fallbackTargets)})
+				extractDoneAtomic.Add(1)
+				emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 				staging.Add(wr)
 				// BFS over subtree: process children inline (same goroutine → no directory races).
 				queue := childrenOf[entry.Session.SessionID]
@@ -4646,8 +4635,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 					queue = queue[1:]
 					childEntry := entryByID[childID]
 					cwr := p.processSession(ctx, childEntry)
-					childDone := int(extractDoneAtomic.Add(1))
-					emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: childDone, Total: extractTotal + len(fallbackTargets)})
+					extractDoneAtomic.Add(1)
+					emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 					staging.Add(cwr)
 					queue = append(queue, childrenOf[childID]...)
 				}
@@ -4719,8 +4708,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 				Harness:   t.session.Harness,
 				Status:    DiffUpdated,
 			})
-			done := int(extractDoneAtomic.Add(1))
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: extractTotal + len(fallbackTargets)})
+			extractDoneAtomic.Add(1)
+			emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 		}
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: int(extractDoneAtomic.Load()), Total: extractTotal + len(fallbackTargets)})
 		p.recordIndexProfileStage(StageExtract, fallbackExtractProfileStart, len(fallbackTargets), len(fallbackTargets))
@@ -4743,8 +4732,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			Harness:   t.session.Harness,
 			Status:    DiffUpdated,
 		})
-		done := int(extractDoneAtomic.Add(1))
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: len(fallbackTargets)})
+		extractDoneAtomic.Add(1)
+		emitAdvance(prog, StageExtract, 1, len(fallbackTargets))
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: int(extractDoneAtomic.Load()), Total: len(fallbackTargets)})
 	p.recordIndexProfileStage(StageExtract, extractProfileStart, int(extractDoneAtomic.Load()), len(fallbackTargets))
@@ -4924,7 +4913,6 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 
 	var wg sync.WaitGroup
 	ch := make(chan SessionID, workers)
-	var done atomic.Int64
 
 	// Spawn worker pool.
 	for range workers {
@@ -4947,8 +4935,7 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 						"user_impact", "session annotations may be incomplete or recomputed on the next index run",
 						"how_to_fix", "re-run peasant harvest index --force --session "+string(sid))
 				}
-				n := int(done.Add(1))
-				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: n, Total: total})
+				emitAdvance(prog, StageAnnotate, 1, total)
 			}
 		}()
 	}
@@ -4978,7 +4965,6 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 	resultWG.Add(1)
 	go func() {
 		defer resultWG.Done()
-		done := 0
 		for result := range results {
 			if result.Err != nil {
 				slog.Warn("pipeline: annotate session",
@@ -4989,8 +4975,7 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 					"user_impact", "session annotations may be incomplete or recomputed on the next index run",
 					"how_to_fix", "re-run peasant harvest index --force --session "+string(result.SessionID))
 			}
-			done++
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: done, Total: total})
+			emitAdvance(prog, StageAnnotate, 1, total)
 		}
 	}()
 

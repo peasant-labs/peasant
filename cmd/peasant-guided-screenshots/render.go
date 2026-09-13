@@ -186,7 +186,7 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
 	program, _ = program.Update(tick(clock.Now()))
 	clock.now = clock.now.Add(2 * time.Second)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
 	program, _ = program.Update(tick(clock.Now()))
 	return program.View(), nil
 }
@@ -198,7 +198,7 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	model = updated.(harvestprogress.Model)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
 	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
