@@ -20,3 +20,5 @@ cases:
     boundary: installed-candidate
   - name: recovery-private-content-refused-without-echo
     boundary: recovery
+  - name: recovery-invalid-title-ref-refused-without-echo
+    boundary: recovery-replay

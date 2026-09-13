@@ -174,6 +174,19 @@ func TestGenerationDiagnosticSafety(t *testing.T) {
 				if pending == nil || pending.GenerationID != fixture.Generation.CandidateID {
 					t.Fatalf("pending intent was not retained after refused recovery: %+v", pending)
 				}
+			case "recovery-replay":
+				// A refused activation leaves the staged candidate and its
+				// intent behind. A later recovery replays the same managed
+				// transaction, so it must refuse the invalid candidate without
+				// echoing the private title reference it carries.
+				candidate, candidateBlobs := buildTestGeneration(t, id, fixture.Generation.CandidateID, "diag text G2", "diag input G2", "diag output G2")
+				candidate.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(fixture.PrivateIdentity)}
+				if err := activateTestGeneration(t, s, candidate, candidateBlobs); err == nil {
+					t.Fatal("activation of a candidate with a private title ref succeeded; it must be refused")
+				}
+				replayErr := s.RecoverGenerationActivation(context.Background(), id)
+				assertPrivateDetailRefused(t, replayErr, fixture.PrivateIdentity, "recovery replay")
+				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
 			default:
 				t.Fatalf("unknown generation diagnostic boundary %q; add it to the fixture, the required-names manifest and this runner", tc.Boundary)
 			}

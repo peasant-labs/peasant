@@ -258,7 +258,17 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 	}})
 	for _, result := range results {
 		if result.Err != nil {
-			return fmt.Errorf("store: recover pending activation for session %s: %w; the prior generation is preserved and the candidate is retained", sessionID, result.Err)
+			// Preserve the typed compare-and-swap refusal so the caller's
+			// verified-retry path keeps working; its message names only the
+			// validated session identifier.
+			var stale *ingest.StaleIndexWorkError
+			if errors.As(result.Err, &stale) {
+				return fmt.Errorf("store: recover pending activation for session %s generation %s: %w; the prior generation is preserved and the candidate is retained", sessionID, intent.GenerationID, result.Err)
+			}
+			// Every other replay failure can carry untrusted candidate detail:
+			// the managed validator echoes title and content references. The
+			// refusal names only the validated requested identities.
+			return fmt.Errorf("store: recover pending activation for session %s generation %s: the managed generation transaction refused the staged candidate; the prior generation is preserved and the candidate is retained; retry a verified activation", sessionID, intent.GenerationID)
 		}
 	}
 	metadataJSON, err := json.Marshal(generation.Metadata)
