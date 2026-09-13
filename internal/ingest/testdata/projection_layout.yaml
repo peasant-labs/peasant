@@ -557,7 +557,7 @@ cases:
           earlier:
             - state: uncertain_unresolved
               entries:
-                - {nativeKey: event-1, index: 0, ref: e_amb, role: user, entryType: text, depth: 0, content: ambiguous input}
+                - {nativeKey: event-1, index: 0, ref: e_amb, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
 
   - name: no-content-merge
     steps:
@@ -638,7 +638,7 @@ cases:
               carrierNativeKey: a1
               toolCallKey: call-long
               toolName: rg
-              toolArgumentsRepeat: {text: "rg parser ", times: 100}
+              toolArgumentsRepeat: {text: "rg parser ", times: 400}
             - nativeKey: result1
               section: {index: 0}
               role: tool
@@ -646,15 +646,15 @@ cases:
               depth: 1
               carrierNativeKey: a1
               toolCallKey: call-long
-              toolResultRepeat: {text: "parser.go:12 ", times: 90}
+              toolResultRepeat: {text: "parser.go:12 ", times: 300}
         want:
           turnCount: 1
           inputSubmissionCount: 0
           titleRefs: []
           main:
             - {nativeKey: a1, index: 0, ref: e_a1, role: assistant, entryType: text, depth: 0, content: carrier}
-            - {nativeKey: call1, index: 1, ref: e_call1, role: assistant, entryType: tool_use, depth: 1, parentIndex: 0, byteLength: 1000, toolCallId: e_call1}
-            - {nativeKey: result1, index: 2, ref: e_result1, role: tool, entryType: tool_result, depth: 1, parentIndex: 0, byteLength: 1170, toolCallId: e_call1}
+            - {nativeKey: call1, index: 1, ref: e_call1, role: assistant, entryType: tool_use, depth: 1, parentIndex: 0, byteLength: 4000, toolCallId: e_call1, toolInputRepeat: {text: "rg parser ", times: 400}}
+            - {nativeKey: result1, index: 2, ref: e_result1, role: tool, entryType: tool_result, depth: 1, parentIndex: 0, byteLength: 3900, toolCallId: e_call1, toolOutputRepeat: {text: "parser.go:12 ", times: 300}}
 
   - name: tool-subtree-partition-closed
     steps:
@@ -939,3 +939,473 @@ cases:
               role: user
               entryType: not_a_type
               content: fix parser
+
+  - name: uncertain-child-relocates-whole-subtree
+    steps:
+      - allocator: [e_u1, e_a1, e_call1, e_result1, s_u1]
+        capture:
+          id: gen-uncertain-child
+          sessionId: sess_uncertainchild
+          harness: codex
+          sourceEvidenceDigest: sha256:uncertain-child
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_uncertainchild
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              submissionKey: accept-uncertain-child
+              section: {index: 0}
+              role: user
+              entryType: text
+              depth: 0
+              content: fix parser
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              depth: 0
+              content: carrier
+            - nativeKey: call1
+              section: {index: 0}
+              role: assistant
+              entryType: tool_use
+              depth: 1
+              carrierNativeKey: a1
+              toolCallKey: call-uncertain
+              toolName: rg
+              toolArguments: rg parser
+            - nativeKey: result1
+              uncertain: true
+              section: {earlier: true, index: 1}
+              role: tool
+              entryType: tool_result
+              depth: 1
+              carrierNativeKey: a1
+              toolCallKey: call-uncertain
+              toolResult: parser.go:12
+        want:
+          turnCount: 1
+          inputSubmissionCount: 1
+          titleRefs: [e_u1]
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: fix parser, submissionRef: s_u1, ownership: local}
+          earlier:
+            - state: uncertain_migrated
+              entries:
+                - {nativeKey: a1, index: 0, ref: e_a1, role: assistant, entryType: text, depth: 0, content: carrier}
+                - {nativeKey: call1, index: 1, ref: e_call1, role: assistant, entryType: tool_use, depth: 1, parentIndex: 0, toolInput: rg parser, toolCallId: e_call1}
+                - {nativeKey: result1, index: 2, ref: e_result1, role: tool, entryType: tool_result, depth: 1, parentIndex: 0, toolOutput: parser.go:12, toolCallId: e_call1}
+
+  - name: ambiguous-pair-differing-body
+    steps:
+      - allocator: [e_amb1, e_amb2]
+        capture:
+          id: gen-ambiguous-body
+          sessionId: sess_ambiguousbody
+          harness: codex
+          sourceEvidenceDigest: sha256:ambiguous-body
+          completeness: complete
+          earlierStates: [uncertain_unresolved]
+          metadata:
+            sessionId: sess_ambiguousbody
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: event-1
+              ambiguousPairKey: pair-body
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input first
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: response-1
+              ambiguousPairKey: pair-body
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input second distinct
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 0
+          inputSubmissionCount: 0
+          titleRefs: []
+          main: []
+          earlier:
+            - state: uncertain_unresolved
+              entries:
+                - {nativeKey: event-1, index: 0, ref: e_amb1, role: user, entryType: text, depth: 0, content: ambiguous input first, ownership: local}
+                - {nativeKey: response-1, index: 1, ref: e_amb2, role: user, entryType: text, depth: 0, content: ambiguous input second distinct, ownership: local}
+
+  - name: ambiguous-pair-differing-provenance
+    steps:
+      - allocator: [e_amb1, e_amb2]
+        capture:
+          id: gen-ambiguous-prov
+          sessionId: sess_ambiguousprov
+          harness: codex
+          sourceEvidenceDigest: sha256:ambiguous-prov
+          completeness: complete
+          earlierStates: [uncertain_unresolved]
+          metadata:
+            sessionId: sess_ambiguousprov
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: event-1
+              ambiguousPairKey: pair-prov
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: response-1
+              ambiguousPairKey: pair-prov
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: uncertain
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 0
+          inputSubmissionCount: 0
+          titleRefs: []
+          main: []
+          earlier:
+            - state: uncertain_unresolved
+              entries:
+                - {nativeKey: event-1, index: 0, ref: e_amb1, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+                - {nativeKey: response-1, index: 1, ref: e_amb2, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: uncertain}
+
+  - name: attachment-enrichment-survives-layout
+    steps:
+      - allocator: [e_old, e_u1, e_a1, e_call1, e_result1, s_u1]
+        capture:
+          id: gen-attach
+          sessionId: sess_attach
+          harness: codex
+          sourceEvidenceDigest: sha256:attach
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_attach
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: old1
+              section: {earlier: true, index: 1}
+              role: assistant
+              entryType: text
+              depth: 0
+              content: old answer
+              usage: {tokensIn: 10, tokensOut: 5}
+              observedModel: codex-old-observe
+              nativeAttachments:
+                - {id: meta-old1, kind: pi.custom.data, sourceType: pi.custom, customType: fixture, data: '{"note":"earlier"}'}
+            - nativeKey: u1
+              submissionKey: accept-attach
+              section: {index: 0}
+              role: user
+              entryType: text
+              depth: 0
+              content: fix parser
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              depth: 0
+              content: I will inspect.
+              usage: {tokensIn: 100, tokensOut: 50}
+              observedModel: codex-observe-1
+              nativeAttachments:
+                - {id: meta-a1, kind: pi.custom.data, sourceType: pi.custom, customType: fixture, data: '{"note":"main"}'}
+            - nativeKey: call1
+              section: {index: 0}
+              role: assistant
+              entryType: tool_use
+              depth: 1
+              carrierNativeKey: a1
+              toolCallKey: call-attach
+              toolName: rg
+              toolArguments: rg parser
+              usage: {tokensIn: 7, tokensOut: 3}
+            - nativeKey: result1
+              section: {index: 0}
+              role: tool
+              entryType: tool_result
+              depth: 1
+              carrierNativeKey: a1
+              toolCallKey: call-attach
+              toolResult: parser.go:12
+              nativeAttachments:
+                - {id: meta-result1, kind: pi.toolresult.details, sourceType: pi.message, messageRole: toolResult, data: '{}', attachmentToolCallKey: call-attach}
+        want:
+          turnCount: 2
+          inputSubmissionCount: 1
+          titleRefs: [e_u1]
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: fix parser, submissionRef: s_u1, ownership: local}
+            - {nativeKey: a1, index: 1, ref: e_a1, role: assistant, entryType: text, depth: 0, content: I will inspect., tokensIn: 100, tokensOut: 50, observedModel: codex-observe-1}
+            - {nativeKey: call1, index: 2, ref: e_call1, role: assistant, entryType: tool_use, depth: 1, parentIndex: 1, toolInput: rg parser, toolCallId: e_call1, tokensIn: 7, tokensOut: 3}
+            - {nativeKey: result1, index: 3, ref: e_result1, role: tool, entryType: tool_result, depth: 1, parentIndex: 1, toolOutput: parser.go:12, toolCallId: e_call1}
+          mainNativeMetadata:
+            - {id: meta-a1, kind: pi.custom.data, sourceType: pi.custom, entryRef: e_a1, customType: fixture, data: '{"note":"main"}'}
+            - {id: meta-result1, kind: pi.toolresult.details, sourceType: pi.message, entryRef: e_result1, data: '{}', attachmentToolId: e_call1}
+          earlier:
+            - state: uncertain_migrated
+              entries:
+                - {nativeKey: old1, index: 0, ref: e_old, role: assistant, entryType: text, depth: 0, content: old answer, tokensIn: 10, tokensOut: 5, observedModel: codex-old-observe}
+              nativeMetadata:
+                - {id: meta-old1, kind: pi.custom.data, sourceType: pi.custom, entryRef: e_old, customType: fixture, data: '{"note":"earlier"}'}
+
+  - name: count-lifecycle-accepted
+    steps:
+      - allocator: [e_u1, s_u1]
+        capture:
+          id: gen-lifecycle
+          sessionId: sess_lifecycle
+          harness: codex
+          sourceEvidenceDigest: sha256:lifecycle
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_lifecycle
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              submissionKey: accept-lifecycle
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: fix parser
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: lifecycle_typed
+                inputModality: text
+        want:
+          turnCount: 1
+          inputSubmissionCount: 1
+          titleRefs: [e_u1]
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: fix parser, submissionRef: s_u1, ownership: local}
+
+  - name: count-actor-excluded
+    steps:
+      - allocator: [e_u1, e_u2, s_harness, s_delegate]
+        capture:
+          id: gen-actor-excluded
+          sessionId: sess_actorexcluded
+          harness: codex
+          sourceEvidenceDigest: sha256:actor-excluded
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_actorexcluded
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              submissionKey: accept-harness
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: harness input
+              provenance:
+                origin: submitted_input
+                actor: harness
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: u2
+              submissionKey: accept-delegate
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: delegate input
+              provenance:
+                origin: submitted_input
+                actor: agent_delegate
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 2
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: harness input, submissionRef: s_harness, ownership: local}
+            - {nativeKey: u2, index: 1, ref: e_u2, role: user, entryType: text, depth: 0, content: delegate input, submissionRef: s_delegate, ownership: local}
+
+  - name: count-delivery-excluded
+    steps:
+      - allocator: [e_u1, e_u2, s_u1, s_u2]
+        capture:
+          id: gen-delivery-excluded
+          sessionId: sess_deliveryexcluded
+          harness: codex
+          sourceEvidenceDigest: sha256:delivery-excluded
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_deliveryexcluded
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              submissionKey: accept-unknown-delivery
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: unknown delivery input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: unknown
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: u2
+              submissionKey: accept-subagent
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: subagent delivery input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: subagent_delivery
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 2
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: unknown delivery input, submissionRef: s_u1, ownership: local}
+            - {nativeKey: u2, index: 1, ref: e_u2, role: user, entryType: text, depth: 0, content: subagent delivery input, submissionRef: s_u2, ownership: local}
+
+  - name: count-action-without-title
+    steps:
+      - allocator: [e_u1, s_u1]
+        capture:
+          id: gen-action
+          sessionId: sess_action
+          harness: codex
+          sourceEvidenceDigest: sha256:action
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_action
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              submissionKey: accept-action
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: tap button
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: user_action
+        want:
+          turnCount: 1
+          inputSubmissionCount: 1
+          titleRefs: []
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: tap button, submissionRef: s_u1, ownership: local}
+
+  - name: count-excluded-main-input
+    steps:
+      - allocator: [e_u1, s_u1]
+        capture:
+          id: gen-excluded-main
+          sessionId: sess_excludedmain
+          harness: codex
+          sourceEvidenceDigest: sha256:excluded-main
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_excludedmain
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              submissionKey: accept-excluded
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: harness input
+              provenance:
+                origin: submitted_input
+                actor: harness
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 1
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: harness input, submissionRef: s_u1, ownership: local}
