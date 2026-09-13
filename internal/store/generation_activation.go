@@ -101,7 +101,11 @@ reconciled:
 		return err
 	}
 	if err := (generationIndexFormat{}).Validate(indexformat.V2{Generation: staged}); err != nil {
-		return fmt.Errorf("store: refuse to activate an invalid managed generation for session %s: %w; the staged candidate is retained and the prior generation is unchanged", sessionID, err)
+		// The validator text is untrusted: a candidate title ref or another
+		// field can carry a private path, so refuse with a fixed category
+		// against the already-validated identities and never wrap the raw
+		// validator error.
+		return fmt.Errorf("store: refuse to activate an invalid managed generation %s for session %s: the staged candidate failed managed generation validation; the staged candidate is retained and the prior generation is unchanged", staged.ID, sessionID)
 	}
 	metadataJSON, err := json.Marshal(staged.Metadata)
 	if err != nil {
@@ -205,7 +209,11 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 	// wrong stamps.
 	stagedDigest, err := computeActivationBinding(generation, bindingFromStaged)
 	if err != nil {
-		return fmt.Errorf("store: recover pending activation for session %s: %w; the synced candidate was preserved and the prior generation is unchanged", sessionID, err)
+		// The staged manifest is untrusted: a content reference can carry a
+		// private path. The wrapped error is the fixed, reference-free binding
+		// category, so the refusal names only the validated requested
+		// identities and never the manifest detail.
+		return fmt.Errorf("store: recover pending activation for session %s generation %s: %w; the synced candidate was preserved and the prior generation is unchanged; retry a verified activation", sessionID, intent.GenerationID, err)
 	}
 	if intent.CandidateDigest == "" || stagedDigest != intent.CandidateDigest {
 		return fmt.Errorf("store: refuse pending activation for session %s generation %s in recoverGenerationIntentLocked: the durable intent does not bind to the staged candidate bytes; the candidate was preserved and the prior generation is unchanged; retry a verified activation", sessionID, intent.GenerationID)
@@ -347,6 +355,9 @@ func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID,
 	}
 	candidateDigest, err := computeActivationBinding(generation, bindingFromBlobs(blobs))
 	if err != nil {
+		// The wrapped error is the fixed, reference-free binding category; a
+		// missing captured blob is untrusted candidate detail and is never
+		// echoed.
 		return indexformat.Generation{}, fmt.Errorf("store: bind activation for generation %s of session %s: %w; the candidate was not staged and any installed generation is unchanged", generation.ID, sessionID, err)
 	}
 	if err := s.verifyImmutableCandidateIdentity(ctx, sessionID, generation, candidateDigest); err != nil {
@@ -405,6 +416,9 @@ func (s *Store) verifyImmutableCandidateIdentity(ctx context.Context, sessionID 
 	}
 	installedDigest, err := computeActivationBinding(installed, bindingFromStaged)
 	if err != nil {
+		// The installed manifest is untrusted; its content references can carry
+		// private paths. The wrapped error is the fixed, reference-free binding
+		// category for the validated requested identities.
 		return fmt.Errorf("store: verify installed candidate for generation %s of session %s before staging: %w; the candidate was not staged and any installed bytes are unchanged", generation.ID, sessionID, err)
 	}
 	if installed.ID != generation.ID || installed.Metadata.SessionID != sessionID || installedDigest != candidateDigest {

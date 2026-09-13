@@ -405,13 +405,25 @@ type activationBinding struct {
 	Content    []activationBindingContent `json:"content"`
 }
 
+// errGenerationContentBlobMissing marks a candidate content record whose
+// captured blob is absent. The record reference comes from candidate data that
+// may still be untrusted (an installed or staged manifest), so the diagnostic
+// names the fixed category only and never the reference.
+var errGenerationContentBlobMissing = errors.New("store: a captured content blob is missing; the generation is not self-contained; supply every captured blob")
+
+// errGenerationContentDigestMissing marks a content record without an integrity
+// digest. The reference may be untrusted manifest data, so the diagnostic names
+// the fixed category only and never the reference.
+var errGenerationContentDigestMissing = errors.New("store: a content record carries no integrity digest; the candidate binding cannot be verified; re-stage the generation")
+
 // computeActivationBinding binds one activation envelope to the COMPLETE
 // candidate. contentDigest supplies each content record's payload digest: the
 // pre-stage caller hashes the blob bytes and the replay path reuses the
 // manifest's verified integrity digest. It never uses a partial main-preview
 // comparison, so two candidates that differ only outside the main preview still
 // bind differently and an installed immutable generation is never rewritten
-// from a partial equality test.
+// from a partial equality test. A failure names a fixed category and never an
+// untrusted record reference or manifest identifier.
 func computeActivationBinding(generation indexformat.Generation, contentDigest func(indexformat.ContentRecord) (string, error)) (string, error) {
 	normalized := generation
 	normalized.Content = append([]indexformat.ContentRecord(nil), generation.Content...)
@@ -423,7 +435,7 @@ func computeActivationBinding(generation indexformat.Generation, contentDigest f
 			return "", err
 		}
 		if strings.TrimSpace(digest) == "" {
-			return "", fmt.Errorf("store: content record %q carries no integrity digest in computeActivationBinding; the candidate cannot be bound; record the blob digest", record.Ref)
+			return "", errGenerationContentDigestMissing
 		}
 		content = append(content, activationBindingContent{Ref: record.Ref, Digest: digest})
 		normalized.Content[i].RelativeBlob = ""
@@ -433,7 +445,7 @@ func computeActivationBinding(generation indexformat.Generation, contentDigest f
 	sort.Slice(content, func(i, j int) bool { return string(content[i].Ref) < string(content[j].Ref) })
 	payload, err := json.Marshal(activationBinding{Generation: normalized, Content: content})
 	if err != nil {
-		return "", fmt.Errorf("store: encode activation binding for generation %s in computeActivationBinding: %s; the candidate cannot be bound and must be re-staged", normalized.ID, sanitizeFSError(err))
+		return "", fmt.Errorf("store: encode activation binding in computeActivationBinding: %s; the candidate cannot be bound and must be re-staged", sanitizeFSError(err))
 	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
@@ -444,7 +456,7 @@ func bindingFromBlobs(blobs map[schema.SourceEntryRef][]byte) func(indexformat.C
 	return func(record indexformat.ContentRecord) (string, error) {
 		payload, ok := blobs[record.Ref]
 		if !ok {
-			return "", fmt.Errorf("store: content blob for ref %q is missing; the generation is not self-contained; supply every captured blob", record.Ref)
+			return "", errGenerationContentBlobMissing
 		}
 		sum := sha256.Sum256(payload)
 		return hex.EncodeToString(sum[:]), nil
@@ -456,7 +468,7 @@ func bindingFromBlobs(blobs map[schema.SourceEntryRef][]byte) func(indexformat.C
 // the same evidence bindingFromBlobs computes before the rename.
 func bindingFromStaged(record indexformat.ContentRecord) (string, error) {
 	if strings.TrimSpace(record.Digest) == "" {
-		return "", fmt.Errorf("store: staged content record %q carries no integrity digest; the candidate binding cannot be verified; re-stage the generation", record.Ref)
+		return "", errGenerationContentDigestMissing
 	}
 	return record.Digest, nil
 }

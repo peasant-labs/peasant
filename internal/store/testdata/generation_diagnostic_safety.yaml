@@ -1,0 +1,22 @@
+# Diagnostic-safety oracle for the activation, installed-candidate verification
+# and recovery boundaries. Untrusted candidate detail can carry a private path:
+# a title reference in a staged candidate, a content reference in an installed
+# manifest, or a content reference in a staged manifest at recovery. Each
+# boundary must refuse with a fixed actionable category that names only the
+# already-validated requested identities, never the private path, and must leave
+# the last-good generation and the candidate bytes unchanged.
+session:
+  id: "77777777-7777-4777-8777-777777777777"
+  harness: claude-code
+generation:
+  complete_id: gen_diag_g1
+  candidate_id: gen_diag_g2
+  installed_id: gen_diag_installed
+private_identity: "/home/tester/private-sentinel-7d4b/leaked-generation"
+cases:
+  - name: activation-private-title-ref-refused-without-echo
+    boundary: activation
+  - name: installed-candidate-private-content-refused-without-echo
+    boundary: installed-candidate
+  - name: recovery-private-content-refused-without-echo
+    boundary: recovery
