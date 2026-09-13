@@ -1,0 +1,4 @@
+requiredNames:
+  - coordinate-kind
+  - segment-inclusion
+  - generation-completeness
