@@ -196,3 +196,67 @@ cases:
       indexVersion: 3
       session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
       metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+
+  - name: v2-snapshot-main-entry-invalid-role
+    wantError: closed role set
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: not-a-role, sourceEntryRef: e-main-0}
+
+  - name: v2-snapshot-earlier-entry-invalid-role
+    wantError: closed role set
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main: {}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: not-a-role, sourceEntryRef: e-earlier-0}
+
+  - name: v2-snapshot-duplicate-ref-across-partitions
+    wantError: one owner per ref across the whole snapshot
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-dup-0}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-dup-0}
+
+  - name: v2-snapshot-complete-absent-count-rejected
+    wantError: measured its submissions
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: v2-snapshot-incomplete-new-with-count-rejected
+    wantError: omits the scalar
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: incomplete_new
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main: {}

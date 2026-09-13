@@ -161,9 +161,27 @@ func stringsOf[T ~string](values []T) []string {
 // --- Generation validation ---
 
 type fixtureEntry struct {
-	EntryIndex     int    `yaml:"entryIndex"`
-	Role           string `yaml:"role"`
-	SourceEntryRef string `yaml:"sourceEntryRef"`
+	EntryIndex     int                `yaml:"entryIndex"`
+	Role           string             `yaml:"role"`
+	SourceEntryRef string             `yaml:"sourceEntryRef"`
+	SessionID      *string            `yaml:"sessionId"`
+	Harness        *string            `yaml:"harness"`
+	EntryType      *string            `yaml:"entryType"`
+	Depth          *int               `yaml:"depth"`
+	ParentIndex    *int               `yaml:"parentIndex"`
+	Provenance     *fixtureProvenance `yaml:"provenance"`
+	ToolKind       *string            `yaml:"toolKind"`
+	StopReason     *string            `yaml:"stopReason"`
+}
+
+type fixtureProvenance struct {
+	Origin        string `yaml:"origin"`
+	Actor         string `yaml:"actor"`
+	Delivery      string `yaml:"delivery"`
+	Ownership     string `yaml:"ownership"`
+	Evidence      string `yaml:"evidence"`
+	InputModality string `yaml:"inputModality"`
+	SubmissionRef string `yaml:"submissionRef"`
 }
 
 type fixtureMetadataRecord struct {
@@ -304,14 +322,56 @@ func buildRelationships(in []fixtureRelationship) []schema.SessionRelationship {
 	return out
 }
 
-func buildPartition(in fixturePartition) indexformat.Partition {
+func buildPartition(in fixturePartition, sessionID, harness string) indexformat.Partition {
 	partition := indexformat.Partition{}
 	for _, row := range in.Entries {
-		partition.Entries = append(partition.Entries, schema.SessionEntry{
+		entry := schema.SessionEntry{
 			EntryIndex:     row.EntryIndex,
 			Role:           schema.Role(row.Role),
 			SourceEntryRef: schema.SourceEntryRef(row.SourceEntryRef),
-		})
+			SessionID:      schema.SessionID(sessionID),
+			Harness:        schema.Harness(harness),
+			EntryType:      schema.EntryTypeText,
+		}
+		if row.SessionID != nil {
+			entry.SessionID = schema.SessionID(*row.SessionID)
+		}
+		if row.Harness != nil {
+			entry.Harness = schema.Harness(*row.Harness)
+		}
+		if row.EntryType != nil {
+			entry.EntryType = schema.EntryType(*row.EntryType)
+		}
+		if row.Depth != nil {
+			entry.Depth = *row.Depth
+		}
+		if row.ParentIndex != nil {
+			parent := *row.ParentIndex
+			entry.ParentIndex = &parent
+		}
+		if row.Provenance != nil {
+			provenance := &schema.ContentProvenance{
+				Origin:        schema.ContentOrigin(row.Provenance.Origin),
+				Actor:         schema.ActorOrigin(row.Provenance.Actor),
+				Delivery:      schema.DeliveryOrigin(row.Provenance.Delivery),
+				Ownership:     schema.ContentOwnership(row.Provenance.Ownership),
+				Evidence:      schema.EvidenceKind(row.Provenance.Evidence),
+				InputModality: schema.InputModality(row.Provenance.InputModality),
+			}
+			if row.Provenance.SubmissionRef != "" {
+				provenance.SubmissionRef = schema.SubmissionRef(row.Provenance.SubmissionRef)
+			}
+			entry.Provenance = provenance
+		}
+		if row.ToolKind != nil {
+			kind := schema.ToolCallKind(*row.ToolKind)
+			entry.ToolKind = &kind
+		}
+		if row.StopReason != nil {
+			reason := schema.StopReason(*row.StopReason)
+			entry.StopReason = &reason
+		}
+		partition.Entries = append(partition.Entries, entry)
 	}
 	for _, row := range in.NativeMetadata {
 		partition.NativeMetadata = append(partition.NativeMetadata, schema.NativeMetadataRecord{
@@ -333,13 +393,13 @@ func buildGeneration(in fixtureGeneration) indexformat.Generation {
 		ID:                   in.ID,
 		Completeness:         indexformat.GenerationCompleteness(in.Completeness),
 		Metadata:             buildMetadata(in.Metadata),
-		Main:                 buildPartition(in.Main),
+		Main:                 buildPartition(in.Main, in.Metadata.SessionID, in.Metadata.ModelHarness),
 		SourceEvidenceDigest: in.SourceEvidenceDigest,
 	}
 	for _, row := range in.Earlier {
 		generation.Earlier = append(generation.Earlier, indexformat.EarlierPartition{
 			State:   schema.EarlierHistoryState(row.State),
-			Content: buildPartition(row.Content),
+			Content: buildPartition(row.Content, in.Metadata.SessionID, in.Metadata.ModelHarness),
 		})
 	}
 	for _, row := range in.Segments {
@@ -490,7 +550,7 @@ func buildSnapshot(in fixtureSnapshot) indexformat.ReadSnapshot {
 			Relationships:        buildRelationships(in.Session.Relationships),
 		},
 		Metadata:  buildMetadata(in.Metadata),
-		Main:      buildPartition(in.Main),
+		Main:      buildPartition(in.Main, in.Metadata.SessionID, in.Metadata.ModelHarness),
 		TitleRefs: refsOf(in.TitleRefs),
 	}
 	if in.Session.RootSessionID != "" {
@@ -504,7 +564,7 @@ func buildSnapshot(in fixtureSnapshot) indexformat.ReadSnapshot {
 	for _, row := range in.Earlier {
 		snapshot.Earlier = append(snapshot.Earlier, indexformat.EarlierPartition{
 			State:   schema.EarlierHistoryState(row.State),
-			Content: buildPartition(row.Content),
+			Content: buildPartition(row.Content, in.Metadata.SessionID, in.Metadata.ModelHarness),
 		})
 	}
 	for _, row := range in.Content {
