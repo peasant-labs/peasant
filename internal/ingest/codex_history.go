@@ -25,11 +25,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/peasant-labs/peasant/internal/codexstate"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // CodexSourceAuthorityKind names how the one current source was selected
@@ -675,63 +674,36 @@ type CodexNativePointerStore interface {
 }
 
 // CodexSQLitePointerStore reads the native current-rollout pointer from the
-// read-only native Codex state database. It is the production pointer
-// authority; it is never a plaintext side document.
+// read-only native Codex state database through the dedicated native-state
+// reader. It performs no SQLite access itself, so the ingest package keeps its
+// fixed, statically attributable SQL inventory.
 type CodexSQLitePointerStore struct {
-	path string
+	store *codexstate.PointerStore
 }
 
 // NewCodexSQLitePointerStore creates a read-only native state-database pointer
 // store over the given database path.
 func NewCodexSQLitePointerStore(path string) *CodexSQLitePointerStore {
-	return &CodexSQLitePointerStore{path: path}
+	return &CodexSQLitePointerStore{store: codexstate.NewPointerStore(path)}
 }
 
 var _ CodexNativePointerStore = (*CodexSQLitePointerStore)(nil)
 
 // NativeCurrentRollout queries the native threads table read-only for the one
-// current rollout path of a stable thread. Failures are sanitized at this
-// boundary: the error never carries a raw private path or a wrapped OS error.
+// current rollout path of a stable thread and projects it into the capture's
+// raw-history-mode shape.
 func (s *CodexSQLitePointerStore) NativeCurrentRollout(ctx context.Context, stableThreadID string) (CodexNativePointerRecord, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return CodexNativePointerRecord{}, false, fmt.Errorf("ingest.CodexSQLitePointerStore.NativeCurrentRollout: the Codex authority read for thread %q was cancelled before the native state database could be queried; no source was read and no state changed; retry the harvest", stableThreadID)
-	}
-	conn, err := sqlite.OpenConn(s.path, sqlite.OpenReadOnly)
+	record, found, err := s.store.CurrentRollout(ctx, stableThreadID)
 	if err != nil {
-		return CodexNativePointerRecord{}, false, fmt.Errorf("ingest.CodexSQLitePointerStore.NativeCurrentRollout: the native Codex state database could not be opened read-only at the resolve-authority-before-diff step because %s; no older rollout was preferred and the capture falls back to detached-file authority", codexSanitizedSQLiteCause())
+		return CodexNativePointerRecord{}, false, err
 	}
-	defer conn.Close()
-
-	var record CodexNativePointerRecord
-	found := false
-	queryErr := sqlitex.ExecuteTransient(conn, "SELECT rollout_path, history_mode FROM threads WHERE id = ? LIMIT 1", &sqlitex.ExecOptions{
-		Args: []any{stableThreadID},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			if stmt.ColumnCount() > 0 {
-				record.Pointer = strings.TrimSpace(stmt.ColumnText(0))
-			}
-			if stmt.ColumnCount() > 1 {
-				if raw := strings.TrimSpace(stmt.ColumnText(1)); raw != "" {
-					if encoded, marshalErr := json.Marshal(raw); marshalErr == nil {
-						record.HistoryMode = encoded
-					}
-				}
-			}
-			found = record.Pointer != ""
-			return nil
-		},
-	})
-	if queryErr != nil {
-		return CodexNativePointerRecord{}, false, fmt.Errorf("ingest.CodexSQLitePointerStore.NativeCurrentRollout: the native Codex state database could not be queried read-only for thread %q because %s; no older rollout was preferred and the capture falls back to detached-file authority", stableThreadID, codexSanitizedSQLiteCause())
+	projected := CodexNativePointerRecord{Pointer: record.Pointer}
+	if record.HistoryMode != "" {
+		if encoded, marshalErr := json.Marshal(record.HistoryMode); marshalErr == nil {
+			projected.HistoryMode = encoded
+		}
 	}
-	return record, found, nil
-}
-
-// codexSanitizedSQLiteCause is the fixed sanitized reason for a native state
-// database failure. It deliberately ignores the underlying error text, which
-// can carry a raw private path.
-func codexSanitizedSQLiteCause() string {
-	return "the native state database could not be read"
+	return projected, found, nil
 }
 
 // CodexFileSourceOption configures a CodexFileSource.
