@@ -347,18 +347,18 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	}
 	var repaired []SessionID
 	for _, sid := range ids {
+		if _, queued := entryIndex[sid]; queued {
+			// Already queued for other work: the queued path reads the pair at
+			// its point of use and decides damage there, so selection does not
+			// read it. A native acquisition rewrites the pair; the retained-first
+			// path and the native-failure fallback both read via readArtifactPair
+			// and refuse damage. Nothing is carried either way.
+			continue
+		}
 		if !p.pairNeedsRepair(ctx, sid) {
 			continue
 		}
 		metadataPath, _ := p.storedMetadataPath(ctx, sid)
-		if i, ok := entryIndex[sid]; ok {
-			// Already queued for other work: carry the repair verdict onto the
-			// existing entry instead of skipping it.
-			entries[i].pairRepair = true
-			entries[i].repairMetadataPath = metadataPath
-			repaired = append(repaired, sid)
-			continue
-		}
 		session, found := native[sid]
 		if !found {
 			reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
