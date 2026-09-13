@@ -160,6 +160,8 @@ type countingReadFS struct {
 	transcriptReads int
 }
 
+var _ FileSystem = (*countingReadFS)(nil)
+
 func (filesystem *countingReadFS) ReadFile(path string) ([]byte, error) {
 	switch path {
 	case filesystem.metadataPath:
@@ -184,6 +186,8 @@ type swapAfterTranscriptReadFS struct {
 	nextTranscript []byte
 	hookFired      bool
 }
+
+var _ FileSystem = (*swapAfterTranscriptReadFS)(nil)
 
 func (filesystem *swapAfterTranscriptReadFS) ReadFile(path string) ([]byte, error) {
 	data, err := filesystem.FileSystem.ReadFile(path)
@@ -212,6 +216,8 @@ func (filesystem *swapAfterTranscriptReadFS) fired() bool {
 
 type snapshotGitResolver struct{}
 
+var _ GitResolver = snapshotGitResolver{}
+
 func (snapshotGitResolver) RemoteURL(_ context.Context, _ string) (string, error) { return "", nil }
 func (snapshotGitResolver) Branch(_ context.Context, _ string) (string, error)    { return "", nil }
 func (snapshotGitResolver) Worktree(_ context.Context, _ string) (string, error)  { return "", nil }
@@ -227,6 +233,8 @@ func (snapshotGitResolver) WalkUpRemoteURL(_ context.Context, _ string) (string,
 // extraction: the native source file is absent, so the capture fails before
 // the adapter is consulted and the retained fallback engages.
 type snapshotFailingAdapter struct{}
+
+var _ SourceAdapter = snapshotFailingAdapter{}
 
 func (snapshotFailingAdapter) Harness() Harness { return HarnessClaudeCode }
 func (snapshotFailingAdapter) Discover(_ context.Context, _ SourceConfig) ([]DiscoveredSession, error) {
@@ -430,6 +438,8 @@ func TestFallbackCarrySurvivesConcurrentMetadataWrite(t *testing.T) {
 // captures before any parse.
 type snapshotFileIndexer struct{}
 
+var _ TranscriptIndexer = snapshotFileIndexer{}
+
 func (snapshotFileIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
 func (snapshotFileIndexer) IndexTranscript(_ context.Context, _ DiscoveredSession) ([]schema.SessionEntry, error) {
 	return nil, nil
@@ -446,6 +456,9 @@ type snapshotPublicationStore struct {
 	metadata UnifiedMetadata
 	revision int64
 }
+
+var _ SessionStore = snapshotPublicationStore{}
+var _ PublicationMetadataReader = snapshotPublicationStore{}
 
 func (store snapshotPublicationStore) LoadPublicationMetadata(_ context.Context, ids []SessionID) (map[SessionID]PublicationMetadata, error) {
 	out := make(map[SessionID]PublicationMetadata, len(ids))
