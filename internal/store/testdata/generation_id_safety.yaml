@@ -1,0 +1,28 @@
+# Generation identifier safety oracle for the owned-artifact activation path.
+# Each named invalid identifier must be rejected before any filesystem
+# operation, and cleanup of such an identifier must preserve the active
+# generation. Intent-owned candidates are preserved, and immutable identifier
+# collisions are refused unless the staged candidate is byte-identical.
+session:
+  id: "22222222-2222-4222-8222-222222222222"
+  harness: claude-code
+generation:
+  complete_id: gen_safe_g1
+  failed_id: gen_safe_g2
+cases:
+  - name: dot-cleanup-preserves-active
+    generation_id: "."
+  - name: dotdot-cleanup-preserves-active
+    generation_id: ".."
+  - name: slash-cleanup-preserves-active
+    generation_id: "a/b"
+  - name: backslash-cleanup-preserves-active
+    generation_id: "a\\b"
+  - name: empty-cleanup-preserves-active
+    generation_id: ""
+  - name: noncanonical-cleanup-preserves-active
+    generation_id: "a/./b"
+  - name: intent-owned-cleanup-preserved
+    generation_id: gen_safe_g2
+  - name: immutable-collision-refused
+    generation_id: gen_safe_g1

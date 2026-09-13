@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -41,7 +42,12 @@ func (generationIndexFormat) Validate(result indexformat.Result) error {
 
 // Write installs one generation in the caller's transaction. The returned main
 // entries are the canonical search projection the common writer persists; the
-// generation rows are the V2 read authority.
+// generation rows are the V2 read authority. It enforces the completeness
+// transition transactionally: an incomplete_new candidate is refused when a
+// complete generation already exists for the session, so a last-good complete
+// generation is never replaced by an incomplete capture. The same guard runs
+// for activation, recovery and direct format writes because all three commit
+// through this handler on the activation connection.
 func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID, result indexformat.Result) ([]schema.SessionEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -53,6 +59,11 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 	generation := value.Generation
 	if generation.Metadata.SessionID != sessionID {
 		return nil, fmt.Errorf("store: managed generation for session %s names session %s; no generation was activated; build the generation for its own captured metadata", sessionID, generation.Metadata.SessionID)
+	}
+	if generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+		if err := refuseIncompleteWhenCompleteExists(conn, sessionID, generation.ID); err != nil {
+			return nil, err
+		}
 	}
 	metadataJSON, err := json.Marshal(generation.Metadata)
 	if err != nil {
@@ -298,20 +309,143 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	if generation.Metadata.Purpose != "" {
 		purpose = string(generation.Metadata.Purpose)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
-		generation.ID, root, purpose, string(sessionID),
+	var inputCount any
+	if generation.Metadata.Stats.InputSubmissionCount != nil {
+		inputCount = *generation.Metadata.Stats.InputSubmissionCount
+	}
+	var adapter any
+	if generation.Metadata.AdapterVersion != nil {
+		if *generation.Metadata.AdapterVersion <= 0 {
+			return fmt.Errorf("store: managed generation %s for session %s carries non-positive adapter revision; no generation was activated; omit unknown provenance instead", generation.ID, sessionID)
+		}
+		adapter = *generation.Metadata.AdapterVersion
+	}
+	// The logical parent is durable relationship evidence, not the
+	// availability cache. sessions.parent_id is the FK-safe cache: the durable
+	// started_by target when it names a stored session, else NULL so an
+	// admitted child survives an absent, unselected or cyclic parent.
+	logicalParent := durableParentTarget(generation.Metadata.Relationships)
+	var parent any
+	if logicalParent != nil {
+		exists := false
+		if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+			Args:       []any{string(*logicalParent)},
+			ResultFunc: func(*sqlite.Stmt) error { exists = true; return nil },
+		}); err != nil {
+			return fmt.Errorf("store: resolve logical parent for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
+		}
+		if exists {
+			parent = string(*logicalParent)
+		}
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
+		generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID),
 	}}); err != nil {
 		return fmt.Errorf("store: point session %s at generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 	}
-	// session_metrics.turn_count is a derived mirror of Metadata.Stats, never a
-	// second authority. INSERT ... ON CONFLICT keeps a session without a metrics
-	// row valid.
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_metrics (session_id, turn_count) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET turn_count = excluded.turn_count`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID), generation.Metadata.Stats.TurnCount,
+	// session_metrics.turn_count and tool_calls are derived mirrors of
+	// Metadata.Stats, never a second authority. The title is derived from the
+	// generation's TitleRefs so ordinary list reads agree with the snapshot
+	// without a separate metadata upsert. INSERT ... ON CONFLICT keeps a
+	// session without a metrics row valid.
+	title := deriveGenerationTitle(generation)
+	var titleValue any
+	if title != "" {
+		titleValue = title
+	}
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_metrics (session_id, turn_count, tool_calls, title) VALUES (?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET turn_count = excluded.turn_count, tool_calls = excluded.tool_calls, title = excluded.title`, &sqlitex.ExecOptions{Args: []any{
+		string(sessionID), generation.Metadata.Stats.TurnCount, generation.Metadata.Stats.ToolCallCount, titleValue,
 	}}); err != nil {
 		return fmt.Errorf("store: derive turn_count mirror for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 	}
 	return nil
+}
+
+// refuseIncompleteWhenCompleteExists implements the completeness transition:
+// incomplete_new is the one first-discovery exception and is allowed only when
+// no complete generation exists for the session. Retrying the same incomplete
+// identifier is idempotent and allowed; replacing any other generation while a
+// complete last-good exists is refused transactionally.
+func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.SessionID, candidateID string) error {
+	completeID := ""
+	if err := sqlitex.ExecuteTransient(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			completeID = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store: check completeness transition for session %s: %w; no generation was activated", sessionID, err)
+	}
+	if completeID != "" && completeID != candidateID {
+		return fmt.Errorf("store: refuse incomplete generation %s for session %s: a complete generation %s is the last-good read authority; incomplete_new is the first-discovery exception only and never replaces it", candidateID, sessionID, completeID)
+	}
+	return nil
+}
+
+// durableParentTarget returns the durable started_by target when the
+// relationship evidence names a known retained session. It mirrors the
+// snapshot's logical-parent derivation so activation and reads agree.
+func durableParentTarget(relationships []schema.SessionRelationship) *schema.SessionID {
+	for i := range relationships {
+		relationship := relationships[i]
+		if relationship.Kind != schema.SessionRelationshipStartedBy {
+			continue
+		}
+		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
+			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
+				target := *relationship.TargetLocalID
+				return &target
+			}
+		}
+	}
+	return nil
+}
+
+// deriveGenerationTitle derives the display title from the generation's
+// TitleRefs: the first ref whose main entry carries usable prose, reduced to
+// its first non-empty line. It never invents a title when no ref yields one.
+func deriveGenerationTitle(generation indexformat.Generation) string {
+	if len(generation.TitleRefs) == 0 {
+		return ""
+	}
+	byRef := make(map[schema.SourceEntryRef]schema.SessionEntry, len(generation.Main.Entries))
+	for _, entry := range generation.Main.Entries {
+		if entry.SourceEntryRef != "" {
+			byRef[entry.SourceEntryRef] = entry
+		}
+	}
+	for _, ref := range generation.TitleRefs {
+		entry, ok := byRef[ref]
+		if !ok {
+			continue
+		}
+		var text string
+		if entry.ContentPreview != nil && *entry.ContentPreview != "" {
+			text = *entry.ContentPreview
+		} else if entry.ToolInput != nil && *entry.ToolInput != "" {
+			text = *entry.ToolInput
+		} else if entry.ToolOutput != nil && *entry.ToolOutput != "" {
+			text = *entry.ToolOutput
+		}
+		if title := firstTitleLine(text); title != "" {
+			return title
+		}
+	}
+	return ""
+}
+
+func firstTitleLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			if runes := []rune(trimmed); len(runes) > 80 {
+				return string(runes[:77]) + "..."
+			}
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func nullableInt64Value(value *int64) any {

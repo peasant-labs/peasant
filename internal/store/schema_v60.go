@@ -6,11 +6,14 @@ package store
 // logical relationship table deliberately has NO foreign key to a target
 // session so an admitted child survives an absent, unselected or cyclic parent.
 //
-// The three new sessions columns stay nullable: a session with no active
-// generation keeps active_generation_id NULL, and root_session_id/session_purpose
-// are durable graph identity that may be legitimately unknown. The V2 generation
-// row carries the full durable metadata JSON, so Metadata.Stats is the single
-// count authority and no parallel submission count column exists.
+// The four new sessions columns stay nullable: a session with no active
+// generation keeps active_generation_id NULL, root_session_id/session_purpose
+// are durable graph identity that may be legitimately unknown, and
+// input_submission_count is NULL when the active generation carries no measured
+// count. The V2 generation row carries the full durable metadata JSON, so
+// Metadata.Stats is the single count authority; the sessions mirror exists so
+// ordinary list/detail reads agree with the snapshot without a separate
+// metadata upsert.
 //
 // session_projection_entries holds the canonical V2 partition entries keyed by
 // partition_id (0 = main, 1..N earlier sections in order). The main partition is
@@ -20,6 +23,7 @@ const migrationV60 = `
 ALTER TABLE sessions ADD COLUMN active_generation_id TEXT;
 ALTER TABLE sessions ADD COLUMN root_session_id TEXT;
 ALTER TABLE sessions ADD COLUMN session_purpose TEXT;
+ALTER TABLE sessions ADD COLUMN input_submission_count INTEGER CHECK(input_submission_count IS NULL OR (input_submission_count BETWEEN 0 AND 9007199254740991));
 
 CREATE TABLE session_projection_generations (
   session_id             TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,

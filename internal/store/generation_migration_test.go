@@ -12,8 +12,9 @@ import (
 
 // TestMigrationV60ManagedGenerationCatalog pins the closed sets and nullable
 // count checks the V2 activation catalog depends on: the relationship target
-// state CHECK admits exactly the schema-owned set, and the generation's input
-// submission count is NULL (unknown) or an integer in the schema-owned range.
+// state CHECK admits exactly the schema-owned set, and both the generation's
+// and the session's input submission counts are NULL (unknown) or an integer
+// in the schema-owned range.
 func TestMigrationV60ManagedGenerationCatalog(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	ctx := context.Background()
@@ -58,6 +59,22 @@ func TestMigrationV60ManagedGenerationCatalog(t *testing.T) {
 	for _, rejected := range []any{int64(-1), int64(9007199254740992), "not-a-number"} {
 		if err := insertGeneration(rejected); err == nil {
 			t.Errorf("input_submission_count %v was accepted; the nullable count check must reject it", rejected)
+		}
+	}
+
+	// The sessions mirror carries the same nullable count so ordinary reads
+	// agree with the snapshot without a separate metadata upsert.
+	updateSessionCount := func(count any) error {
+		return sqlitex.ExecuteTransient(conn, `UPDATE sessions SET input_submission_count = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{count, sid}})
+	}
+	for _, accepted := range []any{nil, int64(0), int64(1), int64(9007199254740991)} {
+		if err := updateSessionCount(accepted); err != nil {
+			t.Fatalf("sessions input_submission_count %v was rejected: %v", accepted, err)
+		}
+	}
+	for _, rejected := range []any{int64(-1), int64(9007199254740992)} {
+		if err := updateSessionCount(rejected); err == nil {
+			t.Errorf("sessions input_submission_count %v was accepted; the nullable count check must reject it", rejected)
 		}
 	}
 

@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -25,8 +27,9 @@ type SessionLocker interface {
 }
 
 // fileSessionLocker is the production lock implementation. Its lock directory
-// is root-confined: the file is derived from the validated session identifier
-// alone, so no captured path can escape the namespace.
+// is root-confined through os.Root: the file is derived from the validated
+// session identifier alone, so no captured path can escape the namespace. No
+// diagnostic exposes a private filesystem path.
 type fileSessionLocker struct {
 	root string
 }
@@ -35,10 +38,22 @@ type fileSessionLocker struct {
 // root is the same owned-artifact root the generation files live under.
 func NewFileSessionLocker(root string) (SessionLocker, error) {
 	if root == "" {
-		return nil, fmt.Errorf("store: session lock root is empty; readers and activation cannot serialize; configure the owned-artifact root")
+		return nil, fmt.Errorf("store: session lock root is empty in NewFileSessionLocker; readers and activation cannot serialize; configure the owned-artifact root")
 	}
-	if err := os.MkdirAll(filepath.Join(root, "locks"), 0o700); err != nil {
-		return nil, fmt.Errorf("store: create session lock directory under %s: %w; no lock was taken; fix filesystem access and retry", root, err)
+	osRoot, err := os.OpenRoot(root)
+	if err != nil {
+		// The root may not exist yet; create it on the host then confine.
+		if mkErr := os.MkdirAll(root, 0o700); mkErr != nil {
+			return nil, fmt.Errorf("store: create owned-artifact root in NewFileSessionLocker: %s; no lock was taken; fix filesystem access and retry", sanitizeFSError(mkErr))
+		}
+		osRoot, err = os.OpenRoot(root)
+		if err != nil {
+			return nil, fmt.Errorf("store: open owned-artifact root in NewFileSessionLocker: %s; no lock was taken; fix filesystem access and retry", sanitizeFSError(err))
+		}
+	}
+	defer osRoot.Close()
+	if err := osRoot.MkdirAll("locks", 0o700); err != nil {
+		return nil, fmt.Errorf("store: create session lock directory in NewFileSessionLocker: %s; no lock was taken; fix filesystem access and retry", sanitizeFSError(err))
 	}
 	return &fileSessionLocker{root: root}, nil
 }
@@ -53,24 +68,41 @@ func (l *fileSessionLocker) LockExclusive(ctx context.Context, id schema.Session
 
 func (l *fileSessionLocker) lock(ctx context.Context, id schema.SessionID, mode int, label string) (func() error, error) {
 	if _, err := schema.NewSessionID(string(id)); err != nil {
-		return nil, fmt.Errorf("store: %s session lock for %q: %w; no lock was taken; supply a canonical session identifier", label, id, err)
+		return nil, fmt.Errorf("store: %s session lock in fileSessionLocker for invalid session: %w; no lock was taken; supply a canonical session identifier", label, err)
 	}
 	if !filepath.IsLocal(string(id)) {
-		return nil, fmt.Errorf("store: %s session lock for %q is not a confined name; no lock was taken; supply a canonical session identifier", label, id)
+		return nil, fmt.Errorf("store: %s session lock in fileSessionLocker for unconfined session; no lock was taken; supply a canonical session identifier", label)
 	}
-	lockPath := filepath.Join(l.root, "locks", string(id)+".lock")
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	osRoot, err := os.OpenRoot(l.root)
 	if err != nil {
-		return nil, fmt.Errorf("store: open %s session lock %s: %w; no lock was taken; fix filesystem access and retry", label, lockPath, err)
+		return nil, fmt.Errorf("store: open owned-artifact root in fileSessionLocker for %s lock: %s; no lock was taken; fix filesystem access and retry", label, sanitizeFSError(err))
+	}
+	// The lock file lives at the confined relative path locks/<session>.lock.
+	// os.Root refuses a namespace escape before the file is created.
+	rel := filepath.Join("locks", string(id)+".lock")
+	file, err := osRoot.OpenFile(rel, os.O_CREATE|os.O_RDWR, 0o600)
+	_ = osRoot.Close()
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// The locks directory vanished; recreate it under confinement.
+			if mkRoot, mkErr := os.OpenRoot(l.root); mkErr == nil {
+				_ = mkRoot.MkdirAll("locks", 0o700)
+				_ = mkRoot.Close()
+			}
+		}
+		return nil, fmt.Errorf("store: open %s session lock in fileSessionLocker: %s; no lock was taken; fix filesystem access and retry", label, sanitizeFSError(err))
 	}
 	if err := acquireFlock(ctx, file.Fd(), mode); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("store: acquire %s session lock for %s: %w; no lock was taken", label, id, err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %w; no lock was taken", label, id, err)
+		}
+		return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %s; no lock was taken", label, id, sanitizeFSError(err))
 	}
 	release := func() error {
 		if err := unix.Flock(int(file.Fd()), unix.LOCK_UN); err != nil {
 			_ = file.Close()
-			return fmt.Errorf("store: release %s session lock for %s: %w", label, id, err)
+			return fmt.Errorf("store: release %s session lock in fileSessionLocker for session %s: %s", label, id, sanitizeFSError(err))
 		}
 		return file.Close()
 	}
