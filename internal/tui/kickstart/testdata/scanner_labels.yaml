@@ -1,0 +1,92 @@
+# The scanner's project-row label matrix, grouped by the two inputs the fold
+# reads from a discovery listing: the recorded Git remote and the resolved
+# project name. Each project names its working directory relative to a real
+# temporary root, and TEMP_ROOT inside a gitRemote marks that same root so a
+# local-path remote stays absolute while the fixture itself stays
+# machine-independent. expectedLabels is the exact set of project labels Load
+# must render for the cohort.
+#
+# requiredCaseNames is a deletion-protection manifest, not a row count: it
+# names every case that must remain present, and adding a new case never
+# requires touching this list.
+requiredCaseNames:
+  - unnamed-non-git-single
+  - unnamed-non-git-duplicates-widen
+  - named-non-git-duplicates-use-short-path
+  - named-non-git-deep-duplicates-widen
+  - unnamed-local-remote-git
+  - unnamed-local-remote-git-widens-with-remoteless-sibling
+  - named-local-remote-git-keeps-bare-name
+  - unnamed-canonical-remote-keeps-remote-label
+cases:
+  - name: unnamed-non-git-single
+    projects:
+      - workingDir: labs/notes
+    expectedLabels:
+      - labs/notes
+
+  - name: unnamed-non-git-duplicates-widen
+    projects:
+      - workingDir: team-a/shared/app
+      - workingDir: team-b/shared/app
+    expectedLabels:
+      - team-a/shared/app
+      - team-b/shared/app
+
+  - name: named-non-git-duplicates-use-short-path
+    projects:
+      - projectName: app
+        workingDir: team-a/app
+      - projectName: app
+        workingDir: team-b/app
+    expectedLabels:
+      - app (team-a/app)
+      - app (team-b/app)
+    expectedRemoteMultiplicity: unique
+    expectedNameMultiplicity: ambiguous
+
+  - name: named-non-git-deep-duplicates-widen
+    projects:
+      - projectName: app
+        workingDir: team-a/shared/app
+      - projectName: app
+        workingDir: team-b/shared/app
+    expectedLabels:
+      - app (team-a/shared/app)
+      - app (team-b/shared/app)
+
+  - name: unnamed-local-remote-git
+    projects:
+      - workingDir: checkout/notes
+        git: true
+        gitRemote: TEMP_ROOT/origin.git
+    expectedLabels:
+      - checkout/notes
+    expectedIdentityPrefix: "repo:"
+
+  - name: unnamed-local-remote-git-widens-with-remoteless-sibling
+    projects:
+      - workingDir: team-a/shared/app
+        git: true
+        gitRemote: TEMP_ROOT/origin.git
+      - workingDir: team-b/shared/app
+    expectedLabels:
+      - team-a/shared/app
+      - team-b/shared/app
+
+  - name: named-local-remote-git-keeps-bare-name
+    projects:
+      - projectName: notes
+        workingDir: checkout/notes
+        git: true
+        gitRemote: TEMP_ROOT/origin.git
+    expectedLabels:
+      - notes
+
+  - name: unnamed-canonical-remote-keeps-remote-label
+    projects:
+      - workingDir: checkout/tool
+        git: true
+        gitRemote: "git@github.com:acme/tool.git"
+    expectedLabels:
+      - github.com:acme/tool
