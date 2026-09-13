@@ -163,6 +163,16 @@ func BuildGeneration(capture ClassifiedCapture, allocator RefAllocator) (indexfo
 	return generation, nil
 }
 
+// BuildV2 projects one classified capture and wraps the validated generation in
+// the concrete index result a native adapter returns for format 2.
+func BuildV2(capture ClassifiedCapture, allocator RefAllocator) (indexformat.V2, error) {
+	generation, err := BuildGeneration(capture, allocator)
+	if err != nil {
+		return indexformat.V2{}, err
+	}
+	return indexformat.V2{Generation: generation}, nil
+}
+
 // projectionPartitions holds the built main and earlier partitions.
 type projectionPartitions struct {
 	main    indexformat.Partition

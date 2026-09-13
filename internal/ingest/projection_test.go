@@ -620,3 +620,23 @@ func TestProjectionRandomAllocatorReuse(t *testing.T) {
 		t.Fatalf("input submission count = %v, want measured 1", count)
 	}
 }
+
+// TestBuildV2WrapsValidatedGeneration pins the format-2 production exit: the
+// projection returns a concrete V2 the existing version gate accepts.
+func TestBuildV2WrapsValidatedGeneration(t *testing.T) {
+	t.Parallel()
+	result, err := ingest.BuildV2(randomBuildCapture(), ingest.RandomRefAllocator{})
+	if err != nil {
+		t.Fatalf("BuildV2() = %v", err)
+	}
+	if err := result.Validate(); err != nil {
+		t.Fatalf("V2.Validate() = %v", err)
+	}
+	version, err := indexformat.VersionOf(result)
+	if err != nil {
+		t.Fatalf("VersionOf(V2) = %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("VersionOf(V2) = %d, want 2", version)
+	}
+}
