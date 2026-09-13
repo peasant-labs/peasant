@@ -1015,16 +1015,29 @@ func (s *CodexFileSource) resolveDerivedReferences(ctx context.Context, authorit
 
 // resolveSibling resolves one referenced native envelope into an independent
 // sibling authority and merges every recursive flag and diagnostic back into
-// the parent, so a nested cycle or truncation is never silently discarded.
-func (s *CodexFileSource) resolveSibling(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, resolution *codexReferenceResolution) []CodexReference {
-	sibling := *authority
-	sibling.References = nil
-	sibling.DerivationIncomplete = false
-	sibling.DerivationDiagnostics = nil
-	_ = s.resolveDerivedReferences(ctx, &sibling, meta, depth+1, resolution)
+// the parent, so a nested cycle, malformed envelope or truncation is never
+// silently discarded. The referenced envelope is derived before traversal so a
+// malformed history envelope marks the derivation incomplete even when it
+// decodes to an empty reference list; the flag the decoder already computed is
+// reused, so no referenced envelope is re-read or re-decoded and no second
+// traversal pass is added.
+func (s *CodexFileSource) resolveSibling(ctx context.Context, authority *CodexSourceAuthority, pointer string, meta codexNativeSessionMeta, depth int, resolution *codexReferenceResolution) ([]CodexReference, error) {
+	stableID := meta.ID
+	if stableID == "" {
+		stableID = authority.StableThreadID
+	}
+	sibling := s.deriveAuthority(stableID, authority.Kind, pointer, meta, true)
+	if len(bytes.TrimSpace(sibling.HistoryMode)) == 0 {
+		// A referenced envelope that declares no history_mode keeps the
+		// parent's proven mode rather than silently downgrading the chain.
+		sibling.HistoryMode = authority.HistoryMode
+	}
+	if err := s.resolveDerivedReferences(ctx, &sibling, meta, depth+1, resolution); err != nil {
+		return nil, err
+	}
 	authority.DerivationIncomplete = authority.DerivationIncomplete || sibling.DerivationIncomplete
 	authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, sibling.DerivationDiagnostics...)
-	return sibling.References
+	return sibling.References, nil
 }
 
 // resolveHistoryEntries resolves the declared native history array
@@ -1054,8 +1067,16 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 				// no duplicate reference is added.
 			default:
 				resolution.stack[basePath] = true
-				if baseMeta, hasBase, err := s.readNativeMeta(basePath); err == nil && hasBase {
-					ordered = append(ordered, s.resolveSibling(ctx, authority, baseMeta, depth, resolution)...)
+				baseMeta, hasBase, err := s.readNativeMeta(basePath)
+				switch {
+				case err != nil || !hasBase:
+					s.unreadableDependencyReference(authority, "history-base")
+				default:
+					siblingRefs, siblingErr := s.resolveSibling(ctx, authority, basePath, baseMeta, depth, resolution)
+					if siblingErr != nil {
+						return siblingErr
+					}
+					ordered = append(ordered, siblingRefs...)
 				}
 				delete(resolution.stack, basePath)
 				resolution.retained[basePath] = true
@@ -1137,11 +1158,19 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 			continue
 		}
 		resolution.stack[target] = true
-		if refMeta, hasRef, err := s.readNativeMeta(target); err == nil && hasRef {
+		refMeta, hasRef, err := s.readNativeMeta(target)
+		switch {
+		case err != nil || !hasRef:
+			s.unreadableDependencyReference(authority, "history")
+		default:
 			if !entry.ModeSpecified {
 				mode = resolveCodexHistoryMode(refMeta.HistoryMode)
 			}
-			ordered = append(ordered, s.resolveSibling(ctx, authority, refMeta, depth, resolution)...)
+			siblingRefs, siblingErr := s.resolveSibling(ctx, authority, target, refMeta, depth, resolution)
+			if siblingErr != nil {
+				return siblingErr
+			}
+			ordered = append(ordered, siblingRefs...)
 		}
 		delete(resolution.stack, target)
 		resolution.retained[target] = true
@@ -1184,6 +1213,20 @@ func (s *CodexFileSource) ambiguousDependencyReference(authority *CodexSourceAut
 		Inclusion:        indexformat.SegmentInclusionInvalidIncomplete,
 		Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindUnknown},
 	}
+}
+
+// unreadableDependencyReference records a declared native dependency whose
+// referenced envelope could not be read or decoded. The failure is carried as
+// incomplete evidence instead of being discarded, so a dependency that cannot
+// be traversed never certifies the parent complete.
+func (s *CodexFileSource) unreadableDependencyReference(authority *CodexSourceAuthority, kind string) {
+	authority.DerivationIncomplete = true
+	authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+		ErrorType:   "codex_reference_unreadable",
+		Location:    fmt.Sprintf("thread %s %s dependency", authority.StableThreadID, kind),
+		Message:     "a declared native history dependency could not be read or decoded as a native envelope; its own dependency chain was not traversed and no parent content was guessed",
+		Remediation: "Repair or restore the referenced native rollout and rerun; the capture stays incomplete and the last good generation is retained.",
+	})
 }
 
 // cycleDependencyReference records a native dependency that points back into

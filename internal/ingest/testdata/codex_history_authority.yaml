@@ -275,6 +275,26 @@ cases:
       earlierRefs: []
       diagnostics: [codex_reference_cycle]
 
+  - name: native-nested-malformed-incomplete
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-21212121-2121-4121-8121-212121212121.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"21212121-2121-4121-8121-212121212121","history_mode":"paginated","history":"malformed-envelope"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"malformed-a","content":[{"type":"input_text","text":"recursively referenced malformed history"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-31313131-3131-4131-8131-313131313131.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"31313131-3131-4131-8131-313131313131","history_mode":"paginated","history":[{"thread_id":"21212121-2121-4121-8121-212121212121","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"nested malformed own"}]}}
+    sessionFile: sessions/2024/01/03/rollout-2024-01-03T00-00-00-31313131-3131-4131-8131-313131313131.jsonl
+    sessionID: 31313131-3131-4131-8131-313131313131
+    expected:
+      kind: detached_file
+      stableThreadID: 31313131-3131-4131-8131-313131313131
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_2]
+      inheritedRefs: [e_1]
+      earlierRefs: []
+      diagnostics: [codex_history_envelope_malformed]
+
   - name: native-depth-bounded-incomplete
     files:
       sessions/2024/01/02/rollout-2024-01-02T00-00-00-50505050-5050-4050-8050-505050505050.jsonl: |

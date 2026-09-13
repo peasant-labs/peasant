@@ -1,0 +1,24 @@
+layouts:
+  - name: parent-child-retention
+    sessionID: aaaaaaaa-1111-4111-8111-111111111111
+    sessionFile: sessions/2024/01/03/rollout-2024-01-03T00-00-00-aaaaaaaa-1111-4111-8111-111111111111.jsonl
+    referencedFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-bbbbbbbb-2222-4222-8222-222222222222.jsonl
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-bbbbbbbb-2222-4222-8222-222222222222.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"bbbbbbbb-2222-4222-8222-222222222222","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"p1","content":[{"type":"input_text","text":"parent one"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-aaaaaaaa-1111-4111-8111-111111111111.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"aaaaaaaa-1111-4111-8111-111111111111","history_mode":"paginated","history":[{"thread_id":"bbbbbbbb-2222-4222-8222-222222222222","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"child one"}]}}
+
+  - name: pointer-switch-incarnations
+    sessionID: cccccccc-3333-4333-8333-333333333333
+    sessionFile: sessions/2024/01/02/rollout-a-cccccccc-3333-4333-8333-333333333333.jsonl
+    referencedFile: sessions/2024/01/03/rollout-b-cccccccc-3333-4333-8333-333333333333.jsonl
+    files:
+      sessions/2024/01/02/rollout-a-cccccccc-3333-4333-8333-333333333333.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"cccccccc-3333-4333-8333-333333333333","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"cccccccc","content":[{"type":"input_text","text":"incarnation a"}]}}
+      sessions/2024/01/03/rollout-b-cccccccc-3333-4333-8333-333333333333.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"cccccccc-3333-4333-8333-333333333333","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"cccccccc","content":[{"type":"input_text","text":"incarnation b"}]}}

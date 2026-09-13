@@ -13,5 +13,6 @@ requiredNames:
   - native-ambiguous-referenced-dependency
   - native-cycle-self-reference
   - native-nested-cycle-incomplete
+  - native-nested-malformed-incomplete
   - native-depth-bounded-incomplete
   - native-segment-budget-bounded-incomplete
