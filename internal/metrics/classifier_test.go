@@ -57,6 +57,17 @@ func (s *stubMetricsStore) GetAnnotationRunInputs(_ context.Context, sessionID i
 		inputs.ComputeVersion = *s.m.ComputeVersion
 		inputs.HasComputeVersion = true
 	}
+	// The production read computes the stored metrics' output hash here, and the
+	// freshness predicate compares it: a stub that left it empty could never
+	// report a pass current, so every case read as "work still runs" whatever the
+	// predicate did.
+	if s.m != nil {
+		hash, err := ingest.MetricOutputHash(s.m)
+		if err != nil {
+			return nil, err
+		}
+		inputs.MetricsOutputHash = hash
+	}
 	return inputs, nil
 }
 
@@ -953,7 +964,11 @@ func TestClassifierAnnotator_Annotate_MatchingStateSkipsWork(t *testing.T) {
 			SessionEntriesHash: hash,
 			ComputeVersion:     8,
 			ClassifierVersion:  metrics.CurrentClassifierAnnotationVersion,
-			AnnotatedAt:        time.UnixMilli(1700000000000),
+			// The pass also recorded which metric OUTPUT it annotated. Without it
+			// the freshness predicate cannot hold, and this test would prove a
+			// skip that no real recorded pass could ever get.
+			MetricsOutputHash: mustMetricOutputHash(t, buildVersionedMetrics(sid, 8)),
+			AnnotatedAt:       time.UnixMilli(1700000000000),
 		},
 	}
 	as := newFullAnnotationStore()
@@ -982,19 +997,82 @@ type classifierCombinedSkipFixture struct {
 	Cases []classifierCombinedSkipCase `yaml:"cases"`
 }
 
+// classifierVersionToken names a recorded classifier revision RELATIVE to this
+// build, because the absolute number moves whenever the classifiers change and a
+// fixture holding the old literal silently turns every case into a stale-version
+// case.
+type classifierVersionToken string
+
+const (
+	classifierVersionUnused  classifierVersionToken = ""
+	classifierVersionCurrent classifierVersionToken = "current"
+	classifierVersionBehind  classifierVersionToken = "behind"
+)
+
+// resolve returns the recorded classifier revision this token names.
+func (token classifierVersionToken) resolve(t *testing.T) int {
+	t.Helper()
+	switch token {
+	case classifierVersionUnused:
+		return 0
+	case classifierVersionCurrent:
+		return metrics.CurrentClassifierAnnotationVersion
+	case classifierVersionBehind:
+		return metrics.CurrentClassifierAnnotationVersion - 1
+	default:
+		t.Fatalf("unknown classifier version token %q; use current, behind, or leave it unset for a case with no recorded state", token)
+		return 0
+	}
+}
+
+// metricsOutputHashToken names a recorded metrics-output hash relative to the
+// metrics this case stores. The matching value is COMPUTED from those metrics by
+// the same function production uses, so it cannot drift from them.
+type metricsOutputHashToken string
+
+const (
+	metricsOutputHashAbsent   metricsOutputHashToken = "absent"
+	metricsOutputHashMatching metricsOutputHashToken = "matching"
+	metricsOutputHashStale    metricsOutputHashToken = "stale"
+)
+
+// resolve returns the hash a case records for its prior annotation pass.
+func (token metricsOutputHashToken) resolve(t *testing.T, stored *ingest.SessionMetrics) string {
+	t.Helper()
+	switch token {
+	case metricsOutputHashAbsent:
+		return ""
+	case metricsOutputHashStale:
+		return strings.Repeat("9", 64)
+	case metricsOutputHashMatching:
+		if stored == nil {
+			t.Fatal("a case cannot record a matching metrics-output hash with no stored metrics to compute it from")
+		}
+		hash, err := ingest.MetricOutputHash(stored)
+		if err != nil {
+			t.Fatalf("compute the stored metrics' output hash: %v", err)
+		}
+		return hash
+	default:
+		t.Fatalf("unknown metrics output hash token %q; use matching, stale, or absent", token)
+		return ""
+	}
+}
+
 type classifierCombinedSkipCase struct {
-	Name                   string `yaml:"name"`
-	CurrentHash            string `yaml:"current_hash"`
-	HasMetrics             bool   `yaml:"has_metrics"`
-	HasComputeVersion      bool   `yaml:"has_compute_version"`
-	MetricComputeVersion   int    `yaml:"metric_compute_version"`
-	StateHash              string `yaml:"state_hash"`
-	StateComputeVersion    int    `yaml:"state_compute_version"`
-	StateClassifierVersion int    `yaml:"state_classifier_version"`
-	HasState               bool   `yaml:"has_state"`
-	WantListEntriesCalls   int    `yaml:"want_list_entries_calls"`
-	WantGetMetricsCalls    int    `yaml:"want_get_metrics_calls"`
-	WantSaveStateCalls     int    `yaml:"want_save_state_calls"`
+	Name                   string                 `yaml:"name"`
+	CurrentHash            string                 `yaml:"current_hash"`
+	HasMetrics             bool                   `yaml:"has_metrics"`
+	HasComputeVersion      bool                   `yaml:"has_compute_version"`
+	MetricComputeVersion   int                    `yaml:"metric_compute_version"`
+	StateHash              string                 `yaml:"state_hash"`
+	StateComputeVersion    int                    `yaml:"state_compute_version"`
+	StateClassifierVersion classifierVersionToken `yaml:"state_classifier_version"`
+	StateMetricsOutputHash metricsOutputHashToken `yaml:"state_metrics_output_hash"`
+	HasState               bool                   `yaml:"has_state"`
+	WantListEntriesCalls   int                    `yaml:"want_list_entries_calls"`
+	WantGetMetricsCalls    int                    `yaml:"want_get_metrics_calls"`
+	WantSaveStateCalls     int                    `yaml:"want_save_state_calls"`
 }
 
 func TestClassifierAnnotator_Annotate_CombinedLookupDecisions(t *testing.T) {
@@ -1026,7 +1104,8 @@ func TestClassifierAnnotator_Annotate_CombinedLookupDecisions(t *testing.T) {
 					SessionID:          sid,
 					SessionEntriesHash: tc.StateHash,
 					ComputeVersion:     tc.StateComputeVersion,
-					ClassifierVersion:  tc.StateClassifierVersion,
+					ClassifierVersion:  tc.StateClassifierVersion.resolve(t),
+					MetricsOutputHash:  tc.StateMetricsOutputHash.resolve(t, sessionMetrics),
 					AnnotatedAt:        time.UnixMilli(1700000000000),
 				}
 			}
@@ -1052,12 +1131,13 @@ func TestClassifierAnnotator_Annotate_CombinedLookupDecisions(t *testing.T) {
 func assertRequiredClassifierCombinedSkipCases(t *testing.T, cases []classifierCombinedSkipCase) {
 	t.Helper()
 	requiredNames := map[string]bool{
-		"current state skips without metrics read":            false,
-		"stale hash reads metrics and recomputes":             false,
-		"stale metric version reads metrics and recomputes":   false,
-		"missing state reads metrics and recomputes":          false,
-		"missing metrics recomputes without saving state":     false,
-		"nil compute version recomputes without saving state": false,
+		"current state skips without metrics read":               false,
+		"stale hash reads metrics and recomputes":                false,
+		"stale metric version reads metrics and recomputes":      false,
+		"missing state reads metrics and recomputes":             false,
+		"missing metrics recomputes without saving state":        false,
+		"nil compute version recomputes without saving state":    false,
+		"stale metrics output hash reads metrics and recomputes": false,
 	}
 	for _, tc := range cases {
 		if _, ok := requiredNames[tc.Name]; ok {
@@ -2184,4 +2264,16 @@ func TestClassifierAnnotator_FlushAnnotationBatches_RecordsBatchLevelError(t *te
 	if stats.BatchErrorCount != 1 {
 		t.Fatalf("BatchErrorCount = %d, want 1", stats.BatchErrorCount)
 	}
+}
+
+// mustMetricOutputHash computes the output hash of stored metrics the way the
+// store does, so a recorded pass in a test names the same output a recorded pass
+// in production would.
+func mustMetricOutputHash(t *testing.T, stored *ingest.SessionMetrics) string {
+	t.Helper()
+	hash, err := ingest.MetricOutputHash(stored)
+	if err != nil {
+		t.Fatalf("compute the stored metrics' output hash: %v", err)
+	}
+	return hash
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 )
 
@@ -180,8 +181,21 @@ func writeTestCredentialsFor(t *testing.T, dir, villageURL string) {
 	}
 }
 
-// seedPushableSession puts one eligible session in the store at dir, so a push
-// reaches the network instead of returning early with nothing to send.
+// pushableSessionID is the session seedPushableSession puts in the store, named
+// so a test can ask the database what the run recorded for it.
+const pushableSessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
+
+// seedPushableSession seeds a session the push actually SELECTS and carries as
+// far as the village: a store row plus a verified full capture, written through
+// the production transactions. A push over it reaches the network instead of
+// returning early with nothing to send.
+//
+// It used to stop at the store row, on the older contract where a session reached
+// the network first and failed later at a metadata read. Publication is now
+// decided from the database capture BEFORE the first request, so a store-row-only
+// seed is refused before anything is sent — which silently turned every test
+// built on it into a test of the refusal, including the upload-budget test that
+// then measured a run making no request at all.
 func seedPushableSession(t *testing.T, dir string) {
 	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
@@ -193,11 +207,9 @@ func seedPushableSession(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	entry := makeCmdStoreEntry(t, "cccc3333-cccc-4ccc-8ccc-cccccccccccc", "github.com-user-repo",
+	entry := makeCmdStoreEntry(t, pushableSessionID, "github.com-user-repo",
 		"git@github.com:user/repo.git", "main", 1700000000000)
-	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
-		t.Fatal(err)
-	}
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 }
 
 // seedUploadableSession seeds a session that survives the whole pre-flight and
@@ -207,7 +219,7 @@ func seedPushableSession(t *testing.T, dir string) {
 //
 // It returns the session id and a config whose output base path is this test's
 // own directory, so parallel tests never share transcripts.
-func seedUploadableSession(t *testing.T, dir, sessionID string) string {
+func seedUploadableSession(t *testing.T, dir, sessionID string, projectPaths ...string) string {
 	t.Helper()
 	const hostSlug = "github.com-user-repo"
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
@@ -219,23 +231,10 @@ func seedUploadableSession(t *testing.T, dir, sessionID string) string {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000)
-	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
-		t.Fatal(err)
-	}
+	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000, projectPaths...)
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 
 	basePath := filepath.Join(dir, "peasant-sync")
-	sessionDir := filepath.Join(basePath, hostSlug, sessionID)
-	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(entry.Metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, sessionID+"--metadata.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	return writeCfg(t, dir, "uploadable.yaml", "version: 1\noutput:\n  basePath: "+basePath+
 		"\npush:\n  method: all\n  visibility: private\n")
 }

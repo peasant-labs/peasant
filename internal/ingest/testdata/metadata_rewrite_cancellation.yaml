@@ -1,0 +1,19 @@
+# The metadata lookup that runs before a rewrite walks the managed output
+# directory. Every case seeds the same managed layout and differs only in when
+# the run is cancelled, so the number of filesystem calls is decided by the
+# cancellation and by nothing else. No case measures elapsed time.
+requiredNames:
+  - complete_run_reads_the_managed_layout
+  - cancelled_before_the_lookup_reads_nothing
+  - cancelled_at_the_first_directory_read_stops_there
+cases:
+  - name: complete_run_reads_the_managed_layout
+    arm: not-cancelled
+    expectMetadata: true
+  - name: cancelled_before_the_lookup_reads_nothing
+    arm: before-lookup
+    expectedCalls: 0
+  - name: cancelled_at_the_first_directory_read_stops_there
+    arm: during-walk
+    cancelAfterCalls: 1
+    expectedCalls: 1

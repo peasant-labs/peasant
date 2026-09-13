@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/spf13/cobra"
 )
 
@@ -23,12 +24,12 @@ func BuildPlayIngestCommand() *cobra.Command {
 			defer cancel()
 
 			progState := ingest.NewProgressState()
-			renderer := newProgressRenderer(os.Stderr, progState, animation.IngestAnimation())
+			renderer := newProgressProgram(os.Stderr, progState, animation.IngestAnimation())
 			go renderer.Run(ctx)
 
 			simulateIngestProgress(progState)
 
-			cancel()
+			renderer.Finish(ingestprogress.FinalMsg{At: time.Now(), Snapshot: progState.Snapshot(), Outcome: ingestprogress.FinalSucceeded})
 			renderer.Wait()
 			renderer.Clear()
 
@@ -88,12 +89,12 @@ func simulateIngestProgress(state *ingest.ProgressState) {
 			Stage: s.stage,
 			Total: s.total,
 		})
-		for i := 1; i <= s.total; i++ {
+		for range s.total {
 			time.Sleep(s.delay)
 			state.Update(ingest.ProgressEvent{
 				Kind:  ingest.KindAdvance,
 				Stage: s.stage,
-				Done:  i,
+				Delta: 1,
 				Total: s.total,
 			})
 		}

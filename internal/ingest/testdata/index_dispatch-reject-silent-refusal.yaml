@@ -7,11 +7,15 @@
 # reported success. So the loader requires an error row to name a phrase the
 # recorded message must carry.
 
-expectedCaseCount: 3
+requiredNames:
+  - an-undeclared-source-kind-is-refused-but-nothing-pins-what-it-says
+  - a-file-source-is-handed-the-bytes
+  - a-directory-source-is-never-handed-bytes
 cases:
   - name: an-undeclared-source-kind-is-refused-but-nothing-pins-what-it-says
     sourceKind: unknown
     originalRoot: present
+    nativeLocator: present
     transcriptBytes: present
     entryPoint: none
     indexOutcome: error
@@ -19,6 +23,7 @@ cases:
   - name: a-file-source-is-handed-the-bytes
     sourceKind: file
     originalRoot: present
+    nativeLocator: present
     transcriptBytes: present
     entryPoint: bytes
     indexOutcome: indexed
@@ -26,6 +31,7 @@ cases:
   - name: a-directory-source-is-never-handed-bytes
     sourceKind: directory
     originalRoot: present
+    nativeLocator: present
     transcriptBytes: present
-    entryPoint: file
+    entryPoint: tree
     indexOutcome: indexed

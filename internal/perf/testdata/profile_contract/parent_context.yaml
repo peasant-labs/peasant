@@ -1,0 +1,16 @@
+cases:
+  - name: standalone_recorder_has_no_parent
+    enabled: true
+    children: [span-2, span-3]
+  - name: nested_scopes_preserve_ancestors
+    enabled: true
+    parents: [span-1, span-2]
+    children: [span-3, span-4, span-5]
+  - name: empty_parent_clears_scope
+    enabled: true
+    parents: [span-1, '']
+    children: [span-2, span-3]
+  - name: disabled_scopes_preserve_noop
+    enabled: false
+    parents: [span-1, '']
+    children: [span-2, span-3]

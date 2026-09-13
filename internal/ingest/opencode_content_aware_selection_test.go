@@ -118,7 +118,8 @@ func TestOpenCodeContentAwareCanonicalSelection(t *testing.T) {
 			if session.TranscriptOrigin != wantOrigin {
 				t.Fatalf("session %q selected origin %d, want %d", fixtureCase.SessionID, session.TranscriptOrigin, wantOrigin)
 			}
-			_, projection, err := adapter.MaterializeTranscript(t.Context(), session)
+			captured, err := adapter.MaterializeTranscript(t.Context(), session)
+			projection := captured.Data
 			if err != nil {
 				t.Fatalf("materialize selected session %q: %v", fixtureCase.SessionID, err)
 			}

@@ -220,6 +220,7 @@ func TestPipeline_PublishedBodyIsRedacted(t *testing.T) {
 		t.Fatalf("build the redactor a production push builds: %v", err)
 	}
 	var stderr bytes.Buffer
+	testutil.SeedPublicationInputs(store, fs, baseTestConfig().Output.BasePath)
 	pipeline, pipelineErr := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
 		push.PipelineConfig{}, redactor, &stderr)
 	if pipelineErr != nil {
@@ -404,6 +405,7 @@ func TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing(t *testing.
 				t.Fatal(redactorErr)
 			}
 			broken := stubJSONRedactor{json: map[string]any{"not": "entries"}, breaks: seam.selects, real: realRedactor}
+			testutil.SeedPublicationInputs(store, fs, baseTestConfig().Output.BasePath)
 			pipeline, pipelineErr := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
 				push.PipelineConfig{}, broken, &stderr)
 			if pipelineErr != nil {
@@ -518,6 +520,7 @@ func TestPipeline_ARedactionThatCannotBeEncodedStopsTheSession(t *testing.T) {
 			// NaN has no JSON representation, so encoding the redacted document fails.
 			// That is precisely the case the underlying primitive swallows.
 			unencodable := stubJSONRedactor{json: []any{map[string]any{"x": math.NaN()}}, breaks: seam.selects, real: realRedactor}
+			testutil.SeedPublicationInputs(store, fs, baseTestConfig().Output.BasePath)
 			pipeline, pipelineErr := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
 				push.PipelineConfig{}, unencodable, &stderr)
 			if pipelineErr != nil {

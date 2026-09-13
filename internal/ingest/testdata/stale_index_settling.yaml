@@ -1,0 +1,195 @@
+# The ordinary harvest must settle a stale session whose stored row has no
+# artifact identity, and a stale session whose strict parser refuses an
+# unrepresented record.
+#
+# Both were impossible before this fix, and the two causes are independent:
+#
+#   - A row written before the artifact-hash column existed records no pair
+#     identity. The index path refused to parse before checking the pair
+#     (there was nothing to check it against), so the session was re-selected
+#     by every harvest and never re-indexed. The ordinary index write now
+#     establishes the identity from the pair it parsed, in the same commit as
+#     the entries and the input proof.
+#
+#   - The strict parser can refuse a WELL-FORMED record kind this build does
+#     not represent. When that refusal is untyped, the ordinary index path
+#     cannot tell it apart from corruption and stores nothing, so the session
+#     never gains an index hash and the content pass re-attempts it forever.
+#     The refusal is typed now, so the tolerant projection is stored as an
+#     incomplete capture with a terminal code, the producer advances, and the
+#     session reaches a steady state.
+#
+# Each case seeds the exact stored state the real store holds for these rows:
+# a v15 producer, an incomplete legacy_preview_only capture, and an artifact
+# identity that is either absent (the row predates the column) or recorded.
+# A settling case's first harvest must index to the current producer, record
+# the input proof, and store the represented entries; its second harvest must
+# read no transcript and warn about nothing. The read count is the parser work
+# the run owes: a run that stopped warning while still re-parsing, or one that
+# stopped working while still warning, is visible in one number or the other.
+# A case marked `refused` asserts the opposite contract for input this build
+# must not settle: the stale state is unchanged (no producer advance, no input
+# proof, no established identity) and the refusal is reported.
+required_names:
+  - claude-null-identity-certifies
+  - claude-null-identity-strict-refused
+  - claude-stored-identity-strict-refused
+  - codex-null-identity-strict-refused
+  - cursor-null-identity-strict-refused
+  - claude-control-record-content-settles
+  - codex-unknown-record-settles
+  - codex-unknown-response-item-settles
+  - codex-message-block-settles
+  - checksum-less-pair-refuses-establishment
+  - codex-empty-event-discriminator-refused
+  - claude-corruption-after-refusal-refused
+  - claude-unknown-block-before-corrupt-block-refused
+  - claude-unknown-block-before-corrupt-tool-result-refused
+  - codex-unknown-block-before-missing-text-refused
+transcripts:
+  claude-certifiable: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
+  claude-unrepresented: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
+    {"type":"agent-setting","setting":"a record kind no shipped build represents"}
+  codex-unrepresented: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"event_msg","payload":{"type":"patch_apply_end"}}
+  cursor-unrepresented: |
+    {"type":"user","role":"user","uuid":"u1","content":[{"type":"text","text":"inspect the retained fixture"},{"type":"image","data":"a content block no shipped build represents"}]}
+  claude-control-record-content: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
+    {"type":"progress","message":{"content":"a control record carrying unrepresented content"}}
+  claude-corruption-after-refusal: |
+    {"type":"agent-setting","setting":"a record kind no shipped build represents"}
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"missing-id","input":{"path":"."}}]}}
+  codex-unknown-record: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"future_record","payload":{"payload":"a record kind no shipped build represents"}}
+  codex-unknown-response-item: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"response_item","payload":{"type":"future_item"}}
+  codex-message-block: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"image","data":"a content block no shipped build represents"}]}}
+  codex-empty-event: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"event_msg","payload":{}}
+  claude-unknown-block-before-corrupt-block: |
+    {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"image","data":"a content block no shipped build represents"},{"type":"tool_use","name":"missing-id","input":{"path":"."}}]}}
+  claude-unknown-block-before-corrupt-tool-result: |
+    {"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"image","data":"a content block no shipped build represents"},{"type":"text"}]}]}}
+  codex-unknown-block-before-missing-text: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"image","data":"a content block no shipped build represents"},{"type":"input_text"}]}}
+cases:
+  - name: claude-null-identity-certifies
+    harness: claude-code
+    transcript: claude-certifiable
+    wantCaptureStatus: complete
+    wantCaptureFormat: full
+    wantEntries: 3
+  - name: claude-null-identity-strict-refused
+    harness: claude-code
+    transcript: claude-unrepresented
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 4
+  - name: claude-stored-identity-strict-refused
+    harness: claude-code
+    transcript: claude-unrepresented
+    storedIdentity: true
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 4
+  - name: codex-null-identity-strict-refused
+    harness: codex
+    transcript: codex-unrepresented
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  - name: cursor-null-identity-strict-refused
+    harness: cursor
+    transcript: cursor-unrepresented
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 3
+  # The same steady state for the refusal branches beyond the first observed
+  # one: a Claude control record carrying content, and Codex unknown top-level
+  # records, unknown response items and unrepresented message blocks.
+  - name: claude-control-record-content-settles
+    harness: claude-code
+    transcript: claude-control-record-content
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 4
+  - name: codex-unknown-record-settles
+    harness: codex
+    transcript: codex-unknown-record
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  - name: codex-unknown-response-item-settles
+    harness: codex
+    transcript: codex-unknown-response-item
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  - name: codex-message-block-settles
+    harness: codex
+    transcript: codex-message-block
+    wantCaptureStatus: incomplete
+    wantCaptureFormat: preview_only
+    wantFailureCode: strict_capture_refused
+    wantEntries: 1
+  # The refusals that must NOT settle. A pair the database never identified
+  # and whose metadata records no transcript checksum cannot be established:
+  # a mixed transcript-new/metadata-old pair is indistinguishable from a whole
+  # one, so the session stays stale and must be re-saved from its source
+  # through a forced harvest.
+  - name: checksum-less-pair-refuses-establishment
+    harness: claude-code
+    transcript: claude-certifiable
+    omitContentHash: true
+    refused: true
+  # A missing discriminator is corruption, not vocabulary: it must stay a
+  # visible error instead of becoming a terminal refusal.
+  - name: codex-empty-event-discriminator-refused
+    harness: codex
+    transcript: codex-empty-event
+    refused: true
+  # Corruption AFTER an unrepresented record wins: one refusal must not mask a
+  # malformed record later in the same transcript.
+  - name: claude-corruption-after-refusal-refused
+    harness: claude-code
+    transcript: claude-corruption-after-refusal
+    refused: true
+  # The same rule WITHIN a content-block array, including recursive
+  # tool_result content and the Codex message-block list: an unrepresented
+  # block must not mask a malformed known block after it.
+  - name: claude-unknown-block-before-corrupt-block-refused
+    harness: claude-code
+    transcript: claude-unknown-block-before-corrupt-block
+    refused: true
+  - name: claude-unknown-block-before-corrupt-tool-result-refused
+    harness: claude-code
+    transcript: claude-unknown-block-before-corrupt-tool-result
+    refused: true
+  - name: codex-unknown-block-before-missing-text-refused
+    harness: codex
+    transcript: codex-unknown-block-before-missing-text
+    refused: true

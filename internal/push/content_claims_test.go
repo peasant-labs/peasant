@@ -633,7 +633,7 @@ func TestPushContent_IsUnredactedOnlyWithNoRedactor(t *testing.T) {
 	const secret = "sk-ant-api03-EXAMPLEKEY0000000000000"
 	preview := secret
 	body, err := marshalTranscriptContent(
-		&ingest.UnifiedMetadata{SessionID: schema.SessionID("11111111-2222-3333-4444-555555555555")},
+		&ingest.UnifiedMetadata{SessionID: schema.SessionID("11111111-2222-3333-4444-555555555555"), ModelHarness: schema.HarnessClaudeCode},
 		[]schema.SessionEntry{{EntryIndex: 1, Role: schema.RoleAssistant, ContentPreview: &preview}},
 		schema.PushContractVersion("0.1.1"),
 		config.DefaultPushFieldVisibility(),

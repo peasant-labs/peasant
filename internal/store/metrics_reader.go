@@ -37,7 +37,7 @@ WHERE s.session_id = ? LIMIT 1`
     computed_at, compute_version,
     cost_input_usd, cost_output_usd, cost_reasoning_usd,
     cost_cache_read_usd, cost_cache_write_usd, cost_total_usd, cost_model_id,
-    scope
+    scope, input_hash, output_hash
 FROM session_metrics WHERE session_id = ?`
 
 	sqlMetricsExist = `SELECT compute_version FROM session_metrics WHERE session_id = ?`
@@ -124,9 +124,12 @@ func (s *Store) GetMetrics(ctx context.Context, sessionID ingest.SessionID) (*in
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return getMetricsOnConn(conn, sessionID)
+}
 
+func getMetricsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) (*ingest.SessionMetrics, error) {
 	var m *ingest.SessionMetrics
-	err = sqlitex.ExecuteTransient(conn, sqlGetMetrics, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlGetMetrics, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			m = scanSessionMetrics(stmt)
@@ -166,18 +169,34 @@ func (s *Store) MetricsExist(ctx context.Context, sessionID ingest.SessionID, co
 
 // ListEntries returns all session_entries for a session ordered by entry_index.
 // Known ext keys are re-hydrated from session_entries_ext back into the Extra JSON string.
-func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
+func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) (_ []schema.SessionEntry, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	return s.listEntriesOnConn(conn, sessionID)
+}
 
+func (s *Store) listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
+	return listEntriesOnConn(conn, sessionID)
+}
+
+func listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
 	var entries []schema.SessionEntry
-	err = sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			entries = append(entries, scanSessionEntry(stmt))
+			entry := scanSessionEntry(stmt)
+			if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+				return err
+			}
+			entries = append(entries, entry)
 			return nil
 		},
 	})
@@ -216,7 +235,9 @@ func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]
 		if !ok || len(extKVs) == 0 {
 			continue
 		}
-		mergeExtIntoExtra(&entries[i], extKVs)
+		if err := mergeExtIntoExtra(&entries[i], extKVs); err != nil {
+			return nil, err
+		}
 	}
 
 	return entries, nil
@@ -226,18 +247,27 @@ func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]
 // [fromIndex, toIndex] (inclusive), ordered by entry_index. ext values are
 // re-hydrated from session_entries_ext using the same logic as ListEntries.
 // Returns an empty slice (not an error) when no entries exist in the range.
-func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID, fromIndex, toIndex int) ([]schema.SessionEntry, error) {
+func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID, fromIndex, toIndex int) (_ []schema.SessionEntry, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var entries []schema.SessionEntry
 	err = sqlitex.ExecuteTransient(conn, sqlListEntriesRange, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), fromIndex, toIndex},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			entries = append(entries, scanSessionEntry(stmt))
+			entry := scanSessionEntry(stmt)
+			if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+				return err
+			}
+			entries = append(entries, entry)
 			return nil
 		},
 	})
@@ -274,7 +304,9 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 		if !ok || len(extKVs) == 0 {
 			continue
 		}
-		mergeExtIntoExtra(&entries[i], extKVs)
+		if err := mergeExtIntoExtra(&entries[i], extKVs); err != nil {
+			return nil, err
+		}
 	}
 
 	return entries, nil
@@ -282,12 +314,17 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 
 // MaxEntryIndex returns the maximum entry_index for a session, or -1 if the
 // session has no indexed entries (empty session or session not found in DB).
-func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (int, error) {
+func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (_ int, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return -1, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return -1, err
+	}
 
 	maxIdx := -1
 	err = sqlitex.ExecuteTransient(conn, sqlMaxEntryIndex, &sqlitex.ExecOptions{
@@ -304,7 +341,19 @@ func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (
 }
 
 // mergeExtIntoExtra merges ext key-value pairs into the entry's Extra JSON string.
-func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) {
+func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) error {
+	extra, pi, err := ingest.DecodePiExtra(e.Extra)
+	if err != nil {
+		return err
+	}
+	if pi {
+		for key, value := range extKVs {
+			if key != "model_id" || value != string(extra.ModelID) {
+				return fmt.Errorf("store Pi evidence rehydration failed before projection: extension columns disagree with typed Extra; no transcript was emitted; re-index this session to repair its evidence")
+			}
+		}
+		return nil
+	}
 	var existing map[string]any
 	if e.Extra != nil {
 		_ = json.Unmarshal([]byte(*e.Extra), &existing)
@@ -317,10 +366,11 @@ func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) {
 	}
 	b, err := json.Marshal(existing)
 	if err != nil {
-		return
+		return err
 	}
 	s := string(b)
 	e.Extra = &s
+	return nil
 }
 
 // scanSessionMetrics reads a SessionMetrics from the current statement.
@@ -331,6 +381,14 @@ func scanSessionMetrics(stmt *sqlite.Stmt) *ingest.SessionMetrics {
 		SessionID: schema.SessionID(stmt.ColumnText(0)),
 	}
 	m.ComputeVersion = &cv
+	if stmt.ColumnType(43) != sqlite.TypeNull {
+		value := stmt.ColumnText(43)
+		m.InputHash = &value
+	}
+	if stmt.ColumnType(44) != sqlite.TypeNull {
+		value := stmt.ColumnText(44)
+		m.OutputHash = &value
+	}
 
 	// Column 1: turn_count (nullable INTEGER)
 	if stmt.ColumnType(1) != sqlite.TypeNull {

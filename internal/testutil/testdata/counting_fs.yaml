@@ -1,0 +1,15 @@
+# The counting filesystem's own baseline: each case runs one operation and
+# asserts the column it lands in, so a write-path fixture that reads a column
+# of zero is reading a column that would have moved.
+requiredNames:
+  - read-counts-and-tallies-bytes
+  - write-counts-destination
+  - rename-counts-destination
+  - walk-counts-root
+  - planted-rename-fault-fails-that-path-only
+cases:
+  - {name: read-counts-and-tallies-bytes, op: ReadFile, path: /tree/a/file.txt, wantCount: 1, wantBytes: 5}
+  - {name: write-counts-destination, op: WriteFile, path: /tree/b/new.txt, wantCount: 1}
+  - {name: rename-counts-destination, op: Rename, path: /tree/a/moved.txt, wantCount: 1}
+  - {name: walk-counts-root, op: WalkDir, path: /tree, wantCount: 1}
+  - {name: planted-rename-fault-fails-that-path-only, op: Rename, path: /tree/a/moved.txt, fault: true, wantCount: 1}

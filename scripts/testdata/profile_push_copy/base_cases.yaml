@@ -1,0 +1,12 @@
+- name: absent
+- name: existing-directory
+  setup: mkdir -m 0750 base; printf untouched > base/sentinel
+  files: {base/sentinel: untouched}
+- name: symlink
+  setup: printf untouched > sentinel; ln -s "$ROOT" base
+  wantError: not a physical directory
+  files: {sentinel: untouched, base/sentinel: untouched}
+- name: regular-file
+  setup: printf untouched > base
+  wantError: not a physical directory
+  files: {base: untouched}

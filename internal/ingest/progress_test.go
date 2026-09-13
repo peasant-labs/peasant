@@ -1,15 +1,63 @@
 package ingest
 
 import (
+	"bytes"
+	_ "embed"
+	"io"
+	"runtime"
 	"sync"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// TestProgressState_NilSafe verifies emitProgress does not panic when ps is nil.
+//go:embed testdata/progress_advance.yaml
+var progressAdvanceYAML []byte
+
+type progressAdvanceCase struct {
+	Name      string `yaml:"name"`
+	Total     int    `yaml:"total"`
+	Deltas    []int  `yaml:"deltas"`
+	WantDone  int    `yaml:"want_done"`
+	WantTotal int    `yaml:"want_total"`
+}
+
+func loadProgressAdvanceCases(t *testing.T) []progressAdvanceCase {
+	t.Helper()
+	var fixture struct {
+		RequiredCases []string              `yaml:"required_cases"`
+		Cases         []progressAdvanceCase `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(progressAdvanceYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode the progress advance fixture: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("the progress advance fixture must hold exactly one YAML document: %v", err)
+	}
+	present := make(map[string]bool, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		if testCase.Name == "" || present[testCase.Name] {
+			t.Fatalf("the progress advance fixture has an empty or repeated case name %q", testCase.Name)
+		}
+		present[testCase.Name] = true
+	}
+	for _, required := range fixture.RequiredCases {
+		if !present[required] {
+			t.Fatalf("required progress advance case %q is missing; the regression it pins would stop being tested", required)
+		}
+	}
+	return fixture.Cases
+}
+
+// TestProgressState_NilSafe verifies emitProgress and emitAdvance do not panic
+// when ps is nil.
 func TestProgressState_NilSafe(t *testing.T) {
 	// Must not panic.
 	emitProgress(nil, ProgressEvent{Kind: KindStart, Stage: StageDiscover, Total: 10})
-	emitProgress(nil, ProgressEvent{Kind: KindAdvance, Stage: StageDiscover, Done: 5})
+	emitAdvance(nil, StageDiscover, 5, 0)
 	emitProgress(nil, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: 10, Total: 10})
 }
 
@@ -17,7 +65,7 @@ func TestProgressState_NilSafe(t *testing.T) {
 func TestProgressState_Update_KindStart(t *testing.T) {
 	ps := NewProgressState()
 	// Advance to non-zero state first.
-	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiscover, Done: 5, Total: 10})
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiscover, Delta: 5, Total: 10})
 	// KindStart should reset.
 	ps.Update(ProgressEvent{Kind: KindStart, Stage: StageDiscover, Total: 20})
 
@@ -37,12 +85,14 @@ func TestProgressState_Update_KindStart(t *testing.T) {
 	}
 }
 
-// TestProgressState_Update_KindAdvance verifies KindAdvance updates Done and Total.
+// TestProgressState_Update_KindAdvance verifies KindAdvance adds its Delta to
+// the stage's cumulative Done and raises Total.
 func TestProgressState_Update_KindAdvance(t *testing.T) {
 	ps := NewProgressState()
 	ps.Update(ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: 10})
-	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: 3})
-	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: 7, Total: 15}) // total grows
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Delta: 3})
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Delta: 4, Total: 15}) // total grows
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Delta: 0})            // a zero delta adds nothing
 
 	snap := ps.Snapshot()
 	sp := snap[StageDiff]
@@ -54,6 +104,103 @@ func TestProgressState_Update_KindAdvance(t *testing.T) {
 	}
 	if sp.Ended {
 		t.Error("Ended: got true after Advance, want false")
+	}
+}
+
+// TestProgressState_KindAdvanceIgnoresDone pins the new contract: KindAdvance
+// carries a delta and the store owns the cumulative count, so a stray absolute
+// Done cannot move the stage's count, not even forwards.
+func TestProgressState_KindAdvanceIgnoresDone(t *testing.T) {
+	ps := NewProgressState()
+	ps.Update(ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: 10})
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Delta: 2})
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: 999})
+
+	if got := ps.Snapshot()[StageDiff].Done; got != 2 {
+		t.Fatalf("Done = %d, want 2; KindAdvance must add Delta and ignore Done", got)
+	}
+}
+
+// TestProgressState_KindAdvanceAccumulatesDeltas is the regression for the
+// absolute-value store: a worker pool emits an advance when a worker finishes,
+// so the deltas arrive in completion order and may be any permutation of the
+// same set. The store adds each delta, so every permutation reaches the same
+// cumulative Done.
+func TestProgressState_KindAdvanceAccumulatesDeltas(t *testing.T) {
+	for _, testCase := range loadProgressAdvanceCases(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
+			ps := NewProgressState()
+			ps.Update(ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: testCase.Total})
+			for _, delta := range testCase.Deltas {
+				ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Delta: delta, Total: testCase.WantTotal})
+			}
+			got := ps.Snapshot()[StageDiff]
+			if got.Done != testCase.WantDone {
+				t.Fatalf("Done = %d, want %d after deltas %v", got.Done, testCase.WantDone, testCase.Deltas)
+			}
+			if got.Total != testCase.WantTotal {
+				t.Fatalf("Total = %d, want %d", got.Total, testCase.WantTotal)
+			}
+		})
+	}
+}
+
+// TestProgressState_KindAdvanceConcurrentAddsStayMonotone proves the cumulative
+// count never decreases while many workers add deltas at once, and reaches the
+// exact sum. Run with -race: the store mutex is the only synchronization.
+func TestProgressState_KindAdvanceConcurrentAddsStayMonotone(t *testing.T) {
+	const writers = 8
+	const iterations = 500
+	ps := NewProgressState()
+	ps.Update(ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: writers * iterations})
+
+	decreased := make(chan int, 1)
+	stop := make(chan struct{})
+	var readerWG sync.WaitGroup
+	readerWG.Add(1)
+	go func() {
+		defer readerWG.Done()
+		previous := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			done := ps.Snapshot()[StageDiff].Done
+			if done < previous {
+				select {
+				case decreased <- done:
+				default:
+				}
+				return
+			}
+			previous = done
+			runtime.Gosched()
+		}
+	}()
+
+	var writersWG sync.WaitGroup
+	for range writers {
+		writersWG.Add(1)
+		go func() {
+			defer writersWG.Done()
+			for range iterations {
+				ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Delta: 1})
+			}
+		}()
+	}
+	writersWG.Wait()
+	close(stop)
+	readerWG.Wait()
+
+	select {
+	case got := <-decreased:
+		t.Fatalf("DIFF Done decreased to %d; the store-owned counter must be monotone", got)
+	default:
+	}
+	if got := ps.Snapshot()[StageDiff].Done; got != writers*iterations {
+		t.Fatalf("Done = %d, want %d", got, writers*iterations)
 	}
 }
 
@@ -106,7 +253,7 @@ func TestProgressState_Snapshot_IsIndependent(t *testing.T) {
 
 	snap1 := ps.Snapshot()
 	// Mutate state after snapshot.
-	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiscover, Done: 5})
+	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: StageDiscover, Delta: 5})
 	snap2 := ps.Snapshot()
 
 	if snap1[StageDiscover].Done != 0 {
@@ -146,7 +293,7 @@ func TestProgressState_ConcurrentReadWrite(t *testing.T) {
 			stage := StageOrder[id%len(StageOrder)]
 			for range iterations {
 				ps.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: iterations})
-				ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Done: iterations / 2})
+				ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Delta: 1})
 				ps.Update(ProgressEvent{Kind: KindEnd, Stage: stage, Done: iterations, Total: iterations})
 			}
 		}(i)
@@ -190,7 +337,7 @@ func TestProgressState_ResetClearsEveryCanonicalStage(t *testing.T) {
 	ps := NewProgressState()
 	for _, stage := range StageOrder {
 		ps.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: 9})
-		ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Done: 4, Total: 9})
+		ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Delta: 4, Total: 9})
 		ps.Update(ProgressEvent{Kind: KindEnd, Stage: stage, Done: 7, Total: 9, Err: errTest})
 	}
 	for stage, progress := range ps.Snapshot() {
@@ -230,7 +377,7 @@ func TestProgressState_ConcurrentResetUpdateSnapshot(t *testing.T) {
 		for index := range iterations {
 			stage := StageOrder[index%len(StageOrder)]
 			ps.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: iterations})
-			ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Done: index, Total: iterations})
+			ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Delta: 1, Total: iterations})
 		}
 	}()
 	go func() {

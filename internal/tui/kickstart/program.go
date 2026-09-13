@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -235,6 +236,7 @@ type Program struct {
 	flowBuilt bool
 
 	ingestRes          *ftue.IngestResult
+	completionOffset   int
 	ingestErr          error
 	retentionErr       error
 	retentionAttempted bool
@@ -244,7 +246,7 @@ type Program struct {
 	ingestCtx          context.Context
 	ingestCancel       context.CancelFunc
 	attemptStarted     time.Time
-	stageObservations  map[ingest.Stage]stageObservation
+	progressView       ingestprogress.Model
 	progressAnimFrame  int
 	lastProgressAnimAt time.Time
 	nextSteps          []NextStepKind
@@ -270,14 +272,14 @@ func NewProgram(deps ProgramDeps) Program {
 		deps.NextSteps = DefaultNextSteps
 	}
 	p := Program{
-		deps:              deps,
-		phase:             PhaseOAuth,
-		oauth:             kit.NewConfirm(deps.Theme, oauthPrompt),
-		visibility:        kit.NewConfirm(deps.Theme, visibilityPrompt),
-		overlay:           kit.NewOverlay(deps.Theme),
-		spinner:           kit.NewSpinner(deps.Theme, "working"),
-		connection:        &villageConnectionState{connected: deps.AlreadyConnected},
-		stageObservations: map[ingest.Stage]stageObservation{},
+		deps:         deps,
+		phase:        PhaseOAuth,
+		oauth:        kit.NewConfirm(deps.Theme, oauthPrompt),
+		visibility:   kit.NewConfirm(deps.Theme, visibilityPrompt),
+		overlay:      kit.NewOverlay(deps.Theme),
+		spinner:      kit.NewSpinner(deps.Theme, "working"),
+		connection:   &villageConnectionState{connected: deps.AlreadyConnected},
+		progressView: ingestprogress.New(ingestprogress.Options{Theme: deps.Theme}),
 	}
 	p = p.buildFlow()
 	if deps.AlreadyConnected {
@@ -346,6 +348,7 @@ func (p *Program) SetSize(width, height int) {
 	p.visibility.SetSize(wrapPromptWidth(width), kit.ConfirmMinSize.Height)
 	p.overlay.SetSize(width, height)
 	p.spinner.SetSize(width, height)
+	p.progressView.SetSize(width, height)
 	if p.flowBuilt {
 		p.flow.SetSize(width, height)
 	}
@@ -800,7 +803,8 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	p.ingestErr = nil
 	p.retryAttempt = retry
 	p.attemptStarted = p.deps.Clock.Now()
-	p.stageObservations = map[ingest.Stage]stageObservation{}
+	p.progressView = ingestprogress.New(ingestprogress.Options{Theme: p.deps.Theme, StartedAt: p.attemptStarted, Retry: retry})
+	p.progressView.SetSize(p.width, p.height)
 	// Each attempt owns a cancellable context, mirroring beginLogin, so an
 	// interrupt key can stop an ingest the runner would otherwise block on.
 	ctx, cancel := context.WithCancel(p.deps.Context)
@@ -864,9 +868,19 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		if m.generation != p.ingestGeneration {
 			return p, nil
 		}
+		at := p.deps.Clock.Now()
+		var snapshot map[ingest.Stage]ingest.StageProgress
+		if p.deps.Progress != nil {
+			snapshot = p.deps.Progress.Snapshot()
+		}
+		outcome := ingestprogress.FinalSucceeded
+		if m.err != nil {
+			outcome = ingestprogress.FinalFailed
+		}
+		p.progressView, _ = p.progressView.Update(ingestprogress.FinalMsg{At: at, Snapshot: snapshot, Outcome: outcome})
 		p = p.clearIngestAttempt()
-		p = p.observeProgress(p.deps.Clock.Now())
 		p.ingestRes = m.result
+		p.completionOffset = 0
 		p.ingestErr = m.err
 		p.phase = PhaseDone
 		if m.err == nil {
@@ -968,66 +982,7 @@ func (p Program) observeProgress(at time.Time) Program {
 	if p.deps.Progress == nil {
 		return p
 	}
-	snapshot := p.deps.Progress.Snapshot()
-	focus, hasFocus := p.progressFocusStage()
-	for _, stage := range ingest.StageOrder {
-		sp := snapshot[stage]
-		if !sp.Started {
-			continue
-		}
-		observation, seen := p.stageObservations[stage]
-		if !seen {
-			observation = stageObservation{
-				startedAt:        at,
-				lastAt:           at,
-				lastDone:         sp.Done,
-				lastTotal:        sp.Total,
-				progress:         sp,
-				estimateEligible: sp.Total > 0 && !sp.HasErr && !p.retryAttempt,
-				estimator:        kit.NewEstimator(estimateWindow),
-			}
-			observation.estimator.Estimate(at, sp.Done, sp.Total)
-			p.stageObservations[stage] = observation
-			continue
-		}
-		if observation.progress.Ended {
-			// Terminal state is immutable: keep the first ended snapshot so
-			// the elapsed clock stops at completion instead of tracking the
-			// wall clock on every later tick.
-			continue
-		}
-
-		observation.estimateValid = false
-		if sp.Total != observation.lastTotal {
-			// The total moved (growth, shrinkage, or unknown-to-known):
-			// re-anchor the stability baseline and wait for the next stable
-			// reading. The display clock (startedAt) is untouched, so stage
-			// times never jump when discovery revises a total.
-			observation.lastAt = at
-			observation.lastDone = sp.Done
-			observation.lastTotal = sp.Total
-			observation.progress = sp
-			observation.estimateEligible = sp.Total > 0 && !sp.HasErr && !p.retryAttempt
-			observation.estimator.Estimate(at, sp.Done, sp.Total)
-			p.stageObservations[stage] = observation
-			continue
-		}
-		if sp.Total <= 0 || sp.HasErr || p.retryAttempt || sp.Done < observation.lastDone {
-			observation.estimateEligible = false
-		}
-		eta, etaOK := observation.estimator.Estimate(at, sp.Done, sp.Total)
-		if observation.estimateEligible && hasFocus && stage == focus && !sp.Ended && sp.Done < sp.Total {
-			if etaOK {
-				observation.estimate = eta
-				observation.estimateValid = true
-			}
-		}
-		observation.lastAt = at
-		observation.lastDone = sp.Done
-		observation.lastTotal = sp.Total
-		observation.progress = sp
-		p.stageObservations[stage] = observation
-	}
+	p.progressView, _ = p.progressView.Update(ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()})
 	return p
 }
 
@@ -1035,6 +990,12 @@ func (p Program) observeProgress(at time.Time) Program {
 // available only after failure and starts local ingest again without touching
 // the already-committed Draft or retention effect.
 func (p Program) updateDone(msg tea.Msg) (Program, tea.Cmd) {
+	if p.hasIngestDiagnostics() {
+		if offset, handled := p.ingestCompletion().Scroll(msg, p.completionOffset); handled {
+			p.completionOffset = offset
+			return p, nil
+		}
+	}
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return p, nil
@@ -1282,7 +1243,7 @@ func (p Program) viewIngest() string {
 	// The footer hint owns two lines of the progress height budget, and is
 	// pinned after the height cut, so a short terminal never removes the
 	// only escape affordance.
-	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines)+2)...)
+	lines = append(lines, p.progressLines(len(lines)+2)...)
 	footer := []string{"", styles.Muted.Render("ctrl+c to quit")}
 	if p.height == 1 {
 		// One row holds the hint, not its blank separator.
@@ -1298,101 +1259,16 @@ func (p Program) viewIngest() string {
 	return panel.View()
 }
 
-func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines int) []string {
-	if now.Before(p.attemptStarted) {
-		now = p.attemptStarted
-	}
-	focus, hasFocus := p.progressFocusStage()
-	// One row per pipeline stage, upfront, started or not, so the full scope
-	// of the import is visible before any stage begins — the same upfront
-	// matrix the harvest renderer shows. Unobserved stages render from the
-	// zero progress: not-started icon, empty bar, no count, no duration.
-	// Observed stages carry their elapsed duration right of the counts, in a
-	// column the matrix aligns across all rows.
-	rows := make([]kit.ProgressRow, 0, len(ingest.StageOrder))
-	focusIdx := -1
-	for _, stage := range ingest.StageOrder {
-		sp := ingest.StageProgress{}
-		row := kit.ProgressRow{Label: strings.ToLower(stage.String())}
-		if observation, ok := p.stageObservations[stage]; ok && observation.progress.Started {
-			sp = observation.progress
-			end := now
-			if sp.Ended && observation.lastAt.Before(end) {
-				end = observation.lastAt
-			}
-			row.Elapsed = displayDuration(end.Sub(observation.startedAt))
-		}
-		row.Done, row.Total, row.Ended, row.HasErr = sp.Done, sp.Total, sp.Ended, sp.HasErr
-		if hasFocus && stage == focus {
-			focusIdx = len(rows)
-		}
-		rows = append(rows, row)
-	}
-	// The rows match the harvest TTY bars exactly; only the stage names stay
-	// lowercase per the lowercase-chrome rule. The duration paints muted,
-	// like the trailing roll-up timings.
-	lines := make([]string, 0, len(rows))
-	for _, line := range kit.ProgressMatrix(rows) {
-		rendered := styles.Base.Render(line.Bar)
-		if line.Elapsed != "" {
-			rendered += styles.Muted.Render("  " + line.Elapsed)
-		}
-		lines = append(lines, rendered)
-	}
-	// Trailing roll-up below the whole matrix: the whole-run total always,
-	// plus the focused stage estimate, unavailable before anything starts.
-	detail := []string{
-		styles.Muted.Render("  total elapsed: " + displayDuration(now.Sub(p.attemptStarted))),
-		styles.Muted.Render("  estimate unavailable"),
-	}
-	if hasFocus {
-		if observation := p.stageObservations[focus]; observation.estimateValid {
-			detail[1] = styles.Muted.Render("  estimate: " + displayDuration(observation.estimate))
-		}
-	}
-	lines = append(lines, detail...)
+func (p Program) progressLines(reservedLines int) []string {
 	available := p.height - reservedLines
-	if p.height > 0 && len(lines) > available {
-		if available <= 0 {
-			return nil
-		}
-		// Degenerate terminal: select rows newest-first, always keeping the
-		// focus row, and keep the trailing roll-up only when it still fits.
-		// The roll-up is trimmed before its row, so detail never survives
-		// without the stage it describes.
-		selected := map[int]bool{}
-		used := 0
-		if focusIdx >= 0 && used+1 <= available {
-			selected[focusIdx] = true
-			used++
-		}
-		useDetail := used+len(detail) <= available
-		if useDetail {
-			used += len(detail)
-		}
-		for ri := len(rows) - 1; ri >= 0; ri-- {
-			if selected[ri] {
-				continue
-			}
-			if used+1 > available {
-				break
-			}
-			selected[ri] = true
-			used++
-		}
-		var window []string
-		for ri := range rows {
-			if !selected[ri] {
-				continue
-			}
-			window = append(window, lines[ri])
-		}
-		if useDetail {
-			window = append(window, detail...)
-		}
-		return window
+	if p.height <= 0 {
+		available = -1
 	}
-	return lines
+	p.progressView.SetSize(p.width, available)
+	if view := p.progressView.View(); view != "" {
+		return strings.Split(view, "\n")
+	}
+	return nil
 }
 
 // progressFocusStage chooses the stage whose elapsed and estimate detail is
@@ -1400,31 +1276,35 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 // timing belongs to the latest failure, otherwise the latest active stage, and
 // finally the latest completed stage.
 func (p Program) progressFocusStage() (ingest.Stage, bool) {
-	var latest, active, failed ingest.Stage
-	var hasLatest, hasActive, hasFailed bool
-	for _, stage := range ingest.StageOrder {
-		observation, ok := p.stageObservations[stage]
-		if !ok || !observation.progress.Started {
-			continue
-		}
-		latest, hasLatest = stage, true
-		if !observation.progress.Ended {
-			active, hasActive = stage, true
-		}
-		if observation.progress.HasErr {
-			failed, hasFailed = stage, true
-		}
-	}
-	if hasFailed {
-		return failed, true
-	}
-	if hasActive {
-		return active, true
-	}
-	return latest, hasLatest
+	return p.progressView.FocusedStage()
 }
 
 func (p Program) viewDone() string {
+	if p.hasIngestDiagnostics() {
+		return p.ingestCompletion().View(p.completionOffset)
+	}
+	content := p.doneContent()
+	panel := kit.NewPanel(p.deps.Theme)
+	// Fill unused terminal space without truncating an existing longer result.
+	panel.SetSize(max(p.width, lipgloss.Width(content)), max(p.height, lipgloss.Height(content)))
+	panel.Rendered(content)
+	return panel.View()
+}
+
+func (p Program) hasIngestDiagnostics() bool {
+	return p.ingestRes != nil && len(p.ingestRes.Diagnostics) > 0
+}
+
+func (p Program) ingestCompletion() ftue.IngestCompletion {
+	actions := programActionAvailability{keymap.ActionPageUp, keymap.ActionPageDown, keymap.ActionQuit}
+	if p.ingestErr != nil {
+		actions = append(actions, keymap.ActionConfirm)
+	}
+	footer := keymap.FooterView(p.deps.Theme, keymap.Default(), actions)
+	return ftue.NewIngestCompletion(p.deps.Theme, fmt.Sprintf("kickstart · %d warnings", len(p.ingestRes.Diagnostics)), p.doneContent(), footer, p.width, p.height)
+}
+
+func (p Program) doneContent() string {
 	styles := p.deps.Theme.Styles()
 	if p.Exited() && !p.Committed() {
 		return strings.Join([]string{
@@ -1448,6 +1328,10 @@ func (p Program) viewDone() string {
 			styles.Muted.Render("estimate unavailable"),
 			styles.Base.Render("retry local import only with enter"),
 			styles.Base.Render("kickstart published nothing"))
+		if p.hasIngestDiagnostics() {
+			lines = append(lines, "", styles.Base.Render(ftue.IngestDiagnosticsText(p.ingestRes.Diagnostics)))
+			return strings.Join(lines, "\n")
+		}
 		lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
 			programActionAvailability{keymap.ActionConfirm, keymap.ActionBack, keymap.ActionQuit}))
 		return strings.Join(lines, "\n")
@@ -1468,7 +1352,11 @@ func (p Program) viewDone() string {
 	} else {
 		lines = append(lines, styles.Muted.Render("local import was not run"))
 	}
-	lines = append(lines, styles.Base.Render("kickstart published nothing"), "", styles.Header.Render("next steps"))
+	lines = append(lines, styles.Base.Render("kickstart published nothing"))
+	if p.hasIngestDiagnostics() {
+		lines = append(lines, "", styles.Base.Render(ftue.IngestDiagnosticsText(p.ingestRes.Diagnostics)))
+	}
+	lines = append(lines, "", styles.Header.Render("next steps"))
 	if p.nextStepsErr != nil {
 		for _, line := range strings.Split(p.nextStepsErr.Error(), "\n") {
 			lines = append(lines, styles.Danger.Render(line))
@@ -1497,8 +1385,10 @@ func (p Program) viewDone() string {
 				styles.Muted.Render(step.detail))
 		}
 	}
-	lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
-		programActionAvailability{keymap.ActionBack, keymap.ActionQuit}))
+	if !p.hasIngestDiagnostics() {
+		lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
+			programActionAvailability{keymap.ActionBack, keymap.ActionQuit}))
+	}
 	return strings.Join(lines, "\n")
 }
 

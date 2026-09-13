@@ -1,0 +1,5 @@
+requiredNames:
+  - absent
+  - existing-directory
+  - symlink
+  - regular-file

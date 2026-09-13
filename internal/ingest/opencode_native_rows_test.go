@@ -103,7 +103,8 @@ func TestOpenCodeNativeRowsProductionMaterializationAndIndexing(t *testing.T) {
 			if err != nil || len(sessions) != 1 || string(sessions[0].SessionID) != testCase.SessionID {
 				t.Fatalf("native discovery: sessions=%+v error=%v", sessions, err)
 			}
-			metadata, data, err := adapter.MaterializeTranscript(t.Context(), sessions[0])
+			captured, err := adapter.MaterializeTranscript(t.Context(), sessions[0])
+			metadata, data := captured.Metadata, captured.Data
 			if err != nil {
 				t.Fatalf("native materialization: %v", err)
 			}

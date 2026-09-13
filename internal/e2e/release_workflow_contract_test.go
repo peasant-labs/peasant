@@ -13,12 +13,16 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/syntax"
 )
 
 //go:embed testdata/workflows/e2e_contract.yaml
 var e2eWorkflowContractFixtureBytes []byte
+
+//go:embed testdata/workflows/e2e_asserted_tests.manifest.yaml
+var e2eAssertedTestsManifest []byte
 
 //go:embed testdata/workflows/release_validate_rpm.yaml
 var releaseValidateRPMFixtureBytes []byte
@@ -167,7 +171,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.E2E.ParityStep == "" || fixture.E2E.ParityRunContains == "" ||
 		fixture.E2E.ParityEnv.Key == "" || fixture.E2E.ParityEnv.Value == "" ||
 		fixture.E2E.DriverStep == "" || fixture.E2E.DriverEnv.Key == "" || fixture.E2E.DriverEnv.Value == "" ||
-		len(fixture.E2E.DriverContains) != 3 || len(fixture.E2E.AssertedTests) != 6 ||
+		len(fixture.E2E.DriverContains) != 3 ||
 		len(fixture.E2E.CleanupRequiredStatuses) != 2 || len(fixture.E2E.CleanupForbiddenStatuses) != 3 ||
 		fixture.Release.ParityStep == "" || fixture.Release.ParityRunContains == "" ||
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
@@ -180,6 +184,13 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
 		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
+	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(e2eAssertedTestsManifest, "asserted E2E tests")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, fixture.E2E.AssertedTests, "asserted E2E tests"); err != nil {
+		t.Fatal(err)
 	}
 	seenCallers := make(map[string]struct{}, len(fixture.ReusableCallers))
 	for callerIndex, caller := range fixture.ReusableCallers {

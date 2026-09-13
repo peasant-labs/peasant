@@ -25,9 +25,10 @@ Peasant ships a single statically linked binary (no runtime dependencies) for
 Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
 `checksums.txt`, and put the `peasant` binary on your `PATH`.
 
-> **Note:** `v0.1.0` publishes GitHub release archives plus `.deb` and `.rpm`
-> packages. AUR, Homebrew, nixpkgs, hosted apt, and macOS signing remain deferred
-> until separately approved; see the [release runbook](docs/release-runbook.md).
+> **Note:** Final releases publish GitHub release archives, `.deb` and `.rpm`
+> packages, and a macOS [Homebrew cask](docs/install/macos.md). AUR, nixpkgs,
+> hosted apt, and macOS signing remain deferred until separately approved; see the
+> [release runbook](docs/release-runbook.md).
 
 ## Quick start
 
@@ -163,7 +164,7 @@ are replayed once through the ordinary push candidate path.
 | `--include-active` | Also ingest sessions still being written |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
 | `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
-| `--source-provider <p>` | Override source provider (`claude`, `opencode`) |
+| `--source-harness <h>` | Override source harness (`claude-code`, `opencode`, `codex`, `cursor`, `strike`) |
 | `--source-path <path>` | Override source path for the provider (replaces config, not additive) |
 | `--output <path>` | Override output base path |
 | `--json` | Output as JSON instead of human-readable |
@@ -200,6 +201,7 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | Claude Code | `claude-code` | JSONL |
 | OpenCode | `opencode` | JSON |
 | Codex | `codex` | JSONL (`rollout-*.jsonl`) |
+| Pi Coding Agent | `pi` | [JSONL v3; delivery status and limits](docs/pi.md) |
 
 Harness identity comes from [`peasant-labs/bestiary`](https://github.com/peasant-labs/bestiary)
 (`Harness` is a type alias re-exported via `internal/defaults`). Further harnesses
@@ -316,6 +318,14 @@ All paths respect their corresponding `XDG_*` environment variable if set.
             ├── {sessionId}--transcript.{jsonl|json}
             └── {sessionId}--metadata.json
 ```
+
+The database is the source of truth; `peasant-sync/` keeps the input files as a
+backup, so the database can be rebuilt if it is ever lost or corrupted. Run
+`peasant harvest index --all` to rebuild a lost or damaged database from those
+files. A rebuild restores transcripts and metadata only: it does not restore
+annotations, Village publication records, session origin attribution, or a
+session's readiness to be shared, so a rebuilt session cannot be shared until the
+next harvest reads it from its source.
 
 See [docs/pipeline.md](docs/pipeline.md) for the ingest write flow, staging
 directory behavior, and the distinction between on-disk transcripts and the
@@ -461,7 +471,7 @@ $XDG_CONFIG_HOME/peasant/config.yaml   # if XDG_CONFIG_HOME is set
 ```
 
 If no config file exists, Peasant uses built-in defaults and prints a notice directing you to
-`peasant kickstart`. CLI flags (`--source-provider`, `--source-path`, `--output`) override the
+`peasant kickstart`. CLI flags (`--source-harness`, `--source-path`, `--output`) override the
 config file for a single run.
 
 ### Selection index

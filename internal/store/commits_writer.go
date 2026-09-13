@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -21,6 +22,18 @@ const (
 // Executes DELETE + INSERT within a single transaction.
 // An empty commits slice deletes existing rows without inserting new ones.
 func (s *Store) UpsertSessionCommits(ctx context.Context, sessionID ingest.SessionID, commits []ingest.CommitInfo) (err error) {
+	return s.writeSessionCommits(ctx, sessionID, commits, false)
+}
+
+var _ ingest.SessionCommitMergeStore = (*Store)(nil)
+
+// MergeSessionCommits adds recovered observations without deleting historical
+// bindings merely because current Git inspection could not rediscover them.
+func (s *Store) MergeSessionCommits(ctx context.Context, sessionID ingest.SessionID, commits []ingest.CommitInfo) error {
+	return s.writeSessionCommits(ctx, sessionID, commits, true)
+}
+
+func (s *Store) writeSessionCommits(ctx context.Context, sessionID ingest.SessionID, commits []ingest.CommitInfo, preserveExisting bool) (err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store.UpsertSessionCommits: take connection for session %s: %w", sessionID, err)
@@ -29,7 +42,20 @@ func (s *Store) UpsertSessionCommits(ctx context.Context, sessionID ingest.Sessi
 
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	if err := upsertSessionCommitsOnConn(conn, sessionID, commits, preserveExisting); err != nil {
+		return err
+	}
+	// A standalone commit update has no validated file manifest. The managed
+	// artifact mirror uses the private helper and restores its exact digest in
+	// its enclosing transaction after metadata and association writes succeed.
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET artifact_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+		return fmt.Errorf("store.UpsertSessionCommits: clear unverified artifact identity for session %s: %w; commit replacement was rolled back; restore database access and retry", sessionID, err)
+	}
+	return nil
+}
 
+func upsertSessionCommitsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, commits []ingest.CommitInfo, preserve ...bool) (err error) {
+	preserveExisting := len(preserve) > 0 && preserve[0]
 	// Allocate or replay every durable association before replacing the current
 	// session_commits projection. The association ledger is intentionally
 	// append-only: a later re-ingest may remove a current binding, but it must
@@ -57,10 +83,12 @@ func (s *Store) UpsertSessionCommits(ctx context.Context, sessionID ingest.Sessi
 	// Delete all current rows for this session to allow clean re-ingest. This
 	// does not delete the durable association ledger, which records original
 	// observations independently of the mutable current projection.
-	if err = sqlitex.ExecuteTransient(conn, sqlDeleteSessionCommits, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-	}); err != nil {
-		return fmt.Errorf("store.UpsertSessionCommits: delete existing commits for session %s: %w", sessionID, err)
+	if !preserveExisting {
+		if err = sqlitex.ExecuteTransient(conn, sqlDeleteSessionCommits, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID)},
+		}); err != nil {
+			return fmt.Errorf("store.UpsertSessionCommits: delete existing commits for session %s: %w", sessionID, err)
+		}
 	}
 
 	for i := range commits {

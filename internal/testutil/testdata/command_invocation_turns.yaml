@@ -1,0 +1,95 @@
+# One stored entry per row, each proven on the WebSocket session_detail payload,
+# the export payload, and the push body. sourceRole is the role the indexer
+# stored on the entry; storedName and storedArgs are the session_commands values
+# as written at index time; expectedName is what the wire must carry after the
+# producer adds any missing leading slash.
+requiredNames:
+  - bare_stored_name_gains_slash
+  - slash_prefixed_command_with_arguments
+  - opencode_skill_invocation_without_text
+  - opencode_assistant_skill_invocation
+  - claude_builtin_never_surfaces
+  - non_string_command_args_kept_empty
+cases:
+  # The harness recorded a bare name. The producer adds the slash the wire
+  # requires. User prose around the markup keeps the turn the author's own.
+  - name: bare_stored_name_gains_slash
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      Please start with the design notes.
+      <command-name>project:review</command-name>
+    storedName: project:review
+    expectedRole: user
+    expectedCommand: true
+    expectedName: /project:review
+
+  # The canonical Claude Code slash command. Content is nothing but harness
+  # markup, so the ratified wrapper gate renders it as a system turn; the
+  # invocation still reaches the wire.
+  - name: slash_prefixed_command_with_arguments
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/project:review</command-name>
+      <command-args>Fix the session viewer filter</command-args>
+    storedName: /project:review
+    storedArgs: Fix the session viewer filter
+    expectedRole: system
+    expectedCommand: true
+    expectedName: /project:review
+    expectedArgs: Fix the session viewer filter
+
+  # The OpenCode tool == "skill" shape records no text at all. On a stored user
+  # entry the turn carries the invocation and nothing else, so it is
+  # harness-injected, not a prompt.
+  - name: opencode_skill_invocation_without_text
+    harness: opencode
+    sourceRole: user
+    content: ""
+    storedName: /project:summarize
+    expectedRole: system
+    expectedCommand: true
+    expectedName: /project:summarize
+
+  # The same textless skill shape, but stored on the ASSISTANT message that
+  # made the skill call. The assistant authored it, so the turn keeps the
+  # assistant role: re-roling it would strip the only role on which a model
+  # observation on the same entry is valid evidence.
+  - name: opencode_assistant_skill_invocation
+    harness: opencode
+    sourceRole: assistant
+    content: ""
+    storedName: /project:changelog
+    expectedRole: assistant
+    expectedCommand: true
+    expectedName: /project:changelog
+
+  # A built-in harness command is a structural signal. Ingest already excludes
+  # one; a stored row from an older build must not reach the wire either.
+  - name: claude_builtin_never_surfaces
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/compact</command-name>
+      <command-message>compact</command-message>
+    storedName: /compact
+    expectedRole: system
+    expectedCommand: false
+
+  # The stored command_args value is a JSON number, not a string — a shape the
+  # store never intentionally writes but a decode must not be fragile against.
+  # The tolerant decode treats a non-string command_args as empty args rather
+  # than dropping the whole invocation, name included. User prose around the
+  # markup keeps the turn the author's own, matching bare_stored_name_gains_slash.
+  - name: non_string_command_args_kept_empty
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      Please continue with the plan.
+      <command-name>project:continue</command-name>
+    storedName: project:continue
+    storedArgsJSON: "42"
+    expectedRole: user
+    expectedCommand: true
+    expectedName: /project:continue

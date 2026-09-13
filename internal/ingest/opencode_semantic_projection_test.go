@@ -51,26 +51,27 @@ type openCodeSemanticFixture struct {
 }
 
 type openCodeSemanticCase struct {
-	Name                  string                        `yaml:"name"`
-	LegacyFixture         string                        `yaml:"legacy_fixture"`
-	CurrentFixture        string                        `yaml:"current_fixture"`
-	SessionID             string                        `yaml:"session_id"`
-	ExpectedEntryIDs      []string                      `yaml:"expected_entry_ids"`
-	ExpectedRoles         []string                      `yaml:"expected_roles"`
-	ExpectedTypes         []string                      `yaml:"expected_types"`
-	ExpectedDepths        []int                         `yaml:"expected_depths"`
-	ExpectedParentIndexes []int                         `yaml:"expected_parent_indexes"`
-	ExpectedTimestamps    []int64                       `yaml:"expected_timestamps"`
-	ExpectedToolCallID    string                        `yaml:"expected_tool_call_id"`
-	ExpectedModel         string                        `yaml:"expected_model"`
-	ExpectedTokensIn      int                           `yaml:"expected_tokens_in"`
-	ExpectedTokensOut     int                           `yaml:"expected_tokens_out"`
-	ExpectedStartMS       int64                         `yaml:"expected_start_ms"`
-	ExpectedEndMS         int64                         `yaml:"expected_end_ms"`
-	ForbiddenMarkers      []string                      `yaml:"forbidden_markers"`
-	JSONMessages          []openCodeSemanticJSONMessage `yaml:"json_messages"`
-	ExpectedMetadataTurns int                           `yaml:"expected_metadata_turns"`
-	ExpectedMetadataTools int                           `yaml:"expected_metadata_tools"`
+	Name                     string                        `yaml:"name"`
+	LegacyFixture            string                        `yaml:"legacy_fixture"`
+	CurrentFixture           string                        `yaml:"current_fixture"`
+	SessionID                string                        `yaml:"session_id"`
+	ExpectedEntryIDs         []string                      `yaml:"expected_entry_ids"`
+	ExpectedRoles            []string                      `yaml:"expected_roles"`
+	ExpectedTypes            []string                      `yaml:"expected_types"`
+	ExpectedDepths           []int                         `yaml:"expected_depths"`
+	ExpectedParentIndexes    []int                         `yaml:"expected_parent_indexes"`
+	ExpectedTimestamps       []int64                       `yaml:"expected_timestamps"`
+	ExpectedToolCallID       string                        `yaml:"expected_tool_call_id"`
+	ExpectedCompactionRecent string                        `yaml:"expected_compaction_recent"`
+	ExpectedModel            string                        `yaml:"expected_model"`
+	ExpectedTokensIn         int                           `yaml:"expected_tokens_in"`
+	ExpectedTokensOut        int                           `yaml:"expected_tokens_out"`
+	ExpectedStartMS          int64                         `yaml:"expected_start_ms"`
+	ExpectedEndMS            int64                         `yaml:"expected_end_ms"`
+	ForbiddenMarkers         []string                      `yaml:"forbidden_markers"`
+	JSONMessages             []openCodeSemanticJSONMessage `yaml:"json_messages"`
+	ExpectedMetadataTurns    int                           `yaml:"expected_metadata_turns"`
+	ExpectedMetadataTools    int                           `yaml:"expected_metadata_tools"`
 }
 
 type openCodeSemanticJSONMessage struct {
@@ -695,6 +696,18 @@ func canonicalSemanticEntries(entries []schema.SessionEntry) []schema.SessionEnt
 
 func assertSemanticEntries(t testing.TB, testCase openCodeSemanticCase, entries []schema.SessionEntry) {
 	t.Helper()
+	if testCase.ExpectedCompactionRecent == "" {
+		t.Fatal("semantic parity fixture must require the compaction recent tail")
+	}
+	foundRecent := false
+	for _, entry := range entries {
+		if entry.PartType != nil && *entry.PartType == "compaction" && entry.ContentPreview != nil && strings.HasSuffix(*entry.ContentPreview, testCase.ExpectedCompactionRecent) {
+			foundRecent = true
+		}
+	}
+	if !foundRecent {
+		t.Error("compaction lost the source-recorded recent context tail")
+	}
 	if len(entries) != len(testCase.ExpectedEntryIDs) {
 		t.Fatalf("entries=%d want %d", len(entries), len(testCase.ExpectedEntryIDs))
 	}

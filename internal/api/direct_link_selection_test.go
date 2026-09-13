@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -215,6 +216,11 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 		t.Fatalf("seed mounted direct-link sessions: %v", err)
 	}
 	api.MarkStoredSessionsIndexed(t, db)
+	for _, entry := range entries {
+		if err := testutil.WriteFullEntries(t.Context(), db, entry.Session.SessionID, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	policy, err := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{

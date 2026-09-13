@@ -152,6 +152,27 @@ type AnnotationSelection struct {
 	RepositoryProjectHashes map[string]bool
 }
 
+var _ ingest.AnnotationReadSelection = AnnotationSelection{}
+
+func (s AnnotationSelection) IncludesAnnotation(row ingest.AnnotationPushRow) bool {
+	if !s.sessionMatches(row) {
+		return false
+	}
+	item, err := annotationRowToPushItem(row)
+	if err != nil {
+		return s.storedLabelMatches(row)
+	}
+	return s.labelMatches(row, item.ComputeContentHash())
+}
+
+func (s AnnotationSelection) IncludesUnresolvedAnchor(row ingest.AnnotationTargetAnchorRow) bool {
+	return s.unresolvedAnchorMatches(row)
+}
+
+func (s AnnotationSelection) IncludesRetraction(row ingest.AnnotationPushRow) bool {
+	return s.sessionMatches(row)
+}
+
 // IsEmpty reports whether the LABEL selection (IDs/hashes) imposes no filter.
 // The session-ID gate is independent and checked separately.
 func (s AnnotationSelection) IsEmpty() bool {
@@ -286,15 +307,26 @@ func PushAnnotationsSelected(
 	selection AnnotationSelection,
 	dryRun bool,
 	concurrency int,
-) (*AnnotationPushSummary, error) {
-	rows, err := store.ListSystemAnnotations(ctx)
+) (result *AnnotationPushSummary, resultErr error) {
+	rec := perf.RecorderFromContext(ctx)
+	span := rec.StartChildSpan(perf.StagePushAnnotationsPublish, perf.ParentSpanFromContext(ctx), nil)
+	ctx = perf.ContextWithParentSpan(ctx, span.ID())
+	defer func() {
+		outcome := perf.OutcomeOK
+		if resultErr != nil || (result != nil && (result.Errors > 0 || len(result.Unpublishable) > 0)) {
+			outcome = perf.OutcomeFailed
+			rec.Error(perf.StagePushAnnotationsPublish, fmt.Errorf("annotation publication was incomplete; inspect command diagnostics and repair failed annotations before retrying"), nil)
+		} else if dryRun || (result != nil && (result.SkipReason != "" || result.Created+result.Updated+result.Retracted == 0)) {
+			outcome = perf.OutcomeSkipped
+		}
+		span.End(outcome, nil)
+	}()
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+	snapshot, err := store.ReadAnnotationPushSnapshot(ctx, selection, !dryRun)
 	if err != nil {
-		return nil, fmt.Errorf("list system annotations: %w", err)
+		return nil, fmt.Errorf("read selected annotation snapshot: %w", err)
 	}
-	unresolved, err := store.ListUnresolvedAnnotationTargetAnchors(ctx, "")
-	if err != nil {
-		return nil, fmt.Errorf("check unresolved annotation targets before publish: %w", err)
-	}
+	rows, unresolved := snapshot.Annotations, snapshot.Unresolved
 	inScopeUnresolved := unresolved[:0]
 	for _, row := range unresolved {
 		if selection.unresolvedAnchorMatches(row) {
@@ -348,10 +380,7 @@ func PushAnnotationsSelected(
 	// The retraction source is the locally-superseded annotations. Queried up
 	// front (cheap local DB read) so that when there is neither anything to push
 	// NOR anything locally retired, we make NO network call at all.
-	superseded, err := store.ListSupersededAnnotations(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list superseded annotations: %w", err)
-	}
+	superseded := snapshot.Retractions
 	// Retraction mutates the village just as publication does. Keep it inside the
 	// same selected-session/repository boundary rather than retracting annotations
 	// from unrelated repositories during a repository-scoped hook run.

@@ -1,0 +1,42 @@
+requiredNames: [default_asymmetric, continuation_eight_mib_boundary, uniform_small, uniform_initial, uniform_one_mib, uniform_large, entry_count_cap, oversized_progress]
+cases:
+  - name: default_asymmetric
+    entries: 96
+    bytes: 16384
+    budget: 0
+    pages: [16, 80]
+  - name: uniform_small
+    entries: 96
+    bytes: 16384
+    budget: 65536
+    pages: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+  - name: continuation_eight_mib_boundary
+    entries: 70
+    bytes: 131072
+    budget: 0
+    pages: [2, 64, 4]
+  - name: uniform_initial
+    entries: 96
+    bytes: 16384
+    budget: 262144
+    pages: [16, 16, 16, 16, 16, 16]
+  - name: uniform_one_mib
+    entries: 96
+    bytes: 16384
+    budget: 1048576
+    pages: [64, 32]
+  - name: uniform_large
+    entries: 96
+    bytes: 16384
+    budget: 4194304
+    pages: [96]
+  - name: entry_count_cap
+    entries: 201
+    bytes: 8
+    budget: 0
+    pages: [100, 100, 1]
+  - name: oversized_progress
+    entries: 3
+    bytes: 270000
+    budget: 16
+    pages: [1, 1, 1]

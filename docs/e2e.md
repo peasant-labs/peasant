@@ -35,10 +35,9 @@ skip-gate and pull contracts.
    path is the fixture's `sessions/` dir ITSELF (`CodexFixtureSourcePath()`),
    since the codex adapter does a strict depth-4 `{root}/YYYY/MM/DD/rollout-*.jsonl`
    walk.
-5. **`peasant ingest --include-active`** (the `--include-active` is load-bearing
-   for determinism: a fresh checkout stamps the committed fixtures with a current
-   mtime, so without it ingest debounces them under the 60s staleness hold and
-   yields fewer than expected) → the committed fixtures become exactly the total
+5. **`peasant ingest`** includes active sessions by default. The harness may still
+   pass `--include-active` as a deprecated compatibility flag; fresh fixture
+   mtimes do not exclude sessions. The committed fixtures become exactly the total
    pinned by `ExpectedTranscriptCount` in `internal/e2e/fixture.go`
    (`ExpectedClaudeTranscripts` + `ExpectedCodexTranscripts` +
    `ExpectedCursorTranscripts`). **`peasant annotate create`** adds a system-origin
@@ -113,6 +112,12 @@ It drives the anchored validation set through the real CLI in two sandboxes:
 
 It runs as part of `make e2e` (same build tag, same prereqs).
 
+The historical association case constructs a V39 database, opens it through the
+current CLI to apply migrations, then runs normal ingest over the retained
+fixture source. Migration alone cannot recover a missing publication metadata
+snapshot. The test checks that ingest preserves the migrated association ID and
+its annotation before the ordinary, non-force publication replay.
+
 ## Warm-stack refresh (`TestHarnessRefreshE2E`)
 
 The refresh regression publishes into a non-empty harness-owned Postgres and
@@ -121,6 +126,37 @@ again. It proves refresh preserves migration-owned reference data such as the
 license and governance-event menus while clearing transcript rows and objects.
 An explicit table classification fails closed when a future migration adds an
 unclassified public table.
+
+## Native Pi preservation (`TestPiRoundTripE2E`)
+
+This backend test reuses the native `active-history` ingestion fixture, with named YAML
+usage variants and a required-name manifest. It runs the actual CLI in disposable HOME
+and XDG directories, against independently provisioned Village/Postgres/MinIO services.
+A pass checks:
+
+- Native harvest, SQLite reopen, and matching local API/export projections.
+- Complete accounting with and without recorded cost, partial-with-zero, and cost-only
+  assistant accounting, plus distinct absent tool and summary owners; exact source/owner
+  refs and recorded cost strings.
+- Thinking once, visible context and summaries, four image placeholders, and extension
+  state preserved as metadata rather than conversation text.
+- Zero HTTP requests during push dry-run, including negotiation and upload; real
+  capability negotiation before the actual CLI upload.
+- Both captured multipart surfaces validated by the published Schema contract, without
+  private carrier fields or image bytes.
+- Real encrypted objects and served/pulled content retaining turns and native metadata.
+- A second authenticated publication of the producer's detail in the supported bare
+  compatibility shape, with its content hash recomputed from those exact bytes. The first
+  read must install a new encrypted canonical object; subsequent reads must not rewrite
+  again. The test does not manufacture ciphertext or claim that changing a database
+  version marker exercises a shape-based migration.
+- Duplicate escaped keys and oversized metadata rejected with unchanged transcript rows,
+  encryption descriptors, governance audit counts, and object counts.
+
+The test is included in `make e2e`. It builds the real backend CLI through the existing
+E2E helper; it does **not** validate the embedded browser bundle or replace the required
+full `make build` and mounted browser review. Pi's current UI limitations
+are recorded in [Pi recordings](pi.md).
 
 The staged pull flow, the idempotency/304 fast-paths, and the
 compensation/cache doctrine this harness asserts are documented in
@@ -148,6 +184,14 @@ fixture meta-tests** over ALL committed fixtures (claude, codex, **and cursor**)
 DO run in `make check` — see [`TESTING.md` → Committed fixture meta-tests](../TESTING.md#committed-fixture-meta-tests-make-check).
 
 ### Crash cleanup and CI concurrency
+
+The joined-hook isolation guard hashes developer state before and after the run.
+It streams file contents through a 32 KiB buffer, including large local databases;
+it does not load each complete file into memory. The guard still checks file
+contents and metadata and excludes only the harness's own sandbox subtree.
+The `TestPathFingerprintBoundedMemory` regression runs in `make check` without
+containers. It uses a synthetic sparse file to verify bounded allocation and
+detects content-only changes even when file size and modification time match.
 
 > **Counter regression note.** An earlier version of this
 > doc claimed "per-run **uniqueness** — not the reaper — is the flake fix." That
@@ -214,6 +258,50 @@ VM/container (whose apt `podman` is 4.9.x). The in-process minio-go count is
 stderr-immune regardless of podman version, so on a 4.9.x box the focused
 `TestTranscriptBucketObjectCountMatchesKnownPuts` and the seeded baseline both stay
 green with the fix and (the baseline) RED without it.
+
+### Memory budget
+
+Local `make e2e` and `make demo` require Linux cgroup v2 and a working systemd
+user manager. The wrapper refuses to start tests if setup or limit read-back fails;
+it never falls back to an unbounded local run. A same-user runtime-directory lock
+rejects overlapping wrapper invocations across worktrees. Direct `go test` bypasses
+this hard protection: use Make or `bash scripts/e2e-budget.sh <command>` instead.
+
+Defaults are **8 GiB MemoryMax**, **6 GiB MemoryHigh**, **zero swap** for the
+runner, builds, CLI children, and Village process together. Limits are read back
+from the actual cgroup before the command starts. On normal exit (including test
+failure), the wrapper prints `memory.peak` and `memory.events`. A whole-scope kill
+can prevent that final report; inspect the systemd/kernel journal in that case.
+The Go target is **2 GiB per process**, not a hard RSS limit: race-detector/C
+allocations are not covered by GOMEMLIMIT. The staging arena is **64 MiB** in the
+test process and inherited CLI environments. These are test budgets, not a claim
+that child allocations explain historical parent `e2e.test` RSS.
+
+Set `E2E_MEMORY_MAX` and `E2E_MEMORY_HIGH` in bytes to change the hard budget.
+`GOMEMLIMIT`, `PEASANT_INGEST_ARENA_BYTES`, `GOMAXPROCS`, and
+`E2E_BUILD_PARALLELISM` (default 2, inherited by child Go builds) are configurable.
+Scheduler concurrency uses Go's CPU/container-aware default unless the caller
+sets `GOMAXPROCS`, for example `GOMAXPROCS=8 make e2e`. Memory limits are independent
+of this scheduler setting. Run `make check`, `make build`, and the full-stack gate
+sequentially. A memory-limit termination is a failed gate, not a passing test.
+Tests retain `-race` and use `-parallel=1`. For a focused run:
+
+```bash
+make e2e E2E_TEST_FLAGS='-v -run ^TestSkipGateE2E$'
+```
+
+Podman service scopes can escape the runner cgroup. Each harness-created Postgres
+and MinIO container therefore has a separate **1 GiB memory/no-swap** limit.
+Budget up to **10 GiB total** for one runner plus these two services, plus host
+overhead; pre-existing or externally supplied services are not changed. Smaller
+machines must lower the runner budget or use a suitably sized isolated runner.
+
+CI without a systemd user session and non-systemd platforms must explicitly use
+`E2E_MEMORY_MODE=external make e2e` **under an outer runner/container hard limit**.
+The CI workflow uses its isolated runner boundary. This mode keeps portable soft
+defaults and scheduling but does not install or verify an OS hard limit. Do not
+use it as a desktop fallback. Direct tagged test invocations still get the small
+arena and Go soft target from TestMain, but no cgroup or scheduling protection.
 
 ### Environment overrides
 

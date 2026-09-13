@@ -30,13 +30,15 @@ Run the opt-in fixture and mounted-render tests with:
 make guided-screenshots-test
 ```
 
-The four PNGs are written to:
+The six PNGs are written to:
 
 ```text
 out/test/screenshots/peasant-guided-final-<commit>/guided-dark.png
 out/test/screenshots/peasant-guided-final-<commit>/guided-light.png
 out/test/screenshots/peasant-guided-final-<commit>/selection.png
 out/test/screenshots/peasant-guided-final-<commit>/push.png
+out/test/screenshots/peasant-guided-final-<commit>/ingest-progress.png
+out/test/screenshots/peasant-guided-final-<commit>/ingest-completion.png
 ```
 
 An explicit dirty capture uses `peasant-guided-final-<commit>-dirty` instead. Generated evidence is
@@ -46,14 +48,16 @@ local and gitignored.
 
 `testdata/captures.yaml` is the strict source of capture scenarios. It pins:
 
-- all five guided sections in dark and light themes at `80x24` and `120x40`;
+- all six guided sections in dark and light themes at `80x24` and `120x40`;
 - the default and retained global-search selection states at both sizes;
 - project, branch, and scrubbed transcript preview states in both themes at both sizes;
 - the start, selection, consent, and receipt screens of the push wizard, in both themes at both
   sizes, over a synthetic candidate inventory that carries every redaction state and one session the
   branch-aware selection withheld;
+- local ingest progress and completion, including multiple nonfatal warnings, scrolled remediation
+  and next steps, and a no-warning control, in both themes and both sizes;
 - synthetic discovery data, row-count guards, required text, and exact matrix coverage; and
-- the four accepted contact-sheet names and pixel dimensions.
+- the six accepted contact-sheet names and pixel dimensions.
 
 Unknown fields, trailing YAML documents, duplicate rows, missing matrix entries, and changed count
 declarations fail before any PNG is published. No local config, transcript, repository, or credential

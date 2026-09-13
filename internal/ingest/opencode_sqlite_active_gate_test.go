@@ -55,7 +55,7 @@ func TestOpenCodeActiveGateUsesFileModTime(t *testing.T) {
 
 	ingestedMS := time.Now().UnixMilli()
 	location := ingest.SessionLocation{IngestedMs: &ingestedMS, SchemaVersion: int(ingest.CurrentSchemaVersion)}
-	if got := ingest.ClassifyAgainstStore(session, location, time.Minute); got != ingest.DiffActive {
-		t.Fatalf("still-active source did not classify active on its file mtime: %v", got)
+	if got := ingest.ClassifyAgainstStore(session, location, time.Minute); got != ingest.DiffUnchanged {
+		t.Fatalf("unchanged active source should remain a no-op: %v", got)
 	}
 }

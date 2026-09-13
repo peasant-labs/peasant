@@ -16,7 +16,6 @@ expectedSeed: Anthropic/Claude Fable-5
 expectedObservedModels:
   - Anthropic/Claude Fable-5
   - anthropic/claude-opus-4-8
-expectedCaseCount: 2
 requiredNames:
   - first_root_observation
   - later_root_observation

@@ -3,6 +3,7 @@ package push
 import (
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/schema"
 )
 
@@ -46,6 +47,10 @@ type PipelineConfig struct {
 	// CommandBinding is the typed, explicitly-bound config/data/state context
 	// used to render recovery commands. Its zero value uses Peasant's defaults.
 	CommandBinding githooks.Binding
+	// Recorder optionally overrides the context recorder for direct pipeline
+	// callers. The CLI supplies its shared recorder through the run context.
+	// Nil resolves through perf.RecorderFromContext (Nop when disabled).
+	Recorder perf.Recorder
 }
 
 // SessionSelection is the immutable branch-aware decision set prepared at the

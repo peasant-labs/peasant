@@ -1,0 +1,67 @@
+requiredNames:
+  - zero
+  - minimum-nonzero
+  - partial
+  - full
+  - overfull
+  - ended-unknown-total
+  - error
+cases:
+  - name: zero
+    label: discover
+    done: 0
+    total: 100
+    filled: 0
+    empty: 24
+    icon: "●"
+    count: 0/100
+  - name: minimum-nonzero
+    label: discover
+    done: 1
+    total: 100
+    filled: 1
+    empty: 23
+    icon: "●"
+    count: 1/100
+  - name: partial
+    label: discover
+    done: 1
+    total: 4
+    filled: 6
+    empty: 18
+    icon: "●"
+    count: 1/4
+  - name: full
+    label: discover
+    done: 4
+    total: 4
+    ended: true
+    filled: 24
+    empty: 0
+    icon: "✓"
+    count: 4/4
+  - name: overfull
+    label: discover
+    done: 5
+    total: 4
+    filled: 24
+    empty: 0
+    icon: "●"
+    count: 5/4
+  - name: ended-unknown-total
+    label: discover
+    ended: true
+    filled: 24
+    empty: 0
+    icon: "✓"
+    count: done
+  - name: error
+    label: discover
+    done: 1
+    total: 4
+    ended: true
+    hasError: true
+    filled: 6
+    empty: 18
+    icon: "✗"
+    count: 1/4

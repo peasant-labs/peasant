@@ -1,6 +1,9 @@
 package push
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // DefaultConcurrencyForCPU returns the default upload concurrency for a host with
 // numCPU logical CPUs: max(1, numCPU/2). Half the cores leaves headroom for the
@@ -40,4 +43,46 @@ func ResolveConcurrency(flagSet bool, flagVal, cfgVal, numCPU int) (int, error) 
 		return cfgVal, nil
 	}
 	return DefaultConcurrencyForCPU(numCPU), nil
+}
+
+// ConcurrencyTracker records the high-water mark of concurrent push sessions.
+//
+// The pipeline runs uploads bounded-parallel via errgroup; the tracker counts
+// how many pushSession bodies overlap in time so the profile can report the
+// actual parallelism achieved (push.concurrency.high_water) without timing
+// anything. It is race-safe: Enter/Exit guard state with a mutex and the
+// package is exercised under go test -race. The high-water value is counted
+// once at run end rather than summing intermediate maxima. The observed value
+// can vary with scheduling; reduced subject order does not.
+type ConcurrencyTracker struct {
+	mu        sync.Mutex
+	current   int
+	highWater int
+}
+
+// Enter marks one session starting work. Callers must pair every Enter with a
+// later Exit, preferably via defer immediately after Enter.
+func (t *ConcurrencyTracker) Enter() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.current++
+	if t.current > t.highWater {
+		t.highWater = t.current
+	}
+}
+
+// Exit marks one session finishing work.
+func (t *ConcurrencyTracker) Exit() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.current > 0 {
+		t.current--
+	}
+}
+
+// HighWater returns the maximum concurrent sessions observed so far.
+func (t *ConcurrencyTracker) HighWater() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.highWater
 }

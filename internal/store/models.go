@@ -34,6 +34,7 @@ WHERE model_id = ? AND provider_key = ?`
 	sqlGetContextWindow = `SELECT context_window
 FROM models
 WHERE model_id = ? AND context_window IS NOT NULL
+ORDER BY provider_key
 LIMIT 1`
 )
 

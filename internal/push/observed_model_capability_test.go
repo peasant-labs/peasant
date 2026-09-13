@@ -112,6 +112,7 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			if fixtureCase.ShapeMutation != "" {
 				redactor = shapeChangingRedactor{mutation: fixtureCase.ShapeMutation}
 			}
+			testutil.SeedPublicationInputs(store, fs, baseTestConfig().Output.BasePath)
 			pipeline, err := push.NewPipeline(store, publisher, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{Concurrency: 1, DryRun: fixtureCase.DryRun}, redactor, &stderr)
 			if err != nil {
 				t.Fatalf("NewPipeline: %v", err)

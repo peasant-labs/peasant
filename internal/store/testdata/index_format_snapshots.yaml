@@ -1,0 +1,14 @@
+requiredGuardNames: [nil-is-no-sessions, empty-is-no-sessions, requested-needs-snapshot, global-needs-snapshot, supported-request-excludes-newer, unsupported-request-refused, explicit-global-refused, unsupported-after-first-batch]
+guards:
+  - {name: nil-is-no-sessions, scope: nil, denyReads: true}
+  - {name: empty-is-no-sessions, scope: empty, denyReads: true}
+  - {name: requested-needs-snapshot, scope: supported, wantError: active SQLite snapshot}
+  - {name: global-needs-snapshot, scope: all, wantError: active SQLite snapshot}
+  - {name: supported-request-excludes-newer, scope: supported, snapshot: true}
+  - {name: unsupported-request-refused, scope: unsupported, snapshot: true, wantError: unsupported index format 99}
+  - {name: explicit-global-refused, scope: all, snapshot: true, wantError: unsupported index format 99}
+  - {name: unsupported-after-first-batch, scope: unsupported, prefixIDs: 300, snapshot: true, wantError: unsupported index format 99}
+requiredSnapshotNames: [entries-base-and-extra, range-base-and-extra]
+snapshots:
+  - {name: entries-base-and-extra, operation: entries}
+  - {name: range-base-and-extra, operation: range}

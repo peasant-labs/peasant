@@ -112,7 +112,7 @@ func TestPipeline_AutoDetectMissingSourcesKeepsExistingEntriesStale(t *testing.T
 				ContentPreview: &content,
 				Extra:          &extra,
 			}}
-			metricsStore.IndexStates[sessionID] = ingest.CurrentIndexVersion - 1
+			metricsStore.IndexStates[sessionID] = ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion - 1
 			metricsStore.SourceInfoByID = map[ingest.SessionID]struct {
 				SourcePath   string
 				SourceFormat ingest.SourceFormat
@@ -147,8 +147,8 @@ func TestPipeline_AutoDetectMissingSourcesKeepsExistingEntriesStale(t *testing.T
 			if len(stored) != 1 || stored[0].EntryIndex != fixtureCase.ExistingEntry.Index || stored[0].Extra == nil || *stored[0].Extra != extra {
 				t.Fatalf("existing indexed evidence changed after missing-source recovery: %#v", stored)
 			}
-			if version := metricsStore.IndexStates[sessionID]; version != ingest.CurrentIndexVersion-1 {
-				t.Fatalf("index state = %d, want stale retryable version %d", version, ingest.CurrentIndexVersion-1)
+			if version := metricsStore.IndexStates[sessionID]; version != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion-1 {
+				t.Fatalf("index state = %d, want stale retryable version %d", version, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion-1)
 			}
 		})
 	}

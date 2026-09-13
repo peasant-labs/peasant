@@ -1,0 +1,19 @@
+requiredNames:
+  - absent_usage_retains_owner
+  - complete_zero_without_cost
+  - partial_base
+  - subset_without_base
+  - cost_only_exponent
+  - recorded_floating_artifact
+  - inconsistent_cost_components_preserved
+  - native_cost_string_rejected
+  - native_cost_overflow_rejected
+  - native_cost_negative_rejected
+  - token_null_rejected_before_decode
+  - usage_null_rejected_before_decode
+  - token_overflow_rejected
+  - token_fraction_rejected
+  - token_negative_rejected
+  - token_total_mismatch_rejected
+  - subset_exceeds_base_rejected
+  - duplicate_usage_key_rejected

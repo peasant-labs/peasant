@@ -19,49 +19,49 @@ cases:
         winning_marker: CURRENT_ALL
         losing_markers: [LEGACY_ALL, JSON_ALL]
         ordered_entry_ids: [msg_current_all]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
       - name: current-and-legacy-prefers-current
         combination: current_legacy
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv6
         winning_marker: CURRENT_LEGACY
         losing_markers: [LEGACY_CURRENT]
         ordered_entry_ids: [msg_current_legacy]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
       - name: current-and-json-prefers-current
         combination: current_json
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv7
         winning_marker: CURRENT_JSON
         losing_markers: [JSON_CURRENT]
         ordered_entry_ids: [msg_current_json]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
       - name: legacy-and-json-prefers-legacy
         combination: legacy_json
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv8
         winning_marker: LEGACY_JSON
         losing_markers: [JSON_LEGACY]
         ordered_entry_ids: [msg_legacy_json, part_legacy_json]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
       - name: current-only
         combination: current_only
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv9
         winning_marker: CURRENT_ONLY
         losing_markers: []
         ordered_entry_ids: [msg_current_only]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
       - name: legacy-only
         combination: legacy_only
         session_id: ses_3cd91f52effeXd3QAJ54jOyzvA
         winning_marker: LEGACY_ONLY
         losing_markers: []
         ordered_entry_ids: [msg_legacy_only, part_legacy_only]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
       - name: json-only
         combination: json_only
         session_id: ses_3cd91f52effeXd3QAJ54jOyzvB
         winning_marker: JSON_ONLY
         losing_markers: []
         ordered_entry_ids: [msg_json_ses_3cd91f52effeXd3QAJ54jOyzvB]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}
+        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 8}
     graph_session: ses_3cd91f52effeXd3QAJ54jOyzvC
     parent_entry: msg_current_root
     child_entry: msg_current_child
@@ -74,7 +74,7 @@ cases:
     # The graph session holds one real tool call, counted on the message row and
     # again on its part row. Its third message carries only a text part and is
     # not a tool call, so it adds nothing here.
-    expected_metrics: {turn_count: 3, tool_calls: 2, compute_version: 7}
+    expected_metrics: {turn_count: 3, tool_calls: 2, compute_version: 8}
 required_loader_mutations:
   - unknown-field
   - wrong-count

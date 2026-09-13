@@ -1,0 +1,84 @@
+detailFields: '"id":"raw-session","harness":"pi","durationMins":0,"startTime":"2026-01-01T00:00:00Z","endTime":"2026-01-01T00:00:00Z","tokensIn":0,"tokensOut":0,"totalTokens":0,"toolCallCount":0,"turnCount":0'
+cases:
+  - name: pi usage and metadata survive mounted channel
+    topic: session_detail
+    accepted: true
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","sourceEntryRef":"source-one","usage":{"ownerId":"owner-one","sourceEntryRef":"source-one","scope":"assistant","completeness":"unknown","cost":{"source":"recorded_harness_estimate","total":"1e-7"}}}],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":{"nested":{"enabled":true}}}]}}'
+  - name: empty tool namespace survives mounted channel
+    topic: session_detail
+    accepted: true
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":"","arguments":"{}","result":""}]}]}}'
+  - name: null tool namespace rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":null,"arguments":"{}","result":""}]}]}}'
+  - name: duplicate tool namespace rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":"one","n\u0061mespace":"two","arguments":"{}","result":""}]}]}}'
+  - name: legacy detail accepts nullable turns and scorecard
+    topic: session_detail
+    accepted: true
+    raw: '{"type":"session_detail","data":{$DETAIL_LEGACY,"turns":null,"scorecard":null}}'
+  - name: duplicate envelope type rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"dashboard","type":"session_detail","data":{$DETAIL,"turns":[]}}'
+  - name: escaped duplicate payload member rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"turn\u0073":[]}}'
+  - name: escaped duplicate metadata key rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":{"safe":1,"s\u0061fe":2}}]}}'
+  - name: measured metadata string within record bound survives
+    topic: session_detail
+    accepted: true
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":"$REPEAT"}]}}'
+    repeat: { unit: x, count: 51175 }
+  - name: metadata string over decoded bound rejects
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":"$REPEAT"}]}}'
+    repeat: { unit: x, count: 65537 }
+  - name: escaped metadata raw byte bound rejects with type last
+    topic: session_detail
+    accepted: false
+    raw: '{"data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":"$REPEAT"}]},"type":"session_detail"}'
+    repeat: { unit: '\u0061', count: 10923 }
+  - name: metadata array over bound rejects
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":[$REPEAT 0]}]}}'
+    repeat: { unit: '0,', count: 4096 }
+  - name: ordinary transcript text is not metadata bounded
+    topic: session_detail
+    accepted: true
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"user","content":"$REPEAT","depth":0,"timestamp":"2026-01-01T00:00:00Z"}]}}'
+    repeat: { unit: x, count: 65537 }
+  - name: unrelated dashboard metadata is not detail validated
+    topic: dashboard
+    accepted: true
+    raw: '{"type":"dashboard","data":{"nativeMetadata":[{"data":"$REPEAT"}],"usage":{"scope":"not-a-detail-scope"}}}'
+    repeat: { unit: x, count: 16385 }
+  - name: unrelated sessions envelope stays compatible
+    topic: sessions
+    accepted: true
+    raw: '{"type":"sessions","data":{"sessions":[],"total":0}}'
+  - name: unrelated message duplicate keys still reject
+    topic: dashboard
+    accepted: false
+    raw: '{"type":"dashboard","data":{"total":1,"t\u006ftal":2}}'
+  - name: malformed JSON rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":'
+  - name: invalid usage domain rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","sourceEntryRef":"source-one","usage":{"ownerId":"owner-one","sourceEntryRef":"source-one","scope":"assistant","completeness":"partial","tokens":{"input":-1}}}]}}'
+  - name: legacy harness cannot carry Pi metadata
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL_LEGACY,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":{}}]}}'

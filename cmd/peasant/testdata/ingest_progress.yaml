@@ -1,0 +1,152 @@
+estimate:
+  required_cases: [raw-key-retains-estimate, external-cancel-retains-estimate, stop-only-retains-estimate, raw-key-retains-unavailable, external-cancel-retains-unavailable, stop-only-retains-unavailable, raw-key-retains-expired, external-cancel-retains-expired, stop-only-retains-expired, external-error-tick-before-delayed-cancel, external-unavailable-tick-before-delayed-cancel, external-expired-tick-before-delayed-cancel, external-stop-context-fallback]
+  cases:
+    - {name: external-error-tick-before-delayed-cancel, external: true, delayed_cancel: true, want: "estimate: 6s"}
+    - {name: external-unavailable-tick-before-delayed-cancel, external: true, delayed_cancel: true, unavailable: true, want: estimate unavailable}
+    - {name: external-expired-tick-before-delayed-cancel, external: true, delayed_cancel: true, unavailable: true, expired: true, want: estimate unavailable}
+    - {name: external-stop-context-fallback, stop_fallback: true, want: "estimate: 6s"}
+    - {name: raw-key-retains-estimate, key: true, want: "estimate: 6s"}
+    - {name: external-cancel-retains-estimate, external: true, want: "estimate: 6s"}
+    - {name: stop-only-retains-estimate, want: "estimate: 6s"}
+    - {name: raw-key-retains-unavailable, key: true, unavailable: true, want: estimate unavailable}
+    - {name: external-cancel-retains-unavailable, external: true, unavailable: true, want: estimate unavailable}
+    - {name: stop-only-retains-unavailable, unavailable: true, want: estimate unavailable}
+    - {name: raw-key-retains-expired, key: true, unavailable: true, expired: true, want: estimate unavailable}
+    - {name: external-cancel-retains-expired, external: true, unavailable: true, expired: true, want: estimate unavailable}
+    - {name: stop-only-retains-expired, unavailable: true, expired: true, want: estimate unavailable}
+lifecycle:
+  required_cases: [raw-key-awaits-acknowledgment, external-context-awaits-acknowledgment, external-tick-before-watcher-notification, successful-completion]
+  cases:
+    - {name: raw-key-awaits-acknowledgment, key: true}
+    - {name: external-context-awaits-acknowledgment, external: true}
+    - {name: external-tick-before-watcher-notification, external: true, delayed_notification: true}
+    - {name: successful-completion}
+execution:
+  required_cases: [startup-cancel-before-pipeline-run, completion-committed-before-late-cancel, failure-committed-before-late-cancel, cancel-ack-before-nil-pipeline-return, success-commit-cancel-tick-before-final-delivery, failed-commit-cancel-tick-before-final-delivery, cancellation-over-pipeline-error, ui-error-over-success, ui-error-over-failure, ui-error-over-cancellation, session-failure-summary, json-session-failure-payload]
+  cases:
+    - {name: startup-cancel-before-pipeline-run, cancel_at: startup, want: canceled, want_error: context, json: true}
+    - {name: completion-committed-before-late-cancel, cancel_at: wait, want: succeeded, contains: ["peasant harvest: 7 sessions", "duration: 2.3s"]}
+    - {name: failure-committed-before-late-cancel, run_error: true, cancel_at: wait, want: failed, want_error: pipeline}
+    - {name: cancel-ack-before-nil-pipeline-return, cancel_at: pipeline, nil_result: true, want: canceled, want_error: context}
+    - {name: success-commit-cancel-tick-before-final-delivery, cancel_at: before-final, want: succeeded, json: true, contains: ['"New": 7', '"duration": "2.3s"']}
+    - {name: failed-commit-cancel-tick-before-final-delivery, run_error: true, cancel_at: before-final, want: failed, want_error: pipeline, json: true}
+    - {name: cancellation-over-pipeline-error, cancel_at: pipeline, run_error: true, want: canceled, want_error: context, json: true}
+    - {name: ui-error-over-success, cancel_at: wait, ui_error: true, want: succeeded, want_error: ui}
+    - {name: ui-error-over-failure, cancel_at: before-final, run_error: true, ui_error: true, want: failed, want_error: ui, json: true}
+    - {name: ui-error-over-cancellation, cancel_at: pipeline, run_error: true, ui_error: true, want: canceled, want_error: ui}
+    - {name: session-failure-summary, cancel_at: none, session_errors: 2, want: succeeded, want_error: sessions, contains: ["peasant harvest: 9 sessions", "duration: 2.3s"]}
+    - {name: json-session-failure-payload, cancel_at: none, session_errors: 2, want: succeeded, json: true, contains: ['"New": 7', '"Errors": 2', '"duration": "2.3s"']}
+command_startup:
+  required_cases: [command-pre-canceled-before-setup, command-pre-canceled-json-before-setup]
+  cases:
+    - {name: command-pre-canceled-before-setup}
+    - {name: command-pre-canceled-json-before-setup, json: true}
+final_override:
+  required_cases: [success-overrides-pending-cancel, failure-overrides-pending-cancel]
+  cases:
+    - {name: success-overrides-pending-cancel, outcome: succeeded}
+    - {name: failure-overrides-pending-cancel, outcome: failed}
+interrupt:
+  required_cases:
+    - raw-control-c
+    - diff-raw-control-c
+    - pipe-sigint
+    - pipe-sigterm
+    - json-sigint
+    - json-sigterm
+    - terminal-sigterm
+    - terminal-sigint
+    - terminal-json-sigint
+  cases:
+    - name: raw-control-c
+      terminal: true
+      interrupt: key
+    - name: diff-raw-control-c
+      terminal: true
+      interrupt: key
+      diff_session: ses_3cd91f52effeXd3QAJ54jOyzn1
+    - name: pipe-sigint
+      interrupt: sigint
+    - name: pipe-sigterm
+      interrupt: sigterm
+    - name: json-sigint
+      json: true
+      interrupt: sigint
+    - name: json-sigterm
+      json: true
+      interrupt: sigterm
+    - name: terminal-sigterm
+      terminal: true
+      interrupt: sigterm
+    - name: terminal-sigint
+      terminal: true
+      interrupt: sigint
+    - name: terminal-json-sigint
+      terminal: true
+      json: true
+      interrupt: sigint
+inline:
+  required_cases:
+    - dark-standard
+    - light-wide
+    - short-retains-focus-and-timings
+    - one-row-retains-interrupt
+    - canceling-retains-stage-and-clock
+    - canceled-retains-stage-and-clock
+    - short-canceled-retains-timings
+    - one-row-canceling-status
+  cases:
+    - name: dark-standard
+      theme: dark
+      width: 80
+      height: 24
+      contains: [local import progress, 4/10, "total elapsed: 8s", estimate unavailable, ctrl+c to cancel]
+      absent: []
+    - name: light-wide
+      theme: light
+      width: 120
+      height: 40
+      contains: [local import progress, 4/10, "total elapsed: 8s", estimate unavailable, ctrl+c to cancel]
+      absent: []
+    - name: short-retains-focus-and-timings
+      theme: dark
+      width: 80
+      height: 6
+      contains: [index, 4/10, "total elapsed: 8s", estimate unavailable, ctrl+c to cancel]
+      absent: [_|||_]
+    - name: one-row-retains-interrupt
+      theme: light
+      width: 80
+      height: 1
+      contains: [ctrl+c to cancel]
+      absent: [local import progress, _|||_]
+    - name: canceling-retains-stage-and-clock
+      theme: dark
+      width: 80
+      height: 24
+      cancel: true
+      contains: [local import progress, 4/10, "total elapsed: 8s", canceling harvest]
+      absent: [ctrl+c to cancel, harvest canceled]
+    - name: canceled-retains-stage-and-clock
+      theme: light
+      width: 120
+      height: 40
+      cancel: true
+      stop: true
+      contains: [local import progress, 4/10, "total elapsed: 8s", harvest canceled]
+      absent: [ctrl+c to cancel, canceling harvest]
+    - name: short-canceled-retains-timings
+      theme: dark
+      width: 80
+      height: 6
+      cancel: true
+      stop: true
+      contains: [index, 4/10, "total elapsed: 8s", harvest canceled]
+      absent: [_|||_, ctrl+c to cancel]
+    - name: one-row-canceling-status
+      theme: light
+      width: 80
+      height: 1
+      cancel: true
+      contains: [canceling harvest]
+      absent: [local import progress, _|||_, ctrl+c to cancel]

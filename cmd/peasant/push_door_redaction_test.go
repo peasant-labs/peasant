@@ -14,14 +14,72 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
 // doorSecret is planted in an indexed entry's content, which is the field this
 // whole path exists to protect.
 const doorSecret = "sk-ant-api03-CLIDOORKEY000000000000x"
+
+func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
+	dir := t.TempDir()
+	const sessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
+	seedUploadableSession(t, dir, sessionID)
+	full := strings.Repeat("safe text ", 300) + "FULL-PREVIEW-TAIL " + doorSecret
+	seedEntryCarrying(t, dir, sessionID, full)
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := push.NewPublishedTurns(storedSessionEntries(t.Context(), db), redactor)
+	published, err := preview(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns := published.Turns
+	if len(turns) != 1 || !strings.Contains(turns[0].Content, "FULL-PREVIEW-TAIL") || strings.Contains(turns[0].Content, doorSecret) || !strings.Contains(turns[0].Content, "ANTHROPIC_KEY") {
+		t.Fatal("publication preview lost full tail or late redaction")
+	}
+	// A verified complete capture is the whole session, so this preview must not
+	// carry the partial line. The seeded session is the mounted producer of that
+	// state, read through the real store.
+	if published.PartialNotice {
+		t.Fatal("a complete capture reached the pane labelled partial, which would put the partial line on every session")
+	}
+	// Replacing the capture with a legacy preview must NOT silence the same
+	// mounted reader. A capture that can no longer publish is still readable, and
+	// refusing here removed the transcript from exactly the sessions a user opens
+	// the previewer to inspect. Publication readiness is enforced at the publish
+	// action instead.
+	//
+	// What must never change is the redaction above: this reader is the only thing
+	// between a recorded secret and the screen, and the assertion that proves it
+	// runs on the full capture, where there is content to inspect. Asserting the
+	// absence of the secret again here would pass on an empty result and prove
+	// nothing; the bounded-projection content belongs to the available-content
+	// store read.
+	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), nil); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := preview(sessionID)
+	if err != nil {
+		t.Fatalf("the preview refused a session it must still be able to show: %v", err)
+	}
+	// The capture that replaced it can no longer prove the whole session, so the
+	// pane is told to say the preview is partial.
+	if !legacy.PartialNotice {
+		t.Fatal("a capture that can no longer prove the whole session was offered to the pane as complete")
+	}
+}
 
 // capturedPublish is every part of one real multipart publish, keyed by form
 // name, as the village received it off the socket.
@@ -177,7 +235,11 @@ func seedEntryCarrying(t *testing.T, dir, sessionID, content string) {
 	}
 	defer db.Close()
 	preview := content
-	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), []schema.SessionEntry{{
+	input, err := db.LoadPublicationInput(t.Context(), ingest.SessionID(sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.SeedReadyPublication(t, db, &input.Metadata, []schema.SessionEntry{{
 		SessionID:      schema.SessionID(sessionID),
 		EntryIndex:     1,
 		Depth:          0,
@@ -185,7 +247,5 @@ func seedEntryCarrying(t *testing.T, dir, sessionID, content string) {
 		Harness:        schema.Harness(defaults.HarnessClaudeCode),
 		EntryType:      schema.EntryTypeText,
 		ContentPreview: &preview,
-	}}); err != nil {
-		t.Fatalf("index entries: %v", err)
-	}
+	}})
 }

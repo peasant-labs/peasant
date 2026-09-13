@@ -5,13 +5,19 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -594,41 +600,97 @@ func presence(present bool) string {
 	return "absent"
 }
 
-// runPushForDisclosures runs the production push command against a village that
-// accepts a connection and never answers, under a short budget.
+// runPushForDisclosures runs the production push command through its disclosures
+// and into a promptly responding local Village preflight.
 //
 // A publishable session has to be present: the record describes what is being
-// published, and there is nothing to record when nothing is. The hanging village
-// keeps the run off the network without stubbing the pipeline, and everything
-// asserted here is written before the first request is made.
+// published, and there is nothing to record when nothing is. The store-only seed
+// reaches preflight but lacks the on-disk metadata needed to upload a transcript.
+// Everything asserted here is written before that first request. Upload success
+// is covered separately; this corpus must not depend on a deadline expiring to
+// terminate, or a busy race run can lose its budget before printing the record.
 func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { listener.Close() })
-	go func() {
-		for {
-			conn, acceptErr := listener.Accept()
-			if acceptErr != nil {
-				return
-			}
-			t.Cleanup(func() { conn.Close() })
+	var preflightReached atomic.Bool
+	var refusedUploads atomic.Int64
+	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/schema/version":
+			preflightReached.Store(true)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/annotations/manifest":
+			// The annotation stage can check its empty manifest after preflight.
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/transcripts/publish":
+			// The seeded session is publishable, which is what carries the run past
+			// the preflight this test needs reached. The village REFUSES the upload,
+			// and the assertions after the run prove nothing was certified locally:
+			// the subject here is what the command discloses, and a stored receipt
+			// would add a second one.
+			refusedUploads.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{}`))
+			return
+		default:
+			t.Errorf("unexpected Village request %s %s: this disclosure scenario publishes nothing", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
 		}
-	}()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(village.Close)
 
 	dir := t.TempDir()
-	writeTestCredentialsFor(t, dir, "http://"+listener.Addr().String())
+	writeTestCredentialsFor(t, dir, village.URL)
 	seedPushableSession(t, dir)
 	cfgPath := writeCfg(t, dir, "disclosures.yaml", fmt.Sprintf(
-		"version: 1\npush:\n  method: all\n  visibility: %s\nredaction:\n  level: %s\n",
-		testCase.Visibility, testCase.ConfiguredLevel))
+		"version: 1\noutput:\n  basePath: %s\npush:\n  method: all\n  visibility: %s\nredaction:\n  level: %s\n",
+		filepath.Join(dir, "transcripts"), testCase.Visibility, testCase.ConfiguredLevel))
 
-	args := []string{"--config", cfgPath, "--non-interactive", "--timeout", (300 * time.Millisecond).String()}
+	// A safety ceiling for local setup and HTTP, not the trigger that ends the
+	// scenario. Keep the intentional 300ms/1ms expiry tests in hook ergonomics
+	// separate: these cases need the report query to complete under package-wide
+	// race-test contention. The server answers immediately, so this cap does not
+	// add a wait to a passing test.
+	const budget = 30 * time.Second
+	args := []string{"--config", cfgPath, "--non-interactive", "--timeout", budget.String(), "--state-dir", dir}
 	if testCase.Quiet {
 		args = append(args, "--quiet")
 	}
-	_, stderr, _ := executePushCmdSeparate(t, dir, args)
+	stdout, stderr, err := executePushCmdSeparate(t, dir, args)
+	if err != nil {
+		t.Fatalf("disclosure command failed before completing its preflight scenario: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !preflightReached.Load() {
+		t.Fatalf("the Village preflight was never reached; an early return cannot prove disclosure behavior, especially for quiet cases\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	// Allowing the upload request must not cost the guarantee the old handler
+	// carried by rejecting it: the village refused every attempt, and the run
+	// certified nothing locally for the session it attempted.
+	if refusedUploads.Load() == 0 {
+		t.Fatalf("no upload was attempted, so the refusal this scenario relies on never happened\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	assertNothingPublishedLocally(t, dir, village.URL)
 	return stderr
+}
+
+// assertNothingPublishedLocally opens the database the command just used and
+// requires that no publication was recorded for the seeded session.
+//
+// A village refusal is only half of "nothing was published": the other half is
+// that Peasant wrote no receipt and advanced no publication cursor for it.
+func assertNothingPublishedLocally(t *testing.T, dir, villageURL string) {
+	t.Helper()
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatalf("reopen the database the command used: %v", err)
+	}
+	defer db.Close()
+	receipt, err := db.Publication(t.Context(), villageURL, testCredentialsUserID, testutil.TestProjectHash, pushableSessionID)
+	if err != nil {
+		t.Fatalf("read the publication record for the seeded session: %v", err)
+	}
+	if receipt != nil {
+		t.Fatalf("a refused upload was still recorded as published: %+v", receipt)
+	}
 }

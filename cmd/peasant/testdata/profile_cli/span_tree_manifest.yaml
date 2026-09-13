@@ -1,0 +1,12 @@
+requiredNames:
+  - single_root
+  - nested_sessions
+  - disconnected_stage
+  - dangling_parent
+  - cyclic_parents
+  - missing_root
+  - duplicate_root
+  - parented_root
+  - duplicate_id
+  - missing_id
+  - cross_session_attribution

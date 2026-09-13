@@ -26,6 +26,16 @@ type GitResolver interface {
 	WalkUpRemoteURL(ctx context.Context, dir string) (remoteURL string, resolvedDir string, err error)
 }
 
+// RecordedBranchRemoteResolver resolves the upstream configured for a branch
+// recorded by a transcript. Git configuration does not retain historical
+// values, so production resolution uses the branch's current configuration.
+type RecordedBranchRemoteResolver interface {
+	RemoteURLForBranch(ctx context.Context, dir, branch string) (remoteURL, trackingBranch string, err error)
+	OriginRemoteURL(ctx context.Context, dir string) (string, error)
+}
+
+var _ RecordedBranchRemoteResolver = (*ExecGitResolver)(nil)
+
 // RepositoryIdentityResolver resolves a physical worktree path to its logical
 // repository cohort and physical Git directory. Callers retain the original
 // ClonePath for matching, persistence, publishing, and destructive operations.
@@ -360,7 +370,78 @@ func (g *ExecGitResolver) ResolveRepositoryRoot(ctx context.Context, dir string)
 }
 
 func (g *ExecGitResolver) RemoteURL(ctx context.Context, dir string) (string, error) {
-	return runGit(ctx, "git", "-C", dir, "remote", "get-url", "origin")
+	branch, branchErr := g.Branch(ctx, dir)
+	if branchErr == nil && branch != "" && branch != "HEAD" {
+		if remote, _, err := g.RemoteURLForBranch(ctx, dir, branch); err == nil && remote != "" {
+			return remote, nil
+		}
+	}
+	return g.OriginRemoteURL(ctx, dir)
+}
+
+// OriginRemoteURL resolves only origin, without consulting checkout tracking.
+func (g *ExecGitResolver) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
+	remote, err := runGit(ctx, "git", "-C", dir, "remote", "get-url", "origin")
+	if err != nil || !isUsableRemoteURL(remote) {
+		return "", err
+	}
+	return remote, nil
+}
+
+// RemoteURLForBranch returns the current configured upstream for branch. A
+// local-only upstream is not a publishable repository identity.
+func (g *ExecGitResolver) RemoteURLForBranch(ctx context.Context, dir, branch string) (string, string, error) {
+	if _, err := runGit(ctx, "git", "check-ref-format", "--branch", branch); err != nil {
+		return "", "", err
+	}
+	format := "%(upstream:remotename)%00%(upstream:short)"
+	out, err := runGit(ctx, "git", "-C", dir, "for-each-ref", "--format="+format, "refs/heads/"+branch)
+	if err != nil || out == "" {
+		return "", "", err
+	}
+	parts := strings.SplitN(out, "\x00", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[0] == "." || parts[1] == "" {
+		return "", "", nil
+	}
+	remote, err := runGit(ctx, "git", "-C", dir, "remote", "get-url", parts[0])
+	if err != nil || !isUsableRemoteURL(remote) {
+		return "", "", err
+	}
+	return remote, parts[1], nil
+}
+
+func isUsableRemoteURL(remote string) bool {
+	_, err := NormalizeRemoteURL(remote)
+	return err == nil
+}
+
+// ResolveGitRemote applies the attribution policy shared by adapters and
+// repository-scoped operations. Explicit provider evidence wins; otherwise a
+// recorded branch uses its current upstream configuration, followed by the
+// origin only. Checkout upstream is used only without a recorded branch. Callers retain path identity when
+// this returns an empty remote.
+func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string) (remoteURL, trackingBranch string) {
+	if explicitRemote != "" {
+		return explicitRemote, ""
+	}
+	if git == nil {
+		return "", ""
+	}
+	if recordedBranch != "" {
+		if resolver, ok := git.(RecordedBranchRemoteResolver); ok {
+			if remote, tracking, err := resolver.RemoteURLForBranch(ctx, dir, recordedBranch); err == nil && remote != "" {
+				return remote, tracking
+			}
+			remote, _ := resolver.OriginRemoteURL(ctx, dir)
+			return remote, ""
+		}
+		// Legacy resolvers expose only origin through RemoteURL.
+		remote, _ := git.RemoteURL(ctx, dir)
+		return remote, ""
+	}
+	remote, _ := git.RemoteURL(ctx, dir)
+	tracking, _ := git.TrackingBranch(ctx, dir)
+	return remote, tracking
 }
 
 func (g *ExecGitResolver) Branch(ctx context.Context, dir string) (string, error) {

@@ -820,8 +820,6 @@ func assertKickstartStoredGateCrossSurfaces(t *testing.T, testCase kickstartStor
 	wizardSessions, err := buildPushWizardSessions(
 		t.Context(),
 		db,
-		&ingest.OSFileSystem{},
-		configured.Output.BasePath,
 		push.PushCandidateQuery{Method: configured.Push.Method, Sources: configured.Push.Sources},
 		selection,
 	)

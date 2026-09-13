@@ -1,0 +1,5 @@
+requiredNames:
+  - legacy_required_refresh_is_retained
+  - optional_adapter_provenance_does_not_invalidate_existing_harnesses
+  - current_metadata_is_unchanged
+  - newer_metadata_is_not_downgraded

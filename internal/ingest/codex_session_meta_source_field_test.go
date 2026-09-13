@@ -156,7 +156,13 @@ func TestCodexAdapter_ExtractMetadata_SessionMetaSourceField(t *testing.T) {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
 			const base = "/home/test/.codex/sessions"
-			sessionID := "00000000-0000-4000-8000-000000000020"
+			var sourceIdentity struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal([]byte(tc.SessionMetaPayloadJSON), &sourceIdentity); err != nil {
+				t.Fatal(err)
+			}
+			sessionID := sourceIdentity.ID
 			rollout := fmt.Sprintf("%s/2024/01/02/rollout-2024-01-02T03-12-00-%s.jsonl", base, sessionID)
 
 			sessionMetaLine := fmt.Sprintf(

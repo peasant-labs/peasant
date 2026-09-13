@@ -1,0 +1,4 @@
+name: explicit provider identity converges independently of checkout
+initial: |
+  {"type":"session_meta","payload":{"id":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","cwd":CWD,"timestamp":"2026-09-07T10:00:00Z","git":{"branch":"main","repository_url":"https://github.com/example/provider.git"}}}
+  {"type":"response_item","timestamp":"2026-09-07T10:00:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"synthetic provider request"}]}}

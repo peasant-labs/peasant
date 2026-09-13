@@ -127,6 +127,50 @@ func validCommandWrapperBody(kind commandWrapperKind, body string) bool {
 	}
 }
 
+// commandInvocationFromEntry projects the command an entry recorded at index
+// time onto the wire type. The recorded name gets the leading slash the wire
+// requires when the harness recorded it bare. It returns nil when the entry
+// recorded no command and when the recorded name cannot form a valid
+// invocation — which is also how a built-in harness command stays off the wire,
+// because schema.NewCommandInvocation refuses one.
+func commandInvocationFromEntry(entry schema.SessionEntry) *schema.CommandInvocation {
+	if entry.Extra == nil {
+		return nil
+	}
+	var stored struct {
+		Name string          `json:"command_name"`
+		Args json.RawMessage `json:"command_args"`
+	}
+	if err := json.Unmarshal([]byte(*entry.Extra), &stored); err != nil || stored.Name == "" {
+		return nil
+	}
+	name := stored.Name
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	invocation, err := schema.NewCommandInvocation(name, commandArgsFromRaw(stored.Args))
+	if err != nil {
+		return nil
+	}
+	return &invocation
+}
+
+// commandArgsFromRaw reads a stored command_args value tolerantly: a JSON
+// string becomes the args, and anything else — a number, an object, an array,
+// a boolean, null, or the field being absent — is treated as empty args, so a
+// non-string args value never drops the invocation (the name still reaches the
+// wire).
+func commandArgsFromRaw(raw json.RawMessage) string {
+	var args string
+	if len(raw) == 0 {
+		return args
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return ""
+	}
+	return args
+}
+
 // entriesToTurns converts flat session_entries into the Turn model expected by
 // the detail view. Depth=1 tool_use and tool_result entries are folded into
 // their depth=0 parent Turn's ToolCalls, producing one card per assistant
@@ -140,13 +184,67 @@ func validCommandWrapperBody(kind commandWrapperKind, body string) bool {
 //     text/thinking siblings of tool turns).
 //   - Pass 3: Emit turns with folded ToolCalls attached to depth=0 parents.
 func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
+	projection, _ := entriesToProjection(entries, ProjectionOptions{}, false)
+	return projection.Turns
+}
+
+// toolResultOutput is the text a tool_result entry contributes as a tool call's
+// result on the served projection.
+//
+// It is the recorded output; and for an OMISSION PLACEHOLDER — the entry that
+// stands where ingest left a source record out — it is the reader-facing note,
+// which is the only text such an entry carries and the whole reason it exists.
+// Without this the placeholder would be stored, published and served as an
+// empty result, and a reader would see a tool call that silently returned
+// nothing instead of being told what is missing and why.
+func toolResultOutput(e schema.SessionEntry) string {
+	if e.ToolOutput != nil {
+		return *e.ToolOutput
+	}
+	if _, omitted := ingest.OmittedRecordOf(e); omitted && e.ContentPreview != nil {
+		return *e.ContentPreview
+	}
+	return ""
+}
+
+// unjoinedOmissionPlaceholder reports whether an entry is an omission
+// placeholder, the entry that stands where ingest left a source record out,
+// that NO tool call will show to a reader.
+//
+// A placeholder is shown as a tool call's result only when it carries the id
+// of a tool call the transcript also holds. It carries no id at all when the
+// omitted record opened without one of the correlation id keys: every Pi
+// omission, an oversized assistant message, and a Cursor or Strike record
+// whose id sits outside the read prefix. It carries an id nothing answers when
+// the tool call itself was the omitted record. In both of those cases the
+// placeholder is the only trace of the missing record, so it has to be emitted
+// as a turn of its own; suppressing it as a depth-0 tool wrapper would drop
+// the note from every served surface (the detail socket, the previews, the
+// export and the publication) and the reader would see the conversation jump.
+func unjoinedOmissionPlaceholder(entry schema.SessionEntry, toolUseIDs map[string]bool) bool {
+	if _, omitted := ingest.OmittedRecordOf(entry); !omitted {
+		return false
+	}
+	return entry.ToolCallID == nil || !toolUseIDs[*entry.ToolCallID]
+}
+
+func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
 	if len(entries) == 0 {
 		return nil
 	}
 
+	// The tool calls this transcript actually holds. An omission placeholder
+	// is folded into one of them only when its id is in this set.
+	toolUseIDs := make(map[string]bool)
+	for _, e := range entries {
+		if e.EntryType == schema.EntryTypeToolUse && e.ToolCallID != nil {
+			toolUseIDs[*e.ToolCallID] = true
+		}
+	}
+
 	// Pass 1: Collect tool_result data keyed by ToolCallID for joining.
-	// Also collects depth=0 entries with ToolOutput for backward compat
-	// (old-style entries where both tool_use and tool_result are at depth=0).
+	// Inline ToolOutput remains a fallback at any depth, including tool_use
+	// children whose harness stores the completed result on the call itself.
 	resultMap := make(map[string]toolResultData)
 	for _, e := range entries {
 		if e.ToolCallID == nil {
@@ -154,25 +252,22 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		}
 		// Depth=1 tool_result entries are the primary source.
 		if e.Depth == 1 && e.EntryType == schema.EntryTypeToolResult {
-			rd := toolResultData{IsError: e.IsError}
-			if e.ToolOutput != nil {
-				rd.Output = *e.ToolOutput
-			}
+			rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
 			if e.TimestampMs != nil {
 				rd.Timestamp = *e.TimestampMs
 			}
 			resultMap[*e.ToolCallID] = rd
 			continue
 		}
-		// Backward compat: depth=0 entries with ToolOutput (old-style).
-		// Only used for duration computation on old-style entries.
-		if e.ToolOutput != nil && e.TimestampMs != nil {
+		// Preserve inline output as well as untimed flat result/error records.
+		// Explicit depth-1 results above take precedence in either entry order.
+		if e.ToolOutput != nil || (e.Depth == 0 && e.EntryType == schema.EntryTypeToolResult) {
 			if _, exists := resultMap[*e.ToolCallID]; !exists {
-				resultMap[*e.ToolCallID] = toolResultData{
-					Output:    *e.ToolOutput,
-					IsError:   e.IsError,
-					Timestamp: *e.TimestampMs,
+				rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
+				if e.TimestampMs != nil {
+					rd.Timestamp = *e.TimestampMs
 				}
+				resultMap[*e.ToolCallID] = rd
 			}
 		}
 	}
@@ -242,6 +337,9 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	// v10+: indexer canonicalizes wrapper role to tool (R2).
 	for _, e := range entries {
 		if e.Depth == 0 && e.Role == schema.RoleTool {
+			if unjoinedOmissionPlaceholder(e, toolUseIDs) {
+				continue
+			}
 			suppress[e.EntryIndex] = true
 		}
 	}
@@ -283,7 +381,8 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	turns := make([]ingest.Turn, 0, len(entries))
 	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
-		if suppress[e.EntryIndex] {
+		_, pi := evidence[e.EntryIndex]
+		if suppress[e.EntryIndex] || ingest.IsPiCarrier(e) || (pi && e.Depth > 0 && e.ParentIndex != nil && (e.EntryType == schema.EntryTypeThinking || e.EntryType == schema.EntryTypeText)) {
 			continue
 		}
 
@@ -297,19 +396,37 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			ts = time.UnixMilli(*e.TimestampMs)
 		}
 
+		command := commandInvocationFromEntry(e)
+		role := injectedCommandRole(e, content)
+		// A USER turn whose only content is the invocation is harness-injected
+		// markup too, exactly like the command wrappers the gate above
+		// recognizes. A harness that records the invocation structurally leaves
+		// no text for that gate to match, so the role is settled here instead.
+		// The stored role is part of the condition because not every harness
+		// records a command on a user entry: one records a skill call on the
+		// ASSISTANT message that made it, and that turn is already correctly
+		// attributed to its author, so it keeps the assistant role (and with it
+		// the only role on which its model observation is valid evidence).
+		if command != nil && e.Role == schema.RoleUser && strings.TrimSpace(content) == "" {
+			role = schema.RoleSystem
+		}
+
 		t := ingest.Turn{
-			Index:       e.EntryIndex,
-			Role:        injectedCommandRole(e, content),
-			Content:     content,
-			Timestamp:   ts,
-			Depth:       e.Depth,
-			ParentIndex: e.ParentIndex,
-			EntryType:   e.EntryType,
-			HasThinking: e.HasThinking,
-			StopReason:  e.StopReason,
-			TokensIn:    e.TokensIn,
-			TokensOut:   e.TokensOut,
-			PartType:    e.PartType,
+			SourceEntryRef: evidence[e.EntryIndex].SourceRef,
+			Usage:          evidence[e.EntryIndex].Usage,
+			Index:          e.EntryIndex,
+			Role:           role,
+			Command:        command,
+			Content:        content,
+			Timestamp:      ts,
+			Depth:          e.Depth,
+			ParentIndex:    e.ParentIndex,
+			EntryType:      e.EntryType,
+			HasThinking:    e.HasThinking,
+			StopReason:     e.StopReason,
+			TokensIn:       e.TokensIn,
+			TokensOut:      e.TokensOut,
+			PartType:       e.PartType,
 		}
 		observation := modelObservation(e)
 		projectedObservation := projectModelObservation(observation)
@@ -325,7 +442,12 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		// Backward compatibility: old-style single-level entries carry ToolCallID
 		// directly on depth=0. These are not collected by the fold pre-pass
 		// (which only processes depth=1), so handle them here.
-		if e.ToolCallID != nil && len(t.ToolCalls) == 0 {
+		//
+		// An omission placeholder no tool call will show is emitted as its own
+		// turn carrying the note, so it gets no synthetic tool call here: that
+		// would show the reader the same note twice, once as the turn and once
+		// as the result of a call that answers nothing.
+		if e.ToolCallID != nil && len(t.ToolCalls) == 0 && !unjoinedOmissionPlaceholder(e, toolUseIDs) {
 			tc := ingest.ToolCall{
 				ID: *e.ToolCallID,
 			}
@@ -336,13 +458,15 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 				tc.Arguments = *e.ToolInput
 				tc.FilePath = extractFilePath(*e.ToolInput)
 			}
-			if e.ToolOutput != nil {
-				tc.Result = *e.ToolOutput
-			}
+			tc.Result = toolResultOutput(e)
 			if e.ToolKind != nil {
 				tc.ToolKind = *e.ToolKind
 			}
 			tc.IsError = e.IsError
+			if rd, ok := resultMap[*e.ToolCallID]; ok && e.EntryType == schema.EntryTypeToolUse {
+				tc.Result = rd.Output
+				tc.IsError = rd.IsError
+			}
 
 			// Compute duration from tool_use → tool_result timestamps.
 			if e.TimestampMs != nil {
@@ -382,7 +506,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
 		hasObservation := turnObservations[t.Index].present
-		if suppressEmptyTurn(hasContent, hasTools, hasObservation) {
+		if t.SourceEntryRef == "" && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -398,7 +522,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		prevObservation := turnObservations[prev.Index]
 		currObservation := turnObservations[curr.Index]
 		observationsEqual := modelObservationsEquivalent(prevObservation, currObservation)
-		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
+		if prev.SourceEntryRef == "" && curr.SourceEntryRef == "" && prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
 			prevHasTools := len(prev.ToolCalls) > 0
 			currHasTools := len(curr.ToolCalls) > 0
 			if currHasTools && !prevHasTools {
@@ -485,6 +609,10 @@ func qualityMetricsToScorecard(q *schema.QualityMetrics) *schema.SessionScorecar
 // Exported for use by the export package to ensure the exported transcript
 // matches exactly what the session viewer shows.
 func SessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
+	if s.Harness == schema.HarnessPi {
+		detail, _ := SessionToDetailValidated(s)
+		return detail
+	}
 	return sessionToDetail(s)
 }
 
@@ -494,7 +622,21 @@ func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, 
 	if err := validateSessionObservedModelEvidence(s); err != nil {
 		return nil, err
 	}
-	return sessionToDetail(s), nil
+	detail := sessionToDetail(s)
+	if s.Harness == schema.HarnessPi {
+		if err := piLegacyMirrors(detail); err != nil {
+			return nil, err
+		}
+	}
+	if err := schema.ValidateSessionDetailPayload(*detail); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return nil, err
+	}
+	validated, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	return &validated, err
 }
 
 // sessionToDetail converts a full Session to a SessionDetailPayload.
@@ -504,31 +646,38 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		toolCalls := make([]schema.ToolCallDetail, len(t.ToolCalls))
 		for j, tc := range t.ToolCalls {
 			toolCalls[j] = schema.ToolCallDetail{
-				ID:         tc.ID,
-				Name:       tc.Name,
-				Arguments:  tc.Arguments,
-				Result:     tc.Result,
-				DurationMs: tc.DurationMs,
-				ExitCode:   tc.ExitCode,
-				FilePath:   tc.FilePath,
-				IsError:    tc.IsError,
-				ToolKind:   tc.ToolKind,
+				CallEntryRef:   tc.CallEntryRef,
+				ResultEntryRef: tc.ResultEntryRef,
+				Usage:          tc.Usage,
+				ID:             tc.ID,
+				Name:           tc.Name,
+				Namespace:      tc.Namespace,
+				Arguments:      tc.Arguments,
+				Result:         tc.Result,
+				DurationMs:     tc.DurationMs,
+				ExitCode:       tc.ExitCode,
+				FilePath:       tc.FilePath,
+				IsError:        tc.IsError,
+				ToolKind:       tc.ToolKind,
 			}
 		}
 		turns[i] = schema.TurnDetail{
-			Index:         t.Index,
-			Role:          t.Role,
-			Content:       t.Content,
-			ToolCalls:     toolCalls,
-			Timestamp:     t.Timestamp,
-			Depth:         t.Depth,
-			ParentIndex:   t.ParentIndex,
-			EntryType:     t.EntryType,
-			HasThinking:   t.HasThinking,
-			StopReason:    t.StopReason,
-			TokensIn:      t.TokensIn,
-			TokensOut:     t.TokensOut,
-			ObservedModel: t.ObservedModel,
+			SourceEntryRef: t.SourceEntryRef,
+			Usage:          t.Usage,
+			Index:          t.Index,
+			Role:           t.Role,
+			Command:        t.Command,
+			Content:        t.Content,
+			ToolCalls:      toolCalls,
+			Timestamp:      t.Timestamp.UTC(),
+			Depth:          t.Depth,
+			ParentIndex:    t.ParentIndex,
+			EntryType:      t.EntryType,
+			HasThinking:    t.HasThinking,
+			StopReason:     t.StopReason,
+			TokensIn:       t.TokensIn,
+			TokensOut:      t.TokensOut,
+			ObservedModel:  t.ObservedModel,
 		}
 	}
 
@@ -551,11 +700,12 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	// self-assessment card; nil when the session has no computed metrics.
 	scorecard := qualityMetricsToScorecard(s.Metadata.Quality)
 
-	return &schema.SessionDetailPayload{
+	detail := &schema.SessionDetailPayload{
+		NativeMetadata:   s.NativeMetadata,
 		ID:               string(s.ID),
 		Harness:          s.Harness,
-		StartTime:        s.StartTime,
-		EndTime:          s.EndTime,
+		StartTime:        s.StartTime.UTC(),
+		EndTime:          s.EndTime.UTC(),
 		DurationMins:     s.Metadata.Duration.Minutes(),
 		TotalTokens:      s.Metadata.TotalTokens,
 		TokensIn:         s.Metadata.TokensIn,
@@ -573,4 +723,17 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Outcome:          outcome,
 		Scorecard:        scorecard,
 	}
+	// Every served detail leaves this one producer bounded for display. A stored
+	// record may be far larger than the contract's document policy allows the
+	// served document to be, and a session is never refused for the size of its
+	// tool outputs: the oversized text is shortened here, with a visible note,
+	// and the store keeps the whole record. A session whose turn structure alone
+	// exceeds the document budget is still refused by the contract's decoder;
+	// that case is bounded by the hard document cap on purpose, and paged
+	// serving is the planned answer to it. Every consumer of this projection,
+	// the session_detail WebSocket, the kickstart preview, `peasant export` and
+	// the publication content, inherits the same bound because they all come
+	// through here.
+	BoundServedDetail(detail, DefaultServedDocumentBudget())
+	return detail
 }

@@ -14,5 +14,3 @@
 {"type":"usage.reported","time":"2026-07-28T12:35:09Z","data":{"turnId":"turn-1","providerRequestId":"request-1","inputTokens":12,"outputTokens":8}}
 {"type":"turn.completed","time":"2026-07-28T12:35:10Z","data":{"turnId":"turn-1","providerRequestId":"request-1","stopReason":"end_turn"}}
 {"type":"session.titled","time":"2026-07-28T12:35:11Z","data":{"title":"fixture root final title"}}
-{"type":
-{"type":"future.additive.event","time":"2026-07-28T12:35:12Z","data":{"ignored":true}}

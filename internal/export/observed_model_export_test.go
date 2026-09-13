@@ -31,7 +31,6 @@ type observedModelExportFixture struct {
 	ExpectedSeed           string                    `yaml:"expectedSeed"`
 	Turns                  []observedModelExportTurn `yaml:"turns"`
 	ExpectedObservedModels []string                  `yaml:"expectedObservedModels"`
-	ExpectedCaseCount      int                       `yaml:"expectedCaseCount"`
 	RequiredNames          []string                  `yaml:"requiredNames"`
 }
 
@@ -41,7 +40,13 @@ func TestExportSessionEmitsObservedModelEvidence(t *testing.T) {
 	if err := yaml.Unmarshal(observedModelExportFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode export fixture: %v", err)
 	}
-	if fixture.SessionID == "" || fixture.ExpectedCaseCount != 2 || len(fixture.Turns) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
+	// The corpus is held by NAME, never by a count. A declared case count lives in
+	// the same file as the cases, so deleting a turn and decrementing the number
+	// leaves the fixture self-consistent and the coverage gone; the required names
+	// below cannot be satisfied by a fixture that dropped one. Every turn still
+	// needs its own expected observed model, which is a relationship between two
+	// lists rather than a number either of them declares.
+	if fixture.SessionID == "" || len(fixture.Turns) == 0 || len(fixture.RequiredNames) == 0 || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
 		t.Fatalf("export fixture inventory is incomplete: %+v", fixture)
 	}
 	seen := map[string]bool{}
@@ -64,7 +69,7 @@ func TestExportSessionEmitsObservedModelEvidence(t *testing.T) {
 		extraString := string(extra)
 		entries[index] = schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: source.Index, Harness: ingest.HarnessClaudeCode, Role: schema.Role(source.Role), EntryType: schema.EntryTypeText, Depth: source.Depth, ContentPreview: &source.Content, Extra: &extraString}
 	}
-	if err := store.IndexSessionEntries(context.Background(), schema.SessionID(fixture.SessionID), entries); err != nil {
+	if err := testutil.WriteFullEntries(context.Background(), store, schema.SessionID(fixture.SessionID), entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 	payload, err := export.ExportSession(context.Background(), store, testutil.NewMemFS(), fixture.SessionID)

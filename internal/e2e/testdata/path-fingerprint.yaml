@@ -1,0 +1,23 @@
+required_case_names:
+  - large_file_has_bounded_allocation_and_content_sensitivity
+  - excluded_subtree_is_not_hashed
+  - sibling_of_excluded_subtree_is_hashed
+cases:
+  - name: large_file_has_bounded_allocation_and_content_sensitivity
+    file: data/large.db
+    file_bytes: 67108864
+    excluded: state/test/e2e
+    max_allocated_bytes: 1048576
+    want_content_change: true
+  - name: excluded_subtree_is_not_hashed
+    file: state/test/e2e/large.db
+    file_bytes: 67108864
+    excluded: state/test/e2e
+    max_allocated_bytes: 1048576
+    want_content_change: false
+  - name: sibling_of_excluded_subtree_is_hashed
+    file: state/test/e2e-other/session.jsonl
+    file_bytes: 4096
+    excluded: state/test/e2e
+    max_allocated_bytes: 1048576
+    want_content_change: true

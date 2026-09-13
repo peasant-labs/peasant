@@ -123,6 +123,7 @@ type SessionFilter struct {
 // sessions list command. All nil pointer fields mean "no constraint".
 type SessionListFilter struct {
 	SessionFilter                           // embed base filter (ModelHarness, ProjectHash, HostSlug, StartFrom, StartBefore)
+	SessionID     *string                   // filter to one exact session id (s.session_id = X); nil = all sessions
 	Tag           *string                   // filter by session tag (matches any tag in the JSON tags array)
 	ProjectName   *string                   // filter by project: canonical_remote LIKE '%X%' first, fallback basename(canonical_cwd) = X
 	SortField     defaults.SessionSortField // column to sort by (date, turns, tokens, project)
@@ -425,9 +426,12 @@ func (s *Store) SessionDetailByID(ctx context.Context, sessionID string) (*Sessi
 		return nil, fmt.Errorf("store: session detail by id take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return sessionDetailByIDOnConn(conn, sessionID)
+}
 
+func sessionDetailByIDOnConn(conn *sqlite.Conn, sessionID string) (*SessionDetailRow, error) {
 	var row *SessionDetailRow
-	err = sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlSessionDetailByID, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			r := scanSessionDetailRow(stmt)
@@ -636,24 +640,81 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version
+	// Readiness is the publication binding plus a current metadata schema
+	// version. The binding half is shared, so it cannot drift from the binding
+	// that captured index state reports.
+	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version,
+s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
+CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
+p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
+c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version,
+s.index_version,s.indexed_input_hash
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
+LEFT JOIN session_content_captures c ON c.session_id=s.session_id
 WHERE s.session_id IN (` +
 		strings.Join(placeholders, ",") + ")"
 
 	result := make(map[ingest.SessionID]ingest.SessionLocation, len(sessionIDs))
 	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: args,
+		Args: append([]any{ingest.CurrentSchemaVersion}, args...),
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			id := schema.SessionID(stmt.ColumnText(0))
+			id, parseErr := schema.NewSessionID(stmt.ColumnText(0))
+			if parseErr != nil {
+				return parseErr
+			}
+			projectHash, parseErr := schema.NewProjectHash(stmt.ColumnText(5))
+			if parseErr != nil {
+				return parseErr
+			}
+			readiness := ingest.PublicationNeedsIngest
+			eligible, captureErr := publicationContentEligible(stmt, 16, stmt.ColumnInt64(8))
+			if stmt.ColumnInt(9) == 1 && publicationLocationSnapshotValid(stmt) && captureErr == nil && eligible {
+				readiness = ingest.PublicationReady
+			}
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
+			var adapterVersion *int
+			if stmt.ColumnType(21) != sqlite.TypeNull {
+				value := stmt.ColumnInt(21)
+				adapterVersion = &value
+			}
+			var sourceFingerprint []byte
+			if stmt.ColumnType(15) != sqlite.TypeNull {
+				sourceFingerprint = make([]byte, stmt.ColumnLen(15))
+				stmt.ColumnBytes(15, sourceFingerprint)
+			}
+			// The capture failure code is read in the same bulk snapshot as the
+			// rest of the location. An unknown code fails the whole lookup: the
+			// DIFF classifier acts on this value, so a code this build cannot
+			// name must never read as "no refusal" and let a refusal be
+			// re-parsed on every harvest.
+			failureCode, codeErr := ingest.NewContentCaptureFailureCode(stmt.ColumnText(19))
+			if codeErr != nil {
+				return fmt.Errorf("bulk lookup session locations: stored content capture failure code for session %s is not recognized: %w; restore valid capture state", id, codeErr)
+			}
+			var indexedInputHash *string
+			if stmt.ColumnType(23) != sqlite.TypeNull {
+				hash := stmt.ColumnText(23)
+				indexedInputHash = &hash
+			}
 			result[id] = ingest.SessionLocation{
-				HostSlug:      stmt.ColumnText(1),
-				ParentID:      stmt.ColumnText(2),
-				IngestedMs:    &ingestedMs,
-				SchemaVersion: schemaVersion,
+				ProjectHash:             projectHash,
+				OpaqueHostID:            stmt.ColumnText(6),
+				GitRemote:               nullableColumnText(stmt, 7),
+				CaptureRevision:         stmt.ColumnInt64(8),
+				PublicationReadiness:    readiness,
+				HostSlug:                stmt.ColumnText(1),
+				ParentID:                stmt.ColumnText(2),
+				IngestedMs:              &ingestedMs,
+				AdapterVersion:          adapterVersion,
+				SchemaVersion:           schemaVersion,
+				SourceFingerprint:       sourceFingerprint,
+				SourceEvidenceSupported: true,
+				ContentFailureCode:      failureCode,
+				IndexerVersion:          stmt.ColumnInt(22),
+				IndexedInputHash:        indexedInputHash,
 			}
 			return nil
 		},
@@ -675,6 +736,12 @@ WHERE s.session_id IN (` +
 //
 // Tag filtering (f.Tag) uses SQLite json_each() over the sessions.tags JSON array.
 func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args []any) {
+	// Exact session id — the most selective filter (primary key).
+	if f.SessionID != nil {
+		conditions = append(conditions, "s.session_id = ?")
+		args = append(args, *f.SessionID)
+	}
+
 	// Base SessionFilter conditions.
 	if f.ModelHarness != nil {
 		conditions = append(conditions, "s.model_harness = ?")
@@ -821,12 +888,17 @@ func sortFieldToColumn(f defaults.SessionSortField) string {
 // FirstUserMessage returns the content_preview of the first user message (depth=0)
 // in a session, truncated to SessionPreviewMaxChars Unicode runes. Returns "" if
 // no user entries exist or the session does not exist.
-func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (string, error) {
+func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (_ string, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return "", fmt.Errorf("store: FirstUserMessage take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return "", err
+	}
 
 	const q = `SELECT content_preview FROM session_entries
 WHERE session_id = ? AND role = 'user' AND depth = 0
@@ -850,13 +922,13 @@ ORDER BY entry_index ASC LIMIT 1`
 }
 
 // FirstUserMessageBulk returns the content_preview of the first user message (depth=0)
-// for each session in sessionIDs, using a single IN(...) query. Sessions that have no
+// for each session in sessionIDs, using bounded IN(...) queries. Sessions that have no
 // user entry are OMITTED from the returned map (the caller should treat a missing key as
 // an empty preview — this matches the current behavior of FirstUserMessage returning "").
 //
 // All previews are truncated to SessionPreviewMaxChars runes for parity with
 // the single-row FirstUserMessage.
-func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error) {
+func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (_ map[string]string, retErr error) {
 	if len(sessionIDs) == 0 {
 		return map[string]string{}, nil
 	}
@@ -866,16 +938,24 @@ func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (
 		return nil, fmt.Errorf("store: FirstUserMessageBulk take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-
-	// Build a single IN(...) query so we pay one round-trip regardless of session count.
-	// The subquery per-session MIN(entry_index) picks the first user message per session.
-	placeholders := make([]string, len(sessionIDs))
-	args := make([]any, len(sessionIDs))
-	for i, id := range sessionIDs {
-		placeholders[i] = "?"
-		args[i] = id
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, sessionIDs); err != nil {
+		return nil, err
 	}
-	q := `SELECT session_id, content_preview FROM session_entries
+
+	result := make(map[string]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		// Keep every projection query below SQLite's variable limit.
+		// The subquery per-session MIN(entry_index) picks the first user message per session.
+		placeholders := make([]string, len(selectedIDs))
+		args := make([]any, len(selectedIDs))
+		for i, id := range selectedIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		q := `SELECT session_id, content_preview FROM session_entries
 WHERE role = 'user' AND depth = 0
   AND (session_id, entry_index) IN (
     SELECT session_id, MIN(entry_index)
@@ -884,21 +964,21 @@ WHERE role = 'user' AND depth = 0
     GROUP BY session_id
   )`
 
-	result := make(map[string]string, len(sessionIDs))
-	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: args,
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			sid := stmt.ColumnText(0)
-			var preview string
-			if stmt.ColumnType(1) != sqlite.TypeNull {
-				preview = stmt.ColumnText(1)
-			}
-			result[sid] = TruncateToRunes(preview, defaults.SessionPreviewMaxChars)
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				sid := stmt.ColumnText(0)
+				var preview string
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					preview = stmt.ColumnText(1)
+				}
+				result[sid] = TruncateToRunes(preview, defaults.SessionPreviewMaxChars)
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		}
 	}
 	return result, nil
 }

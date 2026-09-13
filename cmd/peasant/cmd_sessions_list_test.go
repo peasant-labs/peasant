@@ -272,7 +272,7 @@ func TestCLI_SessionsList_JSON(t *testing.T) {
 		t.Error("sessions list --json: expected at least one session in array")
 	}
 	// Verify expected keys are present.
-	for _, key := range []string{"id", "date", "project", "turns", "tokens", "preview"} {
+	for _, key := range []string{"id", "date", "project", "projectHash", "turns", "tokens", "preview"} {
 		if _, ok := result[0][key]; !ok {
 			t.Errorf("sessions list --json: missing key %q in first object; keys: %v", key, keysOf(result[0]))
 		}
@@ -899,6 +899,74 @@ func TestCLI_SessionsList_Tag(t *testing.T) {
 	}
 	if strings.Contains(output, "dddd4444"[:8]) {
 		t.Errorf("expected untagged session NOT in output; got:\n%s", output)
+	}
+}
+
+// TestCLI_SessionsList_SessionFilter verifies --session returns exactly the one
+// matching session and that --json exposes its projectHash — the value the web
+// transcript deep link /projects/<projectHash>/<sessionId> is built from.
+func TestCLI_SessionsList_SessionFilter(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	const (
+		wantID   = "abcdef01-2345-6789-abcd-ef0123456789"
+		wantHash = "aaaa1111000000000000000000000000000000000000000000000000000011aa"
+		otherID  = "99999999-9999-9999-9999-999999999999"
+	)
+	now := time.Now().UnixMilli()
+	mustSeedMany(t, dir, []seedOpts{
+		{SessionID: wantID, StartMs: now, ProjectHash: wantHash},
+		{SessionID: otherID, StartMs: now - 1000, ProjectHash: "bbbb2222000000000000000000000000000000000000000000000000002222bb"},
+	})
+
+	output, err := executeSessionsCmd(t, dir, []string{"list", "--session", wantID, "--json"})
+	if err != nil {
+		t.Fatalf("sessions list --session --json: unexpected error: %v\noutput: %s", err, output)
+	}
+
+	var result []sessionListEntry
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("sessions list --session --json: invalid JSON: %v\noutput: %s", err, output)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected exactly 1 session for --session %s; got %d:\n%s", wantID, len(result), output)
+	}
+	if result[0].ID != wantID {
+		t.Errorf("expected id %q; got %q", wantID, result[0].ID)
+	}
+	if result[0].ProjectHash != wantHash {
+		t.Errorf("expected projectHash %q; got %q", wantHash, result[0].ProjectHash)
+	}
+}
+
+// TestStore_ListSessionsFiltered_SessionID verifies the SessionID filter returns
+// only the exact session and carries its project_hash.
+func TestStore_ListSessionsFiltered_SessionID(t *testing.T) {
+	t.Parallel()
+	db := storetest.Open(t)
+	ctx := t.Context()
+
+	storetest.SeedSession(t, db, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	storetest.SeedSession(t, db, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	want := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	rows, err := db.ListSessionsFiltered(ctx, store.SessionListFilter{
+		SessionID: &want,
+		SortField: defaults.SessionSortDate,
+		SortDesc:  true,
+	})
+	if err != nil {
+		t.Fatalf("ListSessionsFiltered by session id: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected exactly 1 row for session id %q; got %d", want, len(rows))
+	}
+	if rows[0].SessionID != want {
+		t.Errorf("expected session id %q; got %q", want, rows[0].SessionID)
+	}
+	if rows[0].ProjectHash == "" {
+		t.Error("expected non-empty ProjectHash on the row")
 	}
 }
 

@@ -17,6 +17,7 @@ const (
 	DefaultCodexPath    SourcePath = "~/.codex/sessions"
 	DefaultCursorPath   SourcePath = "~/.cursor/projects"
 	DefaultStrikePath   SourcePath = "~/.strike/sessions"
+	DefaultPiPath       SourcePath = "~/.pi/agent/sessions"
 )
 
 // OutputPath is a typed default output base path.

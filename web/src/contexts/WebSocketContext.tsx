@@ -13,6 +13,7 @@ import {
 } from 'react';
 import type { ChannelName, ClientMessage, ServerMessage, SubscriptionMessage } from '@/types/messages';
 import { subscriptionKey, subscribe as mkSub, ChannelTopic } from '@/types/messages';
+import { parseServerMessageRaw } from '@peasant-labs/schema';
 
 /** Derive WebSocket URL from the current page origin so any --port value works. */
 function defaultWsUrl(): string {
@@ -175,8 +176,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
       let msg: ServerMessage;
       try {
-        msg = JSON.parse(event.data as string) as ServerMessage;
+        if (typeof event.data !== 'string') throw new TypeError('Expected a text WebSocket frame');
+        // Schema scans the original text before decoding can collapse duplicate
+        // keys, then validates detail data only for session_detail messages.
+        msg = parseServerMessageRaw(event.data);
       } catch {
+        // Do not echo untrusted transcript bytes or schema exception values.
+        setError('A server message failed contract validation in WebSocketProvider while receiving an update and was not applied. Retry the connection; if this continues, update the Peasant app and reload this page.');
         return;
       }
 

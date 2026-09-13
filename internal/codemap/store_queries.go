@@ -127,6 +127,7 @@ JOIN session_entries e ON e.rowid = f.rowid
 JOIN sessions s        ON s.session_id = f.session_id
 LEFT JOIN projects p   ON p.project_hash = s.project_hash
 WHERE session_entries_fts MATCH ?
+  AND COALESCE(e.part_type, '') <> 'pi.carrier'
   AND NOT (
     e.depth > 0
     AND e.content_preview IS NOT NULL
@@ -197,12 +198,17 @@ type searchRow struct {
 // the sanitized FTS5 string; limit is positive and already bounded, and offset
 // counts raw ranked rows rather than visibility-filtered results. An empty
 // result set is returned as a nil slice.
-func (s *Service) querySearch(ctx context.Context, match string, limit, offset int) ([]searchRow, error) {
+func (s *Service) querySearch(ctx context.Context, match string, limit, offset int) (_ []searchRow, retErr error) {
 	conn, err := s.store.Pool().Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("codemap: take connection: %w", err)
 	}
 	defer s.store.Pool().Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.store.ValidateAllIndexFormatsOnConn(conn); err != nil {
+		return nil, err
+	}
 
 	var rows []searchRow
 	err = sqlitex.ExecuteTransient(conn, sqlSearch, &sqlitex.ExecOptions{

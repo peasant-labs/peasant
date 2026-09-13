@@ -167,8 +167,8 @@ func TestCursorAdapter_ExtractMetadata(t *testing.T) {
 	if meta.Stats.TokensIn != 10 || meta.Stats.TokensOut != 20 {
 		t.Errorf("Tokens = (%d,%d), want (10,20)", meta.Stats.TokensIn, meta.Stats.TokensOut)
 	}
-	if meta.CWD != "/home/test/testrepo" {
-		t.Errorf("CWD = %q, want decoded project path", meta.CWD)
+	if meta.CWD != "" {
+		t.Errorf("CWD = %q, want absent exact CWD (the decoded path is workspace evidence)", meta.CWD)
 	}
 	if meta.Project.Name != testutil.TestProjectName {
 		t.Errorf("Project.Name = %q, want %q", meta.Project.Name, testutil.TestProjectName)

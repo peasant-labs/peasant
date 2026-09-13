@@ -17,7 +17,7 @@ import (
 // seedEntries indexes transcript bytes into the DB so ListEntries returns them.
 // Returns the indexed entries for use in assertions.
 func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
-	IndexSessionEntries(context.Context, ingest.SessionID, []schema.SessionEntry) error
+	IndexSessionEntryBatch(context.Context, []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult
 }, fs ingest.FileSystem, sessionID string, data []byte) []schema.SessionEntry {
 	t.Helper()
 	session := ingest.DiscoveredSession{
@@ -31,7 +31,7 @@ func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
 	if err != nil {
 		t.Fatalf("seedEntries: IndexTranscriptBytes: %v", err)
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, schema.SessionID(sessionID), entries); err != nil {
 		t.Fatalf("seedEntries: IndexSessionEntries: %v", err)
 	}
 	return entries
@@ -40,7 +40,7 @@ func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
 // seedEntriesFromOpenCode indexes an OpenCode session directory into the DB.
 // Returns the indexed entries for use in assertions.
 func seedEntriesFromOpenCode(t *testing.T, ctx context.Context, s interface {
-	IndexSessionEntries(context.Context, ingest.SessionID, []schema.SessionEntry) error
+	IndexSessionEntryBatch(context.Context, []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult
 }, fs ingest.FileSystem, sessionID string, sourcePath string) []schema.SessionEntry {
 	t.Helper()
 	session := ingest.DiscoveredSession{
@@ -54,7 +54,7 @@ func seedEntriesFromOpenCode(t *testing.T, ctx context.Context, s interface {
 	if err != nil {
 		t.Fatalf("seedEntriesFromOpenCode: IndexTranscript: %v", err)
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), entries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, schema.SessionID(sessionID), entries); err != nil {
 		t.Fatalf("seedEntriesFromOpenCode: IndexSessionEntries: %v", err)
 	}
 	return entries
@@ -734,7 +734,12 @@ func TestExportSession_CodexJSONL_LongContent(t *testing.T) {
 	if seededEntries[0].ContentPreview == nil || len(*seededEntries[0].ContentPreview) != 2000 {
 		t.Fatalf("seeded preview: expected exactly 2000 chars (truncated), got %v", seededEntries[0].ContentPreview)
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), seededEntries); err != nil {
+	fullIndexer := ingest.NewCodexIndexer(fs, ingest.WithCodexFullContent(true))
+	fullEntries, err := fullIndexer.IndexTranscriptBytes(ctx, session, []byte(codexTranscript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteFullEntries(ctx, s, schema.SessionID(sessionID), fullEntries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 
@@ -817,9 +822,9 @@ func TestExportSession_MissingSourceFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("ExportSession: expected error for missing source file, got nil")
 	}
-	// The error should mention the source path for actionability.
-	if !strings.Contains(err.Error(), "/f") {
-		t.Errorf("ExportSession error should mention source path '/f', got: %v", err)
+	// A legacy preview cannot establish authority, even when it is short.
+	if !strings.Contains(err.Error(), "harvest index --force") {
+		t.Errorf("ExportSession error should explain capture remediation, got: %v", err)
 	}
 	// It should NOT be ErrSessionNotFound (the session exists, the file does not).
 	if errors.Is(err, export.ErrSessionNotFound) {
@@ -860,7 +865,7 @@ func TestExportSession_MissingSourceFile_NothingTruncated(t *testing.T) {
 			ContentPreview: &shortContent,
 		},
 	}
-	if err := s.IndexSessionEntries(ctx, schema.SessionID(sessionID), dbEntries); err != nil {
+	if err := testutil.WriteFullEntries(ctx, s, schema.SessionID(sessionID), dbEntries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 

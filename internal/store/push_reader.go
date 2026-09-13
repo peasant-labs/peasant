@@ -249,10 +249,14 @@ func (s *Store) GetTitleContext(ctx context.Context, sessionID ingest.SessionID)
 	}
 	defer s.pool.Put(conn)
 
+	return getTitleContextOnConn(conn, sessionID)
+}
+
+func getTitleContextOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) (schema.Harness, string, error) {
 	var harness schema.Harness
 	var projectPath string
 	found := false
-	err = sqlitex.ExecuteTransient(conn, `SELECT s.model_harness,
+	err := sqlitex.ExecuteTransient(conn, `SELECT s.model_harness,
 COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, '')
 FROM sessions s LEFT JOIN projects p ON p.project_hash = s.project_hash
 WHERE s.session_id = ?`, &sqlitex.ExecOptions{

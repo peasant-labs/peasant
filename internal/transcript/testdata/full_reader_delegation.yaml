@@ -1,0 +1,19 @@
+requiredNames: [default_once, override_once, negative_rejected, incomplete_refused, missing_hash_refused, wrong_identity_refused, wrong_count_refused, reader_error_refused]
+cases:
+  - name: default_once
+    budget: 0
+  - name: override_once
+    budget: 17
+  - name: negative_rejected
+    budget: -1
+    failure: negative
+  - name: incomplete_refused
+    failure: status
+  - name: missing_hash_refused
+    failure: hash
+  - name: wrong_identity_refused
+    failure: identity
+  - name: wrong_count_refused
+    failure: count
+  - name: reader_error_refused
+    failure: reader

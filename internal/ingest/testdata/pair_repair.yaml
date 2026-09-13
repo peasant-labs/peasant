@@ -1,0 +1,80 @@
+# A stored session whose saved pair is missing or damaged is re-ingested from
+# its native source automatically, on the ordinary harvest and on harvest
+# index. The repair used to be an explicit `--force --session` action; a
+# session with no usable retained input has nothing to protect, so the
+# pipeline performs it itself. When the native source is unavailable, the
+# actionable report remains.
+#
+# Each case seeds one stored row and the pair state named, then runs the
+# production pipeline (real SQLite store, real indexer registry; only the
+# source adapter and filesystem are substituted). A repaired case must restore
+# both halves of the pair, advance the producer and record the input proof; a
+# refused case must report that the session could not be re-ingested and leave
+# the stale state untouched.
+required_names:
+  - ordinary-missing-metadata-repairs
+  - ordinary-missing-transcript-repairs
+  - ordinary-damaged-pair-repairs
+  - ordinary-source-unavailable-reports
+  - ordinary-reconstructed-source-repairs
+  - ordinary-transcript-read-fault-not-repaired
+  - reindex-missing-metadata-repairs
+  - reindex-damaged-pair-repairs
+  - reindex-nested-missing-metadata-repairs
+native_transcript: |
+  {"type":"user","message":{"role":"user","content":"inspect the native fixture"},"uuid":"u1"}
+  {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]},"uuid":"a1"}
+damaged_transcript: |
+  {"type":"user","message":{"role":"user","content":"a transcript that no longer matches its recorded identity"},"uuid":"u1"}
+cases:
+  - name: ordinary-missing-metadata-repairs
+    pairState: missing-metadata
+    discovered: true
+    wantRepaired: true
+  - name: ordinary-missing-transcript-repairs
+    pairState: missing-transcript
+    discovered: true
+    wantRepaired: true
+  - name: ordinary-damaged-pair-repairs
+    pairState: damaged
+    discovered: true
+    wantRepaired: true
+  - name: ordinary-source-unavailable-reports
+    pairState: missing-metadata-source-unavailable
+    discovered: false
+    wantRepaired: false
+    wantSourceReport: true
+  # The stored source locator alone is enough to repair a session native
+  # discovery did not offer.
+  - name: ordinary-reconstructed-source-repairs
+    pairState: missing-metadata
+    discovered: false
+    wantRepaired: true
+  # A transcript that cannot be READ is a fault to restore, not damage to
+  # overwrite: the pair and the stale state must survive untouched.
+  - name: ordinary-transcript-read-fault-not-repaired
+    pairState: damaged
+    discovered: true
+    transcriptReadFault: true
+    wantRepaired: false
+  - name: reindex-missing-metadata-repairs
+    pairState: missing-metadata
+    discovered: true
+    reindex: true
+    wantRepaired: true
+  # A damaged pair whose metadata the tree scan DOES find must still be
+  # repaired from native: retained indexing cannot read it.
+  - name: reindex-damaged-pair-repairs
+    pairState: damaged
+    discovered: true
+    reindex: true
+    wantRepaired: true
+  # A subagent whose parent is outside the run scope: the reconstructed
+  # session must carry its recorded parent so the repaired pair is drained,
+  # mirrored and indexed, and lands in the subagents layout.
+  - name: reindex-nested-missing-metadata-repairs
+    pairState: missing-metadata
+    discovered: false
+    reindex: true
+    nested: true
+    wantRepaired: true

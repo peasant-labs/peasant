@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -165,9 +164,7 @@ func (a *CodexAdapter) loadCodexSessionTitles(root string) map[string]string {
 		return titles
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -203,9 +200,7 @@ func (a *CodexAdapter) extractCodexHints(path string) codexSessionHints {
 		return codexSessionHints{}
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -386,25 +381,87 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		Format:   SourceFormatJSONL,
 	}
 
+	sessionMeta, err := parseCodexTranscriptMetadata(ctx, data, &meta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Git context — Codex captures it once in session_meta. When present, we
+	// skip the GitResolver subprocess and derive identifiers directly from the
+	// recorded remote. cwd from session_meta is the real project path (no slug
+	// decoding needed, unlike Claude).
+	cwd := ""
+	var remoteURL string
+	if sessionMeta != nil {
+		cwd = sessionMeta.CWD
+		if sessionMeta.Git != nil {
+			remoteURL = sessionMeta.Git.RepositoryURL
+			if sessionMeta.Git.Branch != "" {
+				b := sessionMeta.Git.Branch
+				meta.Git.Branch = &b
+			}
+			if remoteURL != "" {
+				r := remoteURL
+				meta.Git.Remote = &r
+			}
+		}
+	}
+	meta.CWD = cwd
+	if cwd == "" {
+		cwd = filepath.Dir(string(session.SourcePath))
+	}
+	var recordedBranch string
+	if meta.Git.Branch != nil {
+		recordedBranch = *meta.Git.Branch
+	}
+	remoteURL, tracking := ResolveGitRemote(ctx, a.git, cwd, recordedBranch, remoteURL)
+	if remoteURL != "" {
+		meta.Git.Remote = &remoteURL
+	}
+	if tracking != "" {
+		meta.Git.Tracking = &tracking
+	}
+
+	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
+	if derErr != nil {
+		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+			ErrorType:   "derive_identity_error",
+			Location:    fmt.Sprintf("session %s", session.SessionID),
+			Message:     fmt.Sprintf("failed to derive project identifiers: %v", derErr),
+			Remediation: "Check the recorded git remote URL or working directory path.",
+		})
+	} else {
+		meta.HostSlug = hostSlug
+	}
+
+	meta.Project = ProjectInfo{
+		Hash:     projectHash,
+		FilePath: cwd,
+		Name:     filepath.Base(cwd),
+	}
+
+	return &meta, nil
+}
+
+func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *UnifiedMetadata) (*codexSessionMeta, error) {
 	var (
 		sessionMeta    *codexSessionMeta
 		lastTimestamp  string
 		lastTotalUsage *codexTokenUsage
 		turnCount      int
 		toolCount      int
-		lineNum        int
 		gotSessionMeta bool
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		lineNum++
+		// The reader is the one source of the line number, so a diagnostic after
+		// a record the reader passed over still names the physical line.
+		lineNum := scanner.Line()
 		raw := scanner.Bytes()
 		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
@@ -429,6 +486,9 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		case codexTypeSessionMeta:
 			var sm codexSessionMeta
 			if err := json.Unmarshal(env.Payload, &sm); err == nil {
+				if sm.ID != "" && sm.ID != meta.SessionID.String() {
+					return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", meta.SessionID)
+				}
 				sessionMeta = &sm
 				gotSessionMeta = true
 			} else {
@@ -476,7 +536,7 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 	if err := scanner.Err(); err != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
 			Message:     fmt.Sprintf("scanner error reading rollout: %v", err),
 			Remediation: "Verify the rollout file is not corrupted or truncated.",
 		})
@@ -485,7 +545,7 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 	if !gotSessionMeta {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "missing_session_meta",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
+			Location:    fmt.Sprintf("session %s", meta.SessionID),
 			Message:     "rollout did not begin with a session_meta line",
 			Remediation: "Rollout may be truncated or from an incompatible Codex CLI version.",
 		})
@@ -513,49 +573,6 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		meta.Stats.DurationMs = endMs - startMs
 	}
 
-	// Git context — Codex captures it once in session_meta. When present, we
-	// skip the GitResolver subprocess and derive identifiers directly from the
-	// recorded remote. cwd from session_meta is the real project path (no slug
-	// decoding needed, unlike Claude).
-	cwd := ""
-	var remoteURL string
-	if sessionMeta != nil {
-		cwd = sessionMeta.CWD
-		if sessionMeta.Git != nil {
-			remoteURL = sessionMeta.Git.RepositoryURL
-			if sessionMeta.Git.Branch != "" {
-				b := sessionMeta.Git.Branch
-				meta.Git.Branch = &b
-			}
-			if remoteURL != "" {
-				r := remoteURL
-				meta.Git.Remote = &r
-			}
-		}
-	}
-	if cwd == "" {
-		cwd = filepath.Dir(string(session.SourcePath))
-	}
-	meta.CWD = cwd
-
-	projectHash, hostSlug, derErr := DeriveProjectIdentifiers(a.salt, remoteURL, cwd)
-	if derErr != nil {
-		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-			ErrorType:   "derive_identity_error",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
-			Message:     fmt.Sprintf("failed to derive project identifiers: %v", derErr),
-			Remediation: "Check the recorded git remote URL or working directory path.",
-		})
-	} else {
-		meta.HostSlug = hostSlug
-	}
-
-	meta.Project = ProjectInfo{
-		Hash:     projectHash,
-		FilePath: cwd,
-		Name:     filepath.Base(cwd),
-	}
-
 	// Stats.
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
@@ -572,5 +589,5 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		}
 	}
 
-	return &meta, nil
+	return sessionMeta, nil
 }

@@ -1,0 +1,5 @@
+name: concurrent-capture-after-eligibility
+before_model: claude-opus-4-6
+after_model: claude-sonnet-4-6
+before_text: original complete transcript
+after_text: replacement complete transcript

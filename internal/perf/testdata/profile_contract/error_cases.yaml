@@ -1,0 +1,74 @@
+# All prose sentinels are synthetic, not actual transcript or annotation content.
+cases:
+  - name: generic-transcript-prose
+    message: "The imaginary gardener prefers blue umbrellas on Tuesdays"
+    expectedCode: error_code
+    expectedMessage: &generic "Profiled operation failed during push.publish; the profile records only a safe error code. Check the command output and service availability, then retry the operation."
+    forbiddenValues: ["The imaginary gardener prefers blue umbrellas on Tuesdays"]
+  - name: wrapped-generic-prose
+    message: "An imaginary comet brought marmalade to the meeting"
+    wrapper: "The pretend annotation asks everyone to wear green hats"
+    expectedCode: error_code
+    expectedMessage: *generic
+    forbiddenValues:
+      - "An imaginary comet brought marmalade to the meeting"
+      - "The pretend annotation asks everyone to wear green hats"
+  - name: safe-transport-classification
+    carrier: true
+    code: http_status_503
+    retryable: true
+    message: &transport "Village request failed; inspect command diagnostics and service availability before retrying"
+    expectedCode: http_status_503
+    expectedMessage: *transport
+  - name: wrapped-safe-transport-classification
+    carrier: true
+    code: http_status_503
+    retryable: true
+    message: *transport
+    wrapper: "The fictional transcript discusses lavender pancakes"
+    expectedCode: http_status_503
+    expectedMessage: *transport
+    forbiddenValues: ["The fictional transcript discusses lavender pancakes"]
+  - name: wrapped-pointer-safe-classification
+    carrier: true
+    pointer: true
+    code: response_decode
+    message: &decode "Village response could not be decoded; verify the service contract before retrying"
+    wrapper: "The pretend project once designed flying teacups"
+    expectedCode: response_decode
+    expectedMessage: *decode
+    forbiddenValues: ["The pretend project once designed flying teacups"]
+  - name: invalid-safe-code
+    carrier: true
+    code: "The fictional transcript discusses lavender pancakes"
+    retryable: true
+    message: *transport
+    expectedCode: profile_error
+    expectedMessage: *transport
+    forbiddenValues:
+      - "The fictional transcript discusses lavender pancakes"
+      - "the_fictional_transcript_discusses_lavender_pancakes"
+  - name: empty-safe-message
+    carrier: true
+    code: response_decode
+    message: ""
+    expectedCode: response_decode
+    expectedMessage: *generic
+  - name: unsafe-safe-message-defense
+    carrier: true
+    code: response_decode
+    message: "The synthetic password could not be decoded"
+    expectedCode: response_decode
+    expectedMessage: *generic
+    forbiddenValues: ["The synthetic password could not be decoded"]
+  - name: generic-error-prose-never-read
+    rejectErrorCall: true
+    expectedCode: error_code
+    expectedMessage: *generic
+  - name: unsafe-safe-code-defense
+    carrier: true
+    code: password
+    message: *transport
+    expectedCode: profile_error
+    expectedMessage: *transport
+    forbiddenValues: [password]

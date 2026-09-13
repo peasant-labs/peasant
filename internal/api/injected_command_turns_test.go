@@ -100,7 +100,7 @@ func TestStoreDataProvider_InjectedCommandRolesReachDetailPayload(t *testing.T) 
 			ContentPreview: &content,
 		}
 	}
-	if err := db.IndexSessionEntries(context.Background(), sid, entries); err != nil {
+	if err := testutil.WriteFullEntries(context.Background(), db, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
 	}
 

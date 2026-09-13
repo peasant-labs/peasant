@@ -7,6 +7,12 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Fixed
+- Revert the ingest-time branch reachability filter so a rewritten branch does
+  not discard still-discoverable historical commits before ledger insertion.
+  Commit detection again uses the timestamp, author, and transcript heuristics;
+  these can still over-attribute nearby commits (#333).
+
 ## [0.5.0] - 2026-09-01
 
 ### Added

@@ -1,0 +1,534 @@
+package ingest_test
+
+import (
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"gopkg.in/yaml.v3"
+)
+
+// probeOversizedRecordLimit is the per-record read limit the oversized
+// completion cases inject. It is small so a case can build a record over it
+// in memory; the behavior under test, that an over-limit record is never
+// certified, does not depend on the limit's value.
+const probeOversizedRecordLimit = 8192
+
+type versions struct{ AdapterVersion, IndexerVersion int }
+type guardSnapshot struct {
+	Versions map[string]versions
+	Outputs  map[string]json.RawMessage
+}
+
+// Only the runner injects this test into temporary archived revisions.
+func TestHarvesterGuardCapture(t *testing.T) {
+	corpus := os.Getenv("PEASANT_GUARD_CORPUS")
+	result := guardSnapshot{Versions: parserVersions(), Outputs: make(map[string]json.RawMessage)}
+	read := func(path string, target any) bool {
+		data, err := os.ReadFile(filepath.Join(corpus, path))
+		if os.IsNotExist(err) {
+			return false
+		} // Corpus may predate this fixture family.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(data, target); err != nil {
+			t.Fatal(err)
+		}
+		return true
+	}
+	write := func(filesystem ingest.FileSystem, path, data string) {
+		if err := filesystem.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// observeWithLimit records one probe. maxRecordBytes is the per-record
+	// read limit the indexers get; zero means the production limit. A case
+	// that needs an over-limit record injects a small limit here instead of
+	// building a record of production size.
+	observeWithLimit := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem, maxRecordBytes int) {
+		if _, registered := result.Versions[string(session.Harness)]; !registered {
+			return // A historical revision cannot observe a not-yet-supported harness.
+		}
+		session.ModTime = time.UnixMilli(1700000000000)
+		session.CreatedAt = session.ModTime
+		if session.TranscriptOrigin == ingest.TranscriptOriginFile {
+			adapter := ingest.DefaultAdapterRegistry[session.Harness](filesystem, testutil.DefaultGitResolver(), salt.Salt{})
+			metadata, adapterErr := adapter.ExtractMetadata(t.Context(), session)
+			guardRecord(t, &result, string(session.Harness)+"/AdapterVersion/"+name, guardMetadata(t, metadata, ""), adapterErr)
+		}
+		// The probe runs inside every compared revision, so it may only name
+		// the fields that revision has. A revision without a record limit
+		// cannot observe an over-limit case; the case is then a candidate-only
+		// observation, which the comparison accepts.
+		options := ingest.IndexerRegistryOptions{}
+		if maxRecordBytes > 0 {
+			field := reflect.ValueOf(&options).Elem().FieldByName("MaxRecordBytes")
+			if !field.IsValid() {
+				return
+			}
+			field.SetInt(int64(maxRecordBytes))
+		}
+		indexer := ingest.NewIndexerRegistry(filesystem, options)[session.Harness]
+		var output any
+		var indexErr error
+		// Use the same preference as ingestion: authoritative full capture,
+		// then versioned custom formats, then the historical slice API.
+		authoritative := reflect.ValueOf(indexer).MethodByName("IndexTranscriptForCapture")
+		method := reflect.ValueOf(indexer).MethodByName("IndexTranscriptResult")
+		if authoritative.IsValid() {
+			values := authoritative.Call([]reflect.Value{reflect.ValueOf(t.Context()), reflect.ValueOf(session)})
+			if !values[1].IsNil() {
+				indexErr = values[1].Interface().(error)
+			} else {
+				entries := values[0].FieldByName("Entries")
+				if !entries.IsValid() {
+					t.Fatal("authoritative capture API changed; update the probe before comparing parsers")
+				}
+				output = map[string]any{"format": 1, "result": map[string]any{"Entries": entries.Interface()}}
+			}
+		} else if method.IsValid() {
+			values := method.Call([]reflect.Value{reflect.ValueOf(t.Context()), reflect.ValueOf(session)})
+			if !values[1].IsNil() {
+				indexErr = values[1].Interface().(error)
+			}
+			if !values[0].IsNil() {
+				concrete := values[0].Interface()
+				format := concrete.(interface{ IndexVersion() int }).IndexVersion()
+				output = map[string]any{"format": format, "result": concrete}
+			}
+		} else {
+			entries, err := indexer.IndexTranscript(t.Context(), session)
+			indexErr = err
+			if err == nil {
+				output = map[string]any{"format": 1, "result": map[string]any{"Entries": entries}}
+			}
+		}
+		guardRecord(t, &result, string(session.Harness)+"/IndexerVersion/"+name, output, indexErr)
+	}
+	observe := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem) {
+		observeWithLimit(name, session, filesystem, 0)
+	}
+
+	// Existing native E2E corpora exercise full adapter extraction and shared
+	// tool/entry helpers for Claude, Codex and Cursor; filenames are input IDs.
+	for _, harness := range []string{"claude", "codex", "cursor"} {
+		root := "internal/e2e/testdata/" + harness + "-fixture"
+		var manifest struct {
+			Harness  ingest.Harness `yaml:"harness"`
+			Sessions []struct {
+				ID   string `yaml:"id"`
+				Path string `yaml:"path"`
+			} `yaml:"sessions"`
+		}
+		if !read(root+"/fixture-index.yaml", &manifest) {
+			t.Fatalf("required native corpus missing: %s", root)
+		}
+		for _, row := range manifest.Sessions {
+			filesystem := testutil.NewMemFS()
+			data, err := os.ReadFile(filepath.Join(corpus, root, row.Path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := "/synthetic/" + row.Path
+			write(filesystem, path, string(data))
+			id, err := ingest.NewSessionID(row.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observe("native/"+row.Path, ingest.DiscoveredSession{SessionID: id, Harness: manifest.Harness, SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL}, filesystem)
+		}
+	}
+	filesystem := testutil.NewMemFS()
+	for _, suffix := range []string{"jsonl", "meta.json"} {
+		data, err := os.ReadFile(filepath.Join(corpus, "internal/ingest/testdata/strike_protocol."+suffix))
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(filesystem, "/synthetic/strike_protocol."+suffix, string(data))
+	}
+	observe("strike_protocol", ingest.DiscoveredSession{SessionID: testutil.TestSessionUUID, Harness: ingest.HarnessStrike, SourcePath: "/synthetic/strike_protocol.jsonl", SourceFormat: ingest.SourceFormatJSONL}, filesystem)
+	guardPiCorpus(t, corpus, result.Versions, observe)
+
+	// Reuse the named completion cases, including old failure/new success and
+	// successful empty versus failed parses. Expectations are never digests.
+	var completion struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name        string         `yaml:"name"`
+			Harness     ingest.Harness `yaml:"harness"`
+			Input       string         `yaml:"input"`
+			Missing     bool           `yaml:"missing"`
+			LongContent bool           `yaml:"longContent"`
+			Oversized   bool           `yaml:"oversized"`
+			PartialRead bool           `yaml:"partialRead"`
+		} `yaml:"cases"`
+	}
+	if read("internal/ingest/testdata/indexer_completion.yaml", &completion) {
+		seen := make(map[string]bool)
+		for _, row := range completion.Cases {
+			guardName(t, seen, row.Name)
+			filesystem := &guardFaultFS{MemFS: testutil.NewMemFS(), partial: row.PartialRead}
+			data := row.Input
+			if row.LongContent {
+				data = strings.ReplaceAll(data, "LONG_CONTENT", strings.Repeat("x", 2050))
+			}
+			recordLimit := 0
+			if row.Oversized {
+				// An over-limit record must never be certified as a complete
+				// index. The limit is injected so the case builds a record
+				// over it cheaply instead of one of production size.
+				recordLimit = probeOversizedRecordLimit
+				data += strings.Repeat("x", probeOversizedRecordLimit+1) + "\n"
+			}
+			if !row.Missing {
+				write(filesystem, "/synthetic/transcript.jsonl", data)
+			}
+			observeWithLimit(row.Name, ingest.DiscoveredSession{SessionID: testutil.TestSessionUUID, Harness: row.Harness, SourcePath: "/synthetic/transcript.jsonl", SourceFormat: ingest.SourceFormatJSONL}, filesystem, recordLimit)
+		}
+		for _, name := range completion.RequiredNames {
+			if !seen[name] {
+				t.Fatalf("required completion case missing: %s", name)
+			}
+		}
+	}
+	var openCode struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name        string            `yaml:"name"`
+			Files       map[string]string `yaml:"files"`
+			Directories []string          `yaml:"directories"`
+			ReadError   string            `yaml:"readError"`
+			DirError    string            `yaml:"dirError"`
+			Managed     string            `yaml:"managed"`
+			Origin      string            `yaml:"origin"`
+		} `yaml:"cases"`
+	}
+	if read("internal/ingest/testdata/opencode_index_completion.yaml", &openCode) {
+		seen := make(map[string]bool)
+		for _, row := range openCode.Cases {
+			guardName(t, seen, row.Name)
+			filesystem := &guardFaultFS{MemFS: testutil.NewMemFS()}
+			session := setupOpenCodeFixture(t, filesystem.MemFS, testutil.TestOpenCodeSesID, "synthetic")
+			expand := strings.NewReplacer("SESSION_ID", session.SessionID.String(), "LONG_CONTENT", strings.Repeat("x", 2050))
+			for path, data := range row.Files {
+				write(filesystem, filepath.Join("/opencode-store/storage", expand.Replace(path)), expand.Replace(data))
+			}
+			for _, path := range row.Directories {
+				if err := filesystem.MkdirAll(filepath.Join("/opencode-store/storage", expand.Replace(path)), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if row.ReadError != "" {
+				filesystem.readError = filepath.Join("/opencode-store/storage", expand.Replace(row.ReadError))
+			}
+			if row.DirError != "" {
+				filesystem.dirError = filepath.Join("/opencode-store/storage", expand.Replace(row.DirError))
+			}
+			if row.Origin != "" {
+				// The indexer receives fixed managed bytes, independently of the
+				// adapter's output, so an adapter change alone does not blame it.
+				session.TranscriptOrigin = ingest.TranscriptOriginOpenCodeCurrentSQLite
+				if row.Origin == "legacy" {
+					session.TranscriptOrigin = ingest.TranscriptOriginOpenCodeLegacySQLite
+				}
+				session.SourcePath = "/synthetic/projection.json"
+				write(filesystem, session.SourcePath.String(), expand.Replace(row.Managed))
+			}
+			observe(row.Name, session, filesystem)
+		}
+		for _, name := range openCode.RequiredNames {
+			if !seen[name] {
+				t.Fatalf("required OpenCode case missing: %s", name)
+			}
+		}
+	} else {
+		// This native shape and helper predate the completion fixture family.
+		filesystem := testutil.NewMemFS()
+		session := setupOpenCodeFixture(t, filesystem, testutil.TestOpenCodeSesID, "synthetic")
+		observe("native-directory", session, filesystem)
+	}
+	// Reuse native SQLite shapes from the existing materialization corpus.
+	// The runner installs the same test-only builder and YAML for both revisions.
+	nativeNames := map[string]bool{"legacy-message-part": true, "current-session-message": true}
+	var native struct {
+		Cases []struct {
+			SourceFixture string `yaml:"source_fixture"`
+		} `yaml:"cases"`
+	}
+	if read("internal/ingest/testdata/opencode_native_rows.yaml", &native) {
+		for _, row := range native.Cases {
+			nativeNames[row.SourceFixture] = true
+		}
+	}
+	for name := range nativeNames {
+		source := testfixture.MaterializeByName(t, name)
+		// Reuse the exact same physical locator and file clock across runs:
+		// unattributed sessions derive project identity from this path.
+		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")
+		if err := os.MkdirAll(filepath.Dir(nativePath), 0700); err != nil {
+			t.Fatal(err)
+		}
+		nativeBytes, err := os.ReadFile(source.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(nativePath, nativeBytes, 0600); err != nil {
+			t.Fatal(err)
+		}
+		clock := time.UnixMilli(1700000000000)
+		if err := os.Chtimes(nativePath, clock, clock); err != nil {
+			t.Fatal(err)
+		}
+		filesystem := &ingest.OSFileSystem{}
+		adapter, err := ingest.NewOpenCodeAdapterWithCandidateProbe(filesystem, testutil.DefaultGitResolver(), salt.Salt{}, "latest", guardEnvironment{"OPENCODE_DB": nativePath}, filesystem, ingest.OpenOpenCodeSQLiteSource, ingest.DefaultOpenCodeSQLiteSourceOptions())
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := ingest.ResolvedPath(filepath.Dir(nativePath))
+		sessions, discoverErr := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
+		outputs := make(map[string]any)
+		for _, session := range sessions {
+			metadata, data, materializeErr := guardMaterialize(t, adapter, session)
+			var transcript any
+			if len(data) > 0 {
+				if err := json.Unmarshal(data, &transcript); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outputs[session.SessionID.String()] = struct {
+				Failed               bool
+				Metadata, Transcript any
+			}{materializeErr != nil, guardMetadata(t, metadata, filepath.Dir(nativePath)), transcript}
+		}
+		guardRecord(t, &result, "opencode/AdapterVersion/native/"+name, outputs, discoverErr)
+	}
+	for harness := range result.Versions {
+		for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
+			found := false
+			for name := range result.Outputs {
+				found = found || strings.HasPrefix(name, harness+"/"+stage+"/")
+			}
+			if !found {
+				t.Fatalf("registered harness %s has no %s corpus; add native fixture coverage", harness, stage)
+			}
+		}
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("PEASANT_GUARD_OUTPUT"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Both historical APIs execute the real adapter. Only their return envelope
+// differs; capture fingerprints and cursors are not substitutes for output.
+func guardMaterialize(t *testing.T, adapter *ingest.OpenCodeAdapter, session ingest.DiscoveredSession) (*ingest.UnifiedMetadata, []byte, error) {
+	t.Helper()
+	values := reflect.ValueOf(adapter).MethodByName("MaterializeTranscript").Call([]reflect.Value{reflect.ValueOf(t.Context()), reflect.ValueOf(session)})
+	var metadata, data reflect.Value
+	switch len(values) {
+	case 3:
+		metadata, data = values[0], values[1]
+	case 2:
+		if values[0].Kind() != reflect.Struct {
+			t.Fatal("materialization result is not a captured struct; update the guard API bridge")
+		}
+		metadata, data = values[0].FieldByName("Metadata"), values[0].FieldByName("Data")
+	default:
+		t.Fatal("materialization API changed; update the guard before comparing parsers")
+	}
+	if !metadata.IsValid() || !data.IsValid() {
+		t.Fatal("materialization result lacks metadata or data; update the guard API bridge")
+	}
+	meta, metadataOK := metadata.Interface().(*ingest.UnifiedMetadata)
+	bytes, dataOK := data.Interface().([]byte)
+	if !metadataOK || !dataOK {
+		t.Fatal("materialization result has incompatible metadata or data types; update the guard API bridge")
+	}
+	var err error
+	if last := values[len(values)-1]; !last.IsNil() {
+		err = last.Interface().(error)
+	}
+	return meta, bytes, err
+}
+
+func guardPiCorpus(t *testing.T, corpus string, registered map[string]versions, observe func(string, ingest.DiscoveredSession, ingest.FileSystem)) {
+	t.Helper()
+	if _, ok := registered["pi"]; !ok {
+		return
+	}
+	read := func(name string, target any) {
+		path := filepath.Join(corpus, "internal/ingest/testdata", name)
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			// A new harness uses its first corpus even when the other corpus
+			// predates it. Existing historical cases are never replaced.
+			path = filepath.Join(os.Getenv("PEASANT_GUARD_FALLBACK_CORPUS"), "internal/ingest/testdata", name)
+			data, err = os.ReadFile(path)
+		}
+		if err != nil {
+			t.Fatalf("registered Pi requires native corpus %s: %v", name, err)
+		}
+		if err := yaml.Unmarshal(data, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var capture struct {
+		SessionID   string `yaml:"session_id"`
+		Initial     string `yaml:"initial"`
+		ValidAppend string `yaml:"valid_append"`
+		Cases       []struct {
+			Name        string `yaml:"name"`
+			Tail        string `yaml:"tail"`
+			InvalidUTF8 bool   `yaml:"invalid_utf8"`
+		} `yaml:"cases"`
+	}
+	read("pi_capture.yaml", &capture)
+	id, err := ingest.NewSessionID(capture.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observeSource := func(name, source string) {
+		filesystem := testutil.NewMemFS()
+		path := "/synthetic/pi/transcript.jsonl"
+		if err := filesystem.WriteFile(path, []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+		observe(name, ingest.DiscoveredSession{SessionID: id, Harness: ingest.Harness("pi"), SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL}, filesystem)
+	}
+	seen := make(map[string]bool)
+	for _, row := range capture.Cases {
+		guardName(t, seen, row.Name)
+		data := capture.Initial + capture.ValidAppend + row.Tail
+		if row.InvalidUTF8 {
+			data = strings.ReplaceAll(data, "INVALID_UTF8", string([]byte{0xff}))
+		}
+		observeSource("capture/"+row.Name, data)
+	}
+	var native struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name                 string `yaml:"name"`
+			Source               string `yaml:"source"`
+			MetadataStringBytes  int    `yaml:"metadataStringBytes"`
+			PaddingStringBytes   int    `yaml:"paddingStringBytes"`
+			InvalidUTF8Namespace bool   `yaml:"invalidUTF8Namespace"`
+		} `yaml:"cases"`
+	}
+	read("pi_source_v3_structure.yaml", &native)
+	seen = make(map[string]bool)
+	for _, row := range native.Cases {
+		guardName(t, seen, row.Name)
+		data := strings.ReplaceAll(row.Source, "pi-native-fixture", string(id))
+		if row.MetadataStringBytes > 0 {
+			data = strings.ReplaceAll(data, "native-boundary-string", strings.Repeat("x", row.MetadataStringBytes))
+		}
+		if row.PaddingStringBytes > 0 {
+			data = strings.ReplaceAll(data, "native-boundary-padding", strings.Repeat("p", row.PaddingStringBytes))
+		}
+		if row.InvalidUTF8Namespace {
+			data = strings.ReplaceAll(data, "invalid-utf8-namespace", string([]byte{0xff}))
+		}
+		observeSource("native/"+row.Name, data)
+	}
+	for _, name := range native.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("required Pi native case missing: %s", name)
+		}
+	}
+}
+
+func guardName(t *testing.T, seen map[string]bool, name string) {
+	t.Helper()
+	if name == "" || seen[name] {
+		t.Fatalf("missing or duplicate corpus name %q", name)
+	}
+	seen[name] = true
+}
+
+func guardMetadata(t *testing.T, metadata *ingest.UnifiedMetadata, temporaryRoot string) any {
+	t.Helper()
+	if metadata == nil {
+		return nil
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if temporaryRoot != "" {
+		data = []byte(strings.ReplaceAll(string(data), temporaryRoot, "/synthetic/native"))
+	}
+	var object map[string]any
+	if err := json.Unmarshal(data, &object); err != nil {
+		t.Fatal(err)
+	}
+	// Serialization/producer bookkeeping and hashes derived from it are not
+	// adapter semantics. Keep all actual extracted timestamps, stats and context.
+	for _, key := range []string{"schemaVersion", "adapterVersion", "contentHash", "metadataHash", "artifactHash", "derivedAt"} {
+		delete(object, key)
+	}
+	if timestamp, ok := object["timestamp"].(map[string]any); ok {
+		delete(timestamp, "ingested")
+	}
+	return object
+}
+
+type guardEnvironment map[string]string
+
+func (e guardEnvironment) LookupEnv(key string) (string, bool) { value, ok := e[key]; return value, ok }
+
+func guardRecord(t *testing.T, result *guardSnapshot, name string, value any, err error) {
+	t.Helper()
+	if _, exists := result.Outputs[name]; exists {
+		t.Fatalf("duplicate observation %s", name)
+	}
+	// Diagnostic wording does not alter persisted parser behavior; failure
+	// versus success does. Preserve partial output when a parser returns it.
+	data, marshalErr := json.Marshal(struct {
+		Failed bool
+		Output any
+	}{err != nil, value})
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	result.Outputs[name] = data
+}
+
+type guardFaultFS struct {
+	*testutil.MemFS
+	partial             bool
+	readError, dirError string
+}
+
+var _ ingest.FileSystem = (*guardFaultFS)(nil)
+
+func (f *guardFaultFS) ReadFile(path string) ([]byte, error) {
+	if path == f.readError {
+		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrPermission}
+	}
+	data, err := f.MemFS.ReadFile(path)
+	if err == nil && f.partial {
+		err = fmt.Errorf("synthetic partial source read")
+	}
+	return data, err
+}
+
+func (f *guardFaultFS) ReadDir(path string) ([]os.DirEntry, error) {
+	if path == f.dirError {
+		return nil, &fs.PathError{Op: "readdir", Path: path, Err: fs.ErrPermission}
+	}
+	return f.MemFS.ReadDir(path)
+}

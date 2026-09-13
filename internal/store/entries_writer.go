@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/crypto/sha3"
@@ -82,6 +83,7 @@ ORDER BY entry_index`
 )
 
 type sessionEntryWriteOutcome struct {
+	entriesCount       int
 	skipped            bool
 	sessionEntriesHash string
 	stats              ingest.SessionEntryWriteStats
@@ -99,28 +101,17 @@ type sessionEntryWriteOutcome struct {
 // isolated and reported by push, but a re-index must not create new ones, so the
 // rows are read first and re-attached to the entries that still exist afterwards.
 func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry) (err error) {
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return fmt.Errorf("store: take connection: %w", err)
-	}
-	defer s.pool.Put(conn)
-
-	endFn := sqlitex.Transaction(conn)
-	defer endFn(&err)
-
-	stmts := newSessionEntryWriteStatements(conn)
-	defer func() {
-		err = errors.Join(err, stmts.Close())
-	}()
-	_, err = indexSessionEntriesOnConn(conn, sessionID, entries, stmts)
-	return err
+	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+	}})
+	return results[0].Err
 }
 
 // IndexSessionEntryBatch writes multiple session entry replacements in one
 // outer transaction. Each session runs under a savepoint, so one bad session can
 // roll back without discarding later successful sessions in the same batch.
-func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
-	results := make([]ingest.SessionEntryWriteResult, len(writes))
+func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) (results []ingest.SessionEntryWriteResult) {
+	results = make([]ingest.SessionEntryWriteResult, len(writes))
 	for i := range writes {
 		results[i].SessionID = writes[i].SessionID
 	}
@@ -138,22 +129,36 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 	defer s.pool.Put(conn)
 
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
-	txnOpen := true
-	stmts := newSessionEntryWriteStatements(conn)
+	// This cleanup runs after transaction finalization, so a failed COMMIT can
+	// never leave a successful completion result for rolled-back entries.
 	defer func() {
-		if txnOpen {
-			txnErr = errors.Join(txnErr, stmts.Close())
-			endFn(&txnErr)
+		if txnErr != nil {
+			commitErr := fmt.Errorf("store: commit session entry batch: %w", txnErr)
+			for i := range results {
+				if results[i].Written {
+					results[i].Written = false
+					results[i].Err = commitErr
+				}
+				if results[i].Err == nil {
+					results[i].Err = commitErr
+				}
+			}
 		}
 	}()
+	endFn := sqlitex.Transaction(conn)
+	// Keep this a direct defer: sqlitex must recover an active handler panic
+	// here, roll back the entire outer transaction, then propagate the panic.
+	defer endFn(&txnErr)
+	stmts := newSessionEntryWriteStatements(conn)
+	defer func() { txnErr = errors.Join(txnErr, stmts.Close()) }()
 
 	for i := range writes {
 		if results[i].Err != nil {
 			continue
 		}
-		outcome, err, fatal := indexSessionEntryWriteSavepoint(conn, writes[i], stmts)
+		outcome, err, fatal := s.indexSessionEntryWriteSavepoint(ctx, conn, writes[i], stmts, nil)
 		results[i].Stats = outcome.stats
+		results[i].EntriesCount = outcome.entriesCount
 		if err != nil {
 			results[i].Err = err
 			if fatal {
@@ -166,38 +171,95 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		results[i].Skipped = outcome.skipped
 	}
 
-	txnErr = errors.Join(txnErr, stmts.Close())
-	endFn(&txnErr)
-	txnOpen = false
-	if txnErr != nil {
-		commitErr := fmt.Errorf("store: commit session entry batch: %w", txnErr)
-		for i := range results {
-			if results[i].Written {
-				results[i].Written = false
-				results[i].Err = commitErr
-			}
-			if results[i].Err == nil {
-				results[i].Err = commitErr
-			}
-		}
-	}
 	return results
 }
 
-func indexSessionEntryWriteSavepoint(conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error, bool) {
+func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements, conversion *IndexFormatConversion) (sessionEntryWriteOutcome, error, bool) {
 	const savepointName = "session_entry_batch_item"
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
+	// A forced retained-content repair replaces the projection, but still uses
+	// the same proven metadata/index revision as a content-only backfill. Resolve
+	// it inside this savepoint before replacement can invalidate the old proof.
+	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+		var err error
+		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+	}
+	format, state, err := s.validateIndexWriteOnConn(conn, write, conversion)
+	if err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	if state.IndexVersion != nil && *state.IndexVersion != write.IndexVersion {
+		if err := s.indexFormats[*state.IndexVersion].Delete(ctx, conn, write.SessionID); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+	}
+	entries, err := format.Write(ctx, conn, write.SessionID, write.Result)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.SessionID != write.SessionID {
+				err = fmt.Errorf("store: format %d projected entry for session %s into replacement for %s; no replacement was committed; correct the format projection", write.IndexVersion, entry.SessionID, write.SessionID)
+				break
+			}
+		}
+	}
+	if err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
 
-	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, write.Entries, stmts)
+	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	outcome, err := writeSessionContentOnConn(ctx, conn, write, entries, stmts)
+	outcome.entriesCount = len(entries)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return outcome, rollbackErr, fatal
 	}
-	if write.IndexVersion > 0 {
-		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexVersion, write.IndexedAtMs, outcome.sessionEntriesHash); err != nil {
+	if write.Mode != ingest.SessionEntryWriteContentBackfill {
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	}
+	if write.ArtifactIdentity != nil {
+		// The pair identity this parse consumed. A row that predates the
+		// artifact-hash column has none; establishing it here is what lets the
+		// input proof and the settled index be recorded in the same commit.
+		// The WHERE clause keeps a stored identity untouched even though the
+		// captured-state check already refused a contradicting claim.
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{Args: []any{*write.ArtifactIdentity, string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	}
+	if write.IndexerVersion > 0 && write.Mode != ingest.SessionEntryWriteContentBackfill {
+		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexerVersion, write.IndexedAtMs, outcome.sessionEntriesHash, write.IndexedInputHash); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	} else if conversion == nil && write.Mode != ingest.SessionEntryWriteContentBackfill && write.Mode != ingest.SessionEntryWriteFormatConversion {
+		// An entry-only replacement keeps historical parser stamps but cannot
+		// certify the input, even when the canonical rows happen to match. A
+		// format conversion is excluded because no parser ran: it proved the
+		// canonical rows unchanged, so the input proof still describes them.
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}}); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+	}
+	if write.Mode != ingest.SessionEntryWriteContentBackfill {
+		if err := stampPublicationIndex(conn, write.SessionID, write.CaptureRevision); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
 	}
@@ -224,6 +286,20 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 }
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
+	for _, entry := range entries {
+		if entry.SessionID != sessionID {
+			return sessionEntryWriteOutcome{}, publicationRepairError("entry session identity differs from index request; existing entries were not changed")
+		}
+		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+			return sessionEntryWriteOutcome{}, err
+		}
+		if !ingest.IsPiCarrier(entry) {
+			continue
+		}
+		if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil || !pi || entry.Role != schema.RoleSystem || entry.EntryType != schema.EntryTypeSystem || entry.ContentPreview != nil || entry.ToolInput != nil || entry.ToolOutput != nil || entry.TokensIn != nil || entry.TokensOut != nil {
+			return sessionEntryWriteOutcome{}, fmt.Errorf("store carrier validation failed during index replacement: private Pi rows must have system role/type and no searchable content or token counts (decode: %v); existing entries were not replaced; repair the Pi indexer and re-index", err)
+		}
+	}
 	outcome := sessionEntryWriteOutcome{}
 	sessionEntriesHash, err := computeSessionEntriesHash(entries)
 	if err != nil {
@@ -1345,12 +1421,17 @@ func (anchor entryTargetAnchor) matchKeys() []string {
 }
 
 // SessionEntriesExist returns true if session_entries rows exist for the session.
-func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.SessionID) (bool, error) {
+func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.SessionID) (_ bool, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return false, err
+	}
 
 	var exists bool
 	err = sqlitex.ExecuteTransient(conn, sqlSessionEntriesExist, &sqlitex.ExecOptions{

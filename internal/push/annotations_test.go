@@ -33,6 +33,34 @@ type stubAnnotationStore struct {
 // Compile-time guard: stubAnnotationStore must satisfy ingest.AnnotationQueryStore.
 var _ ingest.AnnotationQueryStore = (*stubAnnotationStore)(nil)
 
+func (s *stubAnnotationStore) ReadAnnotationPushSnapshot(_ context.Context, selection ingest.AnnotationReadSelection, includeRetractions bool) (snapshot ingest.AnnotationPushSnapshot, err error) {
+	if s.err != nil {
+		return snapshot, s.err
+	}
+	for _, row := range s.rows {
+		if selection.IncludesAnnotation(row) {
+			snapshot.Annotations = append(snapshot.Annotations, row)
+		}
+	}
+	for _, row := range s.unresolved {
+		if selection.IncludesUnresolvedAnchor(row) {
+			snapshot.Unresolved = append(snapshot.Unresolved, row)
+		}
+	}
+	if len(snapshot.Unresolved) > 0 || !includeRetractions {
+		return snapshot, nil
+	}
+	if s.supersededErr != nil {
+		return snapshot, s.supersededErr
+	}
+	for _, row := range s.superseded {
+		if selection.IncludesRetraction(row) {
+			snapshot.Retractions = append(snapshot.Retractions, row)
+		}
+	}
+	return snapshot, nil
+}
+
 func (s *stubAnnotationStore) ListSystemAnnotations(_ context.Context) ([]ingest.AnnotationPushRow, error) {
 	return s.rows, s.err
 }

@@ -1,6 +1,6 @@
 module:
   path: github.com/peasant-labs/redact
-  version: v0.1.5
+  version: v0.1.6
 forbidden_imports:
   - github.com/peasant-labs/peasant/pkg/redact
 forbidden_trees:
@@ -10,7 +10,7 @@ scanner_calls:
     function: redactJSONLBytes
     expected_calls: 1
   - file: internal/ingest/pipeline.go
-    function: processSession
+    function: processNativeSession
     expected_calls: 1
   - file: internal/ingest/pipeline.go
     function: redactTranscript

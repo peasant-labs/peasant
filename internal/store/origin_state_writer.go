@@ -80,17 +80,41 @@ const sqlUpdateOriginState = `UPDATE sessions SET session_origin = ?, origin_ver
 // A version BELOW the current rule version is how the caller keeps a row
 // retryable while still giving it a verdict; the column carries no CHECK for
 // exactly that reason.
-func (s *Store) UpdateOriginState(ctx context.Context, sessionID ingest.SessionID, origin string, version int) error {
+func (s *Store) UpdateOriginState(ctx context.Context, sessionID ingest.SessionID, origin string, version int) (err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	end := sqlitex.Transaction(conn)
+	defer end(&err)
+	// Origin is a separately derived fact, not extraction metadata or indexed
+	// transcript input. Preserve the existing proof (including an unready one)
+	// across the conservative legacy-writer invalidation trigger. This read and
+	// both updates share one write transaction, so no newer index can be lost.
+	var indexedRevision int64
+	var provenance string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT indexed_publication_capture_revision, cwd_provenance_kind FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{sessionID.String()},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			indexedRevision, provenance = stmt.ColumnInt64(0), stmt.ColumnText(1)
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store: read publication proof before origin update for %s: %w; no origin verdict was written; repair database access and retry ingest", sessionID, err)
+	}
 
 	if err := sqlitex.ExecuteTransient(conn, sqlUpdateOriginState, &sqlitex.ExecOptions{
 		Args: []any{origin, version, string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: update origin state for %s to %q at version %d: %w", sessionID, origin, version, err)
+	}
+	if provenance != "" {
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_publication_capture_revision = ?, cwd_provenance_kind = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{indexedRevision, provenance, sessionID.String()},
+		}); err != nil {
+			return fmt.Errorf("store: retain publication proof after origin update for %s: %w; the origin transaction was rolled back; repair database access and retry ingest", sessionID, err)
+		}
 	}
 	return nil
 }

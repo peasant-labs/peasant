@@ -8,13 +8,14 @@ import (
 
 // Session represents a normalized agent coding session.
 type Session struct {
-	ID        SessionID
-	Project   string
-	Harness   Harness
-	StartTime time.Time
-	EndTime   time.Time
-	Turns     []Turn
-	Metadata  SessionMetadata
+	ID             SessionID
+	Project        string
+	Harness        Harness
+	StartTime      time.Time
+	EndTime        time.Time
+	Turns          []Turn
+	NativeMetadata []schema.NativeMetadataRecord
+	Metadata       SessionMetadata
 
 	// Detail fields — populated by SessionByID for the detail view.
 	Model       string // from sessions.model_id
@@ -26,12 +27,14 @@ type Session struct {
 
 // Turn represents a single interaction turn within a session.
 type Turn struct {
-	Index     int
-	Role      Role
-	Content   string
-	ToolCalls []ToolCall
-	Timestamp time.Time
-	Depth     int // 0 = main agent, 1+ = subagent nesting levels
+	SourceEntryRef string
+	Usage          *schema.UsageDetail
+	Index          int
+	Role           Role
+	Content        string
+	ToolCalls      []ToolCall
+	Timestamp      time.Time
+	Depth          int // 0 = main agent, 1+ = subagent nesting levels
 	// ParentIndex is the entry_index of the parent entry. At depth 1 and deeper
 	// it names the enclosing depth-0 turn. At depth 0 it is nil. A harness
 	// message graph, when one exists, is carried on the entry ParentEntryID
@@ -41,6 +44,15 @@ type Turn struct {
 	// ObservedModel is exact source evidence. Omission remains omission; readers
 	// derive sticky state without mutating this raw observation.
 	ObservedModel ObservedModelID
+
+	// Command is the skill or user-defined slash command this turn invoked, as
+	// recorded at index time. It is nil when the turn invoked none. The rendered
+	// Role is settled separately, by two mechanisms: harness-injected command
+	// markup within the turn's content demotes it to a system turn, and a
+	// stored user turn whose only content is the invocation (no text) is also
+	// rendered as a system turn; either way the turn still carries its
+	// invocation.
+	Command *schema.CommandInvocation
 
 	// Enrichment fields — propagated from session_entries for the detail view.
 	EntryType   schema.EntryType   // text, tool_use, tool_result, thinking, system, error, result
@@ -53,10 +65,14 @@ type Turn struct {
 
 // ToolCall represents a tool invocation within a turn.
 type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments string
-	Result    string
+	Namespace      *string
+	CallEntryRef   string
+	ResultEntryRef string
+	Usage          *schema.UsageDetail
+	ID             string
+	Name           string
+	Arguments      string
+	Result         string
 
 	// Enrichment fields — computed from session_entries data.
 	DurationMs *int                // wall-clock duration from tool_use to tool_result

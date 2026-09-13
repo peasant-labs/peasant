@@ -1,0 +1,12 @@
+requiredNames: [snapshot_after_capture_select, cancel_projection, cancel_later_chunk, later_chunk_corruption, negative_budget]
+cases:
+  - name: snapshot_after_capture_select
+    action: snapshot
+  - name: cancel_projection
+    action: cancel_projection
+  - name: cancel_later_chunk
+    action: cancel_chunk
+  - name: later_chunk_corruption
+    action: corrupt_chunk
+  - name: negative_budget
+    action: negative

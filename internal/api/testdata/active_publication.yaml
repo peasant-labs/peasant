@@ -1,0 +1,7 @@
+name: active upstream snapshot explicit publication convergence
+initial: |
+  {"sessionId":"SESSION","uuid":"user-one","cwd":CWD,"gitBranch":"main","type":"user","timestamp":"2026-09-07T10:00:00Z","message":{"role":"user","content":"synthetic initial request"}}
+  {"sessionId":"SESSION","uuid":"assistant-one","cwd":CWD,"gitBranch":"main","type":"assistant","timestamp":"2026-09-07T10:00:01Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"synthetic initial answer"}],"usage":{"input_tokens":10,"output_tokens":20}}}
+append: |
+  {"sessionId":"SESSION","uuid":"user-two","cwd":CWD,"gitBranch":"main","type":"user","timestamp":"2026-09-07T10:01:00Z","message":{"role":"user","content":"synthetic later request"}}
+  {"sessionId":"SESSION","uuid":"assistant-two","cwd":CWD,"gitBranch":"main","type":"assistant","timestamp":"2026-09-07T10:01:01Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"synthetic later answer"}],"usage":{"input_tokens":30,"output_tokens":40}}}

@@ -107,6 +107,15 @@ func TestMetricsCompute_EmptyStore(t *testing.T) {
 
 ## Test memory: the staging-arena trap (and the `-race` OOM)
 
+The full-stack E2E harness has a separate memory-sensitive path: the joined-hook
+developer-state isolation guard fingerprints local files. It streams these files
+through a 32 KiB buffer. Loading a multi-gigabyte local database with `os.ReadFile`
+previously made the E2E test process grow with the database size; the race detector
+amplified that allocation. `TestPathFingerprintBoundedMemory` checks this exact
+shared helper with a 64 MiB sparse file and a 1 MiB allocation ceiling, including
+content-only mutation and sandbox-exclusion cases. It runs without the `e2e` tag,
+so the ordinary quality gate protects the full-stack harness from this regression.
+
 Separately from time, the suite's **peak memory** was profiled after CI flakily
 **OOM-SIGTERM'd** `go test -race ./...` (exit 143) on the small 2-core/7 GB
 GitHub runner. The cause was a *single allocation*, and the lesson generalizes:
@@ -122,7 +131,9 @@ production **2 GiB** arena (`DefaultArenaSizeBytes`). With `t.Parallel` at
 **Regression coverage.** A tiny test arena, via an env override that mirrors
 `PEASANT_DB_POOL_SIZE`: `ingest.EnvArenaSizeBytes` (`PEASANT_INGEST_ARENA_BYTES`)
 + `resolveArenaSizeBytes`, set to **64 MiB** in the `cmd/peasant` and
-`internal/ingest` `TestMain`s. Result: `cmd/peasant -race` 2173–6267 MB →
+`internal/ingest` `TestMain`s. The API test binary applies the same override for
+its mounted ingest paths, and E2E TestMain supplies it to the harness and CLI
+children. Result: `cmd/peasant -race` 2173–6267 MB →
 **240 MB**, `ingest` 6185 → **274 MB**; full `make check -race` runs ~26s and
 fits a **2-vcpu** runner (so the per-PR job stays a plain `make check`, no split).
 
@@ -162,8 +173,9 @@ test non-parallel).
 | `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB (`64*1024*1024`) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
 
 Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
-`internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`), and
-`internal/ingest/main_test.go` (arena). The resolvers (`store.resolvePoolSize`,
+`internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`),
+`internal/ingest/main_test.go` and `internal/api/main_test.go` (arena), and
+`internal/e2e/main_test.go` (arena default). The resolvers (`store.resolvePoolSize`,
 `ingest.resolveArenaSizeBytes`) take the env override only when it parses as a
 positive integer, else the default.
 
@@ -398,29 +410,39 @@ Freeze invocation, or PNG dimension check fails.
 
 ### Contact sheets and evidence review
 
-The harness publishes three contact sheets under the commit-derived directory
+The harness publishes six contact sheets under the commit-derived directory
 `out/test/screenshots/peasant-guided-final-<commit>/`:
 
 | File | PNG dimensions | Contents |
 |------|----------------|----------|
-| `guided-dark.png` | `1800x3300` | The five guided sections in the dark theme: auto-ingest, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
-| `guided-light.png` | `1800x3300` | The same five guided sections and terminal sizes in the light theme. |
-| `selection.png` | `1800x5700` | The mounted selection view, showing default and global-search states in dark mode plus project, branch, imported-transcript, and harness-source preview states in both themes. Every state includes `80x24` and `120x40` terminal renders. |
+| `guided-dark.png` | `1800x3420` | The six guided sections in the dark theme: auto-ingest, publication, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
+| `guided-light.png` | `1800x3420` | The same guided sections and terminal sizes in the light theme. |
+| `selection.png` | `1800x6750` | The mounted selection view, including search, project/branch/session previews, and origin filtering. |
+| `push.png` | `1800x6000` | The mounted publication wizard: start, selection, transcript preview, consent, and receipt. |
+| `ingest-progress.png` | `1800x1200` | Local import progress after the guided configuration is saved. |
+| `ingest-completion.png` | `1800x3420` | Local import completion with multiple actionable warnings at the top and bottom of the scrollable result, plus a no-warning control. Every state includes both themes and both terminal sizes. |
 
 The selection fixture contains six synthetic sessions across two harnesses. One session is marked as
 already ingested. One carries scrubbed transcript turns in the store. One carries a scrubbed harness
 transcript that the harness wrote and the store does not hold. Its states exercise the mounted
 hierarchy, global search, grouped repository and branch context, the stored session transcript
 preview, and the preview of a session that Peasant has not imported yet, without depending on a
-developer's repository or session history. The guided matrix contains 20 captures: five sections x
+developer's repository or session history. The guided matrix contains 24 captures: six sections x
 two themes x two terminal sizes.
 
 The generated directory is local evidence and is ignored by git at `/out/test/screenshots/`; do not
-commit the PNGs. Manually inspect all three sheets after generation. Review both themes, both
+commit the PNGs. Manually inspect every sheet after generation. Review both themes, both
 terminal sizes, every guided section, and every selection state for clipped or overlapping content,
 full-line styling, heading-first guidance, readable privacy before/after rows, usable selection
 search, cursor-aligned project/branch/session previews, and blank or stale-looking panels. A passing
 command proves fixture coverage and image dimensions; it does not replace this visual review.
+
+Kickstart keeps nonfatal import warnings separate from error counts. Its completion view retains
+the full session/location, reason, and remediation, sanitizes terminal controls, and keeps paging
+and exit controls visible. The retained legacy receipt labels warning history across setup attempts;
+an earlier warning may already be resolved. The CLI integration tests use synthetic native files
+and a temporary SQLite store to prove the real runner forwards refusals without rewriting last-good
+data; the screenshot harness proves the mounted presentation, not production-source discovery.
 
 ## TypeScript unit tests (verified)
 

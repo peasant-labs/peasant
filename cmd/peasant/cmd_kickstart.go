@@ -66,7 +66,7 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 		},
 		runFlow: runKickstartFlow,
 		runModel: func(model tea.Model) error {
-			_, err := tea.NewProgram(model, tea.WithFPS(progressRendererFPS)).Run()
+			_, err := tea.NewProgram(model, tea.WithFPS(progressProgramFPS)).Run()
 			return err
 		},
 		readRetention: ftue.ReadClaudeCleanupDays,
@@ -701,6 +701,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			Errors:         s.Errors,
 			Duration:       result.Duration,
 			ProviderCounts: providerCounts,
+			Diagnostics:    append([]ingest.DiagnosticEntry(nil), result.Diagnostics...),
 		}, nil
 	}, progState
 }

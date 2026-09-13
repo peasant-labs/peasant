@@ -2,15 +2,355 @@ package ingest
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/pipeline_progress.yaml
+var pipelineProgressYAML []byte
+
+type pipelineProgressCase struct {
+	Name        string `yaml:"name"`
+	Boundary    string `yaml:"boundary"`
+	ReturnError bool   `yaml:"return_error"`
+}
+
+func loadPipelineProgressFixtures(t *testing.T) []pipelineProgressCase {
+	t.Helper()
+	var fixture struct {
+		RequiredCases []string               `yaml:"required_cases"`
+		Cases         []pipelineProgressCase `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(pipelineProgressYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		present[tc.Name] = true
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("missing required cancellation cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if !present[name] {
+			t.Fatalf("missing required case %q", name)
+		}
+	}
+	return fixture.Cases
+}
+
+type progressShortStageCase struct {
+	Name    string `yaml:"name"`
+	Stage   string `yaml:"stage"`
+	Done    int    `yaml:"done"`
+	Total   int    `yaml:"total"`
+	Want    string `yaml:"want"`
+	NotWant string `yaml:"not_want"`
+}
+
+func loadProgressShortStageFixtures(t *testing.T) []progressShortStageCase {
+	t.Helper()
+	var fixture struct {
+		RequiredCases []string                 `yaml:"required_short_stage_cases"`
+		Cases         []progressShortStageCase `yaml:"short_stage_cases"`
+	}
+	if err := yaml.Unmarshal(pipelineProgressYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		present[tc.Name] = true
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("missing required short-stage cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if !present[name] {
+			t.Fatalf("missing required short-stage case %q", name)
+		}
+	}
+	return fixture.Cases
+}
+
+// TestProgressRendererShortStageRendersKOverN pins the renderer count cell for a
+// stage that ends before reaching its total: the ingest ProgressState records
+// the short end (Done < Total, Ended), and the shared progress renderer shows it
+// as "K/N" — the how-far-it-got count — never the "done" sentinel reserved for a
+// stage whose total was never known. The CONTENT stage ends this way when the
+// byte budget stops the one-time full-content pass, and a user must be able to
+// read how much it captured.
+func TestProgressRendererShortStageRendersKOverN(t *testing.T) {
+	for _, tc := range loadProgressShortStageFixtures(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			stage := Stage(tc.Stage)
+			progress := NewProgressState()
+			progress.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: tc.Total})
+			progress.Update(ProgressEvent{Kind: KindEnd, Stage: stage, Done: tc.Done, Total: tc.Total})
+
+			sp := progress.Snapshot()[stage]
+			if !sp.Ended || sp.Done != tc.Done || sp.Total != tc.Total {
+				t.Fatalf("state = %+v, want ended with %d/%d", sp, tc.Done, tc.Total)
+			}
+
+			rendered := kit.ProgressBar(stage.String(), sp.Done, sp.Total, sp.Ended, sp.HasErr)
+			if !strings.Contains(rendered, tc.Want) {
+				t.Errorf("rendered %q, want it to contain the short count %q", rendered, tc.Want)
+			}
+			if strings.Contains(rendered, tc.NotWant) {
+				t.Errorf("rendered %q, want it NOT to contain %q (a short stage must not read as a plain completion)", rendered, tc.NotWant)
+			}
+		})
+	}
+}
+
+func TestPipelineCancellationBeforeDiff(t *testing.T) {
+	for _, tc := range loadPipelineProgressFixtures(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			progress := NewProgressState()
+			filesystem := &cancelNestedDiffFS{}
+			filesystem.canceled.Store(true)
+			adapter := progressAdapter{sessions: []DiscoveredSession{{SessionID: "session-one", Harness: HarnessClaudeCode}}}
+			pipeline := &Pipeline{
+				fs: filesystem,
+				adapters: map[Harness]AdapterFactory{
+					HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter { return adapter },
+				},
+				config: PipelineConfig{Sources: map[Harness]SourceConfig{HarnessClaudeCode: {Enabled: true}}, Progress: progress},
+			}
+			switch tc.Boundary {
+			case "entry":
+				cancel()
+			case "discovery":
+				adapter.discover = cancel
+			case "prepare":
+				pipeline.config.PrepareSessionFilter = func(context.Context, []DiscoveredSession) error { cancel(); return nil }
+			case "bulk":
+				pipeline.store = &cancelProgressStore{cancel: cancel, returnError: tc.ReturnError}
+			default:
+				t.Fatalf("unknown cancellation boundary %q", tc.Boundary)
+			}
+			_, err := pipeline.Run(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Run error = %v, want context.Canceled", err)
+			}
+			if filesystem.afterCancel.Load() != 0 {
+				t.Fatalf("unexpected filesystem calls = %d", filesystem.afterCancel.Load())
+			}
+			for _, stage := range stagesAfter(t, StageDiscover) {
+				if progress.Snapshot()[stage].Started {
+					t.Errorf("stage %s started after preparation cancellation", stage)
+				}
+			}
+		})
+	}
+}
+
+// stagesAfter names every stage the pipeline may reach only once the named
+// stage has run. It is derived from the display order by the NAME of that
+// stage, not by its position, so a stage added earlier in the order cannot
+// silently move the boundary these assertions guard.
+func stagesAfter(t *testing.T, after Stage) []Stage {
+	t.Helper()
+	for index, stage := range StageOrder {
+		if stage == after {
+			return StageOrder[index+1:]
+		}
+	}
+	t.Fatalf("stage display order %v has no %s stage", StageOrder, after)
+	return nil
+}
+
+type cancelProgressStore struct {
+	SessionStore
+	cancel      context.CancelFunc
+	returnError bool
+}
+
+var _ SessionStore = (*cancelProgressStore)(nil)
+
+func (s *cancelProgressStore) BulkLookupSessionLocations(context.Context, []SessionID) (map[SessionID]SessionLocation, error) {
+	s.cancel()
+	if s.returnError {
+		return nil, context.Canceled
+	}
+	ingested := int64(1)
+	return map[SessionID]SessionLocation{"session-one": {IngestedMs: &ingested, SchemaVersion: CurrentSchemaVersion}}, nil
+}
+
+func TestPipelineReindexCancellationDuringDiffLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	progress := NewProgressState()
+	// A reindex classifies each scanned target against recorded evidence, so the
+	// interruption is injected in the stored-compatibility lookup that DIFF
+	// performs for the target it is classifying. That needs one managed session
+	// on disk for DIFF to have a target at all.
+	output := writeReindexProgressFixture(t)
+	pipeline := &Pipeline{
+		fs:           &OSFileSystem{},
+		store:        &cancelProgressStore{cancel: cancel, returnError: true},
+		metricsStore: &cancelReindexProgressStore{},
+		config:       PipelineConfig{Reindex: true, Progress: progress, OutputDir: ResolvedPath(output)},
+	}
+	_, err := pipeline.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	snapshot := progress.Snapshot()
+	if got := snapshot[StageDiff]; !got.Ended || !got.HasErr || got.Done != 0 {
+		t.Fatalf("interrupted reindex DIFF = %+v, want error with no classified sessions", got)
+	}
+	for _, stage := range stagesAfter(t, StageDiff) {
+		// A reindex runs the content pass FIRST, before DISCOVER and DIFF, so
+		// the CONTENT stage has already started and ended by the time DIFF is
+		// cancelled. It sorts after DIFF in the display order but runs before
+		// it here, so it is not a stage that started AFTER the cancellation.
+		if stage == StageContent {
+			continue
+		}
+		if snapshot[stage].Started {
+			t.Errorf("stage %s started after cancellation", stage)
+		}
+	}
+}
+
+type cancelReindexProgressStore struct {
+	MetricsStore
+}
+
+var _ MetricsStore = (*cancelReindexProgressStore)(nil)
+
+// writeReindexProgressFixture writes one managed session under a fresh output
+// directory and returns that directory. A reindex DIFF classifies the sessions
+// it scans, so it needs at least one to classify.
+func writeReindexProgressFixture(t *testing.T) string {
+	t.Helper()
+	output := t.TempDir()
+	sid := SessionID("11111111-2222-3333-4444-555555555555")
+	sessionDir := filepath.Join(output, "test-host", string(sid))
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
+	if err := os.WriteFile(filepath.Join(sessionDir, string(sid)+"--transcript.jsonl"), transcript, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta := NewUnifiedMetadata()
+	meta.SessionID = sid
+	meta.ModelHarness = HarnessClaudeCode
+	meta.HostSlug = HostSlug("test-host")
+	meta.Source = SourceInfo{FilePath: "/nonexistent/source.jsonl", Format: SourceFormatJSONL}
+	meta.Timestamp = TimestampInfo{Start: 1708300800000, End: 1708300860000}
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, string(sid)+"--metadata.json"), encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return output
+}
+
+func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	progress := NewProgressState()
+	filesystem := &cancelNestedDiffFS{cancel: cancel}
+	pipeline := &Pipeline{
+		fs: filesystem,
+		adapters: map[Harness]AdapterFactory{
+			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
+				return progressAdapter{sessions: []DiscoveredSession{
+					{SessionID: "session-one", Harness: HarnessClaudeCode},
+					{SessionID: "session-two", Harness: HarnessClaudeCode},
+					{SessionID: "session-three", Harness: HarnessClaudeCode},
+				}}
+			},
+		},
+		config: PipelineConfig{
+			Sources:   map[Harness]SourceConfig{HarnessClaudeCode: {Enabled: true}},
+			OutputDir: ResolvedPath(cancelNestedDiffOutputDir), Progress: progress,
+			SessionFilter: func(DiscoveredSession) bool { t.Error("FILTER ran after cancellation"); return false },
+		},
+	}
+	_, err := pipeline.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	if !filesystem.canceled.Load() {
+		t.Fatal("DIFF never reached the nested walk that cancels the run")
+	}
+	if filesystem.reads.Load() == 0 || filesystem.stats.Load() == 0 {
+		t.Fatalf("DIFF did no nested filesystem work: ReadDir=%d Stat=%d", filesystem.reads.Load(), filesystem.stats.Load())
+	}
+	// The pool classifies several sessions at once, so how many finish before
+	// the walk cancels is not fixed. What must hold is that DIFF ended with the
+	// run's cancellation and that no later stage started.
+	snapshot := progress.Snapshot()
+	if got := snapshot[StageDiff]; !got.Ended || !got.HasErr || got.Total != 3 {
+		t.Fatalf("interrupted DIFF = %+v, want an ended error stage with total 3", got)
+	}
+	for _, stage := range stagesAfter(t, StageDiff) {
+		if snapshot[stage].Started {
+			t.Errorf("stage %s started after DIFF cancellation", stage)
+		}
+	}
+}
+
+const cancelNestedDiffOutputDir = "/out"
+
+// cancelNestedDiffFS returns a host/session layout for every directory read, so
+// a lookup that misses the flat metadata path walks into the nested subagents
+// layout. The first Stat under "/subagents/session-two/" cancels the run from
+// inside that walk. Counters are atomic because the classifier pool calls the
+// filesystem from several goroutines at once.
+type cancelNestedDiffFS struct {
+	emptyProgressFS
+	cancel      context.CancelFunc
+	reads       atomic.Int64
+	stats       atomic.Int64
+	canceled    atomic.Bool
+	afterCancel atomic.Int64
+}
+
+var _ FileSystem = (*cancelNestedDiffFS)(nil)
+
+func (f *cancelNestedDiffFS) ReadDir(string) ([]os.DirEntry, error) {
+	f.reads.Add(1)
+	if f.canceled.Load() {
+		f.afterCancel.Add(1)
+	}
+	return fs.ReadDir(fstest.MapFS{
+		"parent":  &fstest.MapFile{Mode: fs.ModeDir},
+		"sibling": &fstest.MapFile{Mode: fs.ModeDir},
+	}, ".")
+}
+
+func (f *cancelNestedDiffFS) Stat(path string) (os.FileInfo, error) {
+	f.stats.Add(1)
+	if f.canceled.Load() {
+		f.afterCancel.Add(1)
+	}
+	if f.cancel != nil && strings.Contains(path, "/subagents/session-two/") && f.canceled.CompareAndSwap(false, true) {
+		f.cancel()
+	}
+	return nil, os.ErrNotExist
+}
 
 func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	progress := NewProgressState()
@@ -54,9 +394,10 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 		t.Fatal("DIFF did not reach the controlled second-session metadata lookup")
 	}
 
-	if got := progress.Snapshot()[StageDiff].Done; got != 1 {
-		t.Fatalf("DIFF progress while second session is blocked = %d, want 1", got)
-	}
+	// The pool classifies sessions concurrently, so the first session may not
+	// have finished yet when the second blocks. Wait for it: progress advances
+	// as each session finishes, not only when the slice ends.
+	waitForDiffProgress(t, progress, 1)
 	close(releaseSecondRead)
 	select {
 	case err := <-done:
@@ -70,6 +411,21 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	if diffProgress.Done != 2 || diffProgress.Total != 2 || !diffProgress.Ended {
 		t.Fatalf("final DIFF progress = %+v, want done=2 total=2 ended=true", diffProgress)
 	}
+}
+
+// waitForDiffProgress waits until DIFF reports at least want classified
+// sessions, so a test that blocks one session can still observe the others
+// landing rather than sampling the count once and racing the pool.
+func waitForDiffProgress(t *testing.T, progress *ProgressState, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if progress.Snapshot()[StageDiff].Done >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("DIFF progress = %+v, want at least %d classified", progress.Snapshot()[StageDiff], want)
 }
 
 func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
@@ -141,11 +497,15 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 
 type progressAdapter struct {
 	sessions []DiscoveredSession
+	discover func()
 }
 
 func (adapter progressAdapter) Harness() Harness { return HarnessClaudeCode }
 
 func (adapter progressAdapter) Discover(context.Context, SourceConfig) ([]DiscoveredSession, error) {
+	if adapter.discover != nil {
+		adapter.discover()
+	}
 	return adapter.sessions, nil
 }
 
@@ -179,13 +539,20 @@ func (emptyProgressFS) CopyFile(string, string, os.FileMode) error { return os.E
 
 type blockingReadDirFS struct {
 	emptyProgressFS
-	readDirCalls      atomic.Int64
+	blocked           atomic.Bool
 	secondReadStarted chan struct{}
 	releaseSecondRead chan struct{}
 }
 
 func (filesystem *blockingReadDirFS) ReadDir(string) ([]os.DirEntry, error) {
-	if filesystem.readDirCalls.Add(1) == 2 {
+	return fs.ReadDir(fstest.MapFS{"host": &fstest.MapFile{Mode: fs.ModeDir}}, ".")
+}
+
+// Block the metadata lookup of the SECOND session, named by its path. A call
+// ordinal cannot name it: one session's lookup probes both the flat and the
+// nested layout, so the number of probes per session is incidental.
+func (filesystem *blockingReadDirFS) Stat(path string) (os.FileInfo, error) {
+	if strings.Contains(path, "session-two") && filesystem.blocked.CompareAndSwap(false, true) {
 		close(filesystem.secondReadStarted)
 		<-filesystem.releaseSecondRead
 	}

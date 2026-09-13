@@ -8,9 +8,9 @@ store, indexes entries, computes metrics, and annotates sessions. The transcript
 file on disk stays in the provider source format (`.jsonl` or `.json`); the
 canonical display format is produced later from the DB-backed transcript model.
 
-The pipeline uses a staging directory for publish safety. It writes into a temp
-tree first, then moves that tree into the final session directory once the
-session output is complete.
+The pipeline uses a staging directory so each file lands atomically. It writes
+into a temp tree first, then renames the files into the final session directory,
+transcript first and metadata last, with no file sync and no lock.
 
 ## Architecture
 
@@ -26,11 +26,10 @@ flowchart TD
   F --> G[Write transcript into temp dir]
   G --> H[Copy debug artifacts into temp dir]
   H --> I[Compute content + metadata hashes]
-  I --> J[Move temp dir into peasant-sync/{hostSlug}/{sessionId}/]
-  J --> K[DB insert / upsert session state]
+  I --> J[Rename temp files into peasant-sync/{hostSlug}/{sessionId}/, transcript first, metadata last]
+  J --> K[DB insert / upsert session state in one batched transaction: the durability point]
   K --> L[Upsert current commits + durable association ledger when observed]
-  L --> M[Write metadata.json in final location]
-  M --> N[Index transcript entries]
+  L --> N[Index transcript entries]
   N --> O[Compute metrics + insights]
   O --> P[Prepare and flush classifier annotations]
   P --> Q[Cleanup + report + audit]
@@ -92,6 +91,29 @@ also records profile-only timing rows for **PREPARE**, **INDEX LOG**, and
 **AUDIT**. Those rows explain where time went, but they are not shown as normal
 progress stages.
 
+### Commit observations and rewritten branches
+
+Commit detection uses the existing history query with a three-day lookback and
+lookahead around the session, filters by the configured author email when
+available, and checks readable transcripts for Git activity. The transcript
+check is coarse: one recognized Git command admits all remaining candidates;
+it does not prove a relationship between each commit and the session. Missing
+email or unavailable transcript evidence uses the existing diagnostic fallback.
+
+The ingest-time branch reachability filter has been reverted. Current refs do
+not establish session-era branch membership: after a squash or rebase, original
+commits may remain discoverable through another checked-out ref even though the
+recorded branch no longer contains them. Those candidates can reach storage
+under the restored heuristics. Re-ingestion replaces `session_commits` but
+retains existing observations and their stable IDs in
+`session_commit_associations`.
+
+This restores the risk of attributing nearby same-author commits to the wrong
+session. Stored observations are not definitive proof of PR relevance. Ingest
+does not recover hashes absent from the initial history query or infer a
+successor after a rewrite; historical capture and supported successor mapping
+remain distinct concerns.
+
 ## Write Flow
 
 The ingest implementation follows this sequence:
@@ -101,17 +123,19 @@ The ingest implementation follows this sequence:
 3. Write the transcript to a temp directory under the output base.
 4. Copy any provider debug artifacts into the same temp directory.
 5. Compute transcript and metadata hashes from the final bytes.
-6. Move the temp tree into `peasant-sync/{hostSlug}/{sessionId}/`.
-7. Insert or update the DB state. This includes replacing the mutable
-   `session_commits` projection and ensuring durable
-   `session_commit_associations` rows exist for every observed commit.
-8. Write `metadata.json` after the publish step in the store-backed path.
-9. Stream DB-visible sessions to INDEX, where bounded parser workers parse
+6. Rename the temp files into `peasant-sync/{hostSlug}/{sessionId}/`, transcript
+   first, metadata last. Each file is one rename; there is no file sync and no
+   lock.
+7. Insert the database rows in one batched transaction; this commit is the
+   durability point. This includes replacing the mutable `session_commits`
+   projection and ensuring durable `session_commit_associations` rows exist for
+   every observed commit.
+8. Stream DB-visible sessions to INDEX, where bounded parser workers parse
    entries and one SQLite writer flushes entry batches.
-10. Compute metrics for sessions that were indexed successfully.
-11. Prepare classifier annotations in parallel, then flush annotation batches
+9. Compute metrics for sessions that were indexed successfully.
+10. Prepare classifier annotations in parallel, then flush annotation batches
     through one serial SQLite writer.
-12. Clean up, report, and write the ingest audit row best effort.
+11. Clean up, report, and write the ingest audit row best effort.
 
 The temp directory is intentionally placed under the output base so the final
 publish step stays on the same filesystem. The implementation does not try to

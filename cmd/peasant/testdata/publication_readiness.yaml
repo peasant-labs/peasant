@@ -1,0 +1,9 @@
+- name: complete-without-sidecar
+  action: ready
+  ready: true
+- name: legacy-needs-ingest
+  action: legacy
+- name: index-mismatch-needs-ingest
+  action: invalidate
+- name: missing-model-needs-source-evidence
+  action: missing-model

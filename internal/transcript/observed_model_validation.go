@@ -49,10 +49,8 @@ func ValidateObservedModelEntries(entries []schema.SessionEntry) error {
 
 // EntriesToTurnsValidated is the canonical storage-to-fold producer boundary.
 func EntriesToTurnsValidated(entries []schema.SessionEntry) ([]ingest.Turn, error) {
-	if err := ValidateObservedModelEntries(entries); err != nil {
-		return nil, err
-	}
-	return EntriesToTurns(entries), nil
+	projection, err := EntriesToProjectionValidated(entries, ProjectionOptions{})
+	return projection.Turns, err
 }
 
 func validateSessionObservedModelEvidence(session *ingest.Session) error {

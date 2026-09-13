@@ -12,10 +12,9 @@ import (
 // TestOpenCodeHybridUnionSkipsDeletedSessions proves the two joined rules of a
 // hybrid OpenCode database. Discovery unions both projections, so a session that
 // lives only in the legacy tables is discovered as a legacy winner while a
-// session in both is a current winner. The session table is authoritative for
-// existence, so a discovered session with no row there was deleted from OpenCode
-// and is skipped with a diagnostic rather than resurrected from its historical
-// message or session_message rows.
+// session in both is a current winner. Historical message rows without a live
+// record in the supported session tables are skipped with a diagnostic that
+// establishes absence, not deletion history.
 func TestOpenCodeHybridUnionSkipsDeletedSessions(t *testing.T) {
 	const (
 		legacyOnlyKept = "ses_3cd91f52effeXd3QAJ54jOyzG1"
@@ -65,7 +64,7 @@ func TestOpenCodeHybridUnionSkipsDeletedSessions(t *testing.T) {
 	if !strings.Contains(diagnostic.What, legacyDeleted) || !strings.Contains(diagnostic.What, currentDeleted) {
 		t.Fatalf("deletion diagnostic = %q, want it to name the deleted sessions %q and %q", diagnostic.What, legacyDeleted, currentDeleted)
 	}
-	if !strings.Contains(diagnostic.What, "deleted from OpenCode") {
-		t.Fatalf("deletion diagnostic = %q, want it to explain the sessions were deleted from OpenCode", diagnostic.What)
+	if !strings.Contains(diagnostic.What, "no live record") {
+		t.Fatalf("orphan diagnostic = %q, want evidence of missing live records", diagnostic.What)
 	}
 }

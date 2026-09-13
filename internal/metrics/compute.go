@@ -616,6 +616,12 @@ func makeContextUtilizationFunc(syncer ingest.ModelsSyncer) MetricFunc {
 // Cost = price_per_mtok * tokens / 1,000,000 for each token type.
 func makeCostFunc(syncer ingest.ModelsSyncer) MetricFunc {
 	return func(ctx context.Context, _ ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
+		// Pi carries recorded estimates in detailed usage; never reprice them.
+		for _, entry := range entries {
+			if _, pi, err := ingest.DecodePiExtra(entry.Extra); pi || err != nil {
+				return nil
+			}
+		}
 		if syncer == nil {
 			return nil
 		}
@@ -713,37 +719,12 @@ func makeCostFunc(syncer ingest.ModelsSyncer) MetricFunc {
 
 // extractModelID finds the most common model_id from entries' Extra JSON.
 func extractModelID(entries []schema.SessionEntry) string {
-	counts := make(map[string]int)
-	for i := range entries {
-		if entries[i].Extra == nil {
-			continue
-		}
-		var extra map[string]any
-		if json.Unmarshal([]byte(*entries[i].Extra), &extra) != nil {
-			continue
-		}
-		if mid, ok := extra["model_id"].(string); ok && mid != "" {
-			counts[mid]++
-		}
-	}
-	if len(counts) == 0 {
-		return ""
-	}
-	// Return the most common model_id.
-	var bestID string
-	var bestCount int
-	for id, c := range counts {
-		if c > bestCount {
-			bestID = id
-			bestCount = c
-		}
-	}
-	return bestID
+	return ingest.MetricModelID(entries)
 }
 
 // computeTokenOutcomeRatio (M2) calculates total_tokens / outcome_weight.
 // Weight: resolved=1.0, partial=0.5, failed=0.25.
-// Returns nil if existing metrics have no outcome set (ratio computed on next recompute cycle).
+// The engine supplies the outcome computed earlier in this same run.
 func computeTokenOutcomeRatio(_ context.Context, _ ingest.SessionID, entries []schema.SessionEntry, existing *ingest.SessionMetrics) *ingest.SessionMetrics {
 	if existing == nil || existing.Outcome == nil {
 		return nil
@@ -772,7 +753,15 @@ func computeTokenOutcomeRatio(_ context.Context, _ ingest.SessionID, entries []s
 	}
 
 	if totalTokens == 0 {
-		return nil
+		if existing.InputTokens != nil {
+			totalTokens += *existing.InputTokens
+		}
+		if existing.OutputTokens != nil {
+			totalTokens += *existing.OutputTokens
+		}
+		if totalTokens == 0 {
+			return nil
+		}
 	}
 
 	ratio := float64(totalTokens) / weight

@@ -93,12 +93,17 @@ check: fmt lint
 	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
 	go test $(GORACE_FLAG) ./...
 
+# Explicit revisions keep the expensive cross-revision check out of ordinary builds.
+.PHONY: check-harvester-versions
+check-harvester-versions:
+	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.
 # Deliberately OUT of `check` — it needs containers + a cross-repo build and
 # t.Skips when those are absent. See docs/e2e.md.
 e2e:
-	go test -race -tags=e2e -count=1 ./internal/e2e/...
+	bash scripts/e2e-budget.sh go test -race -parallel=1 -tags=e2e -count=1 $(E2E_TEST_FLAGS) ./internal/e2e/...
 
 # Cross-repo E2E must exercise matching schema-module contracts. CI passes the
 # exact village checkout selected by VILLAGE_REF; this gate prevents a stale
@@ -149,7 +154,7 @@ e2e-schema-parity:
 # Unasserted live demo of the same harness (run1 sends N, run2 sends 0,
 # retraction drops one) with verbose output. See docs/e2e.md.
 demo:
-	go test -race -tags=e2e -count=1 -v -run TestSkipGateDemo ./internal/e2e/...
+	bash scripts/e2e-budget.sh go test -race -parallel=1 -tags=e2e -count=1 -v -run TestSkipGateDemo ./internal/e2e/...
 
 # Manual visual evidence for the mounted guided TUI. The build tag keeps the
 # harness and its tests out of default Go builds and tests.
@@ -178,6 +183,19 @@ build: web
 
 nix-vendor-hash:
 	./scripts/update-nix-vendor-hash.sh
+
+# Regenerate the dependency license notices shipped with the binary. web-stub
+# satisfies the //go:embed all:web/out requirement so `go list` can load
+# ./cmd/peasant; the embedded web content does not affect the Go module set.
+third-party-notices: web-stub
+	./scripts/gen-third-party-notices.sh
+
+# CI gate: fail if the committed notices drift from the deps, and fail on any
+# copyleft (forbidden/restricted) license entering the binary's module set.
+third-party-notices-check: web-stub
+	./scripts/gen-third-party-notices.sh
+	git diff --exit-code -- THIRD_PARTY_NOTICES
+	./scripts/check-dep-licenses.sh
 
 go:
 	@$(build_peasant_cli)

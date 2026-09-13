@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
@@ -40,8 +41,25 @@ type kickstartJourneyDeps struct {
 
 func buildKickstartJourneyRunnerWithDeps(cmd *cobra.Command, configPath string, loaded *config.Config, snapshot []byte, existed bool, ingestRunner ftue.IngestRunnerFunc, deps kickstartJourneyDeps) ftue.JourneyRunner {
 	return ftue.JourneyRunnerFunc(func(ctx context.Context, request ftue.JourneyRequest) (ftue.JourneyResult, error) {
-		operations := buildKickstartJourneyOperations(cmd, configPath, loaded, snapshot, existed, ingestRunner, deps)
-		return (ftue.OrderedJourneyRunner{Operations: operations}).Run(ctx, request)
+		diagnostics := append([]ingest.DiagnosticEntry(nil), request.PriorDiagnostics...)
+		recordingRunner := ingestRunner
+		if ingestRunner != nil {
+			recordingRunner = func(ctx context.Context, answers ftue.WizardAnswers) (*ftue.IngestResult, error) {
+				result, err := ingestRunner(ctx, answers)
+				if result != nil {
+					for _, diagnostic := range result.Diagnostics {
+						if !slices.Contains(diagnostics, diagnostic) {
+							diagnostics = append(diagnostics, diagnostic)
+						}
+					}
+				}
+				return result, err
+			}
+		}
+		operations := buildKickstartJourneyOperations(cmd, configPath, loaded, snapshot, existed, recordingRunner, deps)
+		result, err := (ftue.OrderedJourneyRunner{Operations: operations}).Run(ctx, request)
+		result.Diagnostics = diagnostics
+		return result, err
 	})
 }
 
@@ -72,8 +90,19 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 			return nil, []ftue.RetryTarget{{Stage: ftue.StageIngest, SessionIDs: ids}}, fmt.Errorf("run kickstart ingest: the production ingest runner is unavailable; config was saved but no transcript was imported; retry peasant kickstart")
 		}
 		answers := filterJourneyAnswers(request.Answers, ids)
-		if _, err := ingestRunner(ctx, answers); err != nil {
+		result, err := ingestRunner(ctx, answers)
+		if err != nil {
 			return nil, []ftue.RetryTarget{{Stage: ftue.StageIngest, SessionIDs: ids}}, err
+		}
+		if result != nil && len(result.Diagnostics) > 0 {
+			// A warning can be a refused session; aggregate counts cannot identify
+			// which requested IDs succeeded. Do not invent per-session receipts.
+			status := ftue.StatusPersisted
+			if result.New+result.Updated == 0 {
+				status = ftue.StatusSkipped
+			}
+			detail := fmt.Sprintf("local import completed: %d new, %d updated, %d unchanged, %d errors; see warnings for refused sessions", result.New, result.Updated, result.Unchanged, result.Errors)
+			return []ftue.PersistedEffect{{Stage: ftue.StageIngest, Status: status, Detail: detail}}, nil, nil
 		}
 		effects := make([]ftue.PersistedEffect, 0, len(ids))
 		for _, id := range ids {

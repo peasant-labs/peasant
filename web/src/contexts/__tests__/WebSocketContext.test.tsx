@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseStrictYAML, requireExactFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { parseStrictYAML, requireExactFields, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import { WebSocketProvider, useChannel } from '@/contexts/WebSocketContext';
 import { ChannelTopic, AnnotationAxis, subscribe as mkSub } from '@/types/messages';
 import type { ChannelName, SubscriptionMessage } from '@/types/messages';
@@ -51,8 +51,12 @@ class MockWebSocket {
   }
 
   simulateMessage(data: unknown): void {
+    this.simulateRawMessage(JSON.stringify(data));
+  }
+
+  simulateRawMessage(data: string): void {
     this.onmessage?.(
-      new MessageEvent('message', { data: JSON.stringify(data) }),
+      new MessageEvent('message', { data }),
     );
   }
 }
@@ -105,6 +109,48 @@ function RecoveryConsumer({ topic, id }: { topic: ChannelName; id?: string }) {
   );
 }
 
+function loadRawMessageFixtures() {
+  const directory = resolve(process.cwd(), 'src/contexts/__tests__/testdata');
+  const value = requireRecord(parseStrictYAML(readFileSync(resolve(directory, 'raw_server_messages.yaml'), 'utf8'), 'raw messages'), 'raw messages');
+  requireExactRequiredFields(value, ['detailFields', 'cases'], 'raw messages');
+  if (typeof value.detailFields !== 'string' || !value.detailFields) throw new Error('raw messages.detailFields must be nonempty JSON members');
+  const detailFields = value.detailFields;
+  const legacyFields = detailFields.replace('"harness":"pi"', '"harness":"claude-code"');
+  const legacyDetail = requireRecord(JSON.parse(`{${legacyFields},"turns":[]}`), 'legacy detail');
+  if (!Array.isArray(value.cases)) throw new Error('raw messages.cases must be an array');
+  const rows = value.cases.map((row, index) => requireRecord(row, `raw messages.cases[${index}]`));
+  requireUniqueNames(rows, 'raw messages.cases');
+  const cases = rows.map<{ name: string; topic: ChannelName; raw: string; accepted: boolean }>((row) => {
+    const label = `raw messages.${row.name}`;
+    requireExactFields(row, ['name', 'topic', 'accepted', 'raw', 'repeat'], label);
+    if (typeof row.name !== 'string' || typeof row.raw !== 'string' || !row.raw || typeof row.accepted !== 'boolean') throw new Error(`${label} requires name, raw text and boolean accepted`);
+    const topic = row.topic;
+    if (topic !== 'session_detail' && topic !== 'dashboard' && topic !== 'sessions') throw new Error(`${label} has unsupported topic`);
+    let raw = row.raw.replaceAll('$DETAIL_LEGACY', legacyFields).replaceAll('$DETAIL', detailFields);
+    if (row.repeat !== undefined) {
+      const repeat = requireRecord(row.repeat, `${label}.repeat`);
+      requireExactRequiredFields(repeat, ['unit', 'count'], `${label}.repeat`);
+      if (typeof repeat.unit !== 'string' || !repeat.unit || typeof repeat.count !== 'number' || !Number.isSafeInteger(repeat.count) || repeat.count < 1 || repeat.count > 100000 || !raw.includes('$REPEAT')) throw new Error(`${label}.repeat requires a unit, bounded positive integer count and template marker`);
+      raw = raw.replaceAll('$REPEAT', repeat.unit.repeat(repeat.count));
+    }
+    if (/\$(?:DETAIL|REPEAT)/.test(raw)) throw new Error(`${label} contains an unresolved template marker`);
+    return { name: row.name, topic, accepted: row.accepted, raw };
+  });
+  const manifest = requireRecord(parseStrictYAML(readFileSync(resolve(directory, 'raw_server_messages.manifest.yaml'), 'utf8'), 'raw message manifest'), 'raw message manifest');
+  requireExactRequiredFields(manifest, ['requiredNames'], 'raw message manifest');
+  if (!Array.isArray(manifest.requiredNames) || manifest.requiredNames.length === 0 || manifest.requiredNames.some((name) => typeof name !== 'string' || !name) || new Set(manifest.requiredNames).size !== manifest.requiredNames.length) throw new Error('raw message manifest requires unique nonempty names');
+  const names = new Set(cases.map((row) => row.name));
+  for (const name of manifest.requiredNames) if (!names.has(name)) throw new Error(`raw messages missing required case ${name}`);
+  return { cases, legacyDetail };
+}
+
+const rawMessages = loadRawMessageFixtures();
+
+function TypedDetailConsumer() {
+  const { data } = useChannel(mkSub.sessionDetail('raw-session'));
+  return <div data-testid="typed-detail">{JSON.stringify(data ?? null)}</div>;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -136,6 +182,34 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('WebSocketContext store keying', () => {
+  for (const fixture of rawMessages.cases) {
+    it(fixture.name, async () => {
+      render(
+        <WebSocketProvider>
+          <RecoveryConsumer topic={fixture.topic} id="raw-session" />
+          <TypedDetailConsumer />
+        </WebSocketProvider>,
+      );
+      const ws = latestInstance();
+      await act(async () => ws.simulateOpen());
+      await act(async () => ws.simulateRawMessage(fixture.raw));
+      const expected = fixture.accepted ? JSON.parse(fixture.raw).data : null;
+      expect(JSON.parse(screen.getByTestId('data').textContent!)).toEqual(expected);
+      expect(JSON.parse(screen.getByTestId('typed-detail').textContent!)).toEqual(fixture.topic === 'session_detail' ? expected : null);
+      if (fixture.accepted) {
+        expect(screen.getByTestId('error')).toBeEmptyDOMElement();
+      } else {
+        expect(screen.getByTestId('error')).toHaveTextContent('WebSocketProvider');
+        expect(screen.getByTestId('error')).toHaveTextContent('not applied');
+        expect(screen.getByTestId('error')).toHaveTextContent('Retry');
+      }
+      // A rejected frame must not poison the socket or either subscription API.
+      const recovery = fixture.topic === 'session_detail' ? rawMessages.legacyDetail : { total: 1 };
+      await act(async () => ws.simulateMessage({ type: fixture.topic, data: recovery }));
+      expect(JSON.parse(screen.getByTestId('data').textContent!)).toEqual(recovery);
+      expect(screen.getByTestId('error')).toBeEmptyDOMElement();
+    });
+  }
   for (const testCase of channelRecoveryFixture.cases) {
     it(testCase.name, async () => {
       render(
@@ -208,7 +282,7 @@ describe('WebSocketContext store keying', () => {
       ws.simulateOpen();
     });
 
-    const payload = { id: 'abc', harness: 'claude-code', turns: [], turnCount: 3 };
+    const payload = { ...rawMessages.legacyDetail, id: 'abc', turnCount: 3 };
 
     await act(async () => {
       ws.simulateMessage({ type: 'session_detail', data: payload });
@@ -232,7 +306,7 @@ describe('WebSocketContext store keying', () => {
     });
 
     // Deliver a message for session "abc", not "xyz"
-    const payloadForAbc = { id: 'abc', harness: 'claude-code', turns: [], turnCount: 1 };
+    const payloadForAbc = { ...rawMessages.legacyDetail, id: 'abc', turnCount: 1 };
 
     await act(async () => {
       ws.simulateMessage({ type: 'session_detail', data: payloadForAbc });
@@ -273,8 +347,8 @@ describe('WebSocketContext store keying', () => {
       ws.simulateOpen();
     });
 
-    const payloadAbc = { id: 'abc', harness: 'claude-code', turns: [], turnCount: 1 };
-    const payloadXyz = { id: 'xyz', harness: 'claude-code', turns: [], turnCount: 2 };
+    const payloadAbc = { ...rawMessages.legacyDetail, id: 'abc', turnCount: 1 };
+    const payloadXyz = { ...rawMessages.legacyDetail, id: 'xyz', turnCount: 2 };
 
     await act(async () => {
       ws.simulateMessage({ type: 'session_detail', data: payloadAbc });
@@ -306,7 +380,7 @@ describe('WebSocketContext store keying', () => {
       ws.simulateOpen();
     });
 
-    const payload = { id: 'legacy-session-id', harness: 'claude-code', turns: [], turnCount: 7 };
+    const payload = { ...rawMessages.legacyDetail, id: 'legacy-session-id', turnCount: 7 };
 
     await act(async () => {
       ws.simulateMessage({ type: 'session_detail', data: payload });

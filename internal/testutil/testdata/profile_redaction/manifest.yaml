@@ -1,0 +1,7 @@
+requiredNames:
+  - redaction_secrets_count
+  - redaction_pii_count
+  - redaction_paths_count
+  - redaction_project_count
+  - redaction_failure_safe_error
+  - redaction_no_findings

@@ -1,0 +1,4 @@
+name: large-recorded-library
+sessions: 1800
+entriesPerSession: 8
+entryBytes: 4096

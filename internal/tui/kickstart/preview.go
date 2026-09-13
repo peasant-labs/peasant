@@ -2,6 +2,7 @@ package kickstart
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -109,6 +110,26 @@ type ListingPreviewContextSource interface {
 // ListingPreviewOption configures a ListingPreview.
 type ListingPreviewOption func(*ListingPreview)
 
+// WithDiscoveryInventory keeps skipped-source diagnostics visible in the
+// project preview before the user commits a selection. Session previews remain
+// dedicated to the selected transcript; discovery notes describe the scan, not
+// an error in that otherwise readable session.
+func WithDiscoveryInventory(inventory ftue.ProviderInventory) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		var notes []string
+		for harness, discovery := range inventory {
+			if discovery.Detail != "" {
+				notes = append(notes, harnessDisplayName(harness.String())+": "+previewMetadataValue(discovery.Detail))
+			}
+		}
+		sort.Strings(notes)
+		if len(notes) > 0 {
+			notes = append(notes, "readable sessions remain selectable. repair the reported sources and run peasant kickstart again.")
+		}
+		preview.discoveryNotes = notes
+	}
+}
+
 // WithEmptySessionBody configures the imported-but-empty state. It is called
 // only after SessionTurnsFunc has confirmed that the local store holds the
 // session but returned no renderable turns.
@@ -182,13 +203,14 @@ const notASessionBody = "select a session to preview it."
 // here can lay anything out. Layout happens per draw, at the pane's current
 // width, inside [transcriptview.Document].
 type ListingPreview struct {
-	byID      map[string]ftue.SessionListing
-	turns     SessionTurnsFunc
-	emptyBody EmptySessionBodyFunc
-	renderer  *transcriptview.Renderer
-	th        theme.Theme
-	contexts  ListingPreviewContextSource
-	notice    SessionPreviewNoticeFunc
+	discoveryNotes []string
+	byID           map[string]ftue.SessionListing
+	turns          SessionTurnsFunc
+	emptyBody      EmptySessionBodyFunc
+	renderer       *transcriptview.Renderer
+	th             theme.Theme
+	contexts       ListingPreviewContextSource
+	notice         SessionPreviewNoticeFunc
 	// firstTurns is the optional quick leading read. When it is nil the
 	// preview loads in one step.
 	firstTurns SessionFirstTurnsFunc
@@ -302,7 +324,11 @@ func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool,
 	if !ok {
 		if p.contexts != nil {
 			if context, found := p.contexts.ListingPreviewContext(id); found {
-				return listingContextBody{th: p.th, lines: listingContextLines(context)}, false, nil
+				lines := listingContextLines(context)
+				if context.Kind == ListingPreviewProject && len(p.discoveryNotes) > 0 {
+					lines = append(append([]string{"discovery notes"}, p.discoveryNotes...), lines...)
+				}
+				return listingContextBody{th: p.th, lines: lines}, false, nil
 			}
 		}
 		return sessionBody{th: p.th, note: notASessionBody}, false, nil

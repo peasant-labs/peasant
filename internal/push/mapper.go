@@ -73,7 +73,7 @@ type MapOptions struct {
 // own output - receives redacted entries. This runs where one particular document
 // is assembled. The two cover different populations: remove either and a real
 // path goes unredacted.
-func MapMetadata(opts MapOptions) ([]byte, error) {
+func MapMetadata(opts MapOptions) (_ []byte, err error) {
 	meta := opts.Meta
 	req := schema.PublishRequest{
 		Identity: schema.SessionIdentity{
@@ -175,7 +175,19 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 
 	// Content-layer entries: include when the caller provides mapped entries.
 	if len(opts.Entries) > 0 {
-		req.Entries = opts.Entries
+		for _, entry := range opts.Entries {
+			if ingest.IsPiCarrier(entry) {
+				continue
+			}
+			if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil {
+				return nil, err
+			} else if pi {
+				entry.Extra = nil
+				entry.EntryID = nil
+				entry.ParentEntryID = nil
+			}
+			req.Entries = append(req.Entries, entry)
+		}
 	}
 
 	// License: the contributor's per-transcript content license (sessions.license_id,
@@ -187,9 +199,13 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal publish request: %w", err)
 	}
+	if err := schema.ScanRawJSONDocument(result, schema.RawJSONPathPolicy{MaxDocumentBytes: 4 << 20, MaxDocumentDepth: 64}); err != nil {
+		return nil, err
+	}
 	if opts.Redactor == nil {
 		return result, nil
 	}
+	defer observeRedactionDocument(opts.Redactor, &err, redactionMetadataValidation)
 	redacted, err := redactJSONDocument(opts.Redactor, result, "publish request")
 	if err != nil {
 		return nil, err
@@ -214,7 +230,14 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 			redactedRequest.Entries[index].Extra = restored
 		}
 	}
-	return json.Marshal(redactedRequest)
+	final, err := json.Marshal(redactedRequest)
+	if err != nil {
+		return nil, err
+	}
+	if err := schema.ScanRawJSONDocument(final, schema.RawJSONPathPolicy{MaxDocumentBytes: 4 << 20, MaxDocumentDepth: 64}); err != nil {
+		return nil, err
+	}
+	return final, nil
 }
 
 // projectContextWire builds the wire-safe Project field: the hash is always

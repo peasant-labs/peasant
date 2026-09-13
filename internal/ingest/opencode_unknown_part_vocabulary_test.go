@@ -132,7 +132,8 @@ func TestOpenCodeLegacyUnknownPartVocabularyTolerated(t *testing.T) {
 		t.Fatalf("session %q origin = %v, want legacy SQLite", testCase.SessionID, session.TranscriptOrigin)
 	}
 
-	metadata, data, err := adapter.MaterializeTranscript(context.Background(), session)
+	captured, err := adapter.MaterializeTranscript(context.Background(), session)
+	metadata, data := captured.Metadata, captured.Data
 	if err != nil {
 		t.Fatalf("materialize session with unknown part vocabulary: %v", err)
 	}

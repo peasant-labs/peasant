@@ -1,0 +1,189 @@
+requiredNames:
+  - claude-scan-failure-after-valid
+  - codex-scan-failure-after-valid
+  - cursor-scan-failure-after-valid
+  - claude-partial-read
+  - codex-partial-read
+  - cursor-partial-read
+  - strike-partial-read
+  - codex-malformed-only
+  - codex-whitespace
+  - cursor-whitespace
+  - strike-whitespace
+  - cursor-empty-readable
+  - cursor-malformed-only
+  - cursor-malformed-after-valid
+  - cursor-null
+  - cursor-unrecognized-object
+  - cursor-wrong-content
+  - cursor-missing-source
+  - strike-empty-readable
+  - strike-control-only
+  - strike-malformed-only
+  - strike-malformed-after-valid
+  - strike-null
+  - strike-unrecognized-object
+  - strike-wrong-event-data
+  - strike-unknown-only
+  - strike-mixed-future
+  - strike-missing-source
+  - strike-long-content-parity
+  - strike-oversized-after-valid
+  - claude-empty-readable
+  - claude-whitespace
+  - claude-malformed-only
+  - claude-malformed-after-valid
+  - claude-null
+  - claude-unrecognized-object
+  - claude-wrong-content
+  - claude-control
+  - claude-structured-tool-result
+  - claude-missing-source
+  - claude-long-content-parity
+  - codex-empty-readable
+  - codex-control-only
+  - codex-malformed-after-valid
+  - codex-null
+  - codex-unrecognized-object
+  - codex-wrong-response
+  - codex-unknown-only
+  - codex-mixed-future
+  - codex-mixed-future-opaque-fields
+  - codex-missing-source
+  - codex-long-content-parity
+# `oversizedRecord` is the record an `oversized` case appends: a record VALID
+# for its harness, whose PAD token the test grows until the record is one byte
+# over the injected limit. It must be valid, or the case would be refused as
+# malformed input and would prove nothing about the size rule it exists for.
+cases:
+  - name: claude-scan-failure-after-valid
+    harness: claude-code
+    input: |
+      {"type":"user","message":{"role":"user","content":"valid"}}
+    oversized: true
+    oversizedRecord: '{"type":"user","message":{"role":"user","content":"PAD"}}'
+    error: true
+  - name: codex-scan-failure-after-valid
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"valid"}]}}
+    oversized: true
+    oversizedRecord: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"PAD"}]}}'
+    error: true
+  - name: cursor-scan-failure-after-valid
+    harness: cursor
+    input: |
+      {"role":"user","content":"valid"}
+    oversized: true
+    oversizedRecord: '{"role":"user","content":"PAD"}'
+    error: true
+  - {name: claude-partial-read, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":"valid"}}', partialRead: true, error: true}
+  - {name: codex-partial-read, harness: codex, input: '{"type":"response_item","payload":{"type":"message","role":"user","content":[]}}', partialRead: true, error: true}
+  - {name: cursor-partial-read, harness: cursor, input: '{"role":"user","content":"valid"}', partialRead: true, error: true}
+  - {name: strike-partial-read, harness: strike, input: '{"type":"user.message","data":{"text":"valid"}}', partialRead: true, error: true}
+  - {name: codex-malformed-only, harness: codex, input: 'not json', error: true, legacyEntries: 0}
+  - {name: codex-whitespace, harness: codex, input: " \n\t\n", entries: 0}
+  - {name: cursor-whitespace, harness: cursor, input: " \n\t\n", entries: 0}
+  - {name: strike-whitespace, harness: strike, input: " \n\t\n", entries: 0}
+  - {name: cursor-empty-readable, harness: cursor, input: '', entries: 0}
+  - {name: cursor-malformed-only, harness: cursor, input: 'not json', error: true, legacyEntries: 0}
+  - name: cursor-malformed-after-valid
+    harness: cursor
+    input: |
+      {"role":"user","content":"hello"}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: cursor-null, harness: cursor, input: 'null', error: true, legacyEntries: 1}
+  - {name: cursor-unrecognized-object, harness: cursor, input: '{}', error: true, legacyEntries: 1}
+  - {name: cursor-wrong-content, harness: cursor, input: '{"role":"user","content":42}', error: true, legacyEntries: 1}
+  - {name: cursor-missing-source, harness: cursor, missing: true, error: true}
+  - {name: strike-empty-readable, harness: strike, input: '', entries: 0}
+  - name: strike-control-only
+    harness: strike
+    input: |
+      {"type":"session.started","data":{"sessionId":"synthetic"}}
+      {"type":"model.selected","data":{"model":"synthetic"}}
+      {"type":"turn.started","data":{"turnId":"synthetic"}}
+    entries: 0
+  - {name: strike-malformed-only, harness: strike, input: 'not json', error: true, legacyEntries: 0}
+  - name: strike-malformed-after-valid
+    harness: strike
+    input: |
+      {"type":"user.message","data":{"text":"hello"}}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: strike-null, harness: strike, input: 'null', error: true, legacyEntries: 0}
+  - {name: strike-unrecognized-object, harness: strike, input: '{}', error: true, legacyEntries: 0}
+  - {name: strike-wrong-event-data, harness: strike, input: '{"type":"usage.reported","data":{"inputTokens":"wrong"}}', error: true, legacyEntries: 0}
+  - {name: strike-unknown-only, harness: strike, input: '{"type":"future-event","data":{}}', error: true, legacyEntries: 0}
+  - name: strike-mixed-future
+    harness: strike
+    input: |
+      {"type":"future-event","data":"opaque"}
+      {"type":"user.message","data":{"text":"hello"}}
+    entries: 1
+  - {name: strike-missing-source, harness: strike, missing: true, error: true}
+  - {name: strike-long-content-parity, harness: strike, input: '{"type":"user.message","data":{"text":"LONG_CONTENT"}}', longContent: true, entries: 1}
+  - name: strike-oversized-after-valid
+    harness: strike
+    input: |
+      {"type":"user.message","data":{"text":"hello"}}
+    oversized: true
+    # A VALID Strike envelope padded past the injected limit. A blob of
+    # padding would be refused as malformed JSON whatever the limit is, so
+    # the case would pass without the over-limit rule ever running.
+    oversizedRecord: '{"type":"user.message","data":{"text":"PAD"}}'
+    error: true
+    legacyEntries: 1
+  - {name: claude-empty-readable, harness: claude-code, input: '', entries: 0}
+  - {name: claude-whitespace, harness: claude-code, input: " \n\t\n", entries: 0}
+  - {name: claude-malformed-only, harness: claude-code, input: 'not json', error: true, legacyEntries: 0}
+  - name: claude-malformed-after-valid
+    harness: claude-code
+    input: |
+      {"type":"user","message":{"role":"user","content":"hello"}}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: claude-null, harness: claude-code, input: 'null', error: true, legacyEntries: 1}
+  - {name: claude-unrecognized-object, harness: claude-code, input: '{}', error: true, legacyEntries: 1}
+  - {name: claude-wrong-content, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":42}}', error: true, legacyEntries: 1}
+  - {name: claude-control, harness: claude-code, input: '{"type":"progress"}', entries: 1}
+  - {name: claude-structured-tool-result, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":[{"type":"text","text":"done"}]}]}}', entries: 2}
+  - {name: claude-missing-source, harness: claude-code, missing: true, error: true}
+  - {name: claude-long-content-parity, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":"LONG_CONTENT"}}', longContent: true, entries: 1}
+  - {name: codex-empty-readable, harness: codex, input: '', entries: 0}
+  - name: codex-control-only
+    harness: codex
+    input: |
+      {"type":"session_meta","payload":{"id":"synthetic"}}
+      {"type":"turn_context","payload":{}}
+      {"type":"event_msg","payload":{"type":"task_started"}}
+    entries: 0
+  - name: codex-malformed-after-valid
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: codex-null, harness: codex, input: 'null', error: true, legacyEntries: 0}
+  - {name: codex-unrecognized-object, harness: codex, input: '{}', error: true, legacyEntries: 0}
+  - {name: codex-wrong-response, harness: codex, input: '{"type":"response_item","payload":{"type":"message","content":42}}', error: true, legacyEntries: 0}
+  - {name: codex-unknown-only, harness: codex, input: '{"type":"response_item","payload":{"type":"future-response"}}', error: true, legacyEntries: 0}
+  - name: codex-mixed-future
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"future-response"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+    entries: 1
+  - {name: codex-missing-source, harness: codex, missing: true, error: true}
+  - name: codex-mixed-future-opaque-fields
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+    entries: 1
+  - {name: codex-long-content-parity, harness: codex, input: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"LONG_CONTENT"}]}}', longContent: true, entries: 1}

@@ -71,7 +71,8 @@ func TestOpenCodeLegacyProjectionReadsPartsOnce(t *testing.T) {
 	if host == nil {
 		t.Fatalf("discovery = %+v, want the legacy host session", discovered)
 	}
-	metadata, data, err := adapter.MaterializeTranscript(t.Context(), *host)
+	captured, err := adapter.MaterializeTranscript(t.Context(), *host)
+	metadata, data := captured.Metadata, captured.Data
 	if err != nil || metadata == nil || len(data) == 0 {
 		t.Fatalf("materialize legacy session failed: err=%v data=%d", err, len(data))
 	}

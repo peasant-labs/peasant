@@ -1,0 +1,13 @@
+# These columns are frozen at physical database version 39. Seeding a historic
+# migration test must not depend on the current Store writer's column set.
+requiredNames: [project, host, session, metrics]
+statements:
+  project: INSERT OR IGNORE INTO projects (project_hash, canonical_cwd) VALUES (?, ?)
+  host: INSERT OR IGNORE INTO host_slugs (opaque_id, host_slug) VALUES (?, ?)
+  session: >-
+    INSERT INTO sessions (session_id, model_harness, model_id, opaque_host_id,
+    project_hash, start_ms, end_ms, ingested_ms, source_path, source_format,
+    schema_version, tool_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  metrics: >-
+    INSERT INTO session_metrics (session_id, turn_count, input_tokens, output_tokens,
+    duration_minutes) VALUES (?, ?, ?, ?, ?)
