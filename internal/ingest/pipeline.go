@@ -87,6 +87,12 @@ type PipelineResult struct {
 	Sessions []SessionResult
 	Duration time.Duration
 	IndexLog []IndexLogEntry // per-session indexing outcomes (populated during INDEX stage)
+	// IndexCoverage splits the failed index attempts into sessions with no
+	// stored entries and sessions that kept their previous entries. Nil
+	// means unavailable, never zero: the store could not answer, or a
+	// membership chunk failed. Computed at finalize from FailedIndexSessions
+	// plus the entries-membership capability.
+	IndexCoverage *IndexCoverage `json:"indexCoverage,omitempty"`
 	// DiscoveryDiagnostics names source locations an adapter could not fully
 	// enumerate. Discovery stayed non-fatal per location, so the run continued;
 	// these records make each skipped location visible to the caller.
@@ -3916,6 +3922,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
 	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
+	pipelineResult.IndexCoverage = p.resolveIndexCoverage(ctx, indexLogEntries, logPrefix)
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
 			pipelineResult.Summary.Errors++
