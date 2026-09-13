@@ -27,6 +27,8 @@ cases:
     ancestor: empty-manifest
   - name: malformed-manifest-preserves-sentinel
     ancestor: malformed-manifest
+  - name: unknown-manifest-preserves-sentinel
+    ancestor: unknown-manifest
   - name: mismatched-manifest-preserves-sentinel
     ancestor: mismatched-manifest
   - name: foreign-session-symlink-preserves-sentinel

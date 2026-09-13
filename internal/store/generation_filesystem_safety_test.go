@@ -255,6 +255,26 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 				if _, statErr := os.Stat(candidateSentinel); statErr != nil {
 					t.Fatalf("unowned candidate sentinel missing after refused cleanup: %v", statErr)
 				}
+			case "unknown-manifest":
+				// A directory with no manifest cannot prove ownership; cleanup
+				// must leave it and its sentinel untouched.
+				candidateID := "gen_fs_unknown"
+				candidateDir := filepath.Join(root, fixture.Session.ID, "generations", candidateID)
+				if err := os.MkdirAll(candidateDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				candidateSentinel := filepath.Join(candidateDir, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(candidateSentinel, []byte("unknown candidate must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				err := s.CleanupInactiveGeneration(context.Background(), id, candidateID)
+				if err == nil {
+					t.Fatal("cleanup removed a directory with no manifest; it must be refused")
+				}
+				assertSentinelAbsent(t, err, root)
+				if _, statErr := os.Stat(candidateSentinel); statErr != nil {
+					t.Fatalf("unknown candidate sentinel missing after refused cleanup: %v", statErr)
+				}
 			case "mismatched-manifest":
 				// A decodable manifest that names another session or generation
 				// is not this owner's candidate and must be left in place.
