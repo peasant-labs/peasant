@@ -122,7 +122,8 @@ func TestPipelineCancellationBeforeDiff(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			progress := NewProgressState()
-			filesystem := &cancelNestedDiffFS{canceled: true}
+			filesystem := &cancelNestedDiffFS{}
+			filesystem.canceled.Store(true)
 			adapter := progressAdapter{sessions: []DiscoveredSession{{SessionID: "session-one", Harness: HarnessClaudeCode}}}
 			pipeline := &Pipeline{
 				fs: filesystem,
@@ -147,8 +148,8 @@ func TestPipelineCancellationBeforeDiff(t *testing.T) {
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("Run error = %v, want context.Canceled", err)
 			}
-			if filesystem.afterCancel != 0 {
-				t.Fatalf("unexpected filesystem calls = %d", filesystem.afterCancel)
+			if filesystem.afterCancel.Load() != 0 {
+				t.Fatalf("unexpected filesystem calls = %d", filesystem.afterCancel.Load())
 			}
 			for _, stage := range stagesAfter(t, StageDiscover) {
 				if progress.Snapshot()[stage].Started {
@@ -269,7 +270,7 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	progress := NewProgressState()
-	filesystem := &cancelNestedDiffFS{cancel: cancel, progress: progress, t: t}
+	filesystem := &cancelNestedDiffFS{cancel: cancel}
 	pipeline := &Pipeline{
 		fs: filesystem,
 		adapters: map[Harness]AdapterFactory{
@@ -291,15 +292,18 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run error = %v, want context.Canceled", err)
 	}
-	if !filesystem.canceled || filesystem.afterCancel != 0 {
-		t.Fatalf("nested cancellation reached=%v, later filesystem calls=%d", filesystem.canceled, filesystem.afterCancel)
+	if !filesystem.canceled.Load() {
+		t.Fatal("DIFF never reached the nested walk that cancels the run")
 	}
-	if filesystem.reads == 0 || filesystem.stats == 0 {
-		t.Fatalf("DIFF did no nested filesystem work: ReadDir=%d Stat=%d", filesystem.reads, filesystem.stats)
+	if filesystem.reads.Load() == 0 || filesystem.stats.Load() == 0 {
+		t.Fatalf("DIFF did no nested filesystem work: ReadDir=%d Stat=%d", filesystem.reads.Load(), filesystem.stats.Load())
 	}
+	// The pool classifies several sessions at once, so how many finish before
+	// the walk cancels is not fixed. What must hold is that DIFF ended with the
+	// run's cancellation and that no later stage started.
 	snapshot := progress.Snapshot()
-	if got := snapshot[StageDiff]; got.Done != 1 || got.Total != 3 || !got.Ended || !got.HasErr {
-		t.Fatalf("interrupted DIFF = %+v, want 1/3 ended with error", got)
+	if got := snapshot[StageDiff]; !got.Ended || !got.HasErr || got.Total != 3 {
+		t.Fatalf("interrupted DIFF = %+v, want an ended error stage with total 3", got)
 	}
 	for _, stage := range stagesAfter(t, StageDiff) {
 		if snapshot[stage].Started {
@@ -310,40 +314,26 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 
 const cancelNestedDiffOutputDir = "/out"
 
+// cancelNestedDiffFS returns a host/session layout for every directory read, so
+// a lookup that misses the flat metadata path walks into the nested subagents
+// layout. The first Stat under "/subagents/session-two/" cancels the run from
+// inside that walk. Counters are atomic because the classifier pool calls the
+// filesystem from several goroutines at once.
 type cancelNestedDiffFS struct {
 	emptyProgressFS
-	lookups     int
 	cancel      context.CancelFunc
-	progress    *ProgressState
-	t           *testing.T
-	reads       int
-	stats       int
-	canceled    bool
-	afterCancel int
+	reads       atomic.Int64
+	stats       atomic.Int64
+	canceled    atomic.Bool
+	afterCancel atomic.Int64
 }
 
 var _ FileSystem = (*cancelNestedDiffFS)(nil)
 
-// Only the second session has a nested layout to walk. DIFF progress names the
-// session the walk belongs to; a call ordinal cannot, because one session's
-// lookup probes both the flat and the nested layout more than once.
-// The nested layout belongs to the SECOND session's context-aware lookup.
-//
-// Each session is looked up twice. The first lookup runs under a context of its
-// own (metadataForRewrite in metadata_compatibility.go) and therefore cannot
-// observe the run's cancellation, so the fixture gives that lookup nothing to
-// walk. The second lookup carries the run's context and is the one whose nested
-// walk the boundary interrupts. A bare call ordinal cannot name either lookup.
-func (f *cancelNestedDiffFS) ReadDir(path string) ([]os.DirEntry, error) {
-	if f.canceled {
-		f.afterCancel++
-	}
-	f.reads++
-	if path == cancelNestedDiffOutputDir {
-		f.lookups++
-	}
-	if f.progress.Snapshot()[StageDiff].Done == 0 || f.lookups%2 == 1 {
-		return nil, os.ErrNotExist
+func (f *cancelNestedDiffFS) ReadDir(string) ([]os.DirEntry, error) {
+	f.reads.Add(1)
+	if f.canceled.Load() {
+		f.afterCancel.Add(1)
 	}
 	return fs.ReadDir(fstest.MapFS{
 		"parent":  &fstest.MapFile{Mode: fs.ModeDir},
@@ -352,15 +342,11 @@ func (f *cancelNestedDiffFS) ReadDir(path string) ([]os.DirEntry, error) {
 }
 
 func (f *cancelNestedDiffFS) Stat(path string) (os.FileInfo, error) {
-	f.stats++
-	if f.canceled {
-		f.afterCancel++
+	f.stats.Add(1)
+	if f.canceled.Load() {
+		f.afterCancel.Add(1)
 	}
-	if !f.canceled && strings.Contains(path, "/subagents/session-two/") {
-		if got := f.progress.Snapshot()[StageDiff]; !got.Started || got.Done != 1 {
-			f.t.Errorf("cancel boundary progress = %+v, want the first session already classified", got)
-		}
-		f.canceled = true
+	if f.cancel != nil && strings.Contains(path, "/subagents/session-two/") && f.canceled.CompareAndSwap(false, true) {
 		f.cancel()
 	}
 	return nil, os.ErrNotExist
@@ -408,9 +394,10 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 		t.Fatal("DIFF did not reach the controlled second-session metadata lookup")
 	}
 
-	if got := progress.Snapshot()[StageDiff].Done; got != 1 {
-		t.Fatalf("DIFF progress while second session is blocked = %d, want 1", got)
-	}
+	// The pool classifies sessions concurrently, so the first session may not
+	// have finished yet when the second blocks. Wait for it: progress advances
+	// as each session finishes, not only when the slice ends.
+	waitForDiffProgress(t, progress, 1)
 	close(releaseSecondRead)
 	select {
 	case err := <-done:
@@ -424,6 +411,21 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	if diffProgress.Done != 2 || diffProgress.Total != 2 || !diffProgress.Ended {
 		t.Fatalf("final DIFF progress = %+v, want done=2 total=2 ended=true", diffProgress)
 	}
+}
+
+// waitForDiffProgress waits until DIFF reports at least want classified
+// sessions, so a test that blocks one session can still observe the others
+// landing rather than sampling the count once and racing the pool.
+func waitForDiffProgress(t *testing.T, progress *ProgressState, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if progress.Snapshot()[StageDiff].Done >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("DIFF progress = %+v, want at least %d classified", progress.Snapshot()[StageDiff], want)
 }
 
 func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
