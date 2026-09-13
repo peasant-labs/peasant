@@ -10,6 +10,7 @@ package ingest_test
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -24,6 +25,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/codex_history_authority.yaml
@@ -32,15 +35,21 @@ var codexHistoryAuthorityYAML []byte
 //go:embed testdata/codex_history_authority.manifest.yaml
 var codexHistoryAuthorityManifestYAML []byte
 
+type codexNativePointerRow struct {
+	ID          string `yaml:"id"`
+	RolloutPath string `yaml:"rolloutPath"`
+	HistoryMode string `yaml:"historyMode"`
+}
+
 type codexFileAuthorityCase struct {
-	Name                   string                     `yaml:"name"`
-	Files                  map[string]string          `yaml:"files"`
-	SessionFile            string                     `yaml:"sessionFile"`
-	SessionID              string                     `yaml:"sessionID"`
-	PointerDocument        string                     `yaml:"pointerDocument"`
-	PointerDocumentContent string                     `yaml:"pointerDocumentContent"`
-	ExpectError            string                     `yaml:"expectError"`
-	Expected               codexFileAuthorityExpected `yaml:"expected"`
+	Name              string                     `yaml:"name"`
+	Files             map[string]string          `yaml:"files"`
+	SessionFile       string                     `yaml:"sessionFile"`
+	SessionID         string                     `yaml:"sessionID"`
+	NativePointerDB   string                     `yaml:"nativePointerDatabase"`
+	NativePointerRows []codexNativePointerRow    `yaml:"nativePointerRows"`
+	ExpectError       string                     `yaml:"expectError"`
+	Expected          codexFileAuthorityExpected `yaml:"expected"`
 }
 
 type codexFileAuthorityExpected struct {
@@ -95,6 +104,57 @@ func loadCodexFileAuthorityFixture(t *testing.T) codexFileAuthorityFixture {
 	return fixture
 }
 
+// writeCodexNativeStateDB materializes a real temporary native Codex state
+// database with the production threads columns so the read-only native pointer
+// authority is exercised against real SQLite storage, never a plaintext side
+// document.
+func writeCodexNativeStateDB(t *testing.T, root, dbPath string, rows []codexNativePointerRow) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite|sqlite.OpenCreate)
+	if err != nil {
+		t.Fatalf("open native state database: %v", err)
+	}
+	defer conn.Close()
+	if err := sqlitex.ExecuteTransient(conn, "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, history_mode TEXT NOT NULL DEFAULT 'legacy')", nil); err != nil {
+		t.Fatalf("create native threads table: %v", err)
+	}
+	for _, row := range rows {
+		rollout := row.RolloutPath
+		if !filepath.IsAbs(rollout) {
+			rollout = filepath.Join(root, filepath.FromSlash(rollout))
+		}
+		mode := row.HistoryMode
+		if mode == "" {
+			mode = "legacy"
+		}
+		if err := sqlitex.ExecuteTransient(conn, "INSERT INTO threads (id, rollout_path, history_mode) VALUES (?, ?, ?)", &sqlitex.ExecOptions{Args: []any{row.ID, rollout, mode}}); err != nil {
+			t.Fatalf("insert native thread row: %v", err)
+		}
+	}
+}
+
+// updateCodexNativeStateDB switches the native current-rollout row for one
+// thread in a real temporary state database, modelling the native writer
+// moving its pointer between captures.
+func updateCodexNativeStateDB(t *testing.T, root, dbPath, stableThreadID, rolloutPath string) {
+	t.Helper()
+	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("open native state database: %v", err)
+	}
+	defer conn.Close()
+	rollout := rolloutPath
+	if !filepath.IsAbs(rollout) {
+		rollout = filepath.Join(root, filepath.FromSlash(rollout))
+	}
+	if err := sqlitex.ExecuteTransient(conn, "UPDATE threads SET rollout_path = ? WHERE id = ?", &sqlitex.ExecOptions{Args: []any{rollout, stableThreadID}}); err != nil {
+		t.Fatalf("update native thread row: %v", err)
+	}
+}
+
 func TestCodexHistoryAuthorityFixtures(t *testing.T) {
 	fixture := loadCodexFileAuthorityFixture(t)
 	for _, testCase := range fixture.Cases {
@@ -109,25 +169,9 @@ func TestCodexHistoryAuthorityFixtures(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			var options []ingest.CodexFileSourceOption
-			if testCase.PointerDocument != "" {
-				docPath := filepath.Join(root, filepath.FromSlash(testCase.PointerDocument))
-				content := testCase.PointerDocumentContent
-				if after, ok := strings.CutPrefix(content, "@abs:"); ok {
-					content = filepath.Join(root, filepath.FromSlash(after))
-				} else if after, ok := strings.CutPrefix(content, "@rel:"); ok {
-					content = after
-				}
-				if content == "" {
-					t.Fatalf("case %q names a pointer document without content", testCase.Name)
-				}
-				if err := os.MkdirAll(filepath.Dir(docPath), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(docPath, []byte(content), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				options = append(options, ingest.WithCodexCurrentPointerDocument(docPath))
+			if testCase.NativePointerDB != "" {
+				dbPath := filepath.Join(root, filepath.FromSlash(testCase.NativePointerDB))
+				writeCodexNativeStateDB(t, root, dbPath, testCase.NativePointerRows)
 			}
 			sessionID, err := ingest.NewSessionID(testCase.SessionID)
 			if err != nil {
@@ -142,7 +186,7 @@ func TestCodexHistoryAuthorityFixtures(t *testing.T) {
 			allocator := func(index int) schema.SourceEntryRef {
 				return schema.SourceEntryRef(fmt.Sprintf("e_%d", index+1))
 			}
-			source := ingest.NewCodexFileSource(&ingest.OSFileSystem{}, options...)
+			source := ingest.NewCodexFileSource(&ingest.OSFileSystem{})
 			history, err := ingest.CaptureCodexHistory(t.Context(), source, session, ingest.NewCodexRefRegistry(allocator))
 			if testCase.ExpectError != "" {
 				if err == nil {
@@ -447,34 +491,45 @@ func TestCodexCaptureSentinelPathsSanitized(t *testing.T) {
 	})
 }
 
-// flippingPointerFS alternates the pointer-document content on every read
-// so the stability recheck always observes a changed authority. Rollout
-// bytes come from the real files underneath.
-type flippingPointerFS struct {
-	*ingest.OSFileSystem
-	doc   string
-	first string
-	other string
-	calls int
+// alternatingNativePointerStore alternates the native current-rollout record on
+// every call so the stability recheck always observes a changed authority. It
+// is a dependency control for the read-only source, not a replacement for the
+// capture.
+type alternatingNativePointerStore struct {
+	first  ingest.CodexNativePointerRecord
+	second ingest.CodexNativePointerRecord
+	calls  int
 }
 
-func (f *flippingPointerFS) ReadFile(path string) ([]byte, error) {
-	if path == f.doc {
-		f.calls++
-		if f.calls%2 == 1 {
-			return []byte(f.first), nil
-		}
-		return []byte(f.other), nil
+func (s *alternatingNativePointerStore) NativeCurrentRollout(context.Context, string) (ingest.CodexNativePointerRecord, bool, error) {
+	s.calls++
+	if s.calls%2 == 1 {
+		return s.first, true, nil
 	}
-	return f.OSFileSystem.ReadFile(path)
+	return s.second, true, nil
 }
 
-// TestCodexPointerSwitchDuringRefresh proves an authority switch during the
-// bounded recheck is detected on the real production path: a stable switch
-// converges to the new fingerprint, while a flip on every attempt exhausts
-// the budget with a source-changed error that retains last-good state.
-func TestCodexPointerSwitchDuringRefresh(t *testing.T) {
-	threadID := "cccccccc-3333-4333-8333-333333333333"
+// switchingNativePointerStore delegates to the real read-only SQLite store and
+// performs a one-time native row switch on a chosen call, so the recheck itself
+// resolves the new pointer and the capture can converge after an in-flight
+// switch.
+type switchingNativePointerStore struct {
+	store        *ingest.CodexSQLitePointerStore
+	switchOnCall int
+	onSwitch     func()
+	calls        int
+}
+
+func (s *switchingNativePointerStore) NativeCurrentRollout(ctx context.Context, stableThreadID string) (ingest.CodexNativePointerRecord, bool, error) {
+	s.calls++
+	if s.calls == s.switchOnCall && s.onSwitch != nil {
+		s.onSwitch()
+	}
+	return s.store.NativeCurrentRollout(ctx, stableThreadID)
+}
+
+func writeCodexSwitchRollouts(t *testing.T, root, threadID string) (string, string) {
+	t.Helper()
 	mkRollout := func(id, text string) string {
 		return strings.Join([]string{
 			`{"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"` + id + `","history_mode":"paginated"}}`,
@@ -482,40 +537,47 @@ func TestCodexPointerSwitchDuringRefresh(t *testing.T) {
 			"",
 		}, "\n")
 	}
-	t.Run("stable-switch-converges", func(t *testing.T) {
-		root := t.TempDir()
-		aRel := filepath.Join("sessions", "2024", "01", "02", "rollout-a-"+threadID+".jsonl")
-		bRel := filepath.Join("sessions", "2024", "01", "03", "rollout-b-"+threadID+".jsonl")
-		aPath, bPath := filepath.Join(root, aRel), filepath.Join(root, bRel)
-		for _, file := range []struct {
-			path    string
-			content string
-		}{{aPath, mkRollout(threadID, "incarnation a")}, {bPath, mkRollout(threadID, "incarnation b")}} {
-			if err := os.MkdirAll(filepath.Dir(file.path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(file.path, []byte(file.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		doc := filepath.Join(root, "pointer")
-		if err := os.WriteFile(doc, []byte(aPath), 0o600); err != nil {
+	aRel := filepath.Join("sessions", "2024", "01", "02", "rollout-a-"+threadID+".jsonl")
+	bRel := filepath.Join("sessions", "2024", "01", "03", "rollout-b-"+threadID+".jsonl")
+	aPath, bPath := filepath.Join(root, aRel), filepath.Join(root, bRel)
+	for _, file := range []struct {
+		path    string
+		content string
+	}{{aPath, mkRollout(threadID, "incarnation a")}, {bPath, mkRollout(threadID, "incarnation b")}} {
+		if err := os.MkdirAll(filepath.Dir(file.path), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(file.path, []byte(file.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return aPath, bPath
+}
+
+// TestCodexPointerSwitchDuringRefresh proves an authority switch on the real
+// read-only native database is detected on the production path: a stable
+// switch converges to the new fingerprint, a one-time switch during the recheck
+// converges on the new pointer, and a flip on every attempt exhausts the budget
+// with a source-changed error that retains last-good state.
+func TestCodexPointerSwitchDuringRefresh(t *testing.T) {
+	threadID := "cccccccc-3333-4333-8333-333333333333"
+	t.Run("stable-switch-converges", func(t *testing.T) {
+		root := t.TempDir()
+		aPath, bPath := writeCodexSwitchRollouts(t, root, threadID)
+		dbPath := filepath.Join(root, "state_5.sqlite")
+		writeCodexNativeStateDB(t, root, dbPath, []codexNativePointerRow{{ID: threadID, RolloutPath: aPath, HistoryMode: "paginated"}})
 		session := ingest.DiscoveredSession{
 			SessionID:    schema.SessionID(threadID),
 			Harness:      ingest.HarnessCodex,
 			SourcePath:   ingest.ResolvedPath(aPath),
 			SourceFormat: ingest.SourceFormatJSONL,
 		}
-		source := ingest.NewCodexFileSource(&ingest.OSFileSystem{}, ingest.WithCodexCurrentPointerDocument(doc))
+		source := ingest.NewCodexFileSource(&ingest.OSFileSystem{})
 		before, err := ingest.CaptureCodexHistory(t.Context(), source, session, nil)
 		if err != nil {
 			t.Fatalf("capture before switch: %v", err)
 		}
-		if err := os.WriteFile(doc, []byte(bPath), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		updateCodexNativeStateDB(t, root, dbPath, threadID, bPath)
 		after, err := ingest.CaptureCodexHistoryWithRetry(t.Context(), source, session, nil)
 		if err != nil {
 			t.Fatalf("capture after stable switch: %v", err)
@@ -527,31 +589,50 @@ func TestCodexPointerSwitchDuringRefresh(t *testing.T) {
 			t.Fatalf("switched authority = %q %q, want native pointer at the new rollout", after.AuthorityKind, after.Pointer)
 		}
 	})
-	t.Run("unstable-switch-exhausts-budget", func(t *testing.T) {
+	t.Run("single-switch-during-recheck-converges", func(t *testing.T) {
 		root := t.TempDir()
-		aRel := filepath.Join("sessions", "2024", "01", "02", "rollout-a-"+threadID+".jsonl")
-		bRel := filepath.Join("sessions", "2024", "01", "03", "rollout-b-"+threadID+".jsonl")
-		aPath, bPath := filepath.Join(root, aRel), filepath.Join(root, bRel)
-		for _, file := range []struct {
-			path    string
-			content string
-		}{{aPath, mkRollout(threadID, "incarnation a")}, {bPath, mkRollout(threadID, "incarnation b")}} {
-			if err := os.MkdirAll(filepath.Dir(file.path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(file.path, []byte(file.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		doc := filepath.Join(root, "pointer")
-		fs := &flippingPointerFS{OSFileSystem: &ingest.OSFileSystem{}, doc: doc, first: aPath, other: bPath}
+		aPath, bPath := writeCodexSwitchRollouts(t, root, threadID)
+		dbPath := filepath.Join(root, "state_5.sqlite")
+		writeCodexNativeStateDB(t, root, dbPath, []codexNativePointerRow{{ID: threadID, RolloutPath: aPath, HistoryMode: "paginated"}})
 		session := ingest.DiscoveredSession{
 			SessionID:    schema.SessionID(threadID),
 			Harness:      ingest.HarnessCodex,
 			SourcePath:   ingest.ResolvedPath(aPath),
 			SourceFormat: ingest.SourceFormatJSONL,
 		}
-		source := ingest.NewCodexFileSource(fs, ingest.WithCodexCurrentPointerDocument(doc))
+		store := &switchingNativePointerStore{
+			store:        ingest.NewCodexSQLitePointerStore(dbPath),
+			switchOnCall: 2,
+			onSwitch: func() {
+				updateCodexNativeStateDB(t, root, dbPath, threadID, bPath)
+			},
+		}
+		source := ingest.NewCodexFileSource(&ingest.OSFileSystem{}, ingest.WithCodexNativePointerStore(store))
+		after, err := ingest.CaptureCodexHistoryWithRetry(t.Context(), source, session, nil)
+		if err != nil {
+			t.Fatalf("capture after in-flight switch: %v", err)
+		}
+		if after.Pointer != bPath || after.AuthorityKind != ingest.CodexAuthorityNativeCurrentPointer {
+			t.Fatalf("in-flight switch converged on %q %q, want the new native pointer %q", after.AuthorityKind, after.Pointer, bPath)
+		}
+		if len(after.MainRefs) != 1 {
+			t.Fatalf("in-flight switch main refs = %v, want the second incarnation's own item", after.MainRefs)
+		}
+	})
+	t.Run("unstable-switch-exhausts-budget", func(t *testing.T) {
+		root := t.TempDir()
+		aRelPath, bRelPath := writeCodexSwitchRollouts(t, root, threadID)
+		session := ingest.DiscoveredSession{
+			SessionID:    schema.SessionID(threadID),
+			Harness:      ingest.HarnessCodex,
+			SourcePath:   ingest.ResolvedPath(aRelPath),
+			SourceFormat: ingest.SourceFormatJSONL,
+		}
+		store := &alternatingNativePointerStore{
+			first:  ingest.CodexNativePointerRecord{Pointer: aRelPath},
+			second: ingest.CodexNativePointerRecord{Pointer: bRelPath},
+		}
+		source := ingest.NewCodexFileSource(&ingest.OSFileSystem{}, ingest.WithCodexNativePointerStore(store))
 		_, err := ingest.CaptureCodexHistoryWithRetry(t.Context(), source, session, nil)
 		var changed *ingest.CodexSourceChangedError
 		if !errors.As(err, &changed) {
@@ -561,4 +642,102 @@ func TestCodexPointerSwitchDuringRefresh(t *testing.T) {
 			t.Fatalf("unstable switch attempts = %d, want 3", changed.Attempts)
 		}
 	})
+}
+
+// TestCodexAuthoritativeSessionSeam drives the exported pre-diff selection
+// seam against a real temporary native pointer database: the filename-derived
+// discovered identity is superseded by the stable session_meta.id and the
+// authoritative current source replaces the discovered (stale) path before any
+// diff.
+func TestCodexAuthoritativeSessionSeam(t *testing.T) {
+	threadID := "dddddddd-4444-4444-8444-444444444444"
+	root := t.TempDir()
+	staleRel := filepath.Join("sessions", "2024", "01", "02", "rollout-2024-01-02T00-00-00-"+threadID+".jsonl")
+	currentRel := filepath.Join("sessions", "2024", "01", "03", "rollout-2024-01-03T00-00-00-"+threadID+".jsonl")
+	for rel, id := range map[string]string{staleRel: "stale-id", currentRel: threadID} {
+		abs := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := `{"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"` + threadID + `","history_mode":"paginated"}}` + "\n" +
+			`{"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"` + id + `","content":[{"type":"input_text","text":"seam"}]}}` + "\n"
+		if err := os.WriteFile(abs, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dbPath := filepath.Join(root, "state_6.sqlite")
+	writeCodexNativeStateDB(t, root, dbPath, []codexNativePointerRow{{ID: threadID, RolloutPath: currentRel, HistoryMode: "paginated"}})
+	session := ingest.DiscoveredSession{
+		SessionID:    schema.SessionID(threadID),
+		Harness:      ingest.HarnessCodex,
+		SourcePath:   ingest.ResolvedPath(filepath.Join(root, staleRel)),
+		SourceFormat: ingest.SourceFormatJSONL,
+	}
+	source := ingest.NewCodexFileSource(&ingest.OSFileSystem{})
+	identified, err := ingest.ResolveCodexAuthoritativeSession(t.Context(), source, session)
+	if err != nil {
+		t.Fatalf("ResolveCodexAuthoritativeSession: %v", err)
+	}
+	if identified.Authority.Kind != ingest.CodexAuthorityNativeCurrentPointer {
+		t.Fatalf("authority kind = %q, want native current pointer", identified.Authority.Kind)
+	}
+	if identified.Session.SessionID != schema.SessionID(threadID) {
+		t.Fatalf("authoritative session id = %q, want stable %q", identified.Session.SessionID, threadID)
+	}
+	wantPath := filepath.Join(root, currentRel)
+	if identified.Session.SourcePath.String() != wantPath {
+		t.Fatalf("authoritative source = %q, want current native rollout %q", identified.Session.SourcePath, wantPath)
+	}
+}
+
+// TestCodexIndexerCaptureConsumesNativeCurrentSource drives the real indexer
+// capture path against a real temporary native state database: the discovered
+// (stale) rollout is superseded by the native current-rollout pointer before
+// entry parsing, so the indexed entries come from the authoritative current
+// incarnation and never from the stale discovered path.
+func TestCodexIndexerCaptureConsumesNativeCurrentSource(t *testing.T) {
+	threadID := "eeeeeeee-5555-4555-8555-555555555555"
+	root := t.TempDir()
+	staleRel := filepath.Join("sessions", "2024", "01", "02", "rollout-2024-01-02T00-00-00-"+threadID+".jsonl")
+	currentRel := filepath.Join("sessions", "2024", "01", "03", "rollout-2024-01-03T00-00-00-"+threadID+".jsonl")
+	stale := strings.Join([]string{
+		`{"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"` + threadID + `","history_mode":"paginated"}}`,
+		`{"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"stale","content":[{"type":"input_text","text":"stale incarnation"}]}}`,
+		"",
+	}, "\n")
+	current := strings.Join([]string{
+		`{"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"` + threadID + `","history_mode":"paginated"}}`,
+		`{"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"new1","content":[{"type":"input_text","text":"current one"}]}}`,
+		`{"timestamp":"2024-01-03T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"new2","content":[{"type":"output_text","text":"current two"}]}}`,
+		"",
+	}, "\n")
+	for rel, content := range map[string]string{staleRel: stale, currentRel: current} {
+		abs := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dbPath := filepath.Join(root, "state_5.sqlite")
+	writeCodexNativeStateDB(t, root, dbPath, []codexNativePointerRow{{ID: threadID, RolloutPath: currentRel, HistoryMode: "paginated"}})
+	session := ingest.DiscoveredSession{
+		SessionID:    schema.SessionID(threadID),
+		Harness:      ingest.HarnessCodex,
+		SourcePath:   ingest.ResolvedPath(filepath.Join(root, staleRel)),
+		SourceFormat: ingest.SourceFormatJSONL,
+	}
+	indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{}, ingest.WithCodexHistoryCapture(true))
+	result, err := indexer.IndexTranscriptResult(t.Context(), session)
+	if err != nil {
+		t.Fatalf("IndexTranscriptResult: %v", err)
+	}
+	entries := result.(indexformat.V1).Entries
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2 from the native current rollout", len(entries))
+	}
+	if entries[0].ContentPreview == nil || *entries[0].ContentPreview != "current one" {
+		t.Fatalf("first entry preview = %v, want the native current incarnation", entries[0].ContentPreview)
+	}
 }

@@ -1592,3 +1592,192 @@ cases:
           earlierRefs: []
           revertedRefs: [e_3, e_4]
           correlationKinds: []
+
+  - name: canonical-item-variants-emitted
+    phases:
+      - authority:
+          stableThreadID: 80800001-8080-4080-8080-808080808081
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T22:00:00Z","type":"session_meta","payload":{"id":"80800001-8080-4080-8080-808080808081","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T22:00:01Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"canonical input"}]}}}
+            {"timestamp":"2024-01-02T22:00:02Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"canonical answer"}]}}}
+            {"timestamp":"2024-01-02T22:00:03Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"CommandExecution","id":"c1","command":["echo","safe"],"status":"completed"}}}
+            {"timestamp":"2024-01-02T22:00:04Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"ContextCompaction","id":"k1"}}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3, e_4]
+          inheritedRefs: []
+          earlierRefs: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|80800001-8080-4080-8080-808080808081|item|u1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|80800001-8080-4080-8080-808080808081|item|a1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: assistant
+              itemID: a1
+              ownership: own
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|80800001-8080-4080-8080-808080808081|item|c1|command_execution"
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: event_msg
+              nativeType: command_execution
+              nativeRole: assistant
+              itemID: c1
+              ownership: own
+              hasPayload: true
+            - ref: e_4
+              nativeKey: "codex|80800001-8080-4080-8080-808080808081|item|k1|context_compaction"
+              segment: 0
+              ordinal: 4
+              line: 4
+              envelopeType: event_msg
+              nativeType: context_compaction
+              nativeRole: system
+              itemID: k1
+              ownership: own
+              hasPayload: true
+
+  - name: event-only-tool-item-arguments
+    phases:
+      - authority:
+          stableThreadID: 80800002-8080-4080-8080-808080808082
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T22:10:00Z","type":"session_meta","payload":{"id":"80800002-8080-4080-8080-808080808082","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T22:10:01Z","type":"event_msg","payload":{"type":"item_completed","id":"tool1","item":{"id":"tool1","type":"function_call","call_id":"call1","name":"exec","arguments":"{\"command\":\"echo safe\"}"}}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|80800002-8080-4080-8080-808080808082|item|tool1|function_call"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: event_msg
+              nativeType: function_call
+              itemID: tool1
+              ownership: own
+              hasPayload: true
+              payload: '{"type":"item_completed","id":"tool1","item":{"id":"tool1","type":"function_call","call_id":"call1","name":"exec","arguments":"{\"command\":\"echo safe\"}"}}'
+
+  - name: legacy-canonical-item-rollback-boundary
+    phases:
+      - authority:
+          stableThreadID: 80800003-8080-4080-8080-808080808083
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T22:20:00Z","type":"session_meta","payload":{"id":"80800003-8080-4080-8080-808080808083","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T22:20:01Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"request"}]}}}
+            {"timestamp":"2024-01-02T22:20:02Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"answer"}]}}}
+            {"timestamp":"2024-01-02T22:20:03Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: []
+          inheritedRefs: []
+          earlierRefs: []
+          revertedRefs: [e_1, e_2]
+          correlationKinds: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|80800003-8080-4080-8080-808080808083|item|u1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: reverted
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|80800003-8080-4080-8080-808080808083|item|a1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: assistant
+              itemID: a1
+              ownership: reverted
+              hasPayload: true
+
+  - name: cross-segment-item-body-replaced
+    phases:
+      - authority:
+          stableThreadID: 80800004-8080-4080-8080-808080808084
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: old
+              physicalSourceID: phys-old
+              mode: paginated
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 2
+              logicalSessionID: 80800004-8080-4080-8080-808080808084
+        sources:
+          old: |
+            {"timestamp":"2024-01-02T22:30:00Z","type":"session_meta","payload":{"id":"80800004-8080-4080-8080-808080808084","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T22:30:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"version one"}]}}
+          current: |
+            {"timestamp":"2024-01-02T22:40:00Z","type":"session_meta","payload":{"id":"80800004-8080-4080-8080-808080808084","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T22:40:01Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"version two"}]}}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: [same_thread_rollover]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|80800004-8080-4080-8080-808080808084|item|u1|message"
+              segment: 1
+              ordinal: 1
+              line: 1
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
+              payload: '{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"version two"}]}}'

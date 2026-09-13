@@ -345,6 +345,7 @@ const (
 	codexTypeResponse    = "response_item"
 
 	codexResponseMessage       = "message"
+	codexResponseAgentMessage  = "agent_message"
 	codexResponseFunctionCall  = "function_call"
 	codexResponseCustomCall    = "custom_tool_call"
 	codexResponseReasoning     = "reasoning"
