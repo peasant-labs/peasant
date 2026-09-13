@@ -159,7 +159,9 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
 	//   cache. V45 adds the OpenCode change cursor. V48 adds annotation_run_state.
 	//   V49 adds annotation_target_anchors. V51 adds publication metadata.
-	//   V52 adds three full-content tables.
+	//   V52 adds three full-content tables. V60 adds the managed-generation
+	//   catalog: generations, relationship evidence, sections, entries, context
+	//   segments, content, and aliases.
 	var tableCount int
 	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -170,15 +172,16 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 58 {
-		t.Errorf("expected 58 tables including publication metadata and full content storage, got %d", tableCount)
+	if tableCount != 65 {
+		t.Errorf("expected 65 tables including the managed-generation catalog, got %d", tableCount)
 	}
 
-	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
+	// Verify all indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
 	// + idx_injection_log_project from V30 + idx_lessons_dedup from V31
 	// + idx_lesson_sources_lesson/session from V32
 	// + idx_pulled_annotations_transcript/local_session from V34 + association
-	// ledger and association-target indexes from V40/V41).
+	// ledger and association-target indexes from V40/V41 + the V60 generation
+	// entry partition index).
 	var indexCount int
 	err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -189,8 +192,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count indexes: %v", err)
 	}
-	if indexCount != 48 {
-		t.Errorf("expected 48 indexes including content capture status lookup, got %d", indexCount)
+	if indexCount != 49 {
+		t.Errorf("expected 49 indexes including the generation entry partition index, got %d", indexCount)
 	}
 
 	// Verify STRICT mode by inserting TEXT into an INTEGER column on a table

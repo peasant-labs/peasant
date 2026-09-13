@@ -1,0 +1,8 @@
+requiredNames:
+  - before-temporary-fsync
+  - after-fsync-before-rename
+  - after-rename-before-db
+  - during-activation-transaction
+  - after-db-before-metadata
+  - after-metadata-before-intent-clear
+  - corrupt-artifact
