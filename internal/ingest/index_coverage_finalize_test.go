@@ -1,17 +1,169 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
+//go:embed testdata/index_coverage_finalize.yaml
+var indexCoverageFinalizeFixtureData []byte
+
+const indexCoverageFinalizeFixturePath = "internal/ingest/testdata/index_coverage_finalize.yaml"
+
+type indexCoverageFinalizeDocument struct {
+	RequiredCases []string                        `yaml:"required_cases"`
+	Cases         []indexCoverageFinalizeCaseSpec `yaml:"cases"`
+}
+
+type indexCoverageFinalizeCaseSpec struct {
+	Name               string                `yaml:"name"`
+	LogPrefix          string                `yaml:"logPrefix"`
+	Rows               []indexCoverageLogRow `yaml:"rows"`
+	Without            []string              `yaml:"without"`
+	PartialWithout     []string              `yaml:"partialWithout"`
+	StoreError         bool                  `yaml:"storeError"`
+	AbsentStore        bool                  `yaml:"absentStore"`
+	WantUnavailable    bool                  `yaml:"wantUnavailable"`
+	WantFailedAttempts int                   `yaml:"wantFailedAttempts"`
+	WantEmpty          int                   `yaml:"wantEmpty"`
+	WantRetained       int                   `yaml:"wantRetained"`
+}
+
+type indexCoverageLogRow struct {
+	Session string `yaml:"session"`
+	Outcome string `yaml:"outcome"`
+}
+
+// coverageFinalizeOutcomes maps the fixture's spelling to the production
+// outcome. Explicit, because a blank or misspelled value would otherwise
+// decode to the empty outcome, which counts as neither a failure nor a
+// success - a row could then silently test nothing while reading as a case.
+var coverageFinalizeOutcomes = map[string]IndexOutcome{
+	"indexed":   IndexOutcomeIndexed,
+	"reindexed": IndexOutcomeReindexed,
+	"fallback":  IndexOutcomeFallback,
+	"skipped":   IndexOutcomeSkipped,
+	"error":     IndexOutcomeError,
+}
+
+func loadIndexCoverageFinalizeFixture(data []byte) (indexCoverageFinalizeDocument, error) {
+	var document indexCoverageFinalizeDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		return document, fmt.Errorf("%s: decode typed fields: %w", indexCoverageFinalizeFixturePath, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = errors.New("found another YAML document")
+		}
+		return document, fmt.Errorf("%s: exactly one YAML document is allowed: %w", indexCoverageFinalizeFixturePath, err)
+	}
+	if len(document.Cases) == 0 {
+		return document, fmt.Errorf("%s: the fixture holds no cases", indexCoverageFinalizeFixturePath)
+	}
+	if len(document.RequiredCases) == 0 {
+		return document, fmt.Errorf("%s: no required cases are named; a fixture with no manifest protects nothing", indexCoverageFinalizeFixturePath)
+	}
+	required := map[string]bool{}
+	for _, name := range document.RequiredCases {
+		if strings.TrimSpace(name) == "" || required[name] {
+			return document, fmt.Errorf("%s: required case name %q is blank or repeated", indexCoverageFinalizeFixturePath, name)
+		}
+		required[name] = true
+	}
+	seen := map[string]bool{}
+	for _, spec := range document.Cases {
+		if strings.TrimSpace(spec.Name) == "" || seen[spec.Name] {
+			return document, fmt.Errorf("%s: case name %q is missing or duplicated", indexCoverageFinalizeFixturePath, spec.Name)
+		}
+		seen[spec.Name] = true
+		if strings.TrimSpace(spec.LogPrefix) == "" {
+			return document, fmt.Errorf("%s: case %q has no log prefix", indexCoverageFinalizeFixturePath, spec.Name)
+		}
+		if len(spec.Rows) == 0 {
+			return document, fmt.Errorf("%s: case %q has no log rows", indexCoverageFinalizeFixturePath, spec.Name)
+		}
+		for _, row := range spec.Rows {
+			if _, known := coverageFinalizeOutcomes[row.Outcome]; !known {
+				return document, fmt.Errorf("%s: case %q names the outcome %q, which the pipeline does not record", indexCoverageFinalizeFixturePath, spec.Name, row.Outcome)
+			}
+		}
+		if spec.AbsentStore && (spec.StoreError || len(spec.Without) != 0 || len(spec.PartialWithout) != 0) {
+			return document, fmt.Errorf("%s: case %q has no store but also configures store behavior", indexCoverageFinalizeFixturePath, spec.Name)
+		}
+		if spec.WantUnavailable {
+			if !spec.AbsentStore && !spec.StoreError {
+				return document, fmt.Errorf("%s: case %q expects unavailable coverage without an absent store or a store error", indexCoverageFinalizeFixturePath, spec.Name)
+			}
+			continue
+		}
+		if spec.WantFailedAttempts != spec.WantEmpty+spec.WantRetained {
+			return document, fmt.Errorf("%s: case %q states wantFailedAttempts=%d, which is not wantEmpty=%d + wantRetained=%d", indexCoverageFinalizeFixturePath, spec.Name, spec.WantFailedAttempts, spec.WantEmpty, spec.WantRetained)
+		}
+		// A measured split needs a store that can answer. The one exception is
+		// a run with no failed attempts: it measures zero without consulting
+		// the store at all, so it may configure the store to fail and prove
+		// that it is never asked.
+		if (spec.AbsentStore || spec.StoreError) && spec.WantFailedAttempts > 0 {
+			return document, fmt.Errorf("%s: case %q expects a measured split from a store that cannot answer", indexCoverageFinalizeFixturePath, spec.Name)
+		}
+	}
+	missing, extra := "", ""
+	for name := range required {
+		if !seen[name] {
+			missing = name
+			break
+		}
+	}
+	for name := range seen {
+		if !required[name] {
+			extra = name
+			break
+		}
+	}
+	if missing != "" {
+		return document, fmt.Errorf("%s: required case %q is missing", indexCoverageFinalizeFixturePath, missing)
+	}
+	if extra != "" {
+		return document, fmt.Errorf("%s: case %q is not in the required manifest", indexCoverageFinalizeFixturePath, extra)
+	}
+	return document, nil
+}
+
+func loadIndexCoverageFinalizeCases(t *testing.T) []indexCoverageFinalizeCaseSpec {
+	t.Helper()
+	document, err := loadIndexCoverageFinalizeFixture(indexCoverageFinalizeFixtureData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document.Cases
+}
+
+func buildIndexCoverageFinalizeLog(rows []indexCoverageLogRow) []IndexLogEntry {
+	log := make([]IndexLogEntry, 0, len(rows))
+	for _, row := range rows {
+		log = append(log, IndexLogEntry{SessionID: SessionID(row.Session), Outcome: coverageFinalizeOutcomes[row.Outcome]})
+	}
+	return log
+}
+
 // coverageFinalizeStore is a SessionStore double that answers entries
-// membership from a fixed map, or fails it on demand.
+// membership from a fixed map, or fails it on demand. A partial map can ride
+// with the error so a case can prove finalize discards accumulated rows.
 type coverageFinalizeStore struct {
 	without map[SessionID]bool
+	partial map[SessionID]bool
 	err     error
 }
 
@@ -31,6 +183,13 @@ func (s *coverageFinalizeStore) CleanupOrphanProjects(context.Context) error { r
 func (s *coverageFinalizeStore) Close() error                                { return nil }
 func (s *coverageFinalizeStore) SessionsWithoutEntries(_ context.Context, ids []SessionID) (map[SessionID]bool, error) {
 	if s.err != nil {
+		if s.partial != nil {
+			out := make(map[SessionID]bool, len(s.partial))
+			for id, without := range s.partial {
+				out[id] = without
+			}
+			return out, s.err
+		}
 		return nil, s.err
 	}
 	out := make(map[SessionID]bool, len(ids))
@@ -38,24 +197,6 @@ func (s *coverageFinalizeStore) SessionsWithoutEntries(_ context.Context, ids []
 		out[id] = s.without[id]
 	}
 	return out, nil
-}
-
-// coverageFinalizeLog builds an index log over three fixed sessions.
-func coverageFinalizeLog(outcomes ...IndexOutcome) []IndexLogEntry {
-	ids := []string{
-		"11111111-1111-4111-8111-000000000101",
-		"11111111-1111-4111-8111-000000000102",
-		"11111111-1111-4111-8111-000000000103",
-	}
-	log := make([]IndexLogEntry, 0, len(outcomes))
-	for i, outcome := range outcomes {
-		id, err := NewSessionID(ids[i%len(ids)])
-		if err != nil {
-			panic(err)
-		}
-		log = append(log, IndexLogEntry{SessionID: id, Harness: HarnessClaudeCode, Outcome: outcome})
-	}
-	return log
 }
 
 func coverageFinalizeDiagnostics(p *Pipeline) []DiagnosticEntry {
@@ -93,85 +234,67 @@ func assertCoverageDiagnostic(t *testing.T, diagnostics []DiagnosticEntry, logPr
 	}
 }
 
-// TestIndexComputeAndFinalize_ComputesCoverage drives the production finalize
-// with a capability-carrying store and pins the counts on the result.
-func TestIndexComputeAndFinalize_ComputesCoverage(t *testing.T) {
-	emptyID, _ := NewSessionID("11111111-1111-4111-8111-000000000101")
-	p := coverageFinalizePipeline(t, &coverageFinalizeStore{without: map[SessionID]bool{emptyID: true}})
-	log := coverageFinalizeLog(IndexOutcomeError, IndexOutcomeError, IndexOutcomeIndexed)
-
-	result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeIndexed, "pipeline", nil)
-	if err != nil {
-		t.Fatalf("indexComputeAndFinalize: %v", err)
-	}
-	coverage := result.IndexCoverage
-	if coverage == nil {
-		t.Fatal("finalize left IndexCoverage nil for a store that answers membership")
-	}
-	if coverage.FailedAttempts != 2 || coverage.Empty != 1 || coverage.FailedRetained != 1 {
-		t.Errorf("IndexCoverage = %+v, want {FailedAttempts:2 Empty:1 FailedRetained:1}", coverage)
-	}
+func assertFinalizeCoverageIdentity(t *testing.T, coverage *IndexCoverage) {
+	t.Helper()
 	if coverage.FailedAttempts != coverage.Empty+coverage.FailedRetained {
 		t.Errorf("FailedAttempts = %d, want Empty + FailedRetained = %d", coverage.FailedAttempts, coverage.Empty+coverage.FailedRetained)
 	}
-	for _, diagnostic := range coverageFinalizeDiagnostics(p) {
-		if diagnostic.ErrorType == "index_coverage_unavailable" {
-			t.Errorf("successful coverage reported an unavailable diagnostic: %+v", diagnostic)
-		}
-	}
 }
 
-// TestIndexComputeAndFinalize_MembershipErrorLeavesNilWithOneDiagnostic pins
-// the unavailable path: nil coverage, exactly one actionable diagnostic, and
-// no partial count anywhere on the result.
-func TestIndexComputeAndFinalize_MembershipErrorLeavesNilWithOneDiagnostic(t *testing.T) {
-	p := coverageFinalizePipeline(t, &coverageFinalizeStore{err: errors.New("synthetic membership failure")})
-	log := coverageFinalizeLog(IndexOutcomeError)
+// TestIndexComputeAndFinalize drives every named fixture case through the
+// production finalize: measured splits, the clean-run measured zero, and the
+// unavailable paths (missing capability, membership error, and a read that
+// fails after accumulating rows). An unavailable path must leave a nil
+// coverage and exactly one actionable diagnostic, never a partial count.
+func TestIndexComputeAndFinalize(t *testing.T) {
+	for _, spec := range loadIndexCoverageFinalizeCases(t) {
+		spec := spec
+		t.Run(spec.Name, func(t *testing.T) {
+			t.Parallel()
+			var sessionStore SessionStore
+			if !spec.AbsentStore {
+				double := &coverageFinalizeStore{without: map[SessionID]bool{}}
+				for _, raw := range spec.Without {
+					double.without[SessionID(raw)] = true
+				}
+				if spec.StoreError {
+					double.err = errors.New("synthetic membership failure")
+				}
+				if len(spec.PartialWithout) > 0 {
+					double.partial = map[SessionID]bool{}
+					for _, raw := range spec.PartialWithout {
+						double.partial[SessionID(raw)] = true
+					}
+				}
+				sessionStore = double
+			}
+			p := coverageFinalizePipeline(t, sessionStore)
+			log := buildIndexCoverageFinalizeLog(spec.Rows)
 
-	result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeReindexed, "reindex", nil)
-	if err != nil {
-		t.Fatalf("indexComputeAndFinalize: %v", err)
-	}
-	if result.IndexCoverage != nil {
-		t.Errorf("IndexCoverage = %+v, want nil: a failed chunk must leave no partial count", result.IndexCoverage)
-	}
-	assertCoverageDiagnostic(t, coverageFinalizeDiagnostics(p), "reindex")
-}
-
-// TestIndexComputeAndFinalize_MissingCapabilityLeavesNilWithOneDiagnostic pins
-// the capability-absent path through the same production finalize.
-func TestIndexComputeAndFinalize_MissingCapabilityLeavesNilWithOneDiagnostic(t *testing.T) {
-	p := coverageFinalizePipeline(t, nil)
-	log := coverageFinalizeLog(IndexOutcomeError)
-
-	result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeIndexed, "pipeline", nil)
-	if err != nil {
-		t.Fatalf("indexComputeAndFinalize: %v", err)
-	}
-	if result.IndexCoverage != nil {
-		t.Errorf("IndexCoverage = %+v, want nil: without a membership capability the answer is unavailable, never zero", result.IndexCoverage)
-	}
-	assertCoverageDiagnostic(t, coverageFinalizeDiagnostics(p), "pipeline")
-}
-
-// TestIndexComputeAndFinalize_CleanRunMeasuresZeroWithoutTheStore pins that a
-// run with no failed attempts reports a measured zero and stays silent: no
-// store question was asked, so no diagnostic is owed.
-func TestIndexComputeAndFinalize_CleanRunMeasuresZeroWithoutTheStore(t *testing.T) {
-	p := coverageFinalizePipeline(t, &coverageFinalizeStore{err: errors.New("must not be consulted")})
-	log := coverageFinalizeLog(IndexOutcomeIndexed)
-
-	result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeIndexed, "pipeline", nil)
-	if err != nil {
-		t.Fatalf("indexComputeAndFinalize: %v", err)
-	}
-	if result.IndexCoverage == nil {
-		t.Fatal("finalize left IndexCoverage nil for a run with no failures; nil means unavailable, and zero failures is a measured zero")
-	}
-	if *result.IndexCoverage != (IndexCoverage{}) {
-		t.Errorf("IndexCoverage = %+v, want all zeros", result.IndexCoverage)
-	}
-	if diagnostics := coverageFinalizeDiagnostics(p); len(diagnostics) != 0 {
-		t.Errorf("clean run reported diagnostics %+v, want none", diagnostics)
+			result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeIndexed, spec.LogPrefix, nil)
+			if err != nil {
+				t.Fatalf("indexComputeAndFinalize: %v", err)
+			}
+			diagnostics := coverageFinalizeDiagnostics(p)
+			if spec.WantUnavailable {
+				if result.IndexCoverage != nil {
+					t.Errorf("IndexCoverage = %+v, want nil: unavailable is nil, never a partial count", result.IndexCoverage)
+				}
+				assertCoverageDiagnostic(t, diagnostics, spec.LogPrefix)
+				return
+			}
+			if result.IndexCoverage == nil {
+				t.Fatal("finalize left IndexCoverage nil for a store that answers membership")
+			}
+			assertFinalizeCoverageIdentity(t, result.IndexCoverage)
+			if result.IndexCoverage.FailedAttempts != spec.WantFailedAttempts || result.IndexCoverage.Empty != spec.WantEmpty || result.IndexCoverage.FailedRetained != spec.WantRetained {
+				t.Errorf("IndexCoverage = %+v, want {FailedAttempts:%d Empty:%d FailedRetained:%d}", result.IndexCoverage, spec.WantFailedAttempts, spec.WantEmpty, spec.WantRetained)
+			}
+			for _, diagnostic := range diagnostics {
+				if diagnostic.ErrorType == "index_coverage_unavailable" {
+					t.Errorf("measured coverage reported an unavailable diagnostic: %+v", diagnostic)
+				}
+			}
+		})
 	}
 }

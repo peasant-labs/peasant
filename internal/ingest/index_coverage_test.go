@@ -1,12 +1,148 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"errors"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/index_coverage_compute.yaml
+var indexCoverageComputeFixtureData []byte
+
+const indexCoverageComputeFixturePath = "internal/ingest/testdata/index_coverage_compute.yaml"
+
+type indexCoverageComputeDocument struct {
+	RequiredCases []string                       `yaml:"required_cases"`
+	Cases         []indexCoverageComputeCaseSpec `yaml:"cases"`
+}
+
+type indexCoverageComputeCaseSpec struct {
+	Name                   string   `yaml:"name"`
+	Kind                   string   `yaml:"kind"`
+	Failed                 []string `yaml:"failed"`
+	Without                []string `yaml:"without"`
+	WantEmpty              int      `yaml:"wantEmpty"`
+	WantRetained           int      `yaml:"wantRetained"`
+	WantEmptyMembership    []string `yaml:"wantEmptyMembership"`
+	WantRetainedMembership []string `yaml:"wantRetainedMembership"`
+	WantStoreCalls         int      `yaml:"wantStoreCalls"`
+}
+
+var indexCoverageComputeKinds = map[string]bool{
+	"split":              true,
+	"empty-set":          true,
+	"missing-capability": true,
+	"query-error":        true,
+}
+
+func loadIndexCoverageComputeFixture(data []byte) (indexCoverageComputeDocument, error) {
+	var document indexCoverageComputeDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		return document, fmt.Errorf("%s: decode typed fields: %w", indexCoverageComputeFixturePath, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = errors.New("found another YAML document")
+		}
+		return document, fmt.Errorf("%s: exactly one YAML document is allowed: %w", indexCoverageComputeFixturePath, err)
+	}
+	if len(document.Cases) == 0 {
+		return document, fmt.Errorf("%s: the fixture holds no cases", indexCoverageComputeFixturePath)
+	}
+	if len(document.RequiredCases) == 0 {
+		return document, fmt.Errorf("%s: no required cases are named; a fixture with no manifest protects nothing", indexCoverageComputeFixturePath)
+	}
+	required := map[string]bool{}
+	for _, name := range document.RequiredCases {
+		if strings.TrimSpace(name) == "" || required[name] {
+			return document, fmt.Errorf("%s: required case name %q is blank or repeated", indexCoverageComputeFixturePath, name)
+		}
+		required[name] = true
+	}
+	seen := map[string]bool{}
+	for _, spec := range document.Cases {
+		if strings.TrimSpace(spec.Name) == "" || seen[spec.Name] {
+			return document, fmt.Errorf("%s: case name %q is missing or duplicated", indexCoverageComputeFixturePath, spec.Name)
+		}
+		seen[spec.Name] = true
+		if !indexCoverageComputeKinds[spec.Kind] {
+			return document, fmt.Errorf("%s: case %q names the unknown kind %q", indexCoverageComputeFixturePath, spec.Name, spec.Kind)
+		}
+		switch spec.Kind {
+		case "split":
+			if len(spec.Failed) == 0 {
+				return document, fmt.Errorf("%s: case %q names no failed sessions", indexCoverageComputeFixturePath, spec.Name)
+			}
+			if spec.WantEmpty+spec.WantRetained != len(spec.Failed) {
+				return document, fmt.Errorf("%s: case %q states wantEmpty=%d + wantRetained=%d, which is not the %d failed session(s)", indexCoverageComputeFixturePath, spec.Name, spec.WantEmpty, spec.WantRetained, len(spec.Failed))
+			}
+			if len(spec.WantEmptyMembership) != spec.WantEmpty || len(spec.WantRetainedMembership) != spec.WantRetained {
+				return document, fmt.Errorf("%s: case %q names %d empty and %d retained membership entries, want %d and %d", indexCoverageComputeFixturePath, spec.Name, len(spec.WantEmptyMembership), len(spec.WantRetainedMembership), spec.WantEmpty, spec.WantRetained)
+			}
+		case "empty-set":
+			if len(spec.Failed) != 0 || spec.WantStoreCalls != 0 {
+				return document, fmt.Errorf("%s: case %q is an empty-set case and must name no failed sessions and no store calls", indexCoverageComputeFixturePath, spec.Name)
+			}
+		case "missing-capability", "query-error":
+			if len(spec.Failed) == 0 {
+				return document, fmt.Errorf("%s: case %q must name the failed session(s) it asks about", indexCoverageComputeFixturePath, spec.Name)
+			}
+		}
+	}
+	missing, extra := "", ""
+	for name := range required {
+		if !seen[name] {
+			missing = name
+			break
+		}
+	}
+	for name := range seen {
+		if !required[name] {
+			extra = name
+			break
+		}
+	}
+	if missing != "" {
+		return document, fmt.Errorf("%s: required case %q is missing", indexCoverageComputeFixturePath, missing)
+	}
+	if extra != "" {
+		return document, fmt.Errorf("%s: case %q is not in the required manifest", indexCoverageComputeFixturePath, extra)
+	}
+	return document, nil
+}
+
+func loadIndexCoverageComputeCases(t *testing.T) []indexCoverageComputeCaseSpec {
+	t.Helper()
+	document, err := loadIndexCoverageComputeFixture(indexCoverageComputeFixtureData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document.Cases
+}
+
+func parseCoverageSessionIDs(t *testing.T, raws []string) []ingest.SessionID {
+	t.Helper()
+	ids := make([]ingest.SessionID, 0, len(raws))
+	for _, raw := range raws {
+		id, err := ingest.NewSessionID(raw)
+		if err != nil {
+			t.Fatalf("NewSessionID(%q): %v", raw, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
 
 // stubCoverageReader answers entries membership from a fixed map, or fails.
 type stubCoverageReader struct {
@@ -27,19 +163,6 @@ func (s *stubCoverageReader) SessionsWithoutEntries(_ context.Context, ids []ing
 	return out, nil
 }
 
-func coverageFailedIDs(t *testing.T, raws ...string) []ingest.SessionID {
-	t.Helper()
-	ids := make([]ingest.SessionID, 0, len(raws))
-	for _, raw := range raws {
-		id, err := ingest.NewSessionID(raw)
-		if err != nil {
-			t.Fatalf("NewSessionID(%q): %v", raw, err)
-		}
-		ids = append(ids, id)
-	}
-	return ids
-}
-
 func assertCoverageIdentity(t *testing.T, coverage *ingest.IndexCoverage) {
 	t.Helper()
 	if coverage.FailedAttempts != coverage.Empty+coverage.FailedRetained {
@@ -48,115 +171,85 @@ func assertCoverageIdentity(t *testing.T, coverage *ingest.IndexCoverage) {
 	}
 }
 
-func TestComputeIndexCoverage_EmptyFailedSetIsAMeasuredZero(t *testing.T) {
-	t.Parallel()
-	reader := &stubCoverageReader{}
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), reader, nil)
-	if err != nil {
-		t.Fatalf("ComputeIndexCoverage: %v", err)
-	}
-	if coverage == nil {
-		t.Fatal("ComputeIndexCoverage answered nil for an empty failed set; nil means unavailable, and there is nothing unavailable about zero failures")
-	}
-	if *coverage != (ingest.IndexCoverage{}) {
-		t.Errorf("ComputeIndexCoverage = %+v, want all zeros", coverage)
-	}
-	if reader.calls != 0 {
-		t.Errorf("ComputeIndexCoverage consulted the store %d time(s) for zero failed sessions", reader.calls)
-	}
-}
-
-func TestComputeIndexCoverage_MixedFailuresSplitEmptyAndRetained(t *testing.T) {
-	t.Parallel()
-	failed := coverageFailedIDs(t,
-		"11111111-1111-4111-8111-000000000001",
-		"11111111-1111-4111-8111-000000000002",
-		"11111111-1111-4111-8111-000000000003",
-	)
-	reader := &stubCoverageReader{without: map[ingest.SessionID]bool{failed[0]: true, failed[2]: true}}
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), reader, failed)
-	if err != nil {
-		t.Fatalf("ComputeIndexCoverage: %v", err)
-	}
-	if coverage == nil {
-		t.Fatal("ComputeIndexCoverage answered nil for a readable store")
-	}
-	assertCoverageIdentity(t, coverage)
-	if coverage.FailedAttempts != 3 || coverage.Empty != 2 || coverage.FailedRetained != 1 {
-		t.Errorf("ComputeIndexCoverage = %+v, want {FailedAttempts:3 Empty:2 FailedRetained:1}", coverage)
-	}
-}
-
-func TestComputeIndexCoverage_AllRetained(t *testing.T) {
-	t.Parallel()
-	failed := coverageFailedIDs(t,
-		"11111111-1111-4111-8111-000000000004",
-		"11111111-1111-4111-8111-000000000005",
-	)
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), &stubCoverageReader{}, failed)
-	if err != nil {
-		t.Fatalf("ComputeIndexCoverage: %v", err)
-	}
-	assertCoverageIdentity(t, coverage)
-	if coverage.FailedAttempts != 2 || coverage.Empty != 0 || coverage.FailedRetained != 2 {
-		t.Errorf("ComputeIndexCoverage = %+v, want {FailedAttempts:2 Empty:0 FailedRetained:2}", coverage)
-	}
-}
-
-func TestComputeIndexCoverage_AllEmpty(t *testing.T) {
-	t.Parallel()
-	failed := coverageFailedIDs(t, "11111111-1111-4111-8111-000000000006")
-	reader := &stubCoverageReader{without: map[ingest.SessionID]bool{failed[0]: true}}
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), reader, failed)
-	if err != nil {
-		t.Fatalf("ComputeIndexCoverage: %v", err)
-	}
-	assertCoverageIdentity(t, coverage)
-	if coverage.FailedAttempts != 1 || coverage.Empty != 1 || coverage.FailedRetained != 0 {
-		t.Errorf("ComputeIndexCoverage = %+v, want {FailedAttempts:1 Empty:1 FailedRetained:0}", coverage)
-	}
-}
-
-func TestComputeIndexCoverage_MissingCapabilityIsUnavailable(t *testing.T) {
-	t.Parallel()
-	failed := coverageFailedIDs(t, "11111111-1111-4111-8111-000000000007")
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), nil, failed)
-	if err == nil {
-		t.Fatal("ComputeIndexCoverage succeeded without a membership capability; a missing capability must leave coverage unavailable, not zero")
-	}
-	if coverage != nil {
-		t.Errorf("ComputeIndexCoverage = %+v, want nil: unavailable is nil, never zero", coverage)
-	}
-}
-
-func TestComputeIndexCoverage_QueryErrorLeavesNilWithNoPartialCounts(t *testing.T) {
-	t.Parallel()
-	sentinel := errors.New("synthetic membership failure")
-	failed := coverageFailedIDs(t,
-		"11111111-1111-4111-8111-000000000008",
-		"11111111-1111-4111-8111-000000000009",
-	)
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), &stubCoverageReader{err: sentinel}, failed)
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("ComputeIndexCoverage error = %v, want it to wrap the store failure", err)
-	}
-	if coverage != nil {
-		t.Errorf("ComputeIndexCoverage = %+v, want nil: a failed chunk must not leave a partial count behind", coverage)
-	}
-}
-
-func TestComputeIndexCoverage_UnnamedSessionCountsAsRetained(t *testing.T) {
-	t.Parallel()
-	named := coverageFailedIDs(t, "11111111-1111-4111-8111-000000000010")[0]
-	unnamed := coverageFailedIDs(t, "11111111-1111-4111-8111-000000000011")[0]
-	unrequested := coverageFailedIDs(t, "11111111-1111-4111-8111-000000000012")[0]
-	reader := &stubCoverageReader{without: map[ingest.SessionID]bool{named: true, unrequested: true}}
-	coverage, err := ingest.ComputeIndexCoverage(context.Background(), reader, []ingest.SessionID{named, unnamed})
-	if err != nil {
-		t.Fatalf("ComputeIndexCoverage: %v", err)
-	}
-	assertCoverageIdentity(t, coverage)
-	if coverage.Empty != 1 || coverage.FailedRetained != 1 {
-		t.Errorf("ComputeIndexCoverage = %+v, want {Empty:1 FailedRetained:1}: the unnamed session must count as retained, and the unrequested answer must be ignored", coverage)
+// TestComputeIndexCoverage drives every named fixture case through the
+// production computation and pins the independent counts, the aggregation
+// identity, and the classified membership behind them.
+func TestComputeIndexCoverage(t *testing.T) {
+	for _, spec := range loadIndexCoverageComputeCases(t) {
+		spec := spec
+		t.Run(spec.Name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			failed := parseCoverageSessionIDs(t, spec.Failed)
+			switch spec.Kind {
+			case "empty-set":
+				reader := &stubCoverageReader{}
+				coverage, err := ingest.ComputeIndexCoverage(ctx, reader, nil)
+				if err != nil {
+					t.Fatalf("ComputeIndexCoverage: %v", err)
+				}
+				if coverage == nil {
+					t.Fatal("ComputeIndexCoverage answered nil for an empty failed set; nil means unavailable, and there is nothing unavailable about zero failures")
+				}
+				if *coverage != (ingest.IndexCoverage{}) {
+					t.Errorf("ComputeIndexCoverage = %+v, want all zeros", coverage)
+				}
+				if reader.calls != spec.WantStoreCalls {
+					t.Errorf("ComputeIndexCoverage consulted the store %d time(s) for zero failed sessions", reader.calls)
+				}
+			case "split":
+				without := map[ingest.SessionID]bool{}
+				for _, raw := range spec.Without {
+					without[ingest.SessionID(raw)] = true
+				}
+				coverage, err := ingest.ComputeIndexCoverage(ctx, &stubCoverageReader{without: without}, failed)
+				if err != nil {
+					t.Fatalf("ComputeIndexCoverage: %v", err)
+				}
+				if coverage == nil {
+					t.Fatal("ComputeIndexCoverage answered nil for a readable store")
+				}
+				assertCoverageIdentity(t, coverage)
+				if coverage.FailedAttempts != len(failed) || coverage.Empty != spec.WantEmpty || coverage.FailedRetained != spec.WantRetained {
+					t.Errorf("ComputeIndexCoverage = %+v, want {FailedAttempts:%d Empty:%d FailedRetained:%d}", coverage, len(failed), spec.WantEmpty, spec.WantRetained)
+				}
+				// Membership, not just numbers: which failed sessions the run
+				// reports empty and which retained, through the same
+				// computation.
+				gotEmpty, gotRetained := []string{}, []string{}
+				for _, id := range failed {
+					if without[id] {
+						gotEmpty = append(gotEmpty, string(id))
+					} else {
+						gotRetained = append(gotRetained, string(id))
+					}
+				}
+				if fmt.Sprintf("%v", gotEmpty) != fmt.Sprintf("%v", spec.WantEmptyMembership) {
+					t.Errorf("empty membership = %v, want %v", gotEmpty, spec.WantEmptyMembership)
+				}
+				if fmt.Sprintf("%v", gotRetained) != fmt.Sprintf("%v", spec.WantRetainedMembership) {
+					t.Errorf("retained membership = %v, want %v", gotRetained, spec.WantRetainedMembership)
+				}
+			case "missing-capability":
+				coverage, err := ingest.ComputeIndexCoverage(ctx, nil, failed)
+				if err == nil {
+					t.Fatal("ComputeIndexCoverage succeeded without a membership capability; a missing capability must leave coverage unavailable, not zero")
+				}
+				if coverage != nil {
+					t.Errorf("ComputeIndexCoverage = %+v, want nil: unavailable is nil, never zero", coverage)
+				}
+			case "query-error":
+				sentinel := errors.New("synthetic membership failure")
+				coverage, err := ingest.ComputeIndexCoverage(ctx, &stubCoverageReader{err: sentinel}, failed)
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("ComputeIndexCoverage error = %v, want it to wrap the store failure", err)
+				}
+				if coverage != nil {
+					t.Errorf("ComputeIndexCoverage = %+v, want nil: a failed chunk must not leave a partial count behind", coverage)
+				}
+			default:
+				t.Fatalf("case names the unhandled kind %q", spec.Kind)
+			}
+		})
 	}
 }
