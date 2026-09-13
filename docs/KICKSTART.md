@@ -23,7 +23,8 @@ Discovery runs before the interactive screen. The guided flow then presents:
    this prompt. Connecting only authenticates the machine; publishing stays explicit and opt-in.
 2. **Transcript selection:** choose all recorded sessions or narrow the project-first tree by project,
    branch, or session. The harness facet filters the same tree without redefining the selection.
-   A project with no parseable remote is labeled with its resolved path suffix. A project whose only
+   An unnamed project with no parseable remote is labeled with its resolved path suffix; a named
+   project with an unparseable remote keeps its bare discovery name. A project whose only
    sessions are branchless shows them directly under the project row.
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
@@ -171,13 +172,17 @@ physical clone with that value. Peasant does not use a remote or name alone to c
 ambiguous clones. An old selection entry without `clonePaths` stays readable and follows the same
 uniqueness rule until kickstart migrates it from stored clone evidence.
 
-For a project with no Git remote, Peasant uses the resolved path as identity. When discovery
-resolves a project name, Kickstart shows that name with a short path when it must distinguish equal
-names. When discovery resolves no name either, the project row shows only the shortest trailing path
-segments that keep it distinct from the other path-identified projects in the same scan; two rows
-that share a tail widen together. The label stays relative, and the saved entry keeps the exact
-absolute clone path. The selection tree never renders the `(unknown project)` placeholder, and
-kickstart never writes it to a saved selection. See the
+For a project with no Git remote, Peasant uses the resolved path as identity. A remote that is
+present but unparseable gives no canonical label: a named project keeps its bare discovery name,
+and an unnamed project falls back to its resolved path suffix. When discovery resolves a project
+name and the project records no remote, Kickstart shows that name with a short path when it must
+distinguish equal names. When discovery resolves no name either, the project row shows only the
+shortest trailing path segments that keep it distinct from the other path-identified projects in
+the same scan; two rows that share a tail widen together. For an unnamed project, a resolved path
+with no relative suffix, such as a filesystem root, is shown as the resolved path itself; otherwise
+the label stays relative. The saved entry keeps the exact absolute clone path. The selection tree
+never renders the `(unknown project)` placeholder, and kickstart never writes it to a saved
+selection. See the
 [Selection index example](../README.md#selection-index) for the saved YAML shape.
 
 ## Sessions with no recorded branch

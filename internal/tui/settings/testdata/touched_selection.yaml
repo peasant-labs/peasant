@@ -1,5 +1,5 @@
-expectedCaseCount: 16
-expectedFieldCaseCount: 32
+expectedCaseCount: 17
+expectedFieldCaseCount: 34
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -16,6 +16,7 @@ expectedNames:
   - legacy-placeholder-branch-scope-fails-closed
   - unrestricted-project-clear-denies-branchless-by-session
   - unrestricted-project-select-keeps-broader-allowance
+  - unrestricted-branch-reselect-keeps-unrestricted-harness
   - manual-branch-reselect-materializes-branch-list
 expectedFieldNames:
   - conflict-toggle-is-a-true-no-op
@@ -45,12 +46,13 @@ expectedFieldNames:
   - unrestricted-project-clear-then-reselect-keeps-siblings
   - unrestricted-project-clear-then-select-under-keeps-siblings
   - unrestricted-placeholder-denial-select-under-keeps-siblings
+  - unrestricted-branch-clear-then-reselect-keeps-siblings
+  - restricted-branch-clear-then-reselect-materializes-branch-list
   - invalid-session-id-rolls-back
   - load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
   - grouped-satisfied-select-under-is-a-true-no-op
   - project-toggle-spans-harnesses
   - branch-toggle-spans-harnesses
-expectedDerivationCaseCount: 7
 expectedDerivationNames:
   - partially-checked-project-unknown-group-becomes-explicit-sessions
   - fully-checked-unknown-branch-project-stays-branchless
@@ -59,7 +61,6 @@ expectedDerivationNames:
   - harness-first-placeholder-worktree-becomes-explicit-sessions
   - flat-fully-checked-project-stays-branchless
   - flat-partially-checked-project-keeps-explicit-sessions
-expectedSanitizeCaseCount: 9
 expectedSanitizeNames:
   - placeholder-only-project-selects-its-unknown-sessions
   - named-branch-survives-while-unknown-sessions-become-explicit
@@ -151,6 +152,10 @@ fieldCases:
     gitRemote: "git@github.com:acme/tool.git"
     branch: (no branch detected)
     sessionId: 11111111-1111-4111-8111-111111111111
+    # Both sessions under the placeholder branch must surface as explicit IDs;
+    # emitting only the first changed session scope would pass a one-session
+    # fixture.
+    secondSessionId: 22222222-2222-4222-8222-222222222222
     keys: [down, toggle]
     expectedSessionState: checked
     expectedSetCount: 1
@@ -160,7 +165,7 @@ fieldCases:
       autoIngestNewBranches: false
       harnesses:
         claude-code:
-          sessions: [11111111-1111-4111-8111-111111111111]
+          sessions: [11111111-1111-4111-8111-111111111111, 22222222-2222-4222-8222-222222222222]
 
   - name: unknown-branch-session-toggle-selects-explicit-session
     current: {mode: selected, autoIngestNewBranches: false}
@@ -215,6 +220,10 @@ fieldCases:
     gitRemote: "git@github.com:acme/tool.git"
     branch: (no branch detected)
     sessionId: 11111111-1111-4111-8111-111111111111
+    # Both sessions under the placeholder branch must surface as exclusions;
+    # emitting only the first changed session scope would pass a one-session
+    # fixture.
+    secondSessionId: 22222222-2222-4222-8222-222222222222
     keys: [down, toggle]
     expectedSessionState: unchecked
     expectedSetCount: 1
@@ -227,7 +236,7 @@ fieldCases:
           projects:
             - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
           exclusions:
-            sessions: [11111111-1111-4111-8111-111111111111]
+            sessions: [11111111-1111-4111-8111-111111111111, 22222222-2222-4222-8222-222222222222]
 
   - name: unknown-branch-session-clear-uses-session-exclusion
     current:
@@ -773,6 +782,72 @@ fieldCases:
       harnesses:
         claude-code: {}
 
+  - name: unrestricted-branch-clear-then-reselect-keeps-siblings
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    secondProject:
+      projectIdentity: exact-project-b
+      clonePath: /fixtures/b
+      gitRemote: "git@github.com:acme/other.git"
+      branch: main
+      sessionId: 22222222-2222-4222-8222-222222222222
+    # Clear the named branch by hand, then restore it: the originally
+    # unrestricted harness must stay unrestricted (no positive project rule),
+    # so the untouched sibling project stays checked and the unrelated denial
+    # survives.
+    keys: [down, toggle, toggle]
+    expectedSessionState: checked
+    expectedSecondSessionState: checked
+    expectedSetCount: 2
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
+
+  - name: restricted-branch-clear-then-reselect-materializes-branch-list
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    # The same manual clear-and-restore under a restricted harness keeps the
+    # established replacement behavior: branch-level intent materializes as an
+    # explicit branch list.
+    keys: [down, toggle, toggle]
+    expectedSessionState: checked
+    expectedSetCount: 2
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+
   - name: invalid-session-id-rolls-back
     current:
       mode: selected
@@ -1281,6 +1356,34 @@ cases:
       autoIngestNewBranches: false
       harnesses:
         claude-code: {}
+
+  - name: unrestricted-branch-reselect-keeps-unrestricted-harness
+    operation: branch-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [main]}
+            sessions: [99999999-9999-4999-8999-999999999999]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      branch: main
+      sessionId: 11111111-1111-4111-8111-111111111111
+      visibleSessions:
+        - {branch: main, sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          exclusions:
+            sessions: [99999999-9999-4999-8999-999999999999]
 
   - name: manual-branch-reselect-materializes-branch-list
     operation: branch-on
