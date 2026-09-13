@@ -1,0 +1,9 @@
+requiredNames:
+  - dot-cleanup-preserves-active
+  - dotdot-cleanup-preserves-active
+  - slash-cleanup-preserves-active
+  - backslash-cleanup-preserves-active
+  - empty-cleanup-preserves-active
+  - noncanonical-cleanup-preserves-active
+  - intent-owned-cleanup-preserved
+  - immutable-collision-refused

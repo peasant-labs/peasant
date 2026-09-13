@@ -22,10 +22,12 @@ var (
 // WithSessionSnapshot loads ONE immutable read snapshot for a session. It takes
 // the shared per-session OS lock BEFORE the SQLite read transaction, loads the
 // metadata, active generation, main and earlier partitions, contexts and
-// content map in one snapshot, commits the read transaction, and then keeps the
-// shared lock for the ENTIRE callback through hydration and serialization. A
-// concurrent activation or cleanup takes the exclusive lock and therefore waits
-// until the callback returns.
+// content map in one snapshot, commits the read transaction, returns the pool
+// connection, and then keeps the shared lock for the ENTIRE callback through
+// hydration and serialization. Returning the connection before the callback
+// lets a callback that needs another store lookup proceed without deadlocking
+// at pool size one. A concurrent activation or cleanup takes the exclusive
+// lock and therefore waits until the callback returns.
 //
 // A session with no active generation yields a legacy V1 snapshot whose
 // LegacySource names the retained transcript; the caller uses the unchanged
@@ -48,11 +50,13 @@ func (s *Store) WithSessionSnapshot(ctx context.Context, sessionID schema.Sessio
 	if err != nil {
 		return fmt.Errorf("store: take connection for session snapshot %s: %w", sessionID, err)
 	}
-	defer s.pool.Put(conn)
 
 	endSnapshot := sqlitex.Save(conn)
 	snapshot, readErr := buildReadSnapshotOnConn(conn, sessionID)
 	endSnapshot(&readErr)
+	// The snapshot is fully materialized in memory; return the pool connection
+	// before invoking the callback while retaining the shared OS lock.
+	s.pool.Put(conn)
 	if readErr != nil {
 		return readErr
 	}
@@ -226,15 +230,20 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
 	}
+	// The snapshot is candidate-derived: timestamps and tool counts come from
+	// the committed generation metadata, and the logical parent comes from
+	// durable relationship evidence, never from the availability cache. This
+	// keeps the snapshot and ordinary store reads in agreement without a prior
+	// metadata upsert.
 	session := schema.SessionDetailPayload{
 		ID:                   string(sessionID),
 		Harness:              metadata.ModelHarness,
-		StartTime:            time.UnixMilli(row.startMs),
-		EndTime:              time.UnixMilli(row.endMs),
+		StartTime:            time.UnixMilli(metadata.Timestamp.Start),
+		EndTime:              time.UnixMilli(metadata.Timestamp.End),
 		TurnCount:            metadata.Stats.TurnCount,
 		InputSubmissionCount: metadata.Stats.InputSubmissionCount,
-		ToolCallCount:        row.toolCallCount,
-		ParentSessionID:      row.parentID,
+		ToolCallCount:        metadata.Stats.ToolCallCount,
+		ParentSessionID:      snapshotLogicalParent(metadata),
 		RootSessionID:        metadata.RootSessionID,
 		Purpose:              metadata.Purpose,
 		Relationships:        metadata.Relationships,
@@ -350,4 +359,24 @@ func readGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 		return nil, fmt.Errorf("store: read generation content for session %s generation %s: %w", sessionID, generationID, err)
 	}
 	return records, nil
+}
+
+// snapshotLogicalParent derives the snapshot's logical parent from durable
+// relationship evidence, never from the availability cache. A known or
+// retained started_by target is the logical parent; otherwise the legacy
+// ParentUUID carries the parent when the generation records one.
+func snapshotLogicalParent(metadata schema.UnifiedMetadata) *schema.SessionID {
+	for i := range metadata.Relationships {
+		relationship := metadata.Relationships[i]
+		if relationship.Kind != schema.SessionRelationshipStartedBy {
+			continue
+		}
+		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
+			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
+				target := *relationship.TargetLocalID
+				return &target
+			}
+		}
+	}
+	return metadata.ParentUUID
 }

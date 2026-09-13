@@ -1,0 +1,5 @@
+requiredNames:
+  - session-symlink-preserves-external-sentinel
+  - generations-symlink-preserves-external-sentinel
+  - unrelated-file-preserved-on-cleanup
+  - lock-namespace-confined
