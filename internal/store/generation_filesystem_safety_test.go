@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -17,9 +19,14 @@ type filesystemSafetyFixture struct {
 		ID      string `yaml:"id"`
 		Harness string `yaml:"harness"`
 	} `yaml:"session"`
+	ForeignSession struct {
+		ID      string `yaml:"id"`
+		Harness string `yaml:"harness"`
+	} `yaml:"foreign_session"`
 	Generation struct {
 		CompleteID string `yaml:"complete_id"`
 		InactiveID string `yaml:"inactive_id"`
+		ForeignID  string `yaml:"foreign_id"`
 	} `yaml:"generation"`
 	Cases []struct {
 		Name     string `yaml:"name"`
@@ -28,6 +35,7 @@ type filesystemSafetyFixture struct {
 	Sentinel struct {
 		OutsideFile   string `yaml:"outside_file"`
 		UnrelatedFile string `yaml:"unrelated_file"`
+		CandidateFile string `yaml:"candidate_file"`
 	} `yaml:"sentinel"`
 }
 
@@ -94,13 +102,9 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 			}
 			old, oldBlobs := buildTestGeneration(t, id, fixture.Generation.InactiveID, "fs text old", "fs input old", "fs output old")
 			if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: old, Blobs: oldBlobs}); err != nil {
-				// G2 activation replaces G1; the old generation becomes
-				// inactive but its files remain until cleanup. If activation
-				// is refused (e.g. completeness), fall back to staging the
-				// inactive candidate directly for the symlink test.
-				if _, stageErr := s.generationArtifacts.Stage(context.Background(), old.Generation, oldBlobs); stageErr != nil {
-					t.Fatalf("stage inactive candidate: %v", stageErr)
-				}
+				// A complete candidate must activate; a failure here is a
+				// production regression, never a reason to stage directly.
+				t.Fatalf("activate inactive candidate G2: %v", err)
 			}
 			// Re-activate the complete generation so the inactive target is
 			// not active during the symlink test.
@@ -223,6 +227,88 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 				if _, statErr := os.Stat(sentinelOutside); statErr != nil {
 					t.Fatalf("external sentinel missing after locks test: %v", statErr)
 				}
+			case "empty-manifest", "malformed-manifest":
+				// A directory that is not an owned generation must survive
+				// cleanup even when its manifest merely decodes ({}), and a
+				// malformed manifest must be refused rather than removed.
+				candidateID := "gen_fs_unowned"
+				manifest := "{}"
+				if tc.Ancestor == "malformed-manifest" {
+					manifest = "{ this is not a manifest"
+				}
+				candidateDir := filepath.Join(root, fixture.Session.ID, "generations", candidateID)
+				if err := os.MkdirAll(candidateDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(candidateDir, "manifest.json"), []byte(manifest), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				candidateSentinel := filepath.Join(candidateDir, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(candidateSentinel, []byte("unowned candidate must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				err := s.CleanupInactiveGeneration(context.Background(), id, candidateID)
+				if err == nil {
+					t.Fatal("cleanup removed a directory that is not an owned generation; it must be refused")
+				}
+				assertSentinelAbsent(t, err, root)
+				if _, statErr := os.Stat(candidateSentinel); statErr != nil {
+					t.Fatalf("unowned candidate sentinel missing after refused cleanup: %v", statErr)
+				}
+			case "mismatched-manifest":
+				// A decodable manifest that names another session or generation
+				// is not this owner's candidate and must be left in place.
+				foreign := stageForeignGeneration(t, s, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
+				mismatchedID := "gen_fs_mismatch"
+				candidateDir := filepath.Join(root, fixture.Session.ID, "generations", mismatchedID)
+				if err := os.MkdirAll(candidateDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				foreignManifest, err := jsonMarshalForTest(foreign)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(candidateDir, "manifest.json"), foreignManifest, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				candidateSentinel := filepath.Join(candidateDir, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(candidateSentinel, []byte("mismatched candidate must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				err = s.CleanupInactiveGeneration(context.Background(), id, mismatchedID)
+				if err == nil {
+					t.Fatal("cleanup removed a mismatched-manifest candidate; it must be refused")
+				}
+				assertSentinelAbsent(t, err, root)
+				if _, statErr := os.Stat(candidateSentinel); statErr != nil {
+					t.Fatalf("mismatched candidate sentinel missing after refused cleanup: %v", statErr)
+				}
+			case "foreign-owner-symlink":
+				// An in-root symlink ancestor resolves inside the owned root but
+				// points at another session's generation. os.Root confinement
+				// allows that resolution, so ownership must be proven from the
+				// manifest identity before any recursive removal.
+				foreign := stageForeignGeneration(t, s, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
+				foreignSentinel := filepath.Join(root, fixture.ForeignSession.ID, "generations", fixture.Generation.ForeignID, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(foreignSentinel, []byte("foreign generation must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_ = foreign
+				linkPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.ForeignID)
+				if err := os.Symlink(filepath.Join(root, fixture.ForeignSession.ID, "generations", fixture.Generation.ForeignID), linkPath); err != nil {
+					t.Fatal(err)
+				}
+				err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.ForeignID)
+				_ = os.Remove(linkPath)
+				if err == nil {
+					t.Fatal("cleanup followed an in-root foreign-owner symlink; it must be refused")
+				}
+				assertSentinelAbsent(t, err, root)
+				if _, statErr := os.Stat(foreignSentinel); statErr != nil {
+					t.Fatalf("foreign generation sentinel missing after refused symlink cleanup: %v", statErr)
+				}
+			default:
+				t.Fatalf("unknown filesystem safety scenario %q; add it to the fixture, the required-names manifest and this runner", tc.Ancestor)
 			}
 		})
 	}
@@ -241,6 +327,27 @@ func assertSentinelAbsent(t *testing.T, err error, sentinelRoot string) {
 	if strings.Contains(err.Error(), "open "+sentinelRoot) || strings.Contains(err.Error(), "stat "+sentinelRoot) {
 		t.Fatalf("diagnostic leaks a path-bearing OS error: %v", err)
 	}
+}
+
+// stageForeignGeneration stages one generation owned by another session so an
+// ownership test can point a candidate at, or copy bytes from, a real
+// foreign-owned generation.
+func stageForeignGeneration(t *testing.T, s *Store, foreignSessionID, generationID string) indexformat.Generation {
+	t.Helper()
+	foreign, err := schema.NewSessionID(foreignSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, blobs := buildTestGeneration(t, foreign, generationID, "foreign text", "foreign input", "foreign output")
+	staged, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, blobs)
+	if err != nil {
+		t.Fatalf("stage foreign generation: %v", err)
+	}
+	return staged
+}
+
+func jsonMarshalForTest(g indexformat.Generation) ([]byte, error) {
+	return json.Marshal(g)
 }
 
 // TestGenerationDiagnosticsSanitized proves lock, stage, read, repair and
@@ -288,5 +395,41 @@ func TestGenerationDiagnosticsSanitized(t *testing.T) {
 		t.Fatal("dot removal succeeded; it must be refused")
 	} else {
 		assertSentinelAbsent(t, err, sentinelSegment)
+	}
+
+	// Real path-bearing OS read failure: a directory where the manifest file is
+	// expected forces a non-ENOENT read error whose path-bearing OS error must
+	// be sanitized and rendered actionable.
+	validSID, err := schema.NewSessionID("99999999-9999-4999-8999-999999999999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(root, string(validSID), "generations", "gen_read_seam", "manifest.json")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.ReadManifest(context.Background(), validSID, "gen_read_seam"); err == nil {
+		t.Fatal("reading a manifest that is a directory succeeded; it must fail")
+	} else {
+		assertSentinelAbsent(t, err, sentinelSegment)
+		if !strings.Contains(err.Error(), "read staged manifest") || !strings.Contains(err.Error(), "cannot be recovered") {
+			t.Fatalf("read failure diagnostic is not actionable: %v", err)
+		}
+	}
+
+	// Real path-bearing OS repair failure: a directory where metadata.json is
+	// expected makes the atomic rename fail; the diagnostic must stay sanitized
+	// and name the caller effect and recovery.
+	metadataDir := filepath.Join(root, string(validSID), "metadata.json")
+	if err := os.MkdirAll(metadataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.RepairMetadata(context.Background(), validSID, []byte("{}")); err == nil {
+		t.Fatal("repairing metadata onto a directory succeeded; it must fail")
+	} else {
+		assertSentinelAbsent(t, err, sentinelSegment)
+		if !strings.Contains(err.Error(), "repair the exported metadata") || !strings.Contains(err.Error(), "retry") {
+			t.Fatalf("repair failure diagnostic is not actionable: %v", err)
+		}
 	}
 }

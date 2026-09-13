@@ -78,104 +78,132 @@ func buildMirrorGeneration(t *testing.T, sid schema.SessionID, genID, text strin
 // TestGenerationMirrors proves activation installs title, input-count, adapter,
 // timestamp, logical-parent and tool-count mirrors atomically, derives the
 // snapshot parent from relationship evidence, and changes fields between
-// generations without a prior metadata upsert.
+// generations without a prior metadata upsert. Every case is driven from the
+// typed fixture, and an unknown case fails rather than doing nothing, so
+// deleting a runner branch cannot leave the manifest guard green.
 func TestGenerationMirrors(t *testing.T) {
 	fixture := loadMirrorsFixture(t)
 	id, err := schema.NewSessionID(fixture.Session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(fixture.Cases) == 0 {
+		t.Fatal("generation mirrors fixture carries no cases")
+	}
 
-	t.Run("mirrors-change-between-generations", func(t *testing.T) {
-		s, _ := openGenerationStore(t)
-		seedGenerationSession(t, s, fixture.Session.ID)
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			s, _ := openGenerationStore(t)
+			seedGenerationSession(t, s, fixture.Session.ID)
 
-		input1 := int64(1)
-		input3 := int64(3)
-		adapter11 := 11
-		adapter12 := 12
-		g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "first user request", &input1, &adapter11, 1000, 2000, 2, nil, schema.SourceEntryRef(generationRefs[0]))
-		if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 1, IndexedAtMs: 100}); err != nil {
-			t.Fatalf("activate G1: %v", err)
-		}
-		assertMirrorRow(t, s, id, 1000, 2000, nil, &input1, &adapter11, 3, 2, "first user request")
-		assertSnapshotMirrors(t, s, id, fixture.Generation.FirstID, 1000, 2000, nil, &input1, 3, 2)
+			switch tc.Name {
+			case "mirrors-change-between-generations":
+				if tc.FirstInputCount == nil || tc.SecondInputCount == nil || tc.FirstAdapter == nil || tc.SecondAdapter == nil {
+					t.Fatalf("case %q requires typed first/second counts and adapters", tc.Name)
+				}
+				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, tc.FirstTitle, tc.FirstInputCount, tc.FirstAdapter, 1000, 2000, 2, nil, schema.SourceEntryRef(generationRefs[0]))
+				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 1, IndexedAtMs: 100}); err != nil {
+					t.Fatalf("activate G1: %v", err)
+				}
+				assertMirrorRow(t, s, id, 1000, 2000, nil, tc.FirstInputCount, tc.FirstAdapter, 3, 2, tc.FirstTitle)
+				assertSnapshotMirrors(t, s, id, fixture.Generation.FirstID, 1000, 2000, nil, tc.FirstInputCount, 3, 2)
 
-		g2, g2Blobs := buildMirrorGeneration(t, id, fixture.Generation.SecondID, "second user request follows", &input3, &adapter12, 3000, 4000, 5, nil, schema.SourceEntryRef(generationRefs[0]))
-		// Change tool count via metadata stats: buildMirrorGeneration sets
-		// ToolCallCount from the argument; here G1 used 2 and G2 uses 5.
-		// Turn count stays 3 (three entries) so the test isolates the mirrors
-		// that previously stayed stale.
-		if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g2, Blobs: g2Blobs, IndexerVersion: 2, IndexedAtMs: 200}); err != nil {
-			t.Fatalf("activate G2: %v", err)
-		}
-		assertMirrorRow(t, s, id, 3000, 4000, nil, &input3, &adapter12, 3, 5, "second user request follows")
-		assertSnapshotMirrors(t, s, id, fixture.Generation.SecondID, 3000, 4000, nil, &input3, 3, 5)
-	})
+				g2, g2Blobs := buildMirrorGeneration(t, id, fixture.Generation.SecondID, tc.SecondTitle, tc.SecondInputCount, tc.SecondAdapter, 3000, 4000, 5, nil, schema.SourceEntryRef(generationRefs[0]))
+				// Turn count stays 3 (three entries) so the test isolates the
+				// mirrors that previously stayed stale.
+				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g2, Blobs: g2Blobs, IndexerVersion: 2, IndexedAtMs: 200}); err != nil {
+					t.Fatalf("activate G2: %v", err)
+				}
+				assertMirrorRow(t, s, id, 3000, 4000, nil, tc.SecondInputCount, tc.SecondAdapter, 3, 5, tc.SecondTitle)
+				assertSnapshotMirrors(t, s, id, fixture.Generation.SecondID, 3000, 4000, nil, tc.SecondInputCount, 3, 5)
 
-	t.Run("missing-parent-preserved", func(t *testing.T) {
-		s, _ := openGenerationStore(t)
-		seedGenerationSession(t, s, fixture.Session.ID)
-		missing := schema.SessionID("99999999-9999-4999-8999-999999999999")
-		relationships := []schema.SessionRelationship{{
-			Kind:          schema.SessionRelationshipStartedBy,
-			TargetState:   schema.RelationshipTargetKnown,
-			TargetLocalID: &missing,
-			Evidence:      schema.EvidenceNativeTyped,
-		}}
-		g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "child text", nil, nil, 1000, 2000, 0, relationships, schema.SourceEntryRef(generationRefs[0]))
-		if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
-			t.Fatalf("activate child with missing parent: %v", err)
-		}
-		// The availability cache stays NULL so the admitted child survives,
-		// while the snapshot still names the durable logical parent.
-		conn, err := s.pool.Take(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		parentNull := false
-		_ = sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
-			Args: []any{string(id)},
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				parentNull = stmt.ColumnType(0) == sqlite.TypeNull
-				return nil
-			},
-		})
-		s.pool.Put(conn)
-		if !parentNull {
-			t.Fatal("sessions.parent_id names a missing target; it must stay NULL")
-		}
-		err = s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
-			if snapshot.Session.ParentSessionID == nil || *snapshot.Session.ParentSessionID != missing {
-				return stringsErrorf("snapshot parent = %v, want missing target %s", snapshot.Session.ParentSessionID, missing)
+			case "missing-parent-preserved":
+				// A complete generation has measured its submissions, so the
+				// complete missing-parent control carries a measured count.
+				zero := int64(0)
+				missing, err := schema.NewSessionID(fixture.Parent.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				relationships := []schema.SessionRelationship{{
+					Kind:          schema.SessionRelationshipStartedBy,
+					TargetState:   schema.RelationshipTargetKnown,
+					TargetLocalID: &missing,
+					Evidence:      schema.EvidenceNativeTyped,
+				}}
+				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "child text", &zero, nil, 1000, 2000, 0, relationships, schema.SourceEntryRef(generationRefs[0]))
+				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
+					t.Fatalf("activate child with missing parent: %v", err)
+				}
+				// The availability cache stays NULL so the admitted child
+				// survives, while the snapshot still names the durable logical
+				// parent.
+				conn, err := s.pool.Take(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				parentNull := false
+				_ = sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+					Args: []any{string(id)},
+					ResultFunc: func(stmt *sqlite.Stmt) error {
+						parentNull = stmt.ColumnType(0) == sqlite.TypeNull
+						return nil
+					},
+				})
+				s.pool.Put(conn)
+				if !parentNull {
+					t.Fatal("sessions.parent_id names a missing target; it must stay NULL")
+				}
+				err = s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
+					if snapshot.Session.ParentSessionID == nil || *snapshot.Session.ParentSessionID != missing {
+						return stringsErrorf("snapshot parent = %v, want missing target %s", snapshot.Session.ParentSessionID, missing)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+			case "absent-input-count-preserved":
+				// An unknown count is a first-discovery incomplete candidate:
+				// completeness incomplete_new, no count scalar, no success
+				// stamps. The count must survive as absent, not measured zero.
+				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "text absent", nil, nil, 1000, 2000, 0, nil, schema.SourceEntryRef(generationRefs[0]))
+				g1 = markMirrorIncomplete(t, g1, g1Blobs)
+				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 77, IndexedAtMs: 777}); err != nil {
+					t.Fatalf("activate absent count: %v", err)
+				}
+				stamps := readIndexStateForTest(t, s, id)
+				if stamps.IndexerVersion != 0 || stamps.IndexedAt != nil {
+					t.Fatalf("incomplete absent-count generation carried success stamps: %+v", stamps)
+				}
+				assertInputCountMirror(t, s, id, nil)
+
+			case "zero-input-count-measured":
+				zero := int64(0)
+				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "text zero", &zero, nil, 1000, 2000, 0, nil, schema.SourceEntryRef(generationRefs[0]))
+				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
+					t.Fatalf("activate zero count: %v", err)
+				}
+				assertInputCountMirror(t, s, id, &zero)
+
+			default:
+				t.Fatalf("unknown generation mirror scenario %q; add it to the fixture, the required-names manifest and this runner", tc.Name)
 			}
-			return nil
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	})
+	}
+}
 
-	t.Run("absent-input-count-preserved", func(t *testing.T) {
-		s, _ := openGenerationStore(t)
-		seedGenerationSession(t, s, fixture.Session.ID)
-		g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "text absent", nil, nil, 1000, 2000, 0, nil, schema.SourceEntryRef(generationRefs[0]))
-		if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
-			t.Fatalf("activate absent count: %v", err)
-		}
-		assertInputCountMirror(t, s, id, nil)
-	})
-
-	t.Run("zero-input-count-measured", func(t *testing.T) {
-		s, _ := openGenerationStore(t)
-		seedGenerationSession(t, s, fixture.Session.ID)
-		zero := int64(0)
-		g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "text zero", &zero, nil, 1000, 2000, 0, nil, schema.SourceEntryRef(generationRefs[0]))
-		if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
-			t.Fatalf("activate zero count: %v", err)
-		}
-		assertInputCountMirror(t, s, id, &zero)
-	})
+// markMirrorIncomplete turns a mirror candidate into a valid first-discovery
+// incomplete generation: completeness incomplete_new with no count scalar.
+func markMirrorIncomplete(t *testing.T, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) indexformat.V2 {
+	t.Helper()
+	v2.Generation.Completeness = indexformat.GenerationCompletenessIncompleteNew
+	v2.Generation.Metadata.Stats.InputSubmissionCount = nil
+	if err := filledCandidateForValidation(t, v2, blobs).Validate(); err != nil {
+		t.Fatalf("incomplete mirror candidate is not otherwise valid: %v", err)
+	}
+	return v2
 }
 
 func assertMirrorRow(t *testing.T, s *Store, sid schema.SessionID, wantStart, wantEnd int64, wantParent *string, wantInput *int64, wantAdapter *int, wantTurns, wantTools int, wantTitle string) {

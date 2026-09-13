@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -206,6 +210,28 @@ func buildTestGeneration(t *testing.T, sid schema.SessionID, genID, text, toolIn
 	return indexformat.V2{Generation: generation}, blobs
 }
 
+// filledCandidateForValidation returns the candidate in the shape staging
+// produces: every content record carries its owned relative blob path, byte
+// length and payload digest. Generation.Validate rejects an unfilled candidate,
+// so a test that needs to prove a candidate is otherwise valid must validate
+// the staged shape rather than the pre-stage value.
+func filledCandidateForValidation(t *testing.T, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) indexformat.V2 {
+	t.Helper()
+	filled := append([]indexformat.ContentRecord(nil), v2.Generation.Content...)
+	for i := range filled {
+		payload, ok := blobs[filled[i].Ref]
+		if !ok {
+			t.Fatalf("candidate content blob for ref %q is missing", filled[i].Ref)
+		}
+		sum := sha256.Sum256(payload)
+		filled[i].RelativeBlob = blobName(filled[i].Ref)
+		filled[i].ByteLength = int64(len(payload))
+		filled[i].Digest = hex.EncodeToString(sum[:])
+	}
+	v2.Generation.Content = filled
+	return v2
+}
+
 type faultArtifacts struct {
 	GenerationArtifactStore
 	failRepair bool
@@ -336,7 +362,7 @@ func TestProjectionCommitRecovery(t *testing.T) {
 
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			s, _ := openGenerationStore(t)
+			s, root := openGenerationStore(t)
 			seedGenerationSession(t, s, fixture.Session.ID)
 
 			complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput+" G1", longToolResult+" G1")
@@ -388,6 +414,7 @@ func TestProjectionCommitRecovery(t *testing.T) {
 				t.Fatalf("after recovery the activation intent was not cleared: %+v (err %v)", intent, err)
 			}
 			assertFullContent(t, s, id, fixture.Generation.FailedID, schema.SourceEntryRef(generationRefs[0]), longText+" G2")
+			assertDurableRecoveryOutcome(t, root, id, fixture.Generation.FailedID, longText+" G2", longToolInput+" G2", longToolResult+" G2")
 		})
 	}
 
@@ -445,11 +472,142 @@ func assertFullContent(t *testing.T, s *Store, sid schema.SessionID, generationI
 	}
 }
 
+// reopenGenerationStore opens a second real SQLite/artifact store over the same
+// on-disk state, so a crash-recovery assertion proves the durable outcome a
+// later process would observe rather than the live process's cache.
+func reopenGenerationStore(t *testing.T, root string) *Store {
+	t.Helper()
+	dir := filepath.Dir(root)
+	artifacts, err := NewOSGenerationArtifactStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := NewFileSessionLocker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(filepath.Join(dir, "generations.db"), WithPoolSize(2), WithIndexFormats(generationIndexFormat{}), WithGenerationArtifacts(artifacts, locker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// assertDurableRecoveryOutcome reopens the real store and asserts the repaired
+// metadata, success stamps, complete row/ref sets and every long blob survive
+// the activation. It never trusts the live process state.
+func assertDurableRecoveryOutcome(t *testing.T, root string, id schema.SessionID, generationID, longText, longToolInput, longToolResult string) {
+	t.Helper()
+	reopened := reopenGenerationStore(t, root)
+	defer reopened.Close()
+
+	err := reopened.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
+		if snapshot.IndexVersion != 2 || snapshot.GenerationID != generationID {
+			return fmt.Errorf("reopened snapshot = version %d generation %q, want 2/%q", snapshot.IndexVersion, snapshot.GenerationID, generationID)
+		}
+		if snapshot.Completeness != indexformat.GenerationCompletenessComplete {
+			return fmt.Errorf("reopened completeness = %q, want complete", snapshot.Completeness)
+		}
+		if len(snapshot.Main.Entries) != len(generationRefs) {
+			return fmt.Errorf("reopened main entries = %d, want %d", len(snapshot.Main.Entries), len(generationRefs))
+		}
+		entryRefs := map[schema.SourceEntryRef]struct{}{}
+		for _, entry := range snapshot.Main.Entries {
+			entryRefs[entry.SourceEntryRef] = struct{}{}
+		}
+		for _, want := range generationRefs {
+			if _, ok := entryRefs[schema.SourceEntryRef(want)]; !ok {
+				return fmt.Errorf("reopened main entries are missing ref %q", want)
+			}
+		}
+		if len(snapshot.Content) != len(generationRefs) {
+			return fmt.Errorf("reopened content records = %d, want %d", len(snapshot.Content), len(generationRefs))
+		}
+		if snapshot.Session.TurnCount != len(generationRefs) {
+			return fmt.Errorf("reopened turn count = %d, want %d", snapshot.Session.TurnCount, len(generationRefs))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("reopened snapshot: %v", err)
+	}
+
+	// The alias row set survives reopen.
+	conn, err := reopened.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases := []string{}
+	err = sqlitex.ExecuteTransient(conn, `SELECT native_key FROM session_projection_aliases WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(id), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			aliases = append(aliases, stmt.ColumnText(0))
+			return nil
+		},
+	})
+	reopened.pool.Put(conn)
+	if err != nil {
+		t.Fatalf("reopened alias rows: %v", err)
+	}
+	if len(aliases) != 1 || aliases[0] != "native-0" {
+		t.Fatalf("reopened aliases = %v, want one native-0 alias", aliases)
+	}
+
+	// Every long blob resolves at its full length after reopen.
+	for ref, want := range map[schema.SourceEntryRef]string{
+		schema.SourceEntryRef(generationRefs[0]): longText,
+		schema.SourceEntryRef(generationRefs[1]): longToolInput,
+		schema.SourceEntryRef(generationRefs[2]): longToolResult,
+	} {
+		assertFullContent(t, reopened, id, generationID, ref, want)
+	}
+
+	// The repaired exported metadata is durable and names the committed
+	// generation, so a later open needs no repair.
+	metadataBytes, err := os.ReadFile(filepath.Join(root, string(id), "metadata.json"))
+	if err != nil {
+		t.Fatalf("reopened repaired metadata is missing: %v", err)
+	}
+	var exported schema.UnifiedMetadata
+	if err := json.Unmarshal(metadataBytes, &exported); err != nil {
+		t.Fatalf("reopened repaired metadata does not decode: %v", err)
+	}
+	if exported.SessionID != id || exported.Stats.TurnCount != len(generationRefs) {
+		t.Fatalf("reopened repaired metadata = session %s turns %d, want session %s turns %d", exported.SessionID, exported.Stats.TurnCount, id, len(generationRefs))
+	}
+
+	// Success stamps are durable on the reopened store.
+	stamps := readIndexStateForTest(t, reopened, id)
+	if stamps.IndexerVersion != 1 || stamps.IndexedAt == nil || *stamps.IndexedAt != 1 {
+		t.Fatalf("reopened stamps = (%d,%v), want (1,1)", stamps.IndexerVersion, stamps.IndexedAt)
+	}
+}
+
+// lockAttemptBarrier is a delegating real SessionLocker that observably
+// signals when an exclusive lock attempt starts. It wraps the production
+// locker, so the test asserts against a genuine flock contention rather than a
+// sleep: the signal proves the waiter reached the lock boundary before the
+// test checks that it cannot complete.
+type lockAttemptBarrier struct {
+	SessionLocker
+	exclusiveAttempts chan struct{}
+}
+
+func (b *lockAttemptBarrier) LockExclusive(ctx context.Context, id schema.SessionID) (func() error, error) {
+	select {
+	case b.exclusiveAttempts <- struct{}{}:
+	default:
+	}
+	return b.SessionLocker.LockExclusive(ctx, id)
+}
+
 // TestConcurrentReadAcrossActivation pauses a reader inside its snapshot
-// callback while holding the shared lock, starts a G2 candidate with changed
-// content, and proves the activation waits until the reader releases. The
-// reader sees exactly G1; after release the activation commits and the next
-// reader sees exactly G2.
+// callback while holding the shared lock and hydrating the full G1 bodies,
+// starts a G2 candidate with changed content, and proves the activation waits
+// until the reader releases. The lock attempt is observed through a delegating
+// real locker, so the wait is not inferred from a scheduler sleep. The reader
+// sees exactly G1; after release the activation commits, the next reader sees
+// exactly G2, and the same exclusive-lock barrier applies to cleanup.
 func TestConcurrentReadAcrossActivation(t *testing.T) {
 	fixture := loadProjectionRecoveryFixture(t)
 	id, err := schema.NewSessionID(fixture.Session.ID)
@@ -461,18 +619,36 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	longText := "user input " + strings.Repeat("x", fixture.Generation.LongTextPadding)
 	longToolInput := "rg parser " + strings.Repeat("y", fixture.Generation.LongTextPadding)
 	longToolResult := "parser.go:12 " + strings.Repeat("z", fixture.Generation.LongTextPadding)
+	attempts := make(chan struct{}, 4)
+	s.sessionLocker = &lockAttemptBarrier{SessionLocker: s.sessionLocker, exclusiveAttempts: attempts}
 
 	g1, g1Blobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput, longToolResult)
 	if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
 		t.Fatalf("activate G1: %v", err)
 	}
 
+	wantG1 := map[schema.SourceEntryRef]string{
+		schema.SourceEntryRef(generationRefs[0]): longText + " G1",
+		schema.SourceEntryRef(generationRefs[1]): longToolInput,
+		schema.SourceEntryRef(generationRefs[2]): longToolResult,
+	}
 	readerEntered := make(chan string, 1)
 	readerRelease := make(chan struct{})
 	readerDone := make(chan error, 1)
 	go func() {
 		readerDone <- s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
 			readerEntered <- snapshot.GenerationID
+			// Hydrate every full G1 body while the shared lock is held; the
+			// exclusive activation below must therefore wait through serialization.
+			for _, record := range snapshot.Content {
+				content, err := s.ReadFullContent(context.Background(), id, snapshot.GenerationID, record)
+				if err != nil {
+					return err
+				}
+				if want, ok := wantG1[record.Ref]; ok && string(content) != want {
+					return fmt.Errorf("G1 content for %q = %q, want %q", record.Ref, string(content), want)
+				}
+			}
 			<-readerRelease
 			return nil
 		})
@@ -489,11 +665,12 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	g2, g2Blobs := buildTestGeneration(t, id, fixture.Generation.FailedID, longText+" G2", longToolInput, longToolResult)
 	activationDone := make(chan error, 1)
 	go func() { activationDone <- activateTestGeneration(t, s, g2, g2Blobs) }()
+	waitForExclusiveAttempt(t, attempts, "activation")
 	select {
 	case err := <-activationDone:
 		close(readerRelease)
 		t.Fatalf("activation completed while the reader held the shared lock (err=%v)", err)
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 	}
 
 	close(readerRelease)
@@ -534,11 +711,12 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	go func() {
 		cleanupDone <- s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.CompleteID)
 	}()
+	waitForExclusiveAttempt(t, attempts, "cleanup")
 	select {
 	case err := <-cleanupDone:
 		close(cleanupReaderRelease)
 		t.Fatalf("cleanup removed the inactive generation while a reader held the shared lock (err=%v)", err)
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 	}
 	close(cleanupReaderRelease)
 	if err := <-cleanupReaderDone; err != nil {
@@ -555,5 +733,17 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	// Cleanup must never remove the active generation.
 	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err == nil {
 		t.Fatal("cleanup removed the active generation")
+	}
+}
+
+// waitForExclusiveAttempt blocks until the exclusive-lock waiter observably
+// reached its lock attempt, so a later non-completion check proves contention
+// rather than goroutine scheduling.
+func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {
+	t.Helper()
+	select {
+	case <-attempts:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s never attempted the exclusive session lock", label)
 	}
 }

@@ -1,13 +1,19 @@
-# Owned-root filesystem safety oracle: a symlink at any ancestor inside the
-# owned root cannot redirect staging, reading, repair, removal or locking
-# outside the root. Recursive removal verifies owned identity first and
-# preserves unrelated content. No diagnostic exposes the private root path.
+# Owned-root filesystem safety and ownership oracle. A symlink at any ancestor
+# inside the owned root cannot redirect staging, reading, repair, removal or
+# locking outside the root. Recursive removal proves owned identity first:
+# the directory name and a decodable manifest are not ownership, so an empty,
+# malformed, mismatched or foreign-owner candidate is left in place, including
+# when an in-root symlink ancestor resolves to another session's generation.
+# Unrelated content survives and no diagnostic exposes the private root path.
 session:
   id: "88888888-8888-4888-8888-888888888888"
   harness: claude-code
+foreign_session:
+  id: "99999999-9999-4999-8999-999999999999"
 generation:
   complete_id: gen_fs_g1
   inactive_id: gen_fs_old
+  foreign_id: gen_fs_foreign
 cases:
   - name: session-symlink-preserves-external-sentinel
     ancestor: session
@@ -17,6 +23,15 @@ cases:
     ancestor: unrelated
   - name: lock-namespace-confined
     ancestor: locks
+  - name: empty-manifest-preserves-sentinel
+    ancestor: empty-manifest
+  - name: malformed-manifest-preserves-sentinel
+    ancestor: malformed-manifest
+  - name: mismatched-manifest-preserves-sentinel
+    ancestor: mismatched-manifest
+  - name: foreign-session-symlink-preserves-sentinel
+    ancestor: foreign-owner-symlink
 sentinel:
   outside_file: sentinel-outside-do-not-delete
   unrelated_file: sentinel-unrelated-keep
+  candidate_file: sentinel-candidate-keep

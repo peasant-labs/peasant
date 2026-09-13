@@ -3,3 +3,7 @@ requiredNames:
   - generations-symlink-preserves-external-sentinel
   - unrelated-file-preserved-on-cleanup
   - lock-namespace-confined
+  - empty-manifest-preserves-sentinel
+  - malformed-manifest-preserves-sentinel
+  - mismatched-manifest-preserves-sentinel
+  - foreign-session-symlink-preserves-sentinel
