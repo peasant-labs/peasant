@@ -30,17 +30,19 @@ var (
 const indexFailureCountFixturePath = "cmd/peasant/testdata/index_failure_counts.yaml"
 
 // indexFailureCountFloor is the row count this corpus must not fall below.
-const indexFailureCountFloor = 10
+const indexFailureCountFloor = 11
 
 type indexFailureCountDocument struct {
 	ExpectedCaseCount int                     `yaml:"expectedCaseCount"`
+	RequiredCases     []string                `yaml:"required_cases"`
 	Cases             []indexFailureCountCase `yaml:"cases"`
 }
 
 type indexFailureCountCase struct {
-	Name      string               `yaml:"name"`
-	Rows      []indexFailureLogRow `yaml:"rows"`
-	WantCount int                  `yaml:"wantCount"`
+	Name       string               `yaml:"name"`
+	Rows       []indexFailureLogRow `yaml:"rows"`
+	WantCount  int                  `yaml:"wantCount"`
+	WantFailed []string             `yaml:"wantFailed"`
 }
 
 type indexFailureLogRow struct {
@@ -86,6 +88,26 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 	coveredOutcomes := map[ingest.IndexOutcome]bool{}
 	sawMultiRowSingleSession, sawRecovery, sawPrintableRowSessionGap := false, false, false
 	sawMoreThanOneFailingSession := false
+	// Deletion protection is by NAME, not by number: a bare count cannot tell
+	// a deleted success arm from a corpus that never had it. The required
+	// manifest must match the cases exactly, in both directions, so neither
+	// dropping a required case nor swapping one out for a filler stays green.
+	if len(document.RequiredCases) == 0 {
+		return document, indexFailureCountRuleError(
+			"no required cases are named",
+			"loader=required-name manifest",
+			"fix=name every case in required_cases; a corpus with no manifest protects nothing")
+	}
+	required := map[string]bool{}
+	for _, name := range document.RequiredCases {
+		if strings.TrimSpace(name) == "" || required[name] {
+			return document, indexFailureCountRuleError(
+				fmt.Sprintf("required case name %q is blank or repeated", name),
+				"loader=required-name manifest",
+				"fix=give every required case a unique, behaviour-naming name")
+		}
+		required[name] = true
+	}
 	for index, testCase := range document.Cases {
 		where := fmt.Sprintf("loader=case index %d", index)
 		if strings.TrimSpace(testCase.Name) == "" || seen[testCase.Name] {
@@ -115,6 +137,7 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 				"fix=give it at least one; an empty log is the trivial case and pins nothing")
 		}
 		perSession := map[string][]string{}
+		rowSessions := map[string]bool{}
 		for _, row := range testCase.Rows {
 			if _, known := logOutcomes[row.Outcome]; !known {
 				return document, indexFailureCountRuleError(
@@ -123,21 +146,46 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 			}
 			coveredOutcomes[logOutcomes[row.Outcome]] = true
 			perSession[row.Session] = append(perSession[row.Session], row.Outcome)
+			rowSessions[row.Session] = true
+		}
+		// wantFailed is the classified MEMBERSHIP behind wantCount: which
+		// sessions the run reports, in first-seen order, not just how many.
+		// The two must agree, or the corpus states two answers at once.
+		if len(testCase.WantFailed) != testCase.WantCount {
+			return document, indexFailureCountRuleError(
+				fmt.Sprintf("case %q expects %d session(s) but names %d failed session(s)", testCase.Name, testCase.WantCount, len(testCase.WantFailed)),
+				where, "fix=list exactly the failed sessions in wantFailed, in first-seen order")
+		}
+		seenFailed := map[string]bool{}
+		for _, session := range testCase.WantFailed {
+			if strings.TrimSpace(session) == "" || seenFailed[session] {
+				return document, indexFailureCountRuleError(
+					fmt.Sprintf("case %q names failed session %q blank or twice", testCase.Name, session),
+					where, "fix=name each failed session once")
+			}
+			seenFailed[session] = true
+			if !rowSessions[session] {
+				return document, indexFailureCountRuleError(
+					fmt.Sprintf("case %q names %q failed but records no row for it", testCase.Name, session),
+					where, "fix=name only sessions the rows record")
+			}
 		}
 		for _, outcomes := range perSession {
 			if len(outcomes) > 1 {
 				sawMultiRowSingleSession = true
 			}
-			// Classified through the PRODUCTION function, not a list of my own.
-			// These were written twice with nothing binding them, and the corpus
-			// agreed with production only by coincidence - it used two of the five
-			// outcomes, so deleting the other two success arms was green.
+			// Classified through the SHARED production function in ingest,
+			// not a list of my own. The classifier used to live here as a
+			// switch and in the test as a second list, with nothing binding
+			// the two, so the corpus agreed with production only by
+			// coincidence: it used two of the five outcomes, and deleting
+			// the other success arm was green.
 			hasError, hasSuccess := false, false
 			for _, outcome := range outcomes {
 				if logOutcomes[outcome] == ingest.IndexOutcomeError {
 					hasError = true
 				}
-				if IndexOutcomeEndedIndexed(logOutcomes[outcome]) {
+				if ingest.IndexOutcomeCompleted(logOutcomes[outcome]) {
 					hasSuccess = true
 				}
 			}
@@ -146,14 +194,30 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 			}
 		}
 	}
+	for name := range required {
+		if !seen[name] {
+			return document, indexFailureCountRuleError(
+				fmt.Sprintf("required case %q is missing", name),
+				"loader=required-name manifest",
+				"fix=restore the case; deleting a case the manifest names fails the corpus even when the counts are decremented to match")
+		}
+	}
+	for name := range seen {
+		if !required[name] {
+			return document, indexFailureCountRuleError(
+				fmt.Sprintf("case %q is not in the required manifest", name),
+				"loader=required-name manifest",
+				"fix=name it in required_cases; a count-preserving swap that drops a required case for a filler must not stay green")
+		}
+	}
 	// The two shapes the row-counting bug could not tell apart. Without the first
 	// the count passes whether it counts rows or sessions; without the second it
 	// passes whether or not a later success clears an earlier error.
 	// Every outcome the pipeline can record, walked from the production
-	// enumeration. The corpus used two of the five, so the arms handling the other
-	// three were unreachable from it and deleting two of them was green -
-	// reindexed and fallback are both recorded by --reindex, so the gap was
-	// reachable rather than theoretical.
+	// enumeration. The corpus once used two of the five, so the arm handling
+	// reindexed was unreachable from it and deleting it was green; fallback is
+	// recorded by --reindex too, but as a routing diagnostic before indexing,
+	// never as a completion, so its two rows pin that it clears nothing.
 	for _, outcome := range ingest.AllIndexOutcomes {
 		if !coveredOutcomes[outcome] {
 			return document, indexFailureCountRuleError(
@@ -224,7 +288,52 @@ func TestLoadIndexFailureCountFixture_RejectsACorpusWithNoRowSessionGapItWarnsAb
 	}
 }
 
-// TestCountIndexFailures_CountsSessionsNotLogRows drives the production counter.
+// indexFailureRequiredCases pins the corpus membership in code. The fixture
+// carries its own required_cases manifest, but a deletion that edits both the
+// cases and that manifest together would still satisfy the loader - so the
+// names live here too, and dropping a case means editing this list, where the
+// weakening shows in the diff rather than hiding behind decremented counts.
+var indexFailureRequiredCases = []string{
+	"a-clean-run-reports-nothing",
+	"one-session-failing-once-is-one-session",
+	"one-session-failing-twice-is-still-ONE-session",
+	"a-session-the-sweep-recovers-is-not-a-failure",
+	"recovery-counts-whichever-order-the-rows-arrive-in",
+	"distinct-failing-sessions-are-counted-separately",
+	"a-reindexed-session-is-not-a-failure",
+	"a-fallback-does-not-clear-an-error",
+	"a-routing-fallback-then-error-is-still-a-failure",
+	"a-skip-does-not-clear-an-error",
+	"a-skipped-only-session-is-not-a-failure-at-all",
+}
+
+func TestIndexFailureCountFixture_RequiresNamedCases(t *testing.T) {
+	t.Parallel()
+	document, err := loadIndexFailureCountFixture(indexFailureCountFixtureData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.RequiredCases) != len(indexFailureRequiredCases) {
+		t.Fatalf("required_cases holds %d name(s), want %d; add the new case to the manifest in %s and to indexFailureRequiredCases together",
+			len(document.RequiredCases), len(indexFailureRequiredCases), indexFailureCountFixturePath)
+	}
+	for _, name := range indexFailureRequiredCases {
+		found := false
+		for _, required := range document.RequiredCases {
+			if required == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("required case %q is missing from required_cases in %s; restore it - a corpus that never names a success arm stays green when that arm is deleted",
+				name, indexFailureCountFixturePath)
+		}
+	}
+}
+
+// TestCountIndexFailures_CountsSessionsNotLogRows drives the production counter
+// and the shared classifier behind it: the count AND the classified membership.
 func TestCountIndexFailures_CountsSessionsNotLogRows(t *testing.T) {
 	t.Parallel()
 	document, err := loadIndexFailureCountFixture(indexFailureCountFixtureData)
@@ -248,6 +357,18 @@ func TestCountIndexFailures_CountsSessionsNotLogRows(t *testing.T) {
 				t.Errorf("countIndexFailures reported %d, want %d. The summary prints this directly beneath its session "+
 					"count, so a wrong number here contradicts the line above it and is the first thing a user notices.\n"+
 					"log: %+v", got, testCase.WantCount, testCase.Rows)
+			}
+			// Membership, not just the number: which sessions the run reports,
+			// in first-seen order, through the shared ingest classifier.
+			failed := ingest.FailedIndexSessions(log)
+			if len(failed) != len(testCase.WantFailed) {
+				t.Fatalf("FailedIndexSessions reported %v, want %v.\nlog: %+v", failed, testCase.WantFailed, testCase.Rows)
+			}
+			for i, session := range testCase.WantFailed {
+				if string(failed[i]) != session {
+					t.Errorf("FailedIndexSessions[%d] = %q, want %q (full: %v, want %v).\nlog: %+v",
+						i, failed[i], session, failed, testCase.WantFailed, testCase.Rows)
+				}
 			}
 		})
 	}

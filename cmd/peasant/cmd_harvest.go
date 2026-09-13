@@ -188,27 +188,6 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 var BuildIngestCommand = BuildHarvestCommand
 
 // runHarvest is the shared implementation for all harvest modes.
-// IndexOutcomeEndedIndexed reports whether an outcome means the session came out
-// of the INDEX stage with its entries.
-//
-// It is exported so the corpus that drives countIndexFailures classifies outcomes
-// through the SAME function production does. It was written twice - once here as
-// a switch, once in the test as its own list - and nothing bound the two, so the
-// corpus agreed with production only by coincidence: it used two of the five
-// outcomes, and deleting the other two success arms from production was green.
-//
-// Reindexed and Fallback are successes and are reachable: `--reindex` records
-// both. Skipped is deliberately NOT a success - the session ended without
-// entries, it simply ended that way without an error - so it neither clears a
-// failure nor counts as one.
-func IndexOutcomeEndedIndexed(outcome ingest.IndexOutcome) bool {
-	switch outcome {
-	case ingest.IndexOutcomeIndexed, ingest.IndexOutcomeReindexed, ingest.IndexOutcomeFallback:
-		return true
-	}
-	return false
-}
-
 // countIndexFailures counts SESSIONS the INDEX stage could not index, not log
 // rows.
 //
@@ -224,32 +203,13 @@ func IndexOutcomeEndedIndexed(outcome ingest.IndexOutcome) bool {
 //
 // A session that fails one attempt and SUCCEEDS on another is not a failure at
 // all, so a later success clears an earlier error. That sequence is reachable:
-// the drain loop can lose what the sweep then resolves.
+// the drain loop can lose what the sweep then resolves. Completion is the
+// shared ingest.IndexOutcomeCompleted rule: only indexed and reindexed end
+// with entries. A fallback row is a routing diagnostic emitted before
+// indexing, so it clears nothing; skipped ends without entries and without an
+// error, so it is neither a completion nor a failure.
 func countIndexFailures(log []ingest.IndexLogEntry) int {
-	// Both maps are allocated unconditionally, and the failure map is lazy only
-	// because writing to a nil map panics - not as an optimisation. An earlier
-	// comment here claimed the common case allocates nothing, directly above a map
-	// allocated on every call and populated on every clean run.
-	var failed map[ingest.SessionID]bool
-	succeeded := map[ingest.SessionID]bool{}
-	for _, entry := range log {
-		switch {
-		case entry.Outcome == ingest.IndexOutcomeError:
-			if failed == nil {
-				failed = map[ingest.SessionID]bool{}
-			}
-			failed[entry.SessionID] = true
-		case IndexOutcomeEndedIndexed(entry.Outcome):
-			succeeded[entry.SessionID] = true
-		}
-	}
-	count := 0
-	for session := range failed {
-		if !succeeded[session] {
-			count++
-		}
-	}
-	return count
+	return len(ingest.FailedIndexSessions(log))
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
