@@ -22,6 +22,58 @@ cases:
           inheritedRefs: [e_1, e_2, e_3]
           mainRefs: [e_4]
           earlierRefs: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|11111111-1111-4111-8111-111111111111|item|m1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m1
+              ownership: inherited
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|11111111-1111-4111-8111-111111111111|item|m2|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m2
+              ownership: inherited
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|11111111-1111-4111-8111-111111111111|item|m3|message"
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m3
+              ownership: inherited
+              hasPayload: true
+            - ref: e_4
+              nativeKey: "codex|11111111-1111-4111-8111-111111111111|item|m4|message"
+              segment: 0
+              ordinal: 4
+              line: 4
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m4
+              ownership: own
+              hasPayload: true
+          segments:
+            - ordinal: 0
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 5
+              refs: [e_1, e_2, e_3, e_4]
 
   - name: empty-child-then-append
     phases:
@@ -451,6 +503,77 @@ cases:
           earlierRefs: []
           revertedRefs: [e_4, e_5, e_6]
           checkpointRefs: [e_3]
+          nodes:
+            - ref: e_1
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              itemID: u1
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              itemID: a1
+              ownership: own
+              hasPayload: true
+            - ref: e_3
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: compacted
+              nativeType: compacted_summary
+              ownership: own
+              hasPayload: true
+            - ref: e_4
+              segment: 0
+              ordinal: 4
+              line: 4
+              envelopeType: response_item
+              nativeType: message
+              itemID: u2
+              ownership: reverted
+              hasPayload: true
+            - ref: e_5
+              segment: 0
+              ordinal: 5
+              line: 5
+              envelopeType: response_item
+              nativeType: message
+              itemID: a2
+              ownership: reverted
+              hasPayload: true
+            - ref: e_6
+              segment: 0
+              ordinal: 6
+              line: 6
+              envelopeType: compacted
+              nativeType: compacted_summary
+              ownership: reverted
+              hasPayload: true
+            - ref: e_7
+              segment: 0
+              ordinal: 8
+              line: 8
+              envelopeType: response_item
+              nativeType: message
+              itemID: u3
+              ownership: own
+              hasPayload: true
+            - ref: e_8
+              segment: 0
+              ordinal: 9
+              line: 9
+              envelopeType: response_item
+              nativeType: message
+              itemID: a3
+              ownership: own
+              hasPayload: true
 
   - name: paginated-rollback-anomaly
     phases:
@@ -575,7 +698,7 @@ cases:
           current: |
             {"timestamp":"2024-01-02T12:00:00Z","type":"session_meta","payload":{"id":"eeeeeeee-ffff-4fff-8fff-ffffffffffff","history_mode":"paginated"}}
             {"timestamp":"2024-01-02T12:00:01Z","type":"event_msg","payload":{"type":"item_completed","id":"u1"}}
-            {"timestamp":"2024-01-02T12:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one accepted input"}]}}
+            {"timestamp":"2024-01-02T12:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one accepted input"}]},"metadata":{"user_input_order":7}}
         expected:
           mode: paginated
           completeness: complete
@@ -583,6 +706,26 @@ cases:
           inheritedRefs: []
           earlierRefs: []
           correlationKinds: [paired_response_event]
+          correlations:
+            - kind: paired_response_event
+              itemID: u1
+              eventOrdinal: 1
+              responseOrdinal: 2
+              refs: [e_1]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|eeeeeeee-ffff-4fff-8fff-ffffffffffff|item|u1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
+              hasMetadata: true
+              metadata: '{"user_input_order":7}'
 
   - name: repeated-item-completed
     phases:
@@ -605,6 +748,29 @@ cases:
           inheritedRefs: []
           earlierRefs: []
           correlationKinds: [repeated_item_completed]
+          correlations:
+            - kind: repeated_item_completed
+              itemID: a1
+              eventOrdinal: 2
+              responseOrdinal: 1
+              refs: [e_1]
+            - kind: repeated_item_completed
+              itemID: a1
+              eventOrdinal: 3
+              responseOrdinal: 1
+              refs: [e_1]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|ffffffff-aaaa-4aaa-8aaa-aaaaaaaaaaaa|item|a1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: a1
+              ownership: own
+              hasPayload: true
 
   - name: same-thread-rollover-refs
     phases:
@@ -637,6 +803,35 @@ cases:
           inheritedRefs: []
           earlierRefs: []
           correlationKinds: [same_thread_rollover]
+          correlations:
+            - kind: same_thread_rollover
+              itemID: u1
+              refs: [e_1]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|12345678-1234-4123-8123-123456789abc|item|u1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
+          segments:
+            - ordinal: 0
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 2
+              refs: [e_1]
+            - ordinal: 1
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 2
+              refs: []
 
   - name: checkpoint-alignment-incomplete
     phases:
@@ -677,3 +872,723 @@ cases:
           inheritedRefs: []
           earlierRefs: []
           checkpointRefs: [e_2]
+
+  - name: reference-through-running-target
+    phases:
+      - authority:
+          stableThreadID: 70700001-7070-4707-8707-707070707071
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              historyKind: through
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"running one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"running two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"70700001-7070-4707-8707-707070707071","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after running through"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+          diagnostics: [codex_reference_coverage_incomplete]
+
+  - name: reference-through-completed-target
+    phases:
+      - authority:
+          stableThreadID: 70700002-7070-4707-8707-707070707072
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              historyKind: through
+              throughCompleted: true
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"through one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"through two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"70700002-7070-4707-8707-707070707072","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after completed through"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+
+  - name: truncated-reference-end-beyond-proof
+    phases:
+      - authority:
+          stableThreadID: 70707070-7070-4707-8707-707070707070
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 999
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"proven one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"proven two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"70707070-7070-4707-8707-707070707070","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after truncated proof"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+          diagnostics: [codex_reference_coverage_incomplete]
+
+  - name: reference-byte-boundary-misaligned
+    phases:
+      - authority:
+          stableThreadID: 71717171-7171-4717-8717-717171717171
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+              decodedByteStart: 0
+              decodedByteEndExclusive: 7
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"proven one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"proven two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"71717171-7171-4717-8717-717171717171","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after misaligned bytes"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+          diagnostics: [codex_reference_byte_boundary_invalid]
+          segments:
+            - ordinal: 0
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+              decodedByteStart: 0
+              decodedByteEndExclusive: 7
+              refs: [e_1, e_2]
+            - ordinal: 1
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 2
+              refs: [e_3]
+      - authority:
+          stableThreadID: 71717171-7171-4717-8717-717171717171
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+              decodedByteStart: 0
+              decodedByteEndExclusive: 999999999
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"proven one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"proven two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"71717171-7171-4717-8717-717171717171","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after overflowing bytes"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+          diagnostics: [codex_reference_byte_boundary_invalid]
+
+  - name: reference-legacy-mode-in-paginated-base
+    phases:
+      - authority:
+          stableThreadID: 72727272-7272-4727-8727-727272727272
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: legacy
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"legacy one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"legacy two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"72727272-7272-4727-8727-727272727272","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after legacy dependency"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+          diagnostics: [codex_reference_mode_unsupported]
+
+  - name: reference-ordinal-gap-preserved
+    phases:
+      - authority:
+          stableThreadID: 73737373-7373-4737-8737-737373737373
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 7
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"g1","ordinal":1,"content":[{"type":"input_text","text":"gap one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"g2","ordinal":5,"content":[{"type":"output_text","text":"gap five"}]}}
+            {"timestamp":"2024-01-02T16:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"g3","ordinal":6,"content":[{"type":"input_text","text":"gap six"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"73737373-7373-4737-8737-737373737373","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after gap"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3]
+          earlierRefs: []
+          mainRefs: [e_4]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|73737373-7373-4737-8737-737373737373|item|g1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: g1
+              ownership: inherited
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|73737373-7373-4737-8737-737373737373|item|g2|message"
+              segment: 0
+              ordinal: 5
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: g2
+              ownership: inherited
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|73737373-7373-4737-8737-737373737373|item|g3|message"
+              segment: 0
+              ordinal: 6
+              line: 3
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: g3
+              ownership: inherited
+              hasPayload: true
+            - ref: e_4
+              nativeKey: "codex|73737373-7373-4737-8737-737373737373|item|own1|message"
+              segment: 1
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: own1
+              ownership: own
+              hasPayload: true
+          segments:
+            - ordinal: 0
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 7
+              refs: [e_1, e_2, e_3]
+            - ordinal: 1
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 2
+              refs: [e_4]
+
+  - name: reference-ordinal-regression-skipped
+    phases:
+      - authority:
+          stableThreadID: 74747474-7474-4747-8747-747474747474
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref
+              physicalSourceID: phys-ref
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+        sources:
+          ref: |
+            {"timestamp":"2024-01-02T16:00:00Z","type":"session_meta","payload":{"id":"ref-thread","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"r1","ordinal":1,"content":[{"type":"input_text","text":"kept one"}]}}
+            {"timestamp":"2024-01-02T16:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"r2","ordinal":1,"content":[{"type":"output_text","text":"regressed duplicate"}]}}
+            {"timestamp":"2024-01-02T16:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"r3","ordinal":2,"content":[{"type":"input_text","text":"later valid two"}]}}
+          current: |
+            {"timestamp":"2024-01-02T16:10:00Z","type":"session_meta","payload":{"id":"74747474-7474-4747-8747-747474747474","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T16:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after regression"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2]
+          earlierRefs: []
+          mainRefs: [e_3]
+          diagnostics: [codex_ordinal_regression]
+
+  - name: malformed-lines-no-native-ordinals
+    phases:
+      - authority:
+          stableThreadID: 75757575-7575-4757-8757-757575757575
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: true
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T17:00:00Z","type":"session_meta","payload":{"id":"75757575-7575-4757-8757-757575757575","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T17:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied one"}]}}
+            this line is not native json at all
+            {"timestamp":"2024-01-02T17:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied two"}]}}
+            {"timestamp":"2024-01-02T17:00:04Z","type":"future_type","payload":{"note":"unknown envelope"}}
+            {"timestamp":"2024-01-02T17:00:05Z","type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"copied three"}]}}
+            {"timestamp":"2024-01-02T17:00:06Z","type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"run the command"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3]
+          mainRefs: [e_4]
+          earlierRefs: []
+          diagnostics: [codex_record_malformed, codex_record_unknown]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m1
+              ownership: inherited
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m2|message"
+              segment: 0
+              ordinal: 2
+              line: 3
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m2
+              ownership: inherited
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m3|message"
+              segment: 0
+              ordinal: 3
+              line: 5
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m3
+              ownership: inherited
+              hasPayload: true
+            - ref: e_4
+              nativeKey: "codex|75757575-7575-4757-8757-757575757575|item|m4|message"
+              segment: 0
+              ordinal: 4
+              line: 6
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m4
+              ownership: own
+              hasPayload: true
+
+  - name: event-only-item-with-body
+    phases:
+      - authority:
+          stableThreadID: 76767676-7676-4767-8767-767676767676
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T18:00:00Z","type":"session_meta","payload":{"id":"76767676-7676-4767-8767-767676767676","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T18:00:01Z","type":"event_msg","payload":{"type":"item_completed","id":"x1","item":{"type":"message","role":"user","id":"x1","content":[{"type":"input_text","text":"solo input"}]}}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|76767676-7676-4767-8767-767676767676|item|x1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: user
+              itemID: x1
+              ownership: own
+              hasPayload: true
+              payload: '{"type":"item_completed","id":"x1","item":{"type":"message","role":"user","id":"x1","content":[{"type":"input_text","text":"solo input"}]}}'
+
+  - name: repeated-item-completed-body-replaced
+    phases:
+      - authority:
+          stableThreadID: 77770001-7777-4777-8777-777777777771
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T18:10:00Z","type":"session_meta","payload":{"id":"77770001-7777-4777-8777-777777777771","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T18:10:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"version one"}]}}
+            {"timestamp":"2024-01-02T18:10:02Z","type":"event_msg","payload":{"type":"item_completed","id":"a1","item":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"version two"}]}}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: [repeated_item_completed]
+          correlations:
+            - kind: repeated_item_completed
+              itemID: a1
+              eventOrdinal: 2
+              responseOrdinal: 2
+              refs: [e_1]
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|77770001-7777-4777-8777-777777777771|item|a1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: assistant
+              itemID: a1
+              ownership: own
+              hasPayload: true
+              payload: '{"type":"item_completed","id":"a1","item":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"version two"}]}}'
+      - authority:
+          stableThreadID: 77770001-7777-4777-8777-777777777771
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T18:10:00Z","type":"session_meta","payload":{"id":"77770001-7777-4777-8777-777777777771","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T18:10:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"version one"}]}}
+            {"timestamp":"2024-01-02T18:10:02Z","type":"event_msg","payload":{"type":"item_completed","id":"a1","item":"oops"}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: [repeated_item_completed]
+          correlations:
+            - kind: repeated_item_completed
+              itemID: a1
+              eventOrdinal: 2
+              responseOrdinal: 1
+              refs: [e_1]
+          diagnostics: [codex_item_body_malformed]
+
+  - name: paired-admission-single-turn-rollback
+    phases:
+      - authority:
+          stableThreadID: 77770002-7777-4777-8777-777777777772
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T19:00:00Z","type":"session_meta","payload":{"id":"77770002-7777-4777-8777-777777777772","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T19:00:01Z","type":"event_msg","payload":{"type":"item_completed","id":"u1"}}
+            {"timestamp":"2024-01-02T19:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T19:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-02T19:00:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"second input"}]}}
+            {"timestamp":"2024-01-02T19:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"second answer"}]}}
+            {"timestamp":"2024-01-02T19:00:06Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          revertedRefs: [e_3, e_4]
+          correlationKinds: [paired_response_event]
+          correlations:
+            - kind: paired_response_event
+              itemID: u1
+              eventOrdinal: 1
+              responseOrdinal: 2
+              refs: [e_1]
+
+  - name: inter-agent-delivery-rollback-boundary
+    phases:
+      - authority:
+          stableThreadID: 77770003-7777-4777-8777-777777777773
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T19:10:00Z","type":"session_meta","payload":{"id":"77770003-7777-4777-8777-777777777773","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T19:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T19:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-02T19:10:03Z","type":"event_msg","payload":{"type":"item_completed","id":"d1","delivery":{"target":"agent-b","call_id":"c1"},"item":{"type":"message","role":"user","id":"d1","content":[{"type":"input_text","text":"delegated work"}]}}}
+            {"timestamp":"2024-01-02T19:10:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"second answer"}]}}
+            {"timestamp":"2024-01-02T19:10:05Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          revertedRefs: [e_3, e_4]
+          correlationKinds: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|77770003-7777-4777-8777-777777777773|item|u1|message"
+              segment: 0
+              ordinal: 1
+              line: 1
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|77770003-7777-4777-8777-777777777773|item|a1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: a1
+              ownership: own
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|77770003-7777-4777-8777-777777777773|item|d1|message"
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: event_msg
+              nativeType: message
+              nativeRole: user
+              itemID: d1
+              ownership: reverted
+              hasPayload: true
+            - ref: e_4
+              nativeKey: "codex|77770003-7777-4777-8777-777777777773|item|a2|message"
+              segment: 0
+              ordinal: 4
+              line: 4
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: a2
+              ownership: reverted
+              hasPayload: true
+
+  - name: compaction-absent-metadata-accepted
+    phases:
+      - authority:
+          stableThreadID: 77770004-7777-4777-8777-777777777774
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T20:00:00Z","type":"session_meta","payload":{"id":"77770004-7777-4777-8777-777777777774","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T20:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one input"}]}}
+            {"timestamp":"2024-01-02T20:00:02Z","type":"compacted","payload":{"summary":"baseline without metadata","replacement_history":[{"turn":"u1"},{"turn":"a1"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          checkpointRefs: [e_2]
+
+  - name: compaction-orphan-metadata-rejected
+    phases:
+      - authority:
+          stableThreadID: 77770005-7777-4777-8777-777777777775
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T20:10:00Z","type":"session_meta","payload":{"id":"77770005-7777-4777-8777-777777777775","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T20:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one input"}]}}
+            {"timestamp":"2024-01-02T20:10:02Z","type":"compacted","payload":{"summary":"baseline with orphan metadata","replacement_history_metadata":[{"model":"sample-model"}]}}
+        expected:
+          mode: legacy
+          completeness: incomplete_new
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          checkpointRefs: [e_2]
+          diagnostics: [codex_checkpoint_metadata_misaligned]
+
+  - name: compaction-malformed-metadata-rejected
+    phases:
+      - authority:
+          stableThreadID: 77770006-7777-4777-8777-777777777776
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T20:20:00Z","type":"session_meta","payload":{"id":"77770006-7777-4777-8777-777777777776","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T20:20:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one input"}]}}
+            {"timestamp":"2024-01-02T20:20:02Z","type":"compacted","payload":{"summary":"baseline with malformed metadata","replacement_history":[{"turn":"u1"}],"replacement_history_metadata":"oops"}}
+        expected:
+          mode: legacy
+          completeness: incomplete_new
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          checkpointRefs: [e_2]
+          diagnostics: [codex_checkpoint_metadata_misaligned]
+
+  - name: lifecycle-turn-events-balanced
+    phases:
+      - authority:
+          stableThreadID: 77770007-7777-4777-8777-777777777777
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T21:00:00Z","type":"session_meta","payload":{"id":"77770007-7777-4777-8777-777777777777","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T21:00:01Z","type":"event_msg","payload":{"type":"turn_started","turn_id":"t1"}}
+            {"timestamp":"2024-01-02T21:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T21:00:03Z","type":"event_msg","payload":{"type":"turn_complete","turn_id":"t1"}}
+            {"timestamp":"2024-01-02T21:00:04Z","type":"event_msg","payload":{"type":"turn_complete","turn_id":"tX"}}
+            {"timestamp":"2024-01-02T21:00:05Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"second input"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: [codex_lifecycle_unbalanced]
+
+  - name: item-started-no-phantom-turn
+    phases:
+      - authority:
+          stableThreadID: 77770008-7777-4777-8777-777777777778
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T21:10:00Z","type":"session_meta","payload":{"id":"77770008-7777-4777-8777-777777777778","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T21:10:01Z","type":"event_msg","payload":{"type":"item_started","id":"s1"}}
+            {"timestamp":"2024-01-02T21:10:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"s1","content":[{"type":"input_text","text":"started input"}]}}
+            {"timestamp":"2024-01-02T21:10:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-02T21:10:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"s2","content":[{"type":"input_text","text":"second input"}]}}
+            {"timestamp":"2024-01-02T21:10:05Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"second answer"}]}}
+            {"timestamp":"2024-01-02T21:10:06Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          revertedRefs: [e_3, e_4]
+          correlationKinds: []

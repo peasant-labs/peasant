@@ -3,8 +3,9 @@ package ingest
 // Deterministic replay of captured Codex records into an adapter-private native
 // node graph. The replay applies the recognized history modes, the copied
 // creation boundary, migration uncertainty, instruction rollback, surviving
-// checkpoints, paginated revert, and byte/ordinal checkpoints. It classifies no
-// block and allocates no durable generation rows.
+// checkpoints, paginated revert, canonical paginated items and lifecycle
+// state, and byte/ordinal checkpoints. It classifies no block and allocates
+// no durable generation rows.
 
 import (
 	"bytes"
@@ -17,58 +18,125 @@ import (
 )
 
 // codexHistoryEnvelope is the outer envelope shared by every Codex rollout
-// record.
+// record. Metadata is the history-envelope metadata recorded beside the
+// payload; the classifier reads it, the replay preserves it.
 type codexHistoryEnvelope struct {
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Payload   json.RawMessage `json:"payload"`
+	Metadata  json.RawMessage `json:"metadata"`
+}
+
+// codexDeliveryCorrelation is the explicit native inter-agent admission
+// evidence the frozen legacy boundary reducer keys on: a target, a call
+// correlation, or both. Absence is not negative evidence.
+type codexDeliveryCorrelation struct {
+	Target string `json:"target"`
+	CallID string `json:"call_id"`
+}
+
+func (d *codexDeliveryCorrelation) isCorrelated() bool {
+	return d != nil && (d.Target != "" || d.CallID != "")
+}
+
+// codexItemBody is the canonical paginated item carried by an item lifecycle
+// event. Content, Summary and Output are raw so the captured node keeps the
+// exact native bytes.
+type codexItemBody struct {
+	Type     string                    `json:"type"`
+	Role     string                    `json:"role"`
+	ID       string                    `json:"id"`
+	CallID   string                    `json:"call_id"`
+	TurnID   string                    `json:"turn_id"`
+	Content  json.RawMessage           `json:"content"`
+	Summary  json.RawMessage           `json:"summary"`
+	Output   json.RawMessage           `json:"output"`
+	Delivery *codexDeliveryCorrelation `json:"delivery"`
+}
+
+// codexItemBodyCarriesContent reports whether an item body carries item
+// content of its own. A body without content is a bare completion marker:
+// it correlates but never replaces item state.
+func codexItemBodyCarriesContent(body codexItemBody) bool {
+	return len(bytes.TrimSpace(body.Content)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Content), []byte("null")) ||
+		len(bytes.TrimSpace(body.Summary)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Summary), []byte("null")) ||
+		len(bytes.TrimSpace(body.Output)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Output), []byte("null"))
 }
 
 // codexHistoryReplayPayload is the union of replay-relevant fields on a Codex
 // payload. It is discriminated by the envelope type and the nested payload
 // type; unrelated fields stay zero.
 type codexHistoryReplayPayload struct {
-	Type     string          `json:"type"`
-	Role     string          `json:"role"`
-	ID       string          `json:"id"`
-	ItemID   string          `json:"item_id"`
-	CallID   string          `json:"call_id"`
-	TurnID   string          `json:"turn_id"`
-	Name     string          `json:"name"`
-	Summary  *string         `json:"summary"`
-	NumTurns *int64          `json:"num_turns"`
-	Ordinal  *int64          `json:"ordinal"`
-	Content  json.RawMessage `json:"content"`
+	Type     string                    `json:"type"`
+	Role     string                    `json:"role"`
+	ID       string                    `json:"id"`
+	ItemID   string                    `json:"item_id"`
+	CallID   string                    `json:"call_id"`
+	TurnID   string                    `json:"turn_id"`
+	Name     string                    `json:"name"`
+	Summary  *string                   `json:"summary"`
+	NumTurns *int64                    `json:"num_turns"`
+	Ordinal  *int64                    `json:"ordinal"`
+	Content  json.RawMessage           `json:"content"`
+	Item     json.RawMessage           `json:"item"`
+	Delivery *codexDeliveryCorrelation `json:"delivery"`
 	// ReplacementHistory and ReplacementMetadata are the native compaction
-	// baseline arrays. When both are present their lengths must agree; a
-	// mismatch or an orphan metadata array marks reconstruction incomplete and
-	// no positional pair is invented.
+	// baseline arrays. History without metadata is accepted; orphan or
+	// malformed present metadata, and unequal present arrays, mark
+	// reconstruction incomplete and no positional pair is invented.
 	ReplacementHistory  json.RawMessage `json:"replacement_history"`
 	ReplacementMetadata json.RawMessage `json:"replacement_history_metadata"`
 }
 
-// codexHistoryRecord is one parsed record with its native ordinal position and
-// decoded byte coordinates.
+// codexHistoryRecord is one parsed record with its physical line position,
+// its valid decoded native ordinal and its decoded byte coordinates.
+// Partial, malformed and unknown records carry no decoded ordinal: they
+// advance the byte checkpoint only and are never assigned a native ordinal
+// by line number.
 type codexHistoryRecord struct {
+	LineIndex int64
+	// Ordinal is the valid decoded native ordinal. HasOrdinal is false for
+	// partial, malformed, blank and unknown records.
 	Ordinal          int64
+	HasOrdinal       bool
+	Regressed        bool
+	Blank            bool
 	ByteStart        int64
 	ByteEndExclusive int64
 	EnvelopeType     string
 	Payload          json.RawMessage
+	Metadata         json.RawMessage
 	// Partial marks a trailing record without a terminating newline. It is
 	// deferred and never interpreted.
 	Partial bool
-	// Malformed marks a complete record whose bytes are not valid JSON. The
-	// byte checkpoint still advances; no ordinal is assigned by line number.
+	// Malformed marks a complete record whose bytes could not be decoded
+	// into the replay graph. The byte checkpoint still advances.
 	Malformed bool
 }
 
-// parseCodexHistoryRecords splits bounded decoded bytes into ordered records.
-// A trailing partial line is deferred; a malformed complete line keeps its
-// byte checkpoint but carries no payload.
+// recognizedCodexEnvelopeType reports whether an envelope type advances the
+// decoded native ordinal checkpoint. Session and turn headers advance the
+// checkpoint even though they never become content nodes.
+func recognizedCodexEnvelopeType(envelopeType string) bool {
+	switch envelopeType {
+	case codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, "compacted":
+		return true
+	default:
+		return false
+	}
+}
+
+// parseCodexHistoryRecords splits bounded decoded bytes into ordered records
+// with valid decoded native ordinals. A trailing partial line is deferred; a
+// malformed complete line, a blank line and an unknown envelope type keep
+// their byte checkpoint but carry no native ordinal. An explicit numeric
+// payload ordinal is honored when it advances; a regressed or duplicate one
+// is flagged and skipped, and gaps are preserved, never filled.
 func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 	var records []codexHistoryRecord
+	var maxAssigned int64 = -1
 	offset := int64(0)
+	line := int64(0)
 	for offset < int64(len(data)) {
 		relative := bytes.IndexByte(data[offset:], '\n')
 		end := int64(len(data))
@@ -78,27 +146,89 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 		} else {
 			end = offset + int64(relative) + 1
 		}
-		line := data[offset:end]
+		recordLine := data[offset:end]
 		record := codexHistoryRecord{
-			Ordinal:          int64(len(records)),
+			LineIndex:        line,
 			ByteStart:        offset,
 			ByteEndExclusive: end,
 			Partial:          partial,
 		}
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) > 0 && !partial {
+		line++
+		trimmed := bytes.TrimSpace(recordLine)
+		switch {
+		case partial:
+			// Deferred: no ordinal, no interpretation.
+		case len(trimmed) == 0:
+			record.Blank = true
+		default:
 			var env codexHistoryEnvelope
-			if err := json.Unmarshal(trimmed, &env); err == nil {
+			if err := json.Unmarshal(trimmed, &env); err != nil {
+				record.Malformed = true
+			} else if env.Type == "" && len(bytes.TrimSpace(env.Payload)) == 0 && len(bytes.TrimSpace(env.Metadata)) == 0 {
+				record.Blank = true
+			} else if !recognizedCodexEnvelopeType(env.Type) {
 				record.EnvelopeType = env.Type
 				record.Payload = env.Payload
+				record.Metadata = env.Metadata
 			} else {
-				record.Malformed = true
+				record.EnvelopeType = env.Type
+				record.Payload = env.Payload
+				record.Metadata = env.Metadata
+				if explicit, present := codexExplicitRecordOrdinal(env.Payload); present {
+					switch {
+					case explicit < 0:
+						record.Malformed = true
+					case explicit <= maxAssigned:
+						record.Regressed = true
+					default:
+						record.Ordinal = explicit
+						record.HasOrdinal = true
+						maxAssigned = explicit
+					}
+				} else {
+					record.Ordinal = maxAssigned + 1
+					record.HasOrdinal = true
+					maxAssigned = record.Ordinal
+				}
 			}
 		}
 		records = append(records, record)
 		offset = end
 	}
 	return records
+}
+
+// codexExplicitRecordOrdinal reads an explicit numeric payload ordinal when
+// one is present. A non-numeric or absent ordinal is not present; only a
+// numeric value participates in checkpoint advancement.
+func codexExplicitRecordOrdinal(payload json.RawMessage) (int64, bool) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return 0, false
+	}
+	var probe struct {
+		Ordinal json.RawMessage `json:"ordinal"`
+	}
+	if err := json.Unmarshal(trimmed, &probe); err != nil {
+		return 0, false
+	}
+	if len(bytes.TrimSpace(probe.Ordinal)) == 0 {
+		return 0, false
+	}
+	var ordinal int64
+	if err := json.Unmarshal(probe.Ordinal, &ordinal); err != nil {
+		return 0, false
+	}
+	return ordinal, true
+}
+
+// codexRecordLocation names a record for diagnostics using its decoded
+// ordinal when it has one and its physical line otherwise.
+func codexRecordLocation(threadID string, record codexHistoryRecord) string {
+	if record.HasOrdinal {
+		return fmt.Sprintf("thread %s decoded ordinal %d (line %d)", threadID, record.Ordinal, record.LineIndex)
+	}
+	return fmt.Sprintf("thread %s line %d", threadID, record.LineIndex)
 }
 
 // codexDecodedSegment pairs one ordered segment descriptor with its decoded
@@ -112,6 +242,11 @@ type codexDecodedSegment struct {
 	// readFailed is set when a bounded dependency could not be read. The
 	// segment is retained as incomplete evidence; no refs are invented.
 	readFailed bool
+	// proofFailed is set when the dependency bytes were read but the
+	// required native proof (mode, ordinal coverage, byte boundaries)
+	// failed. The proven valid records still replay; the capture records
+	// incompleteness and the caller retains last-good state.
+	proofFailed bool
 }
 
 // effectiveInclusion returns the segment inclusion a reader should record.
@@ -128,9 +263,78 @@ func (s codexDecodedSegment) effectiveInclusion() indexformat.SegmentInclusion {
 	return indexformat.SegmentInclusionUncertainEarlierHistory
 }
 
+// codexDecodedCheckpoint is the valid decoded native checkpoint of one
+// segment: how many records carry native ordinals and the highest one.
+// Unknown, malformed, blank and partial lines never contribute.
+type codexDecodedCheckpoint struct {
+	validRecords int64
+	maxOrdinal   int64
+	hasValid     bool
+}
+
+// decodedCheckpoint folds the segment records into their native checkpoint.
+func (s codexDecodedSegment) decodedCheckpoint() codexDecodedCheckpoint {
+	var checkpoint codexDecodedCheckpoint
+	checkpoint.maxOrdinal = -1
+	for _, record := range s.records {
+		if !record.HasOrdinal {
+			continue
+		}
+		checkpoint.validRecords++
+		if !checkpoint.hasValid || record.Ordinal > checkpoint.maxOrdinal {
+			checkpoint.maxOrdinal = record.Ordinal
+			checkpoint.hasValid = true
+		}
+	}
+	return checkpoint
+}
+
+// maxOrdinalPtr returns the highest valid decoded ordinal, or nil when the
+// segment proves no valid record.
+func (c codexDecodedCheckpoint) maxOrdinalPtr() *int64 {
+	if !c.hasValid {
+		return nil
+	}
+	ordinal := c.maxOrdinal
+	return &ordinal
+}
+
+// boundedCheckpoint folds only the records inside the segment's native
+// bounds into a checkpoint. A parent append past the captured cutoff never
+// moves it, so the child fingerprint is stable across parent growth.
+func (s codexDecodedSegment) boundedCheckpoint() codexDecodedCheckpoint {
+	var checkpoint codexDecodedCheckpoint
+	checkpoint.maxOrdinal = -1
+	for _, record := range s.records {
+		if !record.HasOrdinal {
+			continue
+		}
+		if !codexRecordInBounds(s, record, nil) {
+			continue
+		}
+		checkpoint.validRecords++
+		if !checkpoint.hasValid || record.Ordinal > checkpoint.maxOrdinal {
+			checkpoint.maxOrdinal = record.Ordinal
+			checkpoint.hasValid = true
+		}
+	}
+	return checkpoint
+}
+
+// partialTail returns the deferred trailing partial bytes, if any.
+func (s codexDecodedSegment) partialTail() []byte {
+	for _, record := range s.records {
+		if record.Partial {
+			return s.data[record.ByteStart:record.ByteEndExclusive]
+		}
+	}
+	return nil
+}
+
 // boundedData returns only the decoded bytes inside the segment's native
-// bounds. A parent append past the captured cutoff therefore does not change
-// the child's fingerprint.
+// bounds, selected by valid decoded ordinals. Malformed, unknown, blank and
+// partial lines never move a bound. A parent append past the captured cutoff
+// therefore does not change the child's fingerprint.
 func (s codexDecodedSegment) boundedData() []byte {
 	coords := s.descriptor.Coordinates
 	if coords.Start == nil && coords.EndExclusive == nil {
@@ -143,6 +347,9 @@ func (s codexDecodedSegment) boundedData() []byte {
 	end := int64(len(s.data))
 	var first, last int64 = -1, -1
 	for _, record := range s.records {
+		if !record.HasOrdinal {
+			continue
+		}
 		if record.Ordinal < start {
 			continue
 		}
@@ -164,7 +371,7 @@ func (s codexDecodedSegment) boundedData() []byte {
 }
 
 // replayCodexHistory resolves the authority into ordered decoded segments,
-// replays them, and returns the captured history.
+// proves reference coverage, replays them, and returns the captured history.
 func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authority CodexSourceAuthority, registry *CodexRefRegistry) (CodexCapturedHistory, error) {
 	if !authority.Kind.IsValid() {
 		return CodexCapturedHistory{}, fmt.Errorf("ingest.replayCodexHistory: authority kind %q is outside the closed set for thread %q; the current source cannot be interpreted; select a published authority kind", authority.Kind, authority.StableThreadID)
@@ -175,7 +382,7 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 	mode := resolveCodexHistoryMode(authority.HistoryMode)
 
 	decoded := make([]codexDecodedSegment, 0, len(authority.References)+1)
-	diagnostics := []DiagnosticEntry{}
+	diagnostics := append([]DiagnosticEntry(nil), authority.DerivationDiagnostics...)
 	seenPointers := map[string]bool{authority.CurrentPointer: true}
 	for index, ref := range authority.References {
 		segment := codexDecodedSegment{descriptor: ref, ordinal: index}
@@ -211,8 +418,8 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 			diagnostics = append(diagnostics, DiagnosticEntry{
 				ErrorType:   "codex_reference_unavailable",
 				Location:    fmt.Sprintf("thread %s reference %d", authority.StableThreadID, index),
-				Message:     fmt.Sprintf("a bounded history dependency could not be read: %v", err),
-				Remediation: "Restore the referenced native source and rerun; the capture is incomplete and no parent content was guessed or looped.",
+				Message:     "a bounded history dependency could not be read; the capture is incomplete and no parent content was guessed or looped",
+				Remediation: "Restore the referenced native source and rerun; the last good generation is retained.",
 			})
 			decoded = append(decoded, segment)
 			continue
@@ -220,6 +427,10 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 		segment.data = data
 		segment.records = parseCodexHistoryRecords(data)
 		segment.descriptor.Coordinates = codexRangeCoordinates(segment.records, ref.Coordinates)
+		if proof, ok := codexProveReference(segment, mode, authority.StableThreadID, index); !ok {
+			segment.proofFailed = true
+			diagnostics = append(diagnostics, proof...)
+		}
 		decoded = append(decoded, segment)
 	}
 
@@ -233,7 +444,10 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 	}
 	currentData, err := source.ReadCodexSource(ctx, authority.CurrentPointer)
 	if err != nil {
-		return CodexCapturedHistory{}, fmt.Errorf("ingest.replayCodexHistory: reading the authoritative current Codex source for thread %s failed: %w; the current pointer is missing, no older rollout was substituted, and the last good generation is retained", authority.StableThreadID, err)
+		return CodexCapturedHistory{}, &CodexCurrentMissingError{
+			StableThreadID: authority.StableThreadID,
+			SourceRef:      authority.PhysicalSourceID,
+		}
 	}
 	current := codexDecodedSegment{descriptor: currentRef, isCurrent: true, ordinal: len(decoded), data: currentData}
 	current.records = parseCodexHistoryRecords(currentData)
@@ -241,11 +455,13 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 	decoded = append(decoded, current)
 
 	state := &codexReplayState{
-		registry:          registry,
-		responseByItem:    map[string]int{},
-		eventOrdinal:      map[string]int64{},
-		lastNativeOrdinal: map[string]int64{},
-		seenKeys:          map[string]bool{},
+		registry:       registry,
+		responseByItem: map[string]int{},
+		itemNodeByID:   map[string]int{},
+		eventOrdinal:   map[string]int64{},
+		seenKeys:       map[string]bool{},
+		openTurns:      map[string]int64{},
+		boundary:       &codexLegacyBoundaryReducer{pending: map[string]bool{}},
 	}
 	for _, segment := range decoded {
 		if err := state.replaySegment(authority.StableThreadID, segment, mode); err != nil {
@@ -263,19 +479,21 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 			Remediation: "Upgrade Peasant to a build that recognizes this Codex history mode; the capture stays incomplete and no legacy fallback was applied.",
 		})
 	}
+	if authority.DerivationIncomplete {
+		completeness = indexformat.GenerationCompletenessIncompleteNew
+	}
 	for _, segment := range decoded {
-		if segment.readFailed {
+		if segment.readFailed || segment.proofFailed {
 			completeness = indexformat.GenerationCompletenessIncompleteNew
 			continue
 		}
 		if segment.isCurrent && segment.descriptor.CopyBoundary != nil {
-			boundary := *segment.descriptor.CopyBoundary
-			if int64(len(segment.records)) < boundary {
+			if segment.decodedCheckpoint().validRecords < *segment.descriptor.CopyBoundary {
 				completeness = indexformat.GenerationCompletenessIncompleteNew
 				diagnostics = append(diagnostics, DiagnosticEntry{
 					ErrorType:   "codex_copied_prefix_incomplete",
 					Location:    fmt.Sprintf("thread %s", authority.StableThreadID),
-					Message:     fmt.Sprintf("the persisted copied prefix ends before boundary %d; the missing prefix was not invented", boundary),
+					Message:     fmt.Sprintf("the persisted copied prefix ends before boundary %d; the missing prefix was not invented", *segment.descriptor.CopyBoundary),
 					Remediation: "Let the native writer persist the complete prefix and rerun; the existing generation stays active and no success stamp is written.",
 				})
 			}
@@ -300,6 +518,7 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 		Diagnostics:      state.diagnostics,
 	}
 	history.Segments = buildCodexSegments(decoded, state)
+	history.CapturedSegments = buildCodexCapturedSegments(decoded)
 	history.MainRefs = codexRefsForOwnership(state.nodes, CodexOwnershipOwn)
 	history.InheritedRefs = codexRefsForOwnership(state.nodes, CodexOwnershipInherited)
 	history.EarlierRefs = codexRefsForOwnership(state.nodes, CodexOwnershipUncertainEarlier)
@@ -309,8 +528,106 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 	return history, nil
 }
 
+// codexProveReference proves the required native evidence of one decoded
+// dependency against its own decoded checkpoint: the referenced mode must be
+// paginated under a paginated current, the ordinal bounds must land inside
+// the proven valid records, and decoded-byte bounds must land on valid
+// record boundaries without overflowing the decoded bytes. Missing proof
+// returns the incompleteness diagnostics; the proven valid prefix still
+// replays under a clamped bound.
+func codexProveReference(segment codexDecodedSegment, currentMode CodexHistoryMode, threadID string, index int) ([]DiagnosticEntry, bool) {
+	location := fmt.Sprintf("thread %s reference %d", threadID, index)
+	if segment.descriptor.HistoryKind == "through" && !segment.descriptor.ThroughCompleted {
+		return []DiagnosticEntry{{
+			ErrorType:   "codex_reference_coverage_incomplete",
+			Location:    location,
+			Message:     "a through history dependency names a running target; only a completed target proves the through bound",
+			Remediation: "Let the native writer complete the referenced target and rerun; the proven prefix replays and the last good generation is retained.",
+		}}, false
+	}
+	if currentMode == CodexHistoryModePaginated && segment.descriptor.Mode != CodexHistoryModePaginated {
+		return []DiagnosticEntry{{
+			ErrorType:   "codex_reference_mode_unsupported",
+			Location:    location,
+			Message:     fmt.Sprintf("a bounded history dependency declares mode %q under a paginated current; the legacy dependency was not replayed as paginated history", segment.descriptor.Mode),
+			Remediation: "Migrate the referenced native history to the paginated shape and rerun; the capture stays incomplete and the proven prefix replays.",
+		}}, false
+	}
+	coords := segment.descriptor.Coordinates
+	switch coords.Kind {
+	case indexformat.CoordinateKindCodexOrdinalRange, indexformat.CoordinateKindCodexReferenceRange, indexformat.CoordinateKindOpenCodeSequenceRange:
+		checkpoint := segment.decodedCheckpoint()
+		if coords.Start == nil || coords.EndExclusive == nil {
+			return []DiagnosticEntry{{
+				ErrorType:   "codex_reference_coverage_incomplete",
+				Location:    location,
+				Message:     "a bounded history dependency declares no provable ordinal range; the missing proof was not invented",
+				Remediation: "Repair the native reference coordinates and rerun; the last good generation is retained.",
+			}}, false
+		}
+		if !checkpoint.hasValid || *coords.EndExclusive > checkpoint.maxOrdinal+1 || *coords.Start > checkpoint.maxOrdinal {
+			return []DiagnosticEntry{{
+				ErrorType:   "codex_reference_coverage_incomplete",
+				Location:    location,
+				Message:     fmt.Sprintf("a bounded history dependency requires decoded ordinals [%d,%d) but the referenced bytes prove only %d valid records; the missing records were not invented", *coords.Start, *coords.EndExclusive, checkpoint.validRecords),
+				Remediation: "Let the native writer persist the complete referenced prefix and rerun; the proven prefix replays and the last good generation is retained.",
+			}}, false
+		}
+	}
+	if coords.DecodedByteStart != nil && coords.DecodedByteEndExclusive != nil {
+		if *coords.DecodedByteEndExclusive > int64(len(segment.data)) {
+			return []DiagnosticEntry{{
+				ErrorType:   "codex_reference_byte_boundary_invalid",
+				Location:    location,
+				Message:     "a bounded history dependency declares a decoded-byte bound past the end of the referenced bytes; the missing bytes were not invented",
+				Remediation: "Repair the native reference byte coordinates and rerun; the proven prefix replays and the last good generation is retained.",
+			}}, false
+		}
+		if !codexByteBoundariesAlign(segment, *coords.DecodedByteStart, *coords.DecodedByteEndExclusive) {
+			return []DiagnosticEntry{{
+				ErrorType:   "codex_reference_byte_boundary_invalid",
+				Location:    location,
+				Message:     "a bounded history dependency declares decoded-byte bounds that do not land on valid decoded record boundaries; unaligned bytes were not claimed",
+				Remediation: "Repair the native reference byte coordinates and rerun; the proven prefix replays and the last good generation is retained.",
+			}}, false
+		}
+	}
+	return nil, true
+}
+
+// codexByteBoundariesAlign reports whether decoded-byte bounds land on valid
+// decoded record boundaries. The file start is always a boundary; any other
+// bound must equal a valid record edge.
+func codexByteBoundariesAlign(segment codexDecodedSegment, start, end int64) bool {
+	if start != 0 && !codexIsValidRecordEdge(segment, start, true) {
+		return false
+	}
+	if !codexIsValidRecordEdge(segment, end, false) {
+		return false
+	}
+	return true
+}
+
+// codexIsValidRecordEdge reports whether offset is the start (or end) of a
+// record that carries a valid decoded native ordinal.
+func codexIsValidRecordEdge(segment codexDecodedSegment, offset int64, wantStart bool) bool {
+	for _, record := range segment.records {
+		if !record.HasOrdinal {
+			continue
+		}
+		if wantStart && record.ByteStart == offset {
+			return true
+		}
+		if !wantStart && record.ByteEndExclusive == offset {
+			return true
+		}
+	}
+	return false
+}
+
 // codexRangeCoordinates keeps declared native bounds and derives an ordinal
-// range from the record count when the segment carries no explicit bounds.
+// range from the valid decoded checkpoint when the segment carries no
+// explicit bounds.
 func codexRangeCoordinates(records []codexHistoryRecord, declared indexformat.SegmentCoordinates) indexformat.SegmentCoordinates {
 	switch declared.Kind {
 	case indexformat.CoordinateKindSnapshotOnly, indexformat.CoordinateKindUnknown:
@@ -320,7 +637,21 @@ func codexRangeCoordinates(records []codexHistoryRecord, declared indexformat.Se
 			return declared
 		}
 	}
-	end := int64(len(records))
+	var maxOrdinal int64 = -1
+	var hasValid bool
+	for _, record := range records {
+		if !record.HasOrdinal {
+			continue
+		}
+		if !hasValid || record.Ordinal > maxOrdinal {
+			maxOrdinal = record.Ordinal
+			hasValid = true
+		}
+	}
+	end := maxOrdinal + 1
+	if !hasValid {
+		end = 0
+	}
 	start := int64(0)
 	return indexformat.SegmentCoordinates{
 		Kind:         indexformat.CoordinateKindCodexOrdinalRange,
@@ -352,6 +683,38 @@ func buildCodexSegments(decoded []codexDecodedSegment, state *codexReplayState) 
 	return segments
 }
 
+// buildCodexCapturedSegments exposes every decoded segment with its bounded
+// bytes and per-record payload plus adjacent envelope metadata, so the
+// classifier consumes the verified capture without reopening native sources.
+func buildCodexCapturedSegments(decoded []codexDecodedSegment) []CodexCapturedSegment {
+	segments := make([]CodexCapturedSegment, 0, len(decoded))
+	for _, segment := range decoded {
+		captured := CodexCapturedSegment{
+			Ordinal:    segment.ordinal,
+			Descriptor: segment.descriptor,
+			Data:       segment.boundedData(),
+		}
+		for _, record := range segment.records {
+			captured.Records = append(captured.Records, CodexCapturedRecord{
+				LineIndex:        record.LineIndex,
+				ByteStart:        record.ByteStart,
+				ByteEndExclusive: record.ByteEndExclusive,
+				EnvelopeType:     record.EnvelopeType,
+				Payload:          record.Payload,
+				Metadata:         record.Metadata,
+				Partial:          record.Partial,
+				Malformed:        record.Malformed,
+			})
+			if record.HasOrdinal {
+				ordinal := record.Ordinal
+				captured.Records[len(captured.Records)-1].DecodedOrdinal = &ordinal
+			}
+		}
+		segments = append(segments, captured)
+	}
+	return segments
+}
+
 func codexRefsForOwnership(nodes []CodexCapturedNode, ownership CodexOwnership) []schema.SourceEntryRef {
 	refs := []schema.SourceEntryRef{}
 	for _, node := range nodes {
@@ -364,31 +727,72 @@ func codexRefsForOwnership(nodes []CodexCapturedNode, ownership CodexOwnership) 
 
 // codexReplayState accumulates the captured graph across segments.
 type codexReplayState struct {
-	registry          *CodexRefRegistry
-	nodes             []CodexCapturedNode
-	correlations      []CodexCapturedCorrelation
-	diagnostics       []DiagnosticEntry
-	responseByItem    map[string]int
-	eventOrdinal      map[string]int64
-	lastNativeOrdinal map[string]int64
-	seenKeys          map[string]bool
-	turns             [][]int
-	checkpoints       []int
+	registry       *CodexRefRegistry
+	nodes          []CodexCapturedNode
+	correlations   []CodexCapturedCorrelation
+	diagnostics    []DiagnosticEntry
+	responseByItem map[string]int
+	itemNodeByID   map[string]int
+	eventOrdinal   map[string]int64
+	seenKeys       map[string]bool
+	openTurns      map[string]int64
+	boundary       *codexLegacyBoundaryReducer
+	turns          [][]int
+	checkpoints    []int
 	// incomplete records replay evidence that could not be aligned or proved;
 	// it forces incomplete_new without inventing a positional pair.
 	incomplete bool
 }
 
-// replaySegment reduces one decoded segment into the shared state.
+// replaySegment reduces one decoded segment into the shared state. A segment
+// whose proof failed still replays its proven valid records under a clamped
+// bound; records past the proven checkpoint are never claimed.
 func (state *codexReplayState) replaySegment(threadID string, segment codexDecodedSegment, mode CodexHistoryMode) error {
 	if segment.readFailed || segment.descriptor.Inclusion == indexformat.SegmentInclusionExcludedReverted {
 		return nil
 	}
+	var clampEnd *int64
+	if segment.proofFailed {
+		checkpoint := segment.decodedCheckpoint()
+		if checkpoint.hasValid {
+			end := checkpoint.maxOrdinal + 1
+			clampEnd = &end
+		} else {
+			return nil
+		}
+	}
 	for _, record := range segment.records {
-		if record.Partial {
+		if record.Partial || record.Blank {
 			continue
 		}
-		if !codexRecordInBounds(segment, record) {
+		if record.Malformed {
+			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+				ErrorType:   "codex_record_malformed",
+				Location:    codexRecordLocation(threadID, record),
+				Message:     "a complete native record could not be decoded into the replay graph; its byte checkpoint advanced and no native ordinal was assigned by line number",
+				Remediation: "Repair the native record and rerun; later valid records are still captured once.",
+			})
+			continue
+		}
+		if record.Regressed {
+			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+				ErrorType:   "codex_ordinal_regression",
+				Location:    codexRecordLocation(threadID, record),
+				Message:     "an explicit decoded ordinal does not advance past the segment checkpoint; the record was skipped and the byte checkpoint advanced",
+				Remediation: "Investigate the native writer; later valid items are still captured once.",
+			})
+			continue
+		}
+		if !record.HasOrdinal {
+			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+				ErrorType:   "codex_record_unknown",
+				Location:    codexRecordLocation(threadID, record),
+				Message:     "a complete native record has an unrecognized envelope type; its byte checkpoint advanced and no native ordinal was assigned",
+				Remediation: "Upgrade Peasant to a build that recognizes this Codex record type; later valid records are still captured once.",
+			})
+			continue
+		}
+		if !codexRecordInBounds(segment, record, clampEnd) {
 			continue
 		}
 		ownership := codexSegmentOwnership(segment, record.Ordinal)
@@ -426,10 +830,11 @@ func codexReferenceBoundsValid(ref CodexReference) bool {
 	return true
 }
 
-// codexRecordInBounds applies an explicit native segment bound. A current
-// segment and a segment with snapshot-only/unknown coordinates include every
-// record.
-func codexRecordInBounds(segment codexDecodedSegment, record codexHistoryRecord) bool {
+// codexRecordInBounds applies an explicit native segment bound in valid
+// decoded-ordinal space, optionally clamped to the proven checkpoint. A
+// current segment and a segment with snapshot-only/unknown coordinates
+// include every valid record.
+func codexRecordInBounds(segment codexDecodedSegment, record codexHistoryRecord, clampEnd *int64) bool {
 	coords := segment.descriptor.Coordinates
 	switch coords.Kind {
 	case indexformat.CoordinateKindCodexOrdinalRange, indexformat.CoordinateKindCodexReferenceRange, indexformat.CoordinateKindOpenCodeSequenceRange:
@@ -439,11 +844,15 @@ func codexRecordInBounds(segment codexDecodedSegment, record codexHistoryRecord)
 		if coords.EndExclusive != nil && record.Ordinal >= *coords.EndExclusive {
 			return false
 		}
+		if clampEnd != nil && record.Ordinal >= *clampEnd {
+			return false
+		}
 	}
 	return true
 }
 
-// codexSegmentOwnership resolves the native ownership evidence for one record.
+// codexSegmentOwnership resolves the native ownership evidence for one valid
+// decoded ordinal.
 func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwnership {
 	if segment.isCurrent {
 		if segment.descriptor.CopyBoundary != nil && ordinal < *segment.descriptor.CopyBoundary {
@@ -470,31 +879,17 @@ func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwne
 	}
 }
 
-// replayRecord dispatches one non-partial record.
+// replayRecord dispatches one valid decoded record.
 func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) error {
-	if record.Malformed {
-		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-			ErrorType:   "codex_record_malformed",
-			Location:    fmt.Sprintf("thread %s ordinal %d", threadID, record.Ordinal),
-			Message:     "a complete native record is not valid JSON; its byte checkpoint advanced and no ordinal was assigned by line number",
-			Remediation: "Repair the native record and rerun; later valid records are still captured once.",
-		})
-		return nil
-	}
-	if record.EnvelopeType == "" {
-		if len(bytes.TrimSpace(record.Payload)) == 0 {
-			return nil
-		}
-	}
 	var payload codexHistoryReplayPayload
 	if len(record.Payload) > 0 {
 		if err := json.Unmarshal(record.Payload, &payload); err != nil {
 			// A malformed complete line advances the byte checkpoint only.
 			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
 				ErrorType:   "codex_record_malformed",
-				Location:    fmt.Sprintf("thread %s ordinal %d", threadID, record.Ordinal),
-				Message:     fmt.Sprintf("a complete record could not be decoded: %v", err),
-				Remediation: "Repair the native record and rerun; the byte checkpoint advanced and no ordinal was assigned by line number.",
+				Location:    codexRecordLocation(threadID, record),
+				Message:     "a complete record payload could not be decoded; the byte checkpoint advanced and no native ordinal beyond its position was assigned by line number",
+				Remediation: "Repair the native record and rerun; later valid records are still captured once.",
 			})
 			return nil
 		}
@@ -504,7 +899,7 @@ func (state *codexReplayState) replayRecord(threadID string, segment codexDecode
 	case codexTypeSessionMeta, codexTypeTurnContext:
 		return nil
 	case codexTypeResponse:
-		return state.replayResponseItem(threadID, segment, record, payload, ownership)
+		return state.replayResponseItem(threadID, segment, record, payload, ownership, mode)
 	case codexTypeEventMsg:
 		return state.replayEventMessage(threadID, segment, record, payload, ownership, mode)
 	case "compacted":
@@ -514,49 +909,63 @@ func (state *codexReplayState) replayRecord(threadID string, segment codexDecode
 	}
 }
 
-// replayResponseItem emits one captured node for a recognized response_item and
-// pairs it with any earlier ItemCompleted event.
-func (state *codexReplayState) replayResponseItem(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership) error {
+// replayResponseItem emits one captured node for a recognized response_item,
+// pairs it with any earlier item lifecycle event, and admits legacy
+// instruction turns through the frozen boundary reducer.
+func (state *codexReplayState) replayResponseItem(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
 	nativeType, ok := codexResponseNativeType(payload.Type)
 	if !ok {
 		return nil
 	}
-	if payload.Ordinal != nil {
-		if last, seen := state.lastNativeOrdinal[nativeType]; seen && *payload.Ordinal <= last {
-			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-				ErrorType:   "codex_ordinal_regression",
-				Location:    fmt.Sprintf("thread %s ordinal %d", threadID, record.Ordinal),
-				Message:     fmt.Sprintf("a decoded ordinal %d does not advance past %d; the record was skipped", *payload.Ordinal, last),
-				Remediation: "Investigate the native writer; the byte checkpoint advanced and later valid items are still captured once.",
+	if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && state.boundary.admitResponse(payload) {
+		state.turns = append(state.turns, nil)
+	}
+	if payload.ID == "" {
+		_, _, err := state.emitNode(threadID, segment, record, ownership, nativeType, payload.Role, "", payload.CallID, payload.TurnID)
+		return err
+	}
+	if index, known := state.itemNodeByID[payload.ID]; known {
+		// An event-sourced item already owns this native identity: the raw
+		// response is its correlated mirror, never a duplicate item. A
+		// mirror in a later segment is same-thread survival, not a new pair.
+		state.responseByItem[payload.ID] = index
+		if state.nodes[index].SegmentOrdinal != segment.ordinal {
+			state.correlations = append(state.correlations, CodexCapturedCorrelation{
+				Kind:   CodexCorrelationSameThreadRollover,
+				ItemID: payload.ID,
+				Refs:   []schema.SourceEntryRef{state.nodes[index].Ref},
 			})
 			return nil
 		}
-		state.lastNativeOrdinal[nativeType] = *payload.Ordinal
+		state.correlations = append(state.correlations, CodexCapturedCorrelation{
+			Kind:            CodexCorrelationPairedResponseEvent,
+			ItemID:          payload.ID,
+			EventOrdinal:    codexInt64Ptr(state.nodes[index].Ordinal),
+			ResponseOrdinal: codexInt64Ptr(record.Ordinal),
+			Refs:            []schema.SourceEntryRef{state.nodes[index].Ref},
+		})
+		state.boundary.correlated(payload.ID)
+		delete(state.eventOrdinal, payload.ID)
+		return nil
 	}
-	if ownership == CodexOwnershipOwn && codexIsUserTurnStart(record.EnvelopeType, payload) {
-		state.turns = append(state.turns, nil)
+	if existing, duplicate := state.responseByItem[payload.ID]; duplicate {
+		// A repeated response for one native item correlates instead of
+		// duplicating. Only an item lifecycle event replaces item state.
+		state.correlations = append(state.correlations, CodexCapturedCorrelation{
+			Kind:            CodexCorrelationRepeatedItemCompleted,
+			ItemID:          payload.ID,
+			EventOrdinal:    codexInt64Ptr(state.nodes[existing].Ordinal),
+			ResponseOrdinal: codexInt64Ptr(record.Ordinal),
+			Refs:            []schema.SourceEntryRef{state.nodes[existing].Ref},
+		})
+		return nil
 	}
 	index, _, err := state.emitNode(threadID, segment, record, ownership, nativeType, payload.Role, payload.ID, payload.CallID, payload.TurnID)
 	if err != nil {
 		return err
 	}
-	if payload.ID == "" {
-		return nil
-	}
-	if existing, duplicate := state.responseByItem[payload.ID]; duplicate {
-		// A repeated item updates the one existing node rather than adding a
-		// duplicate. The same-thread rollover case is a cross-segment reuse and
-		// is recorded by emitNode.
-		if state.nodes[existing].SegmentOrdinal == segment.ordinal {
-			state.correlations = append(state.correlations, CodexCapturedCorrelation{
-				Kind:   CodexCorrelationRepeatedItemCompleted,
-				ItemID: payload.ID,
-				Refs:   []schema.SourceEntryRef{state.nodes[existing].Ref},
-			})
-		}
-		return nil
-	}
 	state.responseByItem[payload.ID] = index
+	state.itemNodeByID[payload.ID] = index
 	if eventOrdinal, paired := state.eventOrdinal[payload.ID]; paired {
 		state.correlations = append(state.correlations, CodexCapturedCorrelation{
 			Kind:            CodexCorrelationPairedResponseEvent,
@@ -565,34 +974,49 @@ func (state *codexReplayState) replayResponseItem(threadID string, segment codex
 			ResponseOrdinal: codexInt64Ptr(record.Ordinal),
 			Refs:            []schema.SourceEntryRef{state.nodes[index].Ref},
 		})
+		state.boundary.correlated(payload.ID)
+		delete(state.eventOrdinal, payload.ID)
 	}
 	return nil
 }
 
 // replayEventMessage handles the event_msg variants that participate in the
-// native replay: pairing, turn boundaries and legacy instruction rollback.
+// native replay: canonical item lifecycle, turn lifecycle, pairing, turn
+// boundaries and legacy instruction rollback.
 func (state *codexReplayState) replayEventMessage(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
 	switch payload.Type {
+	case "item_started":
+		if payload.ID != "" {
+			state.boundary.pendUnopened(payload.ID)
+		}
+		return nil
 	case "item_completed":
-		if payload.ID == "" {
+		return state.replayItemCompleted(threadID, segment, record, payload, ownership, mode)
+	case "turn_started":
+		if payload.TurnID != "" {
+			state.openTurns[payload.TurnID] = record.Ordinal
+		}
+		return nil
+	case "turn_complete":
+		if payload.TurnID == "" {
 			return nil
 		}
-		state.eventOrdinal[payload.ID] = record.Ordinal
-		if index, paired := state.responseByItem[payload.ID]; paired {
-			state.correlations = append(state.correlations, CodexCapturedCorrelation{
-				Kind:            CodexCorrelationRepeatedItemCompleted,
-				ItemID:          payload.ID,
-				EventOrdinal:    codexInt64Ptr(record.Ordinal),
-				ResponseOrdinal: codexInt64Ptr(record.Ordinal),
-				Refs:            []schema.SourceEntryRef{state.nodes[index].Ref},
-			})
+		if _, open := state.openTurns[payload.TurnID]; open {
+			delete(state.openTurns, payload.TurnID)
+			return nil
 		}
+		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+			ErrorType:   "codex_lifecycle_unbalanced",
+			Location:    codexRecordLocation(threadID, record),
+			Message:     "a native turn lifecycle event completes a turn that never started; the event was retained at its native position",
+			Remediation: "Investigate the native writer; the active history is unchanged.",
+		})
 		return nil
 	case "thread_rolled_back":
 		if mode != CodexHistoryModeLegacy {
 			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
 				ErrorType:   "codex_paginated_rollback_anomaly",
-				Location:    fmt.Sprintf("thread %s ordinal %d", threadID, record.Ordinal),
+				Location:    codexRecordLocation(threadID, record),
 				Message:     "a raw rollback record appeared in a paginated rollout; the paginated projector applies no turn deletion",
 				Remediation: "Use the supported paginated revert path; the active history is unchanged and the legacy reducer was not run.",
 			})
@@ -603,6 +1027,12 @@ func (state *codexReplayState) replayEventMessage(threadID string, segment codex
 		}
 		turns := int(*payload.NumTurns)
 		if turns > len(state.turns) {
+			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+				ErrorType:   "codex_rollback_beyond_history",
+				Location:    codexRecordLocation(threadID, record),
+				Message:     fmt.Sprintf("a native rollback removes %d turns but only %d native instruction turns are open; every open turn was excluded and later appends survive", turns, len(state.turns)),
+				Remediation: "Investigate the native writer; the active history holds only the surviving prefix.",
+			})
 			turns = len(state.turns)
 		}
 		for _, turn := range state.turns[len(state.turns)-turns:] {
@@ -613,9 +1043,12 @@ func (state *codexReplayState) replayEventMessage(threadID string, segment codex
 		state.turns = state.turns[:len(state.turns)-turns]
 		return nil
 	case "turn_aborted":
+		if payload.TurnID != "" {
+			delete(state.openTurns, payload.TurnID)
+		}
 		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
 			ErrorType:   "codex_turn_aborted",
-			Location:    fmt.Sprintf("thread %s ordinal %d", threadID, record.Ordinal),
+			Location:    codexRecordLocation(threadID, record),
 			Message:     "a native turn was aborted; its records are retained at their native position",
 			Remediation: "No action required; the abort is a native control event.",
 		})
@@ -625,15 +1058,160 @@ func (state *codexReplayState) replayEventMessage(threadID string, segment codex
 	}
 }
 
+// replayItemCompleted applies the canonical paginated item authority. An
+// event that carries its own item body emits or replaces the one native
+// item; a bare completion correlates with its response mirror or pends for
+// it. Repeated completions replace completed-item state while preserving
+// the native identity (ref); they never duplicate the item.
+func (state *codexReplayState) replayItemCompleted(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
+	if payload.ID == "" {
+		return nil
+	}
+	body, hasBody, bodyMalformed := codexDecodeItemBody(payload.Item)
+	if bodyMalformed {
+		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+			ErrorType:   "codex_item_body_malformed",
+			Location:    codexRecordLocation(threadID, record),
+			Message:     "a carried canonical item could not be decoded; the completion marker still correlates but no item state was replaced",
+			Remediation: "Repair the native item body and rerun; the existing item state is retained.",
+		})
+	}
+	if hasBody {
+		if nativeType, ok := codexResponseNativeType(body.Type); ok && codexItemBodyCarriesContent(body) {
+			return state.applyItemBody(threadID, segment, record, payload, body, nativeType, ownership, mode)
+		}
+	}
+	state.eventOrdinal[payload.ID] = record.Ordinal
+	if index, paired := state.itemNodeByID[payload.ID]; paired {
+		state.correlations = append(state.correlations, CodexCapturedCorrelation{
+			Kind:            CodexCorrelationRepeatedItemCompleted,
+			ItemID:          payload.ID,
+			EventOrdinal:    codexInt64Ptr(record.Ordinal),
+			ResponseOrdinal: codexInt64Ptr(state.nodes[index].Ordinal),
+			Refs:            []schema.SourceEntryRef{state.nodes[index].Ref},
+		})
+		return nil
+	}
+	if payload.Delivery.isCorrelated() {
+		// An inter-agent delivery without its own item body is still a
+		// native admission: it opens a legacy instruction boundary once.
+		if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && state.boundary.admit(payload.ID) {
+			state.turns = append(state.turns, nil)
+		}
+		return nil
+	}
+	state.boundary.pendUnopened(payload.ID)
+	return nil
+}
+
+// applyItemBody emits or replaces the one native item for an item lifecycle
+// event that carries its own body. The event is the transcript item
+// authority: its body wins over a raw response mirror.
+func (state *codexReplayState) applyItemBody(threadID string, segment codexDecodedSegment, record codexHistoryRecord, event codexHistoryReplayPayload, body codexItemBody, nativeType string, ownership CodexOwnership, mode CodexHistoryMode) error {
+	itemID := event.ID
+	if body.ID != "" {
+		itemID = body.ID
+	}
+	role := body.Role
+	callID := body.CallID
+	turnID := body.TurnID
+	if turnID == "" {
+		turnID = event.TurnID
+	}
+	if index, known := state.itemNodeByID[itemID]; known {
+		node := &state.nodes[index]
+		if node.SegmentOrdinal != segment.ordinal {
+			// The same native item survived into a later segment: rollover
+			// evidence, never a state replacement across incarnations.
+			state.correlations = append(state.correlations, CodexCapturedCorrelation{
+				Kind:   CodexCorrelationSameThreadRollover,
+				ItemID: itemID,
+				Refs:   []schema.SourceEntryRef{node.Ref},
+			})
+			return nil
+		}
+		// A repeated completion replaces the completed-item state while
+		// preserving the native identity (ref and key).
+		node.Ordinal = record.Ordinal
+		node.LineIndex = record.LineIndex
+		node.ByteStart = record.ByteStart
+		node.ByteEndExclusive = record.ByteEndExclusive
+		node.EnvelopeType = record.EnvelopeType
+		node.NativeType = nativeType
+		node.NativeRole = role
+		node.CallID = callID
+		node.TurnID = turnID
+		node.Payload = record.Payload
+		if bodyChangedMetadata(record.Metadata) {
+			node.Metadata = record.Metadata
+		}
+		state.correlations = append(state.correlations, CodexCapturedCorrelation{
+			Kind:            CodexCorrelationRepeatedItemCompleted,
+			ItemID:          itemID,
+			EventOrdinal:    codexInt64Ptr(record.Ordinal),
+			ResponseOrdinal: codexInt64Ptr(node.Ordinal),
+			Refs:            []schema.SourceEntryRef{node.Ref},
+		})
+		state.boundary.correlated(itemID)
+		return nil
+	}
+	// The admission opens before emission so the item lands in its own
+	// native instruction turn instead of the previous one.
+	if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && state.boundary.admit(itemID) {
+		state.turns = append(state.turns, nil)
+	}
+	index, _, err := state.emitNode(threadID, segment, record, ownership, nativeType, role, itemID, callID, turnID)
+	if err != nil {
+		return err
+	}
+	state.itemNodeByID[itemID] = index
+	if eventOrdinal, paired := state.eventOrdinal[itemID]; paired {
+		state.correlations = append(state.correlations, CodexCapturedCorrelation{
+			Kind:            CodexCorrelationPairedResponseEvent,
+			ItemID:          itemID,
+			EventOrdinal:    codexInt64Ptr(eventOrdinal),
+			ResponseOrdinal: codexInt64Ptr(record.Ordinal),
+			Refs:            []schema.SourceEntryRef{state.nodes[index].Ref},
+		})
+		state.boundary.correlated(itemID)
+		delete(state.eventOrdinal, itemID)
+	}
+	return nil
+}
+
+// codexDecodeItemBody decodes a carried canonical item. A missing body is
+// not present; a malformed present body is present and malformed, so the
+// caller can record the anomaly while still honoring the completion marker.
+func codexDecodeItemBody(raw json.RawMessage) (codexItemBody, bool, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return codexItemBody{}, false, false
+	}
+	var body codexItemBody
+	if err := json.Unmarshal(trimmed, &body); err != nil {
+		return codexItemBody{}, true, true
+	}
+	if body.Type == "" {
+		return codexItemBody{}, true, true
+	}
+	return body, true, false
+}
+
+func bodyChangedMetadata(metadata json.RawMessage) bool {
+	return len(bytes.TrimSpace(metadata)) > 0 && !bytes.Equal(bytes.TrimSpace(metadata), []byte("null"))
+}
+
 // replayCompaction retains archival turns and selects a surviving checkpoint.
 // A replacement history is a model baseline, never appended duplicate chat.
+// History without metadata is accepted; orphan or malformed present metadata,
+// and unequal present arrays, mark reconstruction incomplete.
 func (state *codexReplayState) replayCompaction(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership) error {
 	if !codexReplacementHistoryAligned(payload) {
 		state.incomplete = true
 		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
 			ErrorType:   "codex_checkpoint_metadata_misaligned",
-			Location:    fmt.Sprintf("thread %s ordinal %d", threadID, record.Ordinal),
-			Message:     "the replacement-history and its metadata arrays do not have equal lengths; no positional pairing was invented and the reconstruction is incomplete",
+			Location:    codexRecordLocation(threadID, record),
+			Message:     "the replacement-history and its metadata arrays cannot be paired; no positional pairing was invented and the reconstruction is incomplete",
 			Remediation: "Repair the native checkpoint metadata and rerun; the existing active generation is retained and the checkpoint summary is not paired.",
 		})
 	}
@@ -650,37 +1228,104 @@ func (state *codexReplayState) replayCompaction(threadID string, segment codexDe
 
 // codexReplacementHistoryAligned reports whether the native replacement-history
 // and replacement-history-metadata arrays can be paired. Absent arrays are
-// supported; two present arrays must have equal lengths.
+// supported, including history without metadata. Two present arrays must have
+// equal lengths; orphan metadata and malformed present arrays are misaligned.
 func codexReplacementHistoryAligned(payload codexHistoryReplayPayload) bool {
-	history, historyPresent := codexArrayLen(payload.ReplacementHistory)
-	metadata, metadataPresent := codexArrayLen(payload.ReplacementMetadata)
+	historyLen, historyPresent, historyMalformed := codexArrayState(payload.ReplacementHistory)
+	metadataLen, metadataPresent, metadataMalformed := codexArrayState(payload.ReplacementMetadata)
+	if historyMalformed || metadataMalformed {
+		return false
+	}
 	if !historyPresent && !metadataPresent {
 		return true
 	}
-	if historyPresent != metadataPresent {
+	if historyPresent && !metadataPresent {
+		return true
+	}
+	if !historyPresent && metadataPresent {
 		return false
 	}
-	return history == metadata
+	return historyLen == metadataLen
 }
 
-// codexArrayLen returns the length of a present JSON array. A null, absent or
-// non-array value is not present.
-func codexArrayLen(raw json.RawMessage) (int, bool) {
+// codexArrayState describes a present JSON array. Absent and null values are
+// not present; a present non-array value is malformed.
+func codexArrayState(raw json.RawMessage) (length int, present bool, malformed bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return 0, false
+		return 0, false, false
 	}
 	var values []json.RawMessage
 	if err := json.Unmarshal(trimmed, &values); err != nil {
-		return 0, false
+		return 0, true, true
 	}
-	return len(values), true
+	return len(values), true, false
 }
 
-// emitNode allocates the stable ref for a native key and appends the node. A
-// key seen before is one logical item: the node is not duplicated, and the
-// reuse is recorded as the same-thread rollover correlation. The returned index
-// is the node's position in the captured graph.
+// codexLegacyBoundaryReducer is the pinned frozen native
+// instruction-boundary predicate for legacy rollback. It keys on native
+// item identity and delivery correlation, never on presentation role or
+// projected input counts. admit opens at most one turn per native
+// admission: the first of a response/event pair opens, the second
+// correlates.
+type codexLegacyBoundaryReducer struct {
+	// pending maps an instruction identity to whether its turn is already
+	// open. False means an event pended for a response that has not
+	// arrived; true means the turn opened and the pair must correlate.
+	pending map[string]bool
+}
+
+// admit records one native instruction admission. It reports whether the
+// caller must open a new turn.
+func (r *codexLegacyBoundaryReducer) admit(id string) bool {
+	if id == "" {
+		return true
+	}
+	if opened, known := r.pending[id]; known {
+		delete(r.pending, id)
+		return !opened
+	}
+	r.pending[id] = true
+	return true
+}
+
+// admitResponse applies the reducer to a raw response item: a user
+// instruction or a delivery-correlated message is an admission; any other
+// response kind is not a turn boundary on its own.
+func (r *codexLegacyBoundaryReducer) admitResponse(payload codexHistoryReplayPayload) bool {
+	if payload.Type != codexResponseMessage {
+		return false
+	}
+	if payload.Role == "user" || payload.Delivery.isCorrelated() {
+		return r.admit(payload.ID)
+	}
+	return false
+}
+
+// pendUnopened records an event awaiting its response mirror without
+// opening a turn.
+func (r *codexLegacyBoundaryReducer) pendUnopened(id string) {
+	if id == "" {
+		return
+	}
+	if _, known := r.pending[id]; !known {
+		r.pending[id] = false
+	}
+}
+
+// correlated drops the pending admission once its pair proved.
+func (r *codexLegacyBoundaryReducer) correlated(id string) {
+	if id == "" {
+		return
+	}
+	delete(r.pending, id)
+}
+
+// emitNode allocates the stable ref for a native key and appends the node,
+// capturing the raw payload plus the adjacent envelope metadata. A key seen
+// before is one logical item: the node is not duplicated, and the reuse is
+// recorded as the same-thread rollover correlation. The returned index is
+// the node's position in the captured graph.
 func (state *codexReplayState) emitNode(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, nativeType, role, itemID, callID, turnID string) (int, bool, error) {
 	key := codexNativeKey(threadID, segment, record, nativeType)
 	if state.seenKeys[key] {
@@ -705,6 +1350,7 @@ func (state *codexReplayState) emitNode(threadID string, segment codexDecodedSeg
 		Ref:              ref,
 		SegmentOrdinal:   segment.ordinal,
 		Ordinal:          record.Ordinal,
+		LineIndex:        record.LineIndex,
 		ByteStart:        record.ByteStart,
 		ByteEndExclusive: record.ByteEndExclusive,
 		EnvelopeType:     record.EnvelopeType,
@@ -714,6 +1360,8 @@ func (state *codexReplayState) emitNode(threadID string, segment codexDecodedSeg
 		CallID:           callID,
 		TurnID:           turnID,
 		Ownership:        ownership,
+		Payload:          record.Payload,
+		Metadata:         record.Metadata,
 	})
 	if codexOwnershipIsOwn(ownership) {
 		state.turns = appendTurnNode(state.turns, len(state.nodes)-1)
@@ -778,21 +1426,6 @@ func codexResponseNativeType(payloadType string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-// codexIsUserTurnStart reports whether a recognized record opens a new turn
-// under the pinned legacy instruction-boundary rule. Inter-agent deliveries are
-// their own boundaries and are handled by the classifier; the replay opens a
-// turn for them too so rollback does not absorb agent deliveries into a user
-// turn.
-func codexIsUserTurnStart(envelopeType string, payload codexHistoryReplayPayload) bool {
-	if envelopeType != codexTypeResponse {
-		return false
-	}
-	if payload.Type != codexResponseMessage {
-		return false
-	}
-	return payload.Role == "user"
 }
 
 // codexNativeKey builds the bounded local identity the ref registry keys on. A
