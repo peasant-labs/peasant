@@ -113,11 +113,11 @@ func BuildGeneration(capture ClassifiedCapture, allocator RefAllocator) (indexfo
 	}
 	prior := capture.Prior.clone()
 
-	resolved, byKey, err := resolveProjectionBlocks(capture)
+	resolved, err := resolveProjectionBlocks(capture)
 	if err != nil {
 		return indexformat.Generation{}, err
 	}
-	if err := allocateBlockRefs(resolved, byKey, prior, allocator); err != nil {
+	if err := allocateBlockRefs(resolved, prior, allocator); err != nil {
 		return indexformat.Generation{}, err
 	}
 	if err := allocateSubmissionRefs(resolved, prior, allocator); err != nil {
@@ -140,7 +140,7 @@ func BuildGeneration(capture ClassifiedCapture, allocator RefAllocator) (indexfo
 	if err != nil {
 		return indexformat.Generation{}, err
 	}
-	aliases, err := buildProjectionAliases(resolved, byKey)
+	aliases, err := buildProjectionAliases(resolved)
 	if err != nil {
 		return indexformat.Generation{}, err
 	}
@@ -218,16 +218,16 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 // relocates an uncertain or ambiguous subtree into a declared earlier section,
 // keeps a tool subtree with its carrier, and collapses an ambiguous pair to one
 // entry.
-func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, map[string]*resolvedBlock, error) {
+func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error) {
 	resolved := make([]*resolvedBlock, len(capture.Blocks))
 	byKey := make(map[string]*resolvedBlock, len(capture.Blocks))
 	for i := range capture.Blocks {
 		block := capture.Blocks[i]
 		if strings.TrimSpace(block.NativeKey) == "" {
-			return nil, nil, fmt.Errorf("ingest.BuildGeneration: block[%d] has an empty native key; the block cannot be matched on reuse; encode a non-empty opaque native key", i)
+			return nil, fmt.Errorf("ingest.BuildGeneration: block[%d] has an empty native key; the block cannot be matched on reuse; encode a non-empty opaque native key", i)
 		}
 		if _, duplicate := byKey[block.NativeKey]; duplicate {
-			return nil, nil, fmt.Errorf("ingest.BuildGeneration: native key %q repeats in one capture; a later capture could not tell the blocks apart; keep one block per native key", block.NativeKey)
+			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q repeats in one capture; a later capture could not tell the blocks apart; keep one block per native key", block.NativeKey)
 		}
 		rb := &resolvedBlock{block: block, section: block.Section.Index}
 		resolved[i] = rb
@@ -240,7 +240,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, map[s
 	for _, rb := range resolved {
 		if rb.block.AmbiguousPairKey != "" {
 			if !hasEarlier {
-				return nil, nil, fmt.Errorf("ingest.BuildGeneration: native key %q is an ambiguous pair but the capture declares no earlier section; the pair cannot be retained honestly; declare an uncertain earlier section", rb.block.NativeKey)
+				return nil, fmt.Errorf("ingest.BuildGeneration: native key %q is an ambiguous pair but the capture declares no earlier section; the pair cannot be retained honestly; declare an uncertain earlier section", rb.block.NativeKey)
 			}
 			rb.section = firstEarlier
 			rb.block.Uncertain = true
@@ -249,7 +249,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, map[s
 		}
 		if rb.block.UncertainSubtree {
 			if !hasEarlier {
-				return nil, nil, fmt.Errorf("ingest.BuildGeneration: carrier %q has an uncertain subtree but the capture declares no earlier section; the subtree cannot be placed honestly; declare an uncertain earlier section", rb.block.NativeKey)
+				return nil, fmt.Errorf("ingest.BuildGeneration: carrier %q has an uncertain subtree but the capture declares no earlier section; the subtree cannot be placed honestly; declare an uncertain earlier section", rb.block.NativeKey)
 			}
 			rb.section = firstEarlier
 			rb.block.Uncertain = true
@@ -264,10 +264,10 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, map[s
 		}
 		carrier := byKey[rb.block.CarrierNativeKey]
 		if carrier == nil {
-			return nil, nil, fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q that is not in this capture; the tool subtree would be split; supply the carrier block", rb.block.NativeKey, rb.block.CarrierNativeKey)
+			return nil, fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q that is not in this capture; the tool subtree would be split; supply the carrier block", rb.block.NativeKey, rb.block.CarrierNativeKey)
 		}
 		if carrier.block.Depth != 0 {
-			return nil, nil, fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q whose depth is %d, not 0; the tool parent cannot be resolved; point the block at its depth-0 carrier", rb.block.NativeKey, carrier.block.NativeKey, carrier.block.Depth)
+			return nil, fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q whose depth is %d, not 0; the tool parent cannot be resolved; point the block at its depth-0 carrier", rb.block.NativeKey, carrier.block.NativeKey, carrier.block.Depth)
 		}
 		rb.section = carrier.section
 	}
@@ -289,12 +289,12 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, map[s
 			rb.block.Uncertain = true
 		}
 	}
-	return resolved, byKey, nil
+	return resolved, nil
 }
 
 // allocateBlockRefs assigns one opaque block ref per retained block, reusing a
 // prior alias when one exists.
-func allocateBlockRefs(resolved []*resolvedBlock, byKey map[string]*resolvedBlock, prior ProjectionPriorState, allocator RefAllocator) error {
+func allocateBlockRefs(resolved []*resolvedBlock, prior ProjectionPriorState, allocator RefAllocator) error {
 	used := make(map[schema.SourceEntryRef]string, len(resolved))
 	for _, rb := range resolved {
 		if rb.dropped {
@@ -624,7 +624,7 @@ func projectionEntryContent(entry schema.SessionEntry) string {
 // acceptance alias per submission key pointing at the first submitted input
 // block. Dropped ambiguous keys alias the retained entry so a reopen cannot
 // reallocate.
-func buildProjectionAliases(resolved []*resolvedBlock, byKey map[string]*resolvedBlock) ([]indexformat.NativeAlias, error) {
+func buildProjectionAliases(resolved []*resolvedBlock) ([]indexformat.NativeAlias, error) {
 	byAlias := make(map[string]schema.SourceEntryRef)
 	firstSubmissionRef := make(map[string]schema.SourceEntryRef)
 	for _, rb := range resolved {
