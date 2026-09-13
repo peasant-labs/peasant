@@ -323,11 +323,14 @@ func (p *Pipeline) cacheRepairLocations(ctx context.Context, ids []SessionID) {
 }
 
 // queuedForNativeChange reports whether an entry already queued for other work
-// was queued because the session's native content or producer version changed.
-// Such a session is re-acquired from native input, which rewrites the pair and
-// recreates a missing sidecar, so a selection-stage damage verdict for it would
-// duplicate a read the queued path does not need. The stored row is read from
-// the location cache, so the decision reads no file.
+// was queued for a reason that proves the queued path rewrites the pair from
+// native input: a forced run, a schema this build re-extracts from native
+// input, or a newer clock on a row with no supported stored fingerprint that
+// could overrule it. Such a session recreates a missing sidecar and republishes
+// the pair, so a selection-stage damage verdict for it would duplicate a read
+// the queued path does not need. It deliberately does not prove the native
+// bytes changed, and it does not defer arbitrary producer-version queues. The
+// stored row is read from the location cache, so the decision reads no file.
 func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
 	// A forced run re-acquires native input for every queued session.
 	if p.config.Force {
@@ -385,8 +388,9 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	for _, sid := range ids {
 		if i, queued := entryIndex[sid]; queued {
 			if p.queuedForNativeChange(entries[i].Session) {
-				// Queued because the session's native content or producer
-				// version changed: the queued path re-acquires native input and
+				// Queued for a proven rewrite reason (a forced run, a
+				// native-refresh schema, or a clock hint no stored fingerprint
+				// can overrule): the queued path re-acquires native input and
 				// rewrites the pair, recreating a missing sidecar, so a
 				// selection-stage damage verdict would only add a read the path
 				// does not need.
@@ -395,10 +399,11 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 			if !p.pairNeedsRepair(ctx, sid) {
 				continue
 			}
-			// Queued for a reason that can settle without reading the pair
-			// (index readiness). Carry the damage verdict onto the existing
-			// entry so a database-first no-op cannot leave the damaged pair
-			// behind.
+			// Queued for a reason that can settle without republishing the
+			// pair: index readiness, or a newer clock that captured fingerprint
+			// comparison may classify unchanged before any write. Carry the
+			// damage verdict onto the existing entry so a database-first no-op
+			// cannot leave the damaged pair behind.
 			metadataPath, _ := p.storedMetadataPath(ctx, sid)
 			entries[i].pairRepair = true
 			entries[i].repairMetadataPath = metadataPath
