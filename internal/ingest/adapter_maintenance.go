@@ -506,6 +506,12 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	// guards independently verify that this retained pair matches its stored state.
 	result.meta = &retained.Metadata
 	result.transcriptData = retained.Transcript
+	// Carry the exact metadata bytes this read validated, beside the
+	// transcript from the same read, so the index forms one snapshot. This
+	// field deliberately does not set result.artifact: the run committed no
+	// pair, and claiming one would mirror a phantom pair and report a false
+	// publication.
+	result.retainedMetadataJSON = retained.MetadataJSON
 	result.result.OutputPath = filepath.Dir(metadataPath)
 	result.outputTranscriptPath = filepath.Join(result.result.OutputPath, string(entry.Session.SessionID)+"--transcript."+string(retained.Metadata.Source.Format))
 	result.originalRoot = entry.Session.OriginalRoot

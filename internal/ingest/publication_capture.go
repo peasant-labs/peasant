@@ -28,7 +28,11 @@ func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTar
 	}
 	// Proof needs metadata and its paired revision, not the old transcript
 	// entries, quality metrics, or association ledger. Keep this projection
-	// lightweight even when publication loads full entry bodies.
+	// lightweight even when publication loads full entry bodies. The proof
+	// carries no metadata bytes: the decoded projection has already dropped
+	// the fields the document holds outside the struct, so re-encoding it
+	// would be lossy. With metadataData unset, the index capture reads both
+	// halves from disk as one validated pair.
 	snapshots, err := reader.LoadPublicationMetadata(ctx, []SessionID{target.session.SessionID})
 	snapshot := snapshots[target.session.SessionID]
 	if err != nil || snapshot.Error != nil || snapshot.Readiness != PublicationReady || snapshot.Metadata.ModelHarness != target.session.Harness || snapshot.Metadata.Source.Format != target.session.SourceFormat || snapshot.Metadata.ContentHash != schema.ComputeTranscriptHash(data) {

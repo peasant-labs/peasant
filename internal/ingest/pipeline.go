@@ -3301,6 +3301,9 @@ func indexWithSourceKind(
 // session, when it published a pair this run. The index path uses them directly
 // instead of reading the metadata file back.
 func workerMetadataJSON(wr *workerResult) []byte {
+	if len(wr.retainedMetadataJSON) != 0 {
+		return wr.retainedMetadataJSON
+	}
 	if wr.artifact != nil {
 		return wr.artifact.MetadataJSON
 	}

@@ -95,31 +95,25 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 }
 
 // captureArtifactForIndex pairs the session's committed metadata with the
-// bytes the index step will parse. When the worker handed over the transcript
-// bytes it just wrote, those are used directly; otherwise the pair is read
-// from disk and validated by the metadata's own content hash.
+// bytes the index step will parse. An in-memory transcript always travels
+// with the metadata bytes from the same read or write: when either half is
+// absent, both halves are read from disk as one validated pair, never a lone
+// metadata read beside an in-memory transcript.
 func (p *Pipeline) captureArtifactForIndex(metadataPath string, im indexedMeta) (*ManagedArtifact, error) {
-	if len(im.transcriptData) == 0 {
+	if len(im.transcriptData) == 0 || len(im.metadataData) == 0 {
 		return readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, im.session.SessionID)
 	}
 	// The worker handed over the bytes it just wrote for both halves of the
-	// pair. Use the in-memory metadata directly rather than reading the file
-	// back: a newly ingested session's index costs no read of its own pair.
-	data := im.metadataData
-	if len(data) == 0 {
-		var err error
-		if data, err = p.fs.ReadFile(metadataPath); err != nil {
-			return nil, err
-		}
-	}
-	meta, err := decodeManagedMetadata(data, metadataPath)
+	// pair. Use them directly rather than reading the files back: a newly
+	// ingested session's index costs no read of its own pair.
+	meta, err := decodeManagedMetadata(im.metadataData, metadataPath)
 	if err != nil {
 		return nil, err
 	}
 	if meta.SessionID != im.session.SessionID {
 		return nil, fmt.Errorf("capture index input for session %s: metadata names different session %s; no parser ran; run harvest to save the session again", im.session.SessionID, meta.SessionID)
 	}
-	return NewManagedArtifact(data, im.transcriptData)
+	return NewManagedArtifact(im.metadataData, im.transcriptData)
 }
 
 func (p *Pipeline) checkIndexProducer(state *SessionIndexState) error {
