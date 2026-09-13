@@ -62,10 +62,17 @@ type ClassifiedBlock struct {
 	// one admitted submission. Empty means the block proves no submission group.
 	SubmissionKey string
 	// AmbiguousPairKey marks an ID-less response/event pair whose pairing the
-	// native reducer could not prove. Each unique unproved representation is
-	// retained with its own ref in uncertain earlier history; only a natively
-	// proved byte-and-evidence mirror collapses to one entry.
+	// native reducer could not prove. Every representation is retained with its
+	// own ref in uncertain earlier history; byte or evidence equality is never
+	// proof of one native item, so an unproved pair never collapses.
 	AmbiguousPairKey string
+	// NativeCorrelationKey is explicit positive native proof, supplied by the
+	// native reducer, that blocks carrying the same non-empty value are one
+	// native item (a proven mirror). The projection collapses those blocks to
+	// one entry and aliases the mirrors to the owner. The proof is never
+	// inferred from equal bytes, equal evidence or first-wins order; a
+	// withdrawn proof leaves every representation with its own ref.
+	NativeCorrelationKey string
 	// Section is the adapter's requested partition.
 	Section ProjectionSection
 	// Uncertain marks evidence whose ownership is not local and certain. It is
@@ -391,13 +398,11 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 		return nil, err
 	}
 
-	// Retain every unique unproved ambiguous representation with its own ref
-	// in uncertain earlier history. Only a natively proved byte-and-evidence
-	// mirror collapses to one entry; an ambiguous first-wins selection never
-	// discards distinct content or clears independent evidence.
-	if err := collapseProvedAmbiguousMirrors(resolved); err != nil {
-		return nil, err
-	}
+	// Retain every unproved ambiguous representation with its own ref in
+	// uncertain earlier history. Only an explicit native correlation proof
+	// collapses representations to one entry; byte or evidence equality never
+	// does, and an ambiguous first-wins selection never discards content.
+	collapseProvedMirrors(resolved)
 	return resolved, nil
 }
 
@@ -456,6 +461,20 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 			union(members[0], members[k])
 		}
 	}
+	// Explicitly proved native correlations are one item and must never be split
+	// across partitions: uncertainty anywhere in a proved mirror moves the whole
+	// group into earlier history before the collapse keeps the owner's entry.
+	byCorrelation := make(map[string][]int)
+	for i, rb := range resolved {
+		if rb.block.NativeCorrelationKey != "" {
+			byCorrelation[rb.block.NativeCorrelationKey] = append(byCorrelation[rb.block.NativeCorrelationKey], i)
+		}
+	}
+	for _, members := range byCorrelation {
+		for k := 1; k < len(members); k++ {
+			union(members[0], members[k])
+		}
+	}
 	components := make(map[int][]*resolvedBlock)
 	for i, rb := range resolved {
 		root := find(i)
@@ -491,181 +510,67 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	return nil
 }
 
-// ambiguousMirrorEqual reports whether two unproved blocks are a natively
-// proved mirror: every substantive representation byte and every independent
-// provenance axis match, so one entry can stand for both without discarding
-// distinct content or evidence.
-func ambiguousMirrorEqual(a, b ClassifiedBlock) bool {
-	if a.Role != b.Role || a.EntryType != b.EntryType || a.Depth != b.Depth {
-		return false
-	}
-	if a.Content != b.Content || a.ToolArguments != b.ToolArguments || a.ToolResult != b.ToolResult {
-		return false
-	}
-	if a.ToolName != b.ToolName || a.ToolKind != b.ToolKind {
-		return false
-	}
-	if a.CarrierNativeKey != b.CarrierNativeKey || a.ToolCallKey != b.ToolCallKey {
-		return false
-	}
-	if a.SubmissionKey != b.SubmissionKey {
-		return false
-	}
-	if a.HasThinking != b.HasThinking {
-		return false
-	}
-	if (a.TimestampMs == nil) != (b.TimestampMs == nil) {
-		return false
-	}
-	if a.TimestampMs != nil && *a.TimestampMs != *b.TimestampMs {
-		return false
-	}
-	if (a.PartType == nil) != (b.PartType == nil) {
-		return false
-	}
-	if a.PartType != nil && *a.PartType != *b.PartType {
-		return false
-	}
-	if !classifiedProvenanceEqual(a.Provenance, b.Provenance) {
-		return false
-	}
-	if !classifiedUsageEqual(a.Usage, b.Usage) {
-		return false
-	}
-	if !classifiedObservedModelEqual(a.ObservedModel, b.ObservedModel) {
-		return false
-	}
-	if !classifiedAttachmentsEqual(a.NativeAttachments, b.NativeAttachments) {
-		return false
-	}
-	return true
-}
-
-func classifiedProvenanceEqual(a, b *schema.ContentProvenance) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return a.Origin == b.Origin &&
-		a.Actor == b.Actor &&
-		a.Delivery == b.Delivery &&
-		a.Ownership == b.Ownership &&
-		a.Evidence == b.Evidence &&
-		a.InputModality == b.InputModality
-}
-
-func classifiedUsageEqual(a, b *ClassifiedUsage) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	if (a.TokensIn == nil) != (b.TokensIn == nil) {
-		return false
-	}
-	if a.TokensIn != nil && *a.TokensIn != *b.TokensIn {
-		return false
-	}
-	if (a.TokensOut == nil) != (b.TokensOut == nil) {
-		return false
-	}
-	if a.TokensOut != nil && *a.TokensOut != *b.TokensOut {
-		return false
-	}
-	return true
-}
-
-func classifiedObservedModelEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return *a == *b
-}
-
-func classifiedAttachmentsEqual(a, b []ClassifiedNativeAttachment) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].ID != b[i].ID ||
-			a[i].Kind != b[i].Kind ||
-			a[i].SourceType != b[i].SourceType ||
-			a[i].CustomType != b[i].CustomType ||
-			a[i].Data != b[i].Data ||
-			a[i].AttachmentToolCallKey != b[i].AttachmentToolCallKey ||
-			a[i].MessageRole != b[i].MessageRole {
-			return false
-		}
-	}
-	return true
-}
-
-// collapseProvedAmbiguousMirrors retains every unique unproved representation
-// with its own ref in uncertain earlier history. Members that are exact
-// mirrors collapse to the first mirror; distinct bodies or distinct provenance
-// axes stay as independent entries with independent evidence and no
-// input/title contribution (earlier history never counts).
-func collapseProvedAmbiguousMirrors(resolved []*resolvedBlock) error {
+// collapseProvedMirrors collapses only blocks the native reducer has positively
+// proved are one native item, by carrying the same non-empty
+// NativeCorrelationKey. The proof is explicit native correlation; the
+// projection never infers it from equal bytes, equal evidence or first-wins
+// order. Every unproved representation keeps its own ref, and the mirror's
+// native key aliases the retained owner so a later capture cannot reallocate.
+func collapseProvedMirrors(resolved []*resolvedBlock) {
 	groups := make(map[string][]*resolvedBlock)
 	for _, rb := range resolved {
-		if rb.block.AmbiguousPairKey != "" {
-			groups[rb.block.AmbiguousPairKey] = append(groups[rb.block.AmbiguousPairKey], rb)
+		if rb.block.NativeCorrelationKey != "" {
+			groups[rb.block.NativeCorrelationKey] = append(groups[rb.block.NativeCorrelationKey], rb)
 		}
 	}
 	for _, group := range groups {
-		retained := []*resolvedBlock{group[0]}
+		owner := group[0]
 		for _, rb := range group[1:] {
-			merged := false
-			for _, owner := range retained {
-				if ambiguousMirrorEqual(owner.block, rb.block) {
-					rb.dropped = true
-					rb.dropTo = owner
-					rb.section = owner.section
-					rb.block.Uncertain = true
-					merged = true
-					break
-				}
-			}
-			if !merged {
-				// Unique unproved representation: keep its own ref and its
-				// independent evidence in uncertain earlier history.
-				rb.section = ownerSection(group[0])
-				rb.block.Uncertain = true
-				retained = append(retained, rb)
-			}
+			rb.dropped = true
+			rb.dropTo = owner
+			rb.section = owner.section
 		}
 	}
-	return nil
-}
-
-func ownerSection(rb *resolvedBlock) int {
-	return rb.section
 }
 
 // allocateBlockRefs assigns one opaque block ref per retained block, reusing a
-// prior alias when one exists.
+// prior alias when one exists. When two distinct native keys inherited the same
+// prior ref because an earlier generation merged them (an unproved pair since
+// proven distinct, or a proved mirror whose proof was withdrawn), the first
+// retained owner keeps the ref and the newly distinct representation gets a
+// fresh one. A persisted alias is never silently cleared or re-merged.
 func allocateBlockRefs(resolved []*resolvedBlock, prior ProjectionPriorState, allocator RefAllocator) error {
 	used := make(map[schema.SourceEntryRef]string, len(resolved))
 	for _, rb := range resolved {
 		if rb.dropped {
 			continue
 		}
-		if ref, ok := prior.Entries[rb.block.NativeKey]; ok {
-			if err := ref.Validate(); err != nil {
+		ref := schema.SourceEntryRef("")
+		if priorRef, ok := prior.Entries[rb.block.NativeKey]; ok {
+			if err := priorRef.Validate(); err != nil {
 				return fmt.Errorf("ingest.BuildGeneration: prior alias for native key %q holds an invalid ref; the identity cannot be reused; re-index the session from a valid prior generation: %w", rb.block.NativeKey, err)
 			}
-			rb.ref = ref
-		} else {
-			ref, err := allocator.NewEntryRef()
+			ref = priorRef
+		}
+		if ref == "" || used[ref] != "" {
+			// No prior identity, or two distinct native keys resolved to one
+			// prior ref. Apply safe reconciliation: keep the owner's ref, then
+			// allocate a fresh identity for the newly distinct representation
+			// so neither representation is lost and no alias needs clearing.
+			fresh, err := allocator.NewEntryRef()
 			if err != nil {
 				return fmt.Errorf("ingest.BuildGeneration: allocating a block ref for native key %q failed; the block has no identity; retry the ingest run: %w", rb.block.NativeKey, err)
 			}
-			if err := ref.Validate(); err != nil {
+			if err := fresh.Validate(); err != nil {
 				return fmt.Errorf("ingest.BuildGeneration: the allocator returned an invalid block ref for native key %q; the block has no publicly valid identity; fix the allocator: %w", rb.block.NativeKey, err)
 			}
-			rb.ref = ref
+			ref = fresh
 		}
-		if other, duplicate := used[rb.ref]; duplicate {
-			return fmt.Errorf("ingest.BuildGeneration: native keys %q and %q resolved to the same block ref %q; two blocks would share one identity; clear the conflicting prior alias", other, rb.block.NativeKey, rb.ref)
+		if other, duplicate := used[ref]; duplicate {
+			return fmt.Errorf("ingest.BuildGeneration: native keys %q and %q resolved to the same block ref %q; the allocator reused an identity; fix the allocator", other, rb.block.NativeKey, ref)
 		}
-		used[rb.ref] = rb.block.NativeKey
+		rb.ref = ref
+		used[ref] = rb.block.NativeKey
 	}
 	for _, rb := range resolved {
 		if rb.dropped {

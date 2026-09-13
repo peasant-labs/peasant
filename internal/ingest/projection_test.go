@@ -62,28 +62,29 @@ type fixtureSection struct {
 }
 
 type fixtureBlock struct {
-	NativeKey           string                    `yaml:"nativeKey"`
-	SubmissionKey       string                    `yaml:"submissionKey"`
-	AmbiguousPairKey    string                    `yaml:"ambiguousPairKey"`
-	Section             fixtureSection            `yaml:"section"`
-	Uncertain           bool                      `yaml:"uncertain"`
-	UncertainSubtree    bool                      `yaml:"uncertainSubtree"`
-	Role                string                    `yaml:"role"`
-	EntryType           string                    `yaml:"entryType"`
-	Depth               int                       `yaml:"depth"`
-	CarrierNativeKey    string                    `yaml:"carrierNativeKey"`
-	ToolCallKey         string                    `yaml:"toolCallKey"`
-	ToolName            string                    `yaml:"toolName"`
-	Content             string                    `yaml:"content"`
-	ToolArguments       string                    `yaml:"toolArguments"`
-	ToolResult          string                    `yaml:"toolResult"`
-	ContentRepeat       *fixtureRepeat            `yaml:"contentRepeat"`
-	ToolArgumentsRepeat *fixtureRepeat            `yaml:"toolArgumentsRepeat"`
-	ToolResultRepeat    *fixtureRepeat            `yaml:"toolResultRepeat"`
-	Provenance          *fixtureProvenance        `yaml:"provenance"`
-	Usage               *fixtureUsage             `yaml:"usage"`
-	ObservedModel       *string                   `yaml:"observedModel"`
-	NativeAttachments   []fixtureNativeAttachment `yaml:"nativeAttachments"`
+	NativeKey            string                    `yaml:"nativeKey"`
+	SubmissionKey        string                    `yaml:"submissionKey"`
+	AmbiguousPairKey     string                    `yaml:"ambiguousPairKey"`
+	NativeCorrelationKey string                    `yaml:"nativeCorrelationKey"`
+	Section              fixtureSection            `yaml:"section"`
+	Uncertain            bool                      `yaml:"uncertain"`
+	UncertainSubtree     bool                      `yaml:"uncertainSubtree"`
+	Role                 string                    `yaml:"role"`
+	EntryType            string                    `yaml:"entryType"`
+	Depth                int                       `yaml:"depth"`
+	CarrierNativeKey     string                    `yaml:"carrierNativeKey"`
+	ToolCallKey          string                    `yaml:"toolCallKey"`
+	ToolName             string                    `yaml:"toolName"`
+	Content              string                    `yaml:"content"`
+	ToolArguments        string                    `yaml:"toolArguments"`
+	ToolResult           string                    `yaml:"toolResult"`
+	ContentRepeat        *fixtureRepeat            `yaml:"contentRepeat"`
+	ToolArgumentsRepeat  *fixtureRepeat            `yaml:"toolArgumentsRepeat"`
+	ToolResultRepeat     *fixtureRepeat            `yaml:"toolResultRepeat"`
+	Provenance           *fixtureProvenance        `yaml:"provenance"`
+	Usage                *fixtureUsage             `yaml:"usage"`
+	ObservedModel        *string                   `yaml:"observedModel"`
+	NativeAttachments    []fixtureNativeAttachment `yaml:"nativeAttachments"`
 }
 
 type fixtureMetadata struct {
@@ -154,8 +155,14 @@ type fixtureWant struct {
 	Earlier               []fixtureEarlierExpect `yaml:"earlier"`
 }
 
+type fixturePrior struct {
+	Entries     map[string]string `yaml:"entries"`
+	Submissions map[string]string `yaml:"submissions"`
+}
+
 type fixtureStep struct {
 	Allocator         []string       `yaml:"allocator"`
+	Prior             *fixturePrior  `yaml:"prior"`
 	PriorFromPrevious bool           `yaml:"priorFromPrevious"`
 	WantError         string         `yaml:"wantError"`
 	Capture           fixtureCapture `yaml:"capture"`
@@ -270,22 +277,23 @@ func buildProjectionCapture(in fixtureCapture) ingest.ClassifiedCapture {
 	}
 	for _, row := range in.Blocks {
 		block := ingest.ClassifiedBlock{
-			NativeKey:        row.NativeKey,
-			SubmissionKey:    row.SubmissionKey,
-			AmbiguousPairKey: row.AmbiguousPairKey,
-			Section:          ingest.ProjectionSection{Earlier: row.Section.Earlier, Index: row.Section.Index},
-			Uncertain:        row.Uncertain,
-			UncertainSubtree: row.UncertainSubtree,
-			Role:             schema.Role(row.Role),
-			EntryType:        schema.EntryType(row.EntryType),
-			Depth:            row.Depth,
-			CarrierNativeKey: row.CarrierNativeKey,
-			ToolCallKey:      row.ToolCallKey,
-			ToolName:         row.ToolName,
-			Content:          repeatText(row.ContentRepeat, row.Content),
-			ToolArguments:    repeatText(row.ToolArgumentsRepeat, row.ToolArguments),
-			ToolResult:       repeatText(row.ToolResultRepeat, row.ToolResult),
-			Provenance:       buildProjectionProvenance(row.Provenance),
+			NativeKey:            row.NativeKey,
+			SubmissionKey:        row.SubmissionKey,
+			AmbiguousPairKey:     row.AmbiguousPairKey,
+			NativeCorrelationKey: row.NativeCorrelationKey,
+			Section:              ingest.ProjectionSection{Earlier: row.Section.Earlier, Index: row.Section.Index},
+			Uncertain:            row.Uncertain,
+			UncertainSubtree:     row.UncertainSubtree,
+			Role:                 schema.Role(row.Role),
+			EntryType:            schema.EntryType(row.EntryType),
+			Depth:                row.Depth,
+			CarrierNativeKey:     row.CarrierNativeKey,
+			ToolCallKey:          row.ToolCallKey,
+			ToolName:             row.ToolName,
+			Content:              repeatText(row.ContentRepeat, row.Content),
+			ToolArguments:        repeatText(row.ToolArgumentsRepeat, row.ToolArguments),
+			ToolResult:           repeatText(row.ToolResultRepeat, row.ToolResult),
+			Provenance:           buildProjectionProvenance(row.Provenance),
 		}
 		if row.Usage != nil {
 			block.Usage = &ingest.ClassifiedUsage{
@@ -323,6 +331,20 @@ func buildProjectionAllocator(refs []string) *queueAllocator {
 		}
 	}
 	return allocator
+}
+
+// buildProjectionPrior builds the production prior alias state a caller supplies
+// before allocation. A fixture uses it to model a persisted alias map that an
+// earlier generation left behind, including aliases it had merged.
+func buildProjectionPrior(in fixturePrior) ingest.ProjectionPriorState {
+	prior := ingest.NewProjectionPriorState()
+	for key, ref := range in.Entries {
+		prior.Entries[key] = schema.SourceEntryRef(ref)
+	}
+	for key, ref := range in.Submissions {
+		prior.Submissions[key] = schema.SubmissionRef(ref)
+	}
+	return prior
 }
 
 func gotEntryContent(entry schema.SessionEntry) string {
@@ -601,21 +623,29 @@ func expectedProjectionAliases(step fixtureStep, want fixtureWant) map[string]st
 			aliases["block:"+block.NativeKey] = ref
 		}
 	}
-	// A dropped ambiguous pair aliases the retained entry.
+	// A mirror collapsed by an explicit native correlation proof aliases the
+	// retained owner entry.
+	correlationOwner := make(map[string]string)
 	for _, block := range step.Capture.Blocks {
-		if block.AmbiguousPairKey == "" {
+		if block.NativeCorrelationKey == "" {
+			continue
+		}
+		if _, ok := correlationOwner[block.NativeCorrelationKey]; ok {
+			continue
+		}
+		if ref, ok := refByNativeKey[block.NativeKey]; ok {
+			correlationOwner[block.NativeCorrelationKey] = ref
+		}
+	}
+	for _, block := range step.Capture.Blocks {
+		if block.NativeCorrelationKey == "" {
 			continue
 		}
 		if _, ok := aliases["block:"+block.NativeKey]; ok {
 			continue
 		}
-		for _, other := range step.Capture.Blocks {
-			if other.AmbiguousPairKey == block.AmbiguousPairKey {
-				if ref, ok := refByNativeKey[other.NativeKey]; ok {
-					aliases["block:"+block.NativeKey] = ref
-					break
-				}
-			}
+		if ref, ok := correlationOwner[block.NativeCorrelationKey]; ok {
+			aliases["block:"+block.NativeKey] = ref
 		}
 	}
 	firstSubmission := make(map[string]string)
@@ -676,7 +706,10 @@ func TestProjectionLayoutFixtures(t *testing.T) {
 			for stepIndex, step := range row.Steps {
 				label := fmt.Sprintf("%s step %d", row.Name, stepIndex)
 				capture := buildProjectionCapture(step.Capture)
-				if step.PriorFromPrevious {
+				switch {
+				case step.Prior != nil:
+					capture.Prior = buildProjectionPrior(*step.Prior)
+				case step.PriorFromPrevious:
 					capture.Prior = prior
 				}
 				generation, err := ingest.BuildGeneration(capture, buildProjectionAllocator(step.Allocator))
