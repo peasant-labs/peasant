@@ -215,7 +215,7 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 			renderer := newProgressProgram(io.Discard, state, nil, cancel)
 			var model tea.Model = renderer.newModel(ctx, started)
 			if !c.Unavailable || c.Expired {
-				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
 			}
 			model, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 			initialClock := "total elapsed: 2s"
@@ -328,7 +328,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			defer cancel()
 			state := ingest.NewProgressState()
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
-			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Delta: 4, Total: 10})
 			out := newSignalWriter("ctrl+c to cancel")
 			r := newProgressProgram(out, state, nil, cancel)
 			r.isTTY = true
@@ -546,7 +546,7 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 			defer cancel()
 			state := ingest.NewProgressState()
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
-			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Delta: 4, Total: 10})
 			committedSnapshot := state.Snapshot()
 			payload := &ingest.PipelineResult{Duration: 2300 * time.Millisecond}
 			payload.Summary.New = 7
@@ -588,7 +588,7 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 				}
 				// Change the shared source after the commit, while final delivery
 				// is held. Neither outcome snapshot may follow these later counts.
-				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 9, Total: 10})
+				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Delta: 5, Total: 10})
 				if c.CancelAt == harvestCancelBeforeFinal {
 					program.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 					pending := program.update(harvestprogress.TickMsg(final.At.Add(time.Second)))
@@ -783,7 +783,7 @@ func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
 	state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
 	m := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: started})
 	updated, _ := m.Update(harvestprogress.CancelMsg{})
-	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
+	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Delta: 4, Total: 10})
 	updated, cmd := updated.Update(ingestprogress.FinalMsg{At: started.Add(8 * time.Second), Snapshot: state.Snapshot(), Outcome: ingestprogress.FinalCanceled})
 	if cmd == nil {
 		t.Fatal("acknowledged cancellation did not quit")
@@ -792,7 +792,7 @@ func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
 	if !strings.Contains(view, "4/10") || !strings.Contains(view, "total elapsed: 8s") || !strings.Contains(view, "harvest canceled") {
 		t.Fatalf("final snapshot omitted last operation progress or clock: %s", view)
 	}
-	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 9, Total: 10})
+	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Delta: 5, Total: 10})
 	updated, _ = updated.Update(harvestprogress.TickMsg(started.Add(time.Minute)))
 	if updated.View().Content != view {
 		t.Fatal("completed cancellation snapshot changed after termination")
@@ -901,7 +901,7 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 	state.Update(ingest.ProgressEvent{
 		Kind:  ingest.KindAdvance,
 		Stage: ingest.StageDiscover,
-		Done:  3,
+		Delta: 3,
 		Total: 5,
 	})
 
@@ -992,7 +992,7 @@ func TestInlineProgressLayout(t *testing.T) {
 			}
 			state := ingest.NewProgressState()
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageIndex, Total: 10})
-			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageIndex, Done: 4, Total: 10})
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageIndex, Delta: 4, Total: 10})
 			started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 			model := harvestprogress.New(harvestprogress.Options{Progress: state, Animation: animation.IngestAnimation(), Theme: theme.New(mode), StartedAt: started})
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: c.Width, Height: c.Height})

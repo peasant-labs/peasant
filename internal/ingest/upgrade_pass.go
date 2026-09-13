@@ -82,11 +82,11 @@ func RunUpgradePass(fs FileSystem, outputDir string, prog *ProgressState) Upgrad
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageRecover, Total: len(keys)})
 	result := UpgradeResult{Ran: true}
 	allResolved := true
-	for done, key := range keys {
+	for _, key := range keys {
 		intent, ok := decodeUpgradeIntent(fs, filepath.Join(txDir, key, "intent.json"))
 		if !ok {
 			allResolved = false
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageRecover, Done: done + 1, Total: len(keys)})
+			emitAdvance(prog, StageRecover, 1, len(keys))
 			continue
 		}
 		restored := false
@@ -118,7 +118,7 @@ func RunUpgradePass(fs FileSystem, outputDir string, prog *ProgressState) Upgrad
 		} else if restored {
 			result.Restored = append(result.Restored, intent.SessionID)
 		}
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageRecover, Done: done + 1, Total: len(keys)})
+		emitAdvance(prog, StageRecover, 1, len(keys))
 	}
 
 	// Remove the state directory (transactions and locks) only when nothing is

@@ -105,7 +105,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | C3 | Atomic File Writes | The pair is installed by writing both files to a temp directory and renaming them into place, transcript first and metadata last, with no file sync and no lock. Never delete a session subtree; children and unrelated files are not owned. Ownership is decided by NAME, never by location: inside the session `debug/` directory only names whose extension is in the closed set `defaults.DebugArtifactSuffixes()` are peasant's own, so a user file with any other extension survives a write. The database commit, not the file write, is the durability point. |
 | C4 | Metadata Compatibility | Versions below 9 require native refresh. Reading metadata 9/10 alone causes no adapter call or metadata rewrite. An omitted adapter version uses baseline 1 for refresh eligibility but stays unknown in provenance until actual extraction succeeds. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
 | C5 | Arena Concurrent Drain | `Add()` uses bounded exponential backoff (1ms→16ms) when arena full. drainLoop goroutine runs concurrently with workers; arena only recycles via `AckBatch`. |
-| C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. |
+| C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. A `KindAdvance` carries a `Delta` that the store adds to a stage-owned cumulative `Done`, so workers that finish out of order cannot move the count backwards. |
 
 ## Invariants
 
@@ -160,7 +160,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | `StagingBuffer` | parallel.go | Lock-free buffer with arena + parent-child ordering |
 | `SessionEntryQueue` | parallel.go | Vyukov MPMC ring buffer |
 | `ProgressState` | progress.go | Pull-model progress aggregator: `Update()` + `Snapshot()` |
-| `ProgressEvent` | progress.go | Single stage progress update (Kind, Stage, Done, Total, Err) |
+| `ProgressEvent` | progress.go | Single stage progress update (Kind, Stage, Delta, Done, Total, Err); `KindAdvance` adds `Delta` to a store-owned cumulative `Done` |
 
 ## Files
 
