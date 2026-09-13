@@ -1,0 +1,76 @@
+# A session already queued for work reads its saved pair at the point of use,
+# not during pair-repair selection: a native acquisition rewrites the pair, and
+# both the retained-first read and the native-failure fallback read through the
+# validated pair reader that refuses a damaged pair. Selection only compares a
+# pair for a candidate the run had otherwise skipped.
+#
+# Each case seeds one stored row with an intact or damaged saved pair and a
+# native source older than the row, then runs the production pipeline (real
+# SQLite store, real indexer registry; only the source adapter and filesystem
+# are substituted). A discovered session with a native mod time newer than its
+# recorded ingest is queued by the ordinary diff; the absent native case is
+# queued only through the repair selection.
+#
+#   - queued, healthy, native unavailable: the fallback indexes the pair.
+#   - queued, damaged, native unavailable: the fallback refuses it; no index
+#     and no write, and the run must not turn it into a successful fallback.
+#   - queued, healthy, native available: native acquisition rewrites the pair.
+#   - unqueued, damaged, native available: selection appends a repair entry.
+#
+# The selection_reads cases run a dry run so no worker processes the row, and
+# count reads of the managed pair. A queued healthy candidate must not be read
+# during selection; an unqueued damaged candidate still is, proving the count.
+required_names:
+  - queued-healthy-native-unavailable-retains
+  - queued-damaged-native-unavailable-refuses
+  - queued-healthy-native-available-rewrites
+  - unqueued-damaged-native-available-repairs
+  - selection-queued-healthy-reads-none
+  - selection-unqueued-damaged-reads-pair
+native_transcript: |
+  {"type":"user","message":{"role":"user","content":"inspect the deferred native fixture"},"uuid":"u1"}
+  {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]},"uuid":"a1"}
+damaged_transcript: |
+  {"type":"user","message":{"role":"user","content":"a transcript that no longer matches its recorded identity"},"uuid":"u1"}
+cases:
+  - name: queued-healthy-native-unavailable-retains
+    discovered: true
+    pairState: healthy
+    nativeAvailable: false
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: true
+  # The damaged pair must not become a successful fallback: the fallback read
+  # refuses it, nothing is written, and the refusal names the failed checksum.
+  - name: queued-damaged-native-unavailable-refuses
+    discovered: true
+    pairState: damaged
+    nativeAvailable: false
+    wantIndexed: false
+    wantChecksumRefusal: true
+    wantPairUnchanged: true
+  - name: queued-healthy-native-available-rewrites
+    discovered: true
+    pairState: healthy
+    nativeAvailable: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+  # Not queued: selection detects the damage and appends the repair entry,
+  # which re-ingests the pair from the native source.
+  - name: unqueued-damaged-native-available-repairs
+    discovered: false
+    pairState: damaged
+    nativeAvailable: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+selection_reads:
+  - name: selection-queued-healthy-reads-none
+    discovered: true
+    pairState: healthy
+    wantPairReads: 0
+  - name: selection-unqueued-damaged-reads-pair
+    discovered: false
+    pairState: damaged
+    wantPairReadsAtLeast: 1
