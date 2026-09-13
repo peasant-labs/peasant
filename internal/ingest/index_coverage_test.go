@@ -183,8 +183,11 @@ func assertCoverageIdentity(t *testing.T, coverage *ingest.IndexCoverage) {
 }
 
 // TestComputeIndexCoverage drives every named fixture case through the
-// production computation and pins the independent counts, the aggregation
-// identity, and the classified membership behind them.
+// production computation and pins the independent counts and the aggregation
+// identity. The membership lists below are a fixture-consistency check, not
+// production output: ComputeIndexCoverage reports counts only, so the loop
+// recomputes the split from the same reader answer the fixture supplies. The
+// real-store integration test covers membership end-to-end.
 func TestComputeIndexCoverage(t *testing.T) {
 	for _, spec := range loadIndexCoverageComputeCases(t) {
 		spec := spec
@@ -224,9 +227,13 @@ func TestComputeIndexCoverage(t *testing.T) {
 				if coverage.FailedAttempts != len(failed) || coverage.Empty != spec.WantEmpty || coverage.FailedRetained != spec.WantRetained {
 					t.Errorf("ComputeIndexCoverage = %+v, want {FailedAttempts:%d Empty:%d FailedRetained:%d}", coverage, len(failed), spec.WantEmpty, spec.WantRetained)
 				}
-				// Membership, not just numbers: which failed sessions the run
-				// reports empty and which retained, through the same
-				// computation.
+				// Fixture consistency, not production output:
+				// ComputeIndexCoverage answers with counts, so this recomputes
+				// the split from the same without map the stub reader is built
+				// from. It only confirms the fixture's membership lists agree
+				// with its own failed list and reader answer; the counts and
+				// identity above exercise production, and real-store
+				// membership is covered end-to-end by the integration test.
 				gotEmpty, gotRetained := []string{}, []string{}
 				for _, id := range failed {
 					if without[id] {

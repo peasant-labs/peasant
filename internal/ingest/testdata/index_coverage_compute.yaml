@@ -1,12 +1,15 @@
 # Coverage-computation cases: the failed set folded against the store's
 # entries-membership answer.
 #
-# Each named case carries its inputs and the independent expectations the test
-# asserts against the production computation, not a second arithmetic: the
-# counts, the FailedAttempts == Empty + FailedRetained identity, and the
-# classified membership behind them. Case names are pinned by required_cases,
-# so deleting a case (or swapping it for a filler) goes red with no count to
-# decrement.
+# Each named case carries its inputs and the expectations the test asserts.
+# The counts and the FailedAttempts == Empty + FailedRetained identity are
+# asserted against the production computation, not a second arithmetic. The
+# membership lists are a fixture-consistency check: ComputeIndexCoverage
+# reports counts only, so the test recomputes the split from the reader answer
+# the fixture supplies and confirms the lists agree with it; real-store
+# membership is covered end-to-end by the integration test. Case names are
+# pinned by required_cases, so deleting a case (or swapping it for a filler)
+# goes red with no count to decrement.
 
 required_cases:
   - empty-failed-set-measures-zero
