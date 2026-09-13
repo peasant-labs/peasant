@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,6 +41,7 @@ type deferredPairRepairCase struct {
 	NativeAvailable     bool   `yaml:"nativeAvailable"`
 	StoredFingerprint   bool   `yaml:"storedFingerprint"`
 	PublicationReady    bool   `yaml:"publicationReady"`
+	StaleProducer       bool   `yaml:"staleProducer"`
 	WantIndexed         bool   `yaml:"wantIndexed"`
 	WantChecksumRefusal bool   `yaml:"wantChecksumRefusal"`
 	WantPairUnchanged   bool   `yaml:"wantPairUnchanged"`
@@ -53,6 +55,7 @@ type deferredSelectionRead struct {
 	NativeAvailable      bool   `yaml:"nativeAvailable"`
 	StoredFingerprint    bool   `yaml:"storedFingerprint"`
 	PublicationReady     bool   `yaml:"publicationReady"`
+	StaleProducer        bool   `yaml:"staleProducer"`
 	WantPairReads        *int   `yaml:"wantPairReads"`
 	WantPairReadsAtLeast int    `yaml:"wantPairReadsAtLeast"`
 }
@@ -311,11 +314,32 @@ func deferredPairModTime(t *testing.T, queueReason string) time.Time {
 	}
 }
 
-func runDeferredPairPipeline(t *testing.T, ctx context.Context, filesystem ingest.FileSystem, database *store.Store, config ingest.PipelineConfig, adapters map[ingest.Harness]ingest.AdapterFactory) *ingest.PipelineResult {
+// deferredPairStaleProducerOption raises this build's adapter target so the
+// seeded row is selected by the stale-producer inventory as well. The stored
+// producer revision stays one behind, matching the stale index candidate the
+// repair selection enumerates.
+func deferredPairStaleProducerOption() ingest.PipelineOption {
+	versions := maps.Clone(ingest.HarvesterVersionRegistry)
+	bumped := versions[ingest.HarnessClaudeCode]
+	bumped.AdapterVersion++
+	versions[ingest.HarnessClaudeCode] = bumped
+	return ingest.WithHarvesterVersions(versions)
+}
+
+func deferredPairOptions(staleProducer bool) []ingest.PipelineOption {
+	if !staleProducer {
+		return nil
+	}
+	return []ingest.PipelineOption{deferredPairStaleProducerOption()}
+}
+
+func runDeferredPairPipeline(t *testing.T, ctx context.Context, filesystem ingest.FileSystem, database *store.Store, config ingest.PipelineConfig, adapters map[ingest.Harness]ingest.AdapterFactory, options ...ingest.PipelineOption) *ingest.PipelineResult {
 	t.Helper()
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config,
+	base := []ingest.PipelineOption{
 		ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})),
-		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),
+	}
+	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +381,7 @@ func TestDeferredPairRepairDetection(t *testing.T) {
 			adapters := deferredPairAdapters(t, seed, []byte(document.NativeTranscript), discoveredSessions, fixture.NativeAvailable)
 			config := makePipelineConfig(testOutputDir)
 
-			result := runDeferredPairPipeline(t, ctx, memfs, database, config, adapters)
+			result := runDeferredPairPipeline(t, ctx, memfs, database, config, adapters, deferredPairOptions(fixture.StaleProducer)...)
 
 			indexed := result.Summary.Indexed != 0
 			if indexed != fixture.WantIndexed {
@@ -466,7 +490,7 @@ func TestDeferredPairRepairSelectionReads(t *testing.T) {
 			config := makePipelineConfig(testOutputDir)
 			config.DryRun = true
 
-			runDeferredPairPipeline(t, ctx, counter, database, config, adapters)
+			runDeferredPairPipeline(t, ctx, counter, database, config, adapters, deferredPairOptions(fixture.StaleProducer)...)
 
 			if fixture.WantPairReads != nil && counter.reads != *fixture.WantPairReads {
 				t.Fatalf("selection read the saved pair %d times, want %d", counter.reads, *fixture.WantPairReads)

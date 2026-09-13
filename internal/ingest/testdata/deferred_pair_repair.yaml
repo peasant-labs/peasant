@@ -98,6 +98,7 @@ cases:
     nativeAvailable: true
     storedFingerprint: true
     publicationReady: true
+    staleProducer: true
     wantIndexed: true
     wantChecksumRefusal: false
     wantPairUnchanged: false
@@ -128,6 +129,7 @@ selection_reads:
     pairState: healthy
     storedFingerprint: true
     publicationReady: true
+    staleProducer: true
     wantPairReadsAtLeast: 1
   - name: selection-unqueued-damaged-reads-pair
     discovered: false
