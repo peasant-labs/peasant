@@ -16,3 +16,20 @@ requiredNames:
   - repeated-item-completed
   - same-thread-rollover-refs
   - checkpoint-alignment-incomplete
+  - truncated-reference-end-beyond-proof
+  - reference-byte-boundary-misaligned
+  - reference-legacy-mode-in-paginated-base
+  - reference-ordinal-gap-preserved
+  - reference-ordinal-regression-skipped
+  - malformed-lines-no-native-ordinals
+  - event-only-item-with-body
+  - repeated-item-completed-body-replaced
+  - paired-admission-single-turn-rollback
+  - inter-agent-delivery-rollback-boundary
+  - compaction-absent-metadata-accepted
+  - compaction-orphan-metadata-rejected
+  - compaction-malformed-metadata-rejected
+  - lifecycle-turn-events-balanced
+  - item-started-no-phantom-turn
+  - reference-through-running-target
+  - reference-through-completed-target

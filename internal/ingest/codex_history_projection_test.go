@@ -39,8 +39,12 @@ type codexHistoryReferenceFixture struct {
 	Mode                    string `yaml:"mode"`
 	Inclusion               string `yaml:"inclusion"`
 	CoordinateKind          string `yaml:"coordinateKind"`
+	HistoryKind             string `yaml:"historyKind"`
+	ThroughCompleted        bool   `yaml:"throughCompleted"`
 	Start                   *int64 `yaml:"start"`
 	EndExclusive            *int64 `yaml:"endExclusive"`
+	DecodedByteStart        *int64 `yaml:"decodedByteStart"`
+	DecodedByteEndExclusive *int64 `yaml:"decodedByteEndExclusive"`
 	CopyBoundary            *int64 `yaml:"copyBoundary"`
 	OriginalOwnershipProven bool   `yaml:"originalOwnershipProven"`
 	LogicalSessionID        string `yaml:"logicalSessionID"`
@@ -57,6 +61,42 @@ type codexHistoryAuthorityFixture struct {
 	References              []codexHistoryReferenceFixture `yaml:"references"`
 }
 
+type codexHistoryNodeExpected struct {
+	Ref          string `yaml:"ref"`
+	NativeKey    string `yaml:"nativeKey"`
+	Segment      *int   `yaml:"segment"`
+	Ordinal      *int64 `yaml:"ordinal"`
+	Line         *int64 `yaml:"line"`
+	EnvelopeType string `yaml:"envelopeType"`
+	NativeType   string `yaml:"nativeType"`
+	NativeRole   string `yaml:"nativeRole"`
+	ItemID       string `yaml:"itemID"`
+	Ownership    string `yaml:"ownership"`
+	HasPayload   *bool  `yaml:"hasPayload"`
+	HasMetadata  *bool  `yaml:"hasMetadata"`
+	Payload      string `yaml:"payload"`
+	Metadata     string `yaml:"metadata"`
+}
+
+type codexHistorySegmentExpected struct {
+	Ordinal                 int      `yaml:"ordinal"`
+	Inclusion               string   `yaml:"inclusion"`
+	CoordinateKind          string   `yaml:"coordinateKind"`
+	Start                   *int64   `yaml:"start"`
+	EndExclusive            *int64   `yaml:"endExclusive"`
+	DecodedByteStart        *int64   `yaml:"decodedByteStart"`
+	DecodedByteEndExclusive *int64   `yaml:"decodedByteEndExclusive"`
+	Refs                    []string `yaml:"refs"`
+}
+
+type codexHistoryCorrelationExpected struct {
+	Kind            string   `yaml:"kind"`
+	ItemID          string   `yaml:"itemID"`
+	EventOrdinal    *int64   `yaml:"eventOrdinal"`
+	ResponseOrdinal *int64   `yaml:"responseOrdinal"`
+	Refs            []string `yaml:"refs"`
+}
+
 type codexHistoryExpected struct {
 	Mode             string   `yaml:"mode"`
 	Completeness     string   `yaml:"completeness"`
@@ -67,6 +107,13 @@ type codexHistoryExpected struct {
 	CheckpointRefs   []string `yaml:"checkpointRefs"`
 	CorrelationKinds []string `yaml:"correlationKinds"`
 	Diagnostics      []string `yaml:"diagnostics"`
+	// Nodes, Segments and Correlations assert the exact captured native
+	// evidence handed downstream: identity, coordinates, ownership and
+	// correlation endpoints in replay order. A nil section is not asserted;
+	// an explicit empty list asserts emptiness.
+	Nodes        []codexHistoryNodeExpected        `yaml:"nodes"`
+	Segments     []codexHistorySegmentExpected     `yaml:"segments"`
+	Correlations []codexHistoryCorrelationExpected `yaml:"correlations"`
 	// FingerprintStableWithPrevious proves a parent append past the captured
 	// cutoff does not change the child fingerprint.
 	FingerprintStableWithPrevious bool `yaml:"fingerprintStableWithPrevious"`
@@ -197,13 +244,17 @@ func codexHistoryAuthorityFromFixture(t *testing.T, f codexHistoryAuthorityFixtu
 			Pointer:                 ref.Pointer,
 			PhysicalSourceID:        ref.PhysicalSourceID,
 			Mode:                    mode,
+			HistoryKind:             ref.HistoryKind,
+			ThroughCompleted:        ref.ThroughCompleted,
 			Inclusion:               inclusion,
 			CopyBoundary:            ref.CopyBoundary,
 			OriginalOwnershipProven: ref.OriginalOwnershipProven,
 			Coordinates: indexformat.SegmentCoordinates{
-				Kind:         coordinateKind,
-				Start:        ref.Start,
-				EndExclusive: ref.EndExclusive,
+				Kind:                    coordinateKind,
+				Start:                   ref.Start,
+				EndExclusive:            ref.EndExclusive,
+				DecodedByteStart:        ref.DecodedByteStart,
+				DecodedByteEndExclusive: ref.DecodedByteEndExclusive,
 			},
 		}
 		if ref.LogicalSessionID != "" {
@@ -297,6 +348,160 @@ func codexAssertExpected(t *testing.T, want codexHistoryExpected, history ingest
 	if want.Diagnostics != nil {
 		if got := codexDiagnosticTypes(history.Diagnostics); !slices.Equal(want.Diagnostics, got) {
 			t.Errorf("diagnostics = %v, want %v", got, want.Diagnostics)
+		}
+	}
+	if want.Nodes != nil {
+		codexAssertNodes(t, want.Nodes, history.Nodes)
+	}
+	if want.Segments != nil {
+		codexAssertSegments(t, want.Segments, history.Segments)
+	}
+	if want.Correlations != nil {
+		codexAssertCorrelations(t, want.Correlations, history.Correlations)
+	}
+	if want.Nodes != nil || want.Segments != nil {
+		codexAssertCapturedSegments(t, history)
+	}
+}
+
+func codexAssertNodes(t *testing.T, want []codexHistoryNodeExpected, got []ingest.CodexCapturedNode) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("nodes = %d, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		g := got[i]
+		if string(g.Ref) != w.Ref {
+			t.Errorf("nodes[%d].ref = %q, want %q", i, g.Ref, w.Ref)
+		}
+		if w.NativeKey != "" && g.NativeKey != w.NativeKey {
+			t.Errorf("nodes[%d].nativeKey = %q, want %q", i, g.NativeKey, w.NativeKey)
+		}
+		if w.Segment != nil && g.SegmentOrdinal != *w.Segment {
+			t.Errorf("nodes[%d].segment = %d, want %d", i, g.SegmentOrdinal, *w.Segment)
+		}
+		if w.Ordinal != nil && g.Ordinal != *w.Ordinal {
+			t.Errorf("nodes[%d].ordinal = %d, want %d", i, g.Ordinal, *w.Ordinal)
+		}
+		if w.Line != nil && g.LineIndex != *w.Line {
+			t.Errorf("nodes[%d].line = %d, want %d", i, g.LineIndex, *w.Line)
+		}
+		if w.EnvelopeType != "" && g.EnvelopeType != w.EnvelopeType {
+			t.Errorf("nodes[%d].envelopeType = %q, want %q", i, g.EnvelopeType, w.EnvelopeType)
+		}
+		if w.NativeType != "" && g.NativeType != w.NativeType {
+			t.Errorf("nodes[%d].nativeType = %q, want %q", i, g.NativeType, w.NativeType)
+		}
+		if w.NativeRole != "" && g.NativeRole != w.NativeRole {
+			t.Errorf("nodes[%d].nativeRole = %q, want %q", i, g.NativeRole, w.NativeRole)
+		}
+		if w.ItemID != "" && g.ItemID != w.ItemID {
+			t.Errorf("nodes[%d].itemID = %q, want %q", i, g.ItemID, w.ItemID)
+		}
+		if w.Ownership != "" && string(g.Ownership) != w.Ownership {
+			t.Errorf("nodes[%d].ownership = %q, want %q", i, g.Ownership, w.Ownership)
+		}
+		if w.HasPayload != nil && (len(g.Payload) > 0) != *w.HasPayload {
+			t.Errorf("nodes[%d].hasPayload = %t, want %t", i, len(g.Payload) > 0, *w.HasPayload)
+		}
+		if w.HasMetadata != nil && (len(bytes.TrimSpace(g.Metadata)) > 0) != *w.HasMetadata {
+			t.Errorf("nodes[%d].hasMetadata = %t, want %t", i, len(bytes.TrimSpace(g.Metadata)) > 0, *w.HasMetadata)
+		}
+		if w.Payload != "" && string(g.Payload) != w.Payload {
+			t.Errorf("nodes[%d].payload = %s, want %s", i, g.Payload, w.Payload)
+		}
+		if w.Metadata != "" && string(g.Metadata) != w.Metadata {
+			t.Errorf("nodes[%d].metadata = %s, want %s", i, g.Metadata, w.Metadata)
+		}
+	}
+}
+
+func codexAssertSegments(t *testing.T, want []codexHistorySegmentExpected, got []indexformat.ContextSegment) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("segments = %d, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		g := got[i]
+		if g.Ordinal != w.Ordinal {
+			t.Errorf("segments[%d].ordinal = %d, want %d", i, g.Ordinal, w.Ordinal)
+		}
+		if w.Inclusion != "" && string(g.Inclusion) != w.Inclusion {
+			t.Errorf("segments[%d].inclusion = %q, want %q", i, g.Inclusion, w.Inclusion)
+		}
+		if w.CoordinateKind != "" && string(g.Coordinates.Kind) != w.CoordinateKind {
+			t.Errorf("segments[%d].coordinateKind = %q, want %q", i, g.Coordinates.Kind, w.CoordinateKind)
+		}
+		if w.Start != nil && (g.Coordinates.Start == nil || *g.Coordinates.Start != *w.Start) {
+			t.Errorf("segments[%d].start = %v, want %d", i, g.Coordinates.Start, *w.Start)
+		}
+		if w.EndExclusive != nil && (g.Coordinates.EndExclusive == nil || *g.Coordinates.EndExclusive != *w.EndExclusive) {
+			t.Errorf("segments[%d].endExclusive = %v, want %d", i, g.Coordinates.EndExclusive, *w.EndExclusive)
+		}
+		if w.DecodedByteStart != nil && (g.Coordinates.DecodedByteStart == nil || *g.Coordinates.DecodedByteStart != *w.DecodedByteStart) {
+			t.Errorf("segments[%d].decodedByteStart = %v, want %d", i, g.Coordinates.DecodedByteStart, *w.DecodedByteStart)
+		}
+		if w.DecodedByteEndExclusive != nil && (g.Coordinates.DecodedByteEndExclusive == nil || *g.Coordinates.DecodedByteEndExclusive != *w.DecodedByteEndExclusive) {
+			t.Errorf("segments[%d].decodedByteEndExclusive = %v, want %d", i, g.Coordinates.DecodedByteEndExclusive, *w.DecodedByteEndExclusive)
+		}
+		if w.Refs != nil && !slices.Equal(normalizeRefs(codexFixtureRefs(t, g.CapturedRefs)), normalizeRefs(w.Refs)) {
+			t.Errorf("segments[%d].refs = %v, want %v", i, codexFixtureRefs(t, g.CapturedRefs), w.Refs)
+		}
+	}
+}
+
+func codexAssertCorrelations(t *testing.T, want []codexHistoryCorrelationExpected, got []ingest.CodexCapturedCorrelation) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("correlations = %d, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		g := got[i]
+		if string(g.Kind) != w.Kind {
+			t.Errorf("correlations[%d].kind = %q, want %q", i, g.Kind, w.Kind)
+		}
+		if w.ItemID != "" && g.ItemID != w.ItemID {
+			t.Errorf("correlations[%d].itemID = %q, want %q", i, g.ItemID, w.ItemID)
+		}
+		if w.EventOrdinal != nil && (g.EventOrdinal == nil || *g.EventOrdinal != *w.EventOrdinal) {
+			t.Errorf("correlations[%d].eventOrdinal = %v, want %d", i, g.EventOrdinal, *w.EventOrdinal)
+		}
+		if w.ResponseOrdinal != nil && (g.ResponseOrdinal == nil || *g.ResponseOrdinal != *w.ResponseOrdinal) {
+			t.Errorf("correlations[%d].responseOrdinal = %v, want %d", i, g.ResponseOrdinal, *w.ResponseOrdinal)
+		}
+		if w.Refs != nil && !slices.Equal(normalizeRefs(codexFixtureRefs(t, g.Refs)), normalizeRefs(w.Refs)) {
+			t.Errorf("correlations[%d].refs = %v, want %v", i, codexFixtureRefs(t, g.Refs), w.Refs)
+		}
+	}
+}
+
+// codexAssertCapturedSegments proves the handoff carries every captured
+// segment payload: one captured segment per projected segment, bounded bytes
+// present exactly when the segment proves valid records, and per-record
+// payload plus envelope metadata preserved without reopening the source.
+func codexAssertCapturedSegments(t *testing.T, history ingest.CodexCapturedHistory) {
+	t.Helper()
+	if len(history.CapturedSegments) != len(history.Segments) {
+		t.Fatalf("captured segments = %d, want %d (one per projected segment)", len(history.CapturedSegments), len(history.Segments))
+	}
+	for i, captured := range history.CapturedSegments {
+		if captured.Ordinal != history.Segments[i].Ordinal {
+			t.Errorf("captured segments[%d].ordinal = %d, want %d", i, captured.Ordinal, history.Segments[i].Ordinal)
+		}
+		hasValid := false
+		for _, record := range captured.Records {
+			if record.DecodedOrdinal != nil {
+				hasValid = true
+				break
+			}
+		}
+		if hasValid && len(captured.Data) == 0 {
+			t.Errorf("captured segments[%d] proves valid records but carries no bounded bytes", i)
+		}
+	}
+	for _, node := range history.Nodes {
+		if len(node.Payload) == 0 {
+			t.Errorf("node %s carries no captured payload; the classifier would have to reopen the source", node.Ref)
 		}
 	}
 }
@@ -416,7 +621,7 @@ func TestCodexCaptureFileSourceProductionPath(t *testing.T) {
 		SourcePath:   ingest.ResolvedPath(path),
 		SourceFormat: ingest.SourceFormatJSONL,
 	}
-	indexer := ingest.NewCodexIndexer(boundedOnlyCodexFS{OSFileSystem: &ingest.OSFileSystem{}})
+	indexer := ingest.NewCodexIndexer(boundedOnlyCodexFS{OSFileSystem: &ingest.OSFileSystem{}}, ingest.WithCodexHistoryCapture(true))
 	result, err := indexer.IndexTranscriptResult(t.Context(), session)
 	if err != nil {
 		t.Fatalf("IndexTranscriptResult: %v", err)
