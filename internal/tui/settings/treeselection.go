@@ -1795,32 +1795,40 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 		}
 		if scope.selected {
 			configured.Exclusions.Branches = removeBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), scope.branch)
-			_, branchlessTemplate := exactProjectTemplate(configured.Projects, scope.clonePath.String())
-			replacement := projectReplacement(configured.Projects, scope, []string{scope.branch}, false)
-			if branchlessTemplate && len(replacement.Branches) == 0 {
-				// A manual branch toggle states branch-level intent. The
-				// branchless template admits every branch, so replacing it with
-				// an explicit list must reproduce the current selection: every
-				// named branch it still admits, plus the branchless group's
-				// admitted sessions as explicit IDs. A later full derivation
-				// then keeps the branch-level representation because the
-				// re-marked provenance marks the sessions.
-				branches, sessions, err := branchlessTemplatePositives(configured, scope)
-				if err != nil {
-					return err
+			// A harness that entered unrestricted (no positive projects or
+			// explicit sessions) must stay unrestricted: installing a positive
+			// project rule for the touched branch would narrow every sibling
+			// project and branch out of the selection. Only a restricted harness
+			// replaces its project rule; an unrestricted one just clears the
+			// touched candidates' denials and keeps its other exclusions.
+			if !wasUnrestricted {
+				_, branchlessTemplate := exactProjectTemplate(configured.Projects, scope.clonePath.String())
+				replacement := projectReplacement(configured.Projects, scope, []string{scope.branch}, false)
+				if branchlessTemplate && len(replacement.Branches) == 0 {
+					// A manual branch toggle states branch-level intent. The
+					// branchless template admits every branch, so replacing it with
+					// an explicit list must reproduce the current selection: every
+					// named branch it still admits, plus the branchless group's
+					// admitted sessions as explicit IDs. A later full derivation
+					// then keeps the branch-level representation because the
+					// re-marked provenance marks the sessions.
+					branches, sessions, err := branchlessTemplatePositives(configured, scope)
+					if err != nil {
+						return err
+					}
+					replacement.Branches = branches
+					for _, sessionID := range sessions {
+						configured.Sessions = appendUniqueString(configured.Sessions, sessionID)
+					}
 				}
-				replacement.Branches = branches
-				for _, sessionID := range sessions {
-					configured.Sessions = appendUniqueString(configured.Sessions, sessionID)
+				if len(replacement.Branches) > 1 {
+					// The persisted branch list is canonical (sorted), matching the
+					// full-derivation round-trip, so a later no-op save cannot
+					// reorder it.
+					sort.Strings(replacement.Branches)
 				}
+				configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
 			}
-			if len(replacement.Branches) > 1 {
-				// The persisted branch list is canonical (sorted), matching the
-				// full-derivation round-trip, so a later no-op save cannot
-				// reorder it.
-				sort.Strings(replacement.Branches)
-			}
-			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
 			for _, candidate := range candidates {
 				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
 				configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, string(candidate.SessionID))
