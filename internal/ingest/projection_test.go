@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -39,31 +41,49 @@ type fixtureRepeat struct {
 	Times int    `yaml:"times"`
 }
 
+type fixtureUsage struct {
+	TokensIn  *int `yaml:"tokensIn"`
+	TokensOut *int `yaml:"tokensOut"`
+}
+
+type fixtureNativeAttachment struct {
+	ID                    string `yaml:"id"`
+	Kind                  string `yaml:"kind"`
+	SourceType            string `yaml:"sourceType"`
+	CustomType            string `yaml:"customType"`
+	Data                  string `yaml:"data"`
+	AttachmentToolCallKey string `yaml:"attachmentToolCallKey"`
+	MessageRole           string `yaml:"messageRole"`
+}
+
 type fixtureSection struct {
 	Earlier bool `yaml:"earlier"`
 	Index   int  `yaml:"index"`
 }
 
 type fixtureBlock struct {
-	NativeKey           string             `yaml:"nativeKey"`
-	SubmissionKey       string             `yaml:"submissionKey"`
-	AmbiguousPairKey    string             `yaml:"ambiguousPairKey"`
-	Section             fixtureSection     `yaml:"section"`
-	Uncertain           bool               `yaml:"uncertain"`
-	UncertainSubtree    bool               `yaml:"uncertainSubtree"`
-	Role                string             `yaml:"role"`
-	EntryType           string             `yaml:"entryType"`
-	Depth               int                `yaml:"depth"`
-	CarrierNativeKey    string             `yaml:"carrierNativeKey"`
-	ToolCallKey         string             `yaml:"toolCallKey"`
-	ToolName            string             `yaml:"toolName"`
-	Content             string             `yaml:"content"`
-	ToolArguments       string             `yaml:"toolArguments"`
-	ToolResult          string             `yaml:"toolResult"`
-	ContentRepeat       *fixtureRepeat     `yaml:"contentRepeat"`
-	ToolArgumentsRepeat *fixtureRepeat     `yaml:"toolArgumentsRepeat"`
-	ToolResultRepeat    *fixtureRepeat     `yaml:"toolResultRepeat"`
-	Provenance          *fixtureProvenance `yaml:"provenance"`
+	NativeKey           string                    `yaml:"nativeKey"`
+	SubmissionKey       string                    `yaml:"submissionKey"`
+	AmbiguousPairKey    string                    `yaml:"ambiguousPairKey"`
+	Section             fixtureSection            `yaml:"section"`
+	Uncertain           bool                      `yaml:"uncertain"`
+	UncertainSubtree    bool                      `yaml:"uncertainSubtree"`
+	Role                string                    `yaml:"role"`
+	EntryType           string                    `yaml:"entryType"`
+	Depth               int                       `yaml:"depth"`
+	CarrierNativeKey    string                    `yaml:"carrierNativeKey"`
+	ToolCallKey         string                    `yaml:"toolCallKey"`
+	ToolName            string                    `yaml:"toolName"`
+	Content             string                    `yaml:"content"`
+	ToolArguments       string                    `yaml:"toolArguments"`
+	ToolResult          string                    `yaml:"toolResult"`
+	ContentRepeat       *fixtureRepeat            `yaml:"contentRepeat"`
+	ToolArgumentsRepeat *fixtureRepeat            `yaml:"toolArgumentsRepeat"`
+	ToolResultRepeat    *fixtureRepeat            `yaml:"toolResultRepeat"`
+	Provenance          *fixtureProvenance        `yaml:"provenance"`
+	Usage               *fixtureUsage             `yaml:"usage"`
+	ObservedModel       *string                   `yaml:"observedModel"`
+	NativeAttachments   []fixtureNativeAttachment `yaml:"nativeAttachments"`
 }
 
 type fixtureMetadata struct {
@@ -86,25 +106,42 @@ type fixtureCapture struct {
 }
 
 type fixtureEntryExpect struct {
-	NativeKey   string `yaml:"nativeKey"`
-	Index       int    `yaml:"index"`
-	Ref         string `yaml:"ref"`
-	Role        string `yaml:"role"`
-	EntryType   string `yaml:"entryType"`
-	Depth       int    `yaml:"depth"`
-	ParentIndex *int   `yaml:"parentIndex"`
-	Content     string `yaml:"content"`
-	ToolInput   string `yaml:"toolInput"`
-	ToolOutput  string `yaml:"toolOutput"`
-	ToolCallID  string `yaml:"toolCallId"`
-	Submission  string `yaml:"submissionRef"`
-	Ownership   string `yaml:"ownership"`
-	ByteLength  int    `yaml:"byteLength"`
+	NativeKey        string         `yaml:"nativeKey"`
+	Index            int            `yaml:"index"`
+	Ref              string         `yaml:"ref"`
+	Role             string         `yaml:"role"`
+	EntryType        string         `yaml:"entryType"`
+	Depth            int            `yaml:"depth"`
+	ParentIndex      *int           `yaml:"parentIndex"`
+	Content          string         `yaml:"content"`
+	ToolInput        string         `yaml:"toolInput"`
+	ToolOutput       string         `yaml:"toolOutput"`
+	ContentRepeat    *fixtureRepeat `yaml:"contentRepeat"`
+	ToolInputRepeat  *fixtureRepeat `yaml:"toolInputRepeat"`
+	ToolOutputRepeat *fixtureRepeat `yaml:"toolOutputRepeat"`
+	ToolCallID       string         `yaml:"toolCallId"`
+	Submission       string         `yaml:"submissionRef"`
+	Ownership        string         `yaml:"ownership"`
+	ByteLength       int            `yaml:"byteLength"`
+	TokensIn         *int           `yaml:"tokensIn"`
+	TokensOut        *int           `yaml:"tokensOut"`
+	ObservedModel    string         `yaml:"observedModel"`
+}
+
+type fixtureNativeExpect struct {
+	ID               string `yaml:"id"`
+	Kind             string `yaml:"kind"`
+	SourceType       string `yaml:"sourceType"`
+	EntryRef         string `yaml:"entryRef"`
+	CustomType       string `yaml:"customType"`
+	Data             string `yaml:"data"`
+	AttachmentToolID string `yaml:"attachmentToolId"`
 }
 
 type fixtureEarlierExpect struct {
-	State   string               `yaml:"state"`
-	Entries []fixtureEntryExpect `yaml:"entries"`
+	State          string                `yaml:"state"`
+	Entries        []fixtureEntryExpect  `yaml:"entries"`
+	NativeMetadata []fixtureNativeExpect `yaml:"nativeMetadata"`
 }
 
 type fixtureWant struct {
@@ -113,6 +150,7 @@ type fixtureWant struct {
 	InputSubmissionAbsent bool                   `yaml:"inputSubmissionAbsent"`
 	TitleRefs             []string               `yaml:"titleRefs"`
 	Main                  []fixtureEntryExpect   `yaml:"main"`
+	MainNativeMetadata    []fixtureNativeExpect  `yaml:"mainNativeMetadata"`
 	Earlier               []fixtureEarlierExpect `yaml:"earlier"`
 }
 
@@ -178,6 +216,9 @@ func loadProjectionCases(t *testing.T) []fixtureCase {
 	names := make([]string, len(document.Cases))
 	for i, row := range document.Cases {
 		names[i] = row.Name
+		if len(row.Steps) == 0 {
+			t.Fatalf("projection layout fixture case %q has no steps; a case without steps passes without invoking the builder; declare at least one step", row.Name)
+		}
 	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "projection layout"); err != nil {
 		t.Fatal(err)
@@ -228,7 +269,7 @@ func buildProjectionCapture(in fixtureCapture) ingest.ClassifiedCapture {
 		capture.EarlierStates = append(capture.EarlierStates, schema.EarlierHistoryState(state))
 	}
 	for _, row := range in.Blocks {
-		capture.Blocks = append(capture.Blocks, ingest.ClassifiedBlock{
+		block := ingest.ClassifiedBlock{
 			NativeKey:        row.NativeKey,
 			SubmissionKey:    row.SubmissionKey,
 			AmbiguousPairKey: row.AmbiguousPairKey,
@@ -245,7 +286,29 @@ func buildProjectionCapture(in fixtureCapture) ingest.ClassifiedCapture {
 			ToolArguments:    repeatText(row.ToolArgumentsRepeat, row.ToolArguments),
 			ToolResult:       repeatText(row.ToolResultRepeat, row.ToolResult),
 			Provenance:       buildProjectionProvenance(row.Provenance),
-		})
+		}
+		if row.Usage != nil {
+			block.Usage = &ingest.ClassifiedUsage{
+				TokensIn:  row.Usage.TokensIn,
+				TokensOut: row.Usage.TokensOut,
+			}
+		}
+		if row.ObservedModel != nil {
+			value := *row.ObservedModel
+			block.ObservedModel = &value
+		}
+		for _, attachment := range row.NativeAttachments {
+			block.NativeAttachments = append(block.NativeAttachments, ingest.ClassifiedNativeAttachment{
+				ID:                    attachment.ID,
+				Kind:                  schema.NativeMetadataKind(attachment.Kind),
+				SourceType:            schema.NativeMetadataSourceType(attachment.SourceType),
+				CustomType:            attachment.CustomType,
+				Data:                  attachment.Data,
+				AttachmentToolCallKey: attachment.AttachmentToolCallKey,
+				MessageRole:           schema.NativePiMessageRole(attachment.MessageRole),
+			})
+		}
+		capture.Blocks = append(capture.Blocks, block)
 	}
 	return capture
 }
@@ -276,6 +339,15 @@ func gotEntryContent(entry schema.SessionEntry) string {
 }
 
 func wantEntryContent(want fixtureEntryExpect) string {
+	if want.ToolInputRepeat != nil {
+		return strings.Repeat(want.ToolInputRepeat.Text, want.ToolInputRepeat.Times)
+	}
+	if want.ToolOutputRepeat != nil {
+		return strings.Repeat(want.ToolOutputRepeat.Text, want.ToolOutputRepeat.Times)
+	}
+	if want.ContentRepeat != nil {
+		return strings.Repeat(want.ContentRepeat.Text, want.ContentRepeat.Times)
+	}
 	if want.ToolInput != "" {
 		return want.ToolInput
 	}
@@ -283,6 +355,25 @@ func wantEntryContent(want fixtureEntryExpect) string {
 		return want.ToolOutput
 	}
 	return want.Content
+}
+
+func observedModelOf(entry schema.SessionEntry) string {
+	if entry.Role != schema.RoleAssistant || entry.Extra == nil {
+		return ""
+	}
+	var extra map[string]json.RawMessage
+	if json.Unmarshal([]byte(*entry.Extra), &extra) != nil {
+		return ""
+	}
+	raw, ok := extra["model_id"]
+	if !ok {
+		return ""
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	return value
 }
 
 func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, got schema.SessionEntry, records map[string]indexformat.ContentRecord) {
@@ -318,6 +409,14 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 		if len(content) != want.ByteLength {
 			t.Fatalf("%s ref %q content bytes = %d, want %d", label, want.Ref, len(content), want.ByteLength)
 		}
+		if expectedContent != "" && content != expectedContent {
+			t.Fatalf("%s ref %q content differs from fixture-source bytes; got %d bytes, want exact %d source bytes", label, want.Ref, len(content), len(expectedContent))
+		}
+		// Long-tool evidence must exceed the preview floor so truncation cannot
+		// hide a same-length corruption.
+		if len(content) <= defaults.ContentPreviewLimit+1024 && (want.ToolInputRepeat != nil || want.ToolOutputRepeat != nil) {
+			t.Fatalf("%s ref %q content bytes = %d, want more than preview limit+1024 (%d)", label, want.Ref, len(content), defaults.ContentPreviewLimit+1024)
+		}
 	} else if content != expectedContent {
 		t.Fatalf("%s ref %q content = %q, want %q", label, want.Ref, content, expectedContent)
 	}
@@ -340,6 +439,15 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 	} else if got.Provenance != nil && got.Provenance.SubmissionRef != "" {
 		t.Fatalf("%s ref %q submissionRef = %q, want none", label, want.Ref, got.Provenance.SubmissionRef)
 	}
+	if !reflect.DeepEqual(got.TokensIn, want.TokensIn) {
+		t.Fatalf("%s ref %q tokensIn = %v, want %v", label, want.Ref, got.TokensIn, want.TokensIn)
+	}
+	if !reflect.DeepEqual(got.TokensOut, want.TokensOut) {
+		t.Fatalf("%s ref %q tokensOut = %v, want %v", label, want.Ref, got.TokensOut, want.TokensOut)
+	}
+	if gotObserved := observedModelOf(got); gotObserved != want.ObservedModel {
+		t.Fatalf("%s ref %q observedModel = %q, want %q", label, want.Ref, gotObserved, want.ObservedModel)
+	}
 	if content != "" {
 		record, ok := records[want.Ref]
 		if !ok {
@@ -348,9 +456,18 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 		if record.ByteLength != int64(len(content)) {
 			t.Fatalf("%s ref %q content record byteLength = %d, want %d", label, want.Ref, record.ByteLength, len(content))
 		}
-		sum := sha256.Sum256([]byte(content))
+		// The digest must match the fixture-source bytes, not just the
+		// returned bytes, so a same-length corruption cannot evade the oracle.
+		digestSource := content
+		if expectedContent != "" {
+			digestSource = expectedContent
+			if content != expectedContent {
+				t.Fatalf("%s ref %q content differs from expected source bytes", label, want.Ref)
+			}
+		}
+		sum := sha256.Sum256([]byte(digestSource))
 		if record.Digest != hex.EncodeToString(sum[:]) {
-			t.Fatalf("%s ref %q content digest = %q, want the digest of its own bytes", label, want.Ref, record.Digest)
+			t.Fatalf("%s ref %q content digest = %q, want the digest of the expected source bytes", label, want.Ref, record.Digest)
 		}
 		if record.RelativeBlob != "content/"+want.Ref {
 			t.Fatalf("%s ref %q relativeBlob = %q, want %q", label, want.Ref, record.RelativeBlob, "content/"+want.Ref)
@@ -396,6 +513,7 @@ func assertProjectionWant(t *testing.T, label string, want fixtureWant, generati
 	for i, entryWant := range want.Main {
 		assertProjectionEntry(t, label+" main", entryWant, generation.Main.Entries[i], records)
 	}
+	assertProjectionNativeMetadata(t, label+" main nativeMetadata", want.MainNativeMetadata, generation.Main.NativeMetadata)
 	if len(want.Earlier) != len(generation.Earlier) {
 		t.Fatalf("%s earlier section count = %d, want %d", label, len(generation.Earlier), len(want.Earlier))
 	}
@@ -411,6 +529,7 @@ func assertProjectionWant(t *testing.T, label string, want fixtureWant, generati
 		for j, entryWant := range earlierWant.Entries {
 			assertProjectionEntry(t, fmt.Sprintf("%s earlier[%d]", label, i), entryWant, section.Content.Entries[j], records)
 		}
+		assertProjectionNativeMetadata(t, fmt.Sprintf("%s earlier[%d] nativeMetadata", label, i), earlierWant.NativeMetadata, section.Content.NativeMetadata)
 	}
 	for _, entry := range generation.Main.Entries {
 		usedRefs[string(entry.SourceEntryRef)] = true
@@ -423,6 +542,41 @@ func assertProjectionWant(t *testing.T, label string, want fixtureWant, generati
 	for ref := range records {
 		if !usedRefs[ref] {
 			t.Fatalf("%s content record ref %q is not an emitted entry", label, ref)
+		}
+	}
+}
+
+func assertProjectionNativeMetadata(t *testing.T, label string, want []fixtureNativeExpect, got []schema.NativeMetadataRecord) {
+	t.Helper()
+	if len(want) != len(got) {
+		t.Fatalf("%s record count = %d, want %d", label, len(got), len(want))
+	}
+	for i, recordWant := range want {
+		record := got[i]
+		if record.ID != recordWant.ID {
+			t.Fatalf("%s[%d] id = %q, want %q", label, i, record.ID, recordWant.ID)
+		}
+		if string(record.Kind) != recordWant.Kind {
+			t.Fatalf("%s[%d] kind = %q, want %q", label, i, record.Kind, recordWant.Kind)
+		}
+		if string(record.Source.SourceType) != recordWant.SourceType {
+			t.Fatalf("%s[%d] sourceType = %q, want %q", label, i, record.Source.SourceType, recordWant.SourceType)
+		}
+		if string(record.Source.EntryRef) != recordWant.EntryRef {
+			t.Fatalf("%s[%d] entryRef = %q, want %q", label, i, record.Source.EntryRef, recordWant.EntryRef)
+		}
+		if record.CustomType != recordWant.CustomType {
+			t.Fatalf("%s[%d] customType = %q, want %q", label, i, record.CustomType, recordWant.CustomType)
+		}
+		if string(record.Data) != recordWant.Data {
+			t.Fatalf("%s[%d] data = %q, want %q", label, i, string(record.Data), recordWant.Data)
+		}
+		gotTool := ""
+		if record.Attachment != nil {
+			gotTool = record.Attachment.ToolCallID
+		}
+		if gotTool != recordWant.AttachmentToolID {
+			t.Fatalf("%s[%d] attachmentToolId = %q, want %q", label, i, gotTool, recordWant.AttachmentToolID)
 		}
 	}
 }

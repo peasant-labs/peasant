@@ -3,6 +3,7 @@ package ingest
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,6 +20,35 @@ type ProjectionSection struct {
 	Index   int
 }
 
+// ClassifiedUsage is the per-block token usage a native classifier observed.
+// Nil means the source recorded no usage; a present zero is measured none.
+type ClassifiedUsage struct {
+	TokensIn  *int
+	TokensOut *int
+}
+
+// ClassifiedNativeAttachment is one typed native-metadata enrichment attached
+// to a single classified block. The projection remaps its owner to the
+// allocated block ref in the owner's final partition and remaps an optional
+// tool attachment from the native call key to the allocated tool-use ref.
+type ClassifiedNativeAttachment struct {
+	// ID is the bounded opaque metadata identity.
+	ID string
+	// Kind and SourceType name the closed native-metadata classification.
+	Kind       schema.NativeMetadataKind
+	SourceType schema.NativeMetadataSourceType
+	// CustomType carries the extension identifier for custom kinds.
+	CustomType string
+	// Data is the non-null JSON evidence payload.
+	Data string
+	// AttachmentToolCallKey optionally names the native call identity whose
+	// allocated tool-use ref the record attaches to. Empty means no tool
+	// attachment.
+	AttachmentToolCallKey string
+	// MessageRole optionally carries the pi message role for message sources.
+	MessageRole schema.NativePiMessageRole
+}
+
 // ClassifiedBlock is one classified native content block produced by an
 // adapter's native classifier. The adapter owns native decoding and the
 // positive attribution of each block; the shared projection owns reference
@@ -32,8 +62,9 @@ type ClassifiedBlock struct {
 	// one admitted submission. Empty means the block proves no submission group.
 	SubmissionKey string
 	// AmbiguousPairKey marks an ID-less response/event pair whose pairing the
-	// native reducer could not prove. Each such group collapses to one
-	// uncertain earlier-history entry instead of counting twice.
+	// native reducer could not prove. Each unique unproved representation is
+	// retained with its own ref in uncertain earlier history; only a natively
+	// proved byte-and-evidence mirror collapses to one entry.
 	AmbiguousPairKey string
 	// Section is the adapter's requested partition.
 	Section ProjectionSection
@@ -67,6 +98,18 @@ type ClassifiedBlock struct {
 	TimestampMs *int64
 	PartType    *string
 	HasThinking bool
+	// Usage is the optional per-block token usage the classifier observed.
+	// Nil means the source recorded no usage; a present zero is measured none.
+	Usage *ClassifiedUsage
+	// ObservedModel is the exact model identifier the source observed while
+	// producing this block. Nil means no observation. When present it must
+	// name an assistant block and survive layout on the owning entry.
+	ObservedModel *string
+	// NativeAttachments carries optional typed native-metadata enrichment
+	// owned by this block. Each record is remapped to the allocated block ref
+	// in the owner's final partition; a tool attachment is remapped from its
+	// native call key to the allocated tool-use ref in the same partition.
+	NativeAttachments []ClassifiedNativeAttachment
 }
 
 // ClassifiedCapture is one classified adapter capture plus the prior alias
@@ -128,6 +171,9 @@ func BuildGeneration(capture ClassifiedCapture, allocator RefAllocator) (indexfo
 		return indexformat.Generation{}, err
 	}
 	if err := remapToolParents(partitions, resolved); err != nil {
+		return indexformat.Generation{}, err
+	}
+	if err := attachProjectionNativeMetadata(&partitions, resolved); err != nil {
 		return indexformat.Generation{}, err
 	}
 	if err := validateProjectionProvenance(partitions); err != nil {
@@ -220,14 +266,86 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 		if block.Uncertain && block.Section.Index == 0 {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q is uncertain but placed in the main stream; uncertain evidence cannot count as local main content; place it in a declared earlier section", i, block.NativeKey)
 		}
+		if err := validateClassifiedUsage(i, block); err != nil {
+			return err
+		}
+		if err := validateClassifiedObservedModel(i, block); err != nil {
+			return err
+		}
+		if err := validateClassifiedAttachments(i, block); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateClassifiedUsage(index int, block ClassifiedBlock) error {
+	if block.Usage == nil {
+		return nil
+	}
+	if block.Usage.TokensIn != nil && *block.Usage.TokensIn < 0 {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q usage tokensIn %d is negative; token usage cannot be negative; record a nonnegative count or omit the usage", index, block.NativeKey, *block.Usage.TokensIn)
+	}
+	if block.Usage.TokensOut != nil && *block.Usage.TokensOut < 0 {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q usage tokensOut %d is negative; token usage cannot be negative; record a nonnegative count or omit the usage", index, block.NativeKey, *block.Usage.TokensOut)
+	}
+	return nil
+}
+
+func validateClassifiedObservedModel(index int, block ClassifiedBlock) error {
+	if block.ObservedModel == nil {
+		return nil
+	}
+	observed := *block.ObservedModel
+	if _, err := schema.NewObservedModelID(observed); err != nil {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q observedModel is invalid; the observation cannot be preserved exactly; supply the exact source identifier or omit it: %w", index, block.NativeKey, err)
+	}
+	if block.Role != schema.RoleAssistant {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries observedModel on role %q; only assistant output can carry an observed model; omit it from user, system, and tool blocks", index, block.NativeKey, block.Role)
+	}
+	return nil
+}
+
+func validateClassifiedAttachments(index int, block ClassifiedBlock) error {
+	if len(block.NativeAttachments) == 0 {
+		return nil
+	}
+	if len(block.NativeAttachments) > 1 {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries %d native attachments; one source ref owns at most one metadata record; keep one attachment per block", index, block.NativeKey, len(block.NativeAttachments))
+	}
+	for j := range block.NativeAttachments {
+		attachment := block.NativeAttachments[j]
+		if attachment.ID == "" || len(attachment.ID) > indexformat.MaxNativeMetadataIDBytes {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment[%d] id is empty or over %d bytes; attached evidence has no bounded identity; emit a bounded opaque id", index, block.NativeKey, j, indexformat.MaxNativeMetadataIDBytes)
+		}
+		if !attachment.Kind.IsValid() {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment %q kind %q is outside the closed set; attached evidence cannot be classified; use a published kind", index, block.NativeKey, attachment.ID, attachment.Kind)
+		}
+		if !attachment.SourceType.IsValid() {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment %q source type %q is outside the closed set; attached evidence cannot be classified; use a published source type", index, block.NativeKey, attachment.ID, attachment.SourceType)
+		}
+		if attachment.CustomType != "" && len(attachment.CustomType) > indexformat.MaxNativeMetadataCustomTypeBytes {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment %q customType is over %d bytes; consumers cannot identify the extension; emit a shorter valid value", index, block.NativeKey, attachment.ID, indexformat.MaxNativeMetadataCustomTypeBytes)
+		}
+		if strings.TrimSpace(attachment.Data) == "" || projectionAttachmentDataIsNull([]byte(attachment.Data)) {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment %q data is missing or null; attached evidence cannot be checked; provide a non-null JSON value", index, block.NativeKey, attachment.ID)
+		}
+		var probe any
+		if err := json.Unmarshal([]byte(attachment.Data), &probe); err != nil {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment %q data is not valid JSON; attached evidence cannot be checked; provide a JSON value: %w", index, block.NativeKey, attachment.ID, err)
+		}
+		if attachment.MessageRole != "" && !attachment.MessageRole.IsValid() {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q native attachment %q message role %q is outside the closed set; attached evidence cannot be classified; use a published message role or omit it", index, block.NativeKey, attachment.ID, attachment.MessageRole)
+		}
 	}
 	return nil
 }
 
 // resolveProjectionBlocks computes each block's effective partition: it
-// relocates an uncertain or ambiguous subtree into a declared earlier section,
-// keeps a tool subtree with its carrier, and collapses an ambiguous pair to one
-// entry.
+// resolves uncertainty across each connected carrier/call subtree before final
+// layout, keeps certain tool subtrees with their carrier, and retains every
+// unique unproved ambiguous representation with its own ref in uncertain
+// earlier history.
 func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error) {
 	resolved := make([]*resolvedBlock, len(capture.Blocks))
 	byKey := make(map[string]*resolvedBlock, len(capture.Blocks))
@@ -254,8 +372,6 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 			}
 			rb.section = firstEarlier
 			rb.block.Uncertain = true
-			rb.block.Provenance = nil
-			rb.block.SubmissionKey = ""
 		}
 		if rb.block.UncertainSubtree {
 			if !hasEarlier {
@@ -266,24 +382,227 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 		}
 	}
 
-	// A tool subtree is partition-closed: a depth-1 entry always follows its
-	// carrier's final partition.
-	for _, rb := range resolved {
+	// Resolve uncertainty across each connected carrier/call/result subtree
+	// before final layout. Uncertainty anywhere that would split the subtree
+	// relocates the entire subtree into one declared earlier section; certain
+	// tool children follow their own carrier. Connected means sharing a
+	// carrier edge or a native call identity.
+	if err := resolveUncertainSubtrees(resolved, byKey, hasEarlier, firstEarlier); err != nil {
+		return nil, err
+	}
+
+	// Retain every unique unproved ambiguous representation with its own ref
+	// in uncertain earlier history. Only a natively proved byte-and-evidence
+	// mirror collapses to one entry; an ambiguous first-wins selection never
+	// discards distinct content or clears independent evidence.
+	if err := collapseProvedAmbiguousMirrors(resolved); err != nil {
+		return nil, err
+	}
+	return resolved, nil
+}
+
+// resolveUncertainSubtrees moves every connected carrier/call/result component
+// that carries uncertainty into one declared earlier section. A component is
+// connected through carrier edges and shared native call identities, so a
+// tool result explicitly marked uncertain in earlier history pulls its carrier
+// and siblings with it instead of being promoted into the carrier's main
+// partition.
+func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resolvedBlock, hasEarlier bool, firstEarlier int) error {
+	indexOf := make(map[*resolvedBlock]int, len(resolved))
+	for i, rb := range resolved {
+		indexOf[rb] = i
+	}
+	parent := make([]int, len(resolved))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[rb] = ra
+		}
+	}
+	// Carrier edges.
+	for i, rb := range resolved {
 		if rb.block.Depth == 0 {
 			continue
 		}
-		carrier := byKey[rb.block.CarrierNativeKey]
-		if carrier == nil {
-			return nil, fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q that is not in this capture; the tool subtree would be split; supply the carrier block", rb.block.NativeKey, rb.block.CarrierNativeKey)
+		carrier, ok := byKey[rb.block.CarrierNativeKey]
+		if !ok {
+			return fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q that is not in this capture; the tool subtree would be split; supply the carrier block", rb.block.NativeKey, rb.block.CarrierNativeKey)
 		}
 		if carrier.block.Depth != 0 {
-			return nil, fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q whose depth is %d, not 0; the tool parent cannot be resolved; point the block at its depth-0 carrier", rb.block.NativeKey, carrier.block.NativeKey, carrier.block.Depth)
+			return fmt.Errorf("ingest.BuildGeneration: depth-1 block %q names carrier %q whose depth is %d, not 0; the tool parent cannot be resolved; point the block at its depth-0 carrier", rb.block.NativeKey, carrier.block.NativeKey, carrier.block.Depth)
 		}
-		rb.section = carrier.section
+		union(i, indexOf[carrier])
 	}
+	// Shared native call identities.
+	byCall := make(map[string][]int)
+	for i, rb := range resolved {
+		if rb.block.ToolCallKey != "" {
+			byCall[rb.block.ToolCallKey] = append(byCall[rb.block.ToolCallKey], i)
+		}
+	}
+	for _, members := range byCall {
+		for k := 1; k < len(members); k++ {
+			union(members[0], members[k])
+		}
+	}
+	components := make(map[int][]*resolvedBlock)
+	for i, rb := range resolved {
+		root := find(i)
+		components[root] = append(components[root], rb)
+	}
+	for _, members := range components {
+		uncertain := false
+		for _, rb := range members {
+			if rb.block.Uncertain || rb.block.UncertainSubtree || rb.block.AmbiguousPairKey != "" {
+				uncertain = true
+				break
+			}
+		}
+		if !uncertain {
+			// Certain subtrees stay partition-closed to their own carrier.
+			for _, rb := range members {
+				if rb.block.Depth == 0 {
+					continue
+				}
+				carrier := byKey[rb.block.CarrierNativeKey]
+				rb.section = carrier.section
+			}
+			continue
+		}
+		if !hasEarlier {
+			return fmt.Errorf("ingest.BuildGeneration: a connected carrier/call subtree carries uncertain evidence but the capture declares no earlier section; the subtree cannot be placed honestly; declare an uncertain earlier section")
+		}
+		for _, rb := range members {
+			rb.section = firstEarlier
+			rb.block.Uncertain = true
+		}
+	}
+	return nil
+}
 
-	// Collapse each ambiguous pair to its first block. The remaining keys alias
-	// to the same ref so a reopen cannot double the entry.
+// ambiguousMirrorEqual reports whether two unproved blocks are a natively
+// proved mirror: every substantive representation byte and every independent
+// provenance axis match, so one entry can stand for both without discarding
+// distinct content or evidence.
+func ambiguousMirrorEqual(a, b ClassifiedBlock) bool {
+	if a.Role != b.Role || a.EntryType != b.EntryType || a.Depth != b.Depth {
+		return false
+	}
+	if a.Content != b.Content || a.ToolArguments != b.ToolArguments || a.ToolResult != b.ToolResult {
+		return false
+	}
+	if a.ToolName != b.ToolName || a.ToolKind != b.ToolKind {
+		return false
+	}
+	if a.CarrierNativeKey != b.CarrierNativeKey || a.ToolCallKey != b.ToolCallKey {
+		return false
+	}
+	if a.SubmissionKey != b.SubmissionKey {
+		return false
+	}
+	if a.HasThinking != b.HasThinking {
+		return false
+	}
+	if (a.TimestampMs == nil) != (b.TimestampMs == nil) {
+		return false
+	}
+	if a.TimestampMs != nil && *a.TimestampMs != *b.TimestampMs {
+		return false
+	}
+	if (a.PartType == nil) != (b.PartType == nil) {
+		return false
+	}
+	if a.PartType != nil && *a.PartType != *b.PartType {
+		return false
+	}
+	if !classifiedProvenanceEqual(a.Provenance, b.Provenance) {
+		return false
+	}
+	if !classifiedUsageEqual(a.Usage, b.Usage) {
+		return false
+	}
+	if !classifiedObservedModelEqual(a.ObservedModel, b.ObservedModel) {
+		return false
+	}
+	if !classifiedAttachmentsEqual(a.NativeAttachments, b.NativeAttachments) {
+		return false
+	}
+	return true
+}
+
+func classifiedProvenanceEqual(a, b *schema.ContentProvenance) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Origin == b.Origin &&
+		a.Actor == b.Actor &&
+		a.Delivery == b.Delivery &&
+		a.Ownership == b.Ownership &&
+		a.Evidence == b.Evidence &&
+		a.InputModality == b.InputModality
+}
+
+func classifiedUsageEqual(a, b *ClassifiedUsage) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if (a.TokensIn == nil) != (b.TokensIn == nil) {
+		return false
+	}
+	if a.TokensIn != nil && *a.TokensIn != *b.TokensIn {
+		return false
+	}
+	if (a.TokensOut == nil) != (b.TokensOut == nil) {
+		return false
+	}
+	if a.TokensOut != nil && *a.TokensOut != *b.TokensOut {
+		return false
+	}
+	return true
+}
+
+func classifiedObservedModelEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func classifiedAttachmentsEqual(a, b []ClassifiedNativeAttachment) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID ||
+			a[i].Kind != b[i].Kind ||
+			a[i].SourceType != b[i].SourceType ||
+			a[i].CustomType != b[i].CustomType ||
+			a[i].Data != b[i].Data ||
+			a[i].AttachmentToolCallKey != b[i].AttachmentToolCallKey ||
+			a[i].MessageRole != b[i].MessageRole {
+			return false
+		}
+	}
+	return true
+}
+
+// collapseProvedAmbiguousMirrors retains every unique unproved representation
+// with its own ref in uncertain earlier history. Members that are exact
+// mirrors collapse to the first mirror; distinct bodies or distinct provenance
+// axes stay as independent entries with independent evidence and no
+// input/title contribution (earlier history never counts).
+func collapseProvedAmbiguousMirrors(resolved []*resolvedBlock) error {
 	groups := make(map[string][]*resolvedBlock)
 	for _, rb := range resolved {
 		if rb.block.AmbiguousPairKey != "" {
@@ -291,15 +610,33 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 		}
 	}
 	for _, group := range groups {
-		retained := group[0]
+		retained := []*resolvedBlock{group[0]}
 		for _, rb := range group[1:] {
-			rb.dropped = true
-			rb.dropTo = retained
-			rb.section = retained.section
-			rb.block.Uncertain = true
+			merged := false
+			for _, owner := range retained {
+				if ambiguousMirrorEqual(owner.block, rb.block) {
+					rb.dropped = true
+					rb.dropTo = owner
+					rb.section = owner.section
+					rb.block.Uncertain = true
+					merged = true
+					break
+				}
+			}
+			if !merged {
+				// Unique unproved representation: keep its own ref and its
+				// independent evidence in uncertain earlier history.
+				rb.section = ownerSection(group[0])
+				rb.block.Uncertain = true
+				retained = append(retained, rb)
+			}
 		}
 	}
-	return resolved, nil
+	return nil
+}
+
+func ownerSection(rb *resolvedBlock) int {
+	return rb.section
 }
 
 // allocateBlockRefs assigns one opaque block ref per retained block, reusing a
@@ -434,6 +771,24 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 		PartType:       block.PartType,
 		HasThinking:    block.HasThinking,
 	}
+	if block.Usage != nil {
+		if block.Usage.TokensIn != nil {
+			value := *block.Usage.TokensIn
+			entry.TokensIn = &value
+		}
+		if block.Usage.TokensOut != nil {
+			value := *block.Usage.TokensOut
+			entry.TokensOut = &value
+		}
+	}
+	if block.ObservedModel != nil {
+		encoded, err := json.Marshal(map[string]string{"model_id": *block.ObservedModel})
+		if err != nil {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q observedModel cannot be encoded; the observation cannot be preserved; supply the exact source identifier: %w", block.NativeKey, err)
+		}
+		value := string(encoded)
+		entry.Extra = &value
+	}
 	switch block.EntryType {
 	case schema.EntryTypeToolUse:
 		entry.HasToolUse = true
@@ -519,6 +874,62 @@ func remapToolParents(partitions projectionPartitions, resolved []*resolvedBlock
 	for i := range partitions.earlier {
 		if err := assign(partitions.earlier[i].Content.Entries, i+1); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// attachProjectionNativeMetadata places each typed native-metadata enrichment
+// on its owner's final partition and remaps its owner and tool attachment to
+// the allocated opaque refs. A record never leaves its owner's partition, so
+// call/result/usage/native ownership survives layout and an uncertain
+// relocation carries its enrichment with it.
+func attachProjectionNativeMetadata(partitions *projectionPartitions, resolved []*resolvedBlock) error {
+	type callKey struct {
+		partition int
+		native    string
+	}
+	toolIDs := make(map[callKey]string)
+	for _, rb := range resolved {
+		if rb.dropped || rb.block.Depth != 1 || rb.block.EntryType != schema.EntryTypeToolUse {
+			continue
+		}
+		if rb.block.ToolCallKey == "" {
+			continue
+		}
+		toolIDs[callKey{partition: rb.section, native: rb.block.ToolCallKey}] = string(rb.ref)
+	}
+	for _, rb := range resolved {
+		if rb.dropped || len(rb.block.NativeAttachments) == 0 {
+			continue
+		}
+		for j := range rb.block.NativeAttachments {
+			supplied := rb.block.NativeAttachments[j]
+			record := schema.NativeMetadataRecord{
+				ID:   supplied.ID,
+				Kind: supplied.Kind,
+				Source: schema.NativeSourceRef{
+					EntryRef:   rb.ref,
+					SourceType: supplied.SourceType,
+				},
+				CustomType: supplied.CustomType,
+				Data:       json.RawMessage(supplied.Data),
+			}
+			if supplied.MessageRole != "" {
+				record.Source.MessageRole = supplied.MessageRole
+			}
+			if supplied.AttachmentToolCallKey != "" {
+				toolID, ok := toolIDs[callKey{partition: rb.section, native: supplied.AttachmentToolCallKey}]
+				if !ok {
+					return fmt.Errorf("ingest.BuildGeneration: native key %q native attachment %q names tool call %q with no tool_use in the same partition; the attachment would be split; supply the call block in its partition", rb.block.NativeKey, supplied.ID, supplied.AttachmentToolCallKey)
+				}
+				record.Attachment = &schema.NativeAttachmentRef{ToolCallID: toolID}
+			}
+			if rb.section == 0 {
+				partitions.main.NativeMetadata = append(partitions.main.NativeMetadata, record)
+				continue
+			}
+			partitions.earlier[rb.section-1].Content.NativeMetadata = append(partitions.earlier[rb.section-1].Content.NativeMetadata, record)
 		}
 	}
 	return nil
@@ -761,4 +1172,9 @@ func nonEmptyString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func projectionAttachmentDataIsNull(data []byte) bool {
+	trimmed := strings.TrimSpace(string(data))
+	return trimmed == "" || trimmed == "null"
 }

@@ -15,3 +15,12 @@ requiredNames:
   - duplicate-native-key-rejected
   - submission-on-non-input-rejected
   - invalid-entry-type-rejected
+  - uncertain-child-relocates-whole-subtree
+  - ambiguous-pair-differing-body
+  - ambiguous-pair-differing-provenance
+  - attachment-enrichment-survives-layout
+  - count-lifecycle-accepted
+  - count-actor-excluded
+  - count-delivery-excluded
+  - count-action-without-title
+  - count-excluded-main-input
