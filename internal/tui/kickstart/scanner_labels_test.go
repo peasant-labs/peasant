@@ -61,6 +61,9 @@ func loadScannerLabels(t *testing.T) scannerLabelDocument {
 	}
 	present := make(map[string]bool, len(doc.Cases))
 	for _, testCase := range doc.Cases {
+		if present[testCase.Name] {
+			t.Fatalf("scanner label fixture repeats case name %q", testCase.Name)
+		}
 		present[testCase.Name] = true
 	}
 	if err := testutil.RequireFixtureNames("scanner label fixture", "case", doc.RequiredCaseNames, present); err != nil {
@@ -112,9 +115,10 @@ const scannerLabelTempRootToken = "TEMP_ROOT"
 // TestScannerTreeSource_ProjectLabelMatrix proves the production scanner's
 // project-row labels over the complete remote x name matrix the fixture YAML
 // holds: the fixture supplies every cohort's working directories, discovery
-// names, remotes, and exact expected labels, while this runner keeps the real
-// temporary-directory and real Git repository setup and executes the
-// production ScannerTreeSource.Load.
+// names, remotes, and exact expected labels, and the runner asserts the
+// rendered label set equals it — every expected label on exactly one root,
+// nothing extra. This runner keeps the real temporary-directory and real Git
+// repository setup and executes the production ScannerTreeSource.Load.
 func TestScannerTreeSource_ProjectLabelMatrix(t *testing.T) {
 	t.Parallel()
 	doc := loadScannerLabels(t)
@@ -133,9 +137,16 @@ func TestScannerTreeSource_ProjectLabelMatrix(t *testing.T) {
 			if len(roots) != len(want) {
 				t.Fatalf("project roots = %d, want %d rendering labels %v", len(roots), len(want), testCase.ExpectedLabels)
 			}
+			actual := make(map[string]bool, len(roots))
+			rendered := make([]string, 0, len(roots))
 			for _, project := range roots {
+				if actual[project.Label] {
+					t.Errorf("project label %q is carried by more than one root; the fixture expects each label on exactly one project", project.Label)
+				}
+				actual[project.Label] = true
+				rendered = append(rendered, project.Label)
 				if !want[project.Label] {
-					t.Errorf("project label = %q, want one of the fixture labels %v", project.Label, testCase.ExpectedLabels)
+					t.Errorf("unexpected project label %q; want one of the fixture labels %v", project.Label, testCase.ExpectedLabels)
 				}
 				if prefix := testCase.ExpectedIdentityPrefix; prefix != "" && !strings.HasPrefix(project.Meta[settings.MetaProjectIdentity], prefix) {
 					t.Errorf("project %q identity = %q, want prefix %q", project.Label, project.Meta[settings.MetaProjectIdentity], prefix)
@@ -153,6 +164,11 @@ func TestScannerTreeSource_ProjectLabelMatrix(t *testing.T) {
 						t.Errorf("project %q session %q name multiplicity = %q, want %q",
 							project.Label, session.ID, session.Meta[settings.MetaNameMultiplicity], testCase.ExpectedNameMultiplicity)
 					}
+				}
+			}
+			for _, label := range testCase.ExpectedLabels {
+				if !actual[filepath.FromSlash(label)] {
+					t.Errorf("missing expected project label %q; the scanner rendered %v", label, rendered)
 				}
 			}
 		})
