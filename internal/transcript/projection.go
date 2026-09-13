@@ -172,12 +172,12 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 		}
 		m.Data = data
 		if m.Kind == schema.NativeMetadataPiCustomData {
-			if _, exists := p.SourceMap[m.Source.EntryRef]; exists {
+			if _, exists := p.SourceMap[string(m.Source.EntryRef)]; exists {
 				return p, projectionError("plain custom metadata collides with a conversational source")
 			}
 			continue
 		}
-		target, ok := p.SourceMap[m.Source.EntryRef]
+		target, ok := p.SourceMap[string(m.Source.EntryRef)]
 		if !ok {
 			return p, projectionError("metadata source has no surviving target")
 		}
@@ -193,7 +193,7 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 		if extra.Usage == nil {
 			continue
 		}
-		target, ok := p.SourceMap[extra.Usage.SourceEntryRef]
+		target, ok := p.SourceMap[string(extra.Usage.SourceEntryRef)]
 		if !ok {
 			return p, projectionError("usage carrier source has no surviving owner target")
 		}

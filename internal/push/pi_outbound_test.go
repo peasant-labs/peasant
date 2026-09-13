@@ -207,7 +207,7 @@ func piOutboundEntries(data string) ([]schema.SessionEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraUsage, Harness: schema.HarnessPi, SourceRef: u.SourceEntryRef, Usage: &u, ModelID: "fixture-model"})
+	extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraUsage, Harness: schema.HarnessPi, SourceRef: string(u.SourceEntryRef), Usage: &u, ModelID: "fixture-model"})
 	if err != nil {
 		return nil, err
 	}
@@ -215,13 +215,13 @@ func piOutboundEntries(data string) ([]schema.SessionEntry, error) {
 	entry := schema.SessionEntry{SessionID: sid, Harness: schema.HarnessPi, EntryIndex: 0, Role: schema.RoleAssistant, EntryType: schema.EntryTypeText, ContentPreview: &text, Extra: extra}
 	namespace := "extension"
 	toolID, toolName, toolInput, parent := ingest.PiPublicRef(string(sid), "tool", "tool"), "search", "{}", 0
-	toolExtra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraState, Harness: schema.HarnessPi, SourceRef: u.SourceEntryRef, Namespace: &namespace})
+	toolExtra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraState, Harness: schema.HarnessPi, SourceRef: string(u.SourceEntryRef), Namespace: &namespace})
 	if err != nil {
 		return nil, err
 	}
 	toolEntry := schema.SessionEntry{SessionID: sid, Harness: schema.HarnessPi, EntryIndex: 1, Role: schema.RoleAssistant, EntryType: schema.EntryTypeToolUse, Depth: 1, ParentIndex: &parent, ToolCallID: &toolID, ToolNamesCSV: &toolName, ToolInput: &toolInput, Extra: toolExtra}
 	ref := ingest.PiPublicRef(string(sid), "entry", "custom")
-	carrier, err := ingest.NewPiCarrier(sid, 2, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: ref, SourceType: schema.NativeSourcePiCustom}, CustomType: "extension", Data: json.RawMessage(data)}}})
+	carrier, err := ingest.NewPiCarrier(sid, 2, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: schema.SourceEntryRef(ref), SourceType: schema.NativeSourcePiCustom}, CustomType: "extension", Data: json.RawMessage(data)}}})
 	return []schema.SessionEntry{entry, toolEntry, carrier}, err
 }
 

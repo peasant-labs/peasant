@@ -186,7 +186,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 				if string(u.Scope) != c.WantScopes[i] || string(u.Completeness) != c.WantCompleteness[i] || cost != c.WantCosts[i] {
 					t.Fatalf("owner %d = %+v cost %s", i, u, cost)
 				}
-				if _, ok := p.SourceMap[u.SourceEntryRef]; !ok {
+				if _, ok := p.SourceMap[string(u.SourceEntryRef)]; !ok {
 					t.Fatalf("owner has no exact source target: %s", u.SourceEntryRef)
 				}
 			}
@@ -353,7 +353,7 @@ func piFixtureEntry(t *testing.T, sid schema.SessionID, index int, e piProjectio
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := schema.NativeMetadataRecord{ID: ingest.PiPublicRef(string(sid), "metadata", e.ID), Kind: k, Source: schema.NativeSourceRef{EntryRef: extra.SourceRef, SourceType: source}, Data: json.RawMessage(e.Metadata), CustomType: e.Custom}
+		m := schema.NativeMetadataRecord{ID: ingest.PiPublicRef(string(sid), "metadata", e.ID), Kind: k, Source: schema.NativeSourceRef{EntryRef: schema.SourceEntryRef(extra.SourceRef), SourceType: source}, Data: json.RawMessage(e.Metadata), CustomType: e.Custom}
 		if kind == schema.EntryTypeToolResult {
 			m.Source.MessageRole = schema.NativePiMessageRoleToolResult
 		}

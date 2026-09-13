@@ -63,7 +63,7 @@ func TestPiShareReviewProductionRoute(t *testing.T) {
 			meta := &ingest.UnifiedMetadata{SessionID: sid, ModelHarness: schema.HarnessPi, Model: "fixture-model", HostSlug: "testslug", Project: schema.ProjectContext{Hash: testutil.TestProjectHash, Name: "testproj", FilePath: "/fixture"}, Timestamp: schema.TimestampInfo{Start: 1, End: 2, Ingested: &ingested}, Source: schema.SourceInfo{FilePath: "/fixture.jsonl", Format: schema.SourceFormatJSONL}}
 			ref := ingest.PiPublicRef(string(sid), "entry", "custom")
 			meta.SchemaVersion = ingest.CurrentSchemaVersion
-			entry, err := ingest.NewPiCarrier(sid, 0, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: ref, SourceType: schema.NativeSourcePiCustom}, CustomType: "fixture", Data: json.RawMessage(c.Data)}}})
+			entry, err := ingest.NewPiCarrier(sid, 0, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: schema.SourceEntryRef(ref), SourceType: schema.NativeSourcePiCustom}, CustomType: "fixture", Data: json.RawMessage(c.Data)}}})
 			if err != nil {
 				t.Fatal(err)
 			}

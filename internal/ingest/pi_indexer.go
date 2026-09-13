@@ -424,7 +424,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			if err != nil {
 				return nil, err
 			}
-			record := schema.NativeMetadataRecord{ID: PiPublicRef(sessionID.String(), "metadata", entry.ID), Kind: metadataKind, Source: schema.NativeSourceRef{EntryRef: extra.SourceRef, SourceType: sourceType}, Data: safe}
+			record := schema.NativeMetadataRecord{ID: PiPublicRef(sessionID.String(), "metadata", entry.ID), Kind: metadataKind, Source: schema.NativeSourceRef{EntryRef: schema.SourceEntryRef(extra.SourceRef), SourceType: sourceType}, Data: safe}
 			if entry.Type == piCustom || entry.Type == piCustomMessage {
 				record.CustomType = entry.CustomType
 			}

@@ -425,7 +425,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			}
 			if tc.Name == "active-history" {
 				assistant := detail.Turns[1]
-				if assistant.ObservedModel != "observed-model" || !assistant.HasThinking || assistant.SourceEntryRef != ingest.PiPublicRef(session.SessionID.String(), "entry", "a") {
+				if assistant.ObservedModel != "observed-model" || !assistant.HasThinking || string(assistant.SourceEntryRef) != ingest.PiPublicRef(session.SessionID.String(), "entry", "a") {
 					t.Fatalf("assistant source/model/thinking attribution lost: %+v", assistant)
 				}
 				if assistant.Usage == nil || assistant.Usage.Completeness != schema.UsageComplete || assistant.Usage.Cost == nil || assistant.Usage.Cost.Total == nil || string(*assistant.Usage.Cost.Total) != "1e-7" {
@@ -435,7 +435,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 					t.Fatal("native tool did not survive")
 				}
 				tool := assistant.ToolCalls[0]
-				if tool.ID != ingest.PiPublicRef(session.SessionID.String(), "tool", "call") || tool.Name != "custom_tool" || tool.Namespace == nil || *tool.Namespace != "fixture.extension" || tool.CallEntryRef != assistant.SourceEntryRef || tool.ResultEntryRef != ingest.PiPublicRef(session.SessionID.String(), "entry", "r") || tool.Usage == nil || tool.Usage.Completeness != schema.UsageUnknown || !tool.IsError {
+				if tool.ID != ingest.PiPublicRef(session.SessionID.String(), "tool", "call") || tool.Name != "custom_tool" || tool.Namespace == nil || *tool.Namespace != "fixture.extension" || tool.CallEntryRef != assistant.SourceEntryRef || string(tool.ResultEntryRef) != ingest.PiPublicRef(session.SessionID.String(), "entry", "r") || tool.Usage == nil || tool.Usage.Completeness != schema.UsageUnknown || !tool.IsError {
 					t.Fatalf("tool source/result/unknown owner not preserved: %+v", tool)
 				}
 				if strings.Count(string(raw), "[image omitted]") != 4 {

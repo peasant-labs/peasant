@@ -88,7 +88,7 @@ if (canonicalHarnesses.length !== 8 || !canonicalHarnesses.includes(Harness.Stri
     'the build dependency tree is not the contract this Peasant source targets',
     'provider-build-provenance.mjs schema inventory',
     'a provider-policy result would be ambiguous',
-    'install the exact @peasant-labs/schema@0.18.0 contract and rebuild',
+    'install the exact @peasant-labs/schema@0.20.0 contract and rebuild',
   )
 }
 
