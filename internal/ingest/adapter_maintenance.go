@@ -337,10 +337,21 @@ func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
 	if !ok || loc.SchemaVersion > CurrentSchemaVersion {
 		return false
 	}
-	if loc.IngestedMs != nil && *loc.IngestedMs > 0 && session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
+	// A schema this build re-extracts from native input forces the update.
+	if metadataNeedsNativeRefresh(loc.SchemaVersion) {
 		return true
 	}
-	return metadataNeedsNativeRefresh(loc.SchemaVersion)
+	if loc.IngestedMs == nil || *loc.IngestedMs <= 0 || !session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
+		return false
+	}
+	// The newer mod time is only a clock hint. For a supported captured source
+	// that already holds a fingerprint, the post-capture comparison can overrule
+	// it with an unchanged verdict before anything is published, and the queued
+	// worker then exits without rewriting the pair. Deferring detection there
+	// would let a damaged pair on unchanged bytes lose its repair, so keep the
+	// detection read whenever a stored fingerprint can overrule the hint. An
+	// empty fingerprint cannot: the capture is forced to update.
+	return !(loc.SourceEvidenceSupported && len(loc.SourceFingerprint) > 0)
 }
 
 // appendPairRepairWork appends the stored sessions whose saved pair is missing
@@ -349,9 +360,10 @@ func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
 // nothing to protect, so the ordinary harvest performs it automatically. A
 // session already queued for other work is marked for repair in place, so a
 // database-first "unchanged" verdict cannot leave the damaged pair behind. The
-// one exception is a session queued for a native content or producer-version
-// change: its queued path rewrites the pair from native input, so selection
-// does not read the pair for it.
+// one exception is a session whose queue reason proves the queued path rewrites
+// the pair from native input: a forced run, a schema this build re-extracts, or
+// a newer clock on a row with no stored fingerprint that could overrule it.
+// Selection does not read the pair for those.
 func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
 	if p.metricsStore == nil {
 		return entries

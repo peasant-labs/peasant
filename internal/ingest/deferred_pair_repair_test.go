@@ -3,14 +3,17 @@ package ingest_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -35,6 +38,8 @@ type deferredPairRepairCase struct {
 	QueueReason         string `yaml:"queueReason"`
 	PairState           string `yaml:"pairState"`
 	NativeAvailable     bool   `yaml:"nativeAvailable"`
+	StoredFingerprint   bool   `yaml:"storedFingerprint"`
+	PublicationReady    bool   `yaml:"publicationReady"`
 	WantIndexed         bool   `yaml:"wantIndexed"`
 	WantChecksumRefusal bool   `yaml:"wantChecksumRefusal"`
 	WantPairUnchanged   bool   `yaml:"wantPairUnchanged"`
@@ -46,6 +51,8 @@ type deferredSelectionRead struct {
 	QueueReason          string `yaml:"queueReason"`
 	PairState            string `yaml:"pairState"`
 	NativeAvailable      bool   `yaml:"nativeAvailable"`
+	StoredFingerprint    bool   `yaml:"storedFingerprint"`
+	PublicationReady     bool   `yaml:"publicationReady"`
 	WantPairReads        *int   `yaml:"wantPairReads"`
 	WantPairReadsAtLeast int    `yaml:"wantPairReadsAtLeast"`
 }
@@ -103,13 +110,22 @@ type deferredPairSeed struct {
 	transcriptBefore []byte
 }
 
+// deferredPairArrangement is the stored state a case needs before the run.
+type deferredPairArrangement struct {
+	PairState         string
+	StoredFingerprint bool
+	PublicationReady  bool
+}
+
 // seedDeferredPair stores one session with an intact pair, records the pair's
-// identity, and then either leaves the intact transcript in place or replaces
-// it with a transcript that no longer matches the recorded identity. The stored
-// ingest clock is set one hour old, so a discovered source mod time in the
-// future of it queues the session for a native content change, and a mod time
-// before it leaves index readiness as the queue signal.
-func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, memfs *testutil.MemFS, fixture deferredPairRepairDocument, pairState string) deferredPairSeed {
+// identity, and then either leaves the intact transcript in place, replaces it
+// with a transcript that no longer matches the recorded identity, or removes
+// the metadata sidecar. The stored ingest clock is set one hour old, so a
+// discovered source mod time in the future of it queues the session for a
+// native content change, and a mod time before it leaves index readiness as the
+// queue signal. A stored fingerprint and a publication-ready row model a source
+// whose post-capture comparison can overrule that clock hint.
+func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, memfs *testutil.MemFS, fixture deferredPairRepairDocument, arrangement deferredPairArrangement) deferredPairSeed {
 	t.Helper()
 	id, err := ingest.NewSessionID(testutil.TestSessionUUID)
 	if err != nil {
@@ -151,7 +167,18 @@ func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, 
 	if err := publishIndexInputFixture(ctx, database, memfs, testOutputDir, artifact, metadataPath); err != nil {
 		t.Fatal(err)
 	}
-	switch pairState {
+	var fingerprint []byte
+	if arrangement.StoredFingerprint {
+		sum := sha256.Sum256(nativeTranscript)
+		fingerprint = sum[:]
+		if err := mirrorDeferredPair(ctx, database, artifact, fingerprint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if arrangement.PublicationReady {
+		seedDeferredPublicationReady(t, ctx, database, meta, artifact, fingerprint)
+	}
+	switch arrangement.PairState {
 	case "healthy":
 		// The intact pair installed by publishIndexInputFixture stays.
 	case "damaged":
@@ -163,11 +190,15 @@ func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, 
 			t.Fatal(err)
 		}
 	default:
-		t.Fatalf("unknown pair state %q", pairState)
+		t.Fatalf("unknown pair state %q", arrangement.PairState)
 	}
-	// Make the row a pair-repair candidate: a stale index revision is what the
-	// selection inventory enumerates.
-	seedStalePreviewCapture(t, ctx, database, id)
+	if !arrangement.PublicationReady {
+		// Make the row a pair-repair candidate: a stale index revision is what
+		// the selection inventory enumerates. A publication-ready row is
+		// already selected by the crash-repair predicate, and a legacy preview
+		// write would clear its binding.
+		seedStalePreviewCapture(t, ctx, database, id)
+	}
 	metadataBefore, metadataErr := memfs.ReadFile(metadataPath)
 	if metadataErr != nil {
 		metadataBefore = nil
@@ -179,6 +210,56 @@ func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, 
 	return deferredPairSeed{
 		id: id, metadataPath: metadataPath, transcriptPath: transcriptPath, nativePath: nativePath,
 		metadataBefore: metadataBefore, transcriptBefore: transcriptBefore,
+	}
+}
+
+func mirrorDeferredPair(ctx context.Context, database *store.Store, artifact *ingest.ManagedArtifact, fingerprint []byte) error {
+	results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact, SourceFingerprint: fingerprint}})
+	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+		return fmt.Errorf("record the source fingerprint for %s: %+v", artifact.Metadata.SessionID, results)
+	}
+	return nil
+}
+
+// seedDeferredPublicationReady establishes the publication binding the store
+// must see for a captured source: a source-inspected metadata capture, its
+// indexed revision, and a complete content capture at that same revision. It
+// leaves the pair on disk alone, so the caller can still damage it.
+func seedDeferredPublicationReady(t *testing.T, ctx context.Context, database *store.Store, meta *ingest.UnifiedMetadata, artifact *ingest.ManagedArtifact, fingerprint []byte) {
+	t.Helper()
+	preview := "publication capture"
+	entries := []schema.SessionEntry{{
+		SessionID: meta.SessionID, Harness: ingest.HarnessClaudeCode, EntryIndex: 0,
+		EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview,
+	}}
+	content, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := *meta
+	ready.ContentHash = schema.ComputeTranscriptHash(content)
+	ready.MetadataHash = schema.ComputeMetadataHash(&ready)
+	kind := ingest.CWDSourceAbsent
+	if ready.CWD != "" {
+		kind = ingest.CWDSourceExact
+	}
+	artifactHash := artifact.ArtifactHash
+	revisions, err := database.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{{
+		Metadata: &ready, PublicationCapture: true, CWDProvenance: kind,
+		ArtifactHash: &artifactHash, SourceFingerprint: fingerprint,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode]
+	writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: meta.SessionID, Result: indexformat.V1{Entries: entries},
+		IndexVersion: versions.IndexVersion, RequireFullContent: true,
+		CaptureRevision: revisions[meta.SessionID], IndexerVersion: versions.IndexerVersion,
+		IndexedAtMs: ready.Timestamp.Start,
+	}})
+	if len(writes) != 1 || writes[0].Err != nil {
+		t.Fatalf("index the publication-ready capture: %+v", writes)
 	}
 }
 
@@ -264,7 +345,11 @@ func TestDeferredPairRepairDetection(t *testing.T) {
 			}
 			defer database.Close()
 
-			seed := seedDeferredPair(t, ctx, database, memfs, document, fixture.PairState)
+			seed := seedDeferredPair(t, ctx, database, memfs, document, deferredPairArrangement{
+				PairState:         fixture.PairState,
+				StoredFingerprint: fixture.StoredFingerprint,
+				PublicationReady:  fixture.PublicationReady,
+			})
 			var discoveredSessions []ingest.DiscoveredSession
 			if fixture.Discovered {
 				discoveredSessions = deferredPairDiscovered(t, seed, fixture.QueueReason)
@@ -332,6 +417,8 @@ type managedPairReadCounter struct {
 	reads int
 }
 
+var _ ingest.FileSystem = (*managedPairReadCounter)(nil)
+
 func (counter *managedPairReadCounter) ReadFile(path string) ([]byte, error) {
 	if counter.paths[path] {
 		counter.reads++
@@ -362,7 +449,11 @@ func TestDeferredPairRepairSelectionReads(t *testing.T) {
 			}
 			defer database.Close()
 
-			seed := seedDeferredPair(t, ctx, database, memfs, document, fixture.PairState)
+			seed := seedDeferredPair(t, ctx, database, memfs, document, deferredPairArrangement{
+				PairState:         fixture.PairState,
+				StoredFingerprint: fixture.StoredFingerprint,
+				PublicationReady:  fixture.PublicationReady,
+			})
 			counter := &managedPairReadCounter{
 				MemFS: memfs,
 				paths: map[string]bool{seed.metadataPath: true, seed.transcriptPath: true},

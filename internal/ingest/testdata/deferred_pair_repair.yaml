@@ -28,15 +28,20 @@
 # The selection_reads cases run a dry run so no worker processes the row, and
 # count reads of the managed pair. A native-change-queued candidate must not be
 # read during selection; an index-readiness-queued candidate and an unqueued
-# damaged candidate must still be read, proving the count.
+# damaged candidate must still be read, proving the count. A native-change
+# candidate that already holds a stored source fingerprint keeps the selection
+# read, because the post-capture comparison can overrule the clock hint with an
+# unchanged verdict before the pair is republished.
 required_names:
   - queued-healthy-native-unavailable-retains
   - queued-damaged-native-unavailable-refuses
   - queued-healthy-native-available-rewrites
   - queued-readiness-missing-metadata-native-available-repairs
+  - queued-unchanged-source-damaged-pair-repairs
   - unqueued-damaged-native-available-repairs
   - selection-queued-native-change-reads-none
   - selection-queued-readiness-reads-pair
+  - selection-queued-stored-fingerprint-reads-pair
   - selection-unqueued-damaged-reads-pair
 native_transcript: |
   {"type":"user","message":{"role":"user","content":"inspect the deferred native fixture"},"uuid":"u1"}
@@ -82,6 +87,20 @@ cases:
     wantIndexed: true
     wantChecksumRefusal: false
     wantPairUnchanged: false
+  # A newer source clock on a row that already recorded the source fingerprint:
+  # the post-capture comparison overrules the clock with an unchanged verdict,
+  # so the queued worker would exit without republishing. The damaged pair must
+  # still be repaired.
+  - name: queued-unchanged-source-damaged-pair-repairs
+    discovered: true
+    queueReason: native-change
+    pairState: damaged
+    nativeAvailable: true
+    storedFingerprint: true
+    publicationReady: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
   # Not queued: selection detects the damage and appends the repair entry,
   # which re-ingests the pair from the native source.
   - name: unqueued-damaged-native-available-repairs
@@ -102,6 +121,13 @@ selection_reads:
     discovered: true
     queueReason: index-readiness
     pairState: missing-metadata
+    wantPairReadsAtLeast: 1
+  - name: selection-queued-stored-fingerprint-reads-pair
+    discovered: true
+    queueReason: native-change
+    pairState: healthy
+    storedFingerprint: true
+    publicationReady: true
     wantPairReadsAtLeast: 1
   - name: selection-unqueued-damaged-reads-pair
     discovered: false
