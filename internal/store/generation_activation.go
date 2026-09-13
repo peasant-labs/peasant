@@ -198,6 +198,18 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		}
 		return fmt.Errorf("store: recover pending activation for session %s: %w; the synced candidate was preserved and the prior generation is unchanged", sessionID, err)
 	}
+	// Verify the envelope binding before replaying anything: the staged bytes
+	// must still produce the digest the intent recorded. A rejected candidate
+	// whose envelope was replaced, or a manifest that changed under the intent,
+	// stays inactive for a verified retry instead of being activated under the
+	// wrong stamps.
+	stagedDigest, err := computeActivationBinding(generation, bindingFromStaged)
+	if err != nil {
+		return fmt.Errorf("store: recover pending activation for session %s: %w; the synced candidate was preserved and the prior generation is unchanged", sessionID, err)
+	}
+	if intent.CandidateDigest == "" || stagedDigest != intent.CandidateDigest {
+		return fmt.Errorf("store: refuse pending activation for session %s generation %s in recoverGenerationIntentLocked: the durable intent does not bind to the staged candidate bytes; the candidate was preserved and the prior generation is unchanged; retry a verified activation", sessionID, intent.GenerationID)
+	}
 	// Replay the persisted envelope with the original guarded preconditions:
 	// the producing revision and time, the captured compare-and-swap state,
 	// the input proof and pair identity, and the content-capture evidence. A
@@ -325,9 +337,19 @@ func readActiveGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (
 // stageWithIntent records the durable activation envelope before staging the
 // generation files, so a crash after the atomic rename is recoverable by
 // replaying the same guarded transaction and a crash before the rename leaves
-// only a stale intent that recovery clears.
+// only a stale intent that recovery clears. The envelope is bound to the
+// complete candidate digest, and any identifier collision is rejected BEFORE
+// the intent is replaced, so a refused candidate cannot leave an activatable
+// envelope bound to older staged bytes.
 func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte, activation GenerationActivation) (indexformat.Generation, error) {
 	if err := validateGenerationID(generation.ID); err != nil {
+		return indexformat.Generation{}, err
+	}
+	candidateDigest, err := computeActivationBinding(generation, bindingFromBlobs(blobs))
+	if err != nil {
+		return indexformat.Generation{}, fmt.Errorf("store: bind activation for generation %s of session %s: %w; the candidate was not staged and any installed generation is unchanged", generation.ID, sessionID, err)
+	}
+	if err := s.verifyImmutableCandidateIdentity(ctx, sessionID, generation, candidateDigest); err != nil {
 		return indexformat.Generation{}, err
 	}
 	capture := activation.ContentCapture
@@ -361,10 +383,34 @@ func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID,
 		ContentCapture:   capture,
 		IndexedInputHash: indexedInputHash,
 		ArtifactIdentity: activation.ArtifactIdentity,
+		CandidateDigest:  candidateDigest,
 	}); err != nil {
 		return indexformat.Generation{}, err
 	}
 	return s.generationArtifacts.Stage(ctx, generation, blobs)
+}
+
+// verifyImmutableCandidateIdentity refuses an identifier collision before the
+// activation intent is replaced. When no candidate is installed the activation
+// proceeds; when one is installed it must bind to the identical complete
+// candidate (the same whole manifest and every blob digest), and an
+// unverifiable installed manifest is refused rather than overwritten.
+func (s *Store) verifyImmutableCandidateIdentity(ctx context.Context, sessionID schema.SessionID, generation indexformat.Generation, candidateDigest string) error {
+	installed, err := s.generationArtifacts.ReadManifest(ctx, sessionID, generation.ID)
+	if err != nil {
+		if errors.Is(err, ErrStagedGenerationAbsent) {
+			return nil
+		}
+		return fmt.Errorf("store: verify installed candidate for generation %s of session %s before staging: %w; the candidate was not staged and any installed bytes are unchanged", generation.ID, sessionID, err)
+	}
+	installedDigest, err := computeActivationBinding(installed, bindingFromStaged)
+	if err != nil {
+		return fmt.Errorf("store: verify installed candidate for generation %s of session %s before staging: %w; the candidate was not staged and any installed bytes are unchanged", generation.ID, sessionID, err)
+	}
+	if installed.ID != generation.ID || installed.Metadata.SessionID != sessionID || installedDigest != candidateDigest {
+		return fmt.Errorf("store: refuse to stage generation %s for session %s in verifyImmutableCandidateIdentity: the identifier is already installed with different candidate evidence; immutable identifiers cannot be reused; the installed generation is unchanged", generation.ID, sessionID)
+	}
+	return nil
 }
 
 // CleanupInactiveGeneration removes one owned inactive generation directory
@@ -425,10 +471,20 @@ func (s *Store) verifyOwnedInactiveGeneration(ctx context.Context, sessionID sch
 	if committed {
 		return nil
 	}
-	// No committed row: the target is owned only when its staged manifest
-	// exists. An unknown identifier is refused rather than deleted.
-	if _, err := s.generationArtifacts.ReadManifest(ctx, sessionID, generationID); err != nil {
+	// No committed row: the target is owned only when its staged manifest is a
+	// valid generation that names this exact session and generation. A
+	// decodable manifest is not ownership: an empty {}, malformed, mismatched
+	// or unknown manifest is refused, so an unrelated or foreign-owner
+	// directory is never removed.
+	staged, err := s.generationArtifacts.ReadManifest(ctx, sessionID, generationID)
+	if err != nil {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is neither a committed nor a staged owned generation; the directory was left in place", generationID, sessionID)
+	}
+	if staged.ID != generationID || staged.Metadata.SessionID != sessionID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s: the staged manifest names generation %q of session %s; ownership could not be proven; the directory was left in place", generationID, sessionID, staged.ID, staged.Metadata.SessionID)
+	}
+	if err := staged.Validate(); err != nil {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s: the staged manifest is not a valid generation; the directory was left in place: %w", generationID, sessionID, err)
 	}
 	return nil
 }

@@ -95,16 +95,19 @@ func (l *fileSessionLocker) lock(ctx context.Context, id schema.SessionID, mode 
 	if err := acquireFlock(ctx, file.Fd(), mode); err != nil {
 		_ = file.Close()
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %w; no lock was taken", label, id, err)
+			return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %w; no lock was taken; retry with a live context after the holder releases", label, id, err)
 		}
-		return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %s; no lock was taken", label, id, sanitizeFSError(err))
+		return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %s; no lock was taken; fix filesystem access and retry", label, id, sanitizeFSError(err))
 	}
 	release := func() error {
 		if err := unix.Flock(int(file.Fd()), unix.LOCK_UN); err != nil {
 			_ = file.Close()
-			return fmt.Errorf("store: release %s session lock in fileSessionLocker for session %s: %s", label, id, sanitizeFSError(err))
+			return fmt.Errorf("store: release %s session lock in fileSessionLocker for session %s: %s; the lock was not released and the file description remains open; retry the release after fixing filesystem access", label, id, sanitizeFSError(err))
 		}
-		return file.Close()
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("store: close %s session lock in fileSessionLocker for session %s: %s; the advisory lock was released but the file description may leak; retry the release after fixing filesystem access", label, id, sanitizeFSError(err))
+		}
+		return nil
 	}
 	return release, nil
 }

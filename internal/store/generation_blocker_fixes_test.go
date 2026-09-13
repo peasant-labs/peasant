@@ -122,31 +122,49 @@ func TestGenerationIDValidation(t *testing.T) {
 					t.Fatalf("after recovery visible = %q, want G2", got)
 				}
 			case "immutable-collision-refused":
-				// A different candidate reusing the installed identifier must
-				// be refused; the installed generation survives.
-				colliding, collidingBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, "different text", "different input", "different output")
-				colliding.Generation.SourceEvidenceDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-				// Force a different digest by changing the text; the same ID
-				// with different evidence is an immutable collision.
-				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
-					SessionID:    id,
-					GenerationID: colliding.Generation.ID,
-					ManifestPath: "generations/" + colliding.Generation.ID + "/manifest.json",
-					Completeness: string(colliding.Generation.Completeness),
-				}); err != nil {
-					t.Fatalf("write collision intent: %v", err)
+				// G1 is active. Install G2 so G1 is an inactive installed
+				// generation whose immutable bytes must survive a colliding
+				// restaging, then reject the collision on the real production
+				// activation path.
+				second, secondBlobs := buildTestGeneration(t, id, fixture.Generation.FailedID, "second text", "second input", "second output")
+				if err := activateTestGeneration(t, s, second, secondBlobs); err != nil {
+					t.Fatalf("activate G2: %v", err)
 				}
-				if _, err := s.generationArtifacts.Stage(context.Background(), colliding.Generation, collidingBlobs); err == nil {
-					_ = s.generationArtifacts.ClearIntent(context.Background(), id)
-					t.Fatal("staging an immutable collision succeeded; it must be refused")
+				collision, collisionBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, "different text", "different input", "different output")
+				if err := (generationIndexFormat{}).Validate(filledCandidateForValidation(t, collision, collisionBlobs)); err != nil {
+					t.Fatalf("collision candidate is not otherwise valid: %v", err)
 				}
-				_ = s.generationArtifacts.ClearIntent(context.Background(), id)
-				if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
-					t.Fatalf("after refused collision visible = %q, want G1", got)
+				err := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:     collision,
+					Blobs:          collisionBlobs,
+					IndexerVersion: 77,
+					IndexedAtMs:    777,
+				})
+				if err == nil {
+					t.Fatal("activation of a colliding immutable identifier succeeded; it must be refused")
 				}
+				// A refused collision must not leave an activatable intent
+				// bound to the old staged bytes.
+				if pending, readErr := s.generationArtifacts.ReadIntent(context.Background(), id); readErr != nil {
+					t.Fatalf("read intent after refused collision: %v", readErr)
+				} else if pending != nil {
+					t.Fatalf("refused immutable collision left an activation intent: %+v", pending)
+				}
+				// Recovery must not activate the old G1 bytes under the
+				// rejected envelope; G2 stays the read authority.
+				if err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
+					t.Fatalf("recover after refused collision: %v", err)
+				}
+				if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
+					t.Fatalf("after refused collision recovery visible = %q, want G2", got)
+				}
+				// The installed G1 bytes are unchanged and still readable.
 				manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.CompleteID, "manifest.json")
 				if _, err := os.Stat(manifestPath); err != nil {
 					t.Fatalf("installed generation manifest missing after refused collision: %v", err)
+				}
+				if _, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CompleteID); err != nil {
+					t.Fatalf("installed generation manifest unreadable after refused collision: %v", err)
 				}
 			default:
 				// Dot, dotdot and non-canonical identifiers are rejected
@@ -219,6 +237,12 @@ func buildIncompleteGeneration(t *testing.T, sid schema.SessionID, genID, text, 
 	t.Helper()
 	v2, blobs := buildTestGeneration(t, sid, genID, text, toolInput, toolOutput)
 	v2.Generation.Completeness = indexformat.GenerationCompletenessIncompleteNew
+	// A first-discovery candidate has not measured its submissions and never
+	// carries success stamps; the count scalar must be absent, not present.
+	v2.Generation.Metadata.Stats.InputSubmissionCount = nil
+	if err := filledCandidateForValidation(t, v2, blobs).Validate(); err != nil {
+		t.Fatalf("incomplete candidate %s is not otherwise valid: %v", genID, err)
+	}
 	return v2, blobs
 }
 
@@ -279,18 +303,35 @@ func TestGenerationCompletenessTransition(t *testing.T) {
 				if err := activateComplete(fixture.Generation.CompleteID, "prior-complete", 5, 500); err != nil {
 					t.Fatalf("prior complete: %v", err)
 				}
-				if err := activateIncomplete(fixture.Generation.IncompleteID, "incomplete-over-complete", 77, 777); err == nil {
+				// Prove the candidate is otherwise valid so the refusal below
+				// can only come from the completeness transition, never from
+				// Generation.Validate.
+				overComplete, overCompleteBlobs := buildIncompleteGeneration(t, id, fixture.Generation.IncompleteID, "incomplete-over-complete", "incomplete input", "incomplete output")
+				if err := (generationIndexFormat{}).Validate(filledCandidateForValidation(t, overComplete, overCompleteBlobs)); err != nil {
+					t.Fatalf("incomplete candidate is not otherwise valid: %v", err)
+				}
+				overErr := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:     overComplete,
+					Blobs:          overCompleteBlobs,
+					IndexerVersion: 77,
+					IndexedAtMs:    777,
+				})
+				if overErr == nil {
 					t.Fatal("incomplete replacing a complete generation succeeded; it must be refused")
+				}
+				if !strings.Contains(overErr.Error(), "last-good") {
+					t.Fatalf("incomplete-over-complete refusal is not the completeness transition: %v", overErr)
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
 					t.Fatalf("after refusal visible = %q, want complete G1", got)
 				}
-				// A direct format write with a positive stamp for an
-				// incomplete candidate is also refused.
-				v2, _ := buildIncompleteGeneration(t, id, "gen_direct_incomplete", "text", "input", "output")
+				// A direct format write with a positive stamp for an otherwise
+				// valid incomplete candidate is refused at the stamp boundary,
+				// not the completeness transition.
+				v2, v2Blobs := buildIncompleteGeneration(t, id, "gen_direct_incomplete", "text", "input", "output")
 				results := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{
 					SessionID:      id,
-					Result:         v2,
+					Result:         filledCandidateForValidation(t, v2, v2Blobs),
 					IndexVersion:   2,
 					Mode:           ingest.SessionEntryWriteReplaceAll,
 					ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, SourceAuthority: ingest.ContentSourceNone, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly},
@@ -299,6 +340,9 @@ func TestGenerationCompletenessTransition(t *testing.T) {
 				}})
 				if len(results) != 1 || results[0].Err == nil {
 					t.Fatal("direct incomplete write with a positive stamp succeeded; it must be refused")
+				}
+				if !strings.Contains(results[0].Err.Error(), "incomplete generation") {
+					t.Fatalf("direct incomplete write refusal is not the stamp boundary: %v", results[0].Err)
 				}
 			case "incomplete-stamps-unset":
 				// Caller-supplied positive stamps for an incomplete candidate
@@ -340,6 +384,8 @@ func TestGenerationCompletenessTransition(t *testing.T) {
 				if stamps.IndexedAt == nil || *stamps.IndexedAt != 999 {
 					t.Fatalf("complete activation indexed_at = %v, want 999", stamps.IndexedAt)
 				}
+			default:
+				t.Fatalf("unknown generation completeness scenario %q; add it to the fixture, the required-names manifest and this runner", tc.Name)
 			}
 		})
 	}

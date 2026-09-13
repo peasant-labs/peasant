@@ -42,6 +42,13 @@ type GenerationIntent struct {
 	ContentCapture   ingest.SessionContentCaptureWrite `json:"contentCapture"`
 	IndexedInputHash *string                           `json:"indexedInputHash,omitempty"`
 	ArtifactIdentity *string                           `json:"artifactIdentity,omitempty"`
+
+	// CandidateDigest binds this envelope to the complete staged candidate: the
+	// normalized whole-generation manifest plus every captured blob digest.
+	// Recovery replays an envelope only when the staged bytes still produce the
+	// same binding, so a rejected candidate can never be activated under a
+	// different envelope.
+	CandidateDigest string `json:"candidateDigest"`
 }
 
 // GenerationArtifactStore owns the file half of the crash protocol. The
@@ -290,9 +297,10 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 		}
 	}
 	// Immutable generations never move: an existing generation directory with
-	// the same identifier must be the identical candidate (a crash retry) or
-	// the staging is refused. Blindly deleting it would destroy committed
-	// content.
+	// the same identifier must bind to the identical complete candidate (a
+	// crash retry) or the staging is refused. The comparison covers the whole
+	// manifest and every blob digest, never a partial main-preview subset, and
+	// blindly deleting an existing directory would destroy committed content.
 	if _, err := root.Lstat(genRel); err == nil {
 		existing, readErr := root.ReadFile(path.Join(genRel, "manifest.json"))
 		if readErr != nil {
@@ -302,8 +310,10 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 		if err := json.Unmarshal(existing, &installed); err != nil {
 			return fail(fmt.Errorf("generation %s is already installed and its manifest cannot be decoded; staging was refused and the installed generation is unchanged", generation.ID))
 		}
-		if installed.ID != generation.ID || installed.SourceEvidenceDigest != generation.SourceEvidenceDigest || installed.Completeness != generation.Completeness || !sameCandidateEntries(installed, generation) {
-			return fail(fmt.Errorf("generation %s is already installed with different source evidence; immutable identifiers cannot be reused; the installed generation is unchanged", generation.ID))
+		installedBinding, installedErr := computeActivationBinding(installed, bindingFromStaged)
+		incomingBinding, incomingErr := computeActivationBinding(generation, bindingFromBlobs(blobs))
+		if installedErr != nil || incomingErr != nil || installed.ID != generation.ID || installedBinding != incomingBinding {
+			return fail(fmt.Errorf("generation %s is already installed with different candidate evidence; immutable identifiers cannot be reused; the installed generation is unchanged", generation.ID))
 		}
 		if err := root.RemoveAll(genRel); err != nil {
 			return fail(fmt.Errorf("remove prior unactivated candidate for generation %s: %s", generation.ID, sanitizeFSError(err)))
@@ -376,30 +386,77 @@ func reorderContent(filled []indexformat.ContentRecord, byRef map[schema.SourceE
 	return filled
 }
 
-// sameCandidateEntries reports whether the staged retry carries the same
-// logical entries as the installed manifest. Content blob addresses are
-// excluded: staging fills them, so a retry legitimately differs there.
-func sameCandidateEntries(installed, incoming indexformat.Generation) bool {
-	if len(installed.Main.Entries) != len(incoming.Main.Entries) {
-		return false
-	}
-	for i := range installed.Main.Entries {
-		a, b := installed.Main.Entries[i], incoming.Main.Entries[i]
-		if a.SourceEntryRef != b.SourceEntryRef || a.EntryIndex != b.EntryIndex {
-			return false
-		}
-		if !equalOptionalString(a.ContentPreview, b.ContentPreview) || !equalOptionalString(a.ToolInput, b.ToolInput) || !equalOptionalString(a.ToolOutput, b.ToolOutput) {
-			return false
-		}
-	}
-	return true
+// activationBindingContent is one content record reduced to the evidence a
+// candidate binding must carry: its ref and the integrity digest of its blob.
+type activationBindingContent struct {
+	Ref    schema.SourceEntryRef `json:"ref"`
+	Digest string                `json:"digest"`
 }
 
-func equalOptionalString(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
+// activationBinding is the canonical, staging-independent encoding of a
+// complete candidate. The whole generation manifest is included (every
+// partition, segment, alias, title ref and metadata field), and the
+// staging-derived blob path/length/digest fields are normalized out so the
+// pre-stage candidate and the staged manifest produce the same binding.
+type activationBinding struct {
+	Generation indexformat.Generation     `json:"generation"`
+	Content    []activationBindingContent `json:"content"`
+}
+
+// computeActivationBinding binds one activation envelope to the COMPLETE
+// candidate. contentDigest supplies each content record's payload digest: the
+// pre-stage caller hashes the blob bytes and the replay path reuses the
+// manifest's verified integrity digest. It never uses a partial main-preview
+// comparison, so two candidates that differ only outside the main preview still
+// bind differently and an installed immutable generation is never rewritten
+// from a partial equality test.
+func computeActivationBinding(generation indexformat.Generation, contentDigest func(indexformat.ContentRecord) (string, error)) (string, error) {
+	normalized := generation
+	normalized.Content = append([]indexformat.ContentRecord(nil), generation.Content...)
+	content := make([]activationBindingContent, 0, len(normalized.Content))
+	for i := range normalized.Content {
+		record := normalized.Content[i]
+		digest, err := contentDigest(record)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(digest) == "" {
+			return "", fmt.Errorf("store: content record %q carries no integrity digest in computeActivationBinding; the candidate cannot be bound; record the blob digest", record.Ref)
+		}
+		content = append(content, activationBindingContent{Ref: record.Ref, Digest: digest})
+		normalized.Content[i].RelativeBlob = ""
+		normalized.Content[i].ByteLength = 0
+		normalized.Content[i].Digest = ""
 	}
-	return *a == *b
+	sort.Slice(content, func(i, j int) bool { return string(content[i].Ref) < string(content[j].Ref) })
+	payload, err := json.Marshal(activationBinding{Generation: normalized, Content: content})
+	if err != nil {
+		return "", fmt.Errorf("store: encode activation binding for generation %s in computeActivationBinding: %s; the candidate cannot be bound and must be re-staged", normalized.ID, sanitizeFSError(err))
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// bindingFromBlobs hashes the captured blob bytes for a pre-stage candidate.
+func bindingFromBlobs(blobs map[schema.SourceEntryRef][]byte) func(indexformat.ContentRecord) (string, error) {
+	return func(record indexformat.ContentRecord) (string, error) {
+		payload, ok := blobs[record.Ref]
+		if !ok {
+			return "", fmt.Errorf("store: content blob for ref %q is missing; the generation is not self-contained; supply every captured blob", record.Ref)
+		}
+		sum := sha256.Sum256(payload)
+		return hex.EncodeToString(sum[:]), nil
+	}
+}
+
+// bindingFromStaged reuses the integrity digest already recorded in a staged
+// manifest. Staging wrote each digest from the exact payload bytes, so it is
+// the same evidence bindingFromBlobs computes before the rename.
+func bindingFromStaged(record indexformat.ContentRecord) (string, error) {
+	if strings.TrimSpace(record.Digest) == "" {
+		return "", fmt.Errorf("store: staged content record %q carries no integrity digest; the candidate binding cannot be verified; re-stage the generation", record.Ref)
+	}
+	return record.Digest, nil
 }
 
 func (a *osGenerationArtifactStore) WriteIntent(ctx context.Context, intent GenerationIntent) error {
@@ -488,7 +545,7 @@ func (a *osGenerationArtifactStore) RepairMetadata(ctx context.Context, id schem
 	}
 	defer root.Close()
 	if err := root.MkdirAll(sessionRel, 0o700); err != nil {
-		return fmt.Errorf("store: create session artifact directory in RepairMetadata for session %s: %s", id, sanitizeFSError(err))
+		return fmt.Errorf("store: create session artifact directory in RepairMetadata for session %s: %s; the exported metadata was not repaired; the committed generation is unchanged and repair is retried on the next open or activation", id, sanitizeFSError(err))
 	}
 	return writeRootSyncedAtomic(root, path.Join(sessionRel, "metadata.json"), metadata, id, "", "repair the exported metadata")
 }
@@ -512,8 +569,11 @@ func (a *osGenerationArtifactStore) RemoveGeneration(ctx context.Context, id sch
 	// Verify owned identity before recursive removal: the target must be a
 	// confined generation directory under the owned root, never the
 	// generations directory itself and never a namespace escape. os.Root
-	// refuses symlink escapes; the Lstat check refuses a missing or
-	// non-directory target without touching unrelated content.
+	// refuses symlink escapes; the manifest identity check refuses an
+	// in-root symlink ancestor that resolves to another session's generation,
+	// and the validity check refuses an unrelated directory whose manifest
+	// merely decodes (including an empty {}). The directory is left in place on
+	// every refusal.
 	info, err := root.Lstat(genRel)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -524,8 +584,38 @@ func (a *osGenerationArtifactStore) RemoveGeneration(ctx context.Context, id sch
 	if !info.IsDir() {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the owned target is not a generation directory; the directory was left in place", generationID, id)
 	}
+	if err := verifyStagedGenerationOwnership(root, genRel, id, generationID); err != nil {
+		return err
+	}
 	if err := root.RemoveAll(genRel); err != nil {
 		return fmt.Errorf("store: remove inactive generation %s for session %s in RemoveGeneration: %s; the directory was left in place", generationID, id, sanitizeFSError(err))
+	}
+	return nil
+}
+
+// verifyStagedGenerationOwnership proves a candidate directory is really the
+// owned generation for (sessionID, generationID) before any recursive delete.
+// The directory name and a decodable manifest are not ownership: the manifest
+// must name this exact session and generation and must itself be a valid,
+// self-contained generation. An empty {}, malformed, mismatched or unknown
+// manifest is refused, so an unrelated directory is never removed.
+func verifyStagedGenerationOwnership(root *os.Root, genRel string, sessionID schema.SessionID, generationID string) error {
+	data, err := root.ReadFile(path.Join(genRel, "manifest.json"))
+	if err != nil {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: its staged manifest cannot be read (%s); the directory was left in place", generationID, sessionID, sanitizeFSError(err))
+	}
+	var staged indexformat.Generation
+	if err := json.Unmarshal(data, &staged); err != nil {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: its staged manifest cannot be decoded (%s); the directory was left in place", generationID, sessionID, sanitizeFSError(err))
+	}
+	if staged.ID != generationID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest names generation %q; the directory was left in place", generationID, sessionID, staged.ID)
+	}
+	if staged.Metadata.SessionID != sessionID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest names session %s; the directory was left in place", generationID, sessionID, staged.Metadata.SessionID)
+	}
+	if err := staged.Validate(); err != nil {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest is not a valid generation; the directory was left in place: %w", generationID, sessionID, err)
 	}
 	return nil
 }
@@ -601,18 +691,18 @@ func (a *osGenerationArtifactStore) ReadBlob(ctx context.Context, id schema.Sess
 func writeRootSyncedFile(root *os.Root, rel string, data []byte) error {
 	file, err := root.OpenFile(rel, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("create managed file in generation staging: %s", sanitizeFSError(err))
+		return fmt.Errorf("create managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
 	}
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("write managed file in generation staging: %s", sanitizeFSError(err))
+		return fmt.Errorf("write managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("fsync managed file in generation staging: %s", sanitizeFSError(err))
+		return fmt.Errorf("fsync managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close managed file in generation staging: %s", sanitizeFSError(err))
+		return fmt.Errorf("close managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
 	}
 	return nil
 }
@@ -628,32 +718,32 @@ func writeRootSyncedAtomic(root *os.Root, rel string, data []byte, sessionID sch
 			if errors.Is(err, fs.ErrExist) {
 				continue
 			}
-			return fmt.Errorf("store: create temporary file in %s for session %s: %s; no intent was recorded", step, sessionID, sanitizeFSError(err))
+			return fmt.Errorf("store: create temporary file in %s for session %s: %s; no file was written; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 		}
 		tmpRel = candidate
 		if _, err := file.Write(data); err != nil {
 			_ = file.Close()
 			_ = root.Remove(tmpRel)
-			return fmt.Errorf("store: write temporary file in %s for session %s: %s", step, sessionID, sanitizeFSError(err))
+			return fmt.Errorf("store: write temporary file in %s for session %s: %s; the previous durable file is unchanged; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 		}
 		if err := file.Sync(); err != nil {
 			_ = file.Close()
 			_ = root.Remove(tmpRel)
-			return fmt.Errorf("store: fsync temporary file in %s for session %s: %s", step, sessionID, sanitizeFSError(err))
+			return fmt.Errorf("store: fsync temporary file in %s for session %s: %s; the previous durable file is unchanged; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 		}
 		if err := file.Close(); err != nil {
 			_ = root.Remove(tmpRel)
-			return fmt.Errorf("store: close temporary file in %s for session %s: %s", step, sessionID, sanitizeFSError(err))
+			return fmt.Errorf("store: close temporary file in %s for session %s: %s; the previous durable file is unchanged; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 		}
 		break
 	}
 	if tmpRel == "" {
-		return fmt.Errorf("store: create temporary file in %s for session %s: file exists; no intent was recorded", step, sessionID)
+		return fmt.Errorf("store: create temporary file in %s for session %s: file exists; no file was written; clear stale temporary files and retry", step, sessionID)
 	}
 	_ = generationID
 	if err := root.Rename(tmpRel, rel); err != nil {
 		_ = root.Remove(tmpRel)
-		return fmt.Errorf("store: atomically rename file in %s for session %s: %s", step, sessionID, sanitizeFSError(err))
+		return fmt.Errorf("store: atomically rename file in %s for session %s: %s; the previous durable file is unchanged; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 	}
 	return fsyncRootDir(root, dir)
 }
@@ -661,11 +751,11 @@ func writeRootSyncedAtomic(root *os.Root, rel string, data []byte, sessionID sch
 func fsyncRootDir(root *os.Root, rel string) error {
 	dir, err := root.Open(rel)
 	if err != nil {
-		return fmt.Errorf("open directory to fsync in generation staging: %s", sanitizeFSError(err))
+		return fmt.Errorf("open directory to fsync in generation staging: %s; the staged file is not durably recorded; re-run the operation after fixing filesystem access", sanitizeFSError(err))
 	}
 	defer dir.Close()
 	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("fsync directory in generation staging: %s", sanitizeFSError(err))
+		return fmt.Errorf("fsync directory in generation staging: %s; the staged file is not durably recorded; re-run the operation after fixing filesystem access", sanitizeFSError(err))
 	}
 	return nil
 }
