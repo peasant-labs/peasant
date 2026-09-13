@@ -1,0 +1,28 @@
+# Every case computes metrics through the stored-input path a harvest uses.
+# Each one records the same user prose, so a case that keeps that prose as its
+# title proves the harness-native name was never applied.
+requiredNames:
+  - absent_native_name_keeps_the_generated_prose
+  - recorded_native_name_titles_the_session
+  - explicit_clear_removes_the_title
+  - recorded_native_name_passes_the_title_privacy_policy
+cases:
+  - name: absent_native_name_keeps_the_generated_prose
+    arm: absent
+    userProse: plan the release
+    expectedTitle: plan the release
+  - name: recorded_native_name_titles_the_session
+    arm: applied
+    userProse: plan the release
+    nativeName: latest name
+    expectedTitle: latest name
+  - name: explicit_clear_removes_the_title
+    arm: cleared
+    userProse: plan the release
+    nativeName: ""
+    expectedTitle: ""
+  - name: recorded_native_name_passes_the_title_privacy_policy
+    arm: sanitized
+    userProse: plan the release
+    nativeName: fix /home/test/project/src/auth.go
+    expectedTitle: fix /<PATH>/project/src/auth.go

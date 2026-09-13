@@ -1,0 +1,64 @@
+cases:
+  # The unchanged baseline: a certified complete capture publishes.
+  - name: complete_capture_publishes
+    status: complete
+    failureCode: ""
+    captureFormat: full
+    writerCertifies: true
+    publishable: true
+    readiness: ready
+    fullContentReadable: true
+  # The exception the ruling allows: incomplete for exactly one reason, and the
+  # placeholders for the omitted records travel with it.
+  - name: omitted_records_capture_publishes
+    status: incomplete
+    failureCode: source_records_omitted
+    failureMessage: "one source record was omitted at line 5"
+    captureFormat: full
+    writerCertifies: true
+    publishable: true
+    readiness: ready
+    fullContentReadable: true
+  # The strict parser refused this exact input, so its stored entries are the
+  # tolerant projection rather than the source's own.
+  - name: strict_refused_capture_stays_refused
+    status: incomplete
+    failureCode: strict_capture_refused
+    failureMessage: "the strict parser refused the transcript"
+    captureFormat: full
+    writerCertifies: false
+    publishable: false
+    readiness: needs_ingest
+    fullContentReadable: false
+  # Nothing has ever certified a capture written by the content-capture
+  # migration.
+  - name: legacy_preview_only_capture_stays_refused
+    status: incomplete
+    failureCode: legacy_preview_only
+    failureMessage: "captured before content capture existed"
+    captureFormat: full
+    writerCertifies: false
+    publishable: false
+    readiness: needs_ingest
+    fullContentReadable: false
+  # A failed capture proves nothing about what is stored.
+  - name: failed_capture_stays_refused
+    status: failed
+    failureCode: source_records_omitted
+    failureMessage: "capture failed"
+    captureFormat: full
+    writerCertifies: false
+    publishable: false
+    readiness: needs_ingest
+    fullContentReadable: false
+  # Fail closed: the allowed code over a BOUNDED PREVIEW is still a preview, and
+  # a preview may never be published.
+  - name: omitted_records_preview_capture_stays_refused
+    status: incomplete
+    failureCode: source_records_omitted
+    failureMessage: "one source record was omitted at line 5"
+    captureFormat: preview_only
+    writerCertifies: false
+    publishable: false
+    readiness: needs_ingest
+    fullContentReadable: false

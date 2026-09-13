@@ -42,17 +42,21 @@ type StoreDataProvider struct {
 	// pathIdentityResolver resolves stored session worktrees into exact clone
 	// identities before user-facing discovery matching.
 	pathIdentityResolver ingest.PathIdentityResolver
+	fs                   ingest.FileSystem
+	managedRoot          string
 }
 
-// NewStoreDataProvider creates a database-authoritative StoreDataProvider.
-func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy) *StoreDataProvider {
-	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver())
+// NewStoreDataProvider creates a StoreDataProvider backed by the given store,
+// reading available captured content from SQLite. Filesystem/root arguments are
+// retained for compatibility and never gate stored content reads.
+func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy, managedRoots ...string) *StoreDataProvider {
+	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
 
-// NewStoreDataProviderWithFS retains the filesystem argument for caller
-// compatibility. Full transcript detail never reads source files.
-func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem) *StoreDataProvider {
-	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver())
+// NewStoreDataProviderWithFS retains injectable filesystem arguments for caller
+// compatibility. SessionByID reads available content only from SQLite.
+func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem, managedRoots ...string) *StoreDataProvider {
+	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver(), managedRoots...)
 }
 
 // NewStoreDataProviderWithFSAndResolver is NewStoreDataProvider with injectable
@@ -63,15 +67,22 @@ func NewStoreDataProviderWithFSAndResolver(
 	visibility sessionvisibility.Policy,
 	fs ingest.FileSystem,
 	resolver ingest.PathIdentityResolver,
+	managedRoots ...string,
 ) *StoreDataProvider {
 	if resolver == nil {
 		resolver = ingest.NewPhysicalPathResolver()
+	}
+	managedRoot := ""
+	if len(managedRoots) > 0 {
+		managedRoot = managedRoots[0]
 	}
 	return &StoreDataProvider{
 		store:                s,
 		codemap:              newCodemapService(s, visibility, resolver),
 		visibility:           visibility,
 		pathIdentityResolver: resolver,
+		fs:                   fs,
+		managedRoot:          managedRoot,
 	}
 }
 
@@ -186,7 +197,7 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		sessionIDs[i] = rows[i].SessionID
 	}
 
-	// FirstUserMessageBulk issues one IN(...) query for all session IDs.
+	// FirstUserMessageBulk reads the requested IDs in bounded IN(...) batches.
 	// Sessions with no indexed user entry are omitted from the map (empty preview).
 	previews, err := p.store.FirstUserMessageBulk(ctx, sessionIDs)
 	if err != nil {
@@ -306,15 +317,32 @@ func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.Ses
 
 // SessionByID returns a single session by ID, or an error if not found.
 // Populates Turns from session_entries for the trajectory view.
-// Uses SessionDetailByID to include extra fields (git_remote, pushed_at, project_path).
+// Uses one content snapshot, including git_remote, pushed_at and project_path.
+//
+// This is the read behind every MOUNTED previewer: the WebSocket session_detail
+// channel and the kickstart preview pane. It therefore reads the content the
+// database actually holds, with no full-capture, publication-readiness,
+// recovery or native-source gate. A session whose capture is still bounded is
+// previewed from its stored projection instead of being refused; export and
+// publication keep the strict reader, so a preview never certifies content.
+// The payload shape is unchanged: completeness is not reported on the wire.
 func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
-	detailRow, err := p.store.SessionDetailByID(ctx, id)
+	// The raw identifier is validated once, here at the boundary it arrives
+	// through, instead of being cast further down where nothing can vouch for
+	// it. This is the WebSocket's subscription id and the kickstart pane's
+	// highlighted row, both of which reach us as untyped text.
+	sessionID, err := ingest.NewSessionID(id)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}
-	if detailRow == nil {
+	snapshot, err := p.store.ReadSessionAvailable(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: session by id: %w", err)
+	}
+	if snapshot == nil {
 		return nil, fmt.Errorf("session not found: %s", id)
 	}
+	detailRow := snapshot.Detail
 	s := sessionRowToSession(&detailRow.SessionRow)
 
 	// Populate detail-specific fields from the extended row.
@@ -329,29 +357,13 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 	s.ProjectPath = detailRow.ProjectPath
 	s.PushedAt = detailRow.PushedAt
 
-	// Populate turns from session_entries.
-	sid, sidErr := ingest.NewSessionID(id)
-	if sidErr != nil {
-		// Invalid session ID format; return session without turns.
-		return &s, nil
-	}
-
-	// Enrich quality metrics with the full session_metrics row. The detail row
-	// only carries the v1 quality columns; the M-series and cost signals needed
-	// by the Highlights scorecard live only in session_metrics. Non-fatal: if
-	// the lookup fails we keep the v1 metrics derived from the detail row.
-	if metrics, mErr := p.store.GetMetrics(ctx, sid); mErr == nil && metrics != nil {
-		full := metrics.QualityMetrics
+	if snapshot.Metrics != nil {
+		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-
-	entries, _, err := transcript.LoadEntriesForDetail(ctx, p.store, sid, transcript.DetailLoadOptions{})
-	if err != nil {
-		return nil, err
-	}
-	projection, validationErr := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: s.Harness})
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness})
 	if validationErr != nil {
-		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
+		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
 	s.Turns = projection.Turns
 	s.NativeMetadata = projection.NativeMetadata

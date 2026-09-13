@@ -1,0 +1,113 @@
+required_names:
+  - stale-single-harness-without-source-path
+  - force-single-harness-preserves-future-producer
+  - stale-session-since-intersection
+  - force-session-since-intersection
+  - stale-session-filter-without-harness
+  - disjoint-harness-and-session-selects-nothing
+  - since-before-all-sessions-selects-nothing
+  - registered-cursor-selector-is-supported
+  - force-since-filter-without-harness
+  - all-clears-index-filters
+  - all-clears-invalid-session-and-since
+  - saved-discovery-selection-does-not-restrict-index-maintenance
+  - index-rejects-unknown-harness
+  - index-rejects-unimplemented-harness
+  - all-still-validates-harness-name
+  - index-rejects-source-path
+required_session_names: [claude-recent, claude-old, claude-current, claude-future, codex-recent, codex-current]
+sessions:
+  - name: claude-recent
+    id: &claude_recent 11111111-1111-4111-8111-111111111111
+    harness: claude-code
+    age: 72h
+    version_delta: -1
+    transcript: &claude_transcript |
+      {"type":"user","message":{"role":"user","content":"fresh Claude fixture"}}
+  - name: claude-old
+    id: &claude_old 22222222-2222-4222-8222-222222222222
+    harness: claude-code
+    age: 720h
+    version_delta: -1
+    transcript: *claude_transcript
+  - name: claude-current
+    id: &claude_current 33333333-3333-4333-8333-333333333333
+    harness: claude-code
+    age: 72h
+    version_delta: 0
+    transcript: *claude_transcript
+  - name: claude-future
+    id: &claude_future 44444444-4444-4444-8444-444444444444
+    harness: claude-code
+    age: 72h
+    version_delta: 1
+    transcript: *claude_transcript
+  - name: codex-recent
+    id: &codex_recent 55555555-5555-4555-8555-555555555555
+    harness: codex
+    age: 72h
+    version_delta: -1
+    transcript: &codex_transcript |
+      {"timestamp":"2024-02-19T00:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fresh Codex fixture"}]}}
+  - name: codex-current
+    id: 66666666-6666-4666-8666-666666666666
+    harness: codex
+    age: 72h
+    version_delta: 0
+    transcript: *codex_transcript
+cases:
+  - name: stale-single-harness-without-source-path
+    args: [--source-harness=claude-code]
+    indexed: [claude-recent, claude-old]
+    refused: [claude-future]
+  - name: force-single-harness-preserves-future-producer
+    args: [--source-harness=claude-code, --force]
+    indexed: [claude-recent, claude-old, claude-current]
+    refused: [claude-future]
+  - name: stale-session-since-intersection
+    args: [--source-harness=claude-code, --session, *claude_recent, --session, *claude_old, --session, *codex_recent, --since=7d]
+    indexed: [claude-recent]
+  - name: force-session-since-intersection
+    args: [--source-harness=claude-code, --force, --session, *claude_current, --session, *claude_old, --session, *codex_recent, --since=7d]
+    indexed: [claude-current]
+  - name: stale-session-filter-without-harness
+    args: [--session, *codex_recent]
+    indexed: [codex-recent]
+  - name: disjoint-harness-and-session-selects-nothing
+    args: [--force, --source-harness=claude-code, --session, *codex_recent]
+    indexed: []
+  - name: since-before-all-sessions-selects-nothing
+    args: [--force, --source-harness=claude-code, --since=1d]
+    indexed: []
+  - name: registered-cursor-selector-is-supported
+    args: [--source-harness=cursor]
+    indexed: []
+  - name: force-since-filter-without-harness
+    args: [--force, --since=7d]
+    indexed: [claude-recent, claude-current, codex-recent, codex-current]
+    refused: [claude-future]
+  - name: all-clears-index-filters
+    args: [--all, --source-harness=claude-code, --session, *claude_recent, --since=7d]
+    indexed: [claude-recent, claude-old, claude-current, codex-recent, codex-current]
+    refused: [claude-future]
+  - name: all-clears-invalid-session-and-since
+    args: [--all, --session=invalid/session, --since=invalid]
+    indexed: [claude-recent, claude-old, claude-current, codex-recent, codex-current]
+    refused: [claude-future]
+  - name: saved-discovery-selection-does-not-restrict-index-maintenance
+    args: [--source-harness=claude-code]
+    selected_session: *codex_recent
+    indexed: [claude-recent, claude-old]
+    refused: [claude-future]
+  - name: index-rejects-unknown-harness
+    args: [--source-harness=unknown-harness]
+    error_contains: 'unknown harness "unknown-harness"'
+  - name: index-rejects-unimplemented-harness
+    args: [--source-harness=gemini-cli]
+    error_contains: 'has no registered harvester'
+  - name: all-still-validates-harness-name
+    args: [--all, --source-harness=unknown-harness]
+    error_contains: 'unknown harness "unknown-harness"'
+  - name: index-rejects-source-path
+    args: [--source-harness=claude-code, --source-path=/unused]
+    error_contains: 'unknown flag: --source-path'

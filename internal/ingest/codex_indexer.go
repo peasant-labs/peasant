@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -26,6 +26,10 @@ import (
 type CodexIndexer struct {
 	fs          FileSystem
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 // CodexIndexerOption configures a CodexIndexer.
@@ -37,7 +41,36 @@ func WithCodexFullContent(enabled bool) CodexIndexerOption {
 	return func(idx *CodexIndexer) { idx.fullContent = enabled }
 }
 
+// WithCodexMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithCodexMaxRecordBytes(limit int) CodexIndexerOption {
+	return func(idx *CodexIndexer) { idx.maxRecordBytes = limit }
+}
+
 var _ TranscriptIndexer = (*CodexIndexer)(nil)
+var _ VersionedTranscriptIndexer = (*CodexIndexer)(nil)
+
+// IndexTranscriptResult verifies completion before authorizing persistent replacement.
+func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	data, err := idx.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return nil, completion.failure(err)
+	}
+	return idx.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
+func (idx *CodexIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	entries, err := idx.parseRolloutWithCompletion(session.SessionID, data, completion)
+	return completion.result(entries, err)
+}
 
 // SourceKind reports that Codex's entries come from a single rollout JSONL file; every entry is in its bytes.
 func (idx *CodexIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
@@ -72,14 +105,24 @@ func (idx *CodexIndexer) IndexTranscriptBytes(_ context.Context, session Discove
 // dispatches each envelope on its `type` (and the nested `payload.type` for
 // response_item / event_msg), and produces SessionEntry rows.
 func (idx *CodexIndexer) parseRollout(sessionID SessionID, data []byte) ([]schema.SessionEntry, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	return idx.parseRolloutWithCompletion(sessionID, data, nil)
+}
+
+func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
 
 	for scanner.Scan() {
+		var placeholderErr error
+		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCodex, &entryIndex)
+		if placeholderErr != nil {
+			return entries, placeholderErr
+		}
+		if completion != nil {
+			completion.line = scanner.Line()
+		}
 		raw := scanner.Bytes()
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
@@ -87,8 +130,28 @@ func (idx *CodexIndexer) parseRollout(sessionID SessionID, data []byte) ([]schem
 		}
 
 		var env codexRolloutLine
+		if completion != nil {
+			if err := completion.record(trimmed); err != nil {
+				return nil, err
+			}
+		}
 		if err := json.Unmarshal(trimmed, &env); err != nil {
+			if completion != nil {
+				return nil, err
+			}
 			continue // malformed line — skip silently
+		}
+		if completion != nil {
+			if env.Type == "" {
+				return nil, fmt.Errorf("rollout record lacks its type")
+			}
+			if err := requireJSONObject(env.Payload); err != nil {
+				return nil, fmt.Errorf("rollout payload: %w", err)
+			}
+			switch env.Type {
+			case codexTypeSessionMeta, codexTypeTurnContext, codexTypeEventMsg:
+				completion.recognized++
+			}
 		}
 
 		// Only response_item lines become indexed entries. session_meta /
@@ -98,17 +161,58 @@ func (idx *CodexIndexer) parseRollout(sessionID SessionID, data []byte) ([]schem
 		if env.Type != codexTypeResponse {
 			continue
 		}
+		if completion != nil {
+			var header struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(env.Payload, &header); err != nil {
+				return nil, err
+			}
+			if header.Type == "" {
+				return nil, fmt.Errorf("response item lacks its type")
+			}
+			switch header.Type {
+			case codexResponseMessage, codexResponseReasoning, codexResponseFunctionCall, codexResponseCustomCall, codexResponseFunctionOut, codexResponseCustomCallOut:
+			default:
+				// Future variants are opaque: fields resembling a known variant
+				// need not have that variant's shape. They cannot alone prove completion.
+				continue
+			}
+		}
 
-		entry, ok := parseCodexResponseItem(sessionID, entryIndex, env, len(trimmed), idx.fullContent)
+		var payload codexResponseItemPayload
+		decodeErr := json.Unmarshal(env.Payload, &payload)
+		if completion != nil {
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if payload.Type == "" {
+				return nil, fmt.Errorf("response item lacks its type")
+			}
+		}
+		entry, ok := codexResponseItemEntry(sessionID, entryIndex, env, len(trimmed), idx.fullContent, payload, decodeErr)
 		if !ok {
 			continue
 		}
 		entries = append(entries, entry)
+		if completion != nil {
+			completion.recognized++
+		}
 		entryIndex++
 	}
 
 	if err := scanner.Err(); err != nil {
 		return entries, fmt.Errorf("codex indexer: scanner error for %s: %w", sessionID, err)
+	}
+	if completion != nil && scanner.SawOversized() {
+		return entries, uncertifiableOversizedRecord(scanner.Oversized(), scanner.limit)
+	}
+	entries, err := appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCodex, &entryIndex)
+	if err != nil {
+		return entries, err
+	}
+	if completion != nil {
+		completion.line = scanner.Line()
 	}
 	return entries, nil
 }
@@ -138,12 +242,11 @@ type codexMessageContent struct {
 	Text string `json:"text,omitempty"`
 }
 
-// parseCodexResponseItem converts one response_item envelope into a
+// codexResponseItemEntry converts one decoded response_item envelope into a
 // SessionEntry. Returns (zero, false) for response_item variants the indexer
 // does not surface (e.g. unknown future payload types).
-func parseCodexResponseItem(sessionID SessionID, index int, env codexRolloutLine, rawLen int, fullContent bool) (schema.SessionEntry, bool) {
-	var p codexResponseItemPayload
-	if err := json.Unmarshal(env.Payload, &p); err != nil {
+func codexResponseItemEntry(sessionID SessionID, index int, env codexRolloutLine, rawLen int, fullContent bool, p codexResponseItemPayload, decodeErr error) (schema.SessionEntry, bool) {
+	if decodeErr != nil {
 		return schema.SessionEntry{}, false
 	}
 

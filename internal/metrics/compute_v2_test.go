@@ -376,6 +376,12 @@ func TestComputeMetrics_V2Recompute(t *testing.T) {
 // seedSession is a helper that inserts minimal session data for metrics tests.
 func ptrInt64(v int64) *int64 { return &v }
 
+// seededProjectPath is the project directory every seeded session records. A
+// capture asks git about paths RELATIVE to it and refuses a written file outside
+// it, so tests that measure survival name their files under this one constant
+// rather than repeating a directory that has to agree with the seed.
+const seededProjectPath = "/home/test/project"
+
 func seedSession(t *testing.T, ctx context.Context, s *store.Store, sessionID string) {
 	t.Helper()
 
@@ -409,7 +415,7 @@ func seedSession(t *testing.T, ctx context.Context, s *store.Store, sessionID st
 			HostSlug:      hs,
 			Timestamp:     ingest.TimestampInfo{Start: 1000, End: 2000, Ingested: ptrInt64(3000)},
 			Source:        ingest.SourceInfo{FilePath: string(srcPath), Format: ingest.SourceFormatJSONL},
-			Project:       ingest.ProjectInfo{Hash: ph, Name: "test-project", FilePath: "/home/test/project"},
+			Project:       ingest.ProjectInfo{Hash: ph, Name: "test-project", FilePath: seededProjectPath},
 			Stats:         ingest.StatsInfo{TurnCount: 10, ToolCallCount: 5},
 		},
 		Session: ingest.DiscoveredSession{
@@ -459,7 +465,7 @@ func seedSessionWithDate(t *testing.T, ctx context.Context, s *store.Store, sess
 			HostSlug:      hs,
 			Timestamp:     ingest.TimestampInfo{Start: startMs, End: startMs + 1000, Ingested: ptrInt64(startMs + 2000)},
 			Source:        ingest.SourceInfo{FilePath: string(srcPath), Format: ingest.SourceFormatJSONL},
-			Project:       ingest.ProjectInfo{Hash: ph, Name: "test-project", FilePath: "/home/test/project"},
+			Project:       ingest.ProjectInfo{Hash: ph, Name: "test-project", FilePath: seededProjectPath},
 			Stats:         ingest.StatsInfo{TurnCount: 10, ToolCallCount: 5},
 		},
 		Session: ingest.DiscoveredSession{

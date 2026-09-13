@@ -52,6 +52,7 @@ JOIN annotator_kinds ak ON ak.id = ann.kind_id
 JOIN annotation_types t ON t.id = a.annotation_type_id
 WHERE ata.state = 'unresolved'
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
   AND (? = '' OR ata.session_id = ?)
 ORDER BY ata.session_id, ata.annotation_id`
 )
@@ -121,6 +122,10 @@ func (s *Store) ListUnresolvedAnnotationTargetAnchors(ctx context.Context, sessi
 	}
 	defer s.pool.Put(conn)
 
+	return listUnresolvedAnnotationTargetAnchorsOnConn(conn, sessionID)
+}
+
+func listUnresolvedAnnotationTargetAnchorsOnConn(conn *sqlite.Conn, sessionID string) ([]ingest.AnnotationTargetAnchorRow, error) {
 	var rows []ingest.AnnotationTargetAnchorRow
 	if err := sqlitex.ExecuteTransient(conn, sqlListUnresolvedAnnotationTargetAnchors, &sqlitex.ExecOptions{
 		Args: []any{sessionID, sessionID},

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
@@ -137,10 +139,11 @@ var (
 // MemFS is an in-memory filesystem for testing.
 // All methods are safe for concurrent use (protected by mu).
 type MemFS struct {
-	mu       sync.RWMutex
-	Files    map[string][]byte
-	Dirs     map[string]bool
-	ModTimes map[string]time.Time
+	mu            sync.RWMutex
+	artifactLocks map[string]chan struct{}
+	Files         map[string][]byte
+	Dirs          map[string]bool
+	ModTimes      map[string]time.Time
 }
 
 var _ ingest.FileSystem = (*MemFS)(nil)
@@ -148,9 +151,10 @@ var _ ingest.FileSystem = (*MemFS)(nil)
 // NewMemFS creates an empty MemFS with root "/" pre-created.
 func NewMemFS() *MemFS {
 	m := &MemFS{
-		Files:    make(map[string][]byte),
-		Dirs:     make(map[string]bool),
-		ModTimes: make(map[string]time.Time),
+		Files:         make(map[string][]byte),
+		Dirs:          make(map[string]bool),
+		ModTimes:      make(map[string]time.Time),
+		artifactLocks: make(map[string]chan struct{}),
 	}
 	m.Dirs["/"] = true
 	return m
@@ -716,7 +720,7 @@ type StubMetricsStore struct {
 	StaleIndexSessions         []ingest.SessionID
 	StaleIndexErr              error
 	IndexStates                map[ingest.SessionID]int // tracks index_version per session
-	ListStaleCalledWithVersion int                      // last currentVersion argument passed to ListStaleIndexSessions
+	ListStaleCalledWithTargets map[ingest.Harness]ingest.HarvesterVersions
 	// SourceInfoByID allows per-session injection for LookupSourceInfo.
 	// Nil = return empty (fallback skipped).
 	SourceInfoByID map[ingest.SessionID]struct {
@@ -733,6 +737,10 @@ type StubMetricsStore struct {
 }
 
 var _ ingest.MetricsStore = (*StubMetricsStore)(nil)
+var _ ingest.SessionEntryBatchStore = (*StubMetricsStore)(nil)
+var _ ingest.IndexFormatSupport = (*StubMetricsStore)(nil)
+
+func (*StubMetricsStore) SupportsIndexFormat(version int) bool { return version == 1 }
 
 // NewStubMetricsStore creates a ready-to-use StubMetricsStore.
 func NewStubMetricsStore() *StubMetricsStore {
@@ -758,6 +766,33 @@ func (s *StubMetricsStore) IndexSessionEntries(_ context.Context, sessionID inge
 	}
 	s.IndexedEntries[sessionID] = entries
 	return nil
+}
+
+func (s *StubMetricsStore) IndexSessionEntryBatch(_ context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
+	results := make([]ingest.SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		results[i].SessionID = write.SessionID
+		if err := errors.Join(s.IndexErr, s.UpdateIndexErr); err != nil {
+			results[i].Err = err
+			continue
+		}
+		if write.IndexerVersion > 0 && s.IndexStates[write.SessionID] > write.IndexerVersion {
+			results[i].Err = fmt.Errorf("newer indexer revision already stored for %s", write.SessionID)
+			continue
+		}
+		result, ok := write.Result.(indexformat.V1)
+		if !ok || write.IndexVersion != 1 {
+			results[i].Err = fmt.Errorf("stub index writer requires concrete V1")
+			continue
+		}
+		s.IndexedEntries[write.SessionID] = result.Entries
+		results[i].EntriesCount = len(result.Entries)
+		if write.IndexerVersion > 0 {
+			s.IndexStates[write.SessionID] = write.IndexerVersion
+		}
+		results[i].Written = true
+	}
+	return results
 }
 
 func (s *StubMetricsStore) SessionEntriesExist(_ context.Context, sessionID ingest.SessionID) (bool, error) {
@@ -825,8 +860,8 @@ func (s *StubMetricsStore) UpdateIndexState(_ context.Context, sessionID ingest.
 	return nil
 }
 
-func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, currentVersion int) ([]ingest.SessionID, error) {
-	s.ListStaleCalledWithVersion = currentVersion
+func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+	s.ListStaleCalledWithTargets = maps.Clone(targets)
 	if s.StaleIndexErr != nil {
 		return nil, s.StaleIndexErr
 	}

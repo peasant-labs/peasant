@@ -446,7 +446,7 @@ func (a *StrikeAdapter) readStrikeTranscriptHints(path string) strikeTranscriptH
 	}
 	var hints strikeTranscriptHints
 	forEachStrikeRecord(data, func(_ int, raw []byte) {
-		if strikeRecordTooLarge(raw) {
+		if strikeRecordTooLarge(raw, 0) {
 			return
 		}
 		var env strikeEnvelope
@@ -567,7 +567,7 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	callIDs := make(map[string]bool)
 	tokensIn, tokensOut := 0, 0
 	forEachStrikeRecord(data, func(line int, raw []byte) {
-		if strikeRecordTooLarge(raw) {
+		if strikeRecordTooLarge(raw, 0) {
 			return
 		}
 		trimmed := bytes.TrimSpace(raw)

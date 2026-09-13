@@ -107,7 +107,7 @@ func redactedMetadataFields(level redact.RedactionLevel) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf(
 			"push: cannot describe what the consent screen redacts: constructing a %s redactor failed.\n"+
-				"What went wrong: redact.NewRedactor returned %v.\n"+
+				"What went wrong: redact.NewRedactor returned %w.\n"+
 				"Where: push.redactedMetadataFields, rendering the push consent screen.\n"+
 				"When: at screen construction, before anything was uploaded.\n"+
 				"Means: the screen cannot say what redaction covers, so it must not claim to cover anything.\n"+

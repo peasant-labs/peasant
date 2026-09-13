@@ -16,7 +16,7 @@ const (
 	// CurrentClassifierAnnotationVersion tracks classifier annotation logic. Bump
 	// this when classifier results or persistence semantics change so unchanged
 	// entry projections are annotated again with the new rules.
-	CurrentClassifierAnnotationVersion = 1
+	CurrentClassifierAnnotationVersion = 2
 
 	annotatorNameOutcome     = "outcome-classifier"
 	annotatorNameFrustration = "frustration-classifier"
@@ -104,6 +104,9 @@ func (ca *ClassifierAnnotator) PrepareAnnotations(ctx context.Context, sessionID
 }
 
 func (ca *ClassifierAnnotator) prepareAnnotations(ctx context.Context, sessionID ingest.SessionID, stats *ingest.AnnotationProfileStats) (ingest.SessionAnnotationBatch, error) {
+	if backing, ok := ca.metricsStore.(ingest.MetricInputStore); ok {
+		return ca.prepareCapturedAnnotations(ctx, backing, sessionID, stats)
+	}
 	batch := ingest.SessionAnnotationBatch{SessionID: sessionID}
 	stateInputs, hasCombinedInputs := ca.combinedAnnotationRunInputs(ctx, sessionID)
 	if hasCombinedInputs && annotationRunInputsCurrent(stateInputs) {
@@ -403,6 +406,25 @@ func (ca *ClassifierAnnotator) recordAnnotationBatchResults(ctx context.Context,
 }
 
 func (ca *ClassifierAnnotator) annotate(ctx context.Context, sessionID ingest.SessionID, stats *ingest.AnnotationProfileStats) error {
+	if _, ok := ca.metricsStore.(ingest.MetricInputStore); ok {
+		batch, err := ca.prepareAnnotations(ctx, sessionID, stats)
+		if err != nil || batch.Skipped {
+			return err
+		}
+		results := ca.flushAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{batch}, stats)
+		if len(results) != 1 {
+			return fmt.Errorf("classify session %s: store returned no completion result; retry classification", sessionID)
+		}
+		if results[0].Err != nil {
+			return results[0].Err
+		}
+		for _, result := range results[0].Results {
+			if result.Err != nil {
+				return result.Err
+			}
+		}
+		return nil
+	}
 	stateInputs, hasCombinedInputs := ca.combinedAnnotationRunInputs(ctx, sessionID)
 	if hasCombinedInputs && annotationRunInputsCurrent(stateInputs) {
 		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) { s.StateSkipCount++ })
@@ -622,6 +644,7 @@ func annotationRunInputsCurrent(inputs *ingest.AnnotationRunInputs) bool {
 		return false
 	}
 	return inputs.State.SessionEntriesHash == inputs.SessionEntriesHash &&
+		inputs.MetricsOutputHash != "" && inputs.State.MetricsOutputHash == inputs.MetricsOutputHash &&
 		inputs.State.ComputeVersion == inputs.ComputeVersion &&
 		inputs.State.ClassifierVersion == CurrentClassifierAnnotationVersion
 }

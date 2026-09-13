@@ -1030,10 +1030,7 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	}
 
 	pipelineOpts = append(pipelineOpts,
-		ingest.WithIndexers(map[defaults.Harness]ingest.TranscriptIndexer{
-			defaults.HarnessClaudeCode: ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)),
-			defaults.HarnessOpenCode:   ingest.NewOpenCodeIndexer(fs, ingest.WithOpenCodeFullDepth(true)),
-		}),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
 		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
 		ingest.WithLogger(db),
@@ -1071,26 +1068,19 @@ func (h *syncHandler) setIngestError(err error) {
 func buildWebSourceConfigs(cfg *config.Config) map[defaults.Harness]ingest.SourceConfig {
 	sources := map[defaults.Harness]ingest.SourceConfig{}
 
-	if cfg.Sources.ClaudeCode.Enabled {
+	for harness := range ingest.DefaultAdapterRegistry {
+		configured, ok := cfg.Sources.Provider(harness)
+		if !ok || !configured.Enabled {
+			continue
+		}
 		var paths []ingest.ResolvedPath
-		for _, p := range cfg.Sources.ClaudeCode.Paths {
+		for _, p := range configured.Paths {
 			rp, err := ingest.NewResolvedPath(p)
 			if err == nil {
 				paths = append(paths, rp)
 			}
 		}
-		sources[defaults.HarnessClaudeCode] = ingest.SourceConfig{Paths: paths, Enabled: true}
-	}
-
-	if cfg.Sources.OpenCode.Enabled {
-		var paths []ingest.ResolvedPath
-		for _, p := range cfg.Sources.OpenCode.Paths {
-			rp, err := ingest.NewResolvedPath(p)
-			if err == nil {
-				paths = append(paths, rp)
-			}
-		}
-		sources[defaults.HarnessOpenCode] = ingest.SourceConfig{Paths: paths, Enabled: true}
+		sources[harness] = ingest.SourceConfig{Paths: paths, Enabled: true}
 	}
 
 	return sources

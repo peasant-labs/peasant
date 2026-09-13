@@ -1,12 +1,22 @@
-required_names: [byte-budget-splits, oversized-session-progress, cancellation-stops-flush]
+# What the write flush owes each parsed session, driven over input captured at the
+# production boundary.
+#
+# The flush commits ONE session per write so that session's artifact ownership is
+# held across its own commit and never nested with another's. The byte-budget
+# GROUPING is a separate boundary: it decides how many parsed sessions travel
+# together before the flush is called at all. It is asserted at that boundary, in
+# content_batch_budget.yaml, not here.
+required_names: [one-session-commits-alone, every-session-commits-separately, cancellation-stops-the-flush]
 cases:
-  - name: byte-budget-splits
-    session_bytes: [20000000, 20000000, 10]
-    expected_batches: [1, 2]
-  - name: oversized-session-progress
-    session_bytes: [34000000, 10]
-    expected_batches: [1, 1]
-  - name: cancellation-stops-flush
-    session_bytes: [20000000, 20000000, 10]
-    expected_batches: [1]
-    cancel_after_batch: true
+  - name: one-session-commits-alone
+    session_bytes: [2048]
+    expected_commits: [1]
+  - name: every-session-commits-separately
+    session_bytes: [2048, 4096, 64]
+    expected_commits: [1, 1, 1]
+  # A cancelled run stops after the commit that observed the cancellation: the
+  # sessions behind it are reported, not written.
+  - name: cancellation-stops-the-flush
+    session_bytes: [2048, 4096, 64]
+    expected_commits: [1]
+    cancel_after_commit: true

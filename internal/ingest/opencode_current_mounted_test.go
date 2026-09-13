@@ -8,22 +8,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	metricspkg "github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 const (
@@ -450,9 +452,10 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			commitReader := &managedProjectionCommitReader{}
 			gitAnalyzer := &testutil.StubGitDiffAnalyzer{CommitInfos: []ingest.CommitInfo{{Hash: "0123456789abcdef0123456789abcdef01234567", AuthorEmail: testutil.TestEmail, Message: "synthetic commit"}}}
 			config := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}
+			fixtureStore := newPipelineFixtureStore(t, store, metrics)
 			pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, config,
-				ingest.WithStore(store), ingest.WithMetricsStore(metrics),
-				ingest.WithAnalyzer(metricspkg.NewEngine(metrics)),
+				ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore),
+				ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)),
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}),
 				ingest.WithGitDiffAnalyzer(gitAnalyzer), ingest.WithCommitTranscriptReader(commitReader),
 			)
@@ -510,8 +513,6 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			}
 			commitReader.mu.Unlock()
 
-			ingested := time.Now().Add(time.Hour).UnixMilli()
-			store.LocationsByID = map[ingest.SessionID]ingest.SessionLocation{sessionID: {HostSlug: string(metadata.HostSlug), IngestedMs: &ingested, SchemaVersion: int(ingest.CurrentSchemaVersion), SourceFingerprint: store.InsertedEntries[0].SourceFingerprint}}
 			repeated, err := pipeline.Run(t.Context())
 			if err != nil {
 				t.Fatalf("repeat mounted harvest: %v", err)
@@ -523,30 +524,63 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			nonStaleMetric := *metrics.SavedMetrics[sessionID]
-			metrics.IndexedEntries[nonStaleID] = append([]schema.SessionEntry(nil), metrics.IndexedEntries[sessionID]...)
+			peerMeta := *metadata
+			peerMeta.SessionID = nonStaleID
+			peerBytes := bytes.ReplaceAll(managedBytes, []byte(sessionID), []byte(nonStaleID))
+			peerEntries := storetest.SeedManagedInput(t, fixtureStore.Store, &ingest.OSFileSystem{}, output.String(), peerMeta, peerBytes)
+			if _, err := metricspkg.NewEngine(fixtureStore).ComputeMetrics(t.Context(), []ingest.SessionID{nonStaleID}); err != nil {
+				t.Fatal(err)
+			}
+			// Read the peer metric from the store that holds it. The seed
+			// computes it through the metrics engine, which leaves current
+			// metrics alone on a later compute, so the recorded copy is the
+			// only place it is guaranteed to be.
+			storedPeerMetric, err := fixtureStore.GetMetrics(t.Context(), nonStaleID)
+			if err != nil || storedPeerMetric == nil {
+				t.Fatalf("peer metrics were not computed for %s: %v", nonStaleID, err)
+			}
+			nonStaleMetric := *storedPeerMetric
+			metrics.IndexedEntries[nonStaleID] = peerEntries
 			metrics.SavedMetrics[nonStaleID] = &nonStaleMetric
-			metrics.IndexStates[nonStaleID] = ingest.CurrentIndexVersion
+			peerState, err := fixtureStore.ReadIndexState(t.Context(), nonStaleID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			metrics.IndexStates[nonStaleID] = peerState.IndexerVersion
 			canonicalSnapshot := captureMountedCurrentSnapshot(t, output, store, metrics, sessionID, metadata)
 
 			if err := os.Remove(materialized.Path); err != nil {
 				t.Fatal(err)
 			}
-			metrics.StaleIndexSessions = []ingest.SessionID{sessionID}
+			state, err := fixtureStore.ReadIndexState(t.Context(), sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fixtureStore.UpdateIndexState(t.Context(), sessionID, state.IndexerVersion, *state.IndexedAt); err != nil {
+				t.Fatal(err)
+			}
+			conn, err := fixtureStore.Pool().Take(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sqlitex.ExecuteTransient(conn, "DELETE FROM session_metrics WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{string(sessionID)}})
+			fixtureStore.Pool().Put(conn)
+			if err != nil {
+				t.Fatal(err)
+			}
 			metrics.IndexedEntries = make(map[ingest.SessionID][]schema.SessionEntry)
 			metrics.SavedMetrics = make(map[ingest.SessionID]*ingest.SessionMetrics)
 			metrics.IndexStates = make(map[ingest.SessionID]int)
-			metrics.IndexedEntries[nonStaleID] = append([]schema.SessionEntry(nil), canonicalSnapshot.Entries...)
+			metrics.IndexedEntries[nonStaleID] = append([]schema.SessionEntry(nil), peerEntries...)
 			metrics.SavedMetrics[nonStaleID] = &nonStaleMetric
-			metrics.IndexStates[nonStaleID] = ingest.CurrentIndexVersion
-			metrics.ListStaleCalledWithVersion = 0
+			metrics.IndexStates[nonStaleID] = peerState.IndexerVersion
 			config.Reindex = true
 			config.Force = false
 			sourceOpenMu.Lock()
 			sourceOpenCount = 0
 			sourceOpenMu.Unlock()
 			reindexer := &mountedCurrentIndexerRecorder{TranscriptIndexer: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}
-			reindex, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config, ingest.WithStore(store), ingest.WithMetricsStore(metrics), ingest.WithAnalyzer(metricspkg.NewEngine(metrics)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: reindexer}))
+			reindex, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: reindexer}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -555,6 +589,10 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			}
 			reindexedSnapshot := captureMountedCurrentSnapshot(t, output, store, metrics, sessionID, metadata)
 			assertMountedCurrentSnapshotEqual(t, "source-free stale reindex", canonicalSnapshot, reindexedSnapshot)
+			reindexedState, err := fixtureStore.ReadIndexState(t.Context(), sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			sourceOpenMu.Lock()
 			removedSourceOpens := sourceOpenCount
 			sourceOpenMu.Unlock()
@@ -562,8 +600,8 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			reindexOrigins := append([]ingest.TranscriptOrigin(nil), reindexer.origins...)
 			reindexByteRuns := reindexer.byteRuns
 			reindexer.mu.Unlock()
-			if metrics.ListStaleCalledWithVersion != ingest.CurrentIndexVersion || reindexByteRuns != 1 || len(reindexOrigins) != 1 || reindexOrigins[0] != ingest.TranscriptOriginOpenCodeCurrentSQLite || removedSourceOpens != 0 || !reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], canonicalSnapshot.Entries) || !reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric) || metrics.IndexStates[nonStaleID] != ingest.CurrentIndexVersion {
-				t.Fatalf("source-free stale reindex selected or mutated the wrong state: stale_version=%d managed_current_runs=%d origins=%v removed_source_opens=%d non_stale_entries=%t non_stale_metrics=%t non_stale_index_version=%d", metrics.ListStaleCalledWithVersion, reindexByteRuns, reindexOrigins, removedSourceOpens, reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], canonicalSnapshot.Entries), reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric), metrics.IndexStates[nonStaleID])
+			if reindexedState.IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode].IndexerVersion || reindexedState.IndexedInputHash == nil || !reflect.DeepEqual(reindexedState.IndexedInputHash, state.IndexedInputHash) || reindexByteRuns != 1 || len(reindexOrigins) != 1 || reindexOrigins[0] != ingest.TranscriptOriginOpenCodeCurrentSQLite || removedSourceOpens != 0 || !reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], peerEntries) || !reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric) || metrics.IndexStates[nonStaleID] != peerState.IndexerVersion {
+				t.Fatalf("source-free stale reindex selected or mutated the wrong state: indexed_version=%d managed_current_runs=%d origins=%v removed_source_opens=%d non_stale_entries=%t non_stale_metrics=%t non_stale_index_version=%d", reindexedState.IndexerVersion, reindexByteRuns, reindexOrigins, removedSourceOpens, reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], peerEntries), reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric), metrics.IndexStates[nonStaleID])
 			}
 		})
 	}
@@ -633,7 +671,8 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			store := &testutil.StubSessionStore{}
 			metrics := testutil.NewStubMetricsStore()
 			config := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}
-			pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config, ingest.WithStore(store), ingest.WithMetricsStore(metrics), ingest.WithAnalyzer(metricspkg.NewEngine(metrics)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
+			fixtureStore := newPipelineFixtureStore(t, store, metrics)
+			pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -650,13 +689,7 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			if len(store.InsertedEntries) != 0 || len(metrics.IndexedEntries) != 0 || len(metrics.SavedMetrics) != 0 {
 				t.Fatalf("mounted failure left partial state: store=%d entries=%d metrics=%d", len(store.InsertedEntries), len(metrics.IndexedEntries), len(metrics.SavedMetrics))
 			}
-			entries, readErr := os.ReadDir(output.String())
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			if len(entries) != 0 {
-				t.Fatalf("mounted failure left temporary or final artifact %q", entries[0].Name())
-			}
+			assertCurrentFailureHasOnlyCoordination(t, output.String(), base.SessionID)
 			// The same source, opener, adapter, and pipeline must remain reusable
 			// after a malformed or canceled read; the fault controller permits the
 			// second bounded attempt through unchanged production wiring.
@@ -674,7 +707,8 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			expectedMetrics := testutil.NewStubMetricsStore()
 			expectedConfig := config
 			expectedConfig.OutputDir = expectedOutput
-			expectedPipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, expectedConfig, ingest.WithStore(expectedStore), ingest.WithMetricsStore(expectedMetrics), ingest.WithAnalyzer(metricspkg.NewEngine(expectedMetrics)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
+			expectedFixtureStore := newPipelineFixtureStore(t, expectedStore, expectedMetrics)
+			expectedPipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, expectedConfig, ingest.WithStore(expectedFixtureStore), ingest.WithMetricsStore(expectedFixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(expectedFixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -684,6 +718,43 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			expectedSnapshot := captureMountedCurrentSnapshot(t, expectedOutput, expectedStore, expectedMetrics, mustMountedSessionID(t, base.SessionID), expectedStore.InsertedEntries[0].Metadata)
 			assertMountedCurrentSnapshotEqual(t, "bounded retry after "+negative.Kind, expectedSnapshot, reusedSnapshot)
 		})
+	}
+}
+
+// A failed native read may leave its empty coordination lock, but no session
+// payload, publication intent, or other session's state is allowed.
+func assertCurrentFailureHasOnlyCoordination(t testing.TB, output, sessionID string) {
+	t.Helper()
+	lockDirectory := filepath.Join(".peasant-state", "locks")
+	lockPath := filepath.Join(lockDirectory, schema.ComputeTranscriptHash([]byte(sessionID))+".lock")
+	err := filepath.WalkDir(output, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(output, path)
+		if err != nil {
+			return err
+		}
+		switch relative {
+		case ".", ".peasant-state", lockDirectory:
+			if !entry.IsDir() {
+				return fmt.Errorf("coordination directory %q is not a directory", relative)
+			}
+		case lockPath:
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() || info.Size() != 0 {
+				return fmt.Errorf("coordination lock %q is not an empty regular file", relative)
+			}
+		default:
+			return fmt.Errorf("mounted failure left temporary or final artifact %q", relative)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -6,8 +6,8 @@ Export session transcripts as JSON
 
 Export session transcripts as JSON files with full turn content.
 
-Each session is re-indexed from its original source file with full content
-extraction (no truncation), producing a JSON envelope with metadata and turns.
+Each session uses a coherent snapshot of retained input and indexed coordinates,
+producing a JSON envelope with full content. Stale or unproven inputs are refused.
 
 Requires either --session for a single session or --session-from-file for a batch.
 

@@ -156,9 +156,22 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 		t.Fatal(err)
 	}
 	write(initial + fixture.Append + "\n" + fixture.Malformed + "\n")
+	// The malformed appended record is refused, and the refusal is nonfatal:
+	// the stored session keeps its last-good artifact and index, is reported
+	// unchanged, and the run carries one actionable warning naming the
+	// session and the malformed record, so the harvest does not fail.
 	failed := run()
-	if len(failed.Sessions) != 1 || failed.Sessions[0].Error == nil {
-		t.Fatalf("malformed record accepted: %+v", failed)
+	if len(failed.Sessions) != 1 || failed.Sessions[0].Error != nil || failed.Sessions[0].Status != ingest.DiffUnchanged || failed.Summary.Errors != 0 || failed.Summary.Unchanged != 1 {
+		t.Fatalf("malformed record was not refused nonfatally: %+v", failed)
+	}
+	refused := false
+	for _, diagnostic := range failed.Diagnostics {
+		if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, fixture.SessionID) && strings.Contains(diagnostic.Message, "malformed") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Fatalf("malformed record refusal was not reported as an actionable warning: %+v", failed.Diagnostics)
 	}
 	preserved := location()
 	if !bytes.Equal(stable.SourceFingerprint, preserved.SourceFingerprint) || *stable.IngestedMs != *preserved.IngestedMs {

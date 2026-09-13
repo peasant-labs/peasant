@@ -2265,11 +2265,11 @@ func TestStoreDataProvider_SessionByID_CompleteContentWithoutSource(t *testing.T
 // indistinguishable from the returned Content alone.
 type readFileSpyFS struct {
 	*testutil.MemFS
-	readFileCalls int
+	readFileCalled bool
 }
 
 func (s *readFileSpyFS) ReadFile(path string) ([]byte, error) {
-	s.readFileCalls++
+	s.readFileCalled = true
 	return s.MemFS.ReadFile(path)
 }
 
@@ -2346,8 +2346,8 @@ func TestStoreDataProvider_SessionByID_ContentOverlay_SkipsReindexWhenNothingTru
 	if len(sess.Turns) != 1 || sess.Turns[0].Content != shortContent {
 		t.Fatalf("Turns[0].Content: got %+v, want the DB preview %q verbatim", sess.Turns, shortContent)
 	}
-	if spy.readFileCalls != 0 {
-		t.Errorf("ReadFile call count: got %d, want 0 — the perf gate should have skipped the content-overlay re-index entirely because nothing in this session was truncated", spy.readFileCalls)
+	if spy.readFileCalled {
+		t.Error("ReadFile was called; database-authoritative detail must not re-read source content")
 	}
 }
 

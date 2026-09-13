@@ -1,0 +1,65 @@
+legacySession: a4000000-0000-4000-8000-000000000001
+targetSession: a4000000-0000-4000-8000-000000000002
+laterSession: a4000000-0000-4000-8000-000000000003
+project: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+requiredRecordNames: [opening, answer]
+records:
+  - {name: opening, ordinal: 0, speaker: 1, text: "needle user question", entryID: fixture-opening, command: inspect, commandArgs: fixture}
+  - {name: answer, ordinal: 1, speaker: 2, text: "needle assistant answer", entryID: fixture-answer, model: gpt-4o}
+codexTranscript: |
+  {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"needle codex update"}]}}
+requiredNames:
+  - mixed-reopen-and-read
+  - equal-projection-owned-rewrite
+  - projection-repair-keeps-semantic-hash
+  - conversion-preserves-newer-producer
+  - conversion-preserves-unknown-producer
+  - conversion-preserves-empty-index
+  - conversion-does-not-bind-an-unbound-index
+  - conversion-error-rolls-back
+  - conversion-wrong-result-rolls-back
+  - conversion-cannot-alter-parser-history
+  - conversion-without-edge-refused
+  - conversion-never-indexed-refused
+  - conversion-unknown-source-refused
+  - invalid-payload-refused
+  - handler-failure-rolls-back-session
+  - commit-failure-rolls-back-batch
+  - panic-rolls-back-batch
+  - supported-newer-format-cannot-downgrade
+  - default-reader-refuses-v2
+  - one-harness-adopts-v2
+  - duplicate-handler-rejected
+  - duplicate-edge-rejected
+  - missing-target-handler-rejected
+  - reverse-conversion-rejected
+  - nil-converter-rejected
+cases:
+  - {name: mixed-reopen-and-read, operation: reopen}
+  - {name: equal-projection-owned-rewrite, operation: rewrite}
+  - {name: projection-repair-keeps-semantic-hash, operation: repair}
+  - {name: conversion-preserves-newer-producer, operation: convert, producer: 99}
+  - {name: conversion-preserves-unknown-producer, operation: convert, unknownProducer: true}
+  - {name: conversion-preserves-empty-index, operation: convert, empty: true}
+  # The capture moved after the last index write, so the stored index is NOT
+  # bound to it. A conversion proves the canonical rows equal the STORED rows;
+  # it proves nothing about whether those rows describe the current capture.
+  - {name: conversion-does-not-bind-an-unbound-index, operation: convert, unboundCapture: true}
+  - {name: conversion-error-rolls-back, operation: convert, fault: convert-error}
+  - {name: conversion-wrong-result-rolls-back, operation: convert, fault: wrong-result}
+  - {name: conversion-cannot-alter-parser-history, operation: convert, fault: alter-history}
+  - {name: conversion-without-edge-refused, operation: convert, fault: no-edge}
+  - {name: conversion-never-indexed-refused, operation: convert, fault: no-index}
+  - {name: conversion-unknown-source-refused, operation: convert, fault: unknown-source}
+  - {name: invalid-payload-refused, operation: batch, fault: invalid-payload}
+  - {name: handler-failure-rolls-back-session, operation: batch, fault: write-error}
+  - {name: commit-failure-rolls-back-batch, operation: batch, fault: commit-error}
+  - {name: panic-rolls-back-batch, operation: batch, fault: panic}
+  - {name: supported-newer-format-cannot-downgrade, operation: downgrade}
+  - {name: default-reader-refuses-v2, operation: unsupported}
+  - {name: one-harness-adopts-v2, operation: pipeline}
+  - {name: duplicate-handler-rejected, operation: registration, fault: duplicate-handler}
+  - {name: duplicate-edge-rejected, operation: registration, fault: duplicate-edge}
+  - {name: missing-target-handler-rejected, operation: registration, fault: missing-handler}
+  - {name: reverse-conversion-rejected, operation: registration, fault: reverse}
+  - {name: nil-converter-rejected, operation: registration, fault: nil-converter}

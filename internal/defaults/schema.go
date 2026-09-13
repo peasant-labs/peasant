@@ -7,8 +7,7 @@ import "github.com/peasant-labs/schema"
 // the single source of truth for the push wire version — both the envelope's
 // ContractVersion and the embedded SchemaVersion are stamped from this constant
 // in lockstep. Typed as schema.PushContractVersion (newtype) so the version
-// flows typed across the codebase, mirroring the ingest.CurrentIndexVersion
-// precedent. Bump for breaking changes; minor/patch for additions.
+// flows typed across the codebase. Bump for breaking changes; minor/patch for additions.
 //
 // 0.1.1: PATCH bump signalling the publish contract strengthening
 // (ModelInfo.Harness/.Model + PublishRequest.Model became `required` in

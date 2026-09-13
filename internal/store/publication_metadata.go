@@ -104,21 +104,107 @@ FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.sessio
 	})
 }
 
-func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) (int64, error) {
+// publicationCaptureSnapshot is the capture state as it stood BEFORE a session
+// upsert. It must be read first: the upsert names every column the v51 trigger
+// watches, so the trigger clears the indexed binding and the recovered
+// provenance on every write, and the post-upsert row can no longer say whether
+// a session fact actually changed.
+//
+// It deliberately carries no index binding. Nothing on this path may read or
+// re-state one: the binding is the index writer's success evidence.
+type publicationCaptureSnapshot struct {
+	Found         bool
+	Revision      int64
+	MetadataHash  string
+	ContentHash   string
+	SchemaVersion int
+	CWD           string
+	CWDProvenance string
+}
+
+func readPublicationCaptureSnapshot(conn *sqlite.Conn, id ingest.SessionID) (snapshot publicationCaptureSnapshot, err error) {
+	err = sqlitex.ExecuteTransient(conn, `SELECT s.publication_capture_revision,
+ COALESCE(s.session_cwd,''),s.cwd_provenance_kind,p.capture_revision,p.schema_version,p.metadata_hash,p.content_hash
+ FROM sessions s JOIN session_publication_metadata p ON p.session_id=s.session_id WHERE s.session_id=?`, &sqlitex.ExecOptions{
+		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			// A snapshot only describes a capture the session actually carries.
+			if stmt.ColumnInt64(0) != stmt.ColumnInt64(3) {
+				return nil
+			}
+			snapshot = publicationCaptureSnapshot{
+				Found: true, Revision: stmt.ColumnInt64(0),
+				CWD: stmt.ColumnText(1), CWDProvenance: stmt.ColumnText(2),
+				SchemaVersion: stmt.ColumnInt(4), MetadataHash: stmt.ColumnText(5), ContentHash: stmt.ColumnText(6),
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return publicationCaptureSnapshot{}, fmt.Errorf("store: read publication capture for session %s before its metadata upsert: %w; nothing was changed; restore database access and retry ingest", id, err)
+	}
+	return snapshot, nil
+}
+
+// unchangedCapture reports that this write re-states exactly the capture the
+// session already carried. Only the metadata digest, the transcript digest, the
+// schema version and the recovered working directory decide it; each session
+// column the trigger watches is derived from that same metadata, so an
+// identical digest means no watched fact moved.
+//
+// Whether the INDEX has caught up is deliberately not part of it. An unchanged
+// session keeps its capture revision whether or not its index write succeeded,
+// because requiring the binding here would judge a session "changed" on its
+// second unchanged re-ingest -- the first having cleared the binding -- and the
+// revision climb would resume for exactly the sessions whose index write is
+// held or failing, which are the ones that can least afford it.
+func (snapshot publicationCaptureSnapshot) unchangedCapture(entry ingest.StoreEntry) bool {
+	m := entry.Metadata
+	return snapshot.Found && snapshot.Revision > 0 &&
+		snapshot.MetadataHash == m.MetadataHash && snapshot.ContentHash == m.ContentHash &&
+		snapshot.SchemaVersion == m.SchemaVersion && snapshot.CWD == m.CWD &&
+		snapshot.CWDProvenance == string(entry.CWDProvenance)
+}
+
+func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry, prior publicationCaptureSnapshot) (int64, error) {
 	m := entry.Metadata
 	body, err := json.Marshal(m)
 	if err != nil {
 		return 0, publicationRepairError("metadata cannot be encoded")
 	}
 	var revision int64
-	err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
+	if prior.unchangedCapture(entry) {
+		// Re-ingesting an unchanged session is not a new capture. Allocating a
+		// revision here would leave the index stamp one behind on every single
+		// harvest, so the session could never be published again: the stamp can
+		// never catch a number that moves each time it is read. Re-state the
+		// capture the upsert's trigger just cleared, at its own revision.
+		//
+		// The index binding is NOT re-stated. This is a metadata transaction,
+		// and the binding is the index writer's success evidence: only a
+		// successful index write may certify one. Re-binding here would report
+		// a held or refused reindex as publishable, which is fabricated
+		// success. The binding comes back when the index writer re-stamps it.
+		revision = prior.Revision
+		if err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
+ publication_capture_revision=? WHERE session_id=?`, &sqlitex.ExecOptions{
+			Args: []any{m.CWD, string(entry.CWDProvenance), revision, string(m.SessionID)},
+		}); err != nil {
+			return 0, fmt.Errorf("store: restore unchanged publication capture; transaction rolled back, retry ingest: %w", err)
+		}
+	} else {
+		err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_cwd=?, cwd_provenance_kind=?,
  publication_capture_revision=publication_capture_revision+1 WHERE session_id=? RETURNING publication_capture_revision`, &sqlitex.ExecOptions{
-		Args:       []any{m.CWD, string(entry.CWDProvenance), string(m.SessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error { revision = stmt.ColumnInt64(0); return nil },
-	})
-	if err != nil {
-		return 0, fmt.Errorf("store: allocate publication capture revision; transaction rolled back, retry ingest: %w", err)
+			Args:       []any{m.CWD, string(entry.CWDProvenance), string(m.SessionID)},
+			ResultFunc: func(stmt *sqlite.Stmt) error { revision = stmt.ColumnInt64(0); return nil },
+		})
+		if err != nil {
+			return 0, fmt.Errorf("store: allocate publication capture revision; transaction rolled back, retry ingest: %w", err)
+		}
 	}
+	// The snapshot is rewritten on BOTH paths. The digest that decided the
+	// restore covers the metadata but not its redaction record or derivation
+	// time, so re-serialising is what keeps the stored snapshot equal to the
+	// metadata this ingest actually captured, at whichever revision it carries.
 	err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_publication_metadata
  (session_id,capture_revision,schema_version,metadata_json,metadata_hash,content_hash,captured_at)
  VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET
@@ -145,7 +231,17 @@ func checkPublicationIndexRevision(conn *sqlite.Conn, id ingest.SessionID, expec
 	if err != nil {
 		return err
 	}
-	if expected < 0 || current != expected {
+	if expected < 0 {
+		return publicationRepairError("stale index capture revision; existing entries were not changed")
+	}
+	// No current capture means there is nothing this write could race: the
+	// session's counter advanced past a capture that no longer exists. The
+	// entries are written, and the binding predicate, which needs the capture
+	// row, leaves publication held until a capture exists again.
+	if current == 0 {
+		return nil
+	}
+	if current != expected {
 		return publicationRepairError("stale index capture revision; existing entries were not changed")
 	}
 	return nil
@@ -192,6 +288,12 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 	if bundle.Readiness != ingest.PublicationReady {
 		return bundle, nil
 	}
+	if err = s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
+		return bundle, err
+	}
+	if err = sqlitex.ExecuteTransient(conn, `SELECT COALESCE(NULLIF(s.git_worktree,''),p.canonical_cwd,'') FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
+		return bundle, err
+	}
 	bundle.Entries, bundle.ContentCapture, err = loadFullSessionEntriesOnConn(ctx, conn, id, 0)
 	if err != nil {
 		return bundle, err
@@ -225,7 +327,7 @@ const publicationMetadataSelect = `SELECT s.project_hash,s.session_origin,s.publ
  s.indexed_publication_capture_revision,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,
  COALESCE(s.parent_id,''),h.host_slug,COALESCE(h.git_remote,''),
  p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash,s.session_id,
- c.status,c.full_capture_sha256,c.publication_capture_revision
+ c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,'')
  FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id
  LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
  LEFT JOIN session_content_captures c ON c.session_id=s.session_id`
@@ -244,6 +346,12 @@ func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ing
 }
 
 // Capture-state columns only: eligibility deliberately does not verify payload.
+//
+// The columns are read back into the typed capture value and judged by the ONE
+// publication rule (PublishableWithOmissions), so readiness cannot drift from
+// what the complete-content readers will actually serve. Both readiness queries
+// select the same five capture columns in the same order from this offset:
+// status, full-capture proof, publication revision, failure code, capture format.
 func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (bool, error) {
 	if stmt.ColumnType(offset) == sqlite.TypeNull {
 		return false, nil
@@ -263,7 +371,23 @@ func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (
 	if contentRevision < 0 {
 		return false, publicationRepairError("negative full content publication revision")
 	}
-	return status == ingest.ContentCaptureComplete && revision > 0 && contentRevision == revision, nil
+	// An unrecognized code or format fails CLOSED: readiness acts on these
+	// values, so a state this build cannot name must never read as publishable.
+	code, err := ingest.NewContentCaptureFailureCode(stmt.ColumnText(offset + 3))
+	if err != nil {
+		return false, publicationRepairError("invalid full content capture failure code")
+	}
+	format, err := ingest.NewContentCaptureFormat(stmt.ColumnText(offset + 4))
+	if err != nil {
+		return false, publicationRepairError("invalid full content capture format")
+	}
+	capture := ingest.SessionContentCapture{Status: status, FailureCode: code, CaptureFormat: format}
+	// A publishable capture that is not complete still needs its full-capture
+	// proof: its entries are read and hashed like any other full capture.
+	if status != ingest.ContentCaptureComplete && hash == "" {
+		return false, nil
+	}
+	return PublishableWithOmissions(capture) && revision > 0 && contentRevision == revision, nil
 }
 
 // Metadata/index proof is also used to bind content-only retained backfills.

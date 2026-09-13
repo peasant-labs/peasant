@@ -23,22 +23,22 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// TestPushCmd_SourceProviderHelpDerived pins the --source-provider flag's help
+// TestPushCmd_SourceHarnessHelpDerived pins the --source-harness flag's help
 // text to schema.AllHarnesses on the ACTUAL flag wired into BuildPushCommand().
-// sourceProviderHelp() derives the provider list so it can never go stale, but a
+// sourceHarnessHelp() derives the provider list so it can never go stale, but a
 // derived helper that is never attached to the flag (or a regression that
 // re-hardcodes the usage string) would still pass the rest of make check. This
 // test fails if the flag is missing/unwired or if any supported harness is absent
 // from its usage, preserving the derived rather than hardcoded contract.
-func TestPushCmd_SourceProviderHelpDerived(t *testing.T) {
+func TestPushCmd_SourceHarnessHelpDerived(t *testing.T) {
 	t.Parallel()
-	flag := BuildPushCommand().Flags().Lookup("source-provider")
+	flag := BuildPushCommand().Flags().Lookup("source-harness")
 	if flag == nil {
-		t.Fatal("--source-provider flag is not registered on the push command")
+		t.Fatal("--source-harness flag is not registered on the push command")
 	}
 	for _, h := range schema.AllHarnesses {
 		if !strings.Contains(flag.Usage, h.String()) {
-			t.Errorf("--source-provider usage %q is missing harness %q; help must be derived from schema.AllHarnesses, not hardcoded", flag.Usage, h.String())
+			t.Errorf("--source-harness usage %q is missing harness %q; help must be derived from schema.AllHarnesses, not hardcoded", flag.Usage, h.String())
 		}
 	}
 }
@@ -56,8 +56,13 @@ func TestPushCmd_SourceProviderHelpDerived(t *testing.T) {
 // --state-dir=dir.
 func executePushCmd(t *testing.T, dir string, args []string) (string, error) {
 	t.Helper()
+	seedClosedStoreForForecast(t, dir, args)
 	return executeWithDataDir(t, BuildPushCommand(), dir, args)
 }
+
+// testCredentialsUserID owns every publication these tests record, so a test can
+// ask the database what the run wrote for this user.
+const testCredentialsUserID = "user-00001"
 
 // writeTestCredentials writes a valid credentials.json to the peasant config dir
 // resolved from the given dir (ResolveConfigDirPathWith(dir) == dir/peasant),
@@ -191,6 +196,7 @@ func seedPublicationCursorsForTest(t *testing.T, dbPath string, sessionIDs []ing
 // (Summary / EmptyReason) lands on STDOUT.
 func executePushCmdSeparate(t *testing.T, dir string, args []string) (stdout, stderr string, err error) {
 	t.Helper()
+	seedClosedStoreForForecast(t, dir, args)
 	root := newTestRoot()
 	cmd := BuildPushCommand()
 	root.AddCommand(cmd)
@@ -316,7 +322,7 @@ func dryRunIDSet(t *testing.T, dir string, args []string) map[string]bool {
 // wizardKeptIDSet builds the wizard's view via the TTY-free seam and returns the
 // approved (unlocked) session-ID set, mirroring how RunE constructs the query +
 // selection from config.
-func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvider string) map[string]bool {
+func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceHarness string) map[string]bool {
 	t.Helper()
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
@@ -330,7 +336,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvid
 
 	q := push.PushCandidateQuery{
 		Force:          force,
-		SourceProvider: sourceProvider,
+		SourceProvider: sourceHarness,
 		Method:         cfg.Push.Method,
 		Sources:        cfg.Push.Sources,
 	}
@@ -422,24 +428,24 @@ selection:
 	claude := string(defaults.HarnessClaudeCode)
 
 	cases := []struct {
-		name           string
-		cfgPath        string
-		force          bool
-		sourceProvider string
-		// dryRunArgs are the extra CLI args (mirroring force/sourceProvider).
+		name          string
+		cfgPath       string
+		force         bool
+		sourceHarness string
+		// dryRunArgs are the extra CLI args (mirroring force/sourceHarness).
 		dryRunArgs []string
 	}{
 		{"default", cfgAll, false, "", nil},
 		{"selected", cfgSelected, false, "", nil},
 		{"force", cfgAll, true, "", []string{"--force"}},
-		{"source-provider", cfgAll, false, claude, []string{"--source-provider=" + claude}},
+		{"source-harness", cfgAll, false, claude, []string{"--source-harness=" + claude}},
 		{"by-source", cfgBySource, false, "", nil},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			pipelineSet := dryRunIDSet(t, dir, append([]string{"--config=" + tc.cfgPath}, tc.dryRunArgs...))
-			wizardSet := wizardKeptIDSet(t, dir, tc.cfgPath, tc.force, tc.sourceProvider)
+			wizardSet := wizardKeptIDSet(t, dir, tc.cfgPath, tc.force, tc.sourceHarness)
 
 			if !setsEqual(pipelineSet, wizardSet) {
 				t.Fatalf("wizard set != pipeline set\n  pipeline: %v\n  wizard:   %v", pipelineSet, wizardSet)
@@ -1086,7 +1092,7 @@ func TestPushCmd_Flags(t *testing.T) {
 	}
 
 	stringFlags := []flagCheck{
-		{"source-provider", ""},
+		{"source-harness", ""},
 		{"visibility", ""},
 		{"repository", ""},
 	}
@@ -1283,6 +1289,37 @@ func TestPushCmd_DryRun(t *testing.T) {
 	}
 }
 
+// TestPushCmd_DryRunRefusesAMissingDatabase is the push side of the forecast
+// prerequisite, and the reason every other forecast test may be seeded past it.
+//
+// A forecast inspects an existing, checkpointed database and creates nothing. On a
+// fresh install there is nothing to inspect, so it says so and stops. The failure
+// this guards is a forecast that falls through to the ordinary open and CREATES a
+// database as the side effect of a command the user ran to be told what would
+// happen — which every other push forecast test is now seeded past and could not
+// notice.
+//
+// It calls the command directly rather than through executePushCmd, because that
+// helper arranges the database this test exists to find missing.
+func TestPushCmd_DryRunRefusesAMissingDatabase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestCredentials(t, dir)
+
+	_, err := executeWithDataDir(t, BuildPushCommand(), dir, []string{"--dry-run"})
+	if err == nil {
+		t.Fatal("a forecast with no database to inspect must refuse, not report an empty push")
+	}
+	for _, want := range []string{"dry-run", "no files were changed", "run a normal harvest"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal must state %q so the user knows what to do; got: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(string(defaults.ResolveDBFilePathWith(dir))); !os.IsNotExist(statErr) {
+		t.Errorf("the forecast created the database it was asked only to inspect: %v", statErr)
+	}
+}
+
 // TestPushCmd_Timing_RollupAndLog verifies that `peasant push --timing` emits the
 // per-phase rollup to stderr and writes a per-upload JSONL log under the XDG state
 // directory. An empty store does no network, so the rollup reports zero uploads —
@@ -1455,7 +1492,7 @@ func TestPushCmd_VerboseCLIFlag(t *testing.T) {
 }
 
 // TestPushCmd_IndividualMethodError verifies that push.method=individual in
-// config (without --source-provider) returns a clear error message.
+// config (without --source-harness) returns a clear error message.
 func TestPushCmd_IndividualMethodError(t *testing.T) {
 	// PARALLEL: credential gate reads via --config-dir; config passed via --config.
 	t.Parallel()

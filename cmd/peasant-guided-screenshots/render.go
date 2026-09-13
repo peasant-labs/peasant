@@ -137,6 +137,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		case sheetKindIngest:
 			content, rows, err = composeIngestProgressSheet(sheet, document.IngestProgressStates, document.IngestProgressCaptures, ingestProgressCaptures)
+		case sheetKindCompletion:
+			content, rows, err = renderCompletionSheet(workingDirectory, sheet, document.Completion)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}
@@ -184,7 +186,7 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
 	program, _ = program.Update(tick(clock.Now()))
 	clock.now = clock.now.Add(2 * time.Second)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
 	program, _ = program.Update(tick(clock.Now()))
 	return program.View(), nil
 }
@@ -196,7 +198,7 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	model = updated.(harvestprogress.Model)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
 	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -535,8 +537,10 @@ func pushPublishedTurns(fixture pushFixture) (push.PublishedTurnsFunc, error) {
 		}
 		stored[sessionID] = entries
 	}
-	return push.NewPublishedTurns(func(sessionID string) ([]schema.SessionEntry, error) {
-		return stored[sessionID], nil
+	return push.NewPublishedTurns(func(sessionID string) (push.StoredContent, error) {
+		// The captured screens stand for complete recordings, so none of them
+		// carries the partial-preview line.
+		return push.StoredContent{Entries: stored[sessionID]}, nil
 	}, redactor), nil
 }
 

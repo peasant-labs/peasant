@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -165,9 +164,7 @@ func (a *CodexAdapter) loadCodexSessionTitles(root string) map[string]string {
 		return titles
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -203,9 +200,7 @@ func (a *CodexAdapter) extractCodexHints(path string) codexSessionHints {
 		return codexSessionHints{}
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -386,134 +381,9 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		Format:   SourceFormatJSONL,
 	}
 
-	var (
-		sessionMeta    *codexSessionMeta
-		lastTimestamp  string
-		lastTotalUsage *codexTokenUsage
-		turnCount      int
-		toolCount      int
-		lineNum        int
-		gotSessionMeta bool
-	)
-
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
-
-	for scanner.Scan() {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		lineNum++
-		raw := scanner.Bytes()
-		if len(bytes.TrimSpace(raw)) == 0 {
-			continue
-		}
-
-		var env codexRolloutLine
-		if err := json.Unmarshal(raw, &env); err != nil {
-			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-				ErrorType:   "parse_error",
-				Location:    fmt.Sprintf("line %d", lineNum),
-				Message:     fmt.Sprintf("failed to parse rollout line: %v", err),
-				Remediation: "Check the rollout file for corruption or truncation at the indicated line.",
-			})
-			continue
-		}
-
-		if env.Timestamp != "" {
-			lastTimestamp = env.Timestamp
-		}
-
-		switch env.Type {
-		case codexTypeSessionMeta:
-			var sm codexSessionMeta
-			if err := json.Unmarshal(env.Payload, &sm); err == nil {
-				if sm.ID != "" && sm.ID != session.SessionID.String() {
-					return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", session.SessionID)
-				}
-				sessionMeta = &sm
-				gotSessionMeta = true
-			} else {
-				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-					ErrorType:   "parse_error",
-					Location:    fmt.Sprintf("line %d", lineNum),
-					Message:     fmt.Sprintf("failed to parse session_meta payload: %v", err),
-					Remediation: "Verify the Codex CLI version that produced this rollout.",
-				})
-			}
-
-		case codexTypeTurnContext:
-			var tc codexTurnContext
-			if err := json.Unmarshal(env.Payload, &tc); err == nil && tc.Model != "" {
-				if mid, mErr := NewModelID(tc.Model); mErr == nil {
-					meta.Model = mid
-				}
-			}
-
-		case codexTypeResponse:
-			var ri codexResponseItem
-			if err := json.Unmarshal(env.Payload, &ri); err != nil {
-				continue
-			}
-			switch ri.Type {
-			case codexResponseMessage:
-				if role := CodexRole(ri.Role); role == codexRoleUser || role == codexRoleAssistant {
-					turnCount++
-				}
-			case codexResponseFunctionCall, codexResponseCustomCall:
-				toolCount++
-			}
-
-		case codexTypeEventMsg:
-			var ev codexEventPayload
-			if err := json.Unmarshal(env.Payload, &ev); err != nil {
-				continue
-			}
-			if ev.Type == codexEventTokenCount && ev.Info != nil && ev.Info.TotalTokenUsage != nil {
-				lastTotalUsage = ev.Info.TotalTokenUsage
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
-			Message:     fmt.Sprintf("scanner error reading rollout: %v", err),
-			Remediation: "Verify the rollout file is not corrupted or truncated.",
-		})
-	}
-
-	if !gotSessionMeta {
-		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-			ErrorType:   "missing_session_meta",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
-			Message:     "rollout did not begin with a session_meta line",
-			Remediation: "Rollout may be truncated or from an incompatible Codex CLI version.",
-		})
-	}
-
-	if sessionMeta != nil {
-		meta.Version = sessionMeta.CLIVersion
-	}
-
-	// Timestamps: prefer session_meta.timestamp for start; fall back to the
-	// first line's envelope timestamp if session_meta is missing.
-	startStr := ""
-	if sessionMeta != nil {
-		startStr = sessionMeta.Timestamp
-	}
-	startMs := parseTimestampMillis(startStr)
-	endMs := parseTimestampMillis(lastTimestamp)
-	ingested := time.Now().UnixMilli()
-	meta.Timestamp = TimestampInfo{
-		Start:    startMs,
-		End:      endMs,
-		Ingested: &ingested,
-	}
-	if startMs > 0 && endMs >= startMs {
-		meta.Stats.DurationMs = endMs - startMs
+	sessionMeta, err := parseCodexTranscriptMetadata(ctx, data, &meta)
+	if err != nil {
+		return nil, err
 	}
 
 	// Git context — Codex captures it once in session_meta. When present, we
@@ -570,6 +440,139 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		Name:     filepath.Base(cwd),
 	}
 
+	return &meta, nil
+}
+
+func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *UnifiedMetadata) (*codexSessionMeta, error) {
+	var (
+		sessionMeta    *codexSessionMeta
+		lastTimestamp  string
+		lastTotalUsage *codexTokenUsage
+		turnCount      int
+		toolCount      int
+		gotSessionMeta bool
+	)
+
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// The reader is the one source of the line number, so a diagnostic after
+		// a record the reader passed over still names the physical line.
+		lineNum := scanner.Line()
+		raw := scanner.Bytes()
+		if len(bytes.TrimSpace(raw)) == 0 {
+			continue
+		}
+
+		var env codexRolloutLine
+		if err := json.Unmarshal(raw, &env); err != nil {
+			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+				ErrorType:   "parse_error",
+				Location:    fmt.Sprintf("line %d", lineNum),
+				Message:     fmt.Sprintf("failed to parse rollout line: %v", err),
+				Remediation: "Check the rollout file for corruption or truncation at the indicated line.",
+			})
+			continue
+		}
+
+		if env.Timestamp != "" {
+			lastTimestamp = env.Timestamp
+		}
+
+		switch env.Type {
+		case codexTypeSessionMeta:
+			var sm codexSessionMeta
+			if err := json.Unmarshal(env.Payload, &sm); err == nil {
+				if sm.ID != "" && sm.ID != meta.SessionID.String() {
+					return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", meta.SessionID)
+				}
+				sessionMeta = &sm
+				gotSessionMeta = true
+			} else {
+				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+					ErrorType:   "parse_error",
+					Location:    fmt.Sprintf("line %d", lineNum),
+					Message:     fmt.Sprintf("failed to parse session_meta payload: %v", err),
+					Remediation: "Verify the Codex CLI version that produced this rollout.",
+				})
+			}
+
+		case codexTypeTurnContext:
+			var tc codexTurnContext
+			if err := json.Unmarshal(env.Payload, &tc); err == nil && tc.Model != "" {
+				if mid, mErr := NewModelID(tc.Model); mErr == nil {
+					meta.Model = mid
+				}
+			}
+
+		case codexTypeResponse:
+			var ri codexResponseItem
+			if err := json.Unmarshal(env.Payload, &ri); err != nil {
+				continue
+			}
+			switch ri.Type {
+			case codexResponseMessage:
+				if role := CodexRole(ri.Role); role == codexRoleUser || role == codexRoleAssistant {
+					turnCount++
+				}
+			case codexResponseFunctionCall, codexResponseCustomCall:
+				toolCount++
+			}
+
+		case codexTypeEventMsg:
+			var ev codexEventPayload
+			if err := json.Unmarshal(env.Payload, &ev); err != nil {
+				continue
+			}
+			if ev.Type == codexEventTokenCount && ev.Info != nil && ev.Info.TotalTokenUsage != nil {
+				lastTotalUsage = ev.Info.TotalTokenUsage
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+			ErrorType:   "read_error",
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
+			Message:     fmt.Sprintf("scanner error reading rollout: %v", err),
+			Remediation: "Verify the rollout file is not corrupted or truncated.",
+		})
+	}
+
+	if !gotSessionMeta {
+		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+			ErrorType:   "missing_session_meta",
+			Location:    fmt.Sprintf("session %s", meta.SessionID),
+			Message:     "rollout did not begin with a session_meta line",
+			Remediation: "Rollout may be truncated or from an incompatible Codex CLI version.",
+		})
+	}
+
+	if sessionMeta != nil {
+		meta.Version = sessionMeta.CLIVersion
+	}
+
+	// Timestamps: prefer session_meta.timestamp for start; fall back to the
+	// first line's envelope timestamp if session_meta is missing.
+	startStr := ""
+	if sessionMeta != nil {
+		startStr = sessionMeta.Timestamp
+	}
+	startMs := parseTimestampMillis(startStr)
+	endMs := parseTimestampMillis(lastTimestamp)
+	ingested := time.Now().UnixMilli()
+	meta.Timestamp = TimestampInfo{
+		Start:    startMs,
+		End:      endMs,
+		Ingested: &ingested,
+	}
+	if startMs > 0 && endMs >= startMs {
+		meta.Stats.DurationMs = endMs - startMs
+	}
+
 	// Stats.
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
@@ -586,5 +589,5 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		}
 	}
 
-	return &meta, nil
+	return sessionMeta, nil
 }

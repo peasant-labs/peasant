@@ -23,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
-	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
@@ -75,20 +74,20 @@ const (
 
 // harvestFlags holds all CLI flags shared across harvest subcommands.
 type harvestFlags struct {
-	sourceProvider string
-	sourcePath     string
-	outputPath     string
-	dryRun         bool
-	force          bool
-	all            bool
-	includeActive  bool
-	verbose        bool
-	debug          bool
-	jsonOutput     bool
-	detectCommits  bool
-	profileIndex   bool
-	sessionIDs     []string
-	since          string
+	sourceHarness string
+	sourcePath    string
+	outputPath    string
+	dryRun        bool
+	force         bool
+	all           bool
+	includeActive bool
+	verbose       bool
+	debug         bool
+	jsonOutput    bool
+	detectCommits bool
+	profileIndex  bool
+	sessionIDs    []string
+	since         string
 }
 
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
@@ -124,7 +123,9 @@ func BuildHarvestCommand() *cobra.Command {
 	indexCmd := &cobra.Command{
 		Use:   "index",
 		Short: "Populate database from existing peasant-sync/ files",
-		Long:  "Read transcripts already in peasant-sync/ and populate the SQLite analytics database (indexing, metrics, annotations).",
+		Long: "Read transcripts already in peasant-sync/ and populate the SQLite analytics database (indexing, metrics, annotations).\n" +
+			"By default, select sessions with stale indexer revisions. Use --source-harness, --session, and --since to narrow the selection, or --force to re-process matching current sessions.\n" +
+			"Use --all to rebuild a lost or damaged database from the files in peasant-sync/. --all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHarvest(cmd, harvestIndexOnly, &flags)
 		},
@@ -153,7 +154,11 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	// Common flags for all modes.
 	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "Show what would be processed without writing")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Force re-process sessions that match current filters")
-	cmd.Flags().BoolVar(&flags.all, "all", false, "Process ALL sessions (clears filters, implies --force)")
+	allHelp := "Process ALL sessions (clears filters, implies --force)"
+	if mode == harvestIndexOnly {
+		allHelp = "Process ALL sessions (clears filters, implies --force; rebuilds a lost database from peasant-sync/)"
+	}
+	cmd.Flags().BoolVar(&flags.all, "all", false, allHelp)
 	cmd.Flags().BoolVar(&flags.verbose, "verbose", false, "Show file-level detail")
 	cmd.Flags().BoolVar(&flags.debug, "debug", false, "Show debug-level logging")
 	_ = cmd.Flags().MarkHidden("debug")
@@ -162,10 +167,12 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	cmd.Flags().StringVar(&flags.since, "since", "", "Filter to sessions from the last N period (e.g. 2w, 3m, 7d)")
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
-	// Source flags are relevant for logs and all modes.
-	if mode != harvestIndexOnly {
-		cmd.Flags().StringVar(&flags.sourceProvider, "source-provider", "", "Override source provider (claude-code, opencode, codex, cursor, strike, pi)")
-		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the provider (replaces config, not additive)")
+	if mode == harvestIndexOnly {
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)")
+	} else {
+		// Native source overrides are relevant only for logs and all modes.
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike, pi)")
+		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
 
@@ -265,7 +272,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	git := &ingest.ExecGitResolver{}
 
 	// 2. Load config.
-	cfg, err := loadConfig(configPath)
+	cfg, err := loadRunConfig(configPath, flags.dryRun)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -287,16 +294,28 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		fmt.Fprintf(os.Stderr, "notice: no config found at %s — using defaults. Run 'peasant kickstart' to configure.\n", configPath)
 	}
 
-	// 3. Apply CLI flag overrides (source flags only for logs/all modes).
-	if mode != harvestIndexOnly {
-		if flags.sourceProvider != "" || flags.sourcePath != "" {
-			if flags.sourceProvider == "" {
-				return fmt.Errorf("--source-path requires --source-provider")
+	// 3. An index selector does not override or discover native source paths.
+	// Validate even when --all clears the selector, so misspelled harnesses fail.
+	var indexHarness *ingest.Harness
+	if mode == harvestIndexOnly {
+		if flags.sourceHarness != "" {
+			harness, err := resolveHarnessFlag(flags.sourceHarness)
+			if err != nil {
+				return err
+			}
+			if !flags.all {
+				indexHarness = &harness
+			}
+		}
+	} else {
+		if flags.sourceHarness != "" || flags.sourcePath != "" {
+			if flags.sourceHarness == "" {
+				return fmt.Errorf("--source-path requires --source-harness")
 			}
 			if flags.sourcePath == "" {
-				return fmt.Errorf("--source-provider requires --source-path")
+				return fmt.Errorf("--source-harness requires --source-path")
 			}
-			provider, err := resolveHarnessFlag(flags.sourceProvider)
+			provider, err := resolveHarnessFlag(flags.sourceHarness)
 			if err != nil {
 				return err
 			}
@@ -305,12 +324,12 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 				return fmt.Errorf("resolve source path: %w", err)
 			}
 			applySourceOverride(cfg, provider, resolved)
-			// --source-path (which requires --source-provider) scopes the run to
+			// --source-path (which requires --source-harness) scopes the run to
 			// the NAMED provider as the SOLE active source: disable default
 			// discovery of the OTHER providers so "ingest from THIS path" does not
 			// also read their real default dirs (~/.claude, opencode, codex) — the
 			// isolation leak exposed by the source-scoped integration path.
-			isolateSourceProvider(cfg, provider)
+			isolateSourceHarness(cfg, provider)
 		}
 	}
 
@@ -326,27 +345,8 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		return fmt.Errorf("resolve output path %q: %w", outputDir, err)
 	}
 
-	// 4. Build adapter registry.
-	adapters := map[defaults.Harness]ingest.AdapterFactory{
-		defaults.HarnessClaudeCode: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewClaudeAdapter(f, g, s)
-		},
-		defaults.HarnessOpenCode: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewOpenCodeAdapter(f, g, s)
-		},
-		defaults.HarnessCodex: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewCodexAdapter(f, g, s)
-		},
-		defaults.HarnessCursor: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewCursorAdapter(f, g, s)
-		},
-		defaults.HarnessStrike: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewStrikeAdapter(f, g, s)
-		},
-		defaults.HarnessPi: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewPiAdapter(f, g, s)
-		},
-	}
+	// 4. Use the canonical adapter registry shared with kickstart and web ingest.
+	adapters := ingest.DefaultAdapterRegistry
 
 	// 5. Build source configs from config.
 	sources := buildSourceConfigs(cfg)
@@ -381,6 +381,8 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		StalenessThreshold: staleness,
 		DryRun:             flags.dryRun,
 		Reindex:            reindex,
+		RebuildAll:         reindex && flags.all,
+		Harness:            indexHarness,
 		Parallelism:        0, // 0 = auto (runtime.NumCPU())
 		IndexProfiler:      indexProfiler,
 		Progress:           progState,
@@ -408,9 +410,9 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		pipelineCfg.Since = &cutoff
 	}
 
-	// 6d. Wire selection index into SessionFilter (unless --all clears filters).
+	// 6d. Saved selection scopes native discovery, not stored maintenance.
 	var selectionConflicts *selectionConflictRecorder
-	if !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
+	if mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
 		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
@@ -427,66 +429,38 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	// Logs-only mode skips all DB operations.
 	skipDB := mode == harvestLogsOnly
 
-	if !skipDB {
-		needsDB := !flags.dryRun || reindex
-		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-		dbExists := func() bool { _, err := os.Stat(dbPath); return err == nil }
-		if needsDB || dbExists() {
-			dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
-			if !flags.dryRun {
-				if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-					return fmt.Errorf("create data directory: %w", err)
-				}
-			}
-			db, err := store.Open(dbPath)
-			if err != nil {
-				if !flags.dryRun {
-					return fmt.Errorf("open analytics store: %w", err)
-				}
-			} else {
-				defer db.Close()
-
-				pipelineOpts = append(pipelineOpts,
-					ingest.WithStore(db),
-					ingest.WithMetricsStore(db),
-				)
-
-				installSalt, _, saltErr := salt.Load(db.Pool())
-				if saltErr != nil {
-					slog.Warn("salt.Load failed; using zero salt for project hashes (non-fatal)",
-						"err", saltErr,
-					)
-				} else {
-					pipelineOpts = append(pipelineOpts, ingest.WithSalt(installSalt))
-				}
-
-				if !flags.dryRun {
-					pipelineOpts = append(pipelineOpts,
-						ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
-						ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
-						ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
-						ingest.WithLogger(db),
-						ingest.WithIndexLogger(db),
-					)
-				}
-			}
+	// A forecast on a fresh install has nothing to inspect and must create
+	// nothing, so it runs without a store and reports what a first harvest would
+	// do. Refusing here instead would answer "what would happen?" with an error
+	// on exactly the install where the answer matters most. The refusal on a
+	// missing database belongs to `peasant push --dry-run`, which forecasts an
+	// upload of recorded sessions that cannot exist yet.
+	//
+	// Every other forecast keeps the read-only path and its refusals unchanged:
+	// an existing file, a live write-ahead log, and a database that needs
+	// migration all still stop the run rather than guess at stored state.
+	if !skipDB && flags.dryRun {
+		dbPath, absent, err := runStoreIsAbsent(cmd)
+		if err != nil {
+			cmd.SilenceUsage = true
+			return err
+		}
+		if absent {
+			skipDB = true
+			// The notice says HOW the forecast decides, not what it will
+			// decide. With no stored row each session is classified from the
+			// retained artifacts under the output tree, so on a tree that still
+			// holds an earlier harvest the report says unchanged or updated, and
+			// a notice that promised "new" would contradict the report printed
+			// under it.
+			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s. This dry run creates none; each discovered session is compared against the retained artifacts on disk, and is reported as new when there are none. Run 'peasant harvest' to create it.\n", dbPath)
 		}
 	}
 
-	// Inject git diff analyzer when --detect-commits is set (not for logs-only).
-	if !skipDB && flags.detectCommits {
-		pipelineOpts = append(pipelineOpts, ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()))
-	}
-
-	// 9. Create and run pipeline.
-	if err := ctx.Err(); err != nil {
-		cmd.SilenceUsage = true
-		return harvestCancellationError(err)
-	}
-	pipeline, err := ingest.NewPipeline(fs, git, adapters, pipelineCfg, pipelineOpts...)
-	if err != nil {
-		return fmt.Errorf("create pipeline: %w", err)
-	}
+	// Build and start the progress renderer before the store opens, so the
+	// one-time upgrade pass and the store open are visible as stage activity
+	// rather than a frozen terminal. The renderer reads progState; every stage,
+	// including RECOVER, reports through it.
 	renderer := newProgressProgram(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
 	renderer.theme = theme.New(themeModeFor(cfg))
 	if flags.jsonOutput {
@@ -507,6 +481,64 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		}
 	}
 	defer stopProgress()
+	go renderer.Run(ctx)
+
+	// Finish any writes an earlier build left half-applied, before the store
+	// opens. The pass reads only the filesystem, opens no store, and reports
+	// through the RECOVER stage; its summary line prints after the renderer
+	// clears.
+	var upgradeResult ingest.UpgradeResult
+	if !flags.dryRun {
+		upgradeResult = ingest.RunUpgradePass(fs, string(resolvedOutput), progState)
+	}
+
+	if !skipDB {
+		db, err := openRunStore(cmd, flags.dryRun)
+		if err != nil {
+			return fmt.Errorf("open analytics store: %w", err)
+		}
+		defer db.Close()
+		pipelineOpts = append(pipelineOpts,
+			ingest.WithStore(db),
+			ingest.WithMetricsStore(db),
+			ingest.WithSalt(db.InstallationSalt()),
+			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		)
+		if !flags.dryRun {
+			pipelineOpts = append(pipelineOpts,
+				ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
+				ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
+				ingest.WithLogger(db),
+				ingest.WithIndexLogger(db),
+			)
+		}
+		// An empty database beside a peasant-sync/ that already holds saved
+		// sessions means the database was lost. A harvest now would read the
+		// harness sources again and overwrite the saved copies, so point the
+		// user at the rebuild first. Detection counts nothing: one bounded
+		// session count and one bounded tree probe. Never on a fresh install
+		// (no tree), never when the database has rows.
+		if mode == harvestAll && !flags.dryRun {
+			if count, countErr := db.CountSessionsFiltered(ctx, store.SessionListFilter{}); countErr == nil && count == 0 && ingest.RetainedTreeHoldsSessions(fs, string(resolvedOutput)) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.")
+			}
+		}
+	}
+
+	// Inject git diff analyzer when --detect-commits is set (not for logs-only).
+	if !skipDB && flags.detectCommits {
+		pipelineOpts = append(pipelineOpts, ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()))
+	}
+
+	// 9. Create and run pipeline.
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
+	pipeline, err := ingest.NewPipeline(fs, git, adapters, pipelineCfg, pipelineOpts...)
+	if err != nil {
+		return fmt.Errorf("create pipeline: %w", err)
+	}
 	if err := ctx.Err(); err != nil {
 		cmd.SilenceUsage = true
 		return harvestCancellationError(err)
@@ -517,6 +549,8 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
 		sources: sources, customPatternCount: customPatternCount,
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
+		rebuildAll: reindex && flags.all,
+		upgrade:    upgradeResult,
 	})
 }
 
@@ -528,6 +562,12 @@ type harvestOutputOptions struct {
 	customPatternCount int
 	selectionConflicts *selectionConflictRecorder
 	indexProfiler      *ingest.IndexProfiler
+	// rebuildAll is set for `harvest index --all`: the run prints the
+	// not-restored summary line at the end.
+	rebuildAll bool
+	// upgrade carries the one-time upgrade pass result so its summary line
+	// prints after the renderer clears.
+	upgrade ingest.UpgradeResult
 }
 
 // outputHarvest consumes only the committed execution, after terminal and logger
@@ -548,8 +588,14 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 	if options.selectionConflicts != nil {
 		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
 	}
+	if options.upgrade.Ran {
+		fmt.Fprintln(cmd.ErrOrStderr(), options.upgrade.Report())
+	}
 
 	// 10. Output results.
+	for _, diagnostic := range result.Diagnostics {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", diagnostic.Location, diagnostic.Message)
+	}
 	if result.Summary.StoreError != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", result.Summary.StoreError)
 	}
@@ -563,6 +609,20 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		return printJSON(cmd.OutOrStdout(), result)
 	}
 	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
+	if remaining := result.Summary.ContentCaptureRemaining; remaining > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d sessions do not have their full text stored yet. The next harvest continues this. Run `peasant harvest index` to finish it now.\n", remaining)
+	}
+	if options.rebuildAll {
+		skipped := "0 saved copies were damaged or stale and skipped."
+		if len(result.Summary.RebuildSkipped) > 0 {
+			ids := make([]string, len(result.Summary.RebuildSkipped))
+			for i, sid := range result.Summary.RebuildSkipped {
+				ids[i] = string(sid)
+			}
+			skipped = fmt.Sprintf("%d saved copies were damaged or stale and skipped: %s.", len(ids), strings.Join(ids, ", "))
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, Village publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
+	}
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
 	if result.Summary.Errors > 0 {
@@ -1046,21 +1106,21 @@ func runAnnotationEngineSection(ctx context.Context, db *store.Store, out io.Wri
 	return nil
 }
 
-// resolveHarnessFlag converts a --source-provider flag value to a typed Harness,
+// resolveHarnessFlag converts a --source-harness flag value to a typed Harness,
 // returning a clear error for unknown values. Legacy harness names that were
 // renamed in the bestiary migration get a specific deprecation message.
 func resolveHarnessFlag(raw string) (defaults.Harness, error) {
 	switch defaults.Harness(raw) {
 	case defaults.LegacyHarnessClaude:
 		return "", fmt.Errorf(
-			"--source-provider=%q is deprecated: the harness was renamed to %q.\n"+
-				"  Rerun with: --source-provider=%s",
+			"--source-harness=%q is deprecated: the harness was renamed to %q.\n"+
+				"  Rerun with: --source-harness=%s",
 			raw, defaults.HarnessClaudeCode, defaults.HarnessClaudeCode,
 		)
 	case defaults.LegacyHarnessGemini:
 		return "", fmt.Errorf(
-			"--source-provider=%q is deprecated: the harness was renamed to %q.\n"+
-				"  Rerun with: --source-provider=%s",
+			"--source-harness=%q is deprecated: the harness was renamed to %q.\n"+
+				"  Rerun with: --source-harness=%s",
 			raw, defaults.HarnessGeminiCLI, defaults.HarnessGeminiCLI,
 		)
 	}
@@ -1076,25 +1136,24 @@ func resolveHarnessFlag(raw string) (defaults.Harness, error) {
 			raw, strings.Join(names, ", "),
 		)
 	}
-	// Cursor and antigravity are recognized by bestiary but peasant has no
-	// ingester adapter for them yet.
-	switch h {
-	case defaults.HarnessCursor, defaults.HarnessAntigravity:
+	// Bestiary also recognizes harnesses this build cannot harvest. Keep the
+	// CLI inventory aligned with the actual registered implementation.
+	if _, ok := ingest.DefaultAdapterRegistry[h]; !ok {
 		return "", fmt.Errorf(
-			"harness %q is recognized by bestiary but peasant has no ingester for it yet (planned for a future release)",
+			"harness %q is recognized by bestiary but this Peasant build has no registered harvester; select a harness listed in --help or upgrade to a build that supports it",
 			raw,
 		)
 	}
 	return h, nil
 }
 
-// isolateSourceProvider scopes ingestion to a single named provider: it enables
+// isolateSourceHarness scopes ingestion to a single named provider: it enables
 // that provider and DISABLES default discovery of every other provider for this
 // run. Used with --source-path so a path-scoped ingest reads ONLY that provider
 // from that path, not the other providers' real default source dirs. Bare
 // `peasant ingest` (no source flags) is unaffected — it uses the config's enabled
 // set as-is; multi-provider mixes remain available via config (sources.*.enabled).
-func isolateSourceProvider(cfg *config.Config, provider defaults.Harness) {
+func isolateSourceHarness(cfg *config.Config, provider defaults.Harness) {
 	cfg.Sources.ClaudeCode.Enabled = provider == defaults.HarnessClaudeCode
 	cfg.Sources.OpenCode.Enabled = provider == defaults.HarnessOpenCode
 	cfg.Sources.Codex.Enabled = provider == defaults.HarnessCodex
@@ -1297,8 +1356,20 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	indexFailures := countIndexFailures(result.IndexLog)
 	if s.Indexed > 0 || s.Computed > 0 || indexFailures > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "index: %d indexed, %d computed (index_version=%d, metadata_version=%d)\n",
-			s.Indexed, s.Computed, s.IndexVersion, s.MetadataVersion)
+		fmt.Fprintf(w, "index: %d indexed, %d computed (metadata_version=%d)\n",
+			s.Indexed, s.Computed, s.MetadataVersion)
+	}
+	if len(s.HarvesterVersions) > 0 {
+		fmt.Fprintln(w, "harvester targets:")
+		harnesses := make([]ingest.Harness, 0, len(s.HarvesterVersions))
+		for harness := range s.HarvesterVersions {
+			harnesses = append(harnesses, harness)
+		}
+		sort.Slice(harnesses, func(i, j int) bool { return harnesses[i] < harnesses[j] })
+		for _, harness := range harnesses {
+			versions := s.HarvesterVersions[harness]
+			fmt.Fprintf(w, "  %s: adapter_version=%d indexer_version=%d index_version=%d\n", harness, versions.AdapterVersion, versions.IndexerVersion, versions.IndexVersion)
+		}
 	}
 	if indexFailures > 0 {
 		fmt.Fprintf(w, "  warning: %d session(s) were imported but NOT indexed, so they are empty in the viewer, in "+

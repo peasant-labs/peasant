@@ -444,6 +444,253 @@ func TestRedactCommand_BackwardCompat_MissingRuleSetVersion(t *testing.T) {
 	}
 }
 
+// seedIndexedRetainedSession seeds a fully-harvested, fully-indexed session:
+// the retained pair is on disk under <dir>/peasant/peasant-sync, the row carries
+// the pair's artifact hash, and the index input proof (indexed_input_hash) is
+// recorded. It returns the raw (unredacted) transcript bytes it wrote. This is
+// the "current" state `peasant redact` acts on: the redaction must re-mirror the
+// row and clear the input proof so the next harvest re-indexes the new content.
+func seedIndexedRetainedSession(t *testing.T, dir, sessionID, hostSlug string) []byte {
+	t.Helper()
+	dataDir := string(defaults.ResolveDataDirPathWith(dir))
+	dbPath := string(defaults.ResolveDBFilePathWith(dir))
+	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("seed indexed: create data directory: %v", err)
+	}
+	storetest.CopyGoldenTo(t, dbPath)
+
+	// A Claude-code JSONL record the indexer parses, carrying a secret the
+	// standard level redacts, so redaction changes the content hash.
+	transcript := []byte(`{"type":"user","message":{"role":"user","content":"my secret key is sk-abc123xyz9876543210deadbeef"}}` + "\n")
+
+	start := int64(1700002000000)
+	ingested := start + 120000
+	meta := ingest.UnifiedMetadata{
+		SchemaVersion: ingest.CurrentSchemaVersion,
+		SessionID:     schema.SessionID(sessionID),
+		ModelHarness:  defaults.HarnessClaudeCode,
+		Model:         schema.ModelID("claude-opus-4-6"),
+		HostSlug:      schema.HostSlug(hostSlug),
+		Project: schema.ProjectContext{
+			Hash:     schema.ProjectHash(redactTestProject),
+			Name:     "redact-test-indexed",
+			FilePath: "/test/indexed",
+		},
+		Timestamp: schema.TimestampInfo{Start: start, End: start + 60000, Ingested: &ingested},
+		Source:    schema.SourceInfo{FilePath: "/test/indexed.jsonl", Format: schema.SourceFormatJSONL},
+	}
+
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("seed indexed: open store: %v", err)
+	}
+	defer db.Close()
+
+	output := filepath.Join(dataDir, "peasant-sync")
+	storetest.SeedManagedInput(t, db, &ingest.OSFileSystem{}, output, meta, transcript)
+
+	// Sanity: the seed established both the artifact identity and the index
+	// input proof, so clearing the proof after redaction is an observable change.
+	before, err := db.ReadIndexState(t.Context(), schema.SessionID(sessionID))
+	if err != nil {
+		t.Fatalf("seed indexed: read index state: %v", err)
+	}
+	if before == nil || before.ArtifactHash == nil {
+		t.Fatalf("seed indexed: expected a recorded artifact hash, got %+v", before)
+	}
+	if before.IndexedInputHash == nil {
+		t.Fatalf("seed indexed: expected a recorded index input proof, got %+v", before)
+	}
+	return transcript
+}
+
+// TestRedactCommand_Redact_UpdatesRowAndNextHarvestReindexes pins the redact
+// write path (design record section 2 and line 54): `peasant redact` writes the
+// redacted pair through MirrorArtifacts, which (1) updates the stored artifact
+// hash to the redacted pair and (2) clears the index input proof so the repair
+// predicate re-indexes the session on the next harvest — there is no in-command
+// reindex. The command reports the exact user-facing line.
+func TestRedactCommand_Redact_UpdatesRowAndNextHarvestReindexes(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	const (
+		sessionID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+		hostSlug  = "github.com-test-reindex"
+	)
+	seedIndexedRetainedSession(t, dataHome, sessionID, hostSlug)
+
+	stdout, _, err := executeRedactCmd(t, dataHome,
+		[]string{"--session", sessionID, "--level", string(redact.Standard), "--json"})
+	if err != nil {
+		t.Fatalf("redact: %v", err)
+	}
+
+	var result struct {
+		Redacted int                   `json:"redacted"`
+		Sessions []redactSessionResult `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse: %v\noutput: %s", err, stdout)
+	}
+	if result.Redacted != 1 {
+		t.Errorf("expected redacted=1, got %d", result.Redacted)
+	}
+	wantLine := "The stored transcript of session " + sessionID + " is updated on the next `peasant harvest`."
+	var reason string
+	for _, s := range result.Sessions {
+		if s.SessionID == sessionID {
+			reason = s.Reason
+		}
+	}
+	if reason != wantLine {
+		t.Errorf("session reason = %q, want %q", reason, wantLine)
+	}
+
+	// Read the row back and prove the write path landed: the stored artifact
+	// hash now matches the redacted pair on disk, and the index input proof is
+	// cleared so the next harvest re-indexes it.
+	dataDir := string(defaults.ResolveDataDirPathWith(dataHome))
+	dbPath := string(defaults.ResolveDBFilePathWith(dataHome))
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer db.Close()
+
+	after, err := db.ReadIndexState(t.Context(), schema.SessionID(sessionID))
+	if err != nil {
+		t.Fatalf("read index state after redact: %v", err)
+	}
+	if after == nil || after.ArtifactHash == nil {
+		t.Fatalf("expected an artifact hash after redact, got %+v", after)
+	}
+	if after.IndexedInputHash != nil {
+		t.Errorf("expected the index input proof cleared after redact (so the next harvest reindexes), got %q", *after.IndexedInputHash)
+	}
+
+	// Rebuild the artifact identity from the redacted pair on disk and confirm
+	// the row now carries exactly that identity.
+	syncDir := filepath.Join(dataDir, "peasant-sync")
+	sessionDir := filepath.Join(syncDir, hostSlug, sessionID)
+	metaBytes, err := os.ReadFile(filepath.Join(sessionDir, sessionID+defaults.MetadataSuffix))
+	if err != nil {
+		t.Fatalf("read redacted metadata: %v", err)
+	}
+	transcriptBytes, err := os.ReadFile(filepath.Join(sessionDir,
+		fmt.Sprintf("%s%s%s", sessionID, defaults.TranscriptPrefix, schema.SourceFormatJSONL)))
+	if err != nil {
+		t.Fatalf("read redacted transcript: %v", err)
+	}
+	redactedArtifact, err := ingest.NewManagedArtifact(metaBytes, transcriptBytes)
+	if err != nil {
+		t.Fatalf("rebuild redacted artifact: %v", err)
+	}
+	if *after.ArtifactHash != redactedArtifact.ArtifactHash {
+		t.Errorf("stored artifact hash = %q, want the redacted pair's identity %q",
+			*after.ArtifactHash, redactedArtifact.ArtifactHash)
+	}
+}
+
+// TestRedactCommand_MirrorFails_NamesCommand pins the redact failure path
+// (design record line 54): when the mirror fails AFTER the files are renamed
+// into place, the command exits non-zero (no success stamp certifies a step that
+// did not complete) and reports the two-command remedy that repairs the row. The
+// mirror is made to fail deterministically by recording a stored adapter
+// revision higher than the on-disk metadata's: MirrorArtifacts refuses to
+// overwrite a row whose producer evidence is newer than the captured pair.
+func TestRedactCommand_MirrorFails_NamesCommand(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	const (
+		sessionID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+		hostSlug  = "github.com-test-mirrorfail"
+	)
+
+	dataDir := string(defaults.ResolveDataDirPathWith(dataHome))
+	dbPath := string(defaults.ResolveDBFilePathWith(dataHome))
+	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("create data directory: %v", err)
+	}
+	storetest.CopyGoldenTo(t, dbPath)
+
+	transcript := []byte(`{"type":"user","message":{"role":"user","content":"my secret key is sk-abc123xyz9876543210deadbeef"}}` + "\n")
+
+	start := int64(1700003000000)
+	ingested := start + 120000
+	func() {
+		db, err := store.Open(dbPath)
+		if err != nil {
+			t.Fatalf("open store: %v", err)
+		}
+		defer db.Close()
+
+		// Record a stored adapter revision the captured pair cannot match: the
+		// on-disk metadata (below) omits AdapterVersion, so the mirror sees a
+		// stored revision that exceeds the captured one and refuses the row.
+		storedAdapter := 5
+		entries := []ingest.StoreEntry{{
+			Metadata: &schema.UnifiedMetadata{
+				SchemaVersion:  ingest.CurrentSchemaVersion,
+				SessionID:      schema.SessionID(sessionID),
+				AdapterVersion: &storedAdapter,
+				ModelHarness:   defaults.HarnessClaudeCode,
+				Model:          schema.ModelID("claude-opus-4-6"),
+				HostSlug:       schema.HostSlug(hostSlug),
+				Project: schema.ProjectContext{
+					Hash:     schema.ProjectHash(redactTestProject),
+					Name:     "redact-test-mirrorfail",
+					FilePath: "/test/mirrorfail",
+				},
+				Timestamp: schema.TimestampInfo{Start: start, End: start + 60000, Ingested: &ingested},
+				Source:    schema.SourceInfo{FilePath: "/test/mirrorfail.jsonl", Format: schema.SourceFormatJSONL},
+			},
+		}}
+		if err := db.InsertSessions(t.Context(), entries); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}()
+
+	syncDir := filepath.Join(dataDir, "peasant-sync")
+	sessionDir := filepath.Join(syncDir, hostSlug, sessionID)
+	if err := os.MkdirAll(sessionDir, defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+	transcriptPath := filepath.Join(sessionDir,
+		fmt.Sprintf("%s%s%s", sessionID, defaults.TranscriptPrefix, schema.SourceFormatJSONL))
+	if err := os.WriteFile(transcriptPath, transcript, defaults.PrivateFilePerm); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	meta := schema.NewUnifiedMetadata() // AdapterVersion left nil on disk
+	meta.SessionID = schema.SessionID(sessionID)
+	meta.ModelHarness = defaults.HarnessClaudeCode
+	meta.Model = schema.ModelID("claude-opus-4-6")
+	meta.HostSlug = schema.HostSlug(hostSlug)
+	meta.Source = schema.SourceInfo{FilePath: "/test/mirrorfail.jsonl", Format: schema.SourceFormatJSONL}
+	meta.Timestamp = schema.TimestampInfo{Start: start, End: start + 60000, Ingested: &ingested}
+	meta.Project = schema.ProjectContext{Hash: schema.ProjectHash(redactTestProject), Name: "redact-test-mirrorfail"}
+	meta.ContentHash = schema.ComputeTranscriptHash(transcript)
+	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
+	metaBytes, err := json.MarshalIndent(&meta, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, sessionID+defaults.MetadataSuffix), metaBytes, defaults.PrivateFilePerm); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	stdout, _, runErr := executeRedactCmd(t, dataHome, []string{"--session", sessionID, "--level", string(redact.Standard)})
+
+	remedy := "run `peasant harvest --force --session " + sessionID + "`"
+	secondPass := "then `peasant redact` again if a different level is wanted"
+	combined := stdout
+	if got := combined; !strings.Contains(got, remedy) || !strings.Contains(got, secondPass) {
+		t.Errorf("output did not name the two-command remedy for a failed mirror.\nwant %q AND %q\ngot: %s", remedy, secondPass, got)
+	}
+	if runErr == nil {
+		t.Errorf("expected a non-zero exit when the mirror fails after the rename; got nil error\noutput: %s", combined)
+	}
+}
+
 func TestRedactCommand_JSON_StatusValues(t *testing.T) {
 	t.Parallel()
 	dataHome := t.TempDir()

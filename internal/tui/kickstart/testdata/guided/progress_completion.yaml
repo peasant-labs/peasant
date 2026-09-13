@@ -80,11 +80,14 @@ progress:
     observations:
       - advanceSeconds: 0
         stages:
+          - {stage: RECOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: RECONCILE, started: true, done: 10, total: 10, ended: true}
           - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
           - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
           - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
           - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
           - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: CONTENT, started: true, done: 10, total: 10, ended: true}
           - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
           - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
@@ -92,11 +95,14 @@ progress:
           - {stage: REPORT, started: true, done: 0, total: 10}
       - advanceSeconds: 2
         stages:
+          - {stage: RECOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: RECONCILE, started: true, done: 10, total: 10, ended: true}
           - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
           - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
           - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
           - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
           - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: CONTENT, started: true, done: 10, total: 10, ended: true}
           - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
           - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
@@ -111,11 +117,14 @@ progress:
     observations:
       - advanceSeconds: 0
         stages:
+          - {stage: RECOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: RECONCILE, started: true, done: 10, total: 10, ended: true}
           - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
           - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
           - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
           - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
           - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: CONTENT, started: true, done: 10, total: 10, ended: true}
           - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
           - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
@@ -123,11 +132,14 @@ progress:
           - {stage: REPORT, started: true, done: 0, total: 2}
       - advanceSeconds: 1
         stages:
+          - {stage: RECOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: RECONCILE, started: true, done: 10, total: 10, ended: true}
           - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
           - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
           - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
           - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
           - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: CONTENT, started: true, done: 10, total: 10, ended: true}
           - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
           - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}

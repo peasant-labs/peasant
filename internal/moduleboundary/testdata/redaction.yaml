@@ -10,7 +10,7 @@ scanner_calls:
     function: redactJSONLBytes
     expected_calls: 1
   - file: internal/ingest/pipeline.go
-    function: processSession
+    function: processNativeSession
     expected_calls: 1
   - file: internal/ingest/pipeline.go
     function: redactTranscript

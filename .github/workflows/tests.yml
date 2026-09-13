@@ -103,7 +103,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          fetch-depth: 1
+          fetch-depth: 0 # The behavior guard compares actual base and candidate code.
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
@@ -120,6 +120,12 @@ jobs:
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: ${{ runner.os }}-go-
+
+      - name: Require harvester version bumps for changed behavior
+        if: github.event_name == 'pull_request'
+        env:
+          GUARD_BASE: ${{ github.event.pull_request.base.sha }}
+        run: nix develop -c make check-harvester-versions BASE="$GUARD_BASE" CANDIDATE=HEAD
 
       # RACE=1 (the race detector on) only for release PRs, release tags, and
       # on-demand dispatch; RACE=0 (detector off) for ordinary feature PRs AND

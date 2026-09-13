@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -483,8 +482,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		return evidence, false
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	var identity *ClaudeTeammateIdentity
 	var invalidIdentity, malformed, conversation bool
@@ -762,8 +760,7 @@ func (a *ClaudeAdapter) hasClaudeConversationRecord(path string) bool {
 		defer closeFile()
 	}
 
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	scanner := newJSONLRecordStreamScanner(reader, defaults.MaxJSONLRecordBytes)
 	var validRecords int
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -886,29 +883,148 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		Format:   SourceFormatJSONL,
 	}
 
+	firstLine, parseErr := parseClaudeTranscriptMetadata(data, &meta)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	if firstLine != nil {
+		// Resolve git metadata using the cwd from the first line.
+		cwd := firstLine.CWD
+		if cwd == "" {
+			cwd = filepath.Dir(string(session.SourcePath))
+		}
+
+		// If cwd is under ~/.claude/projects/, try to decode the actual project path.
+		// Claude project dirs encode the real path by replacing "/" with "-".
+		if decoded := a.decodeClaudeProjectDir(cwd); decoded != "" {
+			cwd = decoded
+		}
+
+		remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, cwd, firstLine.GitBranch, "")
+		remoteErr := error(nil)
+		// If direct remote check fails, walk up parent directories to find one.
+		// This ensures sessions from decoded slug paths (which may point to a
+		// subdirectory) still resolve the correct git remote for project grouping.
+		if (remoteErr != nil || remoteURL == "") && a.git != nil && firstLine.GitBranch == "" {
+			if walkedRemote, _, walkErr := a.git.WalkUpRemoteURL(ctx, cwd); walkErr == nil && walkedRemote != "" {
+				remoteURL = walkedRemote
+				remoteErr = nil
+			}
+		}
+		branchStr, branchErr := a.git.Branch(ctx, cwd)
+		worktreeStr, worktreeErr := a.git.Worktree(ctx, cwd)
+
+		// Build GitContext — all fields are nullable.
+		gitInfo := GitContext{}
+
+		// Prefer gitBranch from JSONL over resolved branch.
+		branch := firstLine.GitBranch
+		if branch == "" && branchErr == nil && branchStr != "" {
+			branch = branchStr
+		}
+		if branch != "" {
+			b := branch
+			gitInfo.Branch = &b
+		}
+
+		if remoteErr == nil && remoteURL != "" {
+			r := remoteURL
+			gitInfo.Remote = &r
+		}
+
+		if worktreeErr == nil && worktreeStr != "" {
+			w := worktreeStr
+			gitInfo.Worktree = &w
+		}
+
+		if trackingStr != "" {
+			tr := trackingStr
+			gitInfo.Tracking = &tr
+		}
+
+		meta.Git = gitInfo
+
+		// Store the real working directory for context-aware slug redaction.
+
+		// ProjectInfo.
+		projectPath := worktreeStr
+		if projectPath == "" {
+			projectPath = cwd
+		}
+
+		projectHash, hostSlug, err := DeriveProjectIdentifiers(a.salt, remoteURL, projectPath)
+		if err != nil {
+			// DeriveProjectIdentifiersWithGit should not fail for valid paths,
+			// but fall back to zero-value hash if it does.
+			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+				ErrorType:   "derive_identity_error",
+				Location:    fmt.Sprintf("session %s", session.SessionID),
+				Message:     fmt.Sprintf("failed to derive project identifiers: %v", err),
+				Remediation: "Check git remote URL or working directory path.",
+			})
+		} else {
+			meta.HostSlug = hostSlug
+		}
+
+		// Derive project name from git remote (repo name) when available,
+		// so that worktrees and subdirectories show the repository name
+		// (e.g., "widget-service") rather than the worktree/branch
+		// name (e.g., "feature-push").
+		projectName := RepoNameFromRemote(remoteURL)
+		if projectName == "" {
+			projectName = filepath.Base(projectPath)
+		}
+
+		meta.Project = ProjectInfo{
+			Hash:     projectHash,
+			FilePath: projectPath,
+			Name:     projectName,
+		}
+	}
+
+	meta.Stats.SubagentCount = len(session.SubagentPaths)
+
+	// Build subagent refs from SubagentPaths.
+	for _, sp := range session.SubagentPaths {
+		filename := filepath.Base(string(sp))
+		subIDStr := strings.TrimSuffix(filename, defaults.ExtJSONL.String())
+		subSID, err := NewSessionID(subIDStr)
+		if err != nil {
+			continue
+		}
+		meta.Subagents = append(meta.Subagents, SubagentRef{
+			SessionID:  subSID,
+			ParentUUID: session.SessionID,
+		})
+	}
+
+	return &meta, nil
+}
+
+func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJSONLLine, error) {
 	var (
 		firstLine      claudeJSONLLine
 		literalCWD     string
 		hasFirst       bool
 		firstTimestamp string // earliest non-empty timestamp across all lines
 		lastTimestamp  string // latest non-empty timestamp across all lines
-		lineNum        int
 		turnCount      int
 		toolCount      int
 		tokensIn       int
 		tokensOut      int
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	// Set scanner buffer to handle large lines. While the entire file is already
-	// in memory via ReadFile(), bufio.Scanner has an internal line-length limit
-	// that defaults to 64KiB. The 10 MiB limit prevents token scan errors on
-	// assistant messages with very large tool outputs.
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	// The shared record reader handles a record of any size: a record up to
+	// defaults.MaxJSONLRecordBytes is read whole, and a longer one is skipped
+	// and listed by Oversized() rather than failing the scan.
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
-		lineNum++
+		// The reader is the one source of the line number. A counter kept here
+		// would count only the records handed back, so every diagnostic after a
+		// record the reader passed over would name an earlier line than the one
+		// at fault.
+		lineNum := scanner.Line()
 		raw := scanner.Bytes()
 		if len(bytes.TrimSpace(raw)) == 0 {
 			continue
@@ -925,9 +1041,9 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			continue
 		}
 
-		if line.SessionID != "" && line.SessionID != session.SessionID.String() &&
-			(session.ParentUUID == nil || line.SessionID != session.ParentUUID.String()) {
-			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", session.SessionID)
+		if line.SessionID != "" && line.SessionID != meta.SessionID.String() &&
+			(meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()) {
+			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", meta.SessionID)
 		}
 		if literalCWD == "" {
 			literalCWD = line.CWD
@@ -986,7 +1102,7 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if err := scanner.Err(); err != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
 			Message:     fmt.Sprintf("scanner error reading transcript: %v", err),
 			Remediation: "Verify the transcript file is not corrupted or truncated.",
 		})
@@ -1013,121 +1129,18 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			meta.Stats.DurationMs = endMs - startMs
 		}
 
-		// Resolve git metadata using the cwd from the first line.
-		cwd := firstLine.CWD
-		if cwd == "" {
-			cwd = filepath.Dir(string(session.SourcePath))
-		}
-
-		// If cwd is under ~/.claude/projects/, try to decode the actual project path.
-		// Claude project dirs encode the real path by replacing "/" with "-".
-		if decoded := a.decodeClaudeProjectDir(cwd); decoded != "" {
-			cwd = decoded
-		}
-
-		branchStr, branchErr := a.git.Branch(ctx, cwd)
-		branch := firstLine.GitBranch
-		if branch == "" && branchErr == nil && branchStr != "" {
-			branch = branchStr
-		}
-		remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, cwd, firstLine.GitBranch, "")
-		remoteErr := error(nil)
-		// If direct remote check fails, walk up parent directories to find one.
-		// This ensures sessions from decoded slug paths (which may point to a
-		// subdirectory) still resolve the correct git remote for project grouping.
-		if (remoteErr != nil || remoteURL == "") && a.git != nil && firstLine.GitBranch == "" {
-			if walkedRemote, _, walkErr := a.git.WalkUpRemoteURL(ctx, cwd); walkErr == nil && walkedRemote != "" {
-				remoteURL = walkedRemote
-				remoteErr = nil
-			}
-		}
-		worktreeStr, worktreeErr := a.git.Worktree(ctx, cwd)
-
-		// Build GitContext — all fields are nullable.
-		gitInfo := GitContext{}
-
-		if branch != "" {
-			b := branch
-			gitInfo.Branch = &b
-		}
-
-		if remoteErr == nil && remoteURL != "" {
-			r := remoteURL
-			gitInfo.Remote = &r
-		}
-
-		if worktreeErr == nil && worktreeStr != "" {
-			w := worktreeStr
-			gitInfo.Worktree = &w
-		}
-
-		if trackingStr != "" {
-			tr := trackingStr
-			gitInfo.Tracking = &tr
-		}
-
-		meta.Git = gitInfo
-
-		// Store the real working directory for context-aware slug redaction.
-		meta.CWD = literalCWD
-
-		// ProjectInfo.
-		projectPath := worktreeStr
-		if projectPath == "" {
-			projectPath = cwd
-		}
-
-		projectHash, hostSlug, err := DeriveProjectIdentifiers(a.salt, remoteURL, projectPath)
-		if err != nil {
-			// DeriveProjectIdentifiers should not fail for valid paths,
-			// but fall back to zero-value hash if it does.
-			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
-				ErrorType:   "derive_identity_error",
-				Location:    fmt.Sprintf("session %s", session.SessionID),
-				Message:     fmt.Sprintf("failed to derive project identifiers: %v", err),
-				Remediation: "Check git remote URL or working directory path.",
-			})
-		} else {
-			meta.HostSlug = hostSlug
-		}
-
-		// Derive project name from git remote (repo name) when available,
-		// so that worktrees and subdirectories show the repository name
-		// (e.g., "widget-service") rather than the worktree/branch
-		// name (e.g., "feature-push").
-		projectName := RepoNameFromRemote(remoteURL)
-		if projectName == "" {
-			projectName = filepath.Base(projectPath)
-		}
-
-		meta.Project = ProjectInfo{
-			Hash:     projectHash,
-			FilePath: projectPath,
-			Name:     projectName,
-		}
 	}
 
+	meta.CWD = literalCWD
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
-	meta.Stats.SubagentCount = len(session.SubagentPaths)
 	meta.Stats.TokensIn = tokensIn
 	meta.Stats.TokensOut = tokensOut
 
-	// Build subagent refs from SubagentPaths.
-	for _, sp := range session.SubagentPaths {
-		filename := filepath.Base(string(sp))
-		subIDStr := strings.TrimSuffix(filename, defaults.ExtJSONL.String())
-		subSID, err := NewSessionID(subIDStr)
-		if err != nil {
-			continue
-		}
-		meta.Subagents = append(meta.Subagents, SubagentRef{
-			SessionID:  subSID,
-			ParentUUID: session.SessionID,
-		})
+	if hasFirst {
+		return &firstLine, nil
 	}
-
-	return &meta, nil
+	return nil, nil
 }
 
 // claudeProjectsDirSegment is the path segment that identifies a directory as a

@@ -33,7 +33,7 @@ func MarkStoredSessionsIndexed(t *testing.T, db *store.Store) {
 		if err := db.UpdateIndexState(
 			t.Context(),
 			ingest.SessionID(rows[i].SessionID),
-			ingest.CurrentIndexVersion,
+			ingest.HarvesterVersionRegistry[ingest.Harness(rows[i].ModelHarness)].IndexerVersion,
 			indexedAtMs,
 		); err != nil {
 			t.Fatalf("mark stored sessions indexed: %s: %v", rows[i].SessionID, err)

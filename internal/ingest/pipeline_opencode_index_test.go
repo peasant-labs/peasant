@@ -71,6 +71,7 @@ func TestPipeline_OpenCodeSessionsAreIndexedOnFreshIngest(t *testing.T) {
 	}
 
 	metricsStore := testutil.NewStubMetricsStore()
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	cfg := makePipelineConfig(testOutputDir)
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
 		defaults.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{session.OriginalRoot}},
@@ -82,7 +83,7 @@ func TestPipeline_OpenCodeSessionsAreIndexedOnFreshIngest(t *testing.T) {
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			defaults.HarnessOpenCode: ingest.NewOpenCodeIndexer(mfs),
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)

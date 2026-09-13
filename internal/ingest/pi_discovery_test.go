@@ -24,6 +24,7 @@ func TestPiDiscoveryLocationsAndCandidates(t *testing.T) {
 			Name   string `yaml:"name"`
 			Mode   string `yaml:"mode"`
 			Reject string `yaml:"reject"`
+			Accept bool   `yaml:"accept"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeNamedFixtureYAML(piDiscoveryYAML, &fixture); err != nil {
@@ -52,15 +53,21 @@ func TestPiDiscoveryLocationsAndCandidates(t *testing.T) {
 			}
 			selected := root
 			switch tc.Mode {
-			case "file-limit":
-				if err := os.Truncate(path, (64<<20)+1); err != nil {
+			case "file-over-retired-file-bound":
+				// A valid recording past the retired 64 MiB FILE bound. The
+				// padding is whitespace, not truncation filler, so the case
+				// tests the file-size rule and not malformed input, and it
+				// does not touch the separate projected-row budgets, which
+				// this change does not alter.
+				padded := body + strings.Repeat(" ", 64<<20) + "\n"
+				if err := os.WriteFile(path, []byte(padded), 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "line-limit":
+			case "record-over-retired-line-bound":
 				if err := os.WriteFile(path, []byte(strings.TrimSpace(body)+strings.Repeat(" ", 8<<20)), 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "line-count-limit":
+			case "recording-over-retired-line-count-bound":
 				if err := os.WriteFile(path, []byte(body+strings.Repeat("\n", 200000)), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -111,6 +118,17 @@ func TestPiDiscoveryLocationsAndCandidates(t *testing.T) {
 			if tc.Mode == "missing" {
 				if len(sessions) != 0 {
 					t.Fatal("missing root invented a session")
+				}
+				return
+			}
+			if tc.Accept {
+				// No size refuses a Pi recording: the session is discovered
+				// and nothing is reported about it.
+				if len(sessions) != 1 || sessions[0].SourcePath.String() != path {
+					t.Fatalf("a recording over a retired size bound was not discovered: %+v / %+v", sessions, adapter.DiscoveryDiagnostics())
+				}
+				if diagnostics := adapter.DiscoveryDiagnostics(); len(diagnostics) != 0 {
+					t.Fatalf("a recording over a retired size bound was reported: %+v", diagnostics)
 				}
 				return
 			}

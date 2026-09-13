@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/schema"
 )
@@ -229,9 +229,7 @@ func (a *CursorAdapter) extractCursorHints(path string) cursorSessionHints {
 	if err != nil {
 		return cursorSessionHints{}
 	}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 	for i := 0; i < 10 && scanner.Scan(); i++ {
 		var line cursorJSONLLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
@@ -262,8 +260,48 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		Format:   SourceFormatJSONL,
 	}
 
+	startMs, endMs := parseCursorTranscriptMetadata(data, &meta)
+	if startMs == 0 {
+		if !session.CreatedAt.IsZero() {
+			startMs = session.CreatedAt.UnixMilli()
+		} else if !session.ModTime.IsZero() {
+			startMs = session.ModTime.UnixMilli()
+		}
+	}
+	if endMs == 0 && !session.ModTime.IsZero() {
+		endMs = session.ModTime.UnixMilli()
+	}
+	if endMs < startMs {
+		endMs = startMs
+	}
+	ingested := time.Now().UnixMilli()
+	meta.Timestamp = TimestampInfo{
+		Start:    startMs,
+		End:      endMs,
+		Ingested: &ingested,
+	}
+	if startMs > 0 && endMs >= startMs {
+		meta.Stats.DurationMs = endMs - startMs
+	}
+	meta.Stats.SubagentCount = len(session.SubagentPaths)
+	for _, sp := range session.SubagentPaths {
+		subIDStr := strings.TrimSuffix(filepath.Base(string(sp)), defaults.ExtJSONL.String())
+		subSID, err := NewSessionID(subIDStr)
+		if err != nil {
+			continue
+		}
+		meta.Subagents = append(meta.Subagents, SubagentRef{
+			SessionID:  subSID,
+			ParentUUID: session.SessionID,
+		})
+	}
+
+	a.enrichCursorProject(ctx, &meta, session, session.CWD)
+	return &meta, nil
+}
+
+func parseCursorTranscriptMetadata(data []byte, meta *UnifiedMetadata) (int64, int64) {
 	var (
-		lineNum        int
 		firstTimestamp json.RawMessage
 		lastTimestamp  json.RawMessage
 		turnCount      int
@@ -272,11 +310,11 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		tokensOut      int
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 	for scanner.Scan() {
-		lineNum++
+		// The reader is the one source of the line number, so a diagnostic after
+		// a record the reader passed over still names the physical line.
+		lineNum := scanner.Line()
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
 			continue
@@ -319,7 +357,7 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if err := scanner.Err(); err != nil {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "read_error",
-			Location:    fmt.Sprintf("line %d", lineNum),
+			Location:    fmt.Sprintf("line %d", scanner.Line()),
 			Message:     fmt.Sprintf("scanner error reading Cursor transcript: %v", err),
 			Remediation: "Verify the transcript file is not corrupted or truncated.",
 		})
@@ -327,55 +365,17 @@ func (a *CursorAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if meta.Model == "" {
 		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 			ErrorType:   "missing_model",
-			Location:    fmt.Sprintf("session %s", session.SessionID),
+			Location:    fmt.Sprintf("session %s", meta.SessionID),
 			Message:     "Cursor transcript omitted message.model; peasant will hold this session from village push because the village requires a recorded model.",
 			Remediation: "Keep the transcript ingested for local analysis, but do not publish it until Cursor records model metadata or the source transcript is corrected.",
 		})
 	}
 
-	startMs := cursorTimestampMillis(firstTimestamp)
-	endMs := cursorTimestampMillis(lastTimestamp)
-	if startMs == 0 {
-		if !session.CreatedAt.IsZero() {
-			startMs = session.CreatedAt.UnixMilli()
-		} else if !session.ModTime.IsZero() {
-			startMs = session.ModTime.UnixMilli()
-		}
-	}
-	if endMs == 0 && !session.ModTime.IsZero() {
-		endMs = session.ModTime.UnixMilli()
-	}
-	if endMs < startMs {
-		endMs = startMs
-	}
-	ingested := time.Now().UnixMilli()
-	meta.Timestamp = TimestampInfo{
-		Start:    startMs,
-		End:      endMs,
-		Ingested: &ingested,
-	}
-	if startMs > 0 && endMs >= startMs {
-		meta.Stats.DurationMs = endMs - startMs
-	}
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
-	meta.Stats.SubagentCount = len(session.SubagentPaths)
 	meta.Stats.TokensIn = tokensIn
 	meta.Stats.TokensOut = tokensOut
-	for _, sp := range session.SubagentPaths {
-		subIDStr := strings.TrimSuffix(filepath.Base(string(sp)), defaults.ExtJSONL.String())
-		subSID, err := NewSessionID(subIDStr)
-		if err != nil {
-			continue
-		}
-		meta.Subagents = append(meta.Subagents, SubagentRef{
-			SessionID:  subSID,
-			ParentUUID: session.SessionID,
-		})
-	}
-
-	a.enrichCursorProject(ctx, &meta, session, session.CWD)
-	return &meta, nil
+	return cursorTimestampMillis(firstTimestamp), cursorTimestampMillis(lastTimestamp)
 }
 
 func cursorTimestampMillis(raw json.RawMessage) int64 {
@@ -521,6 +521,10 @@ type CursorIndexer struct {
 	fs          FileSystem
 	fullDepth   bool
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 // WithCursorFullContent retains source prose before store preview normalization.
@@ -528,7 +532,36 @@ func WithCursorFullContent(enabled bool) CursorIndexerOption {
 	return func(idx *CursorIndexer) { idx.fullContent = enabled }
 }
 
+// WithCursorMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithCursorMaxRecordBytes(limit int) CursorIndexerOption {
+	return func(idx *CursorIndexer) { idx.maxRecordBytes = limit }
+}
+
 var _ TranscriptIndexer = (*CursorIndexer)(nil)
+var _ VersionedTranscriptIndexer = (*CursorIndexer)(nil)
+
+// IndexTranscriptResult verifies completion before authorizing persistent replacement.
+func (idx *CursorIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	data, err := idx.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return nil, completion.failure(err)
+	}
+	return idx.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
+func (idx *CursorIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	entries, err := idx.parseJSONLWithCompletion(session.SessionID, data, completion)
+	return completion.result(entries, err)
+}
 
 // SourceKind reports that Cursor's entries come from a single JSONL file; every entry is in its bytes.
 func (idx *CursorIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
@@ -565,18 +598,45 @@ func (idx *CursorIndexer) IndexTranscriptBytes(_ context.Context, session Discov
 }
 
 func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema.SessionEntry, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
+	return idx.parseJSONLWithCompletion(sessionID, data, nil)
+}
+
+func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
 	for scanner.Scan() {
+		var placeholderErr error
+		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCursor, &entryIndex)
+		if placeholderErr != nil {
+			return entries, placeholderErr
+		}
+		if completion != nil {
+			completion.line = scanner.Line()
+		}
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
 			continue
 		}
-		entry, ok := parseCursorLine(sessionID, entryIndex, raw, idx.fullContent)
+		var line cursorJSONLLine
+		decodeErr := json.Unmarshal(raw, &line)
+		if completion != nil {
+			if err := completion.record(raw); err != nil {
+				return nil, err
+			}
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if line.Role == "" && line.Message.Role == "" {
+				return nil, fmt.Errorf("record has no transcript role")
+			}
+			if err := validateIndexContent(line.content()); err != nil {
+				return nil, err
+			}
+			completion.recognized++
+		}
+		entry, ok := cursorLineEntry(sessionID, entryIndex, raw, line, decodeErr, idx.fullContent)
 		if !ok {
 			entryIndex++
 			continue
@@ -598,12 +658,21 @@ func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 	if err := scanner.Err(); err != nil {
 		return entries, fmt.Errorf("cursor indexer: scanner error for %s: %w", sessionID, err)
 	}
+	if completion != nil && scanner.SawOversized() {
+		return entries, uncertifiableOversizedRecord(scanner.Oversized(), scanner.limit)
+	}
+	entries, err := appendOmissionPlaceholders(entries, scanner, sessionID, HarnessCursor, &entryIndex)
+	if err != nil {
+		return entries, err
+	}
+	if completion != nil {
+		completion.line = scanner.Line()
+	}
 	return entries, nil
 }
 
-func parseCursorLine(sessionID SessionID, index int, raw []byte, fullContent bool) (schema.SessionEntry, bool) {
-	var line cursorJSONLLine
-	if err := json.Unmarshal(raw, &line); err != nil {
+func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSONLLine, decodeErr error, fullContent bool) (schema.SessionEntry, bool) {
+	if decodeErr != nil {
 		return schema.SessionEntry{}, false
 	}
 	role := cursorLineRole(line)

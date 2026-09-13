@@ -310,27 +310,6 @@ func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source
 	return controlOnly
 }
 
-func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
-	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
-	if err != nil {
-		return nil, nil, err
-	}
-	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
-	if err != nil {
-		return nil, nil, err
-	}
-	var projection openCodeCurrentProjection
-	var unknownControlTypes map[string]int
-	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
-		var readErr error
-		projection, unknownControlTypes, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
-		return readErr
-	}); err != nil {
-		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
-	}
-	return a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
-}
-
 // finishCurrentManagedProjection encodes a read current projection into the
 // managed JSON bytes and derives its metadata. The full-session and preview
 // prefix reads share it.

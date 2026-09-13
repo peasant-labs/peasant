@@ -89,12 +89,12 @@ func simulateIngestProgress(state *ingest.ProgressState) {
 			Stage: s.stage,
 			Total: s.total,
 		})
-		for i := 1; i <= s.total; i++ {
+		for range s.total {
 			time.Sleep(s.delay)
 			state.Update(ingest.ProgressEvent{
 				Kind:  ingest.KindAdvance,
 				Stage: s.stage,
-				Done:  i,
+				Delta: 1,
 				Total: s.total,
 			})
 		}

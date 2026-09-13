@@ -35,6 +35,18 @@ const (
 	OpenCodeDirProject DirName = "project"
 )
 
+// DebugArtifactSuffixes is the CLOSED set of extensions a debug output Peasant
+// writes into a session's debug directory carries: ".json" for a captured tool
+// output and ".log" for a harness log.
+//
+// Ownership inside that directory is decided by the name, not by the directory:
+// a publication may retire a file it owns, and the directory is an ordinary one
+// a user or another tool can write into, so a name outside this set is left
+// alone exactly like a file beside the artifact. Widening the set widens what a
+// publication may delete, so a new debug output takes one of these extensions
+// rather than adding a third.
+func DebugArtifactSuffixes() []string { return []string{".json", ".log"} }
+
 // Provider-specific filename prefixes.
 const (
 	ClaudeSubagentPrefix  = "agent-"
@@ -48,17 +60,25 @@ const ContentPreviewLimit = 2000
 // A single oversized session may occupy a batch without truncation.
 const FullContentWriteBatchBytes int64 = 32 << 20
 
-// OpenCodeManagedProjectionMaxBytes bounds the Peasant-managed OpenCode SQLite
-// projection file the indexer reads from disk. The projection holds one
-// session's normalized message and part rows as JSON, so it is small; a real
-// projection is kilobytes to low megabytes. The bound exists as defense in
-// depth: an OpenCode SQLite session's discovered source path is the provider
-// database, and only the post-harvest managed projection ever belongs at the
-// path the indexer reads. If any wiring mistake ever points the reader at the
-// database instead of the projection, the reader refuses the oversized file
-// rather than loading a multi-gigabyte database into memory and aborting the
-// process. 64 MiB is far above any real projection and far below a database
-// that would exhaust memory.
+// OrdinaryHarvestContentBudgetBytes bounds how many input bytes one ordinary
+// `peasant harvest` charges to the one-time full-content capture. The capture
+// is resumable across runs with no cursor, so a large backlog is worked down a
+// bounded slice at a time instead of stalling a single harvest. `peasant
+// harvest index` runs it to the end with no budget.
+const OrdinaryHarvestContentBudgetBytes int64 = 1 << 30 // 1 GiB
+
+// OpenCodeManagedProjectionMaxBytes is the size at which an OpenCode session's
+// payload stops being small. It bounds the kickstart PREVIEW, which shows a
+// prefix and says how much it left out.
+//
+// It is no longer a gate on reading a managed projection. It used to be: the
+// reader refused a projection past this size as defense in depth, because an
+// OpenCode SQLite session's discovered source path is the provider database and
+// a wiring mistake could point the reader at a multi-gigabyte database. That
+// defense is now a content test, which identifies a database from its first
+// bytes without reading it, because a size test also failed the long sessions
+// whose projections are legitimately large, and losing a whole session is not
+// something a size may do.
 const OpenCodeManagedProjectionMaxBytes = 64 << 20 // 64 MiB
 
 // OpenCodePreviewMaterializeMaxBytes bounds how much OpenCode session payload
@@ -127,10 +147,30 @@ const OpenCodePreviewFirstPageMaxBytes = 64 << 10 // 64 KiB
 // retains grow only as far as the reader scrolls.
 const OpenCodePreviewSliceMaxBytes = 8 << 20 // 8 MiB
 
-// Scanner buffer sizes for reading large JSONL lines.
+// MaxJSONLRecordBytes is the largest single JSONL record Peasant reads,
+// redacts and indexes whole. The rule is the same for every JSONL harness
+// (Claude Code, Codex, Cursor, Strike, Pi) and for the per-record reads of
+// the OpenCode sources: a record up to this size is processed in full; a
+// record over it is omitted without being loaded, is reported with an
+// actionable diagnostic and a placeholder entry at its position, and the
+// session still ingests and is stored partial. No size ever fails a session
+// and no record is ever silently dropped.
+//
+// ScannerInitBuf is the starting read buffer. Readers grow from it on demand
+// up to MaxJSONLRecordBytes, so an ordinary transcript never allocates the
+// maximum.
+//
+// RedactScannerMaxLineBytes is the line limit the redact stage runs with. The
+// redaction engine reads a record as a LINE, through a bufio.Scanner, and a
+// Scanner refuses a line it cannot hold WITH its newline terminator. The
+// largest record Peasant keeps is exactly MaxJSONLRecordBytes long, so its line
+// is one byte longer, and a scanner limit equal to the record limit would
+// refuse the very record the filter kept and fail the whole session. It is
+// derived here, once, so the two limits cannot drift apart.
 const (
-	ScannerMaxLine = 10 << 20 // 10 MiB
-	ScannerInitBuf = 64 << 10 // 64 KiB
+	MaxJSONLRecordBytes       = 256 << 20 // 256 MiB
+	ScannerInitBuf            = 64 << 10  // 64 KiB
+	RedactScannerMaxLineBytes = MaxJSONLRecordBytes + 1
 )
 
 // WebAssetsSubdir is the embedded filesystem subdirectory for web assets.

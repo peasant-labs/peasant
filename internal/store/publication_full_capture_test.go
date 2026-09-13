@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -80,7 +81,7 @@ func TestPublicationFullCaptureEligibilityAndBundle(t *testing.T) {
 			}
 			if tc.DisagreeRevision {
 				before := capture(t, s, id)
-				r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: id, Entries: entries, RequireFullContent: true, CaptureRevision: revision, ContentCapture: ingest.SessionContentCaptureWrite{PublicationCaptureRevision: revision + 1}}})[0]
+				r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, RequireFullContent: true, CaptureRevision: revision, ContentCapture: ingest.SessionContentCaptureWrite{PublicationCaptureRevision: revision + 1}}})[0]
 				if r.Err == nil || r.Written || capture(t, s, id) != before {
 					t.Fatal("disagreeing full revision changed capture")
 				}
@@ -95,7 +96,7 @@ func TestPublicationFullCaptureEligibilityAndBundle(t *testing.T) {
 				if tc.ChangeShape {
 					attempt[0].Extra = strPtr(`{"model_id":"different"}`)
 				}
-				r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: id, Entries: attempt, RequireFullContent: true, Mode: ingest.SessionEntryWriteContentBackfill}})[0]
+				r := s.IndexSessionEntryBatch(context.Background(), []ingest.SessionEntryWrite{{SessionID: id, Result: indexformat.V1{Entries: attempt}, IndexVersion: 1, RequireFullContent: true, Mode: ingest.SessionEntryWriteContentBackfill}})[0]
 				if (r.Err != nil) != tc.WriteError {
 					t.Fatalf("backfill error %v", r.Err)
 				}

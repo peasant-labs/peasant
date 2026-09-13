@@ -126,6 +126,24 @@ func TestDatabasePublicationWithoutSourcesOrSidecars(t *testing.T) {
 				if runErr == nil && result.Errors == 0 {
 					t.Fatalf("failed input accepted: %+v", result)
 				}
+				if tc.CloseDatabase {
+					// An unusable database is a fact about the RUN. It must stop
+					// the push with one run-level error, never become a row per
+					// candidate telling the user to re-ingest each session: that
+					// advice cannot repair a closed store, and a run that keeps
+					// walking an unreadable database reports refusals it has no
+					// evidence for.
+					if runErr == nil {
+						t.Fatalf("closed database did not stop the run: %+v", result)
+					}
+					if result != nil {
+						for _, session := range result.Sessions {
+							if push.ClassifyPushError(session.Error) == push.CategoryMetadataMissing {
+								t.Fatalf("closed database blamed session %s for needing ingest: %v", session.SessionID, session.Error)
+							}
+						}
+					}
+				}
 				if len(publisher.Calls) != 0 {
 					t.Fatal("failed input uploaded")
 				}

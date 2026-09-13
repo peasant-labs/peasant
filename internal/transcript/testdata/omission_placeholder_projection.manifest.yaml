@@ -1,0 +1,4 @@
+requiredNames:
+  - placeholder_without_a_tool_call_id_is_a_turn_of_its_own
+  - placeholder_whose_own_tool_call_was_omitted_is_a_turn_of_its_own
+  - placeholder_paired_with_its_tool_call_is_that_call_result

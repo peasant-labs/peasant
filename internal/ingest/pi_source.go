@@ -9,13 +9,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
-)
-
-const (
-	piMaxFile  = 64 << 20
-	piMaxLine  = 8 << 20
-	piMaxLines = 200000
 )
 
 type piEntryType string
@@ -91,6 +86,22 @@ type piDocument struct {
 	title         string
 	hasTitle      bool
 	warnings      []DiagnosticEntry
+	// omissions lists the records ingest left out of this document, each with
+	// the number of accepted entries that preceded it, so the projection can
+	// put a placeholder entry where the omitted record stood.
+	omissions []piOmission
+}
+
+// piOmission is one omitted source record and its position in the document.
+type piOmission struct {
+	At OmittedRecordAt
+	// AfterEntries is how many entries the document had accepted before the
+	// omitted record. A Pi recording is an append-only log, so for an
+	// unbranched session this is the omitted record's own position among the
+	// entries; for a branched one it is the nearest position on the active
+	// path. The record's true physical line stays in the typed omission
+	// record and in the reader-facing note either way.
+	AfterEntries int
 }
 
 func piSourceError(step string, line int, cause error) error {
@@ -101,14 +112,16 @@ func readPiSource(ctx context.Context, fs FileSystem, path string) ([]byte, erro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	info, err := fs.Stat(path)
-	if err != nil {
+	if _, err := fs.Stat(path); err != nil {
 		return nil, piSourceError("source read", 0, err)
 	}
-	if info.Size() > piMaxFile {
-		return nil, piSourceError("source read", 0, fmt.Errorf("file exceeds 64 MiB"))
-	}
-	var data []byte
+	// No size refuses a Pi recording. The former 64 MiB file bound failed the
+	// whole session, which lost every record in it; a record that is too large
+	// to process is left out one record at a time by parsePiDocument instead.
+	var (
+		data []byte
+		err  error
+	)
 	if streaming, ok := fs.(interface {
 		Open(string) (io.ReadCloser, error)
 	}); ok {
@@ -117,49 +130,74 @@ func readPiSource(ctx context.Context, fs FileSystem, path string) ([]byte, erro
 			return nil, piSourceError("source read", 0, openErr)
 		}
 		defer reader.Close()
-		data, err = io.ReadAll(io.LimitReader(reader, piMaxFile+1))
+		data, err = io.ReadAll(reader)
 	} else {
 		data, err = fs.ReadFile(path)
 	}
 	if err != nil {
 		return nil, piSourceError("source read", 0, err)
 	}
-	if len(data) > piMaxFile {
-		return nil, piSourceError("source read", 0, fmt.Errorf("file exceeds 64 MiB"))
-	}
 	return data, nil
 }
 
 func parsePiDocument(ctx context.Context, data []byte) (piDocument, error) {
+	return parsePiDocumentWithLimit(ctx, data, defaults.MaxJSONLRecordBytes)
+}
+
+// parsePiDocumentWithLimit reads a Pi recording with the shared JSONL record
+// reader and the shared per-record limit.
+//
+// The three bounds this replaced each failed the WHOLE session and lost every
+// record in it: a file over 64 MiB, a line over 8 MiB and a recording of more
+// than 200000 physical lines. A Pi recording is now read like every other
+// JSONL harness: a record up to the limit is read and indexed whole, and a
+// record over it is left out one record at a time, reported as a warning, and
+// marked by a placeholder entry, while the session still imports and is stored
+// partial. The incomplete-final-line warning is unchanged.
+func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes int) (piDocument, error) {
+	limit := productionJSONLRecordLimit(maxRecordBytes)
 	doc := piDocument{consumedBytes: len(data)}
-	if len(data) > piMaxFile {
-		return doc, piSourceError("parse", 0, fmt.Errorf("file exceeds 64 MiB"))
-	}
-	lines := bytes.Split(data, []byte{'\n'})
-	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) > piMaxLines {
-		return doc, piSourceError("parse", 0, fmt.Errorf("file exceeds 200000 physical lines"))
+	scanner := newJSONLRecordScanner(data, limit)
+	if err := scanner.Err(); err != nil {
+		return doc, piSourceError("parse", 0, err)
 	}
 	entries := make(map[string]piEntry)
 	var order []string
-	offset := 0
-	for line, raw := range lines {
-		lineStart := offset
-		offset += len(raw) + 1
+
+	// takeOmissions records the records this read left out, at the position
+	// they held, before the next accepted record is processed. It keeps no byte
+	// accounting of its own: the reader reports the bytes it passed, and an
+	// omitted record's own size is not the size of the line the read met, which
+	// on a filtered artifact is a one-line stand-in.
+	takeOmissions := func() error {
+		for _, at := range scanner.TakeOmissions() {
+			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
+			doc.warnings = append(doc.warnings, OversizedRecordDiagnostic("Pi recording", at.Record))
+		}
+		return nil
+	}
+
+	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return doc, err
 		}
-		if len(raw) > piMaxLine {
-			return doc, piSourceError("parse", line+1, fmt.Errorf("line exceeds 8 MiB"))
+		if err := takeOmissions(); err != nil {
+			return doc, err
 		}
-		raw = bytes.TrimSpace(raw)
+		physical := scanner.Bytes()
+		line := scanner.Line() - 1
+		lineStart := scanner.RecordStart()
+		// The record is the document's last when nothing follows it, whether
+		// or not the source ended with a newline. Both the offset and the end
+		// come from the reader, so a line it passed over counts as the bytes it
+		// really held.
+		isLast := scanner.Consumed() >= len(data)
+		raw := bytes.TrimSpace(physical)
 		if len(raw) == 0 {
 			continue
 		}
-		if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: piMaxLine, MaxDocumentDepth: 128}); err != nil {
-			if line == len(lines)-1 && piIncompleteTail(raw, err) {
+		if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: limit, MaxDocumentDepth: 128}); err != nil {
+			if isLast && piIncompleteTail(raw, err) {
 				doc.consumedBytes = lineStart
 				doc.warnings = append(doc.warnings, piWarning("incomplete_tail", line+1, "Incomplete final JSONL line was ignored; the complete prefix was imported."))
 				break
@@ -201,22 +239,58 @@ func parsePiDocument(ctx context.Context, data []byte) (piDocument, error) {
 			doc.hasTitle = true
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return doc, piSourceError("parse", scanner.Line(), err)
+	}
+	if err := takeOmissions(); err != nil {
+		return doc, err
+	}
 	if doc.header.ID == "" {
 		return doc, piSourceError("header", 0, fmt.Errorf("session header is missing"))
 	}
 	if len(order) == 0 {
 		return doc, nil
 	}
+	// The records this read left out, by the entry id each one held. An
+	// omitted record is a node of the entry tree like any other: the walk
+	// below passes THROUGH it to the parent it named, so the records before an
+	// omitted record stay on the active path and the placeholder takes the
+	// place the record held. Omitting one record must cost one record, here as
+	// on every other harness.
+	omittedByID := make(map[string]piOmission, len(doc.omissions))
+	for _, omission := range doc.omissions {
+		if omission.At.EntryID != nil {
+			omittedByID[*omission.At.EntryID] = omission
+		}
+	}
 	seen := make(map[string]bool)
 	for id := order[len(order)-1]; id != ""; {
 		if seen[id] {
 			return doc, piSourceError("active tree", 0, fmt.Errorf("cycle in active path"))
 		}
+		seen[id] = true
 		entry, ok := entries[id]
 		if !ok {
+			if omission, omitted := omittedByID[id]; omitted {
+				// The missing parent is a record this read left out for its
+				// size, and its opening bytes named the record before it. The
+				// walk continues from there; the placeholder entry states what
+				// is missing and where.
+				id = ""
+				if omission.At.ParentEntryID != nil {
+					id = *omission.At.ParentEntryID
+				}
+				continue
+			}
+			if len(doc.omissions) > 0 {
+				// A record was left out, but its opening bytes named no entry
+				// id, so which node of the tree is missing cannot be known.
+				// Ending the walk here keeps the rest of the session, which is
+				// still better than failing it.
+				break
+			}
 			return doc, piSourceError("active tree", 0, fmt.Errorf("dangling active parent"))
 		}
-		seen[id] = true
 		doc.active = append(doc.active, entry)
 		id = ""
 		if entry.ParentID != nil {

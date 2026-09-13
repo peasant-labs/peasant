@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -15,6 +17,10 @@ import (
 type StrikeIndexer struct {
 	fs          FileSystem
 	fullContent bool
+	// maxRecordBytes is the per-record read limit. Zero means the
+	// production limit; a test injects a small one so it can prove the
+	// over-limit path without building a record of production size.
+	maxRecordBytes int
 }
 
 type StrikeIndexerOption func(*StrikeIndexer)
@@ -22,6 +28,14 @@ type StrikeIndexerOption func(*StrikeIndexer)
 // WithStrikeFullContent disables preview truncation for detail/export overlays.
 func WithStrikeFullContent(enabled bool) StrikeIndexerOption {
 	return func(indexer *StrikeIndexer) { indexer.fullContent = enabled }
+}
+
+// WithStrikeMaxRecordBytes sets the per-record read limit. Zero keeps the
+// production limit defaults.MaxJSONLRecordBytes. Passing the limit here
+// keeps it out of any global, so tests that inject a small one stay safe
+// to run in parallel.
+func WithStrikeMaxRecordBytes(limit int) StrikeIndexerOption {
+	return func(idx *StrikeIndexer) { idx.maxRecordBytes = limit }
 }
 
 var _ TranscriptIndexer = (*StrikeIndexer)(nil)
@@ -48,6 +62,68 @@ func (i *StrikeIndexer) IndexTranscript(_ context.Context, session DiscoveredSes
 
 func (i *StrikeIndexer) IndexTranscriptBytes(_ context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
 	return i.parse(session.SessionID, data), nil
+}
+
+var _ VersionedTranscriptIndexer = (*StrikeIndexer)(nil)
+var _ RetainedContentCapturer = (*StrikeIndexer)(nil)
+
+// CaptureRetainedContent reports the retained Strike transcript's own
+// completeness. Ingest removes oversized records before the artifact is
+// written (filterStrikeOversizedRecords) and records that in the metadata
+// diagnostics, so a retained artifact carrying that mark is known to omit
+// rows: it is captured as incomplete, never certified. A missing metadata
+// sidecar does not omit conversation rows and does not affect completeness.
+func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session DiscoveredSession) (ContentCaptureResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ContentCaptureResult{}, err
+	}
+	data, err := i.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(session, 0, err)
+	}
+	inputHash := indexInputDigest(session, data, nil)
+	if !session.ContentOmitted {
+		capture, err := i.IndexTranscriptBytesForCapture(ctx, session, data)
+		if err == nil {
+			return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash, InputBytes: int64(len(data))}, nil
+		}
+		var unrepresented *UnrepresentedRecordError
+		if ctx.Err() != nil || !errors.As(err, &unrepresented) {
+			return ContentCaptureResult{}, err
+		}
+	}
+	// Filtered or unrepresented records: report the represented entries from
+	// the tolerant projection as an incomplete capture, never an empty one and
+	// never a certified one. A malformed transcript is refused above.
+	result, err := i.IndexTranscriptBytesResult(ctx, session, data)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	var entries []schema.SessionEntry
+	if v1, ok := result.(indexformat.V1); ok {
+		entries = v1.Entries
+	}
+	return ContentCaptureResult{Entries: entries, Complete: false, InputHash: inputHash, InputBytes: int64(len(data))}, nil
+}
+
+// IndexTranscriptResult verifies completion before authorizing persistent replacement.
+func (i *StrikeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	data, err := i.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return nil, completion.failure(err)
+	}
+	return i.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// IndexTranscriptBytesResult verifies retained bytes, not native retention completeness.
+func (i *StrikeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	entries, err := i.parseWithCompletion(session.SessionID, data, completion)
+	return completion.result(entries, err)
 }
 
 type strikeContentKind uint8
@@ -88,6 +164,11 @@ type strikeAssembly struct {
 }
 
 func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.SessionEntry {
+	entries, _ := i.parseWithCompletion(sessionID, data, nil)
+	return entries
+}
+
+func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
 	a := &strikeAssembly{
 		sessionID:      sessionID,
 		fullContent:    i.fullContent,
@@ -98,8 +179,34 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 		processCalls:   make(map[string]string),
 	}
 
-	forEachStrikeRecord(data, func(_ int, raw []byte) {
-		if strikeRecordTooLarge(raw) {
+	var parseErr error
+	forEachStrikeRecord(data, func(line int, raw []byte) {
+		if parseErr != nil {
+			return
+		}
+		if completion != nil {
+			completion.line = line
+		}
+		// The limit this indexer was GIVEN, not the production constant: an
+		// injected limit that nothing reads makes the registry option inert
+		// for Strike alone and lets an over-limit record reach the parser.
+		if strikeRecordTooLarge(raw, i.maxRecordBytes) {
+			if completion != nil {
+				parseErr = fmt.Errorf("record exceeds the %d-byte supported processing limit; it was not silently omitted", productionJSONLRecordLimit(i.maxRecordBytes))
+			}
+			return
+		}
+		if at, isOmission := parseOmittedRecordSentinel(raw); isOmission {
+			// Peasant's own stand-in for a record ingest omitted. It is not a
+			// Strike event: it becomes the placeholder entry that holds the
+			// omitted record's position in the indexed transcript.
+			entry, placeholderErr := omissionPlaceholderEntry(a.sessionID, HarnessStrike, a.nextIndex, at)
+			if placeholderErr != nil {
+				parseErr = placeholderErr
+				return
+			}
+			a.entries = append(a.entries, entry)
+			a.nextIndex++
 			return
 		}
 		trimmed := bytes.TrimSpace(raw)
@@ -107,15 +214,40 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 			return
 		}
 		var envelope strikeEnvelope
-		if json.Unmarshal(trimmed, &envelope) != nil {
+		if completion != nil {
+			if err := completion.record(trimmed); err != nil {
+				parseErr = err
+				return
+			}
+		}
+		if err := json.Unmarshal(trimmed, &envelope); err != nil {
+			if completion != nil {
+				parseErr = err
+			}
+			return
+		}
+		if completion != nil && envelope.Type == "" {
+			parseErr = fmt.Errorf("record lacks its event type")
 			return
 		}
 		if !isKnownStrikeEvent(envelope.Type) {
 			return
 		}
+		if completion != nil {
+			if err := requireJSONObject(envelope.Data); err != nil {
+				parseErr = fmt.Errorf("event data: %w", err)
+				return
+			}
+		}
 		event, err := decodeStrikeEventData(envelope.Data)
 		if err != nil {
+			if completion != nil {
+				parseErr = err
+			}
 			return
+		}
+		if completion != nil {
+			completion.recognized++
 		}
 		timestamp := parseIndexTimestamp(envelope.Time)
 
@@ -196,7 +328,7 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 		}
 	})
 
-	return a.entries
+	return a.entries, parseErr
 }
 
 func (a *strikeAssembly) beginTurn(turnID string) {

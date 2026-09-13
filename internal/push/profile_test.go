@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -61,7 +62,6 @@ type pushProfileCase struct {
 	ExpectedSkipped            int               `yaml:"expectedSkipped"`
 	ExpectedSaved              int               `yaml:"expectedSaved"`
 	ExpectedRequests           int64             `yaml:"expectedRequests"`
-	ExpectedDBReads            int64             `yaml:"expectedDBReads"`
 	ExpectedHighWater          int64             `yaml:"expectedHighWater"`
 	ExpectedPatches            int64             `yaml:"expectedPatches"`
 	ExpectedAnnotationRequests int64             `yaml:"expectedAnnotationRequests"`
@@ -175,7 +175,7 @@ func (r *concurrentProfileRedactor) RedactMetadata(meta *ingest.UnifiedMetadata)
 
 func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence {
 	t.Helper()
-	var requests, requestBytes, responseBytes, arrivals atomic.Int64
+	var requests, publishes, requestBytes, responseBytes, arrivals atomic.Int64
 	barrier := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -208,6 +208,7 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 			}
 			write(http.StatusOK, encode(schema.SchemaVersionResponse{PushContractVersion: defaults.PublishSchemaVersion, MinPushContractVersion: defaults.PublishSchemaVersion}))
 		case "/api/v1/transcripts/publish":
+			publishes.Add(1)
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Error(err)
@@ -380,7 +381,7 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 	}
 	assertCount(perf.CounterPushHTTPRequests, tc.ExpectedRequests)
 	assertCount(perf.CounterPushHTTPResponses, tc.ExpectedRequests)
-	assertCount(perf.CounterPushDBReads, tc.ExpectedDBReads)
+	assertPushProfileRelationships(t, tc, doc, evidence, collector, publishes.Load())
 	assertCount(perf.CounterPushSessionsPublished, int64(tc.ExpectedPublished))
 	assertCount(perf.CounterPushSessionsFailed, int64(tc.ExpectedFailed))
 	assertCount(perf.CounterPushSessionsSkipped, int64(tc.ExpectedSkipped))
@@ -503,5 +504,140 @@ func assertStandaloneProfileAncestry(t *testing.T, spans []perf.ProfileSpan) {
 			}
 			current = parent
 		}
+	}
+}
+
+// assertPushProfileRelationships checks what the profile must say about a run in
+// terms of the run itself, instead of pinning the number of SQL reads the store
+// happens to make.
+//
+// The read count was a physical detail of the store: consolidating two reads into
+// one snapshot broke every case while the behaviour it was supposed to protect
+// was unchanged, and a fixture that breaks on a refactor teaches a reader to edit
+// the number rather than ask the question. These are the relationships the run
+// actually promises.
+func assertPushProfileRelationships(t *testing.T, tc pushProfileCase, doc perf.ProfileDocument, evidence pushProfileEvidence, collector *perf.Collector, publishes int64) {
+	t.Helper()
+	candidates := int64(len(tc.Sessions))
+	if tc.ExcludeAll {
+		candidates = 0
+	}
+	// Read accounting is a LOWER BOUND, not a physical count: the run reads every
+	// candidate once to decide its publication state, and reads each surviving
+	// session again inside its own upload so nothing is published from the
+	// preflight's older snapshot. A forecast skips the preflight, so only the
+	// per-session read is promised there. Discovery reads on top of this, which is
+	// why the check is a bound and not an equality.
+	readFloor := candidates + profileValidSessions(doc)
+	if tc.DryRun {
+		readFloor = candidates
+	}
+	if reads := evidence.counters[perf.CounterPushDBReads]; reads < readFloor {
+		t.Errorf("database reads = %d, fewer than the %d reads this run promises (%d candidates inspected, each surviving session re-read before its upload)", reads, readFloor, candidates)
+	}
+	// A forecast never reaches the network, in any branch.
+	if tc.DryRun {
+		if requests := evidence.counters[perf.CounterPushHTTPRequests]; requests != 0 {
+			t.Errorf("a dry run made %d HTTP requests; a forecast contacts nothing", requests)
+		}
+		if publishes != 0 {
+			t.Errorf("a dry run uploaded %d times", publishes)
+		}
+	}
+	// Uploads match the candidates that survived the preflight, minus any that
+	// then failed their own re-read: one upload per session that got as far as
+	// having content to send, and none for a refused one.
+	//
+	// A valid session is the one that reached pushSession, which opens the
+	// push.session span. Each valid session re-reads its content inside that span
+	// immediately before building the payload, and a failure there is the one way
+	// a valid session still sends nothing.
+	sessionSpans := profileSessionSpans(doc)
+	valid := int64(len(sessionSpans))
+	refusedAfterNegotiation := int64(0)
+	for _, span := range doc.Spans {
+		if span.Stage == perf.StagePushSessionLoad && span.Outcome == perf.OutcomeFailed && sessionSpans[span.ParentSpanID] {
+			refusedAfterNegotiation++
+		}
+	}
+	wantUploads := valid - refusedAfterNegotiation
+	if tc.DryRun {
+		wantUploads = 0
+	}
+	if publishes != wantUploads {
+		t.Errorf("uploads = %d for %d valid sessions", publishes, wantUploads)
+	}
+	if valid > candidates {
+		t.Errorf("%d sessions were prepared for upload from %d candidates", valid, candidates)
+	}
+	// Stage order: a session is read before it is uploaded, and a receipt is
+	// persisted only after the upload it belongs to.
+	//
+	// The clock is a constant, and the document sorts spans by stage NAME, so
+	// neither can answer an ordering question. The collector's own event sequence
+	// can: it records each span where it closes, in the order the run closed them.
+	closed := stageCloseOrder(collector)
+	assertStageOrder(t, closed, tc.Stages, perf.StagePushSessionLoad, perf.StagePushPublish)
+	assertStageOrder(t, closed, tc.Stages, perf.StagePushPublish, perf.StagePushReceiptPersist)
+}
+
+// profileSessionSpans returns the span ids of the sessions that reached
+// pushSession: the candidates the preflight let through.
+func profileSessionSpans(doc perf.ProfileDocument) map[string]bool {
+	spans := make(map[string]bool)
+	for _, span := range doc.Spans {
+		if span.Stage == perf.StagePushSession {
+			spans[span.SpanID] = true
+		}
+	}
+	return spans
+}
+
+// profileValidSessions counts the candidates the preflight let through.
+func profileValidSessions(doc perf.ProfileDocument) int64 {
+	return int64(len(profileSessionSpans(doc)))
+}
+
+// stageCloseOrder returns the stages of the run's completed spans, in the order
+// the run closed them.
+func stageCloseOrder(collector *perf.Collector) []perf.StageID {
+	var closed []perf.StageID
+	for _, event := range collector.Events() {
+		if event.Kind == perf.EventKindSpanEnd {
+			closed = append(closed, event.Stage)
+		}
+	}
+	return closed
+}
+
+// assertStageOrder checks that the first appearance of before precedes the first
+// appearance of after.
+//
+// A stage the run never reached is only allowed to be missing when the case did
+// not DECLARE it. Returning silently on any absence made both order checks
+// vacuous on every case that does not publish, and it would have passed a seed
+// regression that stopped a case short of the stage it names — the exact defect
+// class that hid an unexercised upload budget.
+func assertStageOrder(t *testing.T, closed []perf.StageID, declared []perf.StageID, before, after perf.StageID) {
+	t.Helper()
+	first := func(want perf.StageID) int {
+		for index, stage := range closed {
+			if stage == want {
+				return index
+			}
+		}
+		return -1
+	}
+	beforeAt, afterAt := first(before), first(after)
+	for stage, at := range map[perf.StageID]int{before: beforeAt, after: afterAt} {
+		if at < 0 && slices.Contains(declared, stage) {
+			t.Errorf("this case declares stage %s and the run never completed it, so the order of %s and %s is unproved", stage, before, after)
+		}
+	}
+	if beforeAt < 0 || afterAt < 0 {
+		return
+	}
+	if beforeAt > afterAt {
+		t.Errorf("stage %s completed before %s; the run did them in the wrong order", after, before)
 	}
 }

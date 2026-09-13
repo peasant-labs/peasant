@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -24,15 +26,18 @@ func TestRetainedContentBackfill(t *testing.T) {
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
-			Name           string `yaml:"name"`
-			Child          bool   `yaml:"child"`
-			Corrupt        bool   `yaml:"corrupt"`
-			Mismatch       bool   `yaml:"mismatch"`
-			Force          bool   `yaml:"force"`
-			Count          int    `yaml:"count"`
-			Error          bool   `yaml:"expect_error"`
-			Cursor         bool   `yaml:"cursor"`
-			InvalidProject bool   `yaml:"invalid_project"`
+			Name           string   `yaml:"name"`
+			Child          bool     `yaml:"child"`
+			Corrupt        bool     `yaml:"corrupt"`
+			Mismatch       bool     `yaml:"mismatch"`
+			Force          bool     `yaml:"force"`
+			Count          int      `yaml:"count"`
+			Reported       bool     `yaml:"recovery_reported"`
+			Unchanged      bool     `yaml:"unchanged"`
+			Cursor         bool     `yaml:"cursor"`
+			InvalidProject bool     `yaml:"invalid_project"`
+			Diagnostics    []string `yaml:"expected_diagnostics"`
+			Preservation   string   `yaml:"preservation_phrase"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(captureBackfillFixtureData, &fixtures); err != nil {
@@ -93,7 +98,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 						t.Fatal(err)
 					}
 					// The parent already has complete empty content; only the child is a recovery target.
-					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: parentID, RequireFullContent: true}})
+					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: parentID, Result: indexformat.V1{}, IndexVersion: 1, RequireFullContent: true}})
 					if writes[0].Err != nil {
 						t.Fatal(writes[0].Err)
 					}
@@ -164,9 +169,45 @@ func TestRetainedContentBackfill(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = pipeline.Run(ctx)
-			if (err != nil) != fixture.Error {
-				t.Fatalf("reindex error=%v expected error=%v", err, fixture.Error)
+			result, err := pipeline.Run(ctx)
+			if err != nil {
+				t.Fatalf("a failed recovery must not abort the run: %v", err)
+			}
+			// A refused or unavailable recovery is visible per session and names
+			// the session it preserved; every other session still recovers.
+			// A refused or unavailable recovery is visible per session, names the
+			// session, and tells the user its stored state survived. WHICH words
+			// carry that promise depends on the reporter that owns the cause, so
+			// the fixture declares the phrase rather than the test assuming one:
+			// a refusal that stops stating preservation goes red whichever
+			// reporter it comes from.
+			if fixture.Reported == (fixture.Preservation == "") {
+				t.Fatalf("fixture %s: a reported recovery failure must declare the preservation phrase the user reads, and an unreported one must declare none", fixture.Name)
+			}
+			reported := false
+			for _, diagnostic := range result.Diagnostics {
+				if strings.Contains(diagnostic.Location, ids[0].String()) && strings.Contains(diagnostic.Message, fixture.Preservation) && fixture.Preservation != "" {
+					reported = true
+				}
+			}
+			// The exact multiset of diagnostic types naming the first session.
+			// The boolean above says a refusal is visible and preserves; this
+			// says the user is told ONCE, by one reporter, which a boolean
+			// cannot see: a cause reported by two paths reads as two warnings.
+			var naming []string
+			for _, diagnostic := range result.Diagnostics {
+				if strings.Contains(diagnostic.Location, ids[0].String()) || strings.Contains(diagnostic.Message, ids[0].String()) {
+					naming = append(naming, diagnostic.ErrorType)
+				}
+			}
+			sort.Strings(naming)
+			want := append([]string(nil), fixture.Diagnostics...)
+			sort.Strings(want)
+			if len(naming)+len(want) > 0 && !reflect.DeepEqual(naming, want) {
+				t.Fatalf("diagnostics naming the session = %v, want %v: %+v", naming, want, result.Diagnostics)
+			}
+			if reported != fixture.Reported {
+				t.Fatalf("recovery failure reported=%t, expected=%t; diagnostics=%+v", reported, fixture.Reported, result.Diagnostics)
 			}
 			if err := fs.RemoveAll(testOutputDir); err != nil {
 				t.Fatal(err)
@@ -178,7 +219,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 						t.Fatalf("Cursor annotation anchor lost: %v %v", annotations, err)
 					}
 				}
-				if fixture.Error && i == 0 {
+				if fixture.Unchanged && i == 0 {
 					after, err := database.ListEntries(ctx, id)
 					if err != nil {
 						t.Fatal(err)
@@ -213,4 +254,137 @@ func TestRetainedContentBackfill(t *testing.T) {
 			t.Fatalf("missing fixture %s", name)
 		}
 	}
+}
+
+// TestContentStageDetectsTornPair proves the CONTENT stage detects a saved pair
+// whose bytes no longer hash to the identity the row recorded, and reports the
+// one damaged-pair text a user reads, without recovering content from the
+// corrupt bytes. On a plain reindex the write path never reads a present row's
+// pair (it does that only under --all), so the diagnostic here can come from
+// nowhere but the content stage: reverting the content-stage hash compare makes
+// this go silent.
+func TestContentStageDetectsTornPair(t *testing.T) {
+	t.Run("content_stage_detects_torn_pair", func(t *testing.T) {
+		ctx := context.Background()
+		fs := testutil.NewMemFS()
+		database, err := store.Open(filepath.Join(t.TempDir(), "torn.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer database.Close()
+
+		meta := makeMinimalMeta(t, "ses_tornpair00001")
+		meta.Project.Hash = testutil.TestProjectHash
+		meta.Source.FilePath = "/synthetic/missing.jsonl"
+		id := meta.SessionID
+		if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+			t.Fatal(err)
+		}
+
+		// The saved pair as first written: a well-formed transcript whose
+		// identity the mirror records on the row.
+		text := strings.Repeat("safe ", 600) + "RETAINED_TAIL"
+		rawContent, err := json.Marshal(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		correct := []byte(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":%s}}`, rawContent))
+
+		dir := filepath.Join(testOutputDir, testutil.TestHostSlug)
+		sessionDir := filepath.Join(dir, id.String())
+		transcriptPath := filepath.Join(sessionDir, id.String()+"--transcript.jsonl")
+		metadataPath := filepath.Join(sessionDir, id.String()+"--metadata.json")
+		session := ingest.DiscoveredSession{SessionID: id, Harness: ingest.HarnessClaudeCode, SourcePath: ingest.ResolvedPath(transcriptPath), SourceFormat: ingest.SourceFormatJSONL}
+
+		registry := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
+		entries, err := registry[ingest.HarnessClaudeCode].IndexTranscriptBytes(ctx, session, correct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Index the entries without full content, so the session is a content
+		// recovery target the next reindex visits.
+		if err := database.IndexSessionEntries(ctx, id, entries); err != nil {
+			t.Fatal(err)
+		}
+
+		metaJSON, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := ingest.NewManagedArtifact(metaJSON, correct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.MkdirAll(sessionDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.WriteFile(metadataPath, metaJSON, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.WriteFile(transcriptPath, correct, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Record the pair identity on the row, exactly as the write path does.
+		if results := database.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}}); len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
+			t.Fatalf("record the saved pair identity: %+v", results)
+		}
+		state, err := database.ReadIndexState(ctx, id)
+		if err != nil || state == nil || state.ArtifactHash == nil {
+			t.Fatalf("the row must carry a recorded pair hash before the pair is torn: state=%+v err=%v", state, err)
+		}
+
+		// Now the saved transcript is changed in place, as a power loss between
+		// the file write and a later change, or a hand edit, leaves it: its bytes
+		// no longer hash to the recorded identity.
+		tampered := []byte(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":%s}}`, mustJSON(t, strings.Repeat("safe ", 600)+"TAMPERED_TAIL")))
+		if err := fs.WriteFile(transcriptPath, tampered, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := makePipelineConfig(testOutputDir)
+		cfg.Reindex = true // a plain reindex: the write path never reads a present row's pair here.
+		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
+		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+			ingest.WithStore(database), ingest.WithMetricsStore(database))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := pipeline.Run(ctx)
+		if err != nil {
+			t.Fatalf("a torn pair must not abort the run: %v", err)
+		}
+
+		reportedDamaged := false
+		for _, diagnostic := range result.Diagnostics {
+			if strings.Contains(diagnostic.Message, id.String()) &&
+				strings.Contains(diagnostic.Message, "is damaged") &&
+				strings.Contains(diagnostic.Message, "--force --session") {
+				reportedDamaged = true
+			}
+		}
+		if !reportedDamaged {
+			t.Fatalf("the content stage did not report the torn pair as damaged; diagnostics=%+v", result.Diagnostics)
+		}
+		// The database copy is preserved: a torn pair is never recovered into a
+		// complete capture from its corrupt bytes.
+		capture, _, err := database.GetSessionContentCapture(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if capture.Status == ingest.ContentCaptureComplete {
+			t.Fatal("a torn pair was recovered into a complete capture; its corrupt bytes must never replace the stored content")
+		}
+	})
+}
+
+// mustJSON marshals a value the test controls, failing the test on the
+// impossible error rather than returning it.
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }

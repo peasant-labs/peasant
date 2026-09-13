@@ -62,6 +62,11 @@ type ServerConfig struct {
 	// RepositoryIdentityResolver resolves private discovery rows into logical
 	// repository cohorts. Nil uses the production Git topology resolver.
 	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
+	// OutputDir is the peasant-sync output directory the saved transcripts live
+	// under. Empty falls back to the default data directory's peasant-sync path.
+	// The server serves a transcript download from here, so a server started
+	// with --data-dir resolves the same tree the harvest wrote.
+	OutputDir string
 }
 
 // Server is the HTTP server for the web dashboard.
@@ -412,14 +417,20 @@ func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Construct transcript path: {dataDir}/peasant-sync/{hostSlug}/{sessionId}/{sessionId}--transcript.{ext}
-	// Subagent sessions: {dataDir}/peasant-sync/{hostSlug}/{parentId}/subagents/{sessionId}/{sessionId}--transcript.{ext}
-	dataDir := string(defaults.Data.DataDirPath)
+	// Construct the session directory under the saved-transcript output tree.
+	// The server resolves the tree the harvest actually wrote: OutputDir when
+	// set (a server started with --data-dir), else the default data directory's
+	// peasant-sync path. Reading from the default when the harvest wrote
+	// elsewhere is the download data-dir defect this handler fixes.
+	output := s.cfg.OutputDir
+	if output == "" {
+		output = filepath.Join(string(defaults.Data.DataDirPath), "peasant-sync")
+	}
 	var sessionDir string
 	if parentID != "" {
-		sessionDir = filepath.Join(dataDir, "peasant-sync", hostSlug, parentID, "subagents", sessionID)
+		sessionDir = filepath.Join(output, hostSlug, parentID, "subagents", sessionID)
 	} else {
-		sessionDir = filepath.Join(dataDir, "peasant-sync", hostSlug, sessionID)
+		sessionDir = filepath.Join(output, hostSlug, sessionID)
 	}
 
 	// Try JSONL first, then JSON
@@ -433,7 +444,10 @@ func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request)
 	}
 
 	if transcriptPath == "" {
-		http.Error(w, `{"error":"transcript file not found"}`, http.StatusNotFound)
+		// The database still holds the session; only the saved file is gone.
+		// Name where it was looked for and the command that saves it again.
+		body := fmt.Sprintf(`{"error":"the saved transcript file for session %s is missing from %s; the session is still stored in the database; run peasant harvest --force --session %s to save it again"}`, sessionID, sessionDir, sessionID)
+		http.Error(w, body, http.StatusNotFound)
 		return
 	}
 

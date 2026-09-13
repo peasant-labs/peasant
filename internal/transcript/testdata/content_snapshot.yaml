@@ -1,0 +1,28 @@
+metadata: |
+  {"schemaVersion":10,"sessionId":"550e8400-e29b-41d4-a716-446655440000","harness":"claude-code","hostSlug":"github.com-content-fixture","project":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"fixture"},"timestamp":{"start":1700000000000,"end":1700000001000,"ingested":1700000002000},"source":{"filePath":"/native/transcript.jsonl","format":"jsonl"}}
+transcript: '{"type":"user","message":{"role":"user","content":"BODY"}}'
+replacement: '{"type":"user","message":{"role":"user","content":"new retained input"}}'
+# Stored content is database-authoritative. Each case states what the DATABASE
+# holds after the named damage, and therefore what the strict reader (export,
+# publication) and the available reader (every mounted previewer) must do.
+#
+#   strictRefused:  the verified full-content read refuses.
+#   previewRefused: the available read refuses too, which only damaged data may
+#                   cause. An unfinished capture never refuses a preview.
+#   incomplete:     the strict refusal must carry ErrContentCaptureIncomplete,
+#                   so export and publication keep that category.
+requiredNames: [coherent-full-content, stale-input-proof-keeps-stored-content, stale-producer-stamp-keeps-stored-content, replaced-source-file-keeps-stored-content, mirrored-replacement-keeps-stored-content, incomplete-capture-previews-without-full-content, changed-projection-refuses-every-reader, damaged-chunk-refuses-every-reader, full-tool-text-before-turn-conversion]
+cases:
+  - {name: coherent-full-content}
+  - {name: stale-input-proof-keeps-stored-content, sql: 'UPDATE sessions SET indexed_input_hash = NULL'}
+  - {name: stale-producer-stamp-keeps-stored-content, sql: 'UPDATE sessions SET index_version = index_version - 1'}
+  - {name: replaced-source-file-keeps-stored-content, replace: true, noMirror: true}
+  - {name: mirrored-replacement-keeps-stored-content, replace: true}
+  - {name: incomplete-capture-previews-without-full-content, sql: "UPDATE session_content_captures SET status='incomplete', full_capture_sha256=NULL", strictRefused: true, incomplete: true}
+  - {name: changed-projection-refuses-every-reader, sql: "UPDATE session_entries SET entry_id = 'different-coordinate'", strictRefused: true, previewRefused: true}
+  - {name: damaged-chunk-refuses-every-reader, sql: 'UPDATE session_entry_full_content_chunks SET data = zeroblob(byte_length) WHERE chunk_index = 0', strictRefused: true, previewRefused: true}
+  - name: full-tool-text-before-turn-conversion
+    tool: true
+    transcript: |
+      {"timestamp":"2026-01-01T00:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"call-fixture","name":"Read","arguments":"{}"}}
+      {"timestamp":"2026-01-01T00:00:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-fixture","output":"BODY"}}

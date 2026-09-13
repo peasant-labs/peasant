@@ -1,8 +1,17 @@
-requiredNames: [sessions-root, project-root, direct-file, symlink-project, valid-older-beats-invalid-newer, size-tiebreak, canonical-path-tiebreak, missing-root, file-limit, line-limit, line-count-limit]
+# The three retired-bound cases below replace the earlier file-limit,
+# line-limit and line-count-limit cases, which required discovery to REJECT a
+# Pi recording over a 64 MiB file bound, an 8 MiB line bound or a 200000-line
+# bound. The user requirement of 2026-09-10 retires all three: "we need to
+# handle this 'large line' behaviour uniformly across every harness", with Pi
+# named, and "our ingestion and indexing pipeline should be able to handle
+# large lines without failing or dropping them forever". Each case now
+# requires the recording to be ACCEPTED, with no discovery diagnostic at all,
+# which is a stricter demand than the old "exactly one rejection".
+requiredNames: [sessions-root, project-root, direct-file, symlink-project, valid-older-beats-invalid-newer, size-tiebreak, canonical-path-tiebreak, missing-root, file-over-retired-64-MiB-bound-accepted, record-over-retired-8-MiB-bound-accepted, recording-over-retired-200000-line-bound-accepted]
 cases:
-  - {name: file-limit, mode: file-limit, reject: 64 MiB}
-  - {name: line-limit, mode: line-limit, reject: 8 MiB}
-  - {name: line-count-limit, mode: line-count-limit, reject: 200000 physical lines}
+  - {name: file-over-retired-64-MiB-bound-accepted, mode: file-over-retired-file-bound, accept: true}
+  - {name: record-over-retired-8-MiB-bound-accepted, mode: record-over-retired-line-bound, accept: true}
+  - {name: recording-over-retired-200000-line-bound-accepted, mode: recording-over-retired-line-count-bound, accept: true}
   - {name: sessions-root, mode: root}
   - {name: project-root, mode: project}
   - {name: direct-file, mode: file}

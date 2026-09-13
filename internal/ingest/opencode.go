@@ -268,6 +268,10 @@ func closeDeferredOpenCodeSource(callerCtx context.Context, source OpenCodeSQLit
 // validation that every open site needs, so an open never runs without the
 // injected opener.
 func (a *OpenCodeAdapter) openOpenCodeSQLiteSource(ctx context.Context, candidatePath string) (OpenCodeSQLiteSource, error) {
+	return a.openOpenCodeSQLiteSourceWithOptions(ctx, candidatePath, a.candidateOptions)
+}
+
+func (a *OpenCodeAdapter) openOpenCodeSQLiteSourceWithOptions(ctx context.Context, candidatePath string, options OpenCodeSQLiteSourceOptions) (OpenCodeSQLiteSource, error) {
 	if a.candidateOpener == nil {
 		return nil, fmt.Errorf("open OpenCode SQLite source for %q failed before source access: source opener is nil, so typed reads cannot run; no database was accessed; construct the adapter with OpenOpenCodeSQLiteSource", candidatePath)
 	}
@@ -275,7 +279,7 @@ func (a *OpenCodeAdapter) openOpenCodeSQLiteSource(ctx context.Context, candidat
 	if err != nil {
 		return nil, err
 	}
-	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
+	source, err := a.candidateOpener(ctx, path, options)
 	if err != nil {
 		return nil, fmt.Errorf("open OpenCode SQLite source %q failed while opening the restrictive read-only source: %w; no session was exposed; verify source readability and retry without modifying the database", candidatePath, err)
 	}
@@ -286,12 +290,21 @@ func (a *OpenCodeAdapter) openOpenCodeSQLiteSource(ctx context.Context, candidat
 // runs fn against it, and closes it once. It is the scoped open site used where
 // the source does not need to outlive the call.
 func (a *OpenCodeAdapter) withOpenCodeSQLiteSource(ctx context.Context, candidatePath string, fn func(OpenCodeSQLiteSource) error) error {
-	source, err := a.openOpenCodeSQLiteSource(ctx, candidatePath)
+	return a.withOpenCodeMaterializationSource(ctx, candidatePath, false, fn)
+}
+
+func (a *OpenCodeAdapter) withOpenCodeMaterializationSource(ctx context.Context, candidatePath string, snapshot bool, fn func(OpenCodeSQLiteSource) error) (err error) {
+	options := a.candidateOptions
+	options.readSnapshot = snapshot
+	source, err := a.openOpenCodeSQLiteSourceWithOptions(ctx, candidatePath, options)
 	if err != nil {
 		return err
 	}
+	// A snapshot source began its private read transaction when it opened,
+	// and Close releases it; beginning a second one inside would nest. A
+	// plain source is covered by one read transaction around fn instead.
 	var fnErr error
-	if sqliteSource, ok := source.(*zombiezenOpenCodeSQLiteSource); ok {
+	if sqliteSource, ok := source.(*zombiezenOpenCodeSQLiteSource); ok && !snapshot {
 		fnErr = sqliteSource.withReadTransaction(ctx, func() error { return fn(source) })
 	} else {
 		fnErr = fn(source)

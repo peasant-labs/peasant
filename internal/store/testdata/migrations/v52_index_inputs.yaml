@@ -1,0 +1,8 @@
+requiredNames: [unknown-input, valid-input, empty-input, short-input, uppercase-input, nonhex-input]
+cases:
+  - {name: unknown-input}
+  - {name: valid-input, hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  - {name: empty-input, hash: '', refused: true}
+  - {name: short-input, hash: abc, refused: true}
+  - {name: uppercase-input, hash: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, refused: true}
+  - {name: nonhex-input, hash: gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg, refused: true}

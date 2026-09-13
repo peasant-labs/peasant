@@ -176,7 +176,7 @@ func (run nativeCLIRun) harvest(t *testing.T, source testfixture.MaterializedSou
 	defer testfixture.AssertUnchanged(t, source, before)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, run.bin, "--config", run.configPath, "--data-dir", run.dataDir, "--state-dir", filepath.Join(run.root, "state"), "harvest", "--source-provider", string(defaults.HarnessOpenCode), "--source-path", filepath.Dir(source.Path), "--output", run.outputDir, "--json")
+	cmd := exec.CommandContext(ctx, run.bin, "--config", run.configPath, "--data-dir", run.dataDir, "--state-dir", filepath.Join(run.root, "state"), "harvest", "--source-harness", string(defaults.HarnessOpenCode), "--source-path", filepath.Dir(source.Path), "--output", run.outputDir, "--json")
 	cmd.Dir, cmd.Env = run.root, run.env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

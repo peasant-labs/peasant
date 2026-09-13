@@ -1,0 +1,17 @@
+requiredNames: [automatic_single_bump, index_single_bump, force_future_parser, force_harness_scope, stale_harness_scope, index_dry_run]
+sessions:
+  - id: 66666666-6666-4666-8666-666666666666
+    harness: claude-code
+    transcript: |
+      {"type":"user","message":{"role":"user","content":"new Claude fixture"}}
+  - id: 77777777-7777-4777-8777-777777777777
+    harness: codex
+    transcript: |
+      {"timestamp":"2024-02-19T00:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new Codex fixture"}]}}
+cases:
+  - {name: automatic_single_bump, reindex: false, claudeTarget: 17, codexTarget: 16, claudeStored: 16, expectedHarnesses: [claude-code]}
+  - {name: index_single_bump, reindex: true, claudeTarget: 17, codexTarget: 16, claudeStored: 16, expectedHarnesses: [claude-code]}
+  - {name: force_future_parser, reindex: true, force: true, claudeTarget: 16, codexTarget: 16, claudeStored: 17, expectedHarnesses: [codex]}
+  - {name: force_harness_scope, reindex: true, force: true, scope: claude-code, claudeTarget: 16, codexTarget: 16, claudeStored: 16, expectedHarnesses: [claude-code]}
+  - {name: stale_harness_scope, reindex: true, scope: codex, claudeTarget: 17, codexTarget: 17, claudeStored: 16, expectedHarnesses: [codex]}
+  - {name: index_dry_run, reindex: true, dryRun: true, claudeTarget: 17, codexTarget: 16, claudeStored: 16, expectedHarnesses: []}

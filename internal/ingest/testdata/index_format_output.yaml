@@ -1,0 +1,140 @@
+requiredNames:
+  - codex-control-plus-unknown-preserves-last-good
+  - strike-control-plus-unknown-preserves-last-good
+  - completed-empty-opencode-directory
+  - mixed-malformed-opencode-preserves-last-good
+  - completed-empty-cursor
+  - completed-empty-strike
+  - mixed-malformed-cursor-preserves-last-good
+  - mixed-malformed-strike-preserves-last-good
+  - legacy-v1-result
+  - versioned-v1-result
+  - completed-empty-v1
+  - legacy-empty-preserves-last-good
+  - malformed-claude-preserves-last-good
+  - completed-empty-claude
+  - completed-empty-codex
+  - mixed-malformed-claude-preserves-last-good
+  - mixed-malformed-codex-preserves-last-good
+  - mixed-malformed-pi-preserves-last-good
+  - missing-opencode-tree-preserves-last-good
+  - parse-error-preserves-last-good
+  - absent-versioned-result-refused
+  - typed-nil-versioned-result-refused
+  - mismatched-versioned-result-refused
+  - legacy-indexer-cannot-declare-v2
+  - writer-must-support-declaration
+  - future-format-write-refusal-is-visible
+  - logs-ignore-unwritten-index-format
+cases:
+  - name: codex-control-plus-unknown-preserves-last-good
+    declaredFormat: 1
+    payload: empty
+    realIndexer: true
+    harness: codex
+    transcript: |
+      {"type":"session_meta","payload":{"id":"synthetic"}}
+      {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
+    wantLogError: 'at source record 2: json: cannot unmarshal object'
+  - name: strike-control-plus-unknown-preserves-last-good
+    declaredFormat: 1
+    payload: empty
+    realIndexer: true
+    harness: strike
+    transcript: |
+      {"type":"session.started","data":{"sessionId":"synthetic"}}
+      {"type":"future.conversation","data":{"text":"not understood"}}
+    wantLogError: 'unrepresented strike record "future.conversation"'
+  - name: completed-empty-opencode-directory
+    declaredFormat: 1
+    payload: empty
+    realIndexer: true
+    harness: opencode
+    sourceRoot: /synthetic/opencode
+    sourceDirectories: [storage/message/SESSION_ID]
+    wantIndexed: true
+  - name: mixed-malformed-opencode-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: opencode
+    sourceRoot: /synthetic/opencode
+    healthyTranscript: '{}'
+    healthySourceFiles:
+      storage/message/SESSION_ID/msg_healthy.json: '{"role":"user","content":"healthy session"}'
+    sourceFiles:
+      storage/message/SESSION_ID/msg_1.json: '{"role":"user","content":"new content that must not replace old data"}'
+      storage/message/SESSION_ID/msg_2.json: malformed
+    wantLogError: 'message msg_2.json: invalid character'
+  - {name: completed-empty-cursor, declaredFormat: 1, payload: empty, realIndexer: true, harness: cursor, emptyTranscript: true, wantIndexed: true}
+  - {name: completed-empty-strike, declaredFormat: 1, payload: empty, realIndexer: true, harness: strike, emptyTranscript: true, wantIndexed: true}
+  - name: mixed-malformed-pi-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: pi
+    transcriptIdentity: session-scoped
+    healthyTranscript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"new content that must not replace old data","timestamp":1767312001000}}
+      malformed
+    wantLogError: 'at physical line 3: raw JSON validation failed'
+  - name: mixed-malformed-cursor-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: cursor
+    healthyTranscript: '{"role":"user","content":"healthy session"}'
+    transcript: |
+      {"role":"user","content":"new content that must not replace old data"}
+      malformed
+    wantLogError: 'at source record 2: malformed JSON'
+  - name: mixed-malformed-strike-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: strike
+    healthyTranscript: '{"type":"user.message","data":{"text":"healthy session"}}'
+    transcript: |
+      {"type":"user.message","data":{"text":"new content that must not replace old data"}}
+      {"type":"usage.reported","data":{"inputTokens":"wrong"}}
+    wantLogError: 'at source record 2: json: cannot unmarshal string into Go struct field strikeEventData.inputTokens'
+  - {name: legacy-v1-result, declaredFormat: 1, payload: v1, wantIndexed: true}
+  - {name: versioned-v1-result, declaredFormat: 1, versioned: true, payload: v1, wantIndexed: true}
+  - {name: completed-empty-v1, declaredFormat: 1, versioned: true, payload: empty, wantIndexed: true}
+  - {name: legacy-empty-preserves-last-good, declaredFormat: 1, payload: empty, wantDiagnostic: true}
+  - {name: malformed-claude-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, transcript: "malformed json", wantLogError: 'at source record 1: malformed JSON'}
+  - {name: completed-empty-claude, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, emptyTranscript: true, wantIndexed: true}
+  - {name: completed-empty-codex, declaredFormat: 1, payload: empty, realIndexer: true, harness: codex, emptyTranscript: true, wantIndexed: true}
+  - name: mixed-malformed-claude-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: claude-code
+    healthyTranscript: '{"type":"user","message":{"role":"user","content":"healthy session"}}'
+    transcript: |
+      {"type":"user","message":{"role":"user","content":"new content that must not replace old data"}}
+      malformed
+    wantLogError: 'at source record 2: malformed JSON'
+  - name: mixed-malformed-codex-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: codex
+    healthyTranscript: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"healthy session"}]}}'
+    transcript: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new content that must not replace old data"}]}}
+      malformed
+    wantLogError: 'at source record 2: malformed JSON'
+  - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantLogError: read message directory}
+  - {name: parse-error-preserves-last-good, declaredFormat: 1, payload: parse-error, wantLogError: synthetic parser failure}
+  - {name: absent-versioned-result-refused, declaredFormat: 1, versioned: true, payload: absent, wantLogError: no concrete result}
+  - {name: typed-nil-versioned-result-refused, declaredFormat: 1, versioned: true, payload: nil-v1, wantLogError: no concrete result}
+  - {name: mismatched-versioned-result-refused, declaredFormat: 1, versioned: true, payload: v2, wantLogError: declared format 1}
+  - {name: legacy-indexer-cannot-declare-v2, declaredFormat: 2, payload: v1, wantConstructorError: slice-returning indexer}
+  - {name: writer-must-support-declaration, declaredFormat: 2, versioned: true, payload: v2, wantConstructorError: unsupported output format 2}
+  - {name: future-format-write-refusal-is-visible, declaredFormat: 1, storedFormat: 99, payload: v1, wantLogError: unsupported index format 99}
+  - {name: logs-ignore-unwritten-index-format, declaredFormat: 2, payload: v1, logsOnly: true}

@@ -41,6 +41,7 @@ const (
 
 // PublicationInputBundle is read from one database snapshot, without file I/O.
 type PublicationInputBundle struct {
+	ProjectPath        string
 	ContentCapture     SessionContentCapture
 	Metadata           schema.UnifiedMetadata
 	Entries            []schema.SessionEntry

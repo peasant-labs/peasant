@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -27,8 +28,8 @@ const sqlSaveMetrics = `INSERT OR REPLACE INTO session_metrics (
     computed_at, compute_version,
     cost_input_usd, cost_output_usd, cost_reasoning_usd,
     cost_cache_read_usd, cost_cache_write_usd, cost_total_usd, cost_model_id,
-    scope
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    scope, input_hash, output_hash
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // SaveMetrics persists a SessionMetrics row via INSERT OR REPLACE.
 // All nullable fields use nil → SQL NULL binding.
@@ -38,8 +39,13 @@ func (s *Store) SaveMetrics(ctx context.Context, m *ingest.SessionMetrics) (err 
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	// Legacy writes invalidate completion proof; only the conditional writer
+	// can attach captured-input evidence to new computed values.
+	return saveMetricsOnConn(conn, m, nil, nil)
+}
 
-	if err = sqlitex.ExecuteTransient(conn, sqlSaveMetrics, &sqlitex.ExecOptions{
+func saveMetricsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics, inputHash, outputHash *string) error {
+	if err := sqlitex.ExecuteTransient(conn, sqlSaveMetrics, &sqlitex.ExecOptions{
 		Args: []any{
 			string(m.SessionID),
 			derefInt(m.TurnCount),
@@ -86,6 +92,8 @@ func (s *Store) SaveMetrics(ctx context.Context, m *ingest.SessionMetrics) (err 
 			derefString2(m.CostModelID),
 			// v3 scope column (index 42)
 			derefString2(m.Scope),
+			derefString2(inputHash),
+			derefString2(outputHash),
 		},
 	}); err != nil {
 		return fmt.Errorf("store: save metrics for %s: %w", m.SessionID, err)

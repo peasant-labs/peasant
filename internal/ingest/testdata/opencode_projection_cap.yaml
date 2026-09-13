@@ -1,21 +1,40 @@
-# Cap cases for the OpenCode managed-projection read in IndexTranscript. Each
-# case sizes a synthetic file relative to the managed-projection bound through a
-# filesystem double, so no real large file is written. A file past the bound is
-# refused before any read; a file within the bound is read. size = bound +
-# offset_from_bound.
-# required_cases names the cases that must stay present. Removing one goes red
-# by name; adding a case need not appear here. The list, not a count, guards.
+# What the OpenCode managed-projection readers refuse, and what they must read.
+#
+# The path a reader opens must hold the Peasant-owned projection, never the
+# provider's own SQLite database: that database can be gigabytes, and loading it
+# would end the process. A database announces itself in its first bytes, so the
+# readers identify one by CONTENT and refuse it without reading it.
+#
+# Size decides nothing. A long OpenCode session legitimately produces a large
+# projection, and refusing it would fail the whole session, so the case that
+# sizes a file past the old bound must be READ.
+#
+# size = OpenCodeManagedProjectionMaxBytes + offset_from_bound, presented
+# through a filesystem double, so no real large file is written.
+# required_cases names the cases that must stay present; the list, not a count.
 required_cases:
-  - oversized-projection-is-refused-before-any-read
-  - within-bound-projection-is-read
+  - a_projection_past_the_old_bound_is_read
+  - a_projection_far_past_the_old_bound_is_read
+  - a_within_bound_projection_is_read
+  - a_provider_database_is_refused_without_being_read
 cases:
-  - name: oversized-projection-is-refused-before-any-read
+  - name: a_projection_past_the_old_bound_is_read
     origin: opencode-legacy-sqlite
     offset_from_bound: 1
-    expect_refused: true
-    expect_read_attempts: 0
-  - name: within-bound-projection-is-read
+    outcome: read
+  - name: a_projection_far_past_the_old_bound_is_read
+    origin: opencode-current-sqlite
+    offset_from_bound: 1073741824
+    outcome: read
+  - name: a_within_bound_projection_is_read
     origin: opencode-current-sqlite
     offset_from_bound: -1048576
-    expect_refused: false
-    expect_read_attempts: 1
+    outcome: read
+  # The header alone identifies it, so the case is sized well under the old
+  # bound: a database is refused for what it is, not for how big it happens
+  # to be.
+  - name: a_provider_database_is_refused_without_being_read
+    origin: opencode-legacy-sqlite
+    offset_from_bound: -1048576
+    sqlite_header: true
+    outcome: refused-as-provider-database

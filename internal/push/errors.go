@@ -1,9 +1,13 @@
 package push
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"sort"
+	"strings"
+
+	"zombiezen.com/go/sqlite"
 )
 
 // Package sentinel errors. Each error origin in pushSession wraps the matching
@@ -155,4 +159,56 @@ func SummarizePushErrors(result *PushResult) []ErrorTypeCount {
 		return categoryOrder[out[i].Category] < categoryOrder[out[j].Category]
 	})
 	return out
+}
+
+// runWideSQLiteCodes are the SQLite primary result codes that describe the
+// DATABASE, not one session. Reporting any of them as a per-session refusal
+// would print "re-ingest this session" once per candidate while the real cause
+// is the store, and would let a push walk an unreadable database to its end.
+//
+// Interrupt is here because that is how a cancelled run reaches SQLite; the
+// others cannot be repaired by re-ingesting one session.
+var runWideSQLiteCodes = [...]sqlite.ResultCode{
+	sqlite.ResultInterrupt,
+	sqlite.ResultCorrupt,
+	sqlite.ResultNotADB,
+	sqlite.ResultCantOpen,
+	sqlite.ResultIOErr,
+	sqlite.ResultNoMem,
+	sqlite.ResultFull,
+	sqlite.ResultMisuse,
+}
+
+// sqliteDriverMessage is a fragment of text the SQLite driver itself produces.
+// It is a named type so it cannot be mixed with the messages this package writes:
+// nothing here may be compared against a driver string by accident.
+type sqliteDriverMessage string
+
+// closedPoolMessage is what sqlitex returns once the connection pool is closed.
+// The library reports it as an unwrapped string with no sentinel and no result
+// code, so matching the text is the only signal available; the closed-store test
+// in this package fails if that text ever changes, rather than letting a closed
+// store quietly refuse every candidate one at a time.
+const closedPoolMessage sqliteDriverMessage = "pool closed"
+
+// isRunWide reports whether err describes the RUN rather than one candidate, so
+// the push must stop instead of refusing this session and continuing.
+//
+// Everything else is a per-session refusal, including a transient lock or a
+// failed dependent query: those sessions are reported with their own category
+// and the healthy ones still publish.
+func isRunWide(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	code := sqlite.ErrCode(err).ToPrimary()
+	for _, runWide := range runWideSQLiteCodes {
+		if code == runWide {
+			return true
+		}
+	}
+	return strings.Contains(err.Error(), string(closedPoolMessage))
 }

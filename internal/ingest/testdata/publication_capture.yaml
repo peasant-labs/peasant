@@ -104,18 +104,26 @@ cases:
   - <<: *claude
     name: disappeared_source_during_extraction
     disappear_during_extract: true
+  # The metadata write fails during the install. The write path installs the
+  # pair by rename with no publication intent, so nothing recovers it within
+  # the same run: it is a torn pair with no row, which the next harvest
+  # re-ingests from the native source. The faulted run reports an error and
+  # leaves the session needing ingest.
   - <<: *claude
-    name: optional_metadata_write_failure_still_ready
+    name: metadata_write_failure_needs_reingest
     fail_sidecar: true
-    expected_manual_indexed: 0
-    expected_manual_readiness: ready
   - <<: *claude
     name: changed_source_updates_metadata_and_entries
     change_source: true
     expected_manual_indexed: 0
     expected_manual_readiness: ready
+  # The native OpenCode source changes after the worker captured it and before
+  # the index reads it. The index re-reads the native to validate and detects
+  # the change, so it refuses rather than mixing the newer source into the
+  # capture: nothing is indexed, the prior state is preserved, and the next
+  # harvest reads the session again from its now-consistent source.
   - <<: *opencode_json
-    name: opencode_json_index_uses_captured_tree
+    name: opencode_json_index_refuses_changed_source
     mutate_index_file: storage/message/ses_3cd91f52effeXd3QAJ54jOyzv5/msg_assistant.json
   - <<: *claude
     name: absent_model_is_not_fabricated
@@ -140,11 +148,17 @@ cases:
     name: reindex_unreadable_old_entries_ready
     reindex_remove_source: true
     reindex_unreadable_entries: true
+  # The managed transcript no longer matches its committed metadata and the
+  # native source is gone: the reindex is held. It refuses the pair with a
+  # warning, writes nothing, and the run does not fail; the last-good index,
+  # the verified capture and its publication binding stay exactly as they
+  # were, so the session still reads as ready from the store.
   - <<: *claude
     name: reindex_changed_fallback_held
     reindex_remove_source: true
     reindex_change_managed: true
-    expected_manual_readiness: needs_ingest
+    expected_manual_indexed: 0
+    expected_manual_readiness: ready
   - <<: *claude
     name: reindex_stale_source_capture_held
     reindex_concurrent_capture: true

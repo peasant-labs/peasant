@@ -200,7 +200,25 @@ func TestApplySelection(t *testing.T) {
 // seedMemFS creates the metadata.json and transcript.jsonl files for a session
 // in the given MemFS under /sync/{hostSlug}/{sessionID}/.
 // provider must be a typed constant string (e.g. string(defaults.HarnessClaudeCode)).
+// seedMemFS seeds the recorded metadata of one session with this package's
+// default identity. A test whose candidate row carries a different project must
+// seed from that row with seedMemFSForRow: the production read refuses a
+// candidate whose recorded identity disagrees with the selection, and a fixture
+// is the only place the two can disagree without a session having moved.
 func seedMemFS(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID string, provider defaults.Harness) {
+	t.Helper()
+	seedMemFSIdentity(t, fs, hostSlug, sessionID, provider, string(testutil.TestProjectHash))
+}
+
+// seedMemFSForRow seeds the recorded metadata of the session a candidate row
+// names, from that row: ONE seed for the candidate, its publication bundle, and
+// its receipt.
+func seedMemFSForRow(t *testing.T, fs *testutil.MemFS, row ingest.PushSessionRow) {
+	t.Helper()
+	seedMemFSIdentity(t, fs, row.HostSlug, row.SessionID, defaults.Harness(row.ModelHarness), row.ProjectHash)
+}
+
+func seedMemFSIdentity(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID string, provider defaults.Harness, projectHash string) {
 	t.Helper()
 
 	meta := ingest.NewUnifiedMetadata()
@@ -215,7 +233,7 @@ func seedMemFS(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID string, pro
 		Ingested: &ingested,
 	}
 	meta.Project = ingest.ProjectInfo{
-		Hash:     testutil.TestProjectHash,
+		Hash:     ingest.ProjectHash(projectHash),
 		Name:     "myapp",
 		FilePath: "/home/test/myapp",
 	}
@@ -1299,7 +1317,7 @@ func runScopedEmptyState(t *testing.T, testCase scopedEmptyStateCase, quiet bool
 	var stderr bytes.Buffer
 	fs := testutil.NewMemFS()
 	if testCase.World == worldAllPublished {
-		seedMemFS(t, fs, inScope.HostSlug, inScope.SessionID, defaults.HarnessClaudeCode)
+		seedMemFSForRow(t, fs, inScope)
 	}
 	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(), runCfg, &stderr)
 	if testCase.World == worldAllPublished {

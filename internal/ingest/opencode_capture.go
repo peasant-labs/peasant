@@ -14,18 +14,62 @@ import (
 )
 
 var _ AuthoritativeTranscriptIndexer = (*OpenCodeIndexer)(nil)
+var _ RetainedContentCapturer = (*OpenCodeIndexer)(nil)
+
+// CaptureRetainedContent reports the retained OpenCode input's own
+// completeness. A legacy directory-origin session is parsed from the exact
+// native message/part tree captured for it, the same tree an ordinary index
+// run hashes; a message whose part directory is absent means rows the adapter
+// could not read, so that capture is incomplete, never certified. A managed
+// projection is captured through the strict parser, which refuses anything
+// it cannot certify.
+func (idx *OpenCodeIndexer) CaptureRetainedContent(ctx context.Context, s DiscoveredSession) (ContentCaptureResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ContentCaptureResult{}, err
+	}
+	if s.ContentOmitted {
+		return ContentCaptureResult{}, captureFailure(s, 0, fmt.Errorf("upstream extraction omitted source records; regenerate the complete source with a supported Peasant version before retrying"))
+	}
+	if s.TranscriptOrigin != TranscriptOriginFile {
+		data, err := idx.fs.ReadFile(s.SourcePath.String())
+		if err != nil {
+			return ContentCaptureResult{}, captureFailure(s, 0, err)
+		}
+		capture, err := idx.IndexTranscriptBytesForCapture(ctx, s, data)
+		if err != nil {
+			return ContentCaptureResult{}, err
+		}
+		return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: indexInputDigest(s, data, nil), InputBytes: int64(len(data))}, nil
+	}
+	tree, err := idx.captureJSONInput(ctx, s)
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(s, 0, err)
+	}
+	inputHash := indexInputDigest(s, nil, tree)
+	for _, message := range tree.Messages {
+		if message.PartsMissing {
+			return ContentCaptureResult{Complete: false, InputHash: inputHash, InputBytes: openCodeTreeBytes(tree)}, nil
+		}
+	}
+	messages, err := parseOpenCodeJSONInput(tree, &indexCompletion{ctx: ctx, session: s})
+	treeBytes := openCodeTreeBytes(tree)
+	if err != nil {
+		return ContentCaptureResult{}, captureFailure(s, 0, err)
+	}
+	capture, err := idx.captureSemanticMessages(ctx, s, messages)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash, InputBytes: treeBytes}, nil
+}
 
 func (idx *OpenCodeIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
 	if s.ContentOmitted {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("upstream extraction omitted source records; regenerate the complete source with a supported Peasant version before retrying"))
 	}
 	if s.TranscriptOrigin != TranscriptOriginFile {
-		info, err := idx.fs.Stat(s.SourcePath.String())
-		if err != nil {
+		if err := refuseOpenCodeProviderDatabase(idx.fs, s, s.SourcePath.String()); err != nil {
 			return TranscriptCaptureResult{}, captureFailure(s, 0, err)
-		}
-		if info.Size() > defaults.OpenCodeManagedProjectionMaxBytes {
-			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("managed projection exceeds supported file bound; regenerate harvest projection"))
 		}
 		return captureTranscriptFile(ctx, idx.fs, idx, s)
 	}
@@ -120,7 +164,7 @@ func (idx *OpenCodeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, 
 	var ignored []IgnoredSourceRecord
 	for kind, count := range unknown {
 		if !isOpenCodeCaptureControl(kind) {
-			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("unrepresented OpenCode part vocabulary %q", kind))
+			return TranscriptCaptureResult{}, captureFailure(s, 0, &UnrepresentedRecordError{Harness: HarnessOpenCode, Kind: kind})
 		}
 		for range count {
 			ignored = append(ignored, IgnoredSourceRecord{Kind: kind, Reason: IgnoredRecordControl})
@@ -178,7 +222,7 @@ func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s Disco
 				continue
 			}
 			if !isKnownOpenCodeSemanticPartType(part.Data.Type) {
-				return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("unrepresented OpenCode part %q", part.Data.Type))
+				return TranscriptCaptureResult{}, captureFailure(s, 0, &UnrepresentedRecordError{Harness: HarnessOpenCode, Kind: part.Data.Type})
 			}
 			if part.Data.Type == "tool" || part.Data.Type == "tool_use" {
 				if openCodeSemanticToolName(part.Data) == "" {
@@ -228,4 +272,59 @@ func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s Disco
 		}
 	}
 	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+}
+
+// refuseOpenCodeProviderDatabase keeps the managed-projection reader off the
+// provider database. An OpenCode SQLite session's DISCOVERED source path is
+// that database, and only the post-harvest managed projection ever belongs at
+// the path this reader opens, so a wiring mistake would otherwise load a
+// multi-gigabyte database into memory and end the process.
+//
+// It answers that with a content test, not a size one. A projection is
+// identified by what it IS: a database announces itself in its first bytes,
+// and the Peasant-owned envelope is verified in full when the projection is
+// decoded. A long OpenCode session legitimately produces a large projection,
+// and refusing it for its size alone would fail the whole session and lose it,
+// which no size may do.
+//
+// The header is read on its own where the filesystem can do that, so the
+// database is never loaded even to identify it.
+func refuseOpenCodeProviderDatabase(filesystem FileSystem, session DiscoveredSession, path string) error {
+	limit := len(openCodeSQLiteHeader)
+	var header []byte
+	if reader, ok := filesystem.(fileHeaderReader); ok {
+		read, err := reader.ReadFileHeader(path, limit)
+		if err != nil {
+			return fmt.Errorf("identify the managed OpenCode projection at %q for session %q: %w; no entry rows were stored; restore read access to the managed artifact and rerun harvest", path, session.SessionID, err)
+		}
+		header = read
+	} else {
+		// A filesystem with no header capability is an in-memory one holding
+		// only what a caller put there, so reading it whole costs nothing real.
+		data, err := filesystem.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("identify the managed OpenCode projection at %q for session %q: %w; no entry rows were stored; restore read access to the managed artifact and rerun harvest", path, session.SessionID, err)
+		}
+		header = data[:min(limit, len(data))]
+	}
+	if string(header) == openCodeSQLiteHeader {
+		return fmt.Errorf("read the managed OpenCode projection for session %q: %q is an OpenCode SQLite database, not the Peasant-owned projection this path must hold; the file was not read into memory and no entry rows were stored; rerun harvest to regenerate the managed projection, and never point the reader at the provider database", session.SessionID, path)
+	}
+	return nil
+}
+
+// openCodeTreeBytes sums the message and part bytes of a captured native tree,
+// so the one-time content pass can charge what it read against its budget.
+func openCodeTreeBytes(tree *openCodeJSONInput) int64 {
+	if tree == nil {
+		return 0
+	}
+	var total int64
+	for _, message := range tree.Messages {
+		total += int64(len(message.File.Data))
+		for _, part := range message.Parts {
+			total += int64(len(part.Data))
+		}
+	}
+	return total
 }

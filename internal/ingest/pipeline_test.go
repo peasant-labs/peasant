@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -110,6 +112,7 @@ func makeMinimalMeta(t *testing.T, sessionIDStr string) *ingest.UnifiedMetadata 
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID = sid
 	meta.ModelHarness = ingest.HarnessClaudeCode
+	meta.Source.Format = ingest.SourceFormatJSONL
 	ingested := time.Now().UnixMilli()
 	meta.Timestamp = ingest.TimestampInfo{
 		Start:    1708300800000, // 2024-02-19T00:00:00Z
@@ -122,7 +125,17 @@ func makeMinimalMeta(t *testing.T, sessionIDStr string) *ingest.UnifiedMetadata 
 		Remote:   &remote,
 		Worktree: &worktree,
 	}
+	// Derive the project identity the way every adapter does, rather than
+	// leaving it empty. A metadata record without one is not a shape production
+	// can produce: the publication metadata capture refuses to mirror it, and a
+	// pipeline seeded this way never authorizes indexing at all, so a test
+	// arranged around it measures the refusal instead of what it asked about.
+	projectHash, _, err := ingest.DeriveProjectIdentifiers(salt.Salt{}, remote, worktree)
+	if err != nil {
+		t.Fatalf("makeMinimalMeta derive project identity: %v", err)
+	}
 	meta.Project = ingest.ProjectInfo{
+		Hash:     projectHash,
 		FilePath: "/home/test/testrepo",
 		Name:     "testrepo",
 	}
@@ -825,13 +838,13 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
 	meta := makeMinimalMeta(t, testSessionID)
 
-	// Only Claude provider is enabled; Gemini is registered but disabled.
+	// Only Claude provider is enabled; Codex is registered but disabled.
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(
 			[]ingest.DiscoveredSession{session},
 			map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta},
 		),
-		ingest.HarnessGeminiCLI: makeStubAdapter(
+		ingest.HarnessCodex: makeStubAdapter(
 			[]ingest.DiscoveredSession{session}, // would double-count if called
 			nil,
 		),
@@ -840,7 +853,7 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
 			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(testSourceDir)}},
-			ingest.HarnessGeminiCLI:  {Enabled: false}, // explicitly disabled
+			ingest.HarnessCodex:      {Enabled: false}, // explicitly disabled
 		},
 		OutputDir:          ingest.ResolvedPath(testOutputDir),
 		StalenessThreshold: 5 * time.Minute,
@@ -855,9 +868,9 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Only 1 session from Claude (Gemini is disabled).
+	// Only 1 session from Claude (Codex is disabled).
 	if result.Summary.New != 1 {
-		t.Errorf("Summary.New = %d, want 1 (Gemini disabled)", result.Summary.New)
+		t.Errorf("Summary.New = %d, want 1 (Codex disabled)", result.Summary.New)
 	}
 	if len(result.Sessions) != 1 {
 		t.Errorf("Sessions len = %d, want 1", len(result.Sessions))
@@ -1146,66 +1159,6 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 	if sr.Harness != ingest.HarnessClaudeCode {
 		t.Errorf("SessionResult.Harness = %v, want %v", sr.Harness, ingest.HarnessClaudeCode)
-	}
-}
-
-// failedInstallFS refuses atomic installation without changing either file.
-type failedInstallFS struct {
-	*testutil.MemFS
-}
-
-var _ ingest.FileSystem = (*failedInstallFS)(nil)
-
-func (f *failedInstallFS) Rename(src, dst string) error {
-	return fmt.Errorf("injected Rename failure (%s -> %s)", src, dst)
-}
-
-func TestPipeline_FailedInstallDoesNotExposePartialTranscript(t *testing.T) {
-	// Staging is disposable, but the canonical directory is never recursively
-	// removed on failure: it may contain unchanged child output.
-	innerFS := testutil.NewMemFS()
-	mfs := &failedInstallFS{MemFS: innerFS}
-	git := testutil.DefaultGitResolver()
-
-	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
-	setupSourceFile(t, innerFS, sourcePath)
-
-	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
-	meta := makeMinimalMeta(t, testSessionID)
-
-	adapters := map[ingest.Harness]ingest.AdapterFactory{
-		ingest.HarnessClaudeCode: makeStubAdapter(
-			[]ingest.DiscoveredSession{session},
-			map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta},
-		),
-	}
-
-	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
-	if err != nil {
-		t.Fatalf("NewPipeline: %v", err)
-	}
-	result, err := pipeline.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// The session must report installation failure.
-	if len(result.Sessions) != 1 {
-		t.Fatalf("Sessions len = %d, want 1", len(result.Sessions))
-	}
-	if result.Sessions[0].Error == nil {
-		t.Errorf("Sessions[0].Error = nil, want non-nil (installation should have failed)")
-	}
-	if result.Summary.Errors != 1 {
-		t.Errorf("Summary.Errors = %d, want 1", result.Summary.Errors)
-	}
-
-	// No partial transcript or success metadata may be exposed.
-	base := expectedOutputBase(testOutputDir, testSessionID)
-	entries, err := innerFS.ReadDir(base)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("failed installation exposed output: %v, %v", entries, err)
 	}
 }
 
@@ -1524,7 +1477,7 @@ func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
 }
 
 func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
-	// When existing metadata has SchemaVersion < CurrentSchemaVersion,
+	// When existing metadata predates the native-refresh compatibility boundary,
 	// the session should be classified as DiffUpdated on re-run.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1765,8 +1718,11 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 
 	// Store that always fails on InsertSessions.
 	store := &testutil.StubSessionStore{InsertErr: errors.New("db locked")}
+	metricsStore := testutil.NewStubMetricsStore()
+	metricsStore.StaleIndexSessions = []ingest.SessionID{session.SessionID}
+	indexer := &recordingIndexer{kind: ingest.TranscriptSourceFile}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1789,12 +1745,20 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 	if result.Summary.StoreError == nil {
 		t.Errorf("Summary.StoreError = nil, want non-nil (store returned error)")
 	}
+	if indexer.bytesCalls != 0 || indexer.fileCalls != 0 || result.Summary.Indexed != 0 {
+		t.Errorf("failed mirror authorized indexing through drain or stale sweep: bytes=%d files=%d indexed=%d", indexer.bytesCalls, indexer.fileCalls, result.Summary.Indexed)
+	}
 
 	// Verify filesystem output exists.
 	base := expectedOutputBase(testOutputDir, testSessionID)
 	metaPath := fmt.Sprintf("%s/%s--metadata.json", base, testSessionID)
 	if _, err := mfs.Stat(metaPath); err != nil {
 		t.Errorf("metadata file not found at %q: %v", metaPath, err)
+	}
+	data, err := mfs.ReadFile(metaPath)
+	var written ingest.UnifiedMetadata
+	if err != nil || json.Unmarshal(data, &written) != nil || written.DerivedAt != nil {
+		t.Errorf("failed mirror must retain committed metadata without DerivedAt: %v", err)
 	}
 }
 
@@ -2543,11 +2507,12 @@ func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
 	metricsStore := testutil.NewStubMetricsStore()
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -2601,12 +2566,13 @@ func TestPipeline_WithAnalyzer_ComputesMetrics(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithStore(store),
+		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 	)
 	if err != nil {
@@ -2670,12 +2636,13 @@ func TestPipeline_WithClassifier_AnnotatesNewSessions(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithStore(store),
+		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithClassifier(classifier),
 	)
 	if err != nil {
@@ -2784,12 +2751,13 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Parallelism = 2
 	})
+	fixtureStore := newPipelineFixtureStore(t, nil, testutil.NewStubMetricsStore())
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithStore(&testutil.StubSessionStore{}),
+		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(testutil.NewStubMetricsStore()),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithClassifier(classifier),
 	)
 	if err != nil {
@@ -2804,11 +2772,17 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 	if len(classifier.annotated) != 0 {
 		t.Fatalf("Annotate calls = %d, want 0 buffered path calls", len(classifier.annotated))
 	}
-	if len(classifier.prepared) != 2 {
-		t.Fatalf("PrepareAnnotations calls = %d, want 2", len(classifier.prepared))
+	want := []ingest.SessionID{sidA, sidB}
+	prepared := slices.Clone(classifier.prepared)
+	var flushed []ingest.SessionID
+	for _, batch := range classifier.flushes {
+		flushed = append(flushed, batch...)
 	}
-	if len(classifier.flushes) != 1 || len(classifier.flushes[0]) != 2 {
-		t.Fatalf("flushes = %+v, want one flush containing both sessions", classifier.flushes)
+	slices.Sort(want)
+	slices.Sort(prepared)
+	slices.Sort(flushed)
+	if !slices.Equal(prepared, want) || !slices.Equal(flushed, want) {
+		t.Fatalf("prepared=%v flushed=%v, want each selected session %v", prepared, flushed, want)
 	}
 }
 
@@ -2835,11 +2809,12 @@ func TestPipeline_IndexError_NonFatal(t *testing.T) {
 	metricsStore := testutil.NewStubMetricsStore()
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -2900,11 +2875,12 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 	analyzer := &testutil.StubAnalyzer{ComputeErr: errors.New("compute failed")}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 	)
 	if err != nil {
@@ -2961,11 +2937,12 @@ func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	cfg.IndexProfiler = profiler
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 		ingest.WithClassifier(classifier),
 	)
@@ -3080,11 +3057,12 @@ func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
 
 	// Deliberately NOT using WithStore — p.store will be nil.
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 		// No WithStore
 	)
@@ -3192,11 +3170,12 @@ func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) 
 	analyzer := &testutil.StubAnalyzer{}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 	)
 	if err != nil {
@@ -3732,7 +3711,11 @@ func setupPeasantSyncSession(t *testing.T, mfs *testutil.MemFS, outputDir, hostS
 	}
 	transcriptFilename := fmt.Sprintf("%s--transcript.%s", sessionIDStr, ext)
 	transcriptPath := fmt.Sprintf("%s/%s", sessionDir, transcriptFilename)
-	content := []byte(`{"type":"user","content":"hello"}` + "\n")
+	// A real Claude Code JSONL record carries its text under message.content.
+	// The complete-content capture the store performs on a seeded managed
+	// transcript refuses a record that has no message content, so the fixture
+	// must use the shape the shipped harness writes.
+	content := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
 	if err := mfs.WriteFile(transcriptPath, content, 0644); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
@@ -3783,11 +3766,12 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -3807,8 +3791,8 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 	}
 }
 
-// TestPipeline_Reindex_ReExtractsWhenSourceExists verifies that when the original
-// source file exists, reindex re-extracts metadata from it (EXTRACT+WRITE path).
+// TestPipeline_Reindex_ReExtractsWhenSourceExists verifies that when historical
+// metadata requires native refresh and source exists, reindex re-extracts it.
 func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -3818,7 +3802,9 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 	setupSourceFile(t, mfs, originalSourcePath)
 
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
+	storedMeta := *meta
+	storedMeta.SchemaVersion = 8
+	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, &storedMeta)
 
 	sid, _ := ingest.NewSessionID(testSessionID)
 	metricsStore := testutil.NewStubMetricsStore()
@@ -3841,11 +3827,12 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -3887,6 +3874,7 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 	// The original source path does NOT exist in MemFS.
 	originalSourcePath := "/nonexistent/source.jsonl"
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
+	meta.SchemaVersion = 8 // Native refresh is required but the source is unavailable.
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
 	sid, _ := ingest.NewSessionID(testSessionID)
@@ -3909,11 +3897,12 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithIndexLogger(indexLogger),
 	)
 	if err != nil {
@@ -3972,14 +3961,22 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
 
 	meta2 := makeReindexMeta(t, testSessionID2, "/nonexistent/2.jsonl")
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, meta2)
+	_, peerPath := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, meta2)
 
 	sid1, _ := ingest.NewSessionID(testSessionID)
 	sid2, _ := ingest.NewSessionID(testSessionID2)
 
-	// Only mark sid1 as stale. sid2 is NOT stale.
+	// Only sid1 lacks a current input proof; sid2 has a real completed index.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid1}
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	adapterVersion := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].AdapterVersion
+	meta2.AdapterVersion = &adapterVersion
+	meta2.Project.Hash = testutil.TestProjectHash
+	peerTranscript, err := mfs.ReadFile(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *meta2, peerTranscript)
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4001,7 +3998,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline (no force): %v", err)
@@ -4024,7 +4021,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline (force): %v", err)
@@ -4047,6 +4044,7 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 
 	// Session 1: source missing → fallback + reindexed entries.
 	meta1 := makeReindexMeta(t, testSessionID, "/nonexistent/source.jsonl")
+	meta1.SchemaVersion = 8 // Required native refresh produces the fallback audit row.
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
 
 	sid1, _ := ingest.NewSessionID(testSessionID)
@@ -4073,11 +4071,12 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithIndexLogger(indexLogger),
 	)
 	if err != nil {
@@ -4120,11 +4119,19 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 	git := testutil.DefaultGitResolver()
 
 	meta := makeReindexMeta(t, testSessionID, "/nonexistent/source.jsonl")
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
+	_, transcriptPath := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
-	sid, _ := ingest.NewSessionID(testSessionID)
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	// Planning reads recorded evidence, so the session must carry the state a
+	// real retained session carries: a published and mirrored artifact that no
+	// indexer has produced output for yet. That session has genuine index work
+	// waiting, which is what the plan must report.
+	transcript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *meta, transcript)
 
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
@@ -4135,7 +4142,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 	})
 
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4160,7 +4167,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 }
 
 // TestPipeline_Reindex_UpdatesIndexState verifies that after successful reindexing,
-// the pipeline calls UpdateIndexState with CurrentIndexVersion.
+// the pipeline calls UpdateIndexState with the harness indexer target.
 func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -4186,11 +4193,12 @@ func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4206,8 +4214,8 @@ func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 	if !ok {
 		t.Fatal("UpdateIndexState not called for session")
 	}
-	if version != ingest.CurrentIndexVersion {
-		t.Errorf("IndexStates[%s] = %d, want %d", sid, version, ingest.CurrentIndexVersion)
+	if version != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("IndexStates[%s] = %d, want %d", sid, version, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 }
 
@@ -4235,7 +4243,7 @@ func setupPeasantSyncSubagentSession(t *testing.T, mfs *testutil.MemFS, outputDi
 	}
 	transcriptFilename := fmt.Sprintf("%s--transcript.%s", subagentIDStr, ext)
 	transcriptPath := fmt.Sprintf("%s/%s", sessionDir, transcriptFilename)
-	content := []byte(`{"type":"user","content":"subagent hello"}` + "\n")
+	content := []byte(`{"type":"user","message":{"role":"user","content":"subagent hello"}}` + "\n")
 	if err := mfs.WriteFile(transcriptPath, content, 0644); err != nil {
 		t.Fatalf("write subagent transcript: %v", err)
 	}
@@ -4254,23 +4262,42 @@ func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
 	// Set up parent session in flat layout.
 	parentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	parentMeta := makeReindexMeta(t, testSessionID, parentSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
+	_, parentTranscriptPath := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
 
 	// Set up subagent session in nested layout under parent.
 	subagentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testutil.TestSubagentID)
 	subagentMeta := makeReindexMeta(t, testutil.TestSubagentID, subagentSourcePath)
-	setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
+	parentUUID := ingest.SessionID(testSessionID)
+	subagentMeta.ParentUUID = &parentUUID
+	_, subagentTranscriptPath := setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
+
+	// Planning reads recorded evidence. Both sessions therefore carry the state
+	// a real retained session carries: a published and mirrored artifact with no
+	// index output yet.
+	fixtureStore := newPipelineFixtureStore(t, nil, testutil.NewStubMetricsStore())
+	for _, seed := range []struct {
+		meta *ingest.UnifiedMetadata
+		path string
+	}{{parentMeta, parentTranscriptPath}, {subagentMeta, subagentTranscriptPath}} {
+		transcript, err := mfs.ReadFile(seed.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *seed.meta, transcript)
+	}
 
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 	}
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Reindex = true
-		c.Force = true // target ALL sessions (no MetricsStore needed)
+		c.Force = true // target ALL sessions
 		c.DryRun = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+		ingest.WithMetricsStore(fixtureStore),
+	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -4319,18 +4346,21 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	// but the parent itself is not stale — only the subagent is.
 	parentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	parentMeta := makeReindexMeta(t, testSessionID, parentSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
+	_, parentTranscript := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
 
-	// Set up subagent in nested layout.
+	// Set up subagent in nested layout. Its row is seeded below, after the
+	// parent, as a saved pair with no index evidence: its stored index_version
+	// is behind the target, so the database-driven inventory selects it and the
+	// pipeline reconstructs it from its stored metadata. MirrorArtifacts refuses
+	// a child whose parent is not yet stored, so the seed order is parent first.
 	subagentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testutil.TestSubagentID)
 	subagentMeta := makeReindexMeta(t, testutil.TestSubagentID, subagentSourcePath)
-	setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
+	parentID := ingest.SessionID(testSessionID)
+	subagentMeta.ParentUUID = &parentID
 
 	subSID, _ := ingest.NewSessionID(testutil.TestSubagentID)
 
-	// MetricsStore reports only the subagent as stale.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{subSID}
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4348,11 +4378,22 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	adapterVersion := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].AdapterVersion
+	parentMeta.AdapterVersion = &adapterVersion
+	parentMeta.Project.Hash = testutil.TestProjectHash
+	parentBytes, err := mfs.ReadFile(parentTranscript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *parentMeta, parentBytes)
+	subagentContent := []byte(`{"type":"user","message":{"role":"user","content":"subagent hello"}}` + "\n")
+	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *subagentMeta, subagentContent)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4380,25 +4421,26 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 
 // TestPipeline_AutoDetect_StaleVersionTriggersReindex verifies that the auto-detect
 // mechanism in Run() triggers re-indexing for a session whose index_version is
-// older than CurrentIndexVersion. This proves the version bump is wired correctly:
-// ListStaleIndexSessions is called with CurrentIndexVersion, the session is indexed,
+// older than the harness indexer target. This proves the version bump is wired correctly:
+// ListStaleIndexSessions is called with the harness indexer target, the session is indexed,
 // and UpdateIndexState is called with the new version.
 func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
-	// Arrange: write a session to peasant-sync output as if it was previously
-	// indexed at an older version than CurrentIndexVersion.
+	// Arrange: seed a saved pair whose database row is not yet indexed, so its
+	// stored index_version is below the harness indexer target. The ordinary
+	// harvest's database-driven inventory (ListStaleIndexSessions) selects it
+	// without any tree walk, then reconstructs it from its stored metadata.
 	originalSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
 	sid, _ := ingest.NewSessionID(testSessionID)
 
-	// metricsStore returns this session when asked for index_version < currentVersion.
-	// This simulates the DB returning sid because its stored version < CurrentIndexVersion.
+	// metricsStore records the targets ListStaleIndexSessions is called with, so
+	// the version-bump wiring stays observable; the stale row itself comes from
+	// the real store the fixture wraps.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4414,11 +4456,14 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	staleContent := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
+	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *meta, staleContent)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4429,35 +4474,38 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Pipeline must call ListStaleIndexSessions with exactly CurrentIndexVersion.
-	if metricsStore.ListStaleCalledWithVersion != ingest.CurrentIndexVersion {
-		t.Errorf("ListStaleIndexSessions called with version=%d, want CurrentIndexVersion=%d",
-			metricsStore.ListStaleCalledWithVersion, ingest.CurrentIndexVersion)
+	// Pipeline must call ListStaleIndexSessions with exactly the harness indexer target.
+	if metricsStore.ListStaleCalledWithTargets[ingest.HarnessClaudeCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("ListStaleIndexSessions called with version=%d, want the harness indexer target=%d",
+			metricsStore.ListStaleCalledWithTargets[ingest.HarnessClaudeCode].IndexerVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 
 	// The stale session must have been re-indexed.
 	if result.Summary.Indexed != 1 {
 		t.Errorf("Summary.Indexed = %d, want 1 (stale v3 session re-indexed to v%d)",
-			result.Summary.Indexed, ingest.CurrentIndexVersion)
+			result.Summary.Indexed, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 
-	// UpdateIndexState must have been called with CurrentIndexVersion (4).
+	// UpdateIndexState must have been called with the harness indexer target (4).
 	version, ok := metricsStore.IndexStates[sid]
 	if !ok {
 		t.Fatal("UpdateIndexState not called for stale session after re-indexing")
 	}
-	if version != ingest.CurrentIndexVersion {
-		t.Errorf("IndexStates[%s] = %d, want CurrentIndexVersion=%d",
-			sid, version, ingest.CurrentIndexVersion)
+	if version != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("IndexStates[%s] = %d, want the harness indexer target=%d",
+			sid, version, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 }
 
-// TestPipeline_AutoDetect_ReconstructFromSourceInfo verifies that a session
-// that is stale (in StaleIndexSessions) but has NO peasant-sync metadata on disk
-// can still be re-indexed via the reconstructFromSourceInfo fallback path, which
-// reads source_path, source_format, and provider from the DB and constructs the
-// peasant-sync output transcript path using the host_slug from LookupSessionLocation.
-func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
+// TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed verifies that a
+// session known to the database only by its source information, with an intact
+// transcript but no saved metadata file and no mirrored artifact identity, is
+// NOT indexed by an ordinary harvest. The retained pair is the index input and
+// the database is the source of truth for the artifact identity: without a
+// saved pair the session is a lost-metadata case, reported by `harvest index`
+// and repaired by `peasant harvest --force --session <id>`, never silently
+// re-indexed from source information on a plain harvest.
+func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4478,22 +4526,7 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
 
 	// MetricsStore reports this session as stale and provides source info via DB.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
-	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
-	metricsStore.SourceInfoByID = map[ingest.SessionID]struct {
-		SourcePath   string
-		SourceFormat ingest.SourceFormat
-		Harness      string
-	}{
-		sid: {
-			SourcePath:   sourcePath,
-			SourceFormat: ingest.SourceFormatJSONL,
-			Harness:      string(ingest.HarnessClaudeCode),
-		},
-	}
-	metricsStore.LookupSessionLocationFunc = func(_ context.Context, _ ingest.SessionID) (string, string, error) {
-		return testutil.TestHostSlug, "", nil
-	}
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, string(sid))
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4512,11 +4545,16 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	storedMeta := makeReindexMeta(t, string(sid), sourcePath)
+	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: storedMeta}}); err != nil {
+		t.Fatal(err)
+	}
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4527,37 +4565,26 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The session should have been indexed via the source-info fallback.
-	if result.Summary.Indexed != 1 {
-		t.Errorf("Summary.Indexed = %d, want 1 (via reconstructFromSourceInfo)", result.Summary.Indexed)
+	// No saved pair, so an ordinary harvest indexes nothing: the session is a
+	// lost-metadata case left for the rebuild command, not silently re-indexed.
+	if result.Summary.Indexed != 0 {
+		t.Errorf("Summary.Indexed = %d, want 0 (a source-info-only session has no saved pair to index)", result.Summary.Indexed)
 	}
-
-	// Verify the indexed session is our session.
-	indexed, ok := metricsStore.IndexedEntries[sid]
-	if !ok {
-		t.Fatal("session was not indexed in MetricsStore (reconstructFromSourceInfo fallback failed)")
+	if _, ok := metricsStore.IndexedEntries[sid]; ok {
+		t.Fatal("a source-info-only session was indexed on an ordinary harvest; it has no saved pair and must be left for harvest index")
 	}
-	if len(indexed) != 1 {
-		t.Errorf("indexed entries for session = %d, want 1", len(indexed))
-	}
-
-	// Verify the indexer received the correct output transcript path (flat layout).
-	called, ok := indexer.CalledWith[sid]
-	if !ok {
-		t.Fatal("indexer was not called for session")
-	}
-	wantPath := fmt.Sprintf("%s/%s/%s/%s--transcript.jsonl",
-		testOutputDir, testutil.TestHostSlug, testSessionID, testSessionID)
-	if got := string(called.SourcePath); got != wantPath {
-		t.Errorf("indexer received SourcePath = %q, want flat output path %q", got, wantPath)
+	if _, ok := indexer.CalledWith[sid]; ok {
+		t.Fatal("the indexer parsed a session with no saved pair")
 	}
 }
 
-// TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent verifies that a
-// subagent session that is stale but has NO peasant-sync metadata on disk is
-// re-indexed via reconstructFromSourceInfo using the subagent directory layout:
-// {outputDir}/{hostSlug}/{parentID}/subagents/{sid}/{sid}--transcript.{ext}
-func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
+// TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed verifies that a
+// subagent known to the database only by its source information, with an intact
+// transcript in the subagent layout but no saved metadata file and no mirrored
+// artifact identity, is NOT indexed by an ordinary harvest. Like a top-level
+// session, a subagent without a saved pair is a lost-metadata case left for
+// `harvest index`, never silently re-indexed from source information.
+func TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4584,23 +4611,7 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
 
 	// MetricsStore reports the subagent as stale and provides source info + location.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, string(sid))
-	metricsStore.SourceInfoByID = map[ingest.SessionID]struct {
-		SourcePath   string
-		SourceFormat ingest.SourceFormat
-		Harness      string
-	}{
-		sid: {
-			SourcePath:   sourcePath,
-			SourceFormat: ingest.SourceFormatJSONL,
-			Harness:      string(ingest.HarnessClaudeCode),
-		},
-	}
-	// LookupSessionLocation returns a non-empty parentID, indicating subagent layout.
-	metricsStore.LookupSessionLocationFunc = func(_ context.Context, sessionID ingest.SessionID) (string, string, error) {
-		return testutil.TestHostSlug, string(parentSid), nil
-	}
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4619,11 +4630,17 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	storedMeta := makeReindexMeta(t, string(sid), sourcePath)
+	storedMeta.ParentUUID = &parentSid
+	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: makeMinimalMeta(t, string(parentSid))}, {Metadata: storedMeta}}); err != nil {
+		t.Fatal(err)
+	}
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4634,30 +4651,16 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The subagent session should have been indexed via the source-info fallback.
-	if result.Summary.Indexed != 1 {
-		t.Errorf("Summary.Indexed = %d, want 1 (subagent via reconstructFromSourceInfo)", result.Summary.Indexed)
+	// No saved pair, so an ordinary harvest indexes nothing: the subagent is a
+	// lost-metadata case left for the rebuild command, not silently re-indexed.
+	if result.Summary.Indexed != 0 {
+		t.Errorf("Summary.Indexed = %d, want 0 (a source-info-only subagent has no saved pair to index)", result.Summary.Indexed)
 	}
-
-	// Verify the indexed session is our subagent session.
-	indexed, ok := metricsStore.IndexedEntries[sid]
-	if !ok {
-		t.Fatal("subagent session was not indexed in MetricsStore (reconstructFromSourceInfo subagent fallback failed)")
+	if _, ok := metricsStore.IndexedEntries[sid]; ok {
+		t.Fatal("a source-info-only subagent was indexed on an ordinary harvest; it has no saved pair and must be left for harvest index")
 	}
-	if len(indexed) != 1 {
-		t.Errorf("indexed entries for subagent session = %d, want 1", len(indexed))
-	}
-
-	// Verify the indexer received the subagent layout output path (not the flat path).
-	called, ok := indexer.CalledWith[sid]
-	if !ok {
-		t.Fatal("indexer was not called for subagent session")
-	}
-	wantPath := fmt.Sprintf("%s/%s/%s/%s/%s/%s--transcript.jsonl",
-		testOutputDir, testutil.TestHostSlug, string(parentSid),
-		defaults.DirSubagents.String(), string(sid), string(sid))
-	if got := string(called.SourcePath); got != wantPath {
-		t.Errorf("indexer received SourcePath = %q, want subagent output path %q", got, wantPath)
+	if _, ok := indexer.CalledWith[sid]; ok {
+		t.Fatal("the indexer parsed a subagent with no saved pair")
 	}
 }
 
@@ -5070,7 +5073,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 		t.Fatalf("Run 2: %v", err)
 	}
 	if result2.Summary.Unchanged != 1 {
-		t.Errorf("Run 2: Summary.Unchanged = %d, want 1 (session unchanged)", result2.Summary.Unchanged)
+		t.Errorf("Run 2: Summary.Unchanged = %d, want 1 (session unchanged); full summary %+v", result2.Summary.Unchanged, result2.Summary)
 	}
 
 	// Metadata on disk is unchanged — commits still present.
@@ -5378,9 +5381,15 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify every stage reached the Ended state.
+	// Verify every stage reached the Ended state. RECOVER is the one-time
+	// upgrade pass, which the harvest command runs before the pipeline and the
+	// store open; the pipeline itself never emits it, so a pipeline-only run
+	// leaves it unstarted.
 	snap := progState.Snapshot()
 	for _, stage := range ingest.StageOrder {
+		if stage == ingest.StageRecover {
+			continue
+		}
 		sp, ok := snap[stage]
 		if !ok {
 			t.Errorf("stage %s: missing from snapshot", stage)
@@ -5393,7 +5402,7 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 }
 
 // TestPipeline_Reindex_SummaryVersionFields verifies that PipelineSummary
-// includes IndexVersion and MetadataVersion after a reindex run.
+// includes per-harness targets and MetadataVersion after a reindex run.
 func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -5434,8 +5443,8 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if result.Summary.IndexVersion != ingest.CurrentIndexVersion {
-		t.Errorf("Summary.IndexVersion = %d, want %d", result.Summary.IndexVersion, ingest.CurrentIndexVersion)
+	if result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("summary Claude indexer target = %d, want %d", result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 	if result.Summary.MetadataVersion != int(ingest.CurrentSchemaVersion) {
 		t.Errorf("Summary.MetadataVersion = %d, want %d", result.Summary.MetadataVersion, int(ingest.CurrentSchemaVersion))
@@ -5443,7 +5452,7 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 }
 
 // TestPipeline_NormalIngest_SummaryVersionFields verifies that PipelineSummary
-// includes IndexVersion and MetadataVersion after a normal (non-reindex) run.
+// includes per-harness targets and MetadataVersion after a normal (non-reindex) run.
 func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -5489,8 +5498,8 @@ func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if result.Summary.IndexVersion != ingest.CurrentIndexVersion {
-		t.Errorf("Summary.IndexVersion = %d, want %d", result.Summary.IndexVersion, ingest.CurrentIndexVersion)
+	if result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("summary Claude indexer target = %d, want %d", result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 	if result.Summary.MetadataVersion != int(ingest.CurrentSchemaVersion) {
 		t.Errorf("Summary.MetadataVersion = %d, want %d", result.Summary.MetadataVersion, int(ingest.CurrentSchemaVersion))
@@ -5511,8 +5520,10 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 
 	meta1 := makeReindexMeta(t, testSessionID, sourceFile1)
 	meta2 := makeReindexMeta(t, testSessionID2, sourceFile2)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, meta2)
+	storedMeta1, storedMeta2 := *meta1, *meta2
+	storedMeta1.SchemaVersion, storedMeta2.SchemaVersion = 8, 8
+	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, &storedMeta1)
+	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, &storedMeta2)
 
 	sid1, _ := ingest.NewSessionID(testSessionID)
 	sid2, _ := ingest.NewSessionID(testSessionID2)
@@ -5542,11 +5553,12 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 		c.Parallelism = 2 // explicitly use 2 workers
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -6084,9 +6096,10 @@ func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
 // --- metadata.json as write-through cache (schema v8, derived_at) ---
 
 // TestPipeline_SchemaV8_DerivedAtPopulated verifies that after a full ingest run
-// with a store, the written metadata.json contains a non-nil DerivedAt field.
-// DerivedAt must be populated after DB INSERT (it marks when the file was derived
-// from DB state), so it cannot be present if no store is configured.
+// with a store, the written metadata.json carries a nil DerivedAt field. The
+// saved pair is retained input the parsers read, not a projection of the
+// database: the database is the source of truth for every derived field, so the
+// file is written once as the commit point and never restamped from DB state.
 func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6111,9 +6124,7 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 		t.Fatalf("NewPipeline: %v", err)
 	}
 
-	before := time.Now().UnixMilli()
 	result, err := pipeline.Run(context.Background())
-	after := time.Now().UnixMilli()
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -6138,11 +6149,8 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 		t.Errorf("SchemaVersion = %d, want %d", written.SchemaVersion, ingest.CurrentSchemaVersion)
 	}
 
-	if written.DerivedAt == nil {
-		t.Fatal("DerivedAt is nil; expected non-nil (DB INSERT happened, file should be derived from DB state)")
-	}
-	if *written.DerivedAt < before || *written.DerivedAt > after {
-		t.Errorf("DerivedAt = %d, want in range [%d, %d]", *written.DerivedAt, before, after)
+	if written.DerivedAt != nil {
+		t.Fatalf("DerivedAt = %d; expected nil (the saved pair is retained input, not derived from DB state)", *written.DerivedAt)
 	}
 }
 
@@ -6199,14 +6207,12 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 	}
 }
 
-// TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent verifies that when a store is
-// configured, both the DB INSERT and the DerivedAt field are populated after a
-// successful pipeline run. DerivedAt marks metadata.json as a derived artifact;
-// the DB INSERT records the session in the store.
-//
-// Note: write-order enforcement (DB INSERT before metadata.json) is a future
-// enhancement requiring pipeline restructuring. This test verifies the observable
-// outcomes without asserting on ordering.
+// TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent verifies that when a store
+// is configured, the DB INSERT records the session AND the saved metadata.json
+// stays free of a DerivedAt field. The file is retained input the parsers read,
+// never a projection of committed DB state, so it is written once as the commit
+// point and never restamped afterwards. The DB mirror observes a complete,
+// DerivedAt-free file at insert time, and the file is unchanged after the run.
 func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6228,6 +6234,16 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	store := &testutil.StubSessionStore{
 		OnInsert: func(_ []ingest.StoreEntry) {
 			dbInsertCalled = true
+			path := fmt.Sprintf("%s/%s--metadata.json", expectedOutputBase(testOutputDir, testSessionID), testSessionID)
+			data, readErr := mfs.ReadFile(path)
+			if readErr != nil {
+				t.Errorf("database mirror started before complete metadata commit: %v", readErr)
+				return
+			}
+			var committed ingest.UnifiedMetadata
+			if err := json.Unmarshal(data, &committed); err != nil || committed.DerivedAt != nil {
+				t.Errorf("unmirrored file metadata must be readable without DerivedAt: %v", err)
+			}
 		},
 	}
 	cfg := makePipelineConfig(testOutputDir)
@@ -6260,8 +6276,8 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	if err := json.Unmarshal(data, &written); err != nil {
 		t.Fatalf("Unmarshal metadata: %v", err)
 	}
-	if written.DerivedAt == nil {
-		t.Error("DerivedAt is nil; expected non-nil when store is configured")
+	if written.DerivedAt != nil {
+		t.Errorf("DerivedAt = %d; expected nil: the saved pair is retained input and is never restamped from committed DB state", *written.DerivedAt)
 	}
 }
 

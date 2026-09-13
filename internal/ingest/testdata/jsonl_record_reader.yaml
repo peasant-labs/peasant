@@ -1,0 +1,130 @@
+# Cases for the shared JSONL record reader (internal/ingest/jsonl_records.go).
+#
+# Every case builds an input from `records`. A record's bytes are
+# "<line>:" followed by 'x' padding up to `size`, so the test can rebuild the
+# exact expected bytes and prove the reader never truncates a record.
+#
+# `wantYielded` lists the physical line numbers handed to the callback.
+# `wantOversized` lists the records the reader skipped, with the true size it
+# reported. A record is skipped only when its size is OVER `limitBytes`.
+requiredNames:
+  - short records are yielded whole
+  - record larger than the read buffer is yielded whole
+  - record exactly at the limit is yielded whole
+  - final record without a newline is yielded
+  - empty input yields no record
+  - blank lines keep the physical line numbers
+  - record over the limit is skipped and reported with its line and true size
+  - records after an over-limit record are still yielded
+  - final record over the limit without a newline is skipped not truncated
+  - every record over the limit is reported
+
+cases:
+  - name: short records are yielded whole
+    limitBytes: 4096
+    records:
+      - size: 12
+      - size: 40
+      - size: 7
+    finalNewline: true
+    wantYielded: [1, 2, 3]
+    wantOversized: []
+
+  - name: record larger than the read buffer is yielded whole
+    # 200000 bytes is far past the 64 KiB starting read buffer, so the reader
+    # must accumulate across several bufio.ErrBufferFull reads.
+    limitBytes: 1048576
+    records:
+      - size: 10
+      - size: 200000
+      - size: 10
+    finalNewline: true
+    wantYielded: [1, 2, 3]
+    wantOversized: []
+
+  - name: record exactly at the limit is yielded whole
+    limitBytes: 5000
+    records:
+      - size: 5000
+      - size: 10
+    finalNewline: true
+    wantYielded: [1, 2]
+    wantOversized: []
+
+  - name: final record without a newline is yielded
+    limitBytes: 4096
+    records:
+      - size: 20
+      - size: 33
+    finalNewline: false
+    wantYielded: [1, 2]
+    wantOversized: []
+
+  - name: empty input yields no record
+    limitBytes: 4096
+    records: []
+    finalNewline: false
+    wantYielded: []
+    wantOversized: []
+
+  - name: blank lines keep the physical line numbers
+    limitBytes: 4096
+    records:
+      - size: 0
+      - size: 15
+      - size: 0
+      - size: 15
+    finalNewline: true
+    wantYielded: [1, 2, 3, 4]
+    wantOversized: []
+
+  - name: record over the limit is skipped and reported with its line and true size
+    limitBytes: 1000
+    records:
+      - size: 10
+      - size: 1001
+    finalNewline: true
+    wantYielded: [1]
+    wantOversized:
+      - line: 2
+        size: 1001
+
+  - name: records after an over-limit record are still yielded
+    # The over-limit record also spans many read buffers, so the reader must
+    # discard it to the newline and resynchronize on the next record.
+    limitBytes: 1000
+    records:
+      - size: 10
+      - size: 300000
+      - size: 20
+      - size: 30
+    finalNewline: true
+    wantYielded: [1, 3, 4]
+    wantOversized:
+      - line: 2
+        size: 300000
+
+  - name: final record over the limit without a newline is skipped not truncated
+    limitBytes: 1000
+    records:
+      - size: 10
+      - size: 90000
+    finalNewline: false
+    wantYielded: [1]
+    wantOversized:
+      - line: 2
+        size: 90000
+
+  - name: every record over the limit is reported
+    limitBytes: 500
+    records:
+      - size: 501
+      - size: 10
+      - size: 100000
+    finalNewline: true
+    wantYielded: [2]
+    wantOversized:
+      - line: 1
+        size: 501
+      - line: 3
+        size: 100000

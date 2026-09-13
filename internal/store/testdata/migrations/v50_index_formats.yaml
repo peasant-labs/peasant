@@ -1,0 +1,34 @@
+requiredNames:
+  - populated-parser-zero
+  - populated-parser-current
+  - empty-successful-index
+  - never-indexed
+  - parser-without-success-time
+  - timestamp-without-parser
+cases:
+  - name: populated-parser-zero
+    sessionID: a1000000-0000-4000-8000-000000000001
+    indexerVersion: 0
+    entries: true
+    wantFormat: 1
+  - name: populated-parser-current
+    sessionID: a1000000-0000-4000-8000-000000000002
+    indexerVersion: 15
+    indexedAt: 1700000000100
+    entries: true
+    wantFormat: 1
+  - name: empty-successful-index
+    sessionID: a1000000-0000-4000-8000-000000000003
+    indexerVersion: 14
+    indexedAt: 1700000000200
+    wantFormat: 1
+  - name: never-indexed
+    sessionID: a1000000-0000-4000-8000-000000000004
+    indexerVersion: 0
+  - name: parser-without-success-time
+    sessionID: a1000000-0000-4000-8000-000000000005
+    indexerVersion: 15
+  - name: timestamp-without-parser
+    sessionID: a1000000-0000-4000-8000-000000000006
+    indexerVersion: 0
+    indexedAt: 1700000000300

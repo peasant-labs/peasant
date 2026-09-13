@@ -167,7 +167,7 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 				return func(context.Context) (*ftue.IngestResult, error) {
 					ingestCalls++
 					progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover})
-					progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1})
+					progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1})
 					close(ingestStarted)
 					<-releaseIngest
 					progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 1, Total: 1})
@@ -360,7 +360,8 @@ func validateMountedRenderedCompletionPreamble(view, firstCommand string) error 
 
 func mountedExactRenderedLineIndex(lines []string, want string) int {
 	for index, line := range lines {
-		if line == want {
+		// Kit background fill adds terminal cells, not additional copy.
+		if strings.TrimRight(line, " ") == want {
 			return index
 		}
 	}

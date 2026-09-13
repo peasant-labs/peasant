@@ -64,7 +64,7 @@ func TestPiDatabasePublicationThroughCLI(t *testing.T) {
 			if err := os.WriteFile(source, []byte(data), 0600); err != nil {
 				t.Fatal(err)
 			}
-			output, err := executeHarvestCmd(t, root, []string{"--source-provider", "pi", "--source-path", source, "--output", retained, "--json"})
+			output, err := executeHarvestCmd(t, root, []string{"--source-harness", "pi", "--source-path", source, "--output", retained, "--json"})
 			if err != nil {
 				t.Fatalf("native harvest: %v %s", err, output)
 			}

@@ -1,0 +1,16 @@
+requiredNames: [computed-metrics-survive, uncomputed-seeds-stay-uncomputed, unknown-adapter-stays-unknown]
+sessionID: 11111111-1111-4111-8111-111111111111
+projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+hostSlug: github.com-artifact-fixture
+startedAt: 1700000000000
+originalStats: {turncount: 2, toolcallcount: 1, subagentcount: 0, durationms: 60000, tokensin: 100, tokensout: 50}
+replacementStats: {turncount: 4, toolcallcount: 3, subagentcount: 1, durationms: 120000, tokensin: 700, tokensout: 350}
+cases:
+  - name: computed-metrics-survive
+    computed: true
+    adapterVersion: 1
+  - name: uncomputed-seeds-stay-uncomputed
+    computed: false
+    adapterVersion: 1
+  - name: unknown-adapter-stays-unknown
+    computed: true

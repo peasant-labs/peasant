@@ -43,6 +43,61 @@ func NewContentCaptureStatus(s string) (ContentCaptureStatus, error) {
 	return "", fmt.Errorf("content capture: unknown status %q; use complete, incomplete or failed before storing capture", s)
 }
 
+// ContentCaptureFailureCode says WHY a stored capture is not complete, in a
+// value the selector can act on.
+//
+// The distinction it carries is between "not certified yet" and "this build
+// cannot certify this input". A legacy preview-only capture must be certified
+// once; a capture the current strict parser already refused cannot change
+// until the input changes or a newer indexer ships, so re-parsing it on every
+// harvest is work that can never succeed. An empty code means no failure was
+// recorded, which is the not-certified-yet state.
+type ContentCaptureFailureCode string
+
+const (
+	// ContentCaptureNoFailure is the absent code: nothing refused this capture.
+	ContentCaptureNoFailure ContentCaptureFailureCode = ""
+	// ContentCaptureStrictRefused means the strict parser refused this exact
+	// input under the recorded producer, and the tolerant projection was stored
+	// instead. Previews show it; nothing certifies it.
+	ContentCaptureStrictRefused ContentCaptureFailureCode = "strict_capture_refused"
+	// ContentCaptureSourceRecordsOmitted means the retained transcript is KNOWN
+	// to be missing source records: ingest wrote the artifact without them.
+	//
+	// It is named for what its predicate attests and no more. Three ingest
+	// diagnostics raise it and they have different causes and different
+	// remedies: a record longer than the scanner line limit, a part type this
+	// build's OpenCode adapter does not know, and a part whose parent message
+	// is absent from the native source. The session's own metadata diagnostics
+	// say which happened and what fixes it, so nothing here should claim a
+	// cause it cannot tell apart.
+	//
+	// What all three share is why the strict parser refuses the transcript
+	// however often it is re-read: the records are not in it, and re-harvesting
+	// the same source omits them again. That makes it permanent for this build
+	// in the same way a refused record is, and a newer Peasant lifts it through
+	// the producer term or through the bytes a re-ingest changes.
+	ContentCaptureSourceRecordsOmitted ContentCaptureFailureCode = "source_records_omitted"
+	// ContentCaptureLegacyPreviewOnly marks the captures the content-capture
+	// migration wrote for sessions that predate it. Nothing refused them; no
+	// build ever tried to certify them, so a build that can certify them owes
+	// exactly one attempt and this code is NOT a steady state.
+	ContentCaptureLegacyPreviewOnly ContentCaptureFailureCode = "legacy_preview_only"
+)
+
+// NewContentCaptureFailureCode returns the named code for a stored value, or
+// an error for any value this build cannot name. Callers at store boundaries
+// must treat that error as a refusal and never as the absent code: the
+// selector acts on this value, so an unknown code read as "no failure" would
+// put a session back into pending work on every harvest, forever.
+func NewContentCaptureFailureCode(s string) (ContentCaptureFailureCode, error) {
+	switch code := ContentCaptureFailureCode(s); code {
+	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureSourceRecordsOmitted, ContentCaptureLegacyPreviewOnly:
+		return code, nil
+	}
+	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused or source_records_omitted for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)
+}
+
 type ContentSourceAuthority string
 
 const (
@@ -66,11 +121,50 @@ func NewContentSourceAuthority(s string) (ContentSourceAuthority, error) {
 	return "", fmt.Errorf("content capture: unknown source authority %q; select an attributable source before storing capture", s)
 }
 
+// ContentCaptureFormat names the shape of a stored transcript capture. The
+// closed set mirrors the CHECK constraint on session_content_captures.
+type ContentCaptureFormat string
+
+const (
+	// ContentCaptureFormatFull: every entry of the session is stored, so the
+	// row is eligible for full_content reads.
+	ContentCaptureFormatFull ContentCaptureFormat = "full"
+	// ContentCaptureFormatPreviewOnly: only the bounded preview projection is
+	// stored, so a full_content read of the row fails closed.
+	ContentCaptureFormatPreviewOnly ContentCaptureFormat = "preview_only"
+	// ContentCaptureFormatLegacyPreviewOnly: preview_only as inferred for rows
+	// that predate full content capture. New ingest never writes it.
+	ContentCaptureFormatLegacyPreviewOnly ContentCaptureFormat = "legacy_preview_only"
+)
+
+// AllContentCaptureFormats returns the canonical closed set in declared order.
+func AllContentCaptureFormats() []ContentCaptureFormat {
+	return []ContentCaptureFormat{ContentCaptureFormatFull, ContentCaptureFormatPreviewOnly, ContentCaptureFormatLegacyPreviewOnly}
+}
+
+func (f ContentCaptureFormat) String() string { return string(f) }
+
+// NewContentCaptureFormat validates a raw capture-format string at a trust
+// boundary. Unknown text fails closed instead of becoming a silent cast.
+func NewContentCaptureFormat(raw string) (ContentCaptureFormat, error) {
+	for _, f := range AllContentCaptureFormats() {
+		if raw == string(f) {
+			return f, nil
+		}
+	}
+	return "", fmt.Errorf("content capture: unknown capture format %q read at the store boundary in ingest.NewContentCaptureFormat; the value is outside the closed set %v, so the capture cannot be trusted or rewritten; store one of those formats, or run harvest index --force to recapture the session", raw, AllContentCaptureFormats())
+}
+
 type SessionEntryWriteMode string
 
 const (
 	SessionEntryWriteReplaceAll      SessionEntryWriteMode = "replace_all"
 	SessionEntryWriteContentBackfill SessionEntryWriteMode = "content_backfill"
+	// SessionEntryWriteFormatConversion rewrites the stored representation of
+	// entries that a prior parser run already produced. It is not a parser run:
+	// it preserves the producing indexer, its timestamp and the retained input
+	// proof.
+	SessionEntryWriteFormatConversion SessionEntryWriteMode = "format_conversion"
 )
 
 func NewSessionEntryWriteMode(s string) (SessionEntryWriteMode, error) {
@@ -79,8 +173,10 @@ func NewSessionEntryWriteMode(s string) (SessionEntryWriteMode, error) {
 		return SessionEntryWriteReplaceAll, nil
 	case "content_backfill":
 		return SessionEntryWriteContentBackfill, nil
+	case "format_conversion":
+		return SessionEntryWriteFormatConversion, nil
 	}
-	return "", fmt.Errorf("content write: unknown mode %q; use replace_all or content_backfill", s)
+	return "", fmt.Errorf("content write: unknown mode %q; use replace_all, content_backfill or format_conversion", s)
 }
 
 type SessionContentCaptureWrite struct {
@@ -88,9 +184,9 @@ type SessionContentCaptureWrite struct {
 	Status                     ContentCaptureStatus
 	SourceAuthority            ContentSourceAuthority
 	TranscriptOrigin           TranscriptOrigin
-	CaptureRevision            string
+	CaptureFormat              ContentCaptureFormat
 	CapturedAtMs               int64
-	FailureCode                string
+	FailureCode                ContentCaptureFailureCode
 	FailureMessage             string
 }
 type SessionContentCapture struct {
@@ -99,12 +195,12 @@ type SessionContentCapture struct {
 	Status                     ContentCaptureStatus
 	SourceAuthority            ContentSourceAuthority
 	TranscriptOrigin           TranscriptOrigin
-	CaptureRevision            string
+	CaptureFormat              ContentCaptureFormat
 	EntryCount                 int
 	ContentRowCount            int
 	FullCaptureSHA256          string
 	CapturedAtMs               int64
-	FailureCode                string
+	FailureCode                ContentCaptureFailureCode
 	FailureMessage             string
 }
 type SessionEntryReadMode string
@@ -112,6 +208,12 @@ type SessionEntryReadMode string
 const (
 	SessionEntryReadPreview     SessionEntryReadMode = "preview"
 	SessionEntryReadFullContent SessionEntryReadMode = "full_content"
+	// SessionEntryReadAvailable reads the content that is actually stored: the
+	// full content when the capture is complete, the bounded preview projection
+	// otherwise. It is never gated on capture completeness, publication
+	// readiness, recovery or a native source, and it never certifies content
+	// for export or publication; use SessionEntryReadFullContent for that.
+	SessionEntryReadAvailable SessionEntryReadMode = "available"
 )
 
 func NewSessionEntryReadMode(s string) (SessionEntryReadMode, error) {
@@ -120,8 +222,10 @@ func NewSessionEntryReadMode(s string) (SessionEntryReadMode, error) {
 		return SessionEntryReadPreview, nil
 	case "full_content":
 		return SessionEntryReadFullContent, nil
+	case "available":
+		return SessionEntryReadAvailable, nil
 	}
-	return "", fmt.Errorf("content read: unknown mode %q; use preview or full_content", s)
+	return "", fmt.Errorf("content read: unknown mode %q; use preview, full_content or available", s)
 }
 
 type SessionEntryReadOptions struct {
@@ -151,9 +255,23 @@ type SessionEntryFullReader interface {
 	ReadSessionEntries(context.Context, SessionID, SessionEntryReadOptions) (SessionEntryReadPage, error)
 	GetSessionContentCapture(context.Context, SessionID) (SessionContentCapture, bool, error)
 }
+
+// ContentCaptureIncompleteSession names one recovery target. The harness and
+// the session start time travel with the identifier so a caller can scope,
+// order and report recovery work without a second lookup per session.
+type ContentCaptureIncompleteSession struct {
+	SessionID SessionID
+	Harness   Harness
+	StartMs   int64
+}
+
 type ContentBackfillTargetStore interface {
-	ListContentCaptureIncompleteSessions(context.Context, int) ([]SessionID, error)
-	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int) ([]SessionID, error)
+	// One listing, one row shape. Recovery needs the harness and start time
+	// beside the identifier to scope and report its work, and the cursor to
+	// resume a walk, so that is the only listing offered: an identifier-only
+	// variant returned a second shape for the same question and told a caller
+	// less than it needs.
+	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int) ([]ContentCaptureIncompleteSession, error)
 	LookupSessionLocation(context.Context, SessionID) (string, string, error)
 	LookupSourceInfo(context.Context, SessionID) (string, SourceFormat, string, error)
 	IndexSessionEntryBatch(context.Context, []SessionEntryWrite) []SessionEntryWriteResult

@@ -105,7 +105,7 @@ func runSkipGateHarness(t *testing.T, opts harnessOptions) {
 
 	// Sandbox config: claude-code, codex, and cursor enabled, each pointed at its
 	// committed fixture; opencode disabled; output.basePath under the SANDBOX. This
-	// is required because (a) --source-provider/--source-path overrides ONLY the named
+	// is required because (a) --source-harness/--source-path overrides ONLY the named
 	// provider's path while leaving the others enabled at their real defaults, and
 	// (b) the default output.basePath is a hardcoded ~/.local/share path that does
 	// NOT follow XDG_DATA_HOME — so without this, ingest would read the real

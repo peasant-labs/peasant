@@ -620,7 +620,7 @@ func createAssociationRoundTripAnnotation(t *testing.T, dbPath string, associati
 
 func runPeasantAssociationPush(t *testing.T, peasantBin string, xdg []string) pushJSON {
 	t.Helper()
-	out, err := runPeasantRaw(peasantBin, xdg, "village", "push", "--source-provider", defaults.HarnessClaudeCode.String(), "--json", "--non-interactive")
+	out, err := runPeasantRaw(peasantBin, xdg, "village", "push", "--source-harness", defaults.HarnessClaudeCode.String(), "--json", "--non-interactive")
 	if err != nil {
 		t.Fatalf("ordinary association push failed: %v\n%s", err, out)
 	}

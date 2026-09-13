@@ -30,6 +30,53 @@ sheets:
     title: "shared local import progress: kickstart and inline harvest"
     theme: dark
     viewport: {width: 1800, height: 4590}
+  - name: ingest-completion
+    kind: ingest-completion
+    title: "mounted kickstart completion: warning details, scrolling, and successful control"
+    theme: dark
+    viewport: {width: 1800, height: 3420}
+
+completion:
+  new: 2
+  updated: 1
+  unchanged: 3
+  errors: 0
+  diagnostics:
+    - location: /fixtures/managed/session-future/session-future.meta.json
+      message: metadata schema version 999 is newer than this Peasant supports; the last-good index is unchanged
+      remediation: upgrade Peasant before retrying this session
+    - location: /fixtures/managed/session-unreadable/session-unreadable.meta.json
+      message: |
+        permission denied while reading retained metadata
+        the stored index remains available and no source or artifact was replaced
+        inspect the configured managed directory permissions before retrying
+        source histories were not modified
+        this warning does not prevent compatible sessions from importing
+        diagnostics remain visible until setup is explicitly closed
+        long paths and explanations wrap so their final words remain readable
+        last-good session data remains available for local reading
+      remediation: restore read access, then run peasant harvest
+  states:
+    - key: warnings-top
+      wantContains: [kickstart complete, 2 warnings, 2 new, 1 updated, session-future, upgrade Peasant, PgDn, quit]
+    - key: warnings-bottom
+      wantContains: [2 warnings, restore read access, next steps, peasant config, peasant village push, PgUp, quit]
+    - key: no-warnings
+      wantContains: [kickstart complete, 2 new, 1 updated, 3 unchanged, next steps, peasant village push]
+      wantAbsent: [warnings]
+  captures:
+    - {name: ingest-completion-warnings-top-dark-80x24, state: warnings-top, theme: dark, width: 80, height: 24}
+    - {name: ingest-completion-warnings-top-dark-120x40, state: warnings-top, theme: dark, width: 120, height: 40}
+    - {name: ingest-completion-warnings-top-light-80x24, state: warnings-top, theme: light, width: 80, height: 24}
+    - {name: ingest-completion-warnings-top-light-120x40, state: warnings-top, theme: light, width: 120, height: 40}
+    - {name: ingest-completion-warnings-bottom-dark-80x24, state: warnings-bottom, theme: dark, width: 80, height: 24}
+    - {name: ingest-completion-warnings-bottom-dark-120x40, state: warnings-bottom, theme: dark, width: 120, height: 40}
+    - {name: ingest-completion-warnings-bottom-light-80x24, state: warnings-bottom, theme: light, width: 80, height: 24}
+    - {name: ingest-completion-warnings-bottom-light-120x40, state: warnings-bottom, theme: light, width: 120, height: 40}
+    - {name: ingest-completion-no-warnings-dark-80x24, state: no-warnings, theme: dark, width: 80, height: 24}
+    - {name: ingest-completion-no-warnings-dark-120x40, state: no-warnings, theme: dark, width: 120, height: 40}
+    - {name: ingest-completion-no-warnings-light-80x24, state: no-warnings, theme: light, width: 80, height: 24}
+    - {name: ingest-completion-no-warnings-light-120x40, state: no-warnings, theme: light, width: 120, height: 40}
 
 guidedSections:
   - key: auto-ingest

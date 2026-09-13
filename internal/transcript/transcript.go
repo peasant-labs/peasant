@@ -188,14 +188,63 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	return projection.Turns
 }
 
+// toolResultOutput is the text a tool_result entry contributes as a tool call's
+// result on the served projection.
+//
+// It is the recorded output; and for an OMISSION PLACEHOLDER — the entry that
+// stands where ingest left a source record out — it is the reader-facing note,
+// which is the only text such an entry carries and the whole reason it exists.
+// Without this the placeholder would be stored, published and served as an
+// empty result, and a reader would see a tool call that silently returned
+// nothing instead of being told what is missing and why.
+func toolResultOutput(e schema.SessionEntry) string {
+	if e.ToolOutput != nil {
+		return *e.ToolOutput
+	}
+	if _, omitted := ingest.OmittedRecordOf(e); omitted && e.ContentPreview != nil {
+		return *e.ContentPreview
+	}
+	return ""
+}
+
+// unjoinedOmissionPlaceholder reports whether an entry is an omission
+// placeholder, the entry that stands where ingest left a source record out,
+// that NO tool call will show to a reader.
+//
+// A placeholder is shown as a tool call's result only when it carries the id
+// of a tool call the transcript also holds. It carries no id at all when the
+// omitted record opened without one of the correlation id keys: every Pi
+// omission, an oversized assistant message, and a Cursor or Strike record
+// whose id sits outside the read prefix. It carries an id nothing answers when
+// the tool call itself was the omitted record. In both of those cases the
+// placeholder is the only trace of the missing record, so it has to be emitted
+// as a turn of its own; suppressing it as a depth-0 tool wrapper would drop
+// the note from every served surface (the detail socket, the previews, the
+// export and the publication) and the reader would see the conversation jump.
+func unjoinedOmissionPlaceholder(entry schema.SessionEntry, toolUseIDs map[string]bool) bool {
+	if _, omitted := ingest.OmittedRecordOf(entry); !omitted {
+		return false
+	}
+	return entry.ToolCallID == nil || !toolUseIDs[*entry.ToolCallID]
+}
+
 func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
 	if len(entries) == 0 {
 		return nil
 	}
 
+	// The tool calls this transcript actually holds. An omission placeholder
+	// is folded into one of them only when its id is in this set.
+	toolUseIDs := make(map[string]bool)
+	for _, e := range entries {
+		if e.EntryType == schema.EntryTypeToolUse && e.ToolCallID != nil {
+			toolUseIDs[*e.ToolCallID] = true
+		}
+	}
+
 	// Pass 1: Collect tool_result data keyed by ToolCallID for joining.
-	// Also collects depth=0 entries with ToolOutput for backward compat
-	// (old-style entries where both tool_use and tool_result are at depth=0).
+	// Inline ToolOutput remains a fallback at any depth, including tool_use
+	// children whose harness stores the completed result on the call itself.
 	resultMap := make(map[string]toolResultData)
 	for _, e := range entries {
 		if e.ToolCallID == nil {
@@ -203,25 +252,22 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		}
 		// Depth=1 tool_result entries are the primary source.
 		if e.Depth == 1 && e.EntryType == schema.EntryTypeToolResult {
-			rd := toolResultData{IsError: e.IsError}
-			if e.ToolOutput != nil {
-				rd.Output = *e.ToolOutput
-			}
+			rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
 			if e.TimestampMs != nil {
 				rd.Timestamp = *e.TimestampMs
 			}
 			resultMap[*e.ToolCallID] = rd
 			continue
 		}
-		// Backward compat: depth=0 entries with ToolOutput (old-style).
-		// Only used for duration computation on old-style entries.
-		if e.ToolOutput != nil && e.TimestampMs != nil {
+		// Preserve inline output as well as untimed flat result/error records.
+		// Explicit depth-1 results above take precedence in either entry order.
+		if e.ToolOutput != nil || (e.Depth == 0 && e.EntryType == schema.EntryTypeToolResult) {
 			if _, exists := resultMap[*e.ToolCallID]; !exists {
-				resultMap[*e.ToolCallID] = toolResultData{
-					Output:    *e.ToolOutput,
-					IsError:   e.IsError,
-					Timestamp: *e.TimestampMs,
+				rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
+				if e.TimestampMs != nil {
+					rd.Timestamp = *e.TimestampMs
 				}
+				resultMap[*e.ToolCallID] = rd
 			}
 		}
 	}
@@ -291,6 +337,9 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	// v10+: indexer canonicalizes wrapper role to tool (R2).
 	for _, e := range entries {
 		if e.Depth == 0 && e.Role == schema.RoleTool {
+			if unjoinedOmissionPlaceholder(e, toolUseIDs) {
+				continue
+			}
 			suppress[e.EntryIndex] = true
 		}
 	}
@@ -393,7 +442,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		// Backward compatibility: old-style single-level entries carry ToolCallID
 		// directly on depth=0. These are not collected by the fold pre-pass
 		// (which only processes depth=1), so handle them here.
-		if e.ToolCallID != nil && len(t.ToolCalls) == 0 {
+		//
+		// An omission placeholder no tool call will show is emitted as its own
+		// turn carrying the note, so it gets no synthetic tool call here: that
+		// would show the reader the same note twice, once as the turn and once
+		// as the result of a call that answers nothing.
+		if e.ToolCallID != nil && len(t.ToolCalls) == 0 && !unjoinedOmissionPlaceholder(e, toolUseIDs) {
 			tc := ingest.ToolCall{
 				ID: *e.ToolCallID,
 			}
@@ -404,13 +458,15 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 				tc.Arguments = *e.ToolInput
 				tc.FilePath = extractFilePath(*e.ToolInput)
 			}
-			if e.ToolOutput != nil {
-				tc.Result = *e.ToolOutput
-			}
+			tc.Result = toolResultOutput(e)
 			if e.ToolKind != nil {
 				tc.ToolKind = *e.ToolKind
 			}
 			tc.IsError = e.IsError
+			if rd, ok := resultMap[*e.ToolCallID]; ok && e.EntryType == schema.EntryTypeToolUse {
+				tc.Result = rd.Output
+				tc.IsError = rd.IsError
+			}
 
 			// Compute duration from tool_use → tool_result timestamps.
 			if e.TimestampMs != nil {
@@ -644,7 +700,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	// self-assessment card; nil when the session has no computed metrics.
 	scorecard := qualityMetricsToScorecard(s.Metadata.Quality)
 
-	return &schema.SessionDetailPayload{
+	detail := &schema.SessionDetailPayload{
 		NativeMetadata:   s.NativeMetadata,
 		ID:               string(s.ID),
 		Harness:          s.Harness,
@@ -667,4 +723,17 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Outcome:          outcome,
 		Scorecard:        scorecard,
 	}
+	// Every served detail leaves this one producer bounded for display. A stored
+	// record may be far larger than the contract's document policy allows the
+	// served document to be, and a session is never refused for the size of its
+	// tool outputs: the oversized text is shortened here, with a visible note,
+	// and the store keeps the whole record. A session whose turn structure alone
+	// exceeds the document budget is still refused by the contract's decoder;
+	// that case is bounded by the hard document cap on purpose, and paged
+	// serving is the planned answer to it. Every consumer of this projection,
+	// the session_detail WebSocket, the kickstart preview, `peasant export` and
+	// the publication content, inherits the same bound because they all come
+	// through here.
+	BoundServedDetail(detail, DefaultServedDocumentBudget())
+	return detail
 }

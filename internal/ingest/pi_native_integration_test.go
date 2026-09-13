@@ -335,7 +335,11 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if tc.Name == "final-leaf-and-global-name" || tc.Name == "whitespace-clears-name" {
 				computed, err := db.GetMetrics(ctx, session.SessionID)
 				if err != nil || computed == nil || computed.TitleGenerated == nil || *computed.TitleGenerated != tc.Title {
-					t.Fatalf("native title not retained: %+v (%v)", computed, err)
+					got := "<nil>"
+					if computed != nil && computed.TitleGenerated != nil {
+						got = *computed.TitleGenerated
+					}
+					t.Fatalf("native title not retained for %s: got %q, want %q (%v)", tc.Name, got, tc.Title, err)
 				}
 			}
 			projection, err := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: schema.HarnessPi})

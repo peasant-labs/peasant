@@ -16,3 +16,26 @@ cases:
   - name: bulk lookup canceled error
     boundary: bulk
     return_error: true
+
+# Renderer short-stage cases: a stage that ends before reaching its total keeps
+# its count as "K/N", never collapsing to the "done" sentinel reserved for a
+# stage whose total was never known (design record: the CONTENT stage ends with
+# Done < Total when the byte budget stops the pass, and the renderer must show
+# how far it got). `want` is the exact count cell; `not_want` must be absent so a
+# short stage is never rendered as a plain completion.
+required_short_stage_cases:
+  - content stopped on budget
+  - diff interrupted mid-scan
+short_stage_cases:
+  - name: content stopped on budget
+    stage: CONTENT
+    done: 3
+    total: 10
+    want: "3/10"
+    not_want: done
+  - name: diff interrupted mid-scan
+    stage: DIFF
+    done: 1
+    total: 3
+    want: "1/3"
+    not_want: done

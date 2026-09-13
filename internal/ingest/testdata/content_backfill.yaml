@@ -1,27 +1,65 @@
-required_names: [retained-root, retained-child, corrupt-snapshot-rollback, force-shape-replacement, reject-shape-mismatch, failing-first-target-page-progress, cursor-query-shape-requires-force, cursor-query-force-remaps-anchor, invalid-project-proof-rollback]
+# Retained-content recovery cases. A failing recovery is reported as a
+# visible per-session diagnostic that names the preserved session and never
+# aborts the run, so the other sessions still recover.
+#   expected_diagnostics  the EXACT multiset of diagnostic types naming the
+#                      first session. One cause must reach the user once, so a
+#                      second reporting path for it shows up here even when it
+#                      says the same thing in other words. Declared per case
+#                      from what the run reports.
+#   preservation_phrase  the words that tell the user the session's stored
+#                      state survived the refusal. Required exactly when
+#                      recovery_reported is set; the reporter that owns a cause
+#                      owns its wording, so the phrase is declared per case.
+#   recovery_reported  the first session's recovery was refused or unavailable
+#   unchanged          the first session's entries and capture are untouched
+#                      after the whole run (the ordinary index run could not
+#                      replace them either)
+# A refused shape mismatch is content-only recovery declining to reshape the
+# projection; the ordinary index run then replaces the unproven projection
+# through captured input. Without --force the refusal is reported; under
+# --force the same run replaces the projection, so nothing is reported.
+# required_names guards deletion by name; adding a case need not appear here.
+required_names: [retained-root, retained-child, corrupt-snapshot-rollback, force-shape-replacement, shape-mismatch-defers-to-ordinary-index, failing-first-target-page-progress, cursor-query-shape-defers-to-ordinary-index, cursor-query-force-remaps-anchor, invalid-project-proof-rollback]
 cases:
   - name: invalid-project-proof-rollback
+    preservation_phrase: "refused without changing session artifacts or index"
+    expected_diagnostics: [metadata_refused]
     invalid_project: true
-    expect_error: true
-  - name: cursor-query-shape-requires-force
+    recovery_reported: true
+    unchanged: true
+  - name: cursor-query-shape-defers-to-ordinary-index
+    preservation_phrase: "preserved"
+    expected_diagnostics: [content_recovery_unavailable]
     cursor: true
-    expect_error: true
+    recovery_reported: true
   - name: cursor-query-force-remaps-anchor
+    expected_diagnostics: [native_refresh_unavailable]
     cursor: true
     force: true
   - name: retained-root
+    expected_diagnostics: []
   - name: retained-child
+    expected_diagnostics: []
     child: true
   - name: corrupt-snapshot-rollback
+    preservation_phrase: "preserved"
+    expected_diagnostics: [content_recovery_unavailable, index_refused]
     corrupt: true
-    expect_error: true
+    recovery_reported: true
+    unchanged: true
   - name: force-shape-replacement
+    expected_diagnostics: [native_refresh_unavailable]
     mismatch: true
     force: true
-  - name: reject-shape-mismatch
+  - name: shape-mismatch-defers-to-ordinary-index
+    preservation_phrase: "preserved"
+    expected_diagnostics: [content_recovery_unavailable]
     mismatch: true
-    expect_error: true
+    recovery_reported: true
   - name: failing-first-target-page-progress
+    preservation_phrase: "preserved"
+    expected_diagnostics: [content_recovery_unavailable, index_refused]
     count: 102
     corrupt: true
-    expect_error: true
+    recovery_reported: true
+    unchanged: true

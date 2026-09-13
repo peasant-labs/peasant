@@ -256,9 +256,12 @@ func (s *Store) ListCurrentSessionCommitAssociations(ctx context.Context, sessio
 		return nil, fmt.Errorf("store.ListCurrentSessionCommitAssociations: take connection for session %q: %w", sessionID, err)
 	}
 	defer s.pool.Put(conn)
+	return listCurrentSessionCommitAssociationsOnConn(conn, sessionID)
+}
 
+func listCurrentSessionCommitAssociationsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]ingest.CurrentCommitAssociation, error) {
 	rows := make([]ingest.CurrentCommitAssociation, 0)
-	err = sqlitex.ExecuteTransient(conn, sqlListCurrentSessionCommitAssociations, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlListCurrentSessionCommitAssociations, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			association, scanErr := scanSessionCommitAssociation(stmt)

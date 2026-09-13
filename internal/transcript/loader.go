@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
 
@@ -32,7 +33,12 @@ func LoadEntriesForDetail(ctx context.Context, r ingest.FullSessionEntryReader, 
 	if err != nil {
 		return fail(err)
 	}
-	if capture.Status != ingest.ContentCaptureComplete || capture.FullCaptureSHA256 == "" {
+	// A capture that is incomplete ONLY because oversized source records were
+	// omitted still holds every entry, with a placeholder standing in each
+	// omitted record's place, and the store proves it with the same full-capture
+	// hash. It loads here like a complete one; every other incompleteness is
+	// refused exactly as before.
+	if !store.PublishableWithOmissions(capture) || capture.FullCaptureSHA256 == "" {
 		return fail(fmt.Errorf("database capture is incomplete; bounded previews cannot substitute for full content"))
 	}
 	if capture.SessionID != id || len(entries) != capture.EntryCount {

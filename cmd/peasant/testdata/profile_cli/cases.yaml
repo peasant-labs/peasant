@@ -259,11 +259,15 @@ cases:
     mode: default
     trace: true
     existingFiles: true
+  # A forecast uploads nothing, so it has no per-upload timing log to write: this
+  # case has to be a real run for both artifacts to exist at once.
   - name: profile_timing_coexistence
     description: writes legacy timing and the new profile from the same collector
-    mode: default
+    mode: json
     trace: true
     timing: true
+    seedSessions: true
+    publishStatus: 201
     expectStderrContains:
       - per-phase rollup
       - timing log written to

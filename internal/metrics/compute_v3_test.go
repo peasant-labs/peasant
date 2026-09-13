@@ -3,6 +3,7 @@ package metrics_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -64,7 +65,12 @@ func TestOutputSurvival_WithAnalyzer(t *testing.T) {
 	seedSession(t, ctx, s, string(sid))
 
 	// Write 2 lines; analyzer returns file with only 1 surviving line.
-	toolInput := `{"file_path":"/src/main.go","content":"line1\nline2"}`
+	//
+	// The path is INSIDE the seeded session's project, and the analyzer is keyed by
+	// the path relative to it, because that is what the capture asks git for: a
+	// written file outside the session's project is refused rather than measured,
+	// and an absolute key could never be found.
+	toolInput := `{"file_path":"` + seededProjectPath + `/src/main.go","content":"line1\nline2"}`
 	toolName := "Write"
 	ts := int64(1708531200000)
 
@@ -79,13 +85,16 @@ func TestOutputSurvival_WithAnalyzer(t *testing.T) {
 
 	stub := &testutil.StubGitDiffAnalyzer{
 		FileContents: map[string][]byte{
-			"/src/main.go@abc123": []byte("line1\nmodified_line2"),
+			"src/main.go@abc123": []byte("line1\nmodified_line2"),
 		},
 		Commits: []string{"abc123"},
 	}
 
 	engine := metrics.NewEngineWithAll(s, nil, stub)
-	engine.ComputeMetrics(ctx, []ingest.SessionID{sid})
+	computed, err := engine.ComputeMetrics(ctx, []ingest.SessionID{sid})
+	if err != nil || computed == 0 {
+		t.Fatalf("the computation failed instead of measuring survival: computed=%d err=%v", computed, err)
+	}
 
 	m, _ := s.GetMetrics(ctx, sid)
 	if m.M6OutputSurvivalPct == nil {
@@ -103,8 +112,16 @@ func TestOutputSurvival_WithAnalyzer(t *testing.T) {
 	}
 }
 
-// TestOutputSurvival_FileDeleted verifies M6 returns 0% when file was deleted.
-func TestOutputSurvival_FileDeleted(t *testing.T) {
+// TestOutputSurvival_UnreadableFileKeepsLastGood holds the line between "the
+// file is gone" and "git could not answer".
+//
+// The analyzer cannot tell them apart: it reports one error for a deleted file, a
+// bad object, a permission problem, and a broken repository alike. Treating that
+// as zero survival publishes a measurement nobody made, on a metric a reader uses
+// to judge whether their work lasted. The computation fails instead, the last-good
+// value stays, and the next harvest retries. Authoritative deletion needs its own
+// evidence and is not this test's subject.
+func TestOutputSurvival_UnreadableFileKeepsLastGood(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -113,7 +130,7 @@ func TestOutputSurvival_FileDeleted(t *testing.T) {
 	sid := ingest.SessionID(testutil.TestSessionUUID)
 	seedSession(t, ctx, s, string(sid))
 
-	toolInput := `{"file_path":"/src/deleted.go","content":"line1\nline2\nline3"}`
+	toolInput := `{"file_path":"` + seededProjectPath + `/src/unreadable.go","content":"line1\nline2\nline3"}`
 	toolName := "Write"
 	ts := int64(1708531200000)
 
@@ -127,20 +144,24 @@ func TestOutputSurvival_FileDeleted(t *testing.T) {
 	}
 
 	stub := &testutil.StubGitDiffAnalyzer{
-		FileContents: map[string][]byte{}, // file not in git = deleted
+		FileContents: map[string][]byte{},
 		Commits:      []string{"abc123"},
-		GetFileErr:   errors.New("file not found at commit"),
+		// One generic failure, which is all the analyzer can report.
+		GetFileErr: errors.New("file not found at commit"),
 	}
 
 	engine := metrics.NewEngineWithAll(s, nil, stub)
-	engine.ComputeMetrics(ctx, []ingest.SessionID{sid})
+	_, err := engine.ComputeMetrics(ctx, []ingest.SessionID{sid})
+	if err == nil {
+		t.Fatal("a Git lookup that could not answer was reported as a completed measurement")
+	}
+	if !strings.Contains(err.Error(), "file not found at commit") {
+		t.Errorf("the failure must carry Git's own words so it can be diagnosed: %v", err)
+	}
 
 	m, _ := s.GetMetrics(ctx, sid)
-	if m.M6OutputSurvivalPct == nil {
-		t.Fatal("M6OutputSurvivalPct should be non-nil (0% for deleted file)")
-	}
-	if *m.M6OutputSurvivalPct != 0.0 {
-		t.Errorf("M6OutputSurvivalPct: expected 0.0, got %f", *m.M6OutputSurvivalPct)
+	if m != nil && m.M6OutputSurvivalPct != nil {
+		t.Errorf("an unanswerable Git lookup published a survival figure of %f", *m.M6OutputSurvivalPct)
 	}
 }
 
