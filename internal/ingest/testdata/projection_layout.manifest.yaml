@@ -4,7 +4,10 @@ requiredNames:
   - ref-part-reorder
   - idless-append-reopen
   - failed-intent-reuses-refs
-  - ambiguous-pair-uncertain-not-doubled
+  - ambiguous-pair-identical-unproved-retains-both
+  - ambiguous-pair-proved-mirror-collapses
+  - ambiguous-pair-divergence-reuses-identities
+  - ambiguous-pair-merged-alias-reconciled
   - no-content-merge
   - long-tool-bytes
   - tool-subtree-partition-closed

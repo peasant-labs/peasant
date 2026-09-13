@@ -507,9 +507,9 @@ cases:
             - {nativeKey: call1, index: 2, ref: e_call1, role: assistant, entryType: tool_use, depth: 1, parentIndex: 1, toolInput: rg parser, toolCallId: e_call1}
             - {nativeKey: result1, index: 3, ref: e_result1, role: tool, entryType: tool_result, depth: 1, parentIndex: 1, toolOutput: parser.go:12, toolCallId: e_call1}
 
-  - name: ambiguous-pair-uncertain-not-doubled
+  - name: ambiguous-pair-identical-unproved-retains-both
     steps:
-      - allocator: [e_amb]
+      - allocator: [e_amb1, e_amb2]
         capture:
           id: gen-ambiguous
           sessionId: sess_ambiguous
@@ -557,7 +557,223 @@ cases:
           earlier:
             - state: uncertain_unresolved
               entries:
+                - {nativeKey: event-1, index: 0, ref: e_amb1, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+                - {nativeKey: response-1, index: 1, ref: e_amb2, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+
+  - name: ambiguous-pair-proved-mirror-collapses
+    steps:
+      - allocator: [e_amb]
+        capture:
+          id: gen-ambiguous-mirror
+          sessionId: sess_ambiguousmirror
+          harness: codex
+          sourceEvidenceDigest: sha256:ambiguous-mirror
+          completeness: complete
+          earlierStates: [uncertain_unresolved]
+          metadata:
+            sessionId: sess_ambiguousmirror
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: event-1
+              ambiguousPairKey: pair-mirror
+              nativeCorrelationKey: corr-mirror
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: response-1
+              ambiguousPairKey: pair-mirror
+              nativeCorrelationKey: corr-mirror
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 0
+          inputSubmissionCount: 0
+          titleRefs: []
+          main: []
+          earlier:
+            - state: uncertain_unresolved
+              entries:
                 - {nativeKey: event-1, index: 0, ref: e_amb, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+
+  - name: ambiguous-pair-divergence-reuses-identities
+    steps:
+      - allocator: [e_amb1, e_amb2]
+        capture:
+          id: gen-ambiguous-divergence-first
+          sessionId: sess_ambiguousdiv
+          harness: codex
+          sourceEvidenceDigest: sha256:ambiguous-divergence-first
+          completeness: complete
+          earlierStates: [uncertain_unresolved]
+          metadata:
+            sessionId: sess_ambiguousdiv
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: event-1
+              ambiguousPairKey: pair-div
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: response-1
+              ambiguousPairKey: pair-div
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 0
+          inputSubmissionCount: 0
+          titleRefs: []
+          main: []
+          earlier:
+            - state: uncertain_unresolved
+              entries:
+                - {nativeKey: event-1, index: 0, ref: e_amb1, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+                - {nativeKey: response-1, index: 1, ref: e_amb2, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+      - priorFromPrevious: true
+        allocator: []
+        capture:
+          id: gen-ambiguous-divergence-second
+          sessionId: sess_ambiguousdiv
+          harness: codex
+          sourceEvidenceDigest: sha256:ambiguous-divergence-second
+          completeness: complete
+          earlierStates: [uncertain_unresolved]
+          metadata:
+            sessionId: sess_ambiguousdiv
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: event-1
+              ambiguousPairKey: pair-div
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: response-1
+              ambiguousPairKey: pair-div
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input diverged
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 0
+          inputSubmissionCount: 0
+          titleRefs: []
+          main: []
+          earlier:
+            - state: uncertain_unresolved
+              entries:
+                - {nativeKey: event-1, index: 0, ref: e_amb1, role: user, entryType: text, depth: 0, content: ambiguous input, ownership: local}
+                - {nativeKey: response-1, index: 1, ref: e_amb2, role: user, entryType: text, depth: 0, content: ambiguous input diverged, ownership: local}
+
+  - name: ambiguous-pair-merged-alias-reconciled
+    steps:
+      - prior:
+          entries:
+            event-1: e_amb
+            response-1: e_amb
+        allocator: [e_new]
+        capture:
+          id: gen-ambiguous-reconcile
+          sessionId: sess_ambiguousrec
+          harness: codex
+          sourceEvidenceDigest: sha256:ambiguous-reconcile
+          completeness: complete
+          earlierStates: [uncertain_unresolved]
+          metadata:
+            sessionId: sess_ambiguousrec
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: event-1
+              ambiguousPairKey: pair-rec
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input first
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+            - nativeKey: response-1
+              ambiguousPairKey: pair-rec
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: ambiguous input second distinct
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 0
+          inputSubmissionCount: 0
+          titleRefs: []
+          main: []
+          earlier:
+            - state: uncertain_unresolved
+              entries:
+                - {nativeKey: event-1, index: 0, ref: e_amb, role: user, entryType: text, depth: 0, content: ambiguous input first, ownership: local}
+                - {nativeKey: response-1, index: 1, ref: e_new, role: user, entryType: text, depth: 0, content: ambiguous input second distinct, ownership: local}
 
   - name: no-content-merge
     steps:
