@@ -53,7 +53,6 @@ expectedFieldNames:
   - grouped-satisfied-select-under-is-a-true-no-op
   - project-toggle-spans-harnesses
   - branch-toggle-spans-harnesses
-expectedDerivationCaseCount: 7
 expectedDerivationNames:
   - partially-checked-project-unknown-group-becomes-explicit-sessions
   - fully-checked-unknown-branch-project-stays-branchless
@@ -62,7 +61,6 @@ expectedDerivationNames:
   - harness-first-placeholder-worktree-becomes-explicit-sessions
   - flat-fully-checked-project-stays-branchless
   - flat-partially-checked-project-keeps-explicit-sessions
-expectedSanitizeCaseCount: 9
 expectedSanitizeNames:
   - placeholder-only-project-selects-its-unknown-sessions
   - named-branch-survives-while-unknown-sessions-become-explicit

@@ -35,18 +35,16 @@ const (
 )
 
 type touchedSelectionDocument struct {
-	ExpectedCaseCount           int                     `yaml:"expectedCaseCount"`
-	ExpectedFieldCaseCount      int                     `yaml:"expectedFieldCaseCount"`
-	ExpectedDerivationCaseCount int                     `yaml:"expectedDerivationCaseCount"`
-	ExpectedSanitizeCaseCount   int                     `yaml:"expectedSanitizeCaseCount"`
-	ExpectedNames               []string                `yaml:"expectedNames"`
-	ExpectedFieldNames          []string                `yaml:"expectedFieldNames"`
-	ExpectedDerivationNames     []string                `yaml:"expectedDerivationNames"`
-	ExpectedSanitizeNames       []string                `yaml:"expectedSanitizeNames"`
-	FieldCases                  []touchedFieldCase      `yaml:"fieldCases"`
-	Cases                       []touchedSelectionCase  `yaml:"cases"`
-	DerivationCases             []touchedDerivationCase `yaml:"derivationCases"`
-	SanitizeCases               []touchedSanitizeCase   `yaml:"sanitizeCases"`
+	ExpectedCaseCount       int                     `yaml:"expectedCaseCount"`
+	ExpectedFieldCaseCount  int                     `yaml:"expectedFieldCaseCount"`
+	ExpectedNames           []string                `yaml:"expectedNames"`
+	ExpectedFieldNames      []string                `yaml:"expectedFieldNames"`
+	ExpectedDerivationNames []string                `yaml:"expectedDerivationNames"`
+	ExpectedSanitizeNames   []string                `yaml:"expectedSanitizeNames"`
+	FieldCases              []touchedFieldCase      `yaml:"fieldCases"`
+	Cases                   []touchedSelectionCase  `yaml:"cases"`
+	DerivationCases         []touchedDerivationCase `yaml:"derivationCases"`
+	SanitizeCases           []touchedSanitizeCase   `yaml:"sanitizeCases"`
 }
 
 type touchedSelectionCase struct {
@@ -197,11 +195,11 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 	if document.ExpectedFieldCaseCount != len(document.FieldCases) || document.ExpectedFieldCaseCount != len(document.ExpectedFieldNames) || len(document.FieldCases) == 0 {
 		t.Fatalf("field fixture manifest count=%d names=%d cases=%d", document.ExpectedFieldCaseCount, len(document.ExpectedFieldNames), len(document.FieldCases))
 	}
-	if document.ExpectedDerivationCaseCount != len(document.DerivationCases) || document.ExpectedDerivationCaseCount != len(document.ExpectedDerivationNames) || len(document.DerivationCases) == 0 {
-		t.Fatalf("derivation fixture manifest count=%d names=%d cases=%d", document.ExpectedDerivationCaseCount, len(document.ExpectedDerivationNames), len(document.DerivationCases))
+	if len(document.DerivationCases) == 0 {
+		t.Fatal("touched_selection.yaml declares no derivation cases")
 	}
-	if document.ExpectedSanitizeCaseCount != len(document.SanitizeCases) || document.ExpectedSanitizeCaseCount != len(document.ExpectedSanitizeNames) || len(document.SanitizeCases) == 0 {
-		t.Fatalf("sanitize fixture manifest count=%d names=%d cases=%d", document.ExpectedSanitizeCaseCount, len(document.ExpectedSanitizeNames), len(document.SanitizeCases))
+	if len(document.SanitizeCases) == 0 {
+		t.Fatal("touched_selection.yaml declares no sanitize cases")
 	}
 	seen := map[string]bool{}
 	for index, testCase := range document.Cases {
@@ -275,7 +273,8 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 			t.Fatalf("field case %q must set a second project or branch together with expectedSecondSessionState", testCase.Name)
 		}
 	}
-	for index, testCase := range document.DerivationCases {
+	derivationNames := make(map[string]bool, len(document.DerivationCases))
+	for _, testCase := range document.DerivationCases {
 		required := []testutil.FixtureField{
 			{Key: "name", Value: testCase.Name},
 			{Key: "harness", Value: testCase.Harness},
@@ -287,9 +286,10 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 			)
 		}
 		testutil.RequireFixtureFields(t, "touched selection derivation", testCase.Name, required)
-		if testCase.Name != document.ExpectedDerivationNames[index] {
-			t.Fatalf("derivationCase[%d] name=%q, manifest=%q", index, testCase.Name, document.ExpectedDerivationNames[index])
+		if derivationNames[testCase.Name] {
+			t.Fatalf("derivation fixture repeats case name %q", testCase.Name)
 		}
+		derivationNames[testCase.Name] = true
 		if (len(testCase.Branches) == 0) == (len(testCase.FlatSessions) == 0) {
 			t.Fatalf("derivation case %q must declare branches or flatSessions, but not both", testCase.Name)
 		}
@@ -297,20 +297,28 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 			t.Fatalf("derivation case %q expected mode=%q, want %q", testCase.Name, testCase.Expected.Mode, config.SelectionModeSelected)
 		}
 	}
-	for index, testCase := range document.SanitizeCases {
+	if err := testutil.RequireFixtureNames("touched_selection.yaml derivation family", "derivation case", document.ExpectedDerivationNames, derivationNames); err != nil {
+		t.Fatal(err)
+	}
+	sanitizeNames := make(map[string]bool, len(document.SanitizeCases))
+	for _, testCase := range document.SanitizeCases {
 		testutil.RequireFixtureFields(t, "touched selection sanitize", testCase.Name, []testutil.FixtureField{
 			{Key: "name", Value: testCase.Name},
 			{Key: "forest.harness", Value: testCase.Forest.Harness},
 		})
-		if testCase.Name != document.ExpectedSanitizeNames[index] {
-			t.Fatalf("sanitizeCase[%d] name=%q, manifest=%q", index, testCase.Name, document.ExpectedSanitizeNames[index])
+		if sanitizeNames[testCase.Name] {
+			t.Fatalf("sanitize fixture repeats case name %q", testCase.Name)
 		}
+		sanitizeNames[testCase.Name] = true
 		if testCase.Saved.Mode != config.SelectionModeSelected {
 			t.Fatalf("sanitize case %q saved mode=%q, want %q", testCase.Name, testCase.Saved.Mode, config.SelectionModeSelected)
 		}
 		if len(testCase.Forest.Branches) == 0 {
 			t.Fatalf("sanitize case %q has no forest branches", testCase.Name)
 		}
+	}
+	if err := testutil.RequireFixtureNames("touched_selection.yaml sanitize family", "sanitize case", document.ExpectedSanitizeNames, sanitizeNames); err != nil {
+		t.Fatal(err)
 	}
 	return document
 }
