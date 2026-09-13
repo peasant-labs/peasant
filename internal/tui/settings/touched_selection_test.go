@@ -35,12 +35,18 @@ const (
 )
 
 type touchedSelectionDocument struct {
-	ExpectedCaseCount      int                    `yaml:"expectedCaseCount"`
-	ExpectedFieldCaseCount int                    `yaml:"expectedFieldCaseCount"`
-	ExpectedNames          []string               `yaml:"expectedNames"`
-	ExpectedFieldNames     []string               `yaml:"expectedFieldNames"`
-	FieldCases             []touchedFieldCase     `yaml:"fieldCases"`
-	Cases                  []touchedSelectionCase `yaml:"cases"`
+	ExpectedCaseCount           int                     `yaml:"expectedCaseCount"`
+	ExpectedFieldCaseCount      int                     `yaml:"expectedFieldCaseCount"`
+	ExpectedDerivationCaseCount int                     `yaml:"expectedDerivationCaseCount"`
+	ExpectedSanitizeCaseCount   int                     `yaml:"expectedSanitizeCaseCount"`
+	ExpectedNames               []string                `yaml:"expectedNames"`
+	ExpectedFieldNames          []string                `yaml:"expectedFieldNames"`
+	ExpectedDerivationNames     []string                `yaml:"expectedDerivationNames"`
+	ExpectedSanitizeNames       []string                `yaml:"expectedSanitizeNames"`
+	FieldCases                  []touchedFieldCase      `yaml:"fieldCases"`
+	Cases                       []touchedSelectionCase  `yaml:"cases"`
+	DerivationCases             []touchedDerivationCase `yaml:"derivationCases"`
+	SanitizeCases               []touchedSanitizeCase   `yaml:"sanitizeCases"`
 }
 
 type touchedSelectionCase struct {
@@ -67,11 +73,56 @@ type touchedSessionFixture struct {
 	SessionID string `yaml:"sessionId"`
 }
 
+// touchedDerivationCase derives a forest through the production [FromTreeNodes]
+// path and pins the harness-keyed selection it produces. A set providerID
+// selects the harness-first provider -> remote -> worktree -> session shape;
+// otherwise the case builds the project-first shape, with flatSessions as
+// direct session children (a flattened project) or branches as the branch
+// level.
+type touchedDerivationCase struct {
+	Name            string                     `yaml:"name"`
+	ProviderID      string                     `yaml:"providerID"`
+	Harness         string                     `yaml:"harness"`
+	ProjectIdentity string                     `yaml:"projectIdentity"`
+	ClonePath       string                     `yaml:"clonePath"`
+	GitRemote       string                     `yaml:"gitRemote"`
+	ProjectName     string                     `yaml:"projectName"`
+	Branches        []touchedDerivationBranch  `yaml:"branches"`
+	FlatSessions    []touchedDerivationSession `yaml:"flatSessions"`
+	Expected        config.SelectionConfig     `yaml:"expected"`
+}
+
+type touchedDerivationBranch struct {
+	Branch   string                     `yaml:"branch"`
+	Sessions []touchedDerivationSession `yaml:"sessions"`
+}
+
+type touchedDerivationSession struct {
+	ID    string `yaml:"id"`
+	State string `yaml:"state"`
+}
+
+// touchedSanitizeCase pins the rewrite of display-only placeholder policies
+// into explicit session rules against one available forest. expectChecked and
+// expectUnchecked optionally assert what the canonical matcher selects once the
+// sanitized value is applied to that forest.
+type touchedSanitizeCase struct {
+	Name            string                 `yaml:"name"`
+	Forest          touchedDerivationCase  `yaml:"forest"`
+	Saved           config.SelectionConfig `yaml:"saved"`
+	ExpectChanged   bool                   `yaml:"expectChanged"`
+	Expected        config.SelectionConfig `yaml:"expected"`
+	ExpectChecked   []string               `yaml:"expectChecked"`
+	ExpectUnchecked []string               `yaml:"expectUnchecked"`
+}
+
 type touchedFieldKey string
 
 const (
 	touchedFieldDown        touchedFieldKey = "down"
+	touchedFieldUp          touchedFieldKey = "up"
 	touchedFieldToggle      touchedFieldKey = "toggle"
+	touchedFieldSelectAll   touchedFieldKey = "select-all"
 	touchedFieldSelectUnder touchedFieldKey = "select-under"
 	touchedFieldFilter      touchedFieldKey = "filter"
 	touchedFieldCollapse    touchedFieldKey = "collapse"
@@ -80,23 +131,52 @@ const (
 )
 
 type touchedFieldCase struct {
-	Name                 string                  `yaml:"name"`
-	Current              config.SelectionConfig  `yaml:"current"`
-	ProjectIdentity      string                  `yaml:"projectIdentity"`
-	Harness              string                  `yaml:"harness"`
-	LinkedHarness        string                  `yaml:"linkedHarness"`
-	ClonePath            string                  `yaml:"clonePath"`
-	LinkedClonePath      string                  `yaml:"linkedClonePath"`
-	GitRemote            string                  `yaml:"gitRemote"`
-	Branch               string                  `yaml:"branch"`
-	SessionID            string                  `yaml:"sessionId"`
-	LinkedSessionID      string                  `yaml:"linkedSessionId"`
-	Keys                 []touchedFieldKey       `yaml:"keys"`
-	ExpectedSessionState string                  `yaml:"expectedSessionState"`
-	ExpectedSetCount     int                     `yaml:"expectedSetCount"`
-	ExpectReconcileError bool                    `yaml:"expectReconcileError"`
-	WithPreview          bool                    `yaml:"withPreview"`
-	Expected             *config.SelectionConfig `yaml:"expected"`
+	Name            string                 `yaml:"name"`
+	Current         config.SelectionConfig `yaml:"current"`
+	ProjectIdentity string                 `yaml:"projectIdentity"`
+	Harness         string                 `yaml:"harness"`
+	LinkedHarness   string                 `yaml:"linkedHarness"`
+	ClonePath       string                 `yaml:"clonePath"`
+	LinkedClonePath string                 `yaml:"linkedClonePath"`
+	GitRemote       string                 `yaml:"gitRemote"`
+	Branch          string                 `yaml:"branch"`
+	SessionID       string                 `yaml:"sessionId"`
+	SecondSessionID string                 `yaml:"secondSessionId"`
+	// SecondBranch adds a second named branch to the primary project, with its
+	// own session, so a case can exercise manual all-branch toggles. The
+	// optional clone path and harness place that session in a different linked
+	// worktree or harness under the same repository root.
+	SecondBranch          string                `yaml:"secondBranch"`
+	SecondBranchSessionID string                `yaml:"secondBranchSessionId"`
+	SecondBranchClonePath string                `yaml:"secondBranchClonePath"`
+	SecondBranchHarness   string                `yaml:"secondBranchHarness"`
+	LinkedSessionID       string                `yaml:"linkedSessionId"`
+	SecondProject         *touchedSecondProject `yaml:"secondProject"`
+	Keys                  []touchedFieldKey     `yaml:"keys"`
+	// Flat builds the primary project's children as session rows directly under
+	// the project (a flattened project), instead of project -> branch -> session.
+	Flat                       bool   `yaml:"flat"`
+	ExpectedSessionState       string `yaml:"expectedSessionState"`
+	ExpectedSecondSessionState string `yaml:"expectedSecondSessionState"`
+	ExpectedSetCount           int    `yaml:"expectedSetCount"`
+	ExpectReconcileError       bool   `yaml:"expectReconcileError"`
+	// SeedWithoutSave opens the draft directly from current, without the disk
+	// round trip, for a legacy selection the config loader rejects but a draft
+	// can still hold (a display-placeholder branch exclusion).
+	SeedWithoutSave bool                    `yaml:"seedWithoutSave"`
+	WithPreview     bool                    `yaml:"withPreview"`
+	Expected        *config.SelectionConfig `yaml:"expected"`
+}
+
+// touchedSecondProject adds one more project root to a field case's forest,
+// carrying the same harness, so a case can assert what survives in the harness
+// while the primary project is edited.
+type touchedSecondProject struct {
+	ProjectIdentity string `yaml:"projectIdentity"`
+	ClonePath       string `yaml:"clonePath"`
+	GitRemote       string `yaml:"gitRemote"`
+	Branch          string `yaml:"branch"`
+	SessionID       string `yaml:"sessionId"`
 }
 
 func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
@@ -116,6 +196,12 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 	}
 	if document.ExpectedFieldCaseCount != len(document.FieldCases) || document.ExpectedFieldCaseCount != len(document.ExpectedFieldNames) || len(document.FieldCases) == 0 {
 		t.Fatalf("field fixture manifest count=%d names=%d cases=%d", document.ExpectedFieldCaseCount, len(document.ExpectedFieldNames), len(document.FieldCases))
+	}
+	if document.ExpectedDerivationCaseCount != len(document.DerivationCases) || document.ExpectedDerivationCaseCount != len(document.ExpectedDerivationNames) || len(document.DerivationCases) == 0 {
+		t.Fatalf("derivation fixture manifest count=%d names=%d cases=%d", document.ExpectedDerivationCaseCount, len(document.ExpectedDerivationNames), len(document.DerivationCases))
+	}
+	if document.ExpectedSanitizeCaseCount != len(document.SanitizeCases) || document.ExpectedSanitizeCaseCount != len(document.ExpectedSanitizeNames) || len(document.SanitizeCases) == 0 {
+		t.Fatalf("sanitize fixture manifest count=%d names=%d cases=%d", document.ExpectedSanitizeCaseCount, len(document.ExpectedSanitizeNames), len(document.SanitizeCases))
 	}
 	seen := map[string]bool{}
 	for index, testCase := range document.Cases {
@@ -150,7 +236,7 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 			t.Fatalf("fieldCase[%d] name=%q, manifest=%q", index, testCase.Name, document.ExpectedFieldNames[index])
 		}
 		for _, key := range testCase.Keys {
-			if key != touchedFieldDown && key != touchedFieldToggle && key != touchedFieldSelectUnder &&
+			if key != touchedFieldDown && key != touchedFieldUp && key != touchedFieldToggle && key != touchedFieldSelectAll && key != touchedFieldSelectUnder &&
 				key != touchedFieldFilter && key != touchedFieldCollapse && key != touchedFieldSpinner && key != touchedFieldRefresh {
 				t.Fatalf("field case %q has unknown key %q", testCase.Name, key)
 			}
@@ -163,6 +249,67 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 		}
 		if testCase.LinkedHarness != "" && testCase.LinkedClonePath == "" {
 			t.Fatalf("field case %q sets linkedHarness without a linked session", testCase.Name)
+		}
+		if testCase.SecondSessionID != "" && testCase.SecondSessionID == testCase.SessionID {
+			t.Fatalf("field case %q repeats its primary session as the second session", testCase.Name)
+		}
+		if (testCase.SecondBranch == "") != (testCase.SecondBranchSessionID == "") {
+			t.Fatalf("field case %q must set secondBranch and secondBranchSessionId together", testCase.Name)
+		}
+		if testCase.SecondBranch == "" && (testCase.SecondBranchClonePath != "" || testCase.SecondBranchHarness != "") {
+			t.Fatalf("field case %q sets a second-branch clone path or harness without a second branch", testCase.Name)
+		}
+		if testCase.Flat && (testCase.Branch != "" || testCase.LinkedClonePath != "" || testCase.LinkedSessionID != "") {
+			t.Fatalf("flat field case %q cannot declare a branch level or linked worktree", testCase.Name)
+		}
+		if testCase.SecondProject != nil {
+			testutil.RequireFixtureFields(t, "touched tree field second project", testCase.Name, []testutil.FixtureField{
+				{Key: "secondProject.projectIdentity", Value: testCase.SecondProject.ProjectIdentity},
+				{Key: "secondProject.clonePath", Value: testCase.SecondProject.ClonePath},
+				{Key: "secondProject.gitRemote", Value: testCase.SecondProject.GitRemote},
+				{Key: "secondProject.branch", Value: testCase.SecondProject.Branch},
+				{Key: "secondProject.sessionId", Value: testCase.SecondProject.SessionID},
+			})
+		}
+		if (testCase.SecondProject == nil && testCase.SecondBranch == "") != (testCase.ExpectedSecondSessionState == "") {
+			t.Fatalf("field case %q must set a second project or branch together with expectedSecondSessionState", testCase.Name)
+		}
+	}
+	for index, testCase := range document.DerivationCases {
+		required := []testutil.FixtureField{
+			{Key: "name", Value: testCase.Name},
+			{Key: "harness", Value: testCase.Harness},
+		}
+		if testCase.ProviderID == "" {
+			required = append(required,
+				testutil.FixtureField{Key: "projectIdentity", Value: testCase.ProjectIdentity},
+				testutil.FixtureField{Key: "clonePath", Value: testCase.ClonePath},
+			)
+		}
+		testutil.RequireFixtureFields(t, "touched selection derivation", testCase.Name, required)
+		if testCase.Name != document.ExpectedDerivationNames[index] {
+			t.Fatalf("derivationCase[%d] name=%q, manifest=%q", index, testCase.Name, document.ExpectedDerivationNames[index])
+		}
+		if (len(testCase.Branches) == 0) == (len(testCase.FlatSessions) == 0) {
+			t.Fatalf("derivation case %q must declare branches or flatSessions, but not both", testCase.Name)
+		}
+		if testCase.Expected.Mode != config.SelectionModeSelected {
+			t.Fatalf("derivation case %q expected mode=%q, want %q", testCase.Name, testCase.Expected.Mode, config.SelectionModeSelected)
+		}
+	}
+	for index, testCase := range document.SanitizeCases {
+		testutil.RequireFixtureFields(t, "touched selection sanitize", testCase.Name, []testutil.FixtureField{
+			{Key: "name", Value: testCase.Name},
+			{Key: "forest.harness", Value: testCase.Forest.Harness},
+		})
+		if testCase.Name != document.ExpectedSanitizeNames[index] {
+			t.Fatalf("sanitizeCase[%d] name=%q, manifest=%q", index, testCase.Name, document.ExpectedSanitizeNames[index])
+		}
+		if testCase.Saved.Mode != config.SelectionModeSelected {
+			t.Fatalf("sanitize case %q saved mode=%q, want %q", testCase.Name, testCase.Saved.Mode, config.SelectionModeSelected)
+		}
+		if len(testCase.Forest.Branches) == 0 {
+			t.Fatalf("sanitize case %q has no forest branches", testCase.Name)
 		}
 	}
 	return document
@@ -263,11 +410,15 @@ func touchedScope(testCase touchedSelectionCase) selectionScope {
 }
 
 type touchedStaticTreeSource struct {
-	root *kit.TreeNode
+	roots []*kit.TreeNode
 }
 
 func (source touchedStaticTreeSource) Load(context.Context) ([]*kit.TreeNode, error) {
-	return []*kit.TreeNode{cloneTouchedNode(source.root)}, nil
+	roots := make([]*kit.TreeNode, 0, len(source.roots))
+	for _, root := range source.roots {
+		roots = append(roots, cloneTouchedNode(root))
+	}
+	return roots, nil
 }
 
 func cloneTouchedNode(node *kit.TreeNode) *kit.TreeNode {
@@ -293,14 +444,16 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			configured := config.BaseConfig()
 			configured.Selection = testCase.Current
 			path := t.TempDir() + "/config.yaml"
-			if err := config.SaveAtomic(path, configured); err != nil {
-				t.Fatalf("save field fixture config: %v", err)
+			if !testCase.SeedWithoutSave {
+				if err := config.SaveAtomic(path, configured); err != nil {
+					t.Fatalf("save field fixture config: %v", err)
+				}
 			}
 			draft, err := NewDraft(path, configured)
 			if err != nil {
 				t.Fatalf("open field fixture draft: %v", err)
 			}
-			root := touchedFieldRoot(testCase)
+			root := touchedFieldRoots(testCase)
 			setCount := 0
 			accessor := Accessor[TreeSelection]{
 				Get: func(current *config.Config) TreeSelection {
@@ -318,7 +471,7 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			}
 			registry := Registry{Sections: []Section{{
 				Key: "transcripts", Title: "select transcripts",
-				Fields: []Field{Tree("selection", "transcripts", accessor, touchedStaticTreeSource{root: root}, options...)},
+				Fields: []Field{Tree("selection", "transcripts", accessor, touchedStaticTreeSource{roots: root}, options...)},
 			}}}
 			field := registry.Sections[0].Fields[0].(*treeField)
 			flow := NewFlow(theme.New(theme.ModeDark), registry, draft)
@@ -349,6 +502,18 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 				t.Fatalf("accessor Set count=%d, want %d", setCount, testCase.ExpectedSetCount)
 			}
 			after := TreeSelection{Mode: draft.Working().Selection.Mode, Harnesses: draft.Working().Selection.Harnesses}
+			for harness, configured := range after.Harnesses {
+				for _, project := range configured.Projects {
+					if containsBranchlessPlaceholder(project.Branches) {
+						t.Fatalf("field case %q persisted the branchless placeholder in harness %q: %#v", testCase.Name, harness, project)
+					}
+				}
+				for _, exclusion := range configured.Exclusions.Branches {
+					if containsBranchlessPlaceholder(exclusion.Branches) {
+						t.Fatalf("field case %q persisted the branchless placeholder in harness %q: %#v", testCase.Name, harness, exclusion)
+					}
+				}
+			}
 			want := before
 			if testCase.Expected != nil {
 				want = TreeSelection{Mode: testCase.Expected.Mode, Harnesses: testCase.Expected.Harnesses}
@@ -376,8 +541,52 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 			if !ok || sessions[testCase.SessionID] == nil || sessions[testCase.SessionID].State != state {
 				t.Fatalf("session state=%v, want %s", sessions[testCase.SessionID], testCase.ExpectedSessionState)
 			}
+			secondSessionID := ""
+			if testCase.SecondProject != nil {
+				secondSessionID = testCase.SecondProject.SessionID
+			} else if testCase.SecondBranch != "" {
+				secondSessionID = testCase.SecondBranchSessionID
+			}
+			if secondSessionID != "" {
+				secondState, ok := touchedTriState(testCase.ExpectedSecondSessionState)
+				if !ok || sessions[secondSessionID] == nil || sessions[secondSessionID].State != secondState {
+					t.Fatalf("second session state=%v, want %s", sessions[secondSessionID], testCase.ExpectedSecondSessionState)
+				}
+			}
 		})
 	}
+}
+
+// touchedFieldRoots builds the field case's forest: the primary project root
+// plus the optional second project root that shares the case's harness.
+func touchedFieldRoots(testCase touchedFieldCase) []*kit.TreeNode {
+	roots := []*kit.TreeNode{touchedFieldRoot(testCase)}
+	second := testCase.SecondProject
+	if second == nil {
+		return roots
+	}
+	roots = append(roots, &kit.TreeNode{
+		ID: second.ProjectIdentity,
+		Meta: map[string]string{
+			MetaProjectIdentity: second.ProjectIdentity,
+			MetaClonePath:       second.ClonePath,
+			MetaRemote:          second.GitRemote,
+			MetaProjectHarness:  testCase.Harness,
+		},
+		Children: []*kit.TreeNode{{
+			ID: second.Branch, Label: second.Branch, Meta: map[string]string{MetaBranch: second.Branch},
+			Children: []*kit.TreeNode{{
+				ID: second.SessionID,
+				Meta: map[string]string{
+					MetaHarness:         testCase.Harness,
+					MetaProjectIdentity: second.ProjectIdentity,
+					MetaClonePath:       second.ClonePath,
+					MetaRemote:          second.GitRemote,
+				},
+			}},
+		}},
+	})
+	return roots
 }
 
 func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
@@ -388,22 +597,37 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 			MetaClonePath:       testCase.ClonePath,
 			MetaRemote:          testCase.GitRemote,
 		},
-		Children: []*kit.TreeNode{{
-			ID: testCase.Branch, Label: testCase.Branch, Meta: map[string]string{MetaBranch: testCase.Branch},
-			Children: []*kit.TreeNode{{
-				ID: testCase.SessionID,
-				Meta: map[string]string{
-					MetaHarness:         testCase.Harness,
-					MetaProjectIdentity: testCase.ProjectIdentity,
-					MetaClonePath:       testCase.ClonePath,
-					MetaRemote:          testCase.GitRemote,
-				},
-			}},
-		}},
 	}
 	if testCase.LinkedHarness == "" || testCase.LinkedHarness == testCase.Harness {
 		root.Meta[MetaProjectHarness] = testCase.Harness
 	}
+	sessionMetaFor := func(harness, clonePath string) map[string]string {
+		return map[string]string{
+			MetaHarness:         harness,
+			MetaProjectIdentity: testCase.ProjectIdentity,
+			MetaClonePath:       clonePath,
+			MetaRemote:          testCase.GitRemote,
+		}
+	}
+	sessionMeta := func() map[string]string {
+		return sessionMetaFor(testCase.Harness, testCase.ClonePath)
+	}
+	if testCase.Flat {
+		// A flattened project's children are session rows: the branchless group
+		// is the only branch level and is omitted from the rendered forest.
+		root.Children = append(root.Children, &kit.TreeNode{ID: testCase.SessionID, Meta: sessionMeta()})
+		if testCase.SecondSessionID != "" {
+			root.Children = append(root.Children, &kit.TreeNode{ID: testCase.SecondSessionID, Meta: sessionMeta()})
+		}
+		return root
+	}
+	root.Children = []*kit.TreeNode{{
+		ID: testCase.Branch, Label: testCase.Branch, Meta: map[string]string{MetaBranch: testCase.Branch},
+		Children: []*kit.TreeNode{{
+			ID:   testCase.SessionID,
+			Meta: sessionMeta(),
+		}},
+	}}
 	if testCase.LinkedClonePath != "" {
 		delete(root.Meta, MetaClonePath)
 		linkedHarness := testCase.LinkedHarness
@@ -420,15 +644,229 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 			},
 		})
 	}
+	if testCase.SecondSessionID != "" {
+		root.Children[0].Children = append(root.Children[0].Children, &kit.TreeNode{
+			ID:   testCase.SecondSessionID,
+			Meta: sessionMeta(),
+		})
+	}
+	if testCase.SecondBranch != "" {
+		secondHarness := testCase.SecondBranchHarness
+		if secondHarness == "" {
+			secondHarness = testCase.Harness
+		}
+		secondClonePath := testCase.SecondBranchClonePath
+		if secondClonePath == "" {
+			secondClonePath = testCase.ClonePath
+		}
+		if secondClonePath != testCase.ClonePath {
+			// A shared repository root with linked worktrees: the root carries no
+			// single clone path and each session keeps its exact worktree.
+			delete(root.Meta, MetaClonePath)
+		}
+		root.Children = append(root.Children, &kit.TreeNode{
+			ID: testCase.SecondBranch, Label: testCase.SecondBranch, Meta: map[string]string{MetaBranch: testCase.SecondBranch},
+			Children: []*kit.TreeNode{{
+				ID:   testCase.SecondBranchSessionID,
+				Meta: sessionMetaFor(secondHarness, secondClonePath),
+			}},
+		})
+	}
 	return root
+}
+
+// TestFromTreeNodesUnknownBranchDerivationFixture pins the one derivation
+// boundary the saved configuration comes from: a fully checked unknown-branch
+// group never becomes a branch name. Where a branch rule cannot express the
+// group, its sessions fall back to explicit session IDs.
+func TestFromTreeNodesUnknownBranchDerivationFixture(t *testing.T) {
+	document := loadTouchedSelectionDocument(t)
+	for _, testCase := range document.DerivationCases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			got := FromTreeNodes(touchedDerivationRoots(t, testCase))
+			want := TreeSelection{Mode: testCase.Expected.Mode, Harnesses: testCase.Expected.Harnesses}
+			if !selectionsEqual(got, want) {
+				t.Fatalf("derived selection mismatch\n got: %#v\nwant: %#v", got, want)
+			}
+			for harness, configured := range got.Harnesses {
+				for _, project := range configured.Projects {
+					if containsBranchlessPlaceholder(project.Branches) {
+						t.Fatalf("harness %q project %#v persists the branchless placeholder", harness, project)
+					}
+				}
+				for _, exclusion := range configured.Exclusions.Branches {
+					if containsBranchlessPlaceholder(exclusion.Branches) {
+						t.Fatalf("harness %q exclusion %#v persists the branchless placeholder", harness, exclusion)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestSanitizePlaceholderSelectionFixture pins the rewrite itself: placeholder
+// policies become explicit session rules, drop without widening, and leave a
+// placeholder-free selection unchanged.
+func TestSanitizePlaceholderSelectionFixture(t *testing.T) {
+	document := loadTouchedSelectionDocument(t)
+	for _, testCase := range document.SanitizeCases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			projects := availableProjectsFromForest(touchedDerivationRoots(t, testCase.Forest))
+			got, changed := sanitizePlaceholderSelection(testCase.Saved, projects)
+			if changed != testCase.ExpectChanged {
+				t.Fatalf("sanitize changed=%v, want %v\n got: %#v", changed, testCase.ExpectChanged, got)
+			}
+			gotSelection := TreeSelection{Mode: got.Mode, Harnesses: got.Harnesses}
+			wantSelection := TreeSelection{Mode: testCase.Expected.Mode, Harnesses: testCase.Expected.Harnesses}
+			if !selectionsEqual(gotSelection, wantSelection) {
+				t.Fatalf("sanitized selection mismatch\n got: %#v\nwant: %#v", got, testCase.Expected)
+			}
+			for harness, configured := range got.Harnesses {
+				for _, project := range configured.Projects {
+					if containsBranchlessPlaceholder(project.Branches) {
+						t.Fatalf("harness %q project %#v persists the branchless placeholder", harness, project)
+					}
+				}
+				for _, exclusion := range configured.Exclusions.Branches {
+					if containsBranchlessPlaceholder(exclusion.Branches) {
+						t.Fatalf("harness %q exclusion %#v persists the branchless placeholder", harness, exclusion)
+					}
+				}
+			}
+			if len(testCase.ExpectChecked) > 0 || len(testCase.ExpectUnchecked) > 0 {
+				roots := touchedDerivationRoots(t, testCase.Forest)
+				PrepopulateSelection(roots, got)
+				states := sessionNodes(roots)
+				for _, sessionID := range testCase.ExpectChecked {
+					if node := states[sessionID]; node == nil || node.State != kit.Checked {
+						t.Fatalf("session %q state=%v, want checked", sessionID, node)
+					}
+				}
+				for _, sessionID := range testCase.ExpectUnchecked {
+					if node := states[sessionID]; node == nil || node.State != kit.Unchecked {
+						t.Fatalf("session %q state=%v, want unchecked", sessionID, node)
+					}
+				}
+			}
+		})
+	}
+}
+
+func touchedDerivationRoot(t *testing.T, testCase touchedDerivationCase) *kit.TreeNode {
+	t.Helper()
+	root := &kit.TreeNode{
+		ID:    testCase.ProjectIdentity,
+		Label: testCase.ProjectName,
+		Meta: map[string]string{
+			MetaProjectIdentity: testCase.ProjectIdentity,
+			MetaClonePath:       testCase.ClonePath,
+			MetaRemote:          testCase.GitRemote,
+			MetaProjectName:     testCase.ProjectName,
+			MetaProjectHarness:  testCase.Harness,
+		},
+	}
+	for _, session := range testCase.FlatSessions {
+		state, ok := touchedTriState(session.State)
+		if !ok {
+			t.Fatalf("derivation case %q session %q has unknown state %q", testCase.Name, session.ID, session.State)
+		}
+		root.Children = append(root.Children, &kit.TreeNode{
+			ID:    session.ID,
+			State: state,
+			Meta: map[string]string{
+				MetaHarness:         testCase.Harness,
+				MetaProjectIdentity: testCase.ProjectIdentity,
+				MetaClonePath:       testCase.ClonePath,
+				MetaRemote:          testCase.GitRemote,
+				MetaProjectName:     testCase.ProjectName,
+			},
+		})
+	}
+	for _, branch := range testCase.Branches {
+		branchNode := &kit.TreeNode{
+			ID:    "branch:" + branch.Branch,
+			Label: branch.Branch,
+			Meta:  map[string]string{MetaBranch: branch.Branch},
+		}
+		for _, session := range branch.Sessions {
+			state, ok := touchedTriState(session.State)
+			if !ok {
+				t.Fatalf("derivation case %q session %q has unknown state %q", testCase.Name, session.ID, session.State)
+			}
+			branchNode.Children = append(branchNode.Children, &kit.TreeNode{
+				ID:    session.ID,
+				State: state,
+				Meta: map[string]string{
+					MetaHarness:         testCase.Harness,
+					MetaProjectIdentity: testCase.ProjectIdentity,
+					MetaClonePath:       testCase.ClonePath,
+					MetaRemote:          testCase.GitRemote,
+					MetaProjectName:     testCase.ProjectName,
+				},
+			})
+		}
+		root.Children = append(root.Children, branchNode)
+	}
+	rollup(root)
+	return root
+}
+
+// touchedHarnessFirstDerivationRoot builds the compatibility
+// provider -> remote -> worktree -> session shape, whose session leaves carry
+// no harness meta and therefore take the harness-first derivation.
+func touchedHarnessFirstDerivationRoot(t *testing.T, testCase touchedDerivationCase) *kit.TreeNode {
+	t.Helper()
+	remote := &kit.TreeNode{
+		ID:    testCase.ProjectIdentity,
+		Label: testCase.ProjectName,
+		Meta: map[string]string{
+			MetaRemote:      testCase.GitRemote,
+			MetaProjectName: testCase.ProjectName,
+		},
+	}
+	for _, branch := range testCase.Branches {
+		branchNode := &kit.TreeNode{
+			ID:    testCase.ProjectIdentity + "/" + branch.Branch,
+			Label: branch.Branch,
+			Meta:  map[string]string{MetaBranch: branch.Branch},
+		}
+		for _, session := range branch.Sessions {
+			state, ok := touchedTriState(session.State)
+			if !ok {
+				t.Fatalf("derivation case %q session %q has unknown state %q", testCase.Name, session.ID, session.State)
+			}
+			branchNode.Children = append(branchNode.Children, &kit.TreeNode{ID: session.ID, State: state})
+		}
+		remote.Children = append(remote.Children, branchNode)
+	}
+	root := &kit.TreeNode{
+		ID:       testCase.ProviderID,
+		Label:    testCase.ProviderID,
+		Meta:     map[string]string{"kind": "provider"},
+		Children: []*kit.TreeNode{remote},
+	}
+	rollup(root)
+	return root
+}
+
+func touchedDerivationRoots(t *testing.T, testCase touchedDerivationCase) []*kit.TreeNode {
+	t.Helper()
+	if testCase.ProviderID != "" {
+		return []*kit.TreeNode{touchedHarnessFirstDerivationRoot(t, testCase)}
+	}
+	return []*kit.TreeNode{touchedDerivationRoot(t, testCase)}
 }
 
 func touchedFieldKeyPress(key touchedFieldKey) string {
 	switch key {
 	case touchedFieldDown:
 		return "j"
+	case touchedFieldUp:
+		return "k"
 	case touchedFieldToggle:
 		return "space"
+	case touchedFieldSelectAll:
+		return "a"
 	case touchedFieldSelectUnder:
 		return "A"
 	case touchedFieldFilter:
