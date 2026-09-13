@@ -41,8 +41,8 @@ DISCOVER ─▶ DIFF ─▶ FILTER ─┬─▶ EXTRACT+WRITE (N workers) ─▶
                              └─▶ COMPUTE ─▶ CLEANUP ─▶ REPORT ─▶ AUDIT
 ```
 
-**Sequential:** DISCOVER, DIFF, FILTER, COMPUTE, CLEANUP, REPORT, AUDIT (main goroutine)
-**Concurrent:** EXTRACT+WRITE (N workers) + drainLoop (DB INSERT) + indexLoop (INDEX) overlap
+**Sequential:** DISCOVER, FILTER, COMPUTE, CLEANUP, REPORT, AUDIT (main goroutine)
+**Concurrent:** DIFF (N classifier workers) + EXTRACT+WRITE (N workers) + drainLoop (DB INSERT) + indexLoop (INDEX) overlap
 **Pipelined:** drainLoop streams each DB-visible session to INDEX; parser workers overlap with later drains and SQLite writes stay serial
 
 Core data structure: **statically-allocated lock-free batched circular queue**.
@@ -53,7 +53,7 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 | # | Stage | Concurrency | Fatal? | Description |
 |---|-------|-------------|--------|-------------|
 | 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. If all fail, usable retained sessions still receive maintenance; initial import without usable input fails. |
-| 2 | DIFF | Sequential | No | Classify: New / Updated / Unchanged / Active. |
+| 2 | DIFF | **Parallel** (N) | No | Classify: New / Updated / Unchanged / Active. A bounded pool classifies the discovery slice; entries stay at their discovery indices so FILTER can group parents with children. |
 | 3 | FILTER | Sequential | No | Skip Unchanged + Active; resolve FK parent deps. |
 | 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, then install the pair by rename, transcript first and metadata last, with no file sync and no lock. |
 | 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Per-session | Mirror the artifact, retained seeds and acquired evidence to the database in one batched transaction per page → add DerivedAt → stream indexable sessions. The database is the durability point; a failure leaves the saved files for the next harvest and does not enqueue that session. |

@@ -2166,24 +2166,71 @@ func (p *Pipeline) originEvidenceMiners() map[Harness]OriginEvidenceMiner {
 }
 
 // diff categorizes each discovered session.
+//
+// Every session is classified independently, but the ORDER of the result is
+// not free: FILTER groups a parent with the child sessions that follow it, so
+// the entry at each discovery index must remain the entry for that session.
+// The stage therefore runs the same classifier in a bounded worker pool and
+// reassembles the entries at their discovery indices. A large store spends most
+// of this stage reading one metadata file per session that predates the
+// database-first path; those reads are independent, so the pool spreads that
+// wait across the configured workers instead of one core.
+//
+// The pool stops on cancellation. A per-session error is reported at its
+// discovery position, and the partially filled result keeps whatever prefix
+// was classified before it, matching the sequential walk it replaces.
 func (p *Pipeline) diff(ctx context.Context, sessions []DiscoveredSession, prog *ProgressState) (DiffResult, error) {
 	result := DiffResult{
 		Sessions: make([]DiffEntry, 0, len(sessions)),
 	}
+	if len(sessions) == 0 {
+		return result, ctx.Err()
+	}
 
-	for index, session := range sessions {
-		status, err := p.classifySession(ctx, session)
-		if err != nil {
-			return result, err
+	// classified records one session's outcome and whether the pool actually
+	// reached it. An unreached entry is distinguishable from a genuine
+	// no-change verdict, which lets the reassembly below stop at the exact
+	// point a cancelled pool stopped.
+	type classified struct {
+		status DiffStatus
+		err    error
+		done   bool
+	}
+
+	// One advance per finished session keeps the progress total correct
+	// without a shared lock; the counter, not the completion order, is the
+	// value the renderer reads.
+	var completed atomic.Int64
+	classifications := runParallel(
+		func() error { return ctx.Err() },
+		sessions,
+		parallelWorkers(p.config),
+		func(session DiscoveredSession) classified {
+			status, err := p.classifySession(ctx, session)
+			emitProgress(prog, ProgressEvent{
+				Kind:  KindAdvance,
+				Stage: StageDiff,
+				Done:  int(completed.Add(1)),
+				Total: len(sessions),
+			})
+			return classified{status: status, err: err, done: true}
+		},
+	)
+
+	for index := range sessions {
+		outcome := classifications[index]
+		if !outcome.done {
+			// The pool stopped before this session, which only happens when
+			// the run's context is done.
+			return result, ctx.Err()
 		}
-		if err := ctx.Err(); err != nil {
-			return result, err
+		if outcome.err != nil {
+			return result, outcome.err
 		}
 		result.Sessions = append(result.Sessions, DiffEntry{
-			Session: session,
-			Status:  status,
+			Session: sessions[index],
+			Status:  outcome.status,
 		})
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(sessions)})
 	}
 
 	return result, ctx.Err()

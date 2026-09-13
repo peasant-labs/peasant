@@ -1,0 +1,95 @@
+# DIFF classifies every discovered session independently, but the result must
+# stay at its discovery index: FILTER groups a parent with the children that
+# follow it. These cases build one discovery slice from session descriptors and
+# require the bounded worker pool to agree with a plain sequential walk on every
+# status and on the session order. expected_status documents the status each
+# descriptor is built to produce, so a descriptor that stops discriminating, or
+# a classification rule that changed, is visible instead of silently matching.
+#
+# The stored descriptors exercise both database-first branches and the metadata
+# fallback: a present adapter version skips the managed-file read, its absence
+# walks the managed layout, and a fresh session has no stored row at all.
+required_cases:
+  - fresh-session-without-a-stored-row-is-new
+  - clock-moved-past-ingest-is-updated
+  - schema-behind-current-is-updated
+  - current-row-with-a-recorded-adapter-is-unchanged
+  - legacy-row-without-a-recorded-adapter-is-unchanged
+  - in-place-sequence-advance-is-updated
+  - child-session-keeps-its-discovery-position
+required_cancellation_cases:
+  - cancelled-before-the-slice
+  - deadline-already-passed
+  - cancelled-during-the-slice
+sessions:
+  - name: fresh-session-without-a-stored-row-is-new
+    sessionID: 11111111-1111-1111-1111-111111111111
+    stored: false
+    modTimeMs: 5000
+    expected_status: new
+  - name: clock-moved-past-ingest-is-updated
+    sessionID: 22222222-2222-2222-2222-222222222222
+    stored: true
+    ingestedMs: 1000
+    modTimeMs: 2000
+    schemaVersion: 9
+    adapterVersion: 1
+    sourceEvidenceSupported: true
+    publicationReadiness: ready
+    expected_status: updated
+  - name: schema-behind-current-is-updated
+    sessionID: 33333333-3333-3333-3333-333333333333
+    stored: true
+    ingestedMs: 2000
+    modTimeMs: 2000
+    schemaVersion: 8
+    adapterVersion: 1
+    sourceEvidenceSupported: true
+    publicationReadiness: ready
+    expected_status: updated
+  - name: current-row-with-a-recorded-adapter-is-unchanged
+    sessionID: 44444444-4444-4444-4444-444444444444
+    stored: true
+    ingestedMs: 2000
+    modTimeMs: 2000
+    schemaVersion: 9
+    adapterVersion: 1
+    sourceEvidenceSupported: true
+    publicationReadiness: ready
+    expected_status: unchanged
+  - name: legacy-row-without-a-recorded-adapter-is-unchanged
+    sessionID: 55555555-5555-5555-5555-555555555555
+    stored: true
+    ingestedMs: 2000
+    modTimeMs: 2000
+    schemaVersion: 9
+    sourceEvidenceSupported: true
+    publicationReadiness: ready
+    expected_status: unchanged
+  - name: in-place-sequence-advance-is-updated
+    sessionID: 66666666-6666-6666-6666-666666666666
+    stored: true
+    ingestedMs: 2000
+    modTimeMs: 2000
+    schemaVersion: 9
+    adapterVersion: 1
+    sourceEvidenceSupported: true
+    publicationReadiness: ready
+    trackedCursor: true
+    storedSeq: 10
+    eventSeq: 11
+    expected_status: updated
+  - name: child-session-keeps-its-discovery-position
+    sessionID: 77777777-7777-7777-7777-777777777777
+    parentID: 66666666-6666-6666-6666-666666666666
+    stored: false
+    modTimeMs: 5000
+    expected_status: new
+cancellations:
+  - name: cancelled-before-the-slice
+    arm: canceled
+  - name: deadline-already-passed
+    arm: deadline
+  - name: cancelled-during-the-slice
+    arm: during-diff
+    cancelAfterLookups: 1
