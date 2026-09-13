@@ -33,3 +33,7 @@ requiredNames:
   - item-started-no-phantom-turn
   - reference-through-running-target
   - reference-through-completed-target
+  - canonical-item-variants-emitted
+  - event-only-tool-item-arguments
+  - legacy-canonical-item-rollback-boundary
+  - cross-segment-item-body-replaced

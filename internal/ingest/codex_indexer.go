@@ -27,9 +27,10 @@ type CodexIndexer struct {
 	fs             FileSystem
 	fullContent    bool
 	historyCapture bool
-	// pointerDocument names a deployment-managed current-pointer document
-	// for the capture path. Empty means detached-file authority.
-	pointerDocument string
+	// pointerStore is the injected native current-rollout pointer store for
+	// the capture path. Nil means the capture derives the native state
+	// database from the session's sessions tree.
+	pointerStore CodexNativePointerStore
 	// maxRecordBytes is the per-record read limit. Zero means the
 	// production limit; a test injects a small one so it can prove the
 	// over-limit path without building a record of production size.
@@ -56,11 +57,12 @@ func WithCodexHistoryCapture(enabled bool) CodexIndexerOption {
 	return func(idx *CodexIndexer) { idx.historyCapture = enabled }
 }
 
-// WithCodexCapturePointerDocument names a deployment-managed
-// current-pointer document for the capture path. It has no effect unless
-// the history capture is enabled.
-func WithCodexCapturePointerDocument(path string) CodexIndexerOption {
-	return func(idx *CodexIndexer) { idx.pointerDocument = path }
+// WithCodexCaptureNativePointerStore injects the native current-rollout pointer
+// store used by the capture path. It has no effect unless the history capture
+// is enabled. A production caller leaves it unset so the capture derives the
+// native state database from the session's sessions tree.
+func WithCodexCaptureNativePointerStore(store CodexNativePointerStore) CodexIndexerOption {
+	return func(idx *CodexIndexer) { idx.pointerStore = store }
 }
 
 // WithCodexMaxRecordBytes sets the per-record read limit. Zero keeps the
@@ -80,50 +82,60 @@ func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session Disc
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
 	}
-	data, err := idx.readCurrentSource(ctx, session)
+	data, identified, err := idx.readCurrentSource(ctx, session)
 	if err != nil {
 		return nil, completion.failure(err)
 	}
-	return idx.IndexTranscriptBytesResult(ctx, session, data)
+	return idx.IndexTranscriptBytesResult(ctx, identified, data)
 }
 
 // readCurrentSource returns the transcript bytes for the completion-gated
 // path. Without the history capture it reads the file exactly as the
 // retained file indexer always has: one read, no authority selection, no
 // refusal. With the capture it verifies authority, bounds and stability
-// first and refuses incomplete captures so last-good entries are retained.
-func (idx *CodexIndexer) readCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, error) {
+// first, then re-points the session at the stable native identity and
+// authoritative current source the capture selected, so entry parsing
+// consumes the same verified incarnation instead of the discovered path.
+func (idx *CodexIndexer) readCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, DiscoveredSession, error) {
 	if !idx.historyCapture {
 		data, err := idx.fs.ReadFile(session.SourcePath.String())
 		if err != nil {
-			return nil, err
+			return nil, session, err
 		}
-		return data, nil
+		return data, session, nil
 	}
 	return idx.captureCurrentSource(ctx, session)
 }
 
 // captureCurrentSource reads the authoritative current Codex source through the
 // bounded capture, authority and fingerprint-recheck path, and returns the
-// verified decoded prefix so entry parsing consumes the same capture the native
-// history replay produced.
-func (idx *CodexIndexer) captureCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, error) {
+// verified decoded prefix together with the discovered session re-identified by
+// the stable native id and current pointer. A capture without a stable id keeps
+// the discovered identity.
+func (idx *CodexIndexer) captureCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, DiscoveredSession, error) {
 	var options []CodexFileSourceOption
-	if idx.pointerDocument != "" {
-		options = append(options, WithCodexCurrentPointerDocument(idx.pointerDocument))
+	if idx.pointerStore != nil {
+		options = append(options, WithCodexNativePointerStore(idx.pointerStore))
 	}
 	history, err := CaptureCodexHistoryWithRetry(ctx, NewCodexFileSource(idx.fs, options...), session, nil)
 	if err != nil {
-		return nil, err
+		return nil, session, err
 	}
 	if history.Completeness != indexformat.GenerationCompletenessComplete {
-		return nil, &CodexIncompleteCaptureError{
+		return nil, session, &CodexIncompleteCaptureError{
 			StableThreadID: history.StableThreadID,
 			Completeness:   history.Completeness,
 			Diagnostics:    history.Diagnostics,
 		}
 	}
-	return history.RawBytes, nil
+	identified := session
+	if stableID, idErr := NewSessionID(history.StableThreadID); idErr == nil && history.StableThreadID != "" {
+		identified.SessionID = stableID
+	}
+	if history.Pointer != "" {
+		identified.SourcePath = ResolvedPath(history.Pointer)
+	}
+	return history.RawBytes, identified, nil
 }
 
 // IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.

@@ -21,9 +21,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/peasant-labs/peasant/internal/codexstate"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
@@ -389,6 +391,42 @@ func (e *CodexSourceChangedError) Error() string {
 // maxCodexCaptureAttempts is the bounded retry budget for one capture.
 const maxCodexCaptureAttempts = 3
 
+// CodexAuthoritativeSession is a discovered Codex session re-identified by the
+// native authority before discovery identity/diff. Session carries the stable
+// session_meta.id as SessionID and the authoritative current source as
+// SourcePath; Authority is the resolved pointer/mode/boundary evidence.
+type CodexAuthoritativeSession struct {
+	Session   DiscoveredSession
+	Authority CodexSourceAuthority
+}
+
+// ResolveCodexAuthoritativeSession resolves the read-only native current
+// authority before any discovery identity/diff and returns the discovered
+// session re-pointed at the authoritative current source. It is the pre-diff
+// selection seam a discovery/diff caller uses: the stable session_meta.id
+// supersedes the filename-derived identity and the native current pointer
+// supersedes the discovered path. A missing or ambiguous current source is an
+// error; it is never replaced by an older rollout.
+func ResolveCodexAuthoritativeSession(ctx context.Context, source CodexReadOnlySource, session DiscoveredSession) (CodexAuthoritativeSession, error) {
+	if source == nil {
+		return CodexAuthoritativeSession{}, fmt.Errorf("ingest.ResolveCodexAuthoritativeSession: no read-only source was supplied for session %s; the current Codex source cannot be selected before diff; register a Codex source and retry", session.SessionID)
+	}
+	authority, err := source.ResolveCodexAuthority(ctx, session)
+	if err != nil {
+		return CodexAuthoritativeSession{}, err
+	}
+	identified := session
+	if authority.StableThreadID != "" {
+		if stableID, idErr := NewSessionID(authority.StableThreadID); idErr == nil {
+			identified.SessionID = stableID
+		}
+	}
+	if authority.CurrentPointer != "" {
+		identified.SourcePath = ResolvedPath(authority.CurrentPointer)
+	}
+	return CodexAuthoritativeSession{Session: identified, Authority: authority}, nil
+}
+
 // CaptureCodexHistory resolves the authority, reads the bounded ordered
 // segments, replays the native records, and returns the captured history. A
 // missing authoritative source is returned as an error; it is never replaced
@@ -614,31 +652,84 @@ func codexAuthorityReadFailure(op, stableID, sourceRef, step, reason string) err
 	return fmt.Errorf("ingest.CodexFileSource.%s: %s for thread %q (source %s) at the %s step failed because %s; the capture is incomplete, no older rollout was substituted and no prior snapshot was overwritten; restore the native source and rerun harvest", op, step, stableID, sourceRef, step, reason)
 }
 
+// CodexNativePointerRecord is the native current-rollout pointer storage record
+// for one stable thread: the authoritative current rollout path the native
+// database records and the raw history mode it stores beside it. Both are
+// native evidence; neither is a deployment-managed document.
+type CodexNativePointerRecord struct {
+	Pointer     string
+	HistoryMode json.RawMessage
+}
+
+// CodexNativePointerStore reads the native current-rollout pointer storage
+// read-only. The production implementation opens the native Codex state
+// database; a test may supply a real temporary database. It never writes the
+// storage and never starts a native process.
+type CodexNativePointerStore interface {
+	// NativeCurrentRollout returns the current rollout path the native store
+	// records for one stable thread. found is false when the native store holds
+	// no row for the thread, which is the only case that permits detached-file
+	// fallback.
+	NativeCurrentRollout(ctx context.Context, stableThreadID string) (CodexNativePointerRecord, bool, error)
+}
+
+// CodexSQLitePointerStore reads the native current-rollout pointer from the
+// read-only native Codex state database through the dedicated native-state
+// reader. It performs no SQLite access itself, so the ingest package keeps its
+// fixed, statically attributable SQL inventory.
+type CodexSQLitePointerStore struct {
+	store *codexstate.PointerStore
+}
+
+// NewCodexSQLitePointerStore creates a read-only native state-database pointer
+// store over the given database path.
+func NewCodexSQLitePointerStore(path string) *CodexSQLitePointerStore {
+	return &CodexSQLitePointerStore{store: codexstate.NewPointerStore(path)}
+}
+
+var _ CodexNativePointerStore = (*CodexSQLitePointerStore)(nil)
+
+// NativeCurrentRollout queries the native threads table read-only for the one
+// current rollout path of a stable thread and projects it into the capture's
+// raw-history-mode shape.
+func (s *CodexSQLitePointerStore) NativeCurrentRollout(ctx context.Context, stableThreadID string) (CodexNativePointerRecord, bool, error) {
+	record, found, err := s.store.CurrentRollout(ctx, stableThreadID)
+	if err != nil {
+		return CodexNativePointerRecord{}, false, err
+	}
+	projected := CodexNativePointerRecord{Pointer: record.Pointer}
+	if record.HistoryMode != "" {
+		if encoded, marshalErr := json.Marshal(record.HistoryMode); marshalErr == nil {
+			projected.HistoryMode = encoded
+		}
+	}
+	return projected, found, nil
+}
+
 // CodexFileSourceOption configures a CodexFileSource.
 type CodexFileSourceOption func(*CodexFileSource)
 
-// WithCodexCurrentPointerDocument names a deployment-managed current-pointer
-// document: a small read-only file whose trimmed content is the authoritative
-// current rollout path (absolute, or relative to the document's directory).
-// The Codex CLI exposes no live-writer pointer, so without this document the
-// source uses detached-file authority with conflict detection. The document
-// exists so an activation step can select an authoritative replacement
-// pointer; it is never written by the capture path.
-func WithCodexCurrentPointerDocument(path string) CodexFileSourceOption {
-	return func(s *CodexFileSource) { s.pointerDocument = path }
+// WithCodexNativePointerStore injects the native current-rollout pointer store.
+// A production caller leaves it unset: the source then derives the native state
+// database from the session's native sessions tree. It is injectable so a test
+// can drive a real temporary database without a global.
+func WithCodexNativePointerStore(store CodexNativePointerStore) CodexFileSourceOption {
+	return func(s *CodexFileSource) { s.pointerStore = store }
 }
 
-// CodexFileSource is the production read-only source. It derives the
-// authority from native session_meta envelopes read through the FileSystem:
-// the stable thread identity, the raw history mode, fork/parent/root/base
-// evidence, the copied-creation boundary and the ordered native history
-// references. It scans the native sessions tree for competing detached
-// candidates of the same thread and refuses to guess among them. Bounded
-// segment bytes are read through the FileSystem; the native source is never
-// written and no native process is started.
+// CodexFileSource is the production read-only source. It resolves the stable
+// session_meta.id and exactly one current pointer before any diff, in the
+// ratified order: a native live-writer pointer when the read-only source
+// exposes one, then the native SQLite current-rollout pointer, then detached
+// file discovery only when no pointer authority exists. It derives the raw
+// history mode, fork/parent/root/base evidence, the copied-creation boundary
+// and the ordered native history references from native session_meta
+// envelopes, refuses competing candidates instead of guessing by lexical or
+// file-age order, and never writes the native source or starts a native
+// process.
 type CodexFileSource struct {
-	fs              FileSystem
-	pointerDocument string
+	fs           FileSystem
+	pointerStore CodexNativePointerStore
 }
 
 // NewCodexFileSource creates the production read-only Codex source over fs.
@@ -660,64 +751,138 @@ const (
 )
 
 // ResolveCodexAuthority selects the stable session_meta.id and the one current
-// pointer before any diff. A deployment-managed pointer document selects the
-// native current pointer; otherwise exactly one detached candidate for the
-// thread is usable and several conflicting candidates are refused. A missing
-// current source is an error; it is never replaced by an older rollout.
+// pointer before any diff. The ratified order is a native live-writer pointer
+// when the read-only source exposes one, then the native SQLite current-rollout
+// pointer, then detached file discovery only when no pointer authority exists.
+// Exactly one detached candidate for the thread is usable and several
+// conflicting candidates are refused. A paginated current source that is
+// missing is an error; it is never replaced by an older rollout.
 func (s *CodexFileSource) ResolveCodexAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, error) {
-	if s.pointerDocument != "" {
-		return s.resolvePointerAuthority(ctx, session)
+	if err := ctx.Err(); err != nil {
+		return CodexSourceAuthority{}, fmt.Errorf("ingest.CodexFileSource.ResolveCodexAuthority: the Codex capture for session %s was cancelled before the current source could be resolved; no source was read and no state changed; retry the harvest", session.SessionID)
 	}
-	return s.resolveDetachedAuthority(ctx, session)
+	authority, handled, pointerErr := s.resolveNativeAuthority(ctx, session)
+	if handled {
+		return authority, pointerErr
+	}
+	detached, err := s.resolveDetachedAuthority(ctx, session)
+	if err != nil {
+		return CodexSourceAuthority{}, err
+	}
+	if pointerErr != nil {
+		detached.DerivationIncomplete = true
+		detached.DerivationDiagnostics = append(detached.DerivationDiagnostics, DiagnosticEntry{
+			ErrorType:   "codex_native_pointer_unreadable",
+			Location:    fmt.Sprintf("thread %s", detached.StableThreadID),
+			Message:     "the native current-rollout pointer storage could not be read; the capture fell back to detached-file authority and no older rollout was preferred",
+			Remediation: "Repair the native Codex state database and rerun; the capture stays incomplete until the native pointer authority proves.",
+		})
+	}
+	return detached, nil
 }
 
-// resolvePointerAuthority selects the current source named by the
-// deployment-managed pointer document.
-func (s *CodexFileSource) resolvePointerAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, error) {
-	if err := ctx.Err(); err != nil {
-		return CodexSourceAuthority{}, fmt.Errorf("ingest.CodexFileSource.ResolveCodexAuthority: the Codex capture for session %s was cancelled before the current pointer could be resolved; no source was read and no state changed; retry the harvest", session.SessionID)
+// resolveNativeAuthority resolves the native SQLite current-rollout pointer for
+// the discovered session. handled is true when a native pointer was read and
+// the returned authority or error is final; handled is false when no pointer
+// authority exists (or it could not be read), which permits detached fallback.
+func (s *CodexFileSource) resolveNativeAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, bool, error) {
+	store := s.nativePointerStoreFor(session)
+	if store == nil {
+		return CodexSourceAuthority{}, false, nil
 	}
-	raw, err := s.fs.ReadFile(s.pointerDocument)
+	key := session.SessionID.String()
+	record, found, err := store.NativeCurrentRollout(ctx, key)
 	if err != nil {
-		return CodexSourceAuthority{}, &CodexCurrentMissingError{
-			StableThreadID: session.SessionID.String(),
-			SourceRef:      codexPhysicalSourceID(s.pointerDocument),
-			Cause:          codexSanitizedFSCause(err),
-		}
+		return CodexSourceAuthority{}, false, err
 	}
-	pointer := strings.TrimSpace(string(raw))
-	if len(raw) > 4096 {
-		pointer = strings.TrimSpace(string(raw[:4096]))
+	if !found {
+		return CodexSourceAuthority{}, false, nil
 	}
-	if pointer == "" {
-		return CodexSourceAuthority{}, &CodexCurrentMissingError{
-			StableThreadID: session.SessionID.String(),
-			SourceRef:      codexPhysicalSourceID(s.pointerDocument),
-			Cause:          "the pointer document names no current source",
-		}
-	}
-	if !filepath.IsAbs(pointer) {
-		pointer = filepath.Join(filepath.Dir(s.pointerDocument), pointer)
-	}
-	pointer = filepath.Clean(pointer)
-	header, err := codexReadHeader(s.fs, pointer, codexHeaderLimit)
-	if err != nil {
-		return CodexSourceAuthority{}, &CodexCurrentMissingError{
-			StableThreadID: session.SessionID.String(),
+	pointer := filepath.Clean(record.Pointer)
+	header, headerErr := codexReadHeader(s.fs, pointer, codexHeaderLimit)
+	if headerErr != nil {
+		return CodexSourceAuthority{}, true, &CodexCurrentMissingError{
+			StableThreadID: key,
 			SourceRef:      codexPhysicalSourceID(pointer),
-			Cause:          codexSanitizedFSCause(err),
+			Cause:          codexSanitizedFSCause(headerErr),
 		}
 	}
 	meta, hasMeta := parseCodexNativeAuthority(header)
-	stableID := session.SessionID.String()
+	stableID := key
 	if hasMeta && meta.ID != "" {
 		stableID = meta.ID
 	}
 	authority := s.deriveAuthority(stableID, CodexAuthorityNativeCurrentPointer, pointer, meta, hasMeta)
-	if err := s.resolveDerivedReferences(ctx, &authority, meta, 0, map[string]bool{pointer: true}); err != nil {
-		return CodexSourceAuthority{}, err
+	if stableID != key {
+		authority.DerivationIncomplete = true
+		authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+			ErrorType:   "codex_native_pointer_identity_mismatch",
+			Location:    fmt.Sprintf("thread %s", key),
+			Message:     "the native current-rollout row names a rollout whose session_meta.id differs from the requested thread; the native pointer was used and the mismatch is recorded as incomplete instead of silently re-identifying the thread",
+			Remediation: "Repair the native current-rollout row and rerun; the capture stays incomplete and the last good generation is retained.",
+		})
 	}
-	return authority, nil
+	if len(bytes.TrimSpace(authority.HistoryMode)) == 0 && len(bytes.TrimSpace(record.HistoryMode)) > 0 {
+		authority.HistoryMode = record.HistoryMode
+	}
+	if err := s.resolveDerivedReferences(ctx, &authority, meta, 0, newCodexReferenceResolution(pointer)); err != nil {
+		return CodexSourceAuthority{}, true, err
+	}
+	return authority, true, nil
+}
+
+// nativePointerStoreFor returns the native current-rollout pointer store for a
+// discovered session. An injected store wins; otherwise the native
+// state_<n>.sqlite beside the session's sessions tree is opened read-only. A
+// layout without a native sessions tree, or one with no state database, has no
+// pointer authority and returns nil.
+func (s *CodexFileSource) nativePointerStoreFor(session DiscoveredSession) CodexNativePointerStore {
+	if s.pointerStore != nil {
+		return s.pointerStore
+	}
+	sessionsRoot := codexSessionsRoot(session.SourcePath.String())
+	if filepath.Base(sessionsRoot) != "sessions" {
+		return nil
+	}
+	home := filepath.Dir(sessionsRoot)
+	if path := codexNativeStateDatabasePath(s.fs, home); path != "" {
+		return NewCodexSQLitePointerStore(path)
+	}
+	return nil
+}
+
+// codexNativeStateDatabasePath picks the highest-versioned state_<n>.sqlite in
+// the native Codex home. Discovery is read-only; a missing directory or no
+// candidate returns "".
+func codexNativeStateDatabasePath(fs FileSystem, home string) string {
+	entries, err := fs.ReadDir(home)
+	if err != nil {
+		return ""
+	}
+	bestVersion := -1
+	bestPath := ""
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, "state_") || !strings.HasSuffix(name, ".sqlite") {
+			continue
+		}
+		digits := strings.TrimSuffix(strings.TrimPrefix(name, "state_"), ".sqlite")
+		if !isDecimalDigits(digits) {
+			continue
+		}
+		version, convErr := strconv.Atoi(digits)
+		if convErr != nil {
+			continue
+		}
+		if version > bestVersion {
+			bestVersion = version
+			bestPath = filepath.Join(home, name)
+		}
+	}
+	return bestPath
 }
 
 // resolveDetachedAuthority derives the authority from the session's own
@@ -752,8 +917,7 @@ func (s *CodexFileSource) resolveDetachedAuthority(ctx context.Context, session 
 		}
 	}
 	authority := s.deriveAuthority(stableID, CodexAuthorityDetachedFile, pointer, meta, hasMeta)
-	seen := map[string]bool{pointer: true}
-	if err := s.resolveDerivedReferences(ctx, &authority, meta, 0, seen); err != nil {
+	if err := s.resolveDerivedReferences(ctx, &authority, meta, 0, newCodexReferenceResolution(pointer)); err != nil {
 		return CodexSourceAuthority{}, err
 	}
 	return authority, nil
@@ -804,16 +968,40 @@ func (s *CodexFileSource) deriveAuthority(stableID string, kind CodexSourceAutho
 	return authority
 }
 
+// codexReferenceResolution tracks the active resolver recursion separately from
+// the pointers already retained, so a true recursion-stack cycle is
+// distinguishable from a retained reference that is legitimately reachable by
+// more than one ordered dependency.
+type codexReferenceResolution struct {
+	stack    map[string]bool
+	retained map[string]bool
+}
+
+// newCodexReferenceResolution starts a resolution with the current source
+// pointer on the active stack: a dependency that points back at the current
+// source is a cycle, not a retained reference.
+func newCodexReferenceResolution(currentPointer string) *codexReferenceResolution {
+	return &codexReferenceResolution{
+		stack:    map[string]bool{currentPointer: true},
+		retained: map[string]bool{currentPointer: true},
+	}
+}
+
 // resolveDerivedReferences resolves the ordered native history references
 // oldest-to-newest, recursing into each referenced native envelope with a
-// depth bound and a visited set so a reference cycle can never loop the
-// resolver. Unresolvable references are kept as unavailable evidence; the
-// replay proves coverage against them instead of guessing parent content.
-func (s *CodexFileSource) resolveDerivedReferences(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, seen map[string]bool) error {
+// depth bound and an active recursion stack so a reference cycle can never loop
+// the resolver. Every recursive cycle, ambiguity, unavailable dependency and
+// depth/segment truncation is propagated into the authority as
+// DerivationIncomplete plus a diagnostic, so the capture can never certify an
+// unresolved dependency graph as complete. Unresolvable references are also
+// kept as unavailable evidence; the replay proves coverage against them
+// instead of guessing parent content.
+func (s *CodexFileSource) resolveDerivedReferences(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, resolution *codexReferenceResolution) error {
 	if len(meta.History) == 0 && meta.HistoryBaseThreadID == "" {
 		return nil
 	}
 	if depth >= maxCodexHistoryDepth {
+		authority.DerivationIncomplete = true
 		authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
 			ErrorType:   "codex_reference_depth_exceeded",
 			Location:    fmt.Sprintf("thread %s", authority.StableThreadID),
@@ -822,26 +1010,55 @@ func (s *CodexFileSource) resolveDerivedReferences(ctx context.Context, authorit
 		})
 		return nil
 	}
-	return s.resolveHistoryEntries(ctx, authority, meta, depth, seen)
+	return s.resolveHistoryEntries(ctx, authority, meta, depth, resolution)
+}
+
+// resolveSibling resolves one referenced native envelope into an independent
+// sibling authority and merges every recursive flag and diagnostic back into
+// the parent, so a nested cycle or truncation is never silently discarded.
+func (s *CodexFileSource) resolveSibling(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, resolution *codexReferenceResolution) []CodexReference {
+	sibling := *authority
+	sibling.References = nil
+	sibling.DerivationIncomplete = false
+	sibling.DerivationDiagnostics = nil
+	_ = s.resolveDerivedReferences(ctx, &sibling, meta, depth+1, resolution)
+	authority.DerivationIncomplete = authority.DerivationIncomplete || sibling.DerivationIncomplete
+	authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, sibling.DerivationDiagnostics...)
+	return sibling.References
 }
 
 // resolveHistoryEntries resolves the declared native history array
-// oldest-to-newest after the history-base reference.
-func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, seen map[string]bool) error {
+// oldest-to-newest after the history-base reference. A dependency whose thread
+// identity maps to more than one native rollout is refused as ambiguous rather
+// than selected by lexical order; a dependency that points back into the active
+// recursion stack is recorded as a cycle; a dependency already retained by
+// another ordered path is a retained reference and is not re-added.
+func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, resolution *codexReferenceResolution) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	index := s.scanThreadIndex(ctx, authority.CurrentPointer)
 	var ordered []CodexReference
 	if meta.HistoryBaseThreadID != "" {
 		bases := index[meta.HistoryBaseThreadID]
-		if len(bases) > 0 {
+		switch {
+		case len(bases) > 1:
+			ordered = append(ordered, s.ambiguousDependencyReference(authority, "history-base", meta.HistoryBaseThreadID))
+		case len(bases) == 1:
 			basePath := bases[0]
-			if !seen[basePath] {
-				seen[basePath] = true
+			switch {
+			case resolution.stack[basePath]:
+				ordered = append(ordered, s.cycleDependencyReference(authority, indexformat.CoordinateKindUnknown, basePath, nil, nil, nil, nil, "", resolveCodexHistoryMode(authority.HistoryMode)))
+			case resolution.retained[basePath]:
+				// Retained by an earlier ordered dependency: not a cycle, and
+				// no duplicate reference is added.
+			default:
+				resolution.stack[basePath] = true
 				if baseMeta, hasBase, err := s.readNativeMeta(basePath); err == nil && hasBase {
-					sibling := *authority
-					sibling.References = nil
-					_ = s.resolveDerivedReferences(ctx, &sibling, baseMeta, depth+1, seen)
-					ordered = append(ordered, sibling.References...)
+					ordered = append(ordered, s.resolveSibling(ctx, authority, baseMeta, depth, resolution)...)
 				}
+				delete(resolution.stack, basePath)
+				resolution.retained[basePath] = true
 				ordered = append(ordered, CodexReference{
 					Pointer:          basePath,
 					PhysicalSourceID: codexPhysicalSourceID(basePath),
@@ -850,7 +1067,7 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 					Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindUnknown},
 				})
 			}
-		} else {
+		default:
 			ordered = append(ordered, CodexReference{
 				Pointer:          "history-base:" + meta.HistoryBaseThreadID,
 				PhysicalSourceID: codexPhysicalSourceID("history-base:" + meta.HistoryBaseThreadID),
@@ -861,7 +1078,11 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 		}
 	}
 	for _, entry := range meta.History {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(ordered)+len(authority.References) >= maxCodexHistorySegments {
+			authority.DerivationIncomplete = true
 			authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
 				ErrorType:   "codex_reference_segments_bounded",
 				Location:    fmt.Sprintf("thread %s", authority.StableThreadID),
@@ -875,7 +1096,11 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 			mode = resolveCodexHistoryMode(authority.HistoryMode)
 		}
 		targets := index[entry.ThreadID]
-		if len(targets) == 0 {
+		switch {
+		case len(targets) > 1:
+			ordered = append(ordered, s.ambiguousDependencyReference(authority, "history", entry.ThreadID))
+			continue
+		case len(targets) == 0:
 			ordered = append(ordered, CodexReference{
 				Pointer:          "history:" + entry.ThreadID,
 				PhysicalSourceID: codexPhysicalSourceID("history:" + entry.ThreadID),
@@ -894,19 +1119,32 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 			continue
 		}
 		target := targets[0]
-		if seen[target] {
+		if resolution.stack[target] {
+			ordered = append(ordered, s.cycleDependencyReference(
+				authority,
+				indexformat.CoordinateKindCodexReferenceRange,
+				target,
+				entry.Start,
+				entry.EndExclusive,
+				entry.DecodedByteStart,
+				entry.DecodedByteEndExclusive,
+				entry.Kind,
+				mode,
+			))
 			continue
 		}
-		seen[target] = true
+		if resolution.retained[target] {
+			continue
+		}
+		resolution.stack[target] = true
 		if refMeta, hasRef, err := s.readNativeMeta(target); err == nil && hasRef {
 			if !entry.ModeSpecified {
 				mode = resolveCodexHistoryMode(refMeta.HistoryMode)
 			}
-			sibling := *authority
-			sibling.References = nil
-			_ = s.resolveDerivedReferences(ctx, &sibling, refMeta, depth+1, seen)
-			ordered = append(ordered, sibling.References...)
+			ordered = append(ordered, s.resolveSibling(ctx, authority, refMeta, depth, resolution)...)
 		}
+		delete(resolution.stack, target)
+		resolution.retained[target] = true
 		ordered = append(ordered, CodexReference{
 			Pointer:          target,
 			PhysicalSourceID: codexPhysicalSourceID(target),
@@ -925,6 +1163,55 @@ func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *
 	}
 	authority.References = append(authority.References, ordered...)
 	return nil
+}
+
+// ambiguousDependencyReference records a native dependency whose thread
+// identity maps to more than one rollout. It refuses to select a candidate by
+// lexical order, marks the derivation incomplete, and returns the incomplete
+// reference the replay can never read.
+func (s *CodexFileSource) ambiguousDependencyReference(authority *CodexSourceAuthority, kind, threadID string) CodexReference {
+	authority.DerivationIncomplete = true
+	authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+		ErrorType:   "codex_reference_ambiguous",
+		Location:    fmt.Sprintf("thread %s %s dependency", authority.StableThreadID, kind),
+		Message:     fmt.Sprintf("the native %s dependency names thread %s, but several native rollouts in the sessions tree claim that identity; no candidate was selected by lexical order and no parent content was guessed", kind, threadID),
+		Remediation: "Resolve the competing native rollouts to one authoritative incarnation and rerun; the capture stays incomplete and the last good generation is retained.",
+	})
+	return CodexReference{
+		Pointer:          "history-ambiguous:" + threadID,
+		PhysicalSourceID: codexPhysicalSourceID("history-ambiguous:" + threadID),
+		Mode:             resolveCodexHistoryMode(authority.HistoryMode),
+		Inclusion:        indexformat.SegmentInclusionInvalidIncomplete,
+		Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindUnknown},
+	}
+}
+
+// cycleDependencyReference records a native dependency that points back into
+// the active recursion stack. The cycle is retained as invalid/incomplete
+// evidence instead of silently dropped, and the derivation is marked
+// incomplete so the capture can never certify the unresolved graph complete.
+func (s *CodexFileSource) cycleDependencyReference(authority *CodexSourceAuthority, coordinateKind indexformat.CoordinateKind, pointer string, start, endExclusive, decodedByteStart, decodedByteEndExclusive *int64, historyKind string, mode CodexHistoryMode) CodexReference {
+	authority.DerivationIncomplete = true
+	authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+		ErrorType:   "codex_reference_cycle",
+		Location:    fmt.Sprintf("thread %s", authority.StableThreadID),
+		Message:     "a native history dependency points back into the already-open recursion path; the cycle was recorded and no parent content was guessed or looped",
+		Remediation: "Repair the native reference metadata and rerun; the last good generation is retained and no cycle was followed.",
+	})
+	return CodexReference{
+		Pointer:          pointer,
+		PhysicalSourceID: codexPhysicalSourceID(pointer),
+		Mode:             mode,
+		HistoryKind:      historyKind,
+		Inclusion:        indexformat.SegmentInclusionInvalidIncomplete,
+		Coordinates: indexformat.SegmentCoordinates{
+			Kind:                    coordinateKind,
+			Start:                   start,
+			EndExclusive:            endExclusive,
+			DecodedByteStart:        decodedByteStart,
+			DecodedByteEndExclusive: decodedByteEndExclusive,
+		},
+	}
 }
 
 // codexHistoryBaseInclusion classifies a history-base reference: a base that
@@ -1036,8 +1323,8 @@ func sortStrings(values []string) {
 // Failures are sanitized at this source boundary: no raw path and no wrapped
 // OS error ever leaves it.
 func (s *CodexFileSource) ReadCodexSource(_ context.Context, pointer string) ([]byte, error) {
-	if strings.HasPrefix(pointer, "history:") || strings.HasPrefix(pointer, "history-base:") {
-		thread := strings.TrimPrefix(strings.TrimPrefix(pointer, "history-base:"), "history:")
+	if strings.HasPrefix(pointer, "history:") || strings.HasPrefix(pointer, "history-base:") || strings.HasPrefix(pointer, "history-ambiguous:") {
+		thread := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(pointer, "history-base:"), "history:"), "history-ambiguous:")
 		return nil, codexAuthorityReadFailure("ReadCodexSource", thread, codexPhysicalSourceID(pointer), "read bounded dependency", "the referenced native source is not present in the sessions tree")
 	}
 	if reader, ok := s.fs.(sourcePrefixReader); ok {

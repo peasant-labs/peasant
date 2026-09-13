@@ -40,27 +40,118 @@ func (d *codexDeliveryCorrelation) isCorrelated() bool {
 }
 
 // codexItemBody is the canonical paginated item carried by an item lifecycle
-// event. Content, Summary and Output are raw so the captured node keeps the
-// exact native bytes.
+// event, unioned over the native TurnItem variants and the ResponseItem-shaped
+// legacy items. Every payload-bearing field is raw so the captured node keeps
+// the exact native bytes; the adapter-private native type is derived from the
+// native discriminator, never from the presence of one text field.
 type codexItemBody struct {
-	Type     string                    `json:"type"`
-	Role     string                    `json:"role"`
-	ID       string                    `json:"id"`
-	CallID   string                    `json:"call_id"`
-	TurnID   string                    `json:"turn_id"`
-	Content  json.RawMessage           `json:"content"`
-	Summary  json.RawMessage           `json:"summary"`
-	Output   json.RawMessage           `json:"output"`
-	Delivery *codexDeliveryCorrelation `json:"delivery"`
+	Type             string                    `json:"type"`
+	Role             string                    `json:"role"`
+	ID               string                    `json:"id"`
+	CallID           string                    `json:"call_id"`
+	TurnID           string                    `json:"turn_id"`
+	Name             string                    `json:"name"`
+	Content          json.RawMessage           `json:"content"`
+	Summary          json.RawMessage           `json:"summary"`
+	SummaryText      json.RawMessage           `json:"summary_text"`
+	RawContent       json.RawMessage           `json:"raw_content"`
+	Output           json.RawMessage           `json:"output"`
+	Arguments        json.RawMessage           `json:"arguments"`
+	Input            json.RawMessage           `json:"input"`
+	Command          json.RawMessage           `json:"command"`
+	AggregatedOutput json.RawMessage           `json:"aggregated_output"`
+	Stdout           json.RawMessage           `json:"stdout"`
+	Changes          json.RawMessage           `json:"changes"`
+	Delivery         *codexDeliveryCorrelation `json:"delivery"`
 }
 
-// codexItemBodyCarriesContent reports whether an item body carries item
-// content of its own. A body without content is a bare completion marker:
-// it correlates but never replaces item state.
-func codexItemBodyCarriesContent(body codexItemBody) bool {
-	return len(bytes.TrimSpace(body.Content)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Content), []byte("null")) ||
-		len(bytes.TrimSpace(body.Summary)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Summary), []byte("null")) ||
-		len(bytes.TrimSpace(body.Output)) > 0 && !bytes.Equal(bytes.TrimSpace(body.Output), []byte("null"))
+// codexItemBodyCarriesPayload reports whether an item body carries any native
+// payload field. A body with a recognized native discriminator and no payload
+// field is still a valid item (for example a context-compaction item) and is
+// emitted from its identity; the predicate exists only to distinguish a body
+// carrying its own content from an unrecognized body on the marker path.
+func codexItemBodyCarriesPayload(body codexItemBody) bool {
+	for _, raw := range []json.RawMessage{
+		body.Content, body.Summary, body.SummaryText, body.RawContent,
+		body.Output, body.Arguments, body.Input, body.Command,
+		body.AggregatedOutput, body.Stdout, body.Changes,
+	} {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
+			return true
+		}
+	}
+	return false
+}
+
+// codexItemNativeType maps a canonical item body discriminator to the bounded
+// native node type and native role. It recognizes both the canonical TurnItem
+// variants (UserMessage, AgentMessage, Reasoning, CommandExecution, ...) and
+// the ResponseItem-shaped variants the same item can carry. An unrecognized
+// discriminator is not a native item and returns ok=false.
+func codexItemNativeType(body codexItemBody) (nativeType, role string, ok bool) {
+	if mapped, known := codexResponseNativeType(body.Type); known {
+		return mapped, body.Role, true
+	}
+	switch body.Type {
+	case "UserMessage":
+		return "message", "user", true
+	case "AgentMessage":
+		return "message", "assistant", true
+	case "Reasoning":
+		return "reasoning", "assistant", true
+	case "FunctionCallOutput":
+		return "function_call_output", "tool", true
+	case "CommandExecution":
+		return "command_execution", "assistant", true
+	case "FileChange":
+		return "file_change", "assistant", true
+	case "SubAgentActivity":
+		return "sub_agent_activity", "assistant", true
+	case "CollabAgentToolCall":
+		return "collab_agent_tool_call", "assistant", true
+	case "ContextCompaction":
+		return "context_compaction", "system", true
+	case "Extension":
+		return "extension", "assistant", true
+	case "Plan":
+		return "plan", "assistant", true
+	case "HookPrompt":
+		return "hook_prompt", "system", true
+	case "WebSearch":
+		return "web_search", "assistant", true
+	case "ImageView":
+		return "image_view", "user", true
+	case "ImageGeneration":
+		return "image_generation", "assistant", true
+	case "McpToolCall":
+		return "mcp_tool_call", "assistant", true
+	case "DynamicToolCall":
+		return "dynamic_tool_call", "assistant", true
+	case "EnteredReviewMode":
+		return "entered_review_mode", "system", true
+	case "ExitedReviewMode":
+		return "exited_review_mode", "system", true
+	default:
+		return "", "", false
+	}
+}
+
+// codexItemIsAdmission reports whether an item lifecycle body is a native
+// instruction admission: a user message or an inter-agent delivery. Only a
+// native admission opens a legacy instruction turn; assistant/tool output stays
+// inside its admission's turn.
+func codexItemIsAdmission(event codexHistoryReplayPayload, body codexItemBody, nativeType string) bool {
+	if nativeType == "message" && body.Role == "user" {
+		return true
+	}
+	if body.Type == "UserMessage" {
+		return true
+	}
+	if event.Delivery.isCorrelated() || body.Delivery.isCorrelated() {
+		return true
+	}
+	return false
 }
 
 // codexHistoryReplayPayload is the union of replay-relevant fields on a Codex
@@ -992,12 +1083,12 @@ func (state *codexReplayState) replayEventMessage(threadID string, segment codex
 		return nil
 	case "item_completed":
 		return state.replayItemCompleted(threadID, segment, record, payload, ownership, mode)
-	case "turn_started":
+	case "turn_started", "task_started":
 		if payload.TurnID != "" {
 			state.openTurns[payload.TurnID] = record.Ordinal
 		}
 		return nil
-	case "turn_complete":
+	case "turn_complete", "task_complete":
 		if payload.TurnID == "" {
 			return nil
 		}
@@ -1059,14 +1150,12 @@ func (state *codexReplayState) replayEventMessage(threadID string, segment codex
 }
 
 // replayItemCompleted applies the canonical paginated item authority. An
-// event that carries its own item body emits or replaces the one native
-// item; a bare completion correlates with its response mirror or pends for
-// it. Repeated completions replace completed-item state while preserving
-// the native identity (ref); they never duplicate the item.
+// event that carries a canonical item body emits or replaces the one native
+// item, keyed by the item id inside the body (the canonical event has no
+// top-level item id); a bare completion marker correlates with its response
+// mirror or pends for it. Repeated completions replace completed-item state
+// while preserving the native identity (ref); they never duplicate the item.
 func (state *codexReplayState) replayItemCompleted(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
-	if payload.ID == "" {
-		return nil
-	}
 	body, hasBody, bodyMalformed := codexDecodeItemBody(payload.Item)
 	if bodyMalformed {
 		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
@@ -1076,16 +1165,35 @@ func (state *codexReplayState) replayItemCompleted(threadID string, segment code
 			Remediation: "Repair the native item body and rerun; the existing item state is retained.",
 		})
 	}
-	if hasBody {
-		if nativeType, ok := codexResponseNativeType(body.Type); ok && codexItemBodyCarriesContent(body) {
-			return state.applyItemBody(threadID, segment, record, payload, body, nativeType, ownership, mode)
+	itemID := payload.ID
+	if itemID == "" {
+		itemID = payload.ItemID
+	}
+	if body.ID != "" {
+		itemID = body.ID
+	}
+	if hasBody && !bodyMalformed {
+		nativeType, role, recognized := codexItemNativeType(body)
+		if recognized && itemID != "" {
+			return state.applyItemBody(threadID, segment, record, payload, body, nativeType, role, ownership, mode)
+		}
+		if !recognized && codexItemBodyCarriesPayload(body) {
+			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+				ErrorType:   "codex_item_variant_unknown",
+				Location:    codexRecordLocation(threadID, record),
+				Message:     "a carried canonical item has an unrecognized discriminator; the completion marker still correlates but no native item state was projected",
+				Remediation: "Upgrade Peasant to a build that recognizes this Codex item variant; the raw body is retained in the capture.",
+			})
 		}
 	}
-	state.eventOrdinal[payload.ID] = record.Ordinal
-	if index, paired := state.itemNodeByID[payload.ID]; paired {
+	if itemID == "" {
+		return nil
+	}
+	state.eventOrdinal[itemID] = record.Ordinal
+	if index, paired := state.itemNodeByID[itemID]; paired {
 		state.correlations = append(state.correlations, CodexCapturedCorrelation{
 			Kind:            CodexCorrelationRepeatedItemCompleted,
-			ItemID:          payload.ID,
+			ItemID:          itemID,
 			EventOrdinal:    codexInt64Ptr(record.Ordinal),
 			ResponseOrdinal: codexInt64Ptr(state.nodes[index].Ordinal),
 			Refs:            []schema.SourceEntryRef{state.nodes[index].Ref},
@@ -1093,26 +1201,32 @@ func (state *codexReplayState) replayItemCompleted(threadID string, segment code
 		return nil
 	}
 	if payload.Delivery.isCorrelated() {
-		// An inter-agent delivery without its own item body is still a
-		// native admission: it opens a legacy instruction boundary once.
-		if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && state.boundary.admit(payload.ID) {
+		// An inter-agent delivery without its own decodable item body is still
+		// a native admission: it opens a legacy instruction boundary once.
+		if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && state.boundary.admit(itemID) {
 			state.turns = append(state.turns, nil)
 		}
 		return nil
 	}
-	state.boundary.pendUnopened(payload.ID)
+	state.boundary.pendUnopened(itemID)
 	return nil
 }
 
 // applyItemBody emits or replaces the one native item for an item lifecycle
-// event that carries its own body. The event is the transcript item
-// authority: its body wins over a raw response mirror.
-func (state *codexReplayState) applyItemBody(threadID string, segment codexDecodedSegment, record codexHistoryRecord, event codexHistoryReplayPayload, body codexItemBody, nativeType string, ownership CodexOwnership, mode CodexHistoryMode) error {
+// event that carries its own canonical body. The event is the transcript item
+// authority: its body wins over a raw response mirror, and a repeated
+// completion (same or later segment) replaces the item state while preserving
+// the native identity (ref and key). Only a native instruction admission opens
+// a legacy instruction turn; assistant, reasoning, tool and other output stays
+// inside its admission's turn.
+func (state *codexReplayState) applyItemBody(threadID string, segment codexDecodedSegment, record codexHistoryRecord, event codexHistoryReplayPayload, body codexItemBody, nativeType, role string, ownership CodexOwnership, mode CodexHistoryMode) error {
 	itemID := event.ID
+	if itemID == "" {
+		itemID = event.ItemID
+	}
 	if body.ID != "" {
 		itemID = body.ID
 	}
-	role := body.Role
 	callID := body.CallID
 	turnID := body.TurnID
 	if turnID == "" {
@@ -1120,18 +1234,13 @@ func (state *codexReplayState) applyItemBody(threadID string, segment codexDecod
 	}
 	if index, known := state.itemNodeByID[itemID]; known {
 		node := &state.nodes[index]
-		if node.SegmentOrdinal != segment.ordinal {
-			// The same native item survived into a later segment: rollover
-			// evidence, never a state replacement across incarnations.
-			state.correlations = append(state.correlations, CodexCapturedCorrelation{
-				Kind:   CodexCorrelationSameThreadRollover,
-				ItemID: itemID,
-				Refs:   []schema.SourceEntryRef{node.Ref},
-			})
-			return nil
-		}
-		// A repeated completion replaces the completed-item state while
-		// preserving the native identity (ref and key).
+		crossSegment := node.SegmentOrdinal != segment.ordinal
+		// A repeated completion replaces the completed-item state from the
+		// latest native record while preserving the native identity. A
+		// cross-segment repeat is additionally the same-thread rollover
+		// evidence; the later body is the surviving native item, never an
+		// assumed-unchanged duplicate.
+		node.SegmentOrdinal = segment.ordinal
 		node.Ordinal = record.Ordinal
 		node.LineIndex = record.LineIndex
 		node.ByteStart = record.ByteStart
@@ -1145,8 +1254,12 @@ func (state *codexReplayState) applyItemBody(threadID string, segment codexDecod
 		if bodyChangedMetadata(record.Metadata) {
 			node.Metadata = record.Metadata
 		}
+		kind := CodexCorrelationRepeatedItemCompleted
+		if crossSegment {
+			kind = CodexCorrelationSameThreadRollover
+		}
 		state.correlations = append(state.correlations, CodexCapturedCorrelation{
-			Kind:            CodexCorrelationRepeatedItemCompleted,
+			Kind:            kind,
 			ItemID:          itemID,
 			EventOrdinal:    codexInt64Ptr(record.Ordinal),
 			ResponseOrdinal: codexInt64Ptr(node.Ordinal),
@@ -1155,9 +1268,10 @@ func (state *codexReplayState) applyItemBody(threadID string, segment codexDecod
 		state.boundary.correlated(itemID)
 		return nil
 	}
-	// The admission opens before emission so the item lands in its own
-	// native instruction turn instead of the previous one.
-	if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && state.boundary.admit(itemID) {
+	// A native admission opens before emission so the item lands in its own
+	// native instruction turn instead of the previous one. Output items do
+	// not open a turn on their own.
+	if mode == CodexHistoryModeLegacy && ownership == CodexOwnershipOwn && codexItemIsAdmission(event, body, nativeType) && state.boundary.admit(itemID) {
 		state.turns = append(state.turns, nil)
 	}
 	index, _, err := state.emitNode(threadID, segment, record, ownership, nativeType, role, itemID, callID, turnID)
@@ -1413,6 +1527,8 @@ func codexResponseNativeType(payloadType string) (string, bool) {
 	switch payloadType {
 	case codexResponseMessage:
 		return "message", true
+	case codexResponseAgentMessage:
+		return "message", true
 	case codexResponseReasoning:
 		return "reasoning", true
 	case codexResponseFunctionCall:
@@ -1430,12 +1546,29 @@ func codexResponseNativeType(payloadType string) (string, bool) {
 
 // codexNativeKey builds the bounded local identity the ref registry keys on. A
 // surviving native item id is scoped to the stable logical thread, never to the
-// physical rollout path, so a same-thread rollover reuses the same ref.
+// physical rollout path, so a same-thread rollover reuses the same ref. An item
+// lifecycle event carries its native identity inside the nested item body, so
+// that id is read as well as the legacy top-level id.
 func codexNativeKey(threadID string, segment codexDecodedSegment, record codexHistoryRecord, nativeType string) string {
 	if record.Payload != nil {
-		var payload codexHistoryReplayPayload
-		if json.Unmarshal(record.Payload, &payload) == nil && payload.ID != "" {
-			return fmt.Sprintf("codex|%s|item|%s|%s", threadID, payload.ID, nativeType)
+		var payload struct {
+			ID     string `json:"id"`
+			ItemID string `json:"item_id"`
+			Item   struct {
+				ID string `json:"id"`
+			} `json:"item"`
+		}
+		if json.Unmarshal(record.Payload, &payload) == nil {
+			itemID := payload.ID
+			if itemID == "" {
+				itemID = payload.ItemID
+			}
+			if itemID == "" {
+				itemID = payload.Item.ID
+			}
+			if itemID != "" {
+				return fmt.Sprintf("codex|%s|item|%s|%s", threadID, itemID, nativeType)
+			}
 		}
 	}
 	return fmt.Sprintf("codex|%s|pos|%s|%d|%s", threadID, segment.descriptor.PhysicalSourceID, record.ByteStart, nativeType)
