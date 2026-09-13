@@ -456,8 +456,9 @@ func (store snapshotPublicationStore) LoadPublicationMetadata(_ context.Context,
 }
 
 // TestPrepareReindexFallbackKeepsUnprojectedFields pins the rejected seam:
-// the reindex fallback carries no metadata bytes of its own, so the index
-// capture reads both halves from disk and the unprojected fields survive.
+// the reindex fallback carries the raw on-disk metadata bytes, never a
+// re-encoding of the decoded projection whose unprojected fields are
+// already gone, so the index capture parses one complete snapshot.
 func TestPrepareReindexFallbackKeepsUnprojectedFields(t *testing.T) {
 	fixture := loadPairSnapshotFixture(t)
 	output, err := NewResolvedPath(t.TempDir())
@@ -484,8 +485,18 @@ func TestPrepareReindexFallbackKeepsUnprojectedFields(t *testing.T) {
 	if len(im.transcriptData) == 0 {
 		t.Fatal("the reindex fallback lost the transcript the projection proof verified")
 	}
-	if len(im.metadataData) != 0 {
-		t.Fatal("the reindex fallback synthesized metadata bytes from the decoded projection, whose unprojected fields are already gone")
+	// The carried bytes must be the document bytes, not a re-encoding of
+	// the decoded projection: only the document still holds the fields the
+	// projection drops.
+	diskMetadata, err := base.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(im.metadataData, diskMetadata) {
+		t.Fatal("the reindex fallback synthesized metadata bytes instead of carrying the validated document")
+	}
+	if !bytes.Contains(im.metadataData, []byte(fixture.ExtraMetadataValue)) {
+		t.Fatal("the reindex fallback lost the metadata field the decoded projection drops")
 	}
 	if im.captureRevision != 7 {
 		t.Fatalf("the reindex fallback lost the publication proof revision, got %d", im.captureRevision)

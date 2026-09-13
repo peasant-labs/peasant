@@ -3297,9 +3297,10 @@ func indexWithSourceKind(
 // sessionFromWorkerResult reconstructs the DiscoveredSession carried by a workerResult.
 // The session fields needed downstream (SessionID, Harness, ParentUUID, SourceFormat,
 // SourcePath) are preserved on result and meta; we recover them here.
-// workerMetadataJSON returns the metadata bytes the worker committed for this
-// session, when it published a pair this run. The index path uses them directly
-// instead of reading the metadata file back.
+// workerMetadataJSON returns the metadata bytes the index path uses directly
+// instead of reading the metadata file back: the bytes the worker committed
+// when it published a pair this run, or the exact bytes a retained fallback
+// already validated when it committed nothing.
 func workerMetadataJSON(wr *workerResult) []byte {
 	if len(wr.retainedMetadataJSON) != 0 {
 		return wr.retainedMetadataJSON
