@@ -1,0 +1,18 @@
+requiredNames:
+  - copied-prefix-S-boundary
+  - empty-child-then-append
+  - incomplete-prefix-safe
+  - migrated-child-prior-work
+  - multi-segment-ancestor-parent-surviving-own
+  - reference-before-through-and-failures
+  - history-mode-missing-and-unknown
+  - codex-compaction-keeps-archival-turns
+  - codex-rollback-checkpoint-and-later-turn
+  - paginated-rollback-anomaly
+  - pointer-revert-surviving-own
+  - pointer-switch-during-refresh
+  - partial-unknown-ordinal-append
+  - paired-response-event
+  - repeated-item-completed
+  - same-thread-rollover-refs
+  - checkpoint-alignment-incomplete
