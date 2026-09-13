@@ -142,7 +142,6 @@ type swapPairFS struct {
 	nextTranscript []byte
 	armed          bool
 	hookFired      bool
-	metadataReads  int
 }
 
 var _ ingest.FileSystem = (*swapPairFS)(nil)
@@ -156,11 +155,6 @@ func (filesystem *swapPairFS) arm() {
 
 func (filesystem *swapPairFS) ReadFile(path string) ([]byte, error) {
 	data, err := filesystem.MemFS.ReadFile(path)
-	if path == filesystem.metadataPath {
-		filesystem.mu.Lock()
-		filesystem.metadataReads++
-		filesystem.mu.Unlock()
-	}
 	if err == nil && path == filesystem.transcriptPath {
 		filesystem.mu.Lock()
 		defer filesystem.mu.Unlock()
