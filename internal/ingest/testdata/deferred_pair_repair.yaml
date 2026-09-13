@@ -1,31 +1,42 @@
-# A session already queued for work reads its saved pair at the point of use,
-# not during pair-repair selection: a native acquisition rewrites the pair, and
-# both the retained-first read and the native-failure fallback read through the
-# validated pair reader that refuses a damaged pair. Selection only compares a
-# pair for a candidate the run had otherwise skipped.
+# A session already queued for other work reads its saved pair at the point of
+# use, not during pair-repair selection, when the queue reason is a real native
+# content or producer-version change: such a session is re-acquired from native
+# input, which rewrites the pair and recreates a missing sidecar, so a
+# selection-stage damage verdict would duplicate a read the queued path does not
+# need. A session queued only for index readiness keeps the selection read and
+# the repair flag, because its queued path can settle without touching the pair
+# (the legacy provider recovery class).
 #
 # Each case seeds one stored row with an intact or damaged saved pair and a
-# native source older than the row, then runs the production pipeline (real
-# SQLite store, real indexer registry; only the source adapter and filesystem
-# are substituted). A discovered session with a native mod time newer than its
-# recorded ingest is queued by the ordinary diff; the absent native case is
-# queued only through the repair selection.
+# native source, then runs the production pipeline (real SQLite store, real
+# indexer registry; only the source adapter and filesystem are substituted).
+# queueReason selects the queue signal for a discovered session:
+#   native-change   the discovered source mod time is newer than the recorded
+#                   ingest clock.
+#   index-readiness the source is unchanged and the row has no bound
+#                   publication capture, so only index readiness queues it.
 #
-#   - queued, healthy, native unavailable: the fallback indexes the pair.
-#   - queued, damaged, native unavailable: the fallback refuses it; no index
-#     and no write, and the run must not turn it into a successful fallback.
-#   - queued, healthy, native available: native acquisition rewrites the pair.
+#   - queued, native-change, healthy, native unavailable: retained fallback
+#     indexes the pair.
+#   - queued, native-change, damaged, native unavailable: the fallback refuses
+#     it; no index and no write.
+#   - queued, native-change, healthy, native available: native rewrites it.
+#   - queued, index-readiness, damaged, native available: the kept repair flag
+#     forces the native re-ingest that restores the pair.
 #   - unqueued, damaged, native available: selection appends a repair entry.
 #
 # The selection_reads cases run a dry run so no worker processes the row, and
-# count reads of the managed pair. A queued healthy candidate must not be read
-# during selection; an unqueued damaged candidate still is, proving the count.
+# count reads of the managed pair. A native-change-queued candidate must not be
+# read during selection; an index-readiness-queued candidate and an unqueued
+# damaged candidate must still be read, proving the count.
 required_names:
   - queued-healthy-native-unavailable-retains
   - queued-damaged-native-unavailable-refuses
   - queued-healthy-native-available-rewrites
+  - queued-readiness-missing-metadata-native-available-repairs
   - unqueued-damaged-native-available-repairs
-  - selection-queued-healthy-reads-none
+  - selection-queued-native-change-reads-none
+  - selection-queued-readiness-reads-pair
   - selection-unqueued-damaged-reads-pair
 native_transcript: |
   {"type":"user","message":{"role":"user","content":"inspect the deferred native fixture"},"uuid":"u1"}
@@ -35,6 +46,7 @@ damaged_transcript: |
 cases:
   - name: queued-healthy-native-unavailable-retains
     discovered: true
+    queueReason: native-change
     pairState: healthy
     nativeAvailable: false
     wantIndexed: true
@@ -44,6 +56,7 @@ cases:
   # refuses it, nothing is written, and the refusal names the failed checksum.
   - name: queued-damaged-native-unavailable-refuses
     discovered: true
+    queueReason: native-change
     pairState: damaged
     nativeAvailable: false
     wantIndexed: false
@@ -51,7 +64,20 @@ cases:
     wantPairUnchanged: true
   - name: queued-healthy-native-available-rewrites
     discovered: true
+    queueReason: native-change
     pairState: healthy
+    nativeAvailable: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+  # Queued only for index readiness, with the metadata sidecar gone so the
+  # readiness queue signal survives (a present sidecar settles the row): the
+  # pair damage must still drive the native re-ingest, because this queued path
+  # can settle without a pair read.
+  - name: queued-readiness-missing-metadata-native-available-repairs
+    discovered: true
+    queueReason: index-readiness
+    pairState: missing-metadata
     nativeAvailable: true
     wantIndexed: true
     wantChecksumRefusal: false
@@ -66,10 +92,17 @@ cases:
     wantChecksumRefusal: false
     wantPairUnchanged: false
 selection_reads:
-  - name: selection-queued-healthy-reads-none
+  - name: selection-queued-native-change-reads-none
     discovered: true
+    queueReason: native-change
     pairState: healthy
+    nativeAvailable: true
     wantPairReads: 0
+  - name: selection-queued-readiness-reads-pair
+    discovered: true
+    queueReason: index-readiness
+    pairState: missing-metadata
+    wantPairReadsAtLeast: 1
   - name: selection-unqueued-damaged-reads-pair
     discovered: false
     pairState: damaged

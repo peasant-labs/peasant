@@ -32,6 +32,7 @@ type deferredPairRepairDocument struct {
 type deferredPairRepairCase struct {
 	Name                string `yaml:"name"`
 	Discovered          bool   `yaml:"discovered"`
+	QueueReason         string `yaml:"queueReason"`
 	PairState           string `yaml:"pairState"`
 	NativeAvailable     bool   `yaml:"nativeAvailable"`
 	WantIndexed         bool   `yaml:"wantIndexed"`
@@ -42,7 +43,9 @@ type deferredPairRepairCase struct {
 type deferredSelectionRead struct {
 	Name                 string `yaml:"name"`
 	Discovered           bool   `yaml:"discovered"`
+	QueueReason          string `yaml:"queueReason"`
 	PairState            string `yaml:"pairState"`
+	NativeAvailable      bool   `yaml:"nativeAvailable"`
 	WantPairReads        *int   `yaml:"wantPairReads"`
 	WantPairReadsAtLeast int    `yaml:"wantPairReadsAtLeast"`
 }
@@ -56,22 +59,32 @@ func loadDeferredPairRepairFixtures(t *testing.T) deferredPairRepairDocument {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
-	validate := func(name, pairState string) {
+	validate := func(name, pairState string, discovered bool, queueReason string) {
 		if name == "" || names[name] {
 			t.Fatalf("invalid deferred pair repair fixture %q", name)
 		}
 		switch pairState {
-		case "healthy", "damaged":
+		case "healthy", "damaged", "missing-metadata":
 		default:
 			t.Fatalf("deferred pair repair fixture %s names unknown pair state %q", name, pairState)
+		}
+		switch queueReason {
+		case "native-change", "index-readiness":
+		default:
+			if discovered {
+				t.Fatalf("deferred pair repair fixture %s is discovered but names unknown queue reason %q", name, queueReason)
+			}
+			if queueReason != "" {
+				t.Fatalf("deferred pair repair fixture %s names a queue reason while not discovered", name)
+			}
 		}
 		names[name] = true
 	}
 	for _, fixture := range document.Cases {
-		validate(fixture.Name, fixture.PairState)
+		validate(fixture.Name, fixture.PairState, fixture.Discovered, fixture.QueueReason)
 	}
 	for _, fixture := range document.SelectionReads {
-		validate(fixture.Name, fixture.PairState)
+		validate(fixture.Name, fixture.PairState, fixture.Discovered, fixture.QueueReason)
 	}
 	if err := testutil.RequireFixtureNames("deferred pair repair", "case", document.RequiredNames, names); err != nil {
 		t.Fatal(err)
@@ -92,9 +105,10 @@ type deferredPairSeed struct {
 
 // seedDeferredPair stores one session with an intact pair, records the pair's
 // identity, and then either leaves the intact transcript in place or replaces
-// it with a transcript that no longer matches the recorded identity. The
-// stored ingest clock is set older than the discovered mod time so an ordinary
-// diff queues the session.
+// it with a transcript that no longer matches the recorded identity. The stored
+// ingest clock is set one hour old, so a discovered source mod time in the
+// future of it queues the session for a native content change, and a mod time
+// before it leaves index readiness as the queue signal.
 func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, memfs *testutil.MemFS, fixture deferredPairRepairDocument, pairState string) deferredPairSeed {
 	t.Helper()
 	id, err := ingest.NewSessionID(testutil.TestSessionUUID)
@@ -137,17 +151,26 @@ func seedDeferredPair(t *testing.T, ctx context.Context, database *store.Store, 
 	if err := publishIndexInputFixture(ctx, database, memfs, testOutputDir, artifact, metadataPath); err != nil {
 		t.Fatal(err)
 	}
-	if pairState == "damaged" {
+	switch pairState {
+	case "healthy":
+		// The intact pair installed by publishIndexInputFixture stays.
+	case "damaged":
 		if err := memfs.WriteFile(transcriptPath, []byte(fixture.DamagedTranscript), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	case "missing-metadata":
+		if err := memfs.Remove(metadataPath); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatalf("unknown pair state %q", pairState)
 	}
 	// Make the row a pair-repair candidate: a stale index revision is what the
 	// selection inventory enumerates.
 	seedStalePreviewCapture(t, ctx, database, id)
-	metadataBefore, err := memfs.ReadFile(metadataPath)
-	if err != nil {
-		t.Fatal(err)
+	metadataBefore, metadataErr := memfs.ReadFile(metadataPath)
+	if metadataErr != nil {
+		metadataBefore = nil
 	}
 	transcriptBefore, err := memfs.ReadFile(transcriptPath)
 	if err != nil {
@@ -178,14 +201,33 @@ func deferredPairAdapters(t *testing.T, seed deferredPairSeed, nativeTranscript 
 	}
 }
 
-func deferredPairDiscovered(seed deferredPairSeed) []ingest.DiscoveredSession {
+// deferredPairDiscovered offers the seeded session as discovery sees it. The
+// discovered source mod time carries the queue reason: newer than the recorded
+// ingest clock for a native content change, older for an index-readiness queue.
+func deferredPairDiscovered(t *testing.T, seed deferredPairSeed, queueReason string) []ingest.DiscoveredSession {
+	t.Helper()
 	return []ingest.DiscoveredSession{{
 		SessionID:    seed.id,
 		Harness:      ingest.HarnessClaudeCode,
 		SourcePath:   ingest.ResolvedPath(seed.nativePath),
 		SourceFormat: ingest.SourceFormatJSONL,
-		ModTime:      time.Now(),
+		ModTime:      deferredPairModTime(t, queueReason),
 	}}
+}
+
+func deferredPairModTime(t *testing.T, queueReason string) time.Time {
+	t.Helper()
+	switch queueReason {
+	case "native-change":
+		return time.Now()
+	case "index-readiness":
+		// The seeded ingest clock is one hour old; an older mod time leaves
+		// index readiness as the only queue signal.
+		return time.Now().Add(-2 * time.Hour)
+	default:
+		t.Fatalf("unknown deferred pair queue reason %q", queueReason)
+		return time.Time{}
+	}
 }
 
 func runDeferredPairPipeline(t *testing.T, ctx context.Context, filesystem ingest.FileSystem, database *store.Store, config ingest.PipelineConfig, adapters map[ingest.Harness]ingest.AdapterFactory) *ingest.PipelineResult {
@@ -206,8 +248,10 @@ func runDeferredPairPipeline(t *testing.T, ctx context.Context, filesystem inges
 // TestDeferredPairRepairDetection drives the production pipeline over stored
 // sessions the ordinary diff has already queued and asserts that their saved
 // pair decides the outcome at the point of use: a healthy pair indexes from
-// the retained copy even when native acquisition fails, a damaged pair refuses
-// and writes nothing, and an unqueued damaged candidate is still repaired.
+// the retained copy even when native acquisition fails, a damaged pair on a
+// native-change queue refuses and writes nothing, a damaged pair on an
+// index-readiness queue is still repaired natively, and an unqueued damaged
+// candidate is still repaired.
 func TestDeferredPairRepairDetection(t *testing.T) {
 	document := loadDeferredPairRepairFixtures(t)
 	for _, fixture := range document.Cases {
@@ -223,7 +267,7 @@ func TestDeferredPairRepairDetection(t *testing.T) {
 			seed := seedDeferredPair(t, ctx, database, memfs, document, fixture.PairState)
 			var discoveredSessions []ingest.DiscoveredSession
 			if fixture.Discovered {
-				discoveredSessions = deferredPairDiscovered(seed)
+				discoveredSessions = deferredPairDiscovered(t, seed, fixture.QueueReason)
 			}
 			adapters := deferredPairAdapters(t, seed, []byte(document.NativeTranscript), discoveredSessions, fixture.NativeAvailable)
 			config := makePipelineConfig(testOutputDir)
@@ -261,7 +305,7 @@ func TestDeferredPairRepairDetection(t *testing.T) {
 				if state == nil || state.IndexedInputHash != nil {
 					t.Fatalf("a refused session changed the stored index state: %+v", state)
 				}
-				if !bytes.Equal(transcriptAfter, []byte(document.DamagedTranscript)) {
+				if fixture.PairState == "damaged" && !bytes.Equal(transcriptAfter, []byte(document.DamagedTranscript)) {
 					t.Fatalf("a refused session overwrote the damaged transcript: %q", transcriptAfter)
 				}
 			}
@@ -297,14 +341,15 @@ func (counter *managedPairReadCounter) ReadFile(path string) ([]byte, error) {
 
 // TestDeferredPairRepairSelectionReads measures how many times selection reads
 // a stored pair. A dry run stops after the filter pass, so every pair read it
-// performs belongs to selection. An already-queued healthy candidate must be
-// read zero times; an unqueued damaged candidate must still be read, which
-// proves the counter can see a selection read at all.
+// performs belongs to selection. An already-queued candidate whose queue reason
+// is a native content change must be read zero times; a candidate queued only
+// for index readiness and an unqueued damaged candidate must still be read,
+// which proves the counter can see a selection read at all.
 //
-// Measured reduction before and after detection was deferred for the
-// already-queued candidate: 2 managed-pair reads (metadata and transcript)
-// during selection before, 0 after. The unqueued damaged candidate still reads
-// its pair (2) to reach the appended repair entry.
+// Measured reduction for the deferred class: the already-queued native-change
+// candidate went from 2 managed-pair reads (metadata and transcript) during
+// selection before the change to 0 after. The index-readiness candidate and the
+// unqueued damaged candidate still read their pair to reach a verdict.
 func TestDeferredPairRepairSelectionReads(t *testing.T) {
 	document := loadDeferredPairRepairFixtures(t)
 	for _, fixture := range document.SelectionReads {
@@ -324,9 +369,9 @@ func TestDeferredPairRepairSelectionReads(t *testing.T) {
 			}
 			var discoveredSessions []ingest.DiscoveredSession
 			if fixture.Discovered {
-				discoveredSessions = deferredPairDiscovered(seed)
+				discoveredSessions = deferredPairDiscovered(t, seed, fixture.QueueReason)
 			}
-			adapters := deferredPairAdapters(t, seed, []byte(document.NativeTranscript), discoveredSessions, false)
+			adapters := deferredPairAdapters(t, seed, []byte(document.NativeTranscript), discoveredSessions, fixture.NativeAvailable)
 			config := makePipelineConfig(testOutputDir)
 			config.DryRun = true
 

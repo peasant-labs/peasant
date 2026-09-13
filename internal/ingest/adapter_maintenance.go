@@ -322,12 +322,36 @@ func (p *Pipeline) cacheRepairLocations(ctx context.Context, ids []SessionID) {
 	}
 }
 
+// queuedForNativeChange reports whether an entry already queued for other work
+// was queued because the session's native content or producer version changed.
+// Such a session is re-acquired from native input, which rewrites the pair and
+// recreates a missing sidecar, so a selection-stage damage verdict for it would
+// duplicate a read the queued path does not need. The stored row is read from
+// the location cache, so the decision reads no file.
+func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
+	// A forced run re-acquires native input for every queued session.
+	if p.config.Force {
+		return true
+	}
+	loc, ok := p.locationCache[session.SessionID]
+	if !ok || loc.SchemaVersion > CurrentSchemaVersion {
+		return false
+	}
+	if loc.IngestedMs != nil && *loc.IngestedMs > 0 && session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
+		return true
+	}
+	return metadataNeedsNativeRefresh(loc.SchemaVersion)
+}
+
 // appendPairRepairWork appends the stored sessions whose saved pair is missing
 // or damaged as native re-ingest work. The repair used to be an explicit
 // `--force --session` action; a session with no usable retained input has
 // nothing to protect, so the ordinary harvest performs it automatically. A
 // session already queued for other work is marked for repair in place, so a
-// database-first "unchanged" verdict cannot leave the damaged pair behind.
+// database-first "unchanged" verdict cannot leave the damaged pair behind. The
+// one exception is a session queued for a native content or producer-version
+// change: its queued path rewrites the pair from native input, so selection
+// does not read the pair for it.
 func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
 	if p.metricsStore == nil {
 		return entries
@@ -347,12 +371,26 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	}
 	var repaired []SessionID
 	for _, sid := range ids {
-		if _, queued := entryIndex[sid]; queued {
-			// Already queued for other work: the queued path reads the pair at
-			// its point of use and decides damage there, so selection does not
-			// read it. A native acquisition rewrites the pair; the retained-first
-			// path and the native-failure fallback both read via readArtifactPair
-			// and refuse damage. Nothing is carried either way.
+		if i, queued := entryIndex[sid]; queued {
+			if p.queuedForNativeChange(entries[i].Session) {
+				// Queued because the session's native content or producer
+				// version changed: the queued path re-acquires native input and
+				// rewrites the pair, recreating a missing sidecar, so a
+				// selection-stage damage verdict would only add a read the path
+				// does not need.
+				continue
+			}
+			if !p.pairNeedsRepair(ctx, sid) {
+				continue
+			}
+			// Queued for a reason that can settle without reading the pair
+			// (index readiness). Carry the damage verdict onto the existing
+			// entry so a database-first no-op cannot leave the damaged pair
+			// behind.
+			metadataPath, _ := p.storedMetadataPath(ctx, sid)
+			entries[i].pairRepair = true
+			entries[i].repairMetadataPath = metadataPath
+			repaired = append(repaired, sid)
 			continue
 		}
 		if !p.pairNeedsRepair(ctx, sid) {
