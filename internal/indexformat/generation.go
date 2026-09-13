@@ -32,12 +32,25 @@ type Partition struct {
 	NativeMetadata []schema.NativeMetadataRecord
 }
 
-// Validate checks one partition's entry references and native attachment.
-// path names the partition in an error so a caller can tell main from earlier.
-func (p Partition) Validate(path string) error {
+// Validate checks one partition's entries and native attachment. path names
+// the partition in an error so a caller can tell main from earlier.
+// sessionID and harness name the owning session from the generation or
+// snapshot metadata that owns this partition; every entry must carry that
+// same ownership so a reader never mixes blocks across sessions.
+func (p Partition) Validate(path string, sessionID schema.SessionID, harness schema.Harness) error {
+	entryIndexes := make(map[int]struct{}, len(p.Entries))
+	indexDepth := make(map[int]int, len(p.Entries))
 	refs := make(map[schema.SourceEntryRef]struct{}, len(p.Entries))
 	for i := range p.Entries {
 		entry := p.Entries[i]
+		if err := validatePartitionEntry(entry, sessionID, harness, path, i); err != nil {
+			return err
+		}
+		if _, duplicate := entryIndexes[entry.EntryIndex]; duplicate {
+			return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: entryIndex %d repeats inside one partition; a reader cannot order the blocks; keep one entry per index", path, i, entry.EntryIndex)
+		}
+		entryIndexes[entry.EntryIndex] = struct{}{}
+		indexDepth[entry.EntryIndex] = entry.Depth
 		if entry.SourceEntryRef == "" {
 			continue
 		}
@@ -49,7 +62,67 @@ func (p Partition) Validate(path string) error {
 		}
 		refs[entry.SourceEntryRef] = struct{}{}
 	}
+	for i := range p.Entries {
+		entry := p.Entries[i]
+		if entry.ParentIndex == nil {
+			continue
+		}
+		parentDepth, ok := indexDepth[*entry.ParentIndex]
+		if !ok {
+			return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: parentIndex %d does not target an entry in this partition; folded attachment ownership is ambiguous; remap the parent after partition layout", path, i, *entry.ParentIndex)
+		}
+		if parentDepth != 0 {
+			return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: parentIndex %d targets a depth-%d entry; only a depth-0 assistant carrier can own a tool subtree; remap the parent to the carrier", path, i, *entry.ParentIndex, parentDepth)
+		}
+	}
 	return validatePartitionNativeMetadata(p.NativeMetadata, refs, path)
+}
+
+// validatePartitionEntry checks one staged entry's role, type, provenance,
+// owning session and harness, and depth/parent shape. It uses the schema's
+// own closed sets so the managed domain never drifts from the wire contract.
+// An absent provenance stays permitted for legacy rows; a present one must be
+// fully valid.
+func validatePartitionEntry(entry schema.SessionEntry, sessionID schema.SessionID, harness schema.Harness, path string, index int) error {
+	if !entry.Role.IsValid() {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: role %q is outside the closed role set; a reader cannot classify the block; use a published role", path, index, entry.Role)
+	}
+	if !entry.EntryType.IsValid() {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: entryType %q is outside the closed entry-type set; a reader cannot classify the block; use a published entry type", path, index, entry.EntryType)
+	}
+	if entry.Provenance != nil {
+		if err := entry.Provenance.Validate(); err != nil {
+			return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: provenance is malformed; the block cannot be attributed; emit complete provenance or omit it: %w", path, index, err)
+		}
+	}
+	if entry.SessionID != sessionID {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: sessionId %q disagrees with the owning session %q; blocks from another session cannot be staged here; keep one owning session per generation", path, index, entry.SessionID, sessionID)
+	}
+	if !entry.Harness.IsKnown() {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: harness %q is not a known harness; the block cannot be attributed; use a known harness", path, index, entry.Harness)
+	}
+	if entry.Harness != harness {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: harness %q disagrees with the owning harness %q; blocks from another harness cannot be staged here; keep one owning harness per generation", path, index, entry.Harness, harness)
+	}
+	if entry.EntryIndex < 0 {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: entryIndex %d is negative; partition order cannot be reconstructed; record the nonnegative entry index", path, index, entry.EntryIndex)
+	}
+	if entry.Depth < 0 {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: depth %d is negative; attachment ancestry cannot be reconstructed; record depth 0 for a message or 1 for a content part", path, index, entry.Depth)
+	}
+	if entry.Depth == 0 && entry.ParentIndex != nil {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: depth 0 carries parentIndex %d; a message is a root, not a tool part; keep parentIndex nil at depth 0 and use the message-chain link for ancestry", path, index, *entry.ParentIndex)
+	}
+	if entry.Depth > 0 && entry.ParentIndex == nil {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: depth %d has no parentIndex; a content part cannot be attached; record the carrier entry index in the same partition", path, index, entry.Depth)
+	}
+	if entry.ToolKind != nil && !entry.ToolKind.IsValid() {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: toolKind %q is outside the closed set; the tool cannot be classified; use a published tool kind or omit it", path, index, *entry.ToolKind)
+	}
+	if entry.StopReason != nil && !entry.StopReason.IsValid() {
+		return fmt.Errorf("indexformat.Partition.Validate %s entries[%d]: stopReason %q is outside the closed set; the turn end cannot be classified; use a published stop reason or omit it", path, index, *entry.StopReason)
+	}
+	return nil
 }
 
 // entryRefs returns the partition's non-empty source entry refs.
@@ -69,12 +142,13 @@ type EarlierPartition struct {
 	Content Partition
 }
 
-// Validate checks one earlier section's state and content partition.
-func (e EarlierPartition) Validate(index int) error {
+// Validate checks one earlier section's state and content partition. The
+// owner names the generation or snapshot session every entry must carry.
+func (e EarlierPartition) Validate(index int, sessionID schema.SessionID, harness schema.Harness) error {
 	if !e.State.IsValid() {
 		return fmt.Errorf("indexformat.EarlierPartition.Validate earlier[%d]: state %q is outside the closed earlier-history set; retained history cannot be explained; use a published state", index, e.State)
 	}
-	return e.Content.Validate(fmt.Sprintf("earlier[%d]", index))
+	return e.Content.Validate(fmt.Sprintf("earlier[%d]", index), sessionID, harness)
 }
 
 // ContentRecord is one immutable managed content blob for a source entry ref.
@@ -274,13 +348,21 @@ func (g Generation) Validate() error {
 	if err := validateUnifiedMetadata(g.Metadata, "generation.metadata"); err != nil {
 		return err
 	}
-	if err := g.Main.Validate("main"); err != nil {
+	ownerSession := g.Metadata.SessionID
+	ownerHarness := g.Metadata.ModelHarness
+	if err := g.Main.Validate("main", ownerSession, ownerHarness); err != nil {
 		return err
 	}
 	for i := range g.Earlier {
-		if err := g.Earlier[i].Validate(i); err != nil {
+		if err := g.Earlier[i].Validate(i, ownerSession, ownerHarness); err != nil {
 			return err
 		}
+	}
+	if err := validateGlobalEntryRefUniqueness(g.Main, g.Earlier, g.ID); err != nil {
+		return err
+	}
+	if err := validateGlobalNativeMetadataIDUniqueness(g.Main, g.Earlier, g.ID); err != nil {
+		return err
 	}
 	if err := validateSegments(g.Segments); err != nil {
 		return err
@@ -292,6 +374,7 @@ func (g Generation) Validate() error {
 			entryRefs[ref] = struct{}{}
 		}
 	}
+	retainedRefs := segmentCapturedRefs(g.Segments)
 
 	contentRefs := make(map[schema.SourceEntryRef]struct{}, len(g.Content))
 	for i := range g.Content {
@@ -306,7 +389,9 @@ func (g Generation) Validate() error {
 	}
 	for ref := range contentRefs {
 		if _, ok := entryRefs[ref]; !ok {
-			return fmt.Errorf("indexformat.Generation.Validate id %q: content ref %q does not appear in any partition; the generation is not self-contained; attach content only to refs this generation emits", g.ID, ref)
+			if _, retained := retainedRefs[ref]; !retained {
+				return fmt.Errorf("indexformat.Generation.Validate id %q: content ref %q appears in neither an emitted partition nor a captured context segment; the generation is not self-contained; attach content only to refs this generation emits or retains as inherited evidence", g.ID, ref)
+			}
 		}
 	}
 
@@ -321,6 +406,13 @@ func (g Generation) Validate() error {
 		}
 		aliasKeys[alias.NativeKey] = struct{}{}
 	}
+	for _, alias := range g.Aliases {
+		if _, ok := entryRefs[alias.Ref]; !ok {
+			if _, retained := retainedRefs[alias.Ref]; !retained {
+				return fmt.Errorf("indexformat.Generation.Validate id %q: native alias key %q targets ref %q outside the emitted partitions and captured segments; the alias cannot be resolved after reopen; map aliases only to retained generation refs", g.ID, alias.NativeKey, alias.Ref)
+			}
+		}
+	}
 
 	for i := range g.TitleRefs {
 		ref := g.TitleRefs[i]
@@ -329,6 +421,96 @@ func (g Generation) Validate() error {
 		}
 		if _, ok := g.Main.entryRefs()[ref]; !ok {
 			return fmt.Errorf("indexformat.Generation.Validate id %q: title ref %q is not a main entry; a title must be seeded by a main owned block; move the ref or drop it", g.ID, ref)
+		}
+	}
+	return validateCompletenessCountPresence(g.Completeness, g.Metadata.Stats.InputSubmissionCount, g.ID)
+}
+
+// validateGlobalEntryRefUniqueness requires every non-empty source entry ref
+// to have exactly one owning partition across main and all earlier sections.
+// A ref emitted twice would give two blocks one identity after reopen.
+func validateGlobalEntryRefUniqueness(main Partition, earlier []EarlierPartition, generationID string) error {
+	owners := make(map[schema.SourceEntryRef]string, len(main.Entries))
+	for i := range main.Entries {
+		ref := main.Entries[i].SourceEntryRef
+		if ref == "" {
+			continue
+		}
+		if owner, duplicate := owners[ref]; duplicate {
+			return fmt.Errorf("indexformat.Generation.Validate id %q: source entry ref %q is owned by both %s and main entries[%d]; one block cannot live in two partitions; keep one owner per ref across the whole generation", generationID, ref, owner, i)
+		}
+		owners[ref] = fmt.Sprintf("main entries[%d]", i)
+	}
+	for section := range earlier {
+		entries := earlier[section].Content.Entries
+		for i := range entries {
+			ref := entries[i].SourceEntryRef
+			if ref == "" {
+				continue
+			}
+			if owner, duplicate := owners[ref]; duplicate {
+				return fmt.Errorf("indexformat.Generation.Validate id %q: source entry ref %q is owned by both %s and earlier[%d] entries[%d]; one block cannot live in two partitions; keep one owner per ref across the whole generation", generationID, ref, owner, section, i)
+			}
+			owners[ref] = fmt.Sprintf("earlier[%d] entries[%d]", section, i)
+		}
+	}
+	return nil
+}
+
+// validateGlobalNativeMetadataIDUniqueness requires every native metadata id
+// to be unique across the whole generation so an attachment cannot alias two
+// blocks in different partitions.
+func validateGlobalNativeMetadataIDUniqueness(main Partition, earlier []EarlierPartition, generationID string) error {
+	owners := make(map[string]string)
+	for i := range main.NativeMetadata {
+		id := main.NativeMetadata[i].ID
+		if owner, duplicate := owners[id]; duplicate {
+			return fmt.Errorf("indexformat.Generation.Validate id %q: native metadata id %q is attached by both %s and main nativeMetadata[%d]; attachment is ambiguous across partitions; keep unique ids across the whole generation", generationID, id, owner, i)
+		}
+		owners[id] = fmt.Sprintf("main nativeMetadata[%d]", i)
+	}
+	for section := range earlier {
+		records := earlier[section].Content.NativeMetadata
+		for i := range records {
+			id := records[i].ID
+			if owner, duplicate := owners[id]; duplicate {
+				return fmt.Errorf("indexformat.Generation.Validate id %q: native metadata id %q is attached by both %s and earlier[%d] nativeMetadata[%d]; attachment is ambiguous across partitions; keep unique ids across the whole generation", generationID, id, owner, section, i)
+			}
+			owners[id] = fmt.Sprintf("earlier[%d] nativeMetadata[%d]", section, i)
+		}
+	}
+	return nil
+}
+
+// segmentCapturedRefs returns every non-empty ref a validated segment
+// captures. Inherited context is retained locally under these refs without
+// being emitted as main or earlier entries.
+func segmentCapturedRefs(segments []ContextSegment) map[schema.SourceEntryRef]struct{} {
+	retained := make(map[schema.SourceEntryRef]struct{})
+	for i := range segments {
+		for _, ref := range segments[i].CapturedRefs {
+			if ref != "" {
+				retained[ref] = struct{}{}
+			}
+		}
+	}
+	return retained
+}
+
+// validateCompletenessCountPresence enforces the count-presence contract: a
+// complete generation has measured its input submissions, even when the
+// measure is zero, while an incomplete first-discovery generation omits the
+// scalar until a complete inspection exists. Absent stays unknown; present
+// zero stays measured none.
+func validateCompletenessCountPresence(completeness GenerationCompleteness, count *int64, generationID string) error {
+	switch completeness {
+	case GenerationCompletenessComplete:
+		if count == nil {
+			return fmt.Errorf("indexformat.Generation.Validate id %q: completeness is complete but stats.inputSubmissionCount is absent; a complete generation has measured its submissions; record the measured count, including zero", generationID)
+		}
+	case GenerationCompletenessIncompleteNew:
+		if count != nil {
+			return fmt.Errorf("indexformat.Generation.Validate id %q: completeness is incomplete_new but stats.inputSubmissionCount is present; a first-discovery generation without complete inspection omits the scalar; clear it until a complete capture exists", generationID)
 		}
 	}
 	return nil
@@ -552,13 +734,18 @@ func (s ReadSnapshot) validateGeneration() error {
 	if !s.LegacySource.IsZero() {
 		return fmt.Errorf("indexformat.ReadSnapshot.Validate: index version 2 carries a legacy source; a generation read must never fall back to the mutable original; clear it")
 	}
-	if err := s.Main.Validate("main"); err != nil {
+	ownerSession := s.Metadata.SessionID
+	ownerHarness := s.Metadata.ModelHarness
+	if err := s.Main.Validate("main", ownerSession, ownerHarness); err != nil {
 		return err
 	}
 	for i := range s.Earlier {
-		if err := s.Earlier[i].Validate(i); err != nil {
+		if err := s.Earlier[i].Validate(i, ownerSession, ownerHarness); err != nil {
 			return err
 		}
+	}
+	if err := validateSnapshotEntryRefUniqueness(s.Main, s.Earlier); err != nil {
+		return err
 	}
 	entryRefs := s.Main.entryRefs()
 	for i := range s.Earlier {
@@ -589,6 +776,52 @@ func (s ReadSnapshot) validateGeneration() error {
 		}
 		if _, ok := s.Main.entryRefs()[ref]; !ok {
 			return fmt.Errorf("indexformat.ReadSnapshot.Validate: title ref %q is not a main entry; a title must be seeded by a main owned block; move the ref or drop it", ref)
+		}
+	}
+	return validateSnapshotCompletenessCountPresence(s.Completeness, s.Metadata.Stats.InputSubmissionCount)
+}
+
+// validateSnapshotEntryRefUniqueness requires every non-empty source entry ref
+// in a generation snapshot to have exactly one owning partition.
+func validateSnapshotEntryRefUniqueness(main Partition, earlier []EarlierPartition) error {
+	owners := make(map[schema.SourceEntryRef]string, len(main.Entries))
+	for i := range main.Entries {
+		ref := main.Entries[i].SourceEntryRef
+		if ref == "" {
+			continue
+		}
+		if owner, duplicate := owners[ref]; duplicate {
+			return fmt.Errorf("indexformat.ReadSnapshot.Validate: source entry ref %q is owned by both %s and main entries[%d]; one block cannot live in two partitions; keep one owner per ref across the whole snapshot", ref, owner, i)
+		}
+		owners[ref] = fmt.Sprintf("main entries[%d]", i)
+	}
+	for section := range earlier {
+		entries := earlier[section].Content.Entries
+		for i := range entries {
+			ref := entries[i].SourceEntryRef
+			if ref == "" {
+				continue
+			}
+			if owner, duplicate := owners[ref]; duplicate {
+				return fmt.Errorf("indexformat.ReadSnapshot.Validate: source entry ref %q is owned by both %s and earlier[%d] entries[%d]; one block cannot live in two partitions; keep one owner per ref across the whole snapshot", ref, owner, section, i)
+			}
+			owners[ref] = fmt.Sprintf("earlier[%d] entries[%d]", section, i)
+		}
+	}
+	return nil
+}
+
+// validateSnapshotCompletenessCountPresence enforces the same count-presence
+// contract as a stored generation: complete measures, incomplete omits.
+func validateSnapshotCompletenessCountPresence(completeness GenerationCompleteness, count *int64) error {
+	switch completeness {
+	case GenerationCompletenessComplete:
+		if count == nil {
+			return fmt.Errorf("indexformat.ReadSnapshot.Validate: completeness is complete but stats.inputSubmissionCount is absent; a complete snapshot has measured its submissions; record the measured count, including zero")
+		}
+	case GenerationCompletenessIncompleteNew:
+		if count != nil {
+			return fmt.Errorf("indexformat.ReadSnapshot.Validate: completeness is incomplete_new but stats.inputSubmissionCount is present; a first-discovery snapshot without complete inspection omits the scalar; clear it until a complete capture exists")
 		}
 	}
 	return nil

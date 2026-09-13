@@ -23,7 +23,7 @@ cases:
       main: {}
 
   - name: absent-input-submission-count
-    expectInputSubmissionCountAbsent: true
+    wantError: stats.inputSubmissionCount is absent
     generation:
       id: gen-0003
       completeness: complete
@@ -95,12 +95,12 @@ cases:
       main: {}
 
   - name: content-ref-outside-partitions
-    wantError: does not appear in any partition
+    wantError: appears in neither an emitted partition nor a captured context segment
     generation:
       id: gen-0011
       completeness: complete
       sourceEvidenceDigest: sha3-256:evidence-0011
-      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
       main:
         entries:
           - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
@@ -113,7 +113,7 @@ cases:
       id: gen-0012
       completeness: complete
       sourceEvidenceDigest: sha3-256:evidence-0012
-      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
       main:
         entries:
           - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
@@ -129,7 +129,7 @@ cases:
       id: gen-0013
       completeness: complete
       sourceEvidenceDigest: sha3-256:evidence-0013
-      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
       main:
         entries:
           - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
@@ -186,7 +186,7 @@ cases:
       id: gen-0018
       completeness: complete
       sourceEvidenceDigest: sha3-256:evidence-0018
-      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
       main: {}
       segments:
         - {ordinal: 0, inclusion: inherited, physicalSourceId: src-a, coordinateKind: codex_ordinal_range, start: 1, endExclusive: 3, capturedRefs: [c-1, c-2]}
@@ -276,7 +276,7 @@ cases:
       id: gen-0026
       completeness: complete
       sourceEvidenceDigest: sha3-256:evidence-0026
-      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
       main:
         entries:
           - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
@@ -381,3 +381,286 @@ cases:
         relationships:
           - {kind: started_by, targetState: target_known, evidence: native_typed}
       main: {}
+
+  - name: main-entry-invalid-role
+    wantError: closed role set
+    generation:
+      id: gen-0035
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0035
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: not-a-role, sourceEntryRef: e-main-0}
+
+  - name: earlier-entry-invalid-role
+    wantError: closed role set
+    generation:
+      id: gen-0036
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0036
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main: {}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: not-a-role, sourceEntryRef: e-earlier-0}
+
+  - name: main-entry-invalid-entry-type
+    wantError: entry-type set
+    generation:
+      id: gen-0037
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0037
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, entryType: not-a-type, sourceEntryRef: e-main-0}
+
+  - name: main-entry-invalid-provenance
+    wantError: provenance is malformed
+    generation:
+      id: gen-0038
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0038
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - entryIndex: 0
+            role: user
+            sourceEntryRef: e-main-0
+            provenance: {origin: not-an-origin, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+
+  - name: main-entry-valid-provenance
+    generation:
+      id: gen-0039
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0039
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 1, turnCount: 1}
+      main:
+        entries:
+          - entryIndex: 0
+            role: user
+            sourceEntryRef: e-main-0
+            provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text, submissionRef: s-u1}
+
+  - name: main-entry-session-mismatch
+    wantError: owning session
+    generation:
+      id: gen-0040
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0040
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sessionId: 22222222-2222-4222-8222-222222222222, sourceEntryRef: e-main-0}
+
+  - name: main-entry-empty-session-id
+    wantError: owning session
+    generation:
+      id: gen-0041
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0041
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sessionId: "", sourceEntryRef: e-main-0}
+
+  - name: main-entry-harness-mismatch
+    wantError: owning harness
+    generation:
+      id: gen-0042
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0042
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, harness: codex, sourceEntryRef: e-main-0}
+
+  - name: main-entry-unknown-harness
+    wantError: not a known harness
+    generation:
+      id: gen-0043
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0043
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, harness: not-a-harness, sourceEntryRef: e-main-0}
+
+  - name: duplicate-ref-across-partitions
+    wantError: one owner per ref across the whole generation
+    generation:
+      id: gen-0044
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0044
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-dup-0}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-dup-0}
+
+  - name: duplicate-entry-index
+    wantError: entryIndex 0 repeats inside one partition
+    generation:
+      id: gen-0045
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0045
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+          - {entryIndex: 0, role: assistant, sourceEntryRef: e-main-1}
+
+  - name: negative-entry-index
+    wantError: entryIndex -1 is negative
+    generation:
+      id: gen-0046
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0046
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: -1, role: user, sourceEntryRef: e-main-0}
+
+  - name: depth-zero-with-parent
+    wantError: depth 0 carries parentIndex
+    generation:
+      id: gen-0047
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0047
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0, depth: 0, parentIndex: 0}
+
+  - name: depth-one-without-parent
+    wantError: has no parentIndex
+    generation:
+      id: gen-0048
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0048
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: assistant, entryType: tool_use, sourceEntryRef: e-call-0, depth: 1}
+
+  - name: parent-index-missing-target
+    wantError: does not target an entry in this partition
+    generation:
+      id: gen-0049
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0049
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: assistant, sourceEntryRef: e-carrier-0}
+          - {entryIndex: 1, role: assistant, entryType: tool_use, sourceEntryRef: e-call-0, depth: 1, parentIndex: 9}
+
+  - name: parent-index-non-carrier-target
+    wantError: only a depth-0 assistant carrier can own a tool subtree
+    generation:
+      id: gen-0050
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0050
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: assistant, sourceEntryRef: e-carrier-0}
+          - {entryIndex: 1, role: assistant, entryType: tool_use, sourceEntryRef: e-call-0, depth: 1, parentIndex: 2}
+          - {entryIndex: 2, role: tool, entryType: tool_result, sourceEntryRef: e-result-0, depth: 1, parentIndex: 0}
+
+  - name: incomplete-new-with-count-rejected
+    wantError: omits the scalar
+    generation:
+      id: gen-0051
+      completeness: incomplete_new
+      sourceEvidenceDigest: sha3-256:evidence-0051
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main: {}
+
+  - name: inherited-only-content-retained
+    generation:
+      id: gen-0052
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0052
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, physicalSourceId: src-parent, coordinateKind: snapshot_only, capturedRefs: [c-inherited-0]}
+      content:
+        - {ref: c-inherited-0, relativeBlob: generations/gen-0052/c-inherited-0, byteLength: 24, digest: sha3-256:content-0052}
+
+  - name: inherited-alias-retained
+    generation:
+      id: gen-0053
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0053
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, physicalSourceId: src-parent, coordinateKind: snapshot_only, capturedRefs: [c-inherited-0]}
+      content:
+        - {ref: c-inherited-0, relativeBlob: generations/gen-0053/c-inherited-0, byteLength: 24, digest: sha3-256:content-0053}
+      aliases:
+        - {nativeKey: nk-inherited-0, ref: c-inherited-0}
+
+  - name: alias-ref-outside-generation
+    wantError: outside the emitted partitions and captured segments
+    generation:
+      id: gen-0054
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0054
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      aliases:
+        - {nativeKey: nk-ghost, ref: e-ghost}
+
+  - name: duplicate-native-metadata-id-across-partitions
+    wantError: unique ids across the whole generation
+    generation:
+      id: gen-0055
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0055
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+        nativeMetadata:
+          - {id: md-shared, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-main-0, data: '{"k":"v"}'}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-earlier-0}
+            nativeMetadata:
+              - {id: md-shared, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-earlier-0, data: '{"k":"w"}'}
+
+  - name: main-entry-invalid-tool-kind
+    wantError: toolKind
+    generation:
+      id: gen-0056
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0056
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: assistant, sourceEntryRef: e-main-0, toolKind: not-a-tool-kind}
+
+  - name: main-entry-invalid-stop-reason
+    wantError: stopReason
+    generation:
+      id: gen-0057
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0057
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: assistant, sourceEntryRef: e-main-0, stopReason: not-a-reason}

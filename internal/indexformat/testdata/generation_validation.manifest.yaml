@@ -33,3 +33,26 @@ requiredNames:
   - invalid-metadata-harness
   - invalid-metadata-purpose
   - invalid-metadata-relationship
+  - main-entry-invalid-role
+  - earlier-entry-invalid-role
+  - main-entry-invalid-entry-type
+  - main-entry-invalid-provenance
+  - main-entry-valid-provenance
+  - main-entry-session-mismatch
+  - main-entry-empty-session-id
+  - main-entry-harness-mismatch
+  - main-entry-unknown-harness
+  - duplicate-ref-across-partitions
+  - duplicate-entry-index
+  - negative-entry-index
+  - depth-zero-with-parent
+  - depth-one-without-parent
+  - parent-index-missing-target
+  - parent-index-non-carrier-target
+  - incomplete-new-with-count-rejected
+  - inherited-only-content-retained
+  - inherited-alias-retained
+  - alias-ref-outside-generation
+  - duplicate-native-metadata-id-across-partitions
+  - main-entry-invalid-tool-kind
+  - main-entry-invalid-stop-reason

@@ -17,3 +17,8 @@ requiredNames:
   - v2-snapshot-content-ref-outside-partitions
   - v2-snapshot-title-ref-outside-main
   - invalid-index-version
+  - v2-snapshot-main-entry-invalid-role
+  - v2-snapshot-earlier-entry-invalid-role
+  - v2-snapshot-duplicate-ref-across-partitions
+  - v2-snapshot-complete-absent-count-rejected
+  - v2-snapshot-incomplete-new-with-count-rejected
