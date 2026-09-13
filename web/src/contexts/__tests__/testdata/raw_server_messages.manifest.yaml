@@ -3,7 +3,7 @@ requiredNames:
   - null tool namespace rejects before dispatch
   - duplicate tool namespace rejects before dispatch
   - pi usage and metadata survive mounted channel
-  - legacy detail accepts nullable turns and scorecard
+  - legacy detail accepts nullable turns and omitted scorecard
   - duplicate envelope type rejects before dispatch
   - escaped duplicate payload member rejects before dispatch
   - escaped duplicate metadata key rejects before dispatch

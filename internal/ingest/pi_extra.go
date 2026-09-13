@@ -115,7 +115,7 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 		if err := schema.ValidateUsageDetail(*value.Usage); err != nil {
 			return value, true, piEvidenceError(err)
 		}
-		if value.Usage.SourceEntryRef != value.SourceRef || !validPiRef(string(value.Usage.OwnerID)) {
+		if string(value.Usage.SourceEntryRef) != value.SourceRef || !validPiRef(string(value.Usage.OwnerID)) {
 			return value, true, piEvidenceError(fmt.Errorf("usage owner/source reference mismatch"))
 		}
 	}
@@ -123,7 +123,7 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 		return value, true, piEvidenceError(fmt.Errorf("metadata record budget exceeded"))
 	}
 	for _, record := range value.Metadata {
-		if record.Source.EntryRef != value.SourceRef || !validPiRef(record.ID) || record.Attachment != nil {
+		if string(record.Source.EntryRef) != value.SourceRef || !validPiRef(record.ID) || record.Attachment != nil {
 			return value, true, piEvidenceError(fmt.Errorf("metadata must name its owning source and defer attachment to projection"))
 		}
 		if _, err := schema.DecodeNativeMetadataDataRaw(record.Data); err != nil {
@@ -196,7 +196,7 @@ func ConversationalEntries(entries []schema.SessionEntry) []schema.SessionEntry 
 // PiUsageFromRaw preserves native cost spelling and validates present tokens.
 // Absent usage still creates an unknown owner for an eligible source.
 func PiUsageFromRaw(sessionID, nativeID string, scope schema.UsageScope, raw json.RawMessage) (schema.UsageDetail, error) {
-	usage := schema.UsageDetail{OwnerID: schema.UsageOwnerID(PiPublicRef(sessionID, "owner", nativeID)), SourceEntryRef: PiPublicRef(sessionID, "entry", nativeID), Scope: scope, Completeness: schema.UsageUnknown}
+	usage := schema.UsageDetail{OwnerID: schema.UsageOwnerID(PiPublicRef(sessionID, "owner", nativeID)), SourceEntryRef: schema.SourceEntryRef(PiPublicRef(sessionID, "entry", nativeID)), Scope: scope, Completeness: schema.UsageUnknown}
 	if len(raw) != 0 {
 		if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64}); err != nil {
 			return usage, piEvidenceError(err)

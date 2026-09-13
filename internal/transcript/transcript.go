@@ -646,8 +646,8 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		toolCalls := make([]schema.ToolCallDetail, len(t.ToolCalls))
 		for j, tc := range t.ToolCalls {
 			toolCalls[j] = schema.ToolCallDetail{
-				CallEntryRef:   tc.CallEntryRef,
-				ResultEntryRef: tc.ResultEntryRef,
+				CallEntryRef:   schema.SourceEntryRef(tc.CallEntryRef),
+				ResultEntryRef: schema.SourceEntryRef(tc.ResultEntryRef),
 				Usage:          tc.Usage,
 				ID:             tc.ID,
 				Name:           tc.Name,
@@ -662,7 +662,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 			}
 		}
 		turns[i] = schema.TurnDetail{
-			SourceEntryRef: t.SourceEntryRef,
+			SourceEntryRef: schema.SourceEntryRef(t.SourceEntryRef),
 			Usage:          t.Usage,
 			Index:          t.Index,
 			Role:           t.Role,
