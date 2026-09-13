@@ -1,0 +1,383 @@
+# Named generation-validation cases. Each case builds a Generation through the
+# real typed loader and calls indexformat.Generation.Validate.
+cases:
+  - name: complete-generation-with-main-content
+    generation:
+      id: gen-0001
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0001
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 1, turnCount: 1}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      content:
+        - {ref: e-main-0, relativeBlob: generations/gen-0001/e-main-0, byteLength: 12, digest: sha3-256:content-0001}
+      titleRefs: [e-main-0]
+
+  - name: incomplete-new-generation
+    generation:
+      id: gen-0002
+      completeness: incomplete_new
+      sourceEvidenceDigest: sha3-256:evidence-0002
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: absent-input-submission-count
+    expectInputSubmissionCountAbsent: true
+    generation:
+      id: gen-0003
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0003
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: measured-zero-input-submission-count
+    wantInputSubmissionCount: 0
+    generation:
+      id: gen-0004
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0004
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 0, turnCount: 0}
+      main: {}
+
+  - name: empty-generation-id
+    wantError: id is empty
+    generation:
+      id: ""
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0005
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: invalid-completeness
+    wantError: completeness
+    generation:
+      id: gen-0006
+      completeness: partial
+      sourceEvidenceDigest: sha3-256:evidence-0006
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: empty-completeness
+    wantError: completeness
+    generation:
+      id: gen-0007
+      completeness: ""
+      sourceEvidenceDigest: sha3-256:evidence-0007
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: negative-input-submission-count
+    wantError: input submission count
+    generation:
+      id: gen-0008
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0008
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: -1, turnCount: 0}
+      main: {}
+
+  - name: above-safe-max-input-submission-count
+    wantError: input submission count
+    generation:
+      id: gen-0009
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0009
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 9007199254740992, turnCount: 0}
+      main: {}
+
+  - name: blank-source-evidence-digest
+    wantError: sourceEvidenceDigest
+    generation:
+      id: gen-0010
+      completeness: complete
+      sourceEvidenceDigest: ""
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: content-ref-outside-partitions
+    wantError: does not appear in any partition
+    generation:
+      id: gen-0011
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0011
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      content:
+        - {ref: e-missing, relativeBlob: generations/gen-0011/e-missing, byteLength: 1, digest: sha3-256:content-0011}
+
+  - name: title-ref-outside-main
+    wantError: not a main entry
+    generation:
+      id: gen-0012
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0012
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-earlier-0}
+      titleRefs: [e-earlier-0]
+
+  - name: alias-at-bound
+    generation:
+      id: gen-0013
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0013
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      aliases:
+        - {nativeKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ref: e-main-0}
+
+  - name: alias-over-bound
+    wantError: over the 512-byte bound
+    generation:
+      id: gen-0014
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0014
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      aliases:
+        - {nativeKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ref: e-main-0}
+
+  - name: alias-empty-key
+    wantError: nativeKey is empty
+    generation:
+      id: gen-0015
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0015
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      aliases:
+        - {nativeKey: "", ref: e-main-0}
+
+  - name: alias-invalid-ref
+    wantError: ref is invalid
+    generation:
+      id: gen-0016
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0016
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      aliases:
+        - {nativeKey: nk-1, ref: ""}
+
+  - name: duplicate-alias-key
+    wantError: repeats
+    generation:
+      id: gen-0017
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0017
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      aliases:
+        - {nativeKey: nk-1, ref: e-main-0}
+        - {nativeKey: nk-1, ref: e-main-1}
+
+  - name: ordered-segments
+    generation:
+      id: gen-0018
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0018
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, physicalSourceId: src-a, coordinateKind: codex_ordinal_range, start: 1, endExclusive: 3, capturedRefs: [c-1, c-2]}
+        - {ordinal: 1, inclusion: same_thread_surviving_own, physicalSourceId: src-a, coordinateKind: codex_reference_range, start: 4, endExclusive: 6}
+
+  - name: segments-out-of-order
+    wantError: does not increase
+    generation:
+      id: gen-0019
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0019
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 1, inclusion: inherited, coordinateKind: snapshot_only}
+        - {ordinal: 0, inclusion: inherited, coordinateKind: snapshot_only}
+
+  - name: segments-duplicate-ordinal
+    wantError: does not increase
+    generation:
+      id: gen-0020
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0020
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, coordinateKind: snapshot_only}
+        - {ordinal: 0, inclusion: inherited, coordinateKind: snapshot_only}
+
+  - name: segment-range-missing-bounds
+    wantError: start and endExclusive are required
+    generation:
+      id: gen-0021
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0021
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, coordinateKind: codex_ordinal_range}
+
+  - name: segment-snapshot-only-with-bounds
+    wantError: nil numeric bounds
+    generation:
+      id: gen-0022
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0022
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, coordinateKind: snapshot_only, start: 1, endExclusive: 2}
+
+  - name: segment-decoded-byte-half-range
+    wantError: both present or both absent
+    generation:
+      id: gen-0023
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0023
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, coordinateKind: snapshot_only, decodedByteStart: 0}
+
+  - name: segment-invalid-inclusion
+    wantError: inclusion
+    generation:
+      id: gen-0024
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0024
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: helper, coordinateKind: snapshot_only}
+
+  - name: segment-invalid-coordinate-kind
+    wantError: coordinate-kind
+    generation:
+      id: gen-0025
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0025
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+      segments:
+        - {ordinal: 0, inclusion: inherited, coordinateKind: byte_range}
+
+  - name: main-native-metadata-attached
+    generation:
+      id: gen-0026
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0026
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+        nativeMetadata:
+          - {id: md-1, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-main-0, data: '{"k":"v"}'}
+
+  - name: native-metadata-cross-partition
+    wantError: not an entry in this partition
+    generation:
+      id: gen-0027
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0027
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+        nativeMetadata:
+          - {id: md-1, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-earlier-0, data: '{"k":"v"}'}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-earlier-0}
+
+  - name: duplicate-native-metadata-source
+    wantError: source ref
+    generation:
+      id: gen-0028
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0028
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+        nativeMetadata:
+          - {id: md-1, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-main-0, data: '{"k":"v"}'}
+          - {id: md-2, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-main-0, data: '{"k":"w"}'}
+
+  - name: native-metadata-empty-data
+    wantError: data is missing or null
+    generation:
+      id: gen-0029
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0029
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+        nativeMetadata:
+          - {id: md-1, kind: pi.custom.data, sourceType: pi.custom, entryRef: e-main-0, data: ""}
+
+  - name: native-metadata-invalid-kind
+    wantError: kind
+    generation:
+      id: gen-0030
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0030
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+        nativeMetadata:
+          - {id: md-1, kind: pi.future.data, sourceType: pi.custom, entryRef: e-main-0, data: '{"k":"v"}'}
+
+  - name: invalid-metadata-session-id
+    wantError: sessionId is malformed
+    generation:
+      id: gen-0031
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0031
+      metadata: {sessionId: bogus-session, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: invalid-metadata-harness
+    wantError: is not a known harness
+    generation:
+      id: gen-0032
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0032
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: not-a-harness, turnCount: 0}
+      main: {}
+
+  - name: invalid-metadata-purpose
+    wantError: purpose
+    generation:
+      id: gen-0033
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0033
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, purpose: not_a_purpose}
+      main: {}
+
+  - name: invalid-metadata-relationship
+    wantError: presence disagree
+    generation:
+      id: gen-0034
+      completeness: complete
+      sourceEvidenceDigest: sha3-256:evidence-0034
+      metadata:
+        sessionId: 11111111-1111-4111-8111-111111111111
+        modelHarness: claude-code
+        turnCount: 0
+        relationships:
+          - {kind: started_by, targetState: target_known, evidence: native_typed}
+      main: {}
