@@ -413,6 +413,15 @@ func layoutProjectionPartitions(capture ClassifiedCapture, resolved []*resolvedB
 // projectionEntry builds one durable entry row from a resolved block.
 func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.SessionEntry, error) {
 	block := rb.block
+	if !block.Role.IsValid() {
+		return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q role %q is outside the closed role set; the entry cannot be rendered; classify the block with a published role", block.NativeKey, block.Role)
+	}
+	if !block.EntryType.IsValid() {
+		return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q entryType %q is outside the closed entry-type set; the entry cannot be rendered; classify the block with a published entry type", block.NativeKey, block.EntryType)
+	}
+	if block.Depth < 0 {
+		return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q depth %d is negative; the entry has no valid nesting; record a nonnegative depth", block.NativeKey, block.Depth)
+	}
 	entry := schema.SessionEntry{
 		SessionID:      capture.SessionID,
 		Harness:        schema.Harness(capture.Harness),

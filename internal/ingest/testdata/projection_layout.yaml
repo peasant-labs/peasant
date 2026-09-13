@@ -916,3 +916,26 @@ cases:
                 ownership: local
                 evidence: native_typed
                 inputModality: text
+
+  - name: invalid-entry-type-rejected
+    steps:
+      - allocator: [e_u1]
+        wantError: outside the closed entry-type set
+        capture:
+          id: gen-bad-entry-type
+          sessionId: sess_badentry
+          harness: codex
+          sourceEvidenceDigest: sha256:bad
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_badentry
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              section: {index: 0}
+              role: user
+              entryType: not_a_type
+              content: fix parser
