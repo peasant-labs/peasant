@@ -24,8 +24,12 @@ import (
 // already atomic — one event = one logical action. We therefore emit depth=0
 // entries directly; there is no depth=1 decomposition pass.
 type CodexIndexer struct {
-	fs          FileSystem
-	fullContent bool
+	fs             FileSystem
+	fullContent    bool
+	historyCapture bool
+	// pointerDocument names a deployment-managed current-pointer document
+	// for the capture path. Empty means detached-file authority.
+	pointerDocument string
 	// maxRecordBytes is the per-record read limit. Zero means the
 	// production limit; a test injects a small one so it can prove the
 	// over-limit path without building a record of production size.
@@ -39,6 +43,24 @@ type CodexIndexerOption func(*CodexIndexer)
 // remain complete independently of preview mode.
 func WithCodexFullContent(enabled bool) CodexIndexerOption {
 	return func(idx *CodexIndexer) { idx.fullContent = enabled }
+}
+
+// WithCodexHistoryCapture enables the read-only current-history capture
+// path for IndexTranscriptResult: authority selection, bounded capture and
+// fingerprint recheck before entry parsing. It stays disabled by default so
+// existing file indexing keeps its exact retained behavior until the native
+// repair path enables it explicitly. Enabling it also refuses incomplete
+// captures (missing reference proof, unsupported mode, unstable source) so
+// the last good entries are retained instead of replaced.
+func WithCodexHistoryCapture(enabled bool) CodexIndexerOption {
+	return func(idx *CodexIndexer) { idx.historyCapture = enabled }
+}
+
+// WithCodexCapturePointerDocument names a deployment-managed
+// current-pointer document for the capture path. It has no effect unless
+// the history capture is enabled.
+func WithCodexCapturePointerDocument(path string) CodexIndexerOption {
+	return func(idx *CodexIndexer) { idx.pointerDocument = path }
 }
 
 // WithCodexMaxRecordBytes sets the per-record read limit. Zero keeps the
@@ -58,11 +80,27 @@ func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session Disc
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
 	}
-	data, err := idx.captureCurrentSource(ctx, session)
+	data, err := idx.readCurrentSource(ctx, session)
 	if err != nil {
 		return nil, completion.failure(err)
 	}
 	return idx.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// readCurrentSource returns the transcript bytes for the completion-gated
+// path. Without the history capture it reads the file exactly as the
+// retained file indexer always has: one read, no authority selection, no
+// refusal. With the capture it verifies authority, bounds and stability
+// first and refuses incomplete captures so last-good entries are retained.
+func (idx *CodexIndexer) readCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, error) {
+	if !idx.historyCapture {
+		data, err := idx.fs.ReadFile(session.SourcePath.String())
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+	return idx.captureCurrentSource(ctx, session)
 }
 
 // captureCurrentSource reads the authoritative current Codex source through the
@@ -70,9 +108,20 @@ func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session Disc
 // verified decoded prefix so entry parsing consumes the same capture the native
 // history replay produced.
 func (idx *CodexIndexer) captureCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, error) {
-	history, err := CaptureCodexHistoryWithRetry(ctx, newCodexFileSource(idx.fs), session, nil)
+	var options []CodexFileSourceOption
+	if idx.pointerDocument != "" {
+		options = append(options, WithCodexCurrentPointerDocument(idx.pointerDocument))
+	}
+	history, err := CaptureCodexHistoryWithRetry(ctx, NewCodexFileSource(idx.fs, options...), session, nil)
 	if err != nil {
 		return nil, err
+	}
+	if history.Completeness != indexformat.GenerationCompletenessComplete {
+		return nil, &CodexIncompleteCaptureError{
+			StableThreadID: history.StableThreadID,
+			Completeness:   history.Completeness,
+			Diagnostics:    history.Diagnostics,
+		}
 	}
 	return history.RawBytes, nil
 }

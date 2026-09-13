@@ -9,6 +9,7 @@ package ingest
 // generation rows, and never writes the native source.
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -17,6 +18,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -152,12 +155,18 @@ const (
 
 // CodexCapturedNode is one captured native content node. Ref is the opaque
 // stable source-entry ref allocated through the injected registry; NativeKey is
-// the bounded local identity the registry keys on.
+// the bounded local identity the registry keys on. Ordinal is the valid
+// decoded native ordinal checkpoint of the record (never a physical line
+// position); LineIndex is the physical line position for byte accounting.
+// Payload is the captured raw record payload bytes and Metadata is the
+// history-envelope metadata recorded beside the payload; together they let the
+// native provenance classifier work without reopening the mutable source.
 type CodexCapturedNode struct {
 	NativeKey        string
 	Ref              schema.SourceEntryRef
 	SegmentOrdinal   int
 	Ordinal          int64
+	LineIndex        int64
 	ByteStart        int64
 	ByteEndExclusive int64
 	EnvelopeType     string
@@ -167,6 +176,8 @@ type CodexCapturedNode struct {
 	CallID           string
 	TurnID           string
 	Ownership        CodexOwnership
+	Payload          []byte
+	Metadata         json.RawMessage
 }
 
 // CodexCapturedCorrelation is one proven native correlation. Refs names the
@@ -179,13 +190,47 @@ type CodexCapturedCorrelation struct {
 	Refs            []schema.SourceEntryRef
 }
 
+// CodexCapturedRecord is one captured native record inside a captured
+// segment, including records that produced no node. DecodedOrdinal is the
+// valid decoded native ordinal; it is nil for partial, malformed and unknown
+// records, which advance the byte checkpoint only and are never assigned a
+// native ordinal by line number. Payload holds the raw record payload bytes
+// and Metadata the history-envelope metadata recorded beside the payload.
+type CodexCapturedRecord struct {
+	DecodedOrdinal   *int64
+	LineIndex        int64
+	ByteStart        int64
+	ByteEndExclusive int64
+	EnvelopeType     string
+	Payload          []byte
+	Metadata         json.RawMessage
+	Partial          bool
+	Malformed        bool
+}
+
+// CodexCapturedSegment is one ordered captured segment with its bounded
+// decoded bytes and per-record evidence. Data holds ONLY the decoded bytes
+// inside the segment's native bounds, so the classifier sees every captured
+// segment payload without reopening mutable native sources.
+type CodexCapturedSegment struct {
+	Ordinal    int
+	Descriptor CodexReference
+	Data       []byte
+	Records    []CodexCapturedRecord
+}
+
 // CodexReference is one ordered bounded dependency of the current source. The
 // reference graph is resolved oldest-to-newest before the current pointer.
+// HistoryKind is the native dependency kind: "before" or "through". A
+// through dependency requires a completed target; a running target leaves
+// the coverage unproven and the capture incomplete.
 type CodexReference struct {
 	LogicalSessionID        *SessionID
 	Pointer                 string
 	PhysicalSourceID        string
 	Mode                    CodexHistoryMode
+	HistoryKind             string
+	ThroughCompleted        bool
 	Coordinates             indexformat.SegmentCoordinates
 	Inclusion               indexformat.SegmentInclusion
 	CopyBoundary            *int64
@@ -194,7 +239,10 @@ type CodexReference struct {
 
 // CodexSourceAuthority is the selected read-only authority for one Codex
 // thread. HistoryMode is the raw native value: the capture resolves it so an
-// omitted value and a null value stay distinguishable.
+// omitted value and a null value stay distinguishable. CopyBoundary,
+// HistoryBaseThreadID, RootID and References are derived from the native
+// session_meta envelope by the production source; a test double supplies the
+// same derived shape, never a competing derivation.
 type CodexSourceAuthority struct {
 	StableThreadID   string
 	Kind             CodexSourceAuthorityKind
@@ -204,6 +252,10 @@ type CodexSourceAuthority struct {
 	RootID           string
 	ParentID         string
 	ForkSourceID     string
+	// HistoryBaseThreadID is the native history_base.thread_id rollout
+	// identity when the current session_meta records one. It is a physical
+	// rollout identity, never automatically a logical edge.
+	HistoryBaseThreadID string
 	// CopyBoundary is the native copied-creation boundary S of the current
 	// incarnation. Records before S are inherited only when native ownership is
 	// proven; otherwise they are migrated/uncertain earlier history.
@@ -211,6 +263,16 @@ type CodexSourceAuthority struct {
 	OriginalOwnershipProven bool
 	// References are the ordered bounded dependencies, oldest first.
 	References []CodexReference
+	// DerivationDiagnostics records non-fatal native-envelope observations
+	// made while deriving this authority (malformed optional bounds,
+	// malformed history envelopes). The replay merges them into the captured
+	// diagnostics; derivation never invents a bound it could not decode.
+	DerivationDiagnostics []DiagnosticEntry
+	// DerivationIncomplete marks that the native envelope could not prove a
+	// bound the replay needs (malformed history envelope or malformed copy
+	// boundary). The capture replays the proven records and reports
+	// incomplete_new; the caller retains last-good state.
+	DerivationIncomplete bool
 }
 
 // CodexReadOnlySource is the read-only access the capture path uses. A
@@ -286,8 +348,11 @@ func defaultCodexRefAllocator(int) schema.SourceEntryRef {
 
 // CodexCapturedHistory is the adapter-private capture handed to the native
 // provenance classifier. It contains the captured native node graph, the
-// ordered segment evidence, the proven correlations and completeness. RawBytes
-// is the bounded decoded prefix of the authoritative current source.
+// ordered segment evidence, the proven correlations and completeness.
+// CapturedSegments carries the verified graph plus every captured
+// segment/node payload and adjacent envelope metadata, so the classifier
+// never reopens the mutable native sources. RawBytes is the bounded decoded
+// prefix of the authoritative current source, retained for the entry path.
 type CodexCapturedHistory struct {
 	StableThreadID   string
 	AuthorityKind    CodexSourceAuthorityKind
@@ -297,6 +362,7 @@ type CodexCapturedHistory struct {
 	Completeness     indexformat.GenerationCompleteness
 	Nodes            []CodexCapturedNode
 	Segments         []indexformat.ContextSegment
+	CapturedSegments []CodexCapturedSegment
 	Correlations     []CodexCapturedCorrelation
 	MainRefs         []schema.SourceEntryRef
 	InheritedRefs    []schema.SourceEntryRef
@@ -382,6 +448,7 @@ func codexCaptureIsStable(ctx context.Context, source CodexReadOnlySource, sessi
 // selected authority. It never carries a raw private path.
 func codexAuthoritySignature(authority CodexSourceAuthority) string {
 	var b strings.Builder
+	writeLengthPrefixed(&b, string(HarnessCodex))
 	writeLengthPrefixed(&b, authority.StableThreadID)
 	writeLengthPrefixed(&b, string(authority.Kind))
 	writeLengthPrefixed(&b, authority.CurrentPointer)
@@ -390,12 +457,15 @@ func codexAuthoritySignature(authority CodexSourceAuthority) string {
 	writeLengthPrefixed(&b, authority.RootID)
 	writeLengthPrefixed(&b, authority.ParentID)
 	writeLengthPrefixed(&b, authority.ForkSourceID)
+	writeLengthPrefixed(&b, authority.HistoryBaseThreadID)
 	writeLengthPrefixed(&b, codexOptionalInt64(authority.CopyBoundary))
 	writeLengthPrefixed(&b, fmt.Sprintf("%t", authority.OriginalOwnershipProven))
 	for _, ref := range authority.References {
 		writeLengthPrefixed(&b, ref.Pointer)
 		writeLengthPrefixed(&b, ref.PhysicalSourceID)
 		writeLengthPrefixed(&b, string(ref.Mode))
+		writeLengthPrefixed(&b, ref.HistoryKind)
+		writeLengthPrefixed(&b, fmt.Sprintf("%t", ref.ThroughCompleted))
 		writeLengthPrefixed(&b, string(ref.Inclusion))
 		writeLengthPrefixed(&b, string(ref.Coordinates.Kind))
 		writeLengthPrefixed(&b, codexOptionalInt64(ref.Coordinates.Start))
@@ -410,9 +480,10 @@ func codexAuthoritySignature(authority CodexSourceAuthority) string {
 
 // codexFingerprint is the SHA-256 of canonical length-prefixed local fields:
 // the authority signature, the completeness, the decoded prefix length and
-// digest, and the ordered per-segment identities and bounded byte digests.
-// Parent whole-file mtime, size and digest after the child cutoff are NOT
-// inputs.
+// digest, the valid decoded record/ordinal checkpoint and partial-tail
+// evidence per segment, and the ordered per-segment identities and bounded
+// byte digests. Parent whole-file mtime, size and digest after the child
+// cutoff are NOT inputs.
 func codexFingerprint(authority CodexSourceAuthority, completeness indexformat.GenerationCompleteness, segments []codexDecodedSegment) string {
 	hash := sha256.New()
 	writeHashedLengthPrefixed(hash, codexAuthoritySignature(authority))
@@ -423,10 +494,17 @@ func codexFingerprint(authority CodexSourceAuthority, completeness indexformat.G
 		writeHashedLengthPrefixed(hash, string(segment.descriptor.Coordinates.Kind))
 		writeHashedLengthPrefixed(hash, codexOptionalInt64(segment.descriptor.Coordinates.Start))
 		writeHashedLengthPrefixed(hash, codexOptionalInt64(segment.descriptor.Coordinates.EndExclusive))
+		checkpoint := segment.boundedCheckpoint()
+		writeHashedLengthPrefixed(hash, fmt.Sprintf("%d", checkpoint.validRecords))
+		writeHashedLengthPrefixed(hash, codexOptionalInt64(checkpoint.maxOrdinalPtr()))
 		bounded := segment.boundedData()
 		writeHashedLengthPrefixed(hash, fmt.Sprintf("%d", len(bounded)))
 		digest := sha256.Sum256(bounded)
 		writeHashedLengthPrefixed(hash, hex.EncodeToString(digest[:]))
+		tail := segment.partialTail()
+		writeHashedLengthPrefixed(hash, fmt.Sprintf("%d", len(tail)))
+		tailDigest := sha256.Sum256(tail)
+		writeHashedLengthPrefixed(hash, hex.EncodeToString(tailDigest[:]))
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
@@ -464,60 +542,514 @@ func codexPhysicalSourceID(path string) string {
 // large lives in response_item records, not the header.
 const codexHeaderLimit = 1 << 20
 
-// codexFileSource is the production read-only source. It selects the detached
-// rollout file as the authority when no native pointer index exists, and reads
-// the bounded decoded prefix through the FileSystem.
-type codexFileSource struct {
-	fs FileSystem
+// CodexCurrentMissingError reports that the authoritative current Codex
+// source is missing. It is never replaced by an older rollout: the caller
+// retains the last good generation and retries when the source returns.
+type CodexCurrentMissingError struct {
+	StableThreadID string
+	SourceRef      string
+	// Cause is the sanitized filesystem classification (not found,
+	// permission denied, unreadable). It never carries a raw path.
+	Cause string
 }
 
-var _ CodexReadOnlySource = (*codexFileSource)(nil)
-
-func newCodexFileSource(fs FileSystem) *codexFileSource {
-	return &codexFileSource{fs: fs}
+func (e *CodexCurrentMissingError) Error() string {
+	cause := e.Cause
+	if cause == "" {
+		cause = "the native source is not found"
+	}
+	return fmt.Sprintf("ingest.CodexFileSource.ResolveCodexAuthority: the authoritative current Codex source for thread %q (source %s) is unavailable (%s) at the resolve-authority-before-diff step; no older rollout was substituted and the last good generation is retained; restore the native current rollout and rerun harvest", e.StableThreadID, e.SourceRef, cause)
 }
+
+// CodexAuthorityConflictError reports competing detached candidates for one
+// stable thread. Selection by newest mtime is refused; the caller keeps one
+// logical record in last-good/unresolved state until native evidence (an
+// authoritative replacement pointer) resolves the conflict.
+type CodexAuthorityConflictError struct {
+	StableThreadID string
+	Candidates     int
+	Refs           []string
+}
+
+func (e *CodexAuthorityConflictError) Error() string {
+	return fmt.Sprintf("ingest.CodexFileSource.ResolveCodexAuthority: %d competing detached Codex sources claim thread %q (sources %s); no candidate was selected by file age and no session was invented; the logical record stays last-good/unresolved until an authoritative replacement pointer resolves the conflict", e.Candidates, e.StableThreadID, strings.Join(e.Refs, ","))
+}
+
+// CodexIncompleteCaptureError reports that the verified capture is
+// incomplete (missing reference proof, unsupported mode, misaligned
+// checkpoint). No replacement result is produced: the caller retains the
+// last good generation and versions. The diagnostics name the missing
+// proof without raw private paths.
+type CodexIncompleteCaptureError struct {
+	StableThreadID string
+	Completeness   indexformat.GenerationCompleteness
+	Diagnostics    []DiagnosticEntry
+}
+
+func (e *CodexIncompleteCaptureError) Error() string {
+	kinds := make([]string, 0, len(e.Diagnostics))
+	for _, diagnostic := range e.Diagnostics {
+		kinds = append(kinds, diagnostic.ErrorType)
+	}
+	return fmt.Sprintf("ingest.CodexIndexer.captureCurrentSource: the verified Codex capture for thread %q is %s (%s); no replacement result was produced and the last good generation and versions were retained; repair the native history proof and retry harvest", e.StableThreadID, e.Completeness, strings.Join(kinds, ","))
+}
+
+// codexSanitizedFSCause classifies a filesystem failure without its raw path
+// or raw error text, so diagnostics never leak private source locations.
+func codexSanitizedFSCause(err error) string {
+	if os.IsNotExist(err) {
+		return "the native source is not found"
+	}
+	if os.IsPermission(err) {
+		return "the native source could not be read (permission denied)"
+	}
+	return "the native source could not be read"
+}
+
+// codexAuthorityReadFailure builds the actionable source-boundary error for a
+// failed authority or segment read. It names the module/function, the failed
+// step, the sanitized reason, the caller effect and the safe recovery; it
+// never carries a raw private path or a wrapped OS error.
+func codexAuthorityReadFailure(op, stableID, sourceRef, step, reason string) error {
+	return fmt.Errorf("ingest.CodexFileSource.%s: %s for thread %q (source %s) at the %s step failed because %s; the capture is incomplete, no older rollout was substituted and no prior snapshot was overwritten; restore the native source and rerun harvest", op, step, stableID, sourceRef, step, reason)
+}
+
+// CodexFileSourceOption configures a CodexFileSource.
+type CodexFileSourceOption func(*CodexFileSource)
+
+// WithCodexCurrentPointerDocument names a deployment-managed current-pointer
+// document: a small read-only file whose trimmed content is the authoritative
+// current rollout path (absolute, or relative to the document's directory).
+// The Codex CLI exposes no live-writer pointer, so without this document the
+// source uses detached-file authority with conflict detection. The document
+// exists so an activation step can select an authoritative replacement
+// pointer; it is never written by the capture path.
+func WithCodexCurrentPointerDocument(path string) CodexFileSourceOption {
+	return func(s *CodexFileSource) { s.pointerDocument = path }
+}
+
+// CodexFileSource is the production read-only source. It derives the
+// authority from native session_meta envelopes read through the FileSystem:
+// the stable thread identity, the raw history mode, fork/parent/root/base
+// evidence, the copied-creation boundary and the ordered native history
+// references. It scans the native sessions tree for competing detached
+// candidates of the same thread and refuses to guess among them. Bounded
+// segment bytes are read through the FileSystem; the native source is never
+// written and no native process is started.
+type CodexFileSource struct {
+	fs              FileSystem
+	pointerDocument string
+}
+
+// NewCodexFileSource creates the production read-only Codex source over fs.
+func NewCodexFileSource(fs FileSystem, opts ...CodexFileSourceOption) *CodexFileSource {
+	source := &CodexFileSource{fs: fs}
+	for _, opt := range opts {
+		opt(source)
+	}
+	return source
+}
+
+var _ CodexReadOnlySource = (*CodexFileSource)(nil)
+
+// maxCodexHistoryDepth bounds recursive native history-reference resolution.
+// maxCodexHistorySegments bounds the ordered decoded segments of one capture.
+const (
+	maxCodexHistoryDepth    = 8
+	maxCodexHistorySegments = 32
+)
 
 // ResolveCodexAuthority selects the stable session_meta.id and the one current
-// detached rollout pointer. A missing file is an error; it is never replaced by
-// an older rollout.
-func (s *codexFileSource) ResolveCodexAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, error) {
-	pointer := session.SourcePath.String()
+// pointer before any diff. A deployment-managed pointer document selects the
+// native current pointer; otherwise exactly one detached candidate for the
+// thread is usable and several conflicting candidates are refused. A missing
+// current source is an error; it is never replaced by an older rollout.
+func (s *CodexFileSource) ResolveCodexAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, error) {
+	if s.pointerDocument != "" {
+		return s.resolvePointerAuthority(ctx, session)
+	}
+	return s.resolveDetachedAuthority(ctx, session)
+}
+
+// resolvePointerAuthority selects the current source named by the
+// deployment-managed pointer document.
+func (s *CodexFileSource) resolvePointerAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, error) {
+	if err := ctx.Err(); err != nil {
+		return CodexSourceAuthority{}, fmt.Errorf("ingest.CodexFileSource.ResolveCodexAuthority: the Codex capture for session %s was cancelled before the current pointer could be resolved; no source was read and no state changed; retry the harvest", session.SessionID)
+	}
+	raw, err := s.fs.ReadFile(s.pointerDocument)
+	if err != nil {
+		return CodexSourceAuthority{}, &CodexCurrentMissingError{
+			StableThreadID: session.SessionID.String(),
+			SourceRef:      codexPhysicalSourceID(s.pointerDocument),
+			Cause:          codexSanitizedFSCause(err),
+		}
+	}
+	pointer := strings.TrimSpace(string(raw))
+	if len(raw) > 4096 {
+		pointer = strings.TrimSpace(string(raw[:4096]))
+	}
+	if pointer == "" {
+		return CodexSourceAuthority{}, &CodexCurrentMissingError{
+			StableThreadID: session.SessionID.String(),
+			SourceRef:      codexPhysicalSourceID(s.pointerDocument),
+			Cause:          "the pointer document names no current source",
+		}
+	}
+	if !filepath.IsAbs(pointer) {
+		pointer = filepath.Join(filepath.Dir(s.pointerDocument), pointer)
+	}
+	pointer = filepath.Clean(pointer)
 	header, err := codexReadHeader(s.fs, pointer, codexHeaderLimit)
 	if err != nil {
-		return CodexSourceAuthority{}, fmt.Errorf("ingest.codexFileSource.ResolveCodexAuthority: reading the Codex current pointer %s for session %s failed: %w; the authoritative source is unavailable, no older rollout was substituted, and the last good generation is retained until the source returns", codexPhysicalSourceID(pointer), session.SessionID, err)
+		return CodexSourceAuthority{}, &CodexCurrentMissingError{
+			StableThreadID: session.SessionID.String(),
+			SourceRef:      codexPhysicalSourceID(pointer),
+			Cause:          codexSanitizedFSCause(err),
+		}
 	}
-	meta, hasMeta := parseCodexSessionMetaHeader(header)
+	meta, hasMeta := parseCodexNativeAuthority(header)
 	stableID := session.SessionID.String()
 	if hasMeta && meta.ID != "" {
 		stableID = meta.ID
 	}
-	authority := CodexSourceAuthority{
-		StableThreadID:   stableID,
-		Kind:             CodexAuthorityDetachedFile,
-		CurrentPointer:   pointer,
-		PhysicalSourceID: codexPhysicalSourceID(pointer),
-		HistoryMode:      metaHistoryMode(meta, hasMeta),
-	}
-	if hasMeta {
-		authority.ForkSourceID = meta.ForkedFromID
-		authority.ParentID = meta.nestedParentThreadID()
+	authority := s.deriveAuthority(stableID, CodexAuthorityNativeCurrentPointer, pointer, meta, hasMeta)
+	if err := s.resolveDerivedReferences(ctx, &authority, meta, 0, map[string]bool{pointer: true}); err != nil {
+		return CodexSourceAuthority{}, err
 	}
 	return authority, nil
 }
 
+// resolveDetachedAuthority derives the authority from the session's own
+// rollout file and refuses competing same-thread candidates.
+func (s *CodexFileSource) resolveDetachedAuthority(ctx context.Context, session DiscoveredSession) (CodexSourceAuthority, error) {
+	if err := ctx.Err(); err != nil {
+		return CodexSourceAuthority{}, fmt.Errorf("ingest.CodexFileSource.ResolveCodexAuthority: the Codex capture for session %s was cancelled before the detached authority could be resolved; no source was read and no state changed; retry the harvest", session.SessionID)
+	}
+	pointer := session.SourcePath.String()
+	header, err := codexReadHeader(s.fs, pointer, codexHeaderLimit)
+	if err != nil {
+		return CodexSourceAuthority{}, &CodexCurrentMissingError{
+			StableThreadID: session.SessionID.String(),
+			SourceRef:      codexPhysicalSourceID(pointer),
+			Cause:          codexSanitizedFSCause(err),
+		}
+	}
+	meta, hasMeta := parseCodexNativeAuthority(header)
+	stableID := session.SessionID.String()
+	if hasMeta && meta.ID != "" {
+		stableID = meta.ID
+	}
+	if conflicts := s.scanThreadCandidates(ctx, pointer, stableID); len(conflicts) > 1 {
+		refs := make([]string, 0, len(conflicts))
+		for _, candidate := range conflicts {
+			refs = append(refs, codexPhysicalSourceID(candidate))
+		}
+		return CodexSourceAuthority{}, &CodexAuthorityConflictError{
+			StableThreadID: stableID,
+			Candidates:     len(conflicts),
+			Refs:           refs,
+		}
+	}
+	authority := s.deriveAuthority(stableID, CodexAuthorityDetachedFile, pointer, meta, hasMeta)
+	seen := map[string]bool{pointer: true}
+	if err := s.resolveDerivedReferences(ctx, &authority, meta, 0, seen); err != nil {
+		return CodexSourceAuthority{}, err
+	}
+	return authority, nil
+}
+
+// deriveAuthority projects a parsed native envelope into the authority shape.
+// Bounds the envelope proves stay; bounds it cannot prove stay absent.
+func (s *CodexFileSource) deriveAuthority(stableID string, kind CodexSourceAuthorityKind, pointer string, meta codexNativeSessionMeta, hasMeta bool) CodexSourceAuthority {
+	authority := CodexSourceAuthority{
+		StableThreadID:   stableID,
+		Kind:             kind,
+		CurrentPointer:   pointer,
+		PhysicalSourceID: codexPhysicalSourceID(pointer),
+		HistoryMode:      metaHistoryModeRaw(meta, hasMeta),
+	}
+	if !hasMeta {
+		return authority
+	}
+	authority.ForkSourceID = meta.ForkedFromID
+	authority.ParentID = meta.nativeParentThreadID()
+	if meta.RootSessionID != "" && meta.RootSessionID != stableID {
+		authority.RootID = meta.RootSessionID
+	}
+	if meta.HistoryBaseThreadID != "" {
+		authority.HistoryBaseThreadID = meta.HistoryBaseThreadID
+	}
+	if meta.CopyBoundary != nil && *meta.CopyBoundary >= 0 {
+		authority.CopyBoundary = meta.CopyBoundary
+		authority.OriginalOwnershipProven = meta.ForkedFromID != "" || len(meta.History) > 0
+	} else if meta.CopyBoundary != nil {
+		authority.DerivationIncomplete = true
+		authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+			ErrorType:   "codex_copy_boundary_malformed",
+			Location:    fmt.Sprintf("thread %s", stableID),
+			Message:     "the native copied-creation boundary is negative; no boundary was invented and the prefix stays own content",
+			Remediation: "Repair the native session_meta envelope and rerun; the capture used no copied prefix.",
+		})
+	}
+	if meta.HistoryMalformed {
+		authority.DerivationIncomplete = true
+		authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+			ErrorType:   "codex_history_envelope_malformed",
+			Location:    fmt.Sprintf("thread %s", stableID),
+			Message:     "the native history envelope beside the current session_meta could not be decoded; no dependency was invented and the current records replay alone",
+			Remediation: "Repair the native history envelope and rerun; the capture stays incomplete until the dependencies prove.",
+		})
+	}
+	return authority
+}
+
+// resolveDerivedReferences resolves the ordered native history references
+// oldest-to-newest, recursing into each referenced native envelope with a
+// depth bound and a visited set so a reference cycle can never loop the
+// resolver. Unresolvable references are kept as unavailable evidence; the
+// replay proves coverage against them instead of guessing parent content.
+func (s *CodexFileSource) resolveDerivedReferences(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, seen map[string]bool) error {
+	if len(meta.History) == 0 && meta.HistoryBaseThreadID == "" {
+		return nil
+	}
+	if depth >= maxCodexHistoryDepth {
+		authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+			ErrorType:   "codex_reference_depth_exceeded",
+			Location:    fmt.Sprintf("thread %s", authority.StableThreadID),
+			Message:     "native history references recurse deeper than the bounded resolver follows; deeper ancestors were not invented",
+			Remediation: "Flatten the native history chain and rerun; the resolved prefix replays and the capture records the bound.",
+		})
+		return nil
+	}
+	return s.resolveHistoryEntries(ctx, authority, meta, depth, seen)
+}
+
+// resolveHistoryEntries resolves the declared native history array
+// oldest-to-newest after the history-base reference.
+func (s *CodexFileSource) resolveHistoryEntries(ctx context.Context, authority *CodexSourceAuthority, meta codexNativeSessionMeta, depth int, seen map[string]bool) error {
+	index := s.scanThreadIndex(ctx, authority.CurrentPointer)
+	var ordered []CodexReference
+	if meta.HistoryBaseThreadID != "" {
+		bases := index[meta.HistoryBaseThreadID]
+		if len(bases) > 0 {
+			basePath := bases[0]
+			if !seen[basePath] {
+				seen[basePath] = true
+				if baseMeta, hasBase, err := s.readNativeMeta(basePath); err == nil && hasBase {
+					sibling := *authority
+					sibling.References = nil
+					_ = s.resolveDerivedReferences(ctx, &sibling, baseMeta, depth+1, seen)
+					ordered = append(ordered, sibling.References...)
+				}
+				ordered = append(ordered, CodexReference{
+					Pointer:          basePath,
+					PhysicalSourceID: codexPhysicalSourceID(basePath),
+					Mode:             resolveCodexHistoryMode(authority.HistoryMode),
+					Inclusion:        codexHistoryBaseInclusion(authority, meta),
+					Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindUnknown},
+				})
+			}
+		} else {
+			ordered = append(ordered, CodexReference{
+				Pointer:          "history-base:" + meta.HistoryBaseThreadID,
+				PhysicalSourceID: codexPhysicalSourceID("history-base:" + meta.HistoryBaseThreadID),
+				Mode:             resolveCodexHistoryMode(authority.HistoryMode),
+				Inclusion:        codexHistoryBaseInclusion(authority, meta),
+				Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindUnknown},
+			})
+		}
+	}
+	for _, entry := range meta.History {
+		if len(ordered)+len(authority.References) >= maxCodexHistorySegments {
+			authority.DerivationDiagnostics = append(authority.DerivationDiagnostics, DiagnosticEntry{
+				ErrorType:   "codex_reference_segments_bounded",
+				Location:    fmt.Sprintf("thread %s", authority.StableThreadID),
+				Message:     "native history references exceed the bounded segment budget; later dependencies were not invented",
+				Remediation: "Flatten the native history chain and rerun; the resolved prefix replays and the capture records the bound.",
+			})
+			break
+		}
+		mode := entry.Mode
+		if !entry.ModeSpecified {
+			mode = resolveCodexHistoryMode(authority.HistoryMode)
+		}
+		targets := index[entry.ThreadID]
+		if len(targets) == 0 {
+			ordered = append(ordered, CodexReference{
+				Pointer:          "history:" + entry.ThreadID,
+				PhysicalSourceID: codexPhysicalSourceID("history:" + entry.ThreadID),
+				Mode:             mode,
+				HistoryKind:      entry.Kind,
+				ThroughCompleted: entry.Completed,
+				Inclusion:        indexformat.SegmentInclusionInherited,
+				Coordinates: indexformat.SegmentCoordinates{
+					Kind:                    indexformat.CoordinateKindCodexReferenceRange,
+					Start:                   entry.Start,
+					EndExclusive:            entry.EndExclusive,
+					DecodedByteStart:        entry.DecodedByteStart,
+					DecodedByteEndExclusive: entry.DecodedByteEndExclusive,
+				},
+			})
+			continue
+		}
+		target := targets[0]
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
+		if refMeta, hasRef, err := s.readNativeMeta(target); err == nil && hasRef {
+			if !entry.ModeSpecified {
+				mode = resolveCodexHistoryMode(refMeta.HistoryMode)
+			}
+			sibling := *authority
+			sibling.References = nil
+			_ = s.resolveDerivedReferences(ctx, &sibling, refMeta, depth+1, seen)
+			ordered = append(ordered, sibling.References...)
+		}
+		ordered = append(ordered, CodexReference{
+			Pointer:          target,
+			PhysicalSourceID: codexPhysicalSourceID(target),
+			Mode:             mode,
+			HistoryKind:      entry.Kind,
+			ThroughCompleted: entry.Completed,
+			Inclusion:        indexformat.SegmentInclusionInherited,
+			Coordinates: indexformat.SegmentCoordinates{
+				Kind:                    indexformat.CoordinateKindCodexReferenceRange,
+				Start:                   entry.Start,
+				EndExclusive:            entry.EndExclusive,
+				DecodedByteStart:        entry.DecodedByteStart,
+				DecodedByteEndExclusive: entry.DecodedByteEndExclusive,
+			},
+		})
+	}
+	authority.References = append(authority.References, ordered...)
+	return nil
+}
+
+// codexHistoryBaseInclusion classifies a history-base reference: a base that
+// directly names the logical parent or fork source is proven inherited
+// history; any other base is uncertain earlier history, never invented
+// parent content.
+func codexHistoryBaseInclusion(authority *CodexSourceAuthority, meta codexNativeSessionMeta) indexformat.SegmentInclusion {
+	if meta.HistoryBaseThreadID == "" {
+		return indexformat.SegmentInclusionUncertainEarlierHistory
+	}
+	if meta.HistoryBaseThreadID == authority.ParentID || meta.HistoryBaseThreadID == authority.ForkSourceID {
+		return indexformat.SegmentInclusionInherited
+	}
+	return indexformat.SegmentInclusionUncertainEarlierHistory
+}
+
+// readNativeMeta reads and parses the native authority envelope of one
+// sibling rollout file.
+func (s *CodexFileSource) readNativeMeta(path string) (codexNativeSessionMeta, bool, error) {
+	header, err := codexReadHeader(s.fs, path, codexHeaderLimit)
+	if err != nil {
+		return codexNativeSessionMeta{}, false, err
+	}
+	meta, ok := parseCodexNativeAuthority(header)
+	return meta, ok, nil
+}
+
+// scanThreadCandidates lists every sibling rollout path whose native
+// session_meta.id names stableID, oldest path first. Unreadable siblings are
+// skipped; readable conflicts are never hidden by file age.
+func (s *CodexFileSource) scanThreadCandidates(ctx context.Context, pointer, stableID string) []string {
+	candidates := append([]string(nil), s.scanThreadIndex(ctx, pointer)[stableID]...)
+	sortStrings(candidates)
+	return candidates
+}
+
+// scanThreadIndex maps native session_meta.id to every rollout path that
+// claims it, oldest path first, over the native sessions tree that contains
+// pointer. The scan is read-only and bounded to header reads.
+func (s *CodexFileSource) scanThreadIndex(ctx context.Context, pointer string) map[string][]string {
+	index := map[string][]string{}
+	root := codexSessionsRoot(pointer)
+	_ = s.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() || d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if !strings.HasSuffix(filepath.Base(path), ".jsonl") || !strings.HasPrefix(filepath.Base(path), codexRolloutFilePrefix) {
+			return nil
+		}
+		header, readErr := codexReadHeader(s.fs, path, codexHeaderLimit)
+		if readErr != nil {
+			return nil
+		}
+		meta, ok := parseCodexNativeAuthority(header)
+		if !ok || meta.ID == "" {
+			return nil
+		}
+		index[meta.ID] = append(index[meta.ID], path)
+		return nil
+	})
+	for id := range index {
+		sortStrings(index[id])
+	}
+	return index
+}
+
+// codexSessionsRoot finds the native sessions tree that contains a rollout
+// path. A Codex date-partitioned layout root/YYYY/MM/DD/file resolves to
+// root; any other layout resolves to the containing directory.
+func codexSessionsRoot(pointer string) string {
+	dir := filepath.Dir(pointer)
+	day := filepath.Base(dir)
+	month := filepath.Base(filepath.Dir(dir))
+	year := filepath.Base(filepath.Dir(filepath.Dir(dir)))
+	if len(year) == 4 && len(month) == 2 && len(day) == 2 && isDecimalDigits(year) && isDecimalDigits(month) && isDecimalDigits(day) {
+		return filepath.Dir(filepath.Dir(filepath.Dir(dir)))
+	}
+	return dir
+}
+
+func isDecimalDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		for j := i; j > 0 && values[j] < values[j-1]; j-- {
+			values[j], values[j-1] = values[j-1], values[j]
+		}
+	}
+}
+
 // ReadCodexSource reads the bounded decoded bytes at one pointer. The
 // descriptor-size capture boundary is used when the FileSystem can resolve it.
-func (s *codexFileSource) ReadCodexSource(_ context.Context, pointer string) ([]byte, error) {
+// Failures are sanitized at this source boundary: no raw path and no wrapped
+// OS error ever leaves it.
+func (s *CodexFileSource) ReadCodexSource(_ context.Context, pointer string) ([]byte, error) {
+	if strings.HasPrefix(pointer, "history:") || strings.HasPrefix(pointer, "history-base:") {
+		thread := strings.TrimPrefix(strings.TrimPrefix(pointer, "history-base:"), "history:")
+		return nil, codexAuthorityReadFailure("ReadCodexSource", thread, codexPhysicalSourceID(pointer), "read bounded dependency", "the referenced native source is not present in the sessions tree")
+	}
 	if reader, ok := s.fs.(sourcePrefixReader); ok {
 		data, err := reader.ReadSourcePrefix(pointer)
 		if err != nil {
-			return nil, fmt.Errorf("ingest.codexFileSource.ReadCodexSource: bounded read of %s failed: %w; the capture is incomplete and no prior snapshot was overwritten", codexPhysicalSourceID(pointer), err)
+			return nil, codexAuthorityReadFailure("ReadCodexSource", "", codexPhysicalSourceID(pointer), "bounded read", codexSanitizedFSCause(err))
 		}
 		return data, nil
 	}
 	data, err := s.fs.ReadFile(pointer)
 	if err != nil {
-		return nil, fmt.Errorf("ingest.codexFileSource.ReadCodexSource: read of %s failed: %w; the capture is incomplete and no prior snapshot was overwritten", codexPhysicalSourceID(pointer), err)
+		return nil, codexAuthorityReadFailure("ReadCodexSource", "", codexPhysicalSourceID(pointer), "read", codexSanitizedFSCause(err))
 	}
 	return data, nil
 }
@@ -538,18 +1070,45 @@ func codexReadHeader(fs FileSystem, path string, limit int) ([]byte, error) {
 	return data, nil
 }
 
-// codexSessionMetaRead is the header projection of a session_meta payload.
-type codexSessionMetaRead struct {
-	ID             string          `json:"id"`
-	HistoryMode    json.RawMessage `json:"history_mode"`
-	ForkedFromID   string          `json:"forked_from_id"`
-	ParentThreadID string          `json:"parent_thread_id"`
-	Source         json.RawMessage `json:"source"`
+// codexNativeHistoryEntry is one declared native history dependency decoded
+// from the session_meta history envelope. ThreadID names the referenced
+// stable thread; Start/EndExclusive are decoded-ordinal bounds and the byte
+// bounds are decoded-byte bounds. Mode is the declared history mode of the
+// referenced segment. The envelope is optional: absent history means no
+// declared dependencies, and a malformed envelope marks the authority
+// derivation incomplete without inventing a dependency.
+type codexNativeHistoryEntry struct {
+	ThreadID                string
+	Mode                    CodexHistoryMode
+	ModeSpecified           bool
+	Kind                    string
+	Completed               bool
+	Start                   *int64
+	EndExclusive            *int64
+	DecodedByteStart        *int64
+	DecodedByteEndExclusive *int64
 }
 
-// nestedParentThreadID reads the nested thread-spawn parent when the top-level
-// field is absent. Nesting alone is not a cycle proof.
-func (m codexSessionMetaRead) nestedParentThreadID() string {
+// codexNativeSessionMeta is the authority-relevant native session_meta
+// envelope decoded from real rollout bytes. Every field is optional except
+// the stable identity: absent bounds stay absent and malformed envelopes
+// stay incomplete, never invented.
+type codexNativeSessionMeta struct {
+	ID                  string
+	HistoryMode         json.RawMessage
+	ForkedFromID        string
+	ParentThreadID      string
+	Source              json.RawMessage
+	RootSessionID       string
+	HistoryBaseThreadID string
+	CopyBoundary        *int64
+	History             []codexNativeHistoryEntry
+	HistoryMalformed    bool
+}
+
+// nativeParentThreadID reads the nested thread-spawn parent when the
+// top-level field is absent. Nesting alone is not a cycle proof.
+func (m codexNativeSessionMeta) nativeParentThreadID() string {
 	if m.ParentThreadID != "" {
 		return m.ParentThreadID
 	}
@@ -569,9 +1128,10 @@ func (m codexSessionMetaRead) nestedParentThreadID() string {
 	return source.Subagent.ThreadSpawn.ParentThreadID
 }
 
-// parseCodexSessionMetaHeader finds the first session_meta record in a header
-// peek. It reports false when no session_meta could be decoded.
-func parseCodexSessionMetaHeader(header []byte) (codexSessionMetaRead, bool) {
+// parseCodexNativeAuthority finds the first session_meta record in a header
+// peek and decodes its authority-relevant native envelope. It reports false
+// when no session_meta could be decoded.
+func parseCodexNativeAuthority(header []byte) (codexNativeSessionMeta, bool) {
 	scanner := newJSONLRecordScanner(header, defaults.MaxJSONLRecordBytes)
 	for scanner.Scan() {
 		raw := strings.TrimSpace(string(scanner.Bytes()))
@@ -580,23 +1140,125 @@ func parseCodexSessionMetaHeader(header []byte) (codexSessionMetaRead, bool) {
 		}
 		var env codexRolloutLine
 		if err := json.Unmarshal([]byte(raw), &env); err != nil {
-			return codexSessionMetaRead{}, false
+			return codexNativeSessionMeta{}, false
 		}
 		if env.Type != codexTypeSessionMeta {
-			return codexSessionMetaRead{}, false
+			return codexNativeSessionMeta{}, false
 		}
-		var meta codexSessionMetaRead
-		if err := json.Unmarshal(env.Payload, &meta); err != nil {
-			return codexSessionMetaRead{}, false
+		var wire struct {
+			ID             string          `json:"id"`
+			HistoryMode    json.RawMessage `json:"history_mode"`
+			ForkedFromID   string          `json:"forked_from_id"`
+			ParentThreadID string          `json:"parent_thread_id"`
+			Source         json.RawMessage `json:"source"`
+			RootSessionID  string          `json:"session_id"`
+			HistoryBase    json.RawMessage `json:"history_base"`
+			CopyBoundary   *int64          `json:"subagent_history_start_ordinal"`
+			History        json.RawMessage `json:"history"`
 		}
+		if err := json.Unmarshal(env.Payload, &wire); err != nil {
+			return codexNativeSessionMeta{}, false
+		}
+		meta := codexNativeSessionMeta{
+			ID:             wire.ID,
+			HistoryMode:    wire.HistoryMode,
+			ForkedFromID:   wire.ForkedFromID,
+			ParentThreadID: wire.ParentThreadID,
+			Source:         wire.Source,
+			RootSessionID:  wire.RootSessionID,
+			CopyBoundary:   wire.CopyBoundary,
+		}
+		if len(bytes.TrimSpace(wire.HistoryBase)) > 0 && !bytes.Equal(bytes.TrimSpace(wire.HistoryBase), []byte("null")) {
+			var base struct {
+				ThreadID string `json:"thread_id"`
+			}
+			if err := json.Unmarshal(wire.HistoryBase, &base); err == nil {
+				meta.HistoryBaseThreadID = base.ThreadID
+			} else {
+				meta.HistoryMalformed = true
+			}
+		}
+		meta.History, meta.HistoryMalformed = decodeCodexNativeHistory(wire.History, meta.HistoryMalformed)
 		return meta, true
 	}
-	return codexSessionMetaRead{}, false
+	return codexNativeSessionMeta{}, false
 }
 
-// metaHistoryMode returns the raw history_mode of a parsed session_meta, or nil
-// when the header could not be parsed.
-func metaHistoryMode(meta codexSessionMetaRead, hasMeta bool) json.RawMessage {
+// decodeCodexNativeHistory decodes the optional native history envelope.
+// Absent or null history is not malformed. A present envelope must be an
+// array of objects with a thread_id, ordinal bounds and optional byte
+// bounds; anything else marks the envelope malformed without inventing a
+// dependency.
+func decodeCodexNativeHistory(raw json.RawMessage, malformed bool) ([]codexNativeHistoryEntry, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, malformed
+	}
+	var entries []struct {
+		ThreadID                string          `json:"thread_id"`
+		Mode                    json.RawMessage `json:"mode"`
+		Kind                    string          `json:"kind"`
+		Completed               bool            `json:"completed"`
+		Start                   *int64          `json:"start"`
+		EndExclusive            *int64          `json:"end_exclusive"`
+		DecodedByteStart        *int64          `json:"decoded_byte_start"`
+		DecodedByteEndExclusive *int64          `json:"decoded_byte_end_exclusive"`
+	}
+	if err := json.Unmarshal(trimmed, &entries); err != nil {
+		return nil, true
+	}
+	var history []codexNativeHistoryEntry
+	for _, entry := range entries {
+		if entry.ThreadID == "" || entry.Start == nil || entry.EndExclusive == nil {
+			return nil, true
+		}
+		if *entry.Start < 0 || *entry.EndExclusive <= *entry.Start {
+			return nil, true
+		}
+		if (entry.DecodedByteStart == nil) != (entry.DecodedByteEndExclusive == nil) {
+			return nil, true
+		}
+		if entry.DecodedByteStart != nil && (*entry.DecodedByteStart < 0 || *entry.DecodedByteEndExclusive <= *entry.DecodedByteStart) {
+			return nil, true
+		}
+		mode := CodexHistoryModePaginated
+		modeSpecified := false
+		if len(bytes.TrimSpace(entry.Mode)) > 0 && !bytes.Equal(bytes.TrimSpace(entry.Mode), []byte("null")) {
+			var name string
+			if err := json.Unmarshal(entry.Mode, &name); err != nil {
+				return nil, true
+			}
+			mode = CodexHistoryMode(name)
+			if !mode.IsValid() {
+				return nil, true
+			}
+			modeSpecified = true
+		}
+		kind := entry.Kind
+		if kind == "" {
+			kind = "before"
+		}
+		if kind != "before" && kind != "through" {
+			return nil, true
+		}
+		history = append(history, codexNativeHistoryEntry{
+			ThreadID:                entry.ThreadID,
+			Mode:                    mode,
+			ModeSpecified:           modeSpecified,
+			Kind:                    kind,
+			Completed:               entry.Completed,
+			Start:                   entry.Start,
+			EndExclusive:            entry.EndExclusive,
+			DecodedByteStart:        entry.DecodedByteStart,
+			DecodedByteEndExclusive: entry.DecodedByteEndExclusive,
+		})
+	}
+	return history, malformed
+}
+
+// metaHistoryModeRaw returns the raw history_mode of a parsed native
+// session_meta, or nil when the header could not be parsed.
+func metaHistoryModeRaw(meta codexNativeSessionMeta, hasMeta bool) json.RawMessage {
 	if !hasMeta {
 		return nil
 	}
