@@ -58,11 +58,23 @@ func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session Disc
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
 	}
-	data, err := idx.fs.ReadFile(session.SourcePath.String())
+	data, err := idx.captureCurrentSource(ctx, session)
 	if err != nil {
 		return nil, completion.failure(err)
 	}
 	return idx.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// captureCurrentSource reads the authoritative current Codex source through the
+// bounded capture, authority and fingerprint-recheck path, and returns the
+// verified decoded prefix so entry parsing consumes the same capture the native
+// history replay produced.
+func (idx *CodexIndexer) captureCurrentSource(ctx context.Context, session DiscoveredSession) ([]byte, error) {
+	history, err := CaptureCodexHistoryWithRetry(ctx, newCodexFileSource(idx.fs), session, nil)
+	if err != nil {
+		return nil, err
+	}
+	return history.RawBytes, nil
 }
 
 // IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.

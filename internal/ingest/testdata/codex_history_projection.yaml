@@ -1,0 +1,679 @@
+cases:
+  - name: copied-prefix-S-boundary
+    phases:
+      - authority:
+          stableThreadID: 11111111-1111-4111-8111-111111111111
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: true
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T03:00:00Z","type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T03:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied one"}]}}
+            {"timestamp":"2024-01-02T03:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied two"}]}}
+            {"timestamp":"2024-01-02T03:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"copied three"}]}}
+            {"timestamp":"2024-01-02T03:00:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"run the command"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3]
+          mainRefs: [e_4]
+          earlierRefs: []
+
+  - name: empty-child-then-append
+    phases:
+      - authority:
+          stableThreadID: 22222222-2222-4222-8222-222222222222
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: true
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T03:10:00Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T03:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied one"}]}}
+            {"timestamp":"2024-01-02T03:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied two"}]}}
+            {"timestamp":"2024-01-02T03:10:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"copied three"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3]
+          mainRefs: []
+          earlierRefs: []
+      - authority:
+          stableThreadID: 22222222-2222-4222-8222-222222222222
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: true
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T03:10:00Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T03:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied one"}]}}
+            {"timestamp":"2024-01-02T03:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied two"}]}}
+            {"timestamp":"2024-01-02T03:10:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"copied three"}]}}
+            {"timestamp":"2024-01-02T03:10:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"run the command"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3]
+          mainRefs: [e_4]
+          earlierRefs: []
+
+  - name: incomplete-prefix-safe
+    phases:
+      - authority:
+          stableThreadID: 33333333-3333-4333-8333-333333333333
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: true
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T03:20:00Z","type":"session_meta","payload":{"id":"33333333-3333-4333-8333-333333333333","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T03:20:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied one"}]}}
+            {"timestamp":"2024-01-02T03:20:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied two"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2]
+          mainRefs: []
+          earlierRefs: []
+          diagnostics: [codex_copied_prefix_incomplete]
+      - authority:
+          stableThreadID: 33333333-3333-4333-8333-333333333333
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: true
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T03:20:00Z","type":"session_meta","payload":{"id":"33333333-3333-4333-8333-333333333333","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T03:20:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied one"}]}}
+            {"timestamp":"2024-01-02T03:20:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied two"}]}}
+            {"timestamp":"2024-01-02T03:20:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"copied three"}]}}
+            {"timestamp":"2024-01-02T03:20:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"run the command"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3]
+          mainRefs: [e_4]
+          earlierRefs: []
+
+  - name: migrated-child-prior-work
+    phases:
+      - authority:
+          stableThreadID: 44444444-4444-4444-8444-444444444444
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          copyBoundary: 4
+          originalOwnershipProven: false
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T03:30:00Z","type":"session_meta","payload":{"id":"44444444-4444-4444-8444-444444444444","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T03:30:01Z","type":"turn_context","payload":{"model":"sample-model","turn_id":"t1"}}
+            {"timestamp":"2024-01-02T03:30:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"old2","content":[{"type":"input_text","text":"old unique question"}]}}
+            {"timestamp":"2024-01-02T03:30:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"old3","content":[{"type":"output_text","text":"old unique answer"}]}}
+            {"timestamp":"2024-01-02T03:30:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"u4","content":[{"type":"input_text","text":"current action"}]}}
+            {"timestamp":"2024-01-02T03:30:05Z","type":"response_item","payload":{"type":"message","role":"user","id":"chat5","content":[{"type":"input_text","text":"current unknown delivery chat"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: []
+          earlierRefs: [e_1, e_2]
+          mainRefs: [e_3, e_4]
+
+  - name: multi-segment-ancestor-parent-surviving-own
+    phases:
+      - authority:
+          stableThreadID: 55555555-5555-4555-8555-555555555555
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref-a
+              physicalSourceID: phys-a
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 3
+              logicalSessionID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+            - pointer: ref-p
+              physicalSourceID: phys-p
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 3
+              logicalSessionID: ffffffff-ffff-4fff-8fff-ffffffffffff
+            - pointer: ref-c
+              physicalSourceID: phys-c
+              mode: paginated
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 3
+              logicalSessionID: 55555555-5555-4555-8555-555555555555
+        sources:
+          ref-a: |
+            {"timestamp":"2024-01-02T04:00:00Z","type":"session_meta","payload":{"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"a1","content":[{"type":"input_text","text":"ancestor one"}]}}
+            {"timestamp":"2024-01-02T04:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"ancestor two"}]}}
+          ref-p: |
+            {"timestamp":"2024-01-02T04:10:00Z","type":"session_meta","payload":{"id":"ffffffff-ffff-4fff-8fff-ffffffffffff","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"p4","content":[{"type":"input_text","text":"parent four"}]}}
+            {"timestamp":"2024-01-02T04:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"p5","content":[{"type":"output_text","text":"parent five"}]}}
+          ref-c: |
+            {"timestamp":"2024-01-02T04:20:00Z","type":"session_meta","payload":{"id":"55555555-5555-4555-8555-555555555555","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:20:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"c7","content":[{"type":"input_text","text":"child seven"}]}}
+            {"timestamp":"2024-01-02T04:20:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"c8","content":[{"type":"output_text","text":"child eight"}]}}
+          current: |
+            {"timestamp":"2024-01-02T04:30:00Z","type":"session_meta","payload":{"id":"55555555-5555-4555-8555-555555555555","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:30:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"c10","content":[{"type":"input_text","text":"current own"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3, e_4]
+          earlierRefs: []
+          mainRefs: [e_5, e_6, e_7]
+      - authority:
+          stableThreadID: 55555555-5555-4555-8555-555555555555
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref-a
+              physicalSourceID: phys-a
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 3
+              logicalSessionID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+            - pointer: ref-p
+              physicalSourceID: phys-p
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 3
+              logicalSessionID: ffffffff-ffff-4fff-8fff-ffffffffffff
+            - pointer: ref-c
+              physicalSourceID: phys-c
+              mode: paginated
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 3
+              logicalSessionID: 55555555-5555-4555-8555-555555555555
+        sources:
+          ref-a: |
+            {"timestamp":"2024-01-02T04:00:00Z","type":"session_meta","payload":{"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"a1","content":[{"type":"input_text","text":"ancestor one"}]}}
+            {"timestamp":"2024-01-02T04:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"ancestor two"}]}}
+          ref-p: |
+            {"timestamp":"2024-01-02T04:10:00Z","type":"session_meta","payload":{"id":"ffffffff-ffff-4fff-8fff-ffffffffffff","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"p4","content":[{"type":"input_text","text":"parent four"}]}}
+            {"timestamp":"2024-01-02T04:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"p5","content":[{"type":"output_text","text":"parent five"}]}}
+            {"timestamp":"2024-01-02T04:10:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"p11","content":[{"type":"input_text","text":"parent append after the captured cutoff"}]}}
+          ref-c: |
+            {"timestamp":"2024-01-02T04:20:00Z","type":"session_meta","payload":{"id":"55555555-5555-4555-8555-555555555555","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:20:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"c7","content":[{"type":"input_text","text":"child seven"}]}}
+            {"timestamp":"2024-01-02T04:20:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"c8","content":[{"type":"output_text","text":"child eight"}]}}
+          current: |
+            {"timestamp":"2024-01-02T04:30:00Z","type":"session_meta","payload":{"id":"55555555-5555-4555-8555-555555555555","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T04:30:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"c10","content":[{"type":"input_text","text":"current own"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          inheritedRefs: [e_1, e_2, e_3, e_4]
+          earlierRefs: []
+          mainRefs: [e_5, e_6, e_7]
+          fingerprintStableWithPrevious: true
+
+  - name: reference-before-through-and-failures
+    phases:
+      - authority:
+          stableThreadID: 66666666-6666-4666-8666-666666666666
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: ref-before
+              physicalSourceID: phys-before
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+            - pointer: ref-through
+              physicalSourceID: phys-through
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 5
+            - pointer: ref-missing
+              physicalSourceID: phys-missing
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 2
+            - pointer: ref-before
+              physicalSourceID: phys-before
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 0
+              endExclusive: 3
+            - pointer: ref-invalid
+              physicalSourceID: phys-invalid
+              mode: paginated
+              inclusion: inherited
+              coordinateKind: codex_reference_range
+              start: 4
+              endExclusive: 2
+        sources:
+          ref-before: |
+            {"timestamp":"2024-01-02T05:00:00Z","type":"session_meta","payload":{"id":"ref-before","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T05:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"b1","content":[{"type":"input_text","text":"before one"}]}}
+            {"timestamp":"2024-01-02T05:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"b2","content":[{"type":"output_text","text":"before two"}]}}
+            {"timestamp":"2024-01-02T05:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"b3","content":[{"type":"input_text","text":"before three excluded by the bound"}]}}
+          ref-through: |
+            {"timestamp":"2024-01-02T05:10:00Z","type":"session_meta","payload":{"id":"ref-through","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T05:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"t1","content":[{"type":"input_text","text":"through one"}]}}
+            {"timestamp":"2024-01-02T05:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"t2","content":[{"type":"output_text","text":"through two"}]}}
+            {"timestamp":"2024-01-02T05:10:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"t3","content":[{"type":"input_text","text":"through three"}]}}
+            {"timestamp":"2024-01-02T05:10:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"t4","content":[{"type":"output_text","text":"through four included"}]}}
+          current: |
+            {"timestamp":"2024-01-02T05:20:00Z","type":"session_meta","payload":{"id":"66666666-6666-4666-8666-666666666666","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T05:20:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"own after failures"}]}}
+        expected:
+          mode: paginated
+          completeness: incomplete_new
+          inheritedRefs: [e_1, e_2, e_3, e_4, e_5, e_6]
+          earlierRefs: []
+          mainRefs: [e_7]
+          diagnostics: [codex_reference_bounds_invalid, codex_reference_cycle, codex_reference_unavailable]
+
+  - name: history-mode-missing-and-unknown
+    phases:
+      - authority:
+          stableThreadID: 77777777-7777-4777-8777-777777777777
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: ""
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T06:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777"}}
+            {"timestamp":"2024-01-02T06:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"one"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+      - authority:
+          stableThreadID: 77777777-7777-4777-8777-777777777777
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T06:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T06:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"one"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+      - authority:
+          stableThreadID: 77777777-7777-4777-8777-777777777777
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T06:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T06:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"one"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+      - authority:
+          stableThreadID: 77777777-7777-4777-8777-777777777777
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: unknown_future_mode
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T06:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777","history_mode":"unknown_future_mode"}}
+            {"timestamp":"2024-01-02T06:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"one"}]}}
+        expected:
+          mode: unsupported
+          completeness: incomplete_new
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: [codex_history_mode_unsupported]
+      - authority:
+          stableThreadID: 77777777-7777-4777-8777-777777777777
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: "null"
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T06:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777","history_mode":null}}
+            {"timestamp":"2024-01-02T06:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"one"}]}}
+        expected:
+          mode: unsupported
+          completeness: incomplete_new
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: [codex_history_mode_unsupported]
+
+  - name: codex-compaction-keeps-archival-turns
+    phases:
+      - authority:
+          stableThreadID: 88888888-8888-4888-8888-888888888888
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T07:00:00Z","type":"session_meta","payload":{"id":"88888888-8888-4888-8888-888888888888","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T07:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T07:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-02T07:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"second input"}]}}
+            {"timestamp":"2024-01-02T07:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"second answer"}]}}
+            {"timestamp":"2024-01-02T07:00:05Z","type":"compacted","payload":{"summary":"quoted first input and second input retention"}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3, e_4, e_5]
+          inheritedRefs: []
+          earlierRefs: []
+          checkpointRefs: [e_5]
+
+  - name: codex-rollback-checkpoint-and-later-turn
+    phases:
+      - authority:
+          stableThreadID: 99999999-9999-4999-8999-999999999999
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T08:00:00Z","type":"session_meta","payload":{"id":"99999999-9999-4999-8999-999999999999","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T08:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T08:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-02T08:00:03Z","type":"compacted","payload":{"summary":"surviving checkpoint one"}}
+            {"timestamp":"2024-01-02T08:00:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"second input"}]}}
+            {"timestamp":"2024-01-02T08:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"second answer"}]}}
+            {"timestamp":"2024-01-02T08:00:06Z","type":"compacted","payload":{"summary":"checkpoint inside the rolled back turn"}}
+            {"timestamp":"2024-01-02T08:00:07Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+            {"timestamp":"2024-01-02T08:00:08Z","type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"third input"}]}}
+            {"timestamp":"2024-01-02T08:00:09Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a3","content":[{"type":"output_text","text":"third answer"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3, e_7, e_8]
+          inheritedRefs: []
+          earlierRefs: []
+          revertedRefs: [e_4, e_5, e_6]
+          checkpointRefs: [e_3]
+
+  - name: paginated-rollback-anomaly
+    phases:
+      - authority:
+          stableThreadID: aaaaaaaa-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T09:00:00Z","type":"session_meta","payload":{"id":"aaaaaaaa-bbbb-4bbb-8bbb-bbbbbbbbbbbb","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T09:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T09:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-02T09:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"second input"}]}}
+            {"timestamp":"2024-01-02T09:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"second answer"}]}}
+            {"timestamp":"2024-01-02T09:00:05Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3, e_4]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: [codex_paginated_rollback_anomaly]
+
+  - name: pointer-revert-surviving-own
+    phases:
+      - authority:
+          stableThreadID: bbbbbbbb-cccc-4ccc-8ccc-cccccccccccc
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: old
+              physicalSourceID: phys-old
+              mode: paginated
+              inclusion: excluded_reverted
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 5
+        sources:
+          old: |
+            {"timestamp":"2024-01-02T10:00:00Z","type":"session_meta","payload":{"id":"bbbbbbbb-cccc-4ccc-8ccc-cccccccccccc","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"kept first input"}]}}
+            {"timestamp":"2024-01-02T10:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"kept first answer"}]}}
+            {"timestamp":"2024-01-02T10:00:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"removed second input"}]}}
+            {"timestamp":"2024-01-02T10:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"removed second answer"}]}}
+          current: |
+            {"timestamp":"2024-01-02T10:10:00Z","type":"session_meta","payload":{"id":"bbbbbbbb-cccc-4ccc-8ccc-cccccccccccc","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T10:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"kept first input"}]}}
+            {"timestamp":"2024-01-02T10:10:02Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"kept first answer"}]}}
+            {"timestamp":"2024-01-02T10:10:03Z","type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"surviving third input"}]}}
+            {"timestamp":"2024-01-02T10:10:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a3","content":[{"type":"output_text","text":"surviving third answer"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3, e_4]
+          inheritedRefs: []
+          earlierRefs: []
+          revertedRefs: []
+
+  - name: pointer-switch-during-refresh
+    unstable: true
+    phases:
+      - authority:
+          stableThreadID: cccccccc-dddd-4ddd-8ddd-dddddddddddd
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+
+  - name: partial-unknown-ordinal-append
+    phases:
+      - authority:
+          stableThreadID: dddddddd-eeee-4eee-8eee-eeeeeeeeeeee
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |-
+            {"timestamp":"2024-01-02T11:00:00Z","type":"session_meta","payload":{"id":"dddddddd-eeee-4eee-8eee-eeeeeeeeeeee","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T11:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T11:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u3"
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+      - authority:
+          stableThreadID: dddddddd-eeee-4eee-8eee-eeeeeeeeeeee
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T11:00:00Z","type":"session_meta","payload":{"id":"dddddddd-eeee-4eee-8eee-eeeeeeeeeeee","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T11:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"first input"}]}}
+            {"timestamp":"2024-01-02T11:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"completed third input"}]}}
+            {"type":
+            {"timestamp":"2024-01-02T11:00:04Z","type":"response_item","payload":{"type":"message","role":"user","id":"u4","content":[{"type":"input_text","text":"later valid fourth input"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: [codex_record_malformed]
+
+  - name: paired-response-event
+    phases:
+      - authority:
+          stableThreadID: eeeeeeee-ffff-4fff-8fff-ffffffffffff
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T12:00:00Z","type":"session_meta","payload":{"id":"eeeeeeee-ffff-4fff-8fff-ffffffffffff","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T12:00:01Z","type":"event_msg","payload":{"type":"item_completed","id":"u1"}}
+            {"timestamp":"2024-01-02T12:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one accepted input"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: [paired_response_event]
+
+  - name: repeated-item-completed
+    phases:
+      - authority:
+          stableThreadID: ffffffff-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T13:00:00Z","type":"session_meta","payload":{"id":"ffffffff-aaaa-4aaa-8aaa-aaaaaaaaaaaa","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T13:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"one answer"}]}}
+            {"timestamp":"2024-01-02T13:00:02Z","type":"event_msg","payload":{"type":"item_completed","id":"a1"}}
+            {"timestamp":"2024-01-02T13:00:03Z","type":"event_msg","payload":{"type":"item_completed","id":"a1"}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: [repeated_item_completed]
+
+  - name: same-thread-rollover-refs
+    phases:
+      - authority:
+          stableThreadID: 12345678-1234-4123-8123-123456789abc
+          kind: native_current_pointer
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+          references:
+            - pointer: old
+              physicalSourceID: phys-old-a
+              mode: paginated
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 1
+              endExclusive: 2
+              logicalSessionID: 12345678-1234-4123-8123-123456789abc
+        sources:
+          old: |
+            {"timestamp":"2024-01-02T14:00:00Z","type":"session_meta","payload":{"id":"12345678-1234-4123-8123-123456789abc","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T14:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"surviving input"}]}}
+          current: |
+            {"timestamp":"2024-01-02T14:10:00Z","type":"session_meta","payload":{"id":"12345678-1234-4123-8123-123456789abc","history_mode":"paginated"}}
+            {"timestamp":"2024-01-02T14:10:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"surviving input"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          correlationKinds: [same_thread_rollover]
+
+  - name: checkpoint-alignment-incomplete
+    phases:
+      - authority:
+          stableThreadID: 24681357-2468-4246-8246-246813579abc
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T15:00:00Z","type":"session_meta","payload":{"id":"24681357-2468-4246-8246-246813579abc","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T15:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one input"}]}}
+            {"timestamp":"2024-01-02T15:00:02Z","type":"compacted","payload":{"summary":"baseline with unequal metadata","replacement_history":[{"turn":"u1"},{"turn":"a1"}],"replacement_history_metadata":[{"model":"sample-model"}]}}
+        expected:
+          mode: legacy
+          completeness: incomplete_new
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          checkpointRefs: [e_2]
+          diagnostics: [codex_checkpoint_metadata_misaligned]
+      - authority:
+          stableThreadID: 24681357-2468-4246-8246-246813579abc
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T15:00:00Z","type":"session_meta","payload":{"id":"24681357-2468-4246-8246-246813579abc","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T15:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"one input"}]}}
+            {"timestamp":"2024-01-02T15:00:02Z","type":"compacted","payload":{"summary":"baseline with equal metadata","replacement_history":[{"turn":"u1"},{"turn":"a1"}],"replacement_history_metadata":[{"model":"sample-model"},{"model":"sample-model"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          checkpointRefs: [e_2]
