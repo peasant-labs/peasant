@@ -60,8 +60,20 @@
 # wantFailed  the failed session ids in first-seen order: the classified
 #             membership behind the count, so the corpus pins WHICH sessions,
 #             not just how many. Its length must equal wantCount.
+# entries     per-session stored-entries presence: true means the session
+#             holds session_entries rows, false means it holds none. Present
+#             only on cases that also pin the coverage split below.
+# wantEmpty / wantRetained
+#             the coverage split of wantCount: sessions with no stored entries
+#             versus sessions that kept their previous entries. Stated
+#             independently of wantCount: the test asserts each against the
+#             production computation, and asserts the identity
+#             wantCount == wantEmpty + wantRetained separately.
+# wantEmptySessions / wantRetainedSessions
+#             the classified membership behind the split, in first-seen order:
+#             which failed sessions are empty and which retained.
 
-expectedCaseCount: 11
+expectedCaseCount: 14
 required_cases:
   - a-clean-run-reports-nothing
   - one-session-failing-once-is-one-session
@@ -74,6 +86,9 @@ required_cases:
   - a-routing-fallback-then-error-is-still-a-failure
   - a-skip-does-not-clear-an-error
   - a-skipped-only-session-is-not-a-failure-at-all
+  - failed-sessions-split-empty-and-retained
+  - failed-sessions-all-kept-their-entries
+  - failed-sessions-all-empty
 cases:
   - name: a-clean-run-reports-nothing
     rows:
@@ -129,6 +144,8 @@ cases:
   # not a completion: it must not clear an error, in either row order. The
   # second case below is the real routing order - the fallback row is written
   # when the original source is missing, and the indexing attempt then errors.
+  # That case also pins the coverage split: the session holds no entries, so
+  # it lands in Empty, not in the retained set.
   - name: a-fallback-does-not-clear-an-error
     rows:
       - {session: s1, outcome: error}
@@ -140,8 +157,13 @@ cases:
     rows:
       - {session: s1, outcome: fallback}
       - {session: s1, outcome: error}
+    entries: {s1: false}
     wantCount: 1
     wantFailed: [s1]
+    wantEmpty: 1
+    wantRetained: 0
+    wantEmptySessions: [s1]
+    wantRetainedSessions: []
 
   # Skipped is NOT a success: the session ended without entries, it simply ended
   # that way without an error. It must not clear a failure.
@@ -167,3 +189,47 @@ cases:
       - {session: s1, outcome: skipped}
     wantCount: 0
     wantFailed: []
+
+  # The coverage split: failed attempts divide into sessions with no stored
+  # entries (Empty) and sessions that kept their previous entries
+  # (FailedRetained). The three shapes below - mixed, all retained, all
+  # empty - pin that each sentence of the summary answers to its own count,
+  # and that a measured zero (all retained reports Empty 0) is a carried
+  # zero, not an omitted field.
+  - name: failed-sessions-split-empty-and-retained
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s2, outcome: error}
+      - {session: s2, outcome: error}
+    entries: {s1: true, s2: false}
+    wantCount: 2
+    wantFailed: [s1, s2]
+    wantEmpty: 1
+    wantRetained: 1
+    wantEmptySessions: [s2]
+    wantRetainedSessions: [s1]
+
+  - name: failed-sessions-all-kept-their-entries
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s2, outcome: error}
+    entries: {s1: true, s2: true}
+    wantCount: 2
+    wantFailed: [s1, s2]
+    wantEmpty: 0
+    wantRetained: 2
+    wantEmptySessions: []
+    wantRetainedSessions: [s1, s2]
+
+  - name: failed-sessions-all-empty
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: skipped}
+      - {session: s2, outcome: error}
+    entries: {s1: false, s2: false}
+    wantCount: 2
+    wantFailed: [s1, s2]
+    wantEmpty: 2
+    wantRetained: 0
+    wantEmptySessions: [s1, s2]
+    wantRetainedSessions: []

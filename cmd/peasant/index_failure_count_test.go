@@ -30,7 +30,7 @@ var (
 const indexFailureCountFixturePath = "cmd/peasant/testdata/index_failure_counts.yaml"
 
 // indexFailureCountFloor is the row count this corpus must not fall below.
-const indexFailureCountFloor = 11
+const indexFailureCountFloor = 14
 
 type indexFailureCountDocument struct {
 	ExpectedCaseCount int                     `yaml:"expectedCaseCount"`
@@ -39,10 +39,15 @@ type indexFailureCountDocument struct {
 }
 
 type indexFailureCountCase struct {
-	Name       string               `yaml:"name"`
-	Rows       []indexFailureLogRow `yaml:"rows"`
-	WantCount  int                  `yaml:"wantCount"`
-	WantFailed []string             `yaml:"wantFailed"`
+	Name                 string               `yaml:"name"`
+	Rows                 []indexFailureLogRow `yaml:"rows"`
+	WantCount            int                  `yaml:"wantCount"`
+	WantFailed           []string             `yaml:"wantFailed"`
+	Entries              map[string]bool      `yaml:"entries"`
+	WantEmpty            int                  `yaml:"wantEmpty"`
+	WantRetained         int                  `yaml:"wantRetained"`
+	WantEmptySessions    []string             `yaml:"wantEmptySessions"`
+	WantRetainedSessions []string             `yaml:"wantRetainedSessions"`
 }
 
 type indexFailureLogRow struct {
@@ -88,6 +93,7 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 	coveredOutcomes := map[ingest.IndexOutcome]bool{}
 	sawMultiRowSingleSession, sawRecovery, sawPrintableRowSessionGap := false, false, false
 	sawMoreThanOneFailingSession := false
+	sawMixedCoverage, sawAllRetainedCoverage, sawAllEmptyCoverage := false, false, false
 	// Deletion protection is by NAME, not by number: a bare count cannot tell
 	// a deleted success arm from a corpus that never had it. The required
 	// manifest must match the cases exactly, in both directions, so neither
@@ -168,6 +174,113 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 				return document, indexFailureCountRuleError(
 					fmt.Sprintf("case %q names %q failed but records no row for it", testCase.Name, session),
 					where, "fix=name only sessions the rows record")
+			}
+		}
+		// The coverage split rides on the same cases: per-session entries
+		// presence plus independent expected Empty/Retained counts and the
+		// classified membership behind them. A case carries the split exactly
+		// when it names entries; the loader then pins the section's internal
+		// consistency so the coverage test asserts each count against the
+		// production computation rather than against a second arithmetic.
+		if testCase.Entries != nil {
+			for session := range testCase.Entries {
+				if !rowSessions[session] {
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q records entries presence for %q but no row for it", testCase.Name, session),
+						where, "fix=name only sessions the rows record")
+				}
+			}
+			for failed := range seenFailed {
+				if _, ok := testCase.Entries[failed]; !ok {
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q names %q failed but records no entries presence for it", testCase.Name, failed),
+						where, "fix=say whether every failed session holds stored entries; without it the split is undefined")
+				}
+			}
+			if testCase.WantEmpty+testCase.WantRetained != testCase.WantCount {
+				return document, indexFailureCountRuleError(
+					fmt.Sprintf("case %q expects wantEmpty=%d + wantRetained=%d, which is not wantCount=%d", testCase.Name, testCase.WantEmpty, testCase.WantRetained, testCase.WantCount),
+					where, "fix=state the split so it adds up: every failed session is either empty or retained")
+			}
+			if len(testCase.WantEmptySessions) != testCase.WantEmpty {
+				return document, indexFailureCountRuleError(
+					fmt.Sprintf("case %q expects wantEmpty=%d but names %d empty session(s)", testCase.Name, testCase.WantEmpty, len(testCase.WantEmptySessions)),
+					where, "fix=name exactly the empty sessions in wantEmptySessions, in first-seen order")
+			}
+			if len(testCase.WantRetainedSessions) != testCase.WantRetained {
+				return document, indexFailureCountRuleError(
+					fmt.Sprintf("case %q expects wantRetained=%d but names %d retained session(s)", testCase.Name, testCase.WantRetained, len(testCase.WantRetainedSessions)),
+					where, "fix=name exactly the retained sessions in wantRetainedSessions, in first-seen order")
+			}
+			// The two membership lists must partition the failed set, each in
+			// first-seen order: filtering wantFailed by each list must give
+			// the list back unchanged.
+			emptySet := map[string]bool{}
+			for _, session := range testCase.WantEmptySessions {
+				if emptySet[session] || !seenFailed[session] {
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q names empty session %q twice or outside the failed set", testCase.Name, session),
+						where, "fix=name each failed session in exactly one of the two membership lists")
+				}
+				emptySet[session] = true
+			}
+			retainedSet := map[string]bool{}
+			for _, session := range testCase.WantRetainedSessions {
+				if retainedSet[session] || emptySet[session] || !seenFailed[session] {
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q names retained session %q twice, as empty too, or outside the failed set", testCase.Name, session),
+						where, "fix=name each failed session in exactly one of the two membership lists")
+				}
+				retainedSet[session] = true
+			}
+			var wantEmptyOrder, wantRetainedOrder []string
+			for _, session := range testCase.WantFailed {
+				switch {
+				case emptySet[session]:
+					wantEmptyOrder = append(wantEmptyOrder, session)
+				case retainedSet[session]:
+					wantRetainedOrder = append(wantRetainedOrder, session)
+				default:
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q leaves failed session %q in neither membership list", testCase.Name, session),
+						where, "fix=name every failed session in exactly one of the two membership lists")
+				}
+			}
+			for i, session := range wantEmptyOrder {
+				if testCase.WantEmptySessions[i] != session {
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q names empty sessions %v, want first-seen order %v", testCase.Name, testCase.WantEmptySessions, wantEmptyOrder),
+						where, "fix=list the membership in the order the log first names the sessions")
+				}
+			}
+			for i, session := range wantRetainedOrder {
+				if testCase.WantRetainedSessions[i] != session {
+					return document, indexFailureCountRuleError(
+						fmt.Sprintf("case %q names retained sessions %v, want first-seen order %v", testCase.Name, testCase.WantRetainedSessions, wantRetainedOrder),
+						where, "fix=list the membership in the order the log first names the sessions")
+				}
+			}
+		} else if testCase.WantEmpty != 0 || testCase.WantRetained != 0 || len(testCase.WantEmptySessions) != 0 || len(testCase.WantRetainedSessions) != 0 {
+			return document, indexFailureCountRuleError(
+				fmt.Sprintf("case %q states coverage expectations without entries presence", testCase.Name),
+				where, "fix=either name entries for the failed sessions or drop the split; a split with nothing to compute it from asserts nothing")
+		}
+		// The split shapes the summary sentences answer to: a mixed case
+		// prints both, an all-retained case prints only the retained
+		// sentence with a measured Empty zero, an all-empty case only the
+		// empty one. Each shape must stay represented.
+		//
+		// Only a case that carries entries counts: a case without them has no
+		// split at all, and its zero-valued WantEmpty would otherwise register
+		// as the all-retained shape, making that requirement unfalsifiable.
+		if testCase.Entries != nil && testCase.WantCount > 0 {
+			switch {
+			case testCase.WantEmpty > 0 && testCase.WantRetained > 0:
+				sawMixedCoverage = true
+			case testCase.WantEmpty == 0:
+				sawAllRetainedCoverage = true
+			case testCase.WantRetained == 0:
+				sawAllEmptyCoverage = true
 			}
 		}
 		for _, outcomes := range perSession {
@@ -258,6 +371,14 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 				"the warning prints the same digit either way - so the number a user reads would be unpinned while the "+
 				"counter behind it looked thoroughly covered, which is the state this corpus was in")
 	}
+	for shape, seen := range map[string]bool{"mixed (empty and retained)": sawMixedCoverage, "all-retained": sawAllRetainedCoverage, "all-empty": sawAllEmptyCoverage} {
+		if !seen {
+			return document, indexFailureCountRuleError(
+				fmt.Sprintf("no case with entries presence covers the %s split", shape),
+				"loader=coverage-split coverage",
+				"fix=add one; each summary sentence answers to its own count, so a shape no case exercises is a sentence nothing checks")
+		}
+	}
 	return document, nil
 }
 
@@ -305,6 +426,9 @@ var indexFailureRequiredCases = []string{
 	"a-routing-fallback-then-error-is-still-a-failure",
 	"a-skip-does-not-clear-an-error",
 	"a-skipped-only-session-is-not-a-failure-at-all",
+	"failed-sessions-split-empty-and-retained",
+	"failed-sessions-all-kept-their-entries",
+	"failed-sessions-all-empty",
 }
 
 func TestIndexFailureCountFixture_RequiresNamedCases(t *testing.T) {
