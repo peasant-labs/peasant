@@ -118,28 +118,30 @@ func (a *osGenerationArtifactStore) openOwnedRoot() (*os.Root, error) {
 // validateGenerationID is the central single-component generation identifier
 // guard. It rejects empty names, dot and dotdot, non-local paths, separators,
 // and non-canonical spellings before any filesystem operation, so "." can
-// never resolve to the generations directory itself.
+// never resolve to the generations directory itself. It never echoes the
+// rejected value: a rejected identifier can be an untrusted private path, so
+// the refusal names the failed rule and the fix, never the offending bytes.
 func validateGenerationID(generationID string) error {
 	if strings.TrimSpace(generationID) == "" {
 		return fmt.Errorf("store: generation identifier is empty in generation validation; no file was written; supply an installed generation identifier")
 	}
 	if generationID == "." || generationID == ".." {
-		return fmt.Errorf("store: generation identifier %q is a directory reference in generation validation; no file was written; supply an installed generation identifier", generationID)
+		return fmt.Errorf("store: generation identifier is a directory reference in generation validation; no file was written; supply an installed generation identifier")
 	}
 	if !filepath.IsLocal(generationID) {
-		return fmt.Errorf("store: generation identifier %q is not a confined name in generation validation; no file was written; supply an installed generation identifier", generationID)
+		return fmt.Errorf("store: generation identifier is not a confined name in generation validation; no file was written; supply an installed generation identifier")
 	}
 	if strings.ContainsAny(generationID, `/\`) {
-		return fmt.Errorf("store: generation identifier %q carries a separator in generation validation; no file was written; supply a single-component generation identifier", generationID)
+		return fmt.Errorf("store: generation identifier carries a separator in generation validation; no file was written; supply a single-component generation identifier")
 	}
 	if cleaned := path.Clean(generationID); cleaned != generationID {
-		return fmt.Errorf("store: generation identifier %q is not canonical (cleaned %q) in generation validation; no file was written; supply the cleaned single-component identifier", generationID, cleaned)
+		return fmt.Errorf("store: generation identifier is not canonical in generation validation; no file was written; supply the cleaned single-component identifier")
 	}
 	if cleaned := filepath.Clean(generationID); cleaned != generationID {
-		return fmt.Errorf("store: generation identifier %q is not canonical in generation validation; no file was written; supply the cleaned single-component identifier", generationID)
+		return fmt.Errorf("store: generation identifier is not canonical for this platform in generation validation; no file was written; supply the cleaned single-component identifier")
 	}
 	if strings.HasPrefix(generationID, ".tmp-gen-") {
-		return fmt.Errorf("store: generation identifier %q uses the reserved temporary prefix in generation validation; no file was written; supply an installed generation identifier", generationID)
+		return fmt.Errorf("store: generation identifier uses the reserved temporary prefix in generation validation; no file was written; supply an installed generation identifier")
 	}
 	return nil
 }
@@ -566,15 +568,16 @@ func (a *osGenerationArtifactStore) RemoveGeneration(ctx context.Context, id sch
 		return err
 	}
 	defer root.Close()
-	// Verify owned identity before recursive removal: the target must be a
-	// confined generation directory under the owned root, never the
-	// generations directory itself and never a namespace escape. os.Root
-	// refuses symlink escapes; the manifest identity check refuses an
-	// in-root symlink ancestor that resolves to another session's generation,
-	// and the validity check refuses an unrelated directory whose manifest
-	// merely decodes (including an empty {}). The directory is left in place on
-	// every refusal.
-	info, err := root.Lstat(genRel)
+	// Refuse a symlinked path component before any recursive removal. os.Root
+	// confines an escape outside the owned root, but it still FOLLOWS a
+	// relative symlink that resolves to another location INSIDE the root, so a
+	// symlinked ancestor (for example this session's generations directory
+	// pointing at an unrelated in-root sibling) would redirect RemoveAll. The
+	// component walk is the only check that sees the link; the manifest
+	// identity and validity checks below then prove the resolved target is the
+	// requested owner's generation. The directory is left in place on every
+	// refusal.
+	info, err := noFollowRemovalPath(root, genRel)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -593,12 +596,48 @@ func (a *osGenerationArtifactStore) RemoveGeneration(ctx context.Context, id sch
 	return nil
 }
 
+// noFollowRemovalPath walks every component of a root-relative path with a
+// no-follow Lstat and refuses when any component is a symbolic link or an
+// intermediate component is not a directory. It returns the final component's
+// FileInfo. os.Root resolves a relative symlink that stays INSIDE the root, so
+// confinement alone cannot prove a delete target is the path it names; only a
+// per-component Lstat sees the link. It runs on the delete and cleanup path
+// only, one Lstat per path component, and never on reads or snapshots.
+func noFollowRemovalPath(root *os.Root, rel string) (fs.FileInfo, error) {
+	components := strings.Split(rel, "/")
+	prefix := ""
+	var final fs.FileInfo
+	for index, component := range components {
+		if prefix == "" {
+			prefix = component
+		} else {
+			prefix += "/" + component
+		}
+		info, err := root.Lstat(prefix)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("path component %d is a symbolic link; a symlinked ancestor cannot be traversed for deletion", index)
+		}
+		if index < len(components)-1 && !info.IsDir() {
+			return nil, fmt.Errorf("path component %d is not a directory", index)
+		}
+		final = info
+	}
+	return final, nil
+}
+
 // verifyStagedGenerationOwnership proves a candidate directory is really the
 // owned generation for (sessionID, generationID) before any recursive delete.
 // The directory name and a decodable manifest are not ownership: the manifest
 // must name this exact session and generation and must itself be a valid,
 // self-contained generation. An empty {}, malformed, mismatched or unknown
-// manifest is refused, so an unrelated directory is never removed.
+// manifest is refused, so an unrelated directory is never removed. The
+// manifest's own identifiers and the validator's error text are untrusted and
+// may carry a private path, so a refusal reports the fixed mismatch or
+// invalid-manifest category against the already-validated requested owner
+// instead of echoing any manifest bytes.
 func verifyStagedGenerationOwnership(root *os.Root, genRel string, sessionID schema.SessionID, generationID string) error {
 	data, err := root.ReadFile(path.Join(genRel, "manifest.json"))
 	if err != nil {
@@ -608,14 +647,11 @@ func verifyStagedGenerationOwnership(root *os.Root, genRel string, sessionID sch
 	if err := json.Unmarshal(data, &staged); err != nil {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: its staged manifest cannot be decoded (%s); the directory was left in place", generationID, sessionID, sanitizeFSError(err))
 	}
-	if staged.ID != generationID {
-		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest names generation %q; the directory was left in place", generationID, sessionID, staged.ID)
-	}
-	if staged.Metadata.SessionID != sessionID {
-		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest names session %s; the directory was left in place", generationID, sessionID, staged.Metadata.SessionID)
+	if staged.ID != generationID || staged.Metadata.SessionID != sessionID {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest identity does not match the requested owner; the directory was left in place", generationID, sessionID)
 	}
 	if err := staged.Validate(); err != nil {
-		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest is not a valid generation; the directory was left in place: %w", generationID, sessionID, err)
+		return fmt.Errorf("store: refuse to remove generation %s for session %s in RemoveGeneration: the staged manifest identity matches but the generation is not valid and self-contained; the directory was left in place", generationID, sessionID)
 	}
 	return nil
 }

@@ -40,6 +40,15 @@ cases:
     seam: after-metadata-before-intent-clear
     visible: g2
     recovery: recover
+  # A rejected or corrupted durable envelope must not be replayed: after the
+  # staged candidate is renamed into place, change ONLY the persisted intent's
+  # candidate binding. Recovery must refuse the mismatched binding, leaving the
+  # last-good generation and its success stamps unchanged and the candidate and
+  # intent retained for a verified retry.
+  - name: mismatched-durable-intent-digest-refused
+    seam: after-rename-before-db
+    visible: g1
+    recovery: mismatched-digest
 # A committed generation whose content blob is damaged after the commit must be
 # refused with an actionable managed-recovery error, never served as partial or
 # empty content.

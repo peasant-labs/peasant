@@ -28,14 +28,19 @@ type filesystemSafetyFixture struct {
 		InactiveID string `yaml:"inactive_id"`
 		ForeignID  string `yaml:"foreign_id"`
 	} `yaml:"generation"`
+	Layout struct {
+		HoldingDir        string `yaml:"holding_dir"`
+		ForeignHoldingDir string `yaml:"foreign_holding_dir"`
+	} `yaml:"layout"`
 	Cases []struct {
 		Name     string `yaml:"name"`
 		Ancestor string `yaml:"ancestor"`
 	} `yaml:"cases"`
 	Sentinel struct {
-		OutsideFile   string `yaml:"outside_file"`
-		UnrelatedFile string `yaml:"unrelated_file"`
-		CandidateFile string `yaml:"candidate_file"`
+		OutsideFile     string `yaml:"outside_file"`
+		UnrelatedFile   string `yaml:"unrelated_file"`
+		CandidateFile   string `yaml:"candidate_file"`
+		PrivateIdentity string `yaml:"private_identity"`
 	} `yaml:"sentinel"`
 }
 
@@ -327,6 +332,105 @@ func TestGenerationFilesystemSafety(t *testing.T) {
 				if _, statErr := os.Stat(foreignSentinel); statErr != nil {
 					t.Fatalf("foreign generation sentinel missing after refused symlink cleanup: %v", statErr)
 				}
+			case "relative-ancestor-matching-owner":
+				// Move the real generations directory to an in-root sibling and
+				// replace the generations component with a RELATIVE symlink that
+				// stays inside the root. os.Root follows the link, and the moved
+				// manifest still names this exact owner, so only the anchored
+				// no-follow component walk can refuse the recursive removal.
+				generationsPath := filepath.Join(root, fixture.Session.ID, "generations")
+				holdingPath := filepath.Join(root, fixture.Layout.HoldingDir)
+				if err := os.Rename(generationsPath, holdingPath); err != nil {
+					t.Fatalf("relocate generations directory: %v", err)
+				}
+				sentinel := filepath.Join(holdingPath, fixture.Generation.InactiveID, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(sentinel, []byte("relocated generation must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../"+fixture.Layout.HoldingDir, generationsPath); err != nil {
+					t.Fatalf("plant relative generations symlink: %v", err)
+				}
+				assertRemovalBoundariesRefused(t, s, id, fixture.Generation.InactiveID, sentinel, "", root)
+			case "relative-ancestor-foreign-owner":
+				// The generations component is a relative in-root symlink to a
+				// sibling that holds a foreign session's generation under the
+				// same identifier. Confinement follows the link; the removal
+				// walk must refuse the symlinked component on both boundaries.
+				generationsPath := filepath.Join(root, fixture.Session.ID, "generations")
+				if err := os.Rename(generationsPath, generationsPath+".backup"); err != nil {
+					t.Fatalf("set aside generations directory: %v", err)
+				}
+				foreignDir := filepath.Join(root, fixture.Layout.ForeignHoldingDir, fixture.Generation.ForeignID)
+				if err := os.MkdirAll(foreignDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				foreign := stageForeignGeneration(t, s, fixture.ForeignSession.ID, fixture.Generation.ForeignID)
+				foreignManifest, err := jsonMarshalForTest(foreign)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(foreignDir, "manifest.json"), foreignManifest, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				sentinel := filepath.Join(foreignDir, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(sentinel, []byte("foreign generation must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../"+fixture.Layout.ForeignHoldingDir, generationsPath); err != nil {
+					t.Fatalf("plant relative foreign symlink: %v", err)
+				}
+				assertRemovalBoundariesRefused(t, s, id, fixture.Generation.ForeignID, sentinel, "", root)
+			case "private-identity-manifest":
+				// A manifest whose identity fields carry a private path must be
+				// refused without echoing that path into the diagnostic, and the
+				// candidate and its sentinel must survive both removal boundaries.
+				candidateID := "gen_fs_private_identity"
+				candidateDir := filepath.Join(root, fixture.Session.ID, "generations", candidateID)
+				if err := os.MkdirAll(candidateDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				manifest, err := json.Marshal(indexformat.Generation{
+					ID:       fixture.Sentinel.PrivateIdentity,
+					Metadata: schema.UnifiedMetadata{SessionID: schema.SessionID(fixture.Sentinel.PrivateIdentity)},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(candidateDir, "manifest.json"), manifest, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				sentinel := filepath.Join(candidateDir, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(sentinel, []byte("private identity candidate must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				assertRemovalBoundariesRefused(t, s, id, candidateID, sentinel, fixture.Sentinel.PrivateIdentity, root)
+			case "private-content-path-manifest":
+				// A manifest with a matching identity but a private path in its
+				// validation detail must also be refused without echoing the
+				// path-bearing validator text.
+				candidateID := "gen_fs_private_content"
+				installed, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CompleteID)
+				if err != nil {
+					t.Fatalf("read installed manifest: %v", err)
+				}
+				installed.ID = candidateID
+				installed.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(fixture.Sentinel.PrivateIdentity)}
+				manifest, err := jsonMarshalForTest(installed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				candidateDir := filepath.Join(root, fixture.Session.ID, "generations", candidateID)
+				if err := os.MkdirAll(candidateDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(candidateDir, "manifest.json"), manifest, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				sentinel := filepath.Join(candidateDir, fixture.Sentinel.CandidateFile)
+				if err := os.WriteFile(sentinel, []byte("private content-path candidate must survive"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				assertRemovalBoundariesRefused(t, s, id, candidateID, sentinel, fixture.Sentinel.PrivateIdentity, root)
 			default:
 				t.Fatalf("unknown filesystem safety scenario %q; add it to the fixture, the required-names manifest and this runner", tc.Ancestor)
 			}
@@ -346,6 +450,36 @@ func assertSentinelAbsent(t *testing.T, err error, sentinelRoot string) {
 	// embedded paths.
 	if strings.Contains(err.Error(), "open "+sentinelRoot) || strings.Contains(err.Error(), "stat "+sentinelRoot) {
 		t.Fatalf("diagnostic leaks a path-bearing OS error: %v", err)
+	}
+}
+
+// assertRemovalBoundariesRefused proves both destructive boundaries
+// (Store.CleanupInactiveGeneration and the artifact store's direct
+// RemoveGeneration) refuse the requested generation, that the sentinel survives
+// both refusals, and that neither diagnostic echoes the private root or a
+// private identity.
+func assertRemovalBoundariesRefused(t *testing.T, s *Store, id schema.SessionID, generationID, sentinelPath, privateIdentity, root string) {
+	t.Helper()
+	cleanupErr := s.CleanupInactiveGeneration(context.Background(), id, generationID)
+	if cleanupErr == nil {
+		t.Fatalf("cleanup of generation %s succeeded; the destructive boundary must refuse it", generationID)
+	}
+	assertRefusalDiagnostic(t, cleanupErr, sentinelPath, privateIdentity, root, "cleanup")
+	removeErr := s.generationArtifacts.RemoveGeneration(context.Background(), id, generationID)
+	if removeErr == nil {
+		t.Fatalf("direct removal of generation %s succeeded; the destructive boundary must refuse it", generationID)
+	}
+	assertRefusalDiagnostic(t, removeErr, sentinelPath, privateIdentity, root, "removal")
+}
+
+func assertRefusalDiagnostic(t *testing.T, err error, sentinelPath, privateIdentity, root, boundary string) {
+	t.Helper()
+	assertSentinelAbsent(t, err, root)
+	if privateIdentity != "" && strings.Contains(err.Error(), privateIdentity) {
+		t.Fatalf("%s diagnostic echoes the private identity: %v", boundary, err)
+	}
+	if _, statErr := os.Stat(sentinelPath); statErr != nil {
+		t.Fatalf("%s sentinel %s missing after refused %s: %v", boundary, sentinelPath, boundary, statErr)
 	}
 }
 

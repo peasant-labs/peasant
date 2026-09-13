@@ -22,6 +22,8 @@ cases:
     generation_id: ""
   - name: noncanonical-cleanup-preserves-active
     generation_id: "a/./b"
+  - name: private-path-cleanup-not-echoed
+    generation_id: "/home/runner/private-sentinel-3f9a/leaked-generation"
   - name: intent-owned-cleanup-preserved
     generation_id: gen_safe_g2
   - name: immutable-collision-refused
