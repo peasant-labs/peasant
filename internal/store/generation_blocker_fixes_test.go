@@ -169,9 +169,14 @@ func TestGenerationIDValidation(t *testing.T) {
 			default:
 				// Dot, dotdot and non-canonical identifiers are rejected
 				// before any filesystem operation; the active generation and
-				// its manifest survive.
-				if err := s.CleanupInactiveGeneration(context.Background(), id, tc.GenerationID); err == nil {
+				// its manifest survive. The refusal never echoes the rejected
+				// value, because it can be an untrusted private path.
+				cleanupErr := s.CleanupInactiveGeneration(context.Background(), id, tc.GenerationID)
+				if cleanupErr == nil {
 					t.Fatalf("cleanup of %q succeeded; dot and non-canonical identifiers must be rejected", tc.GenerationID)
+				}
+				if tc.GenerationID != "" && strings.Contains(cleanupErr.Error(), tc.GenerationID) {
+					t.Fatalf("cleanup refusal echoed the raw generation identifier: %v", cleanupErr)
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
 					t.Fatalf("after refused cleanup visible = %q, want G1", got)
@@ -180,12 +185,15 @@ func TestGenerationIDValidation(t *testing.T) {
 				if _, err := os.Stat(manifestPath); err != nil {
 					t.Fatalf("active generation manifest missing after refused cleanup of %q: %v", tc.GenerationID, err)
 				}
-				// Staging the same identifier is also refused.
+				// Staging the same identifier is also refused, and the refusal
+				// must not echo the rejected value either.
 				bad := complete
 				bad.Generation.ID = tc.GenerationID
 				if tc.GenerationID != "" {
 					if _, err := s.generationArtifacts.Stage(context.Background(), bad.Generation, completeBlobs); err == nil {
 						t.Fatalf("staging of %q succeeded; it must be rejected", tc.GenerationID)
+					} else if strings.Contains(err.Error(), tc.GenerationID) {
+						t.Fatalf("staging refusal echoed the raw generation identifier: %v", err)
 					}
 				}
 			}

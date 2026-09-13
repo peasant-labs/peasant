@@ -481,10 +481,10 @@ func (s *Store) verifyOwnedInactiveGeneration(ctx context.Context, sessionID sch
 		return fmt.Errorf("store: refuse to remove generation %s for session %s: it is neither a committed nor a staged owned generation; the directory was left in place", generationID, sessionID)
 	}
 	if staged.ID != generationID || staged.Metadata.SessionID != sessionID {
-		return fmt.Errorf("store: refuse to remove generation %s for session %s: the staged manifest names generation %q of session %s; ownership could not be proven; the directory was left in place", generationID, sessionID, staged.ID, staged.Metadata.SessionID)
+		return fmt.Errorf("store: refuse to remove generation %s for session %s: the staged manifest identity does not match the requested owner; ownership could not be proven; the directory was left in place", generationID, sessionID)
 	}
 	if err := staged.Validate(); err != nil {
-		return fmt.Errorf("store: refuse to remove generation %s for session %s: the staged manifest is not a valid generation; the directory was left in place: %w", generationID, sessionID, err)
+		return fmt.Errorf("store: refuse to remove generation %s for session %s: the staged manifest identity matches but the generation is not valid and self-contained; the directory was left in place", generationID, sessionID)
 	}
 	return nil
 }

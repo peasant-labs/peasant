@@ -8,3 +8,7 @@ requiredNames:
   - unknown-manifest-preserves-sentinel
   - mismatched-manifest-preserves-sentinel
   - foreign-session-symlink-preserves-sentinel
+  - relative-generations-ancestor-matching-owner-preserves-sentinel
+  - relative-generations-ancestor-foreign-owner-preserves-sentinel
+  - private-identity-manifest-refused-without-echo
+  - private-content-path-manifest-refused-without-echo

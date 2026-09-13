@@ -404,6 +404,12 @@ func TestProjectionCommitRecovery(t *testing.T) {
 				if err := activateTestGeneration(t, s, failed, failedBlobs); err != nil {
 					t.Fatalf("retry after seam %s: %v", tc.Seam, err)
 				}
+			case "mismatched-digest":
+				// The durable envelope was altered after the candidate was
+				// renamed into place. Recovery must refuse it without changing
+				// the last-good read authority.
+				assertIntentDigestMismatchRefused(t, s, id, fixture)
+				return
 			default:
 				t.Fatalf("unknown recovery %q", tc.Recovery)
 			}
@@ -443,6 +449,54 @@ func TestProjectionCommitRecovery(t *testing.T) {
 			t.Fatalf("damaged artifact error is not actionable: %v", err)
 		}
 	})
+}
+
+// assertIntentDigestMismatchRefused alters only the durable intent's candidate
+// binding after the staged candidate was renamed into place, then replays it
+// through the real recovery path. Recovery must refuse the mismatched binding:
+// the last-good generation and its success stamps stay unchanged, and the
+// staged candidate and the intent are retained for a verified retry.
+func assertIntentDigestMismatchRefused(t *testing.T, s *Store, id schema.SessionID, fixture projectionRecoveryFixture) {
+	t.Helper()
+	intent, err := s.generationArtifacts.ReadIntent(context.Background(), id)
+	if err != nil {
+		t.Fatalf("read durable intent before mutation: %v", err)
+	}
+	if intent == nil || intent.GenerationID != fixture.Generation.FailedID {
+		t.Fatalf("pending intent = %+v, want generation %s", intent, fixture.Generation.FailedID)
+	}
+	before := readIndexStateForTest(t, s, id)
+	intent.CandidateDigest = strings.Repeat("0", 64)
+	if err := s.generationArtifacts.WriteIntent(context.Background(), *intent); err != nil {
+		t.Fatalf("rewrite the mismatched durable intent: %v", err)
+	}
+	if err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
+		t.Fatal("recovery accepted a mismatched durable candidate binding; it must be refused")
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
+		t.Fatalf("after refused recovery visible = %q, want the last-good generation %q", got, fixture.Generation.CompleteID)
+	}
+	retained, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.FailedID)
+	if err != nil {
+		t.Fatalf("staged candidate was not retained after refused recovery: %v", err)
+	}
+	if retained.ID != fixture.Generation.FailedID {
+		t.Fatalf("retained candidate manifest = %q, want %q", retained.ID, fixture.Generation.FailedID)
+	}
+	stillPending, err := s.generationArtifacts.ReadIntent(context.Background(), id)
+	if err != nil {
+		t.Fatalf("read intent after refused recovery: %v", err)
+	}
+	if stillPending == nil || stillPending.GenerationID != fixture.Generation.FailedID {
+		t.Fatalf("pending intent was not retained after refused recovery: %+v", stillPending)
+	}
+	after := readIndexStateForTest(t, s, id)
+	if after.IndexerVersion != before.IndexerVersion {
+		t.Fatalf("refused recovery changed index_version from %d to %d", before.IndexerVersion, after.IndexerVersion)
+	}
+	if (before.IndexedAt == nil) != (after.IndexedAt == nil) || (before.IndexedAt != nil && *before.IndexedAt != *after.IndexedAt) {
+		t.Fatalf("refused recovery changed indexed_at from %v to %v", before.IndexedAt, after.IndexedAt)
+	}
 }
 
 func assertFullContent(t *testing.T, s *Store, sid schema.SessionID, generationID string, ref schema.SourceEntryRef, want string) {
