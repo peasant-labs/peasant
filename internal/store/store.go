@@ -257,12 +257,14 @@ var (
 // It holds a connection pool, the installation salt (for opaque ID computation),
 // and manages the database lifecycle.
 type Store struct {
-	pool              *sqlitex.Pool
-	indexFormats      map[int]IndexFormat
-	indexConversions  map[indexConversionKey]IndexFormatConversion
-	salt              salt.Salt
-	annotationWriteMu sync.Mutex
-	closed            atomic.Bool
+	pool                *sqlitex.Pool
+	indexFormats        map[int]IndexFormat
+	indexConversions    map[indexConversionKey]IndexFormatConversion
+	generationArtifacts GenerationArtifactStore
+	sessionLocker       SessionLocker
+	salt                salt.Salt
+	annotationWriteMu   sync.Mutex
+	closed              atomic.Bool
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -286,11 +288,13 @@ var pragmas = []string{
 type OpenOption func(*openOptions)
 
 type openOptions struct {
-	indexFormats     []IndexFormat
-	indexConversions []IndexFormatConversion
-	migrationConsent MigrationConsent
-	poolSize         int
-	skipMigrations   bool
+	indexFormats        []IndexFormat
+	indexConversions    []IndexFormatConversion
+	migrationConsent    MigrationConsent
+	poolSize            int
+	skipMigrations      bool
+	generationArtifacts GenerationArtifactStore
+	sessionLocker       SessionLocker
 	// walAutocheckpointDisabled keeps every committed frame in the write-ahead
 	// log for the life of the pool. It exists so a test can count commits by
 	// reading the log, and is never set on a production open.
@@ -321,6 +325,17 @@ func WithPoolSize(n int) OpenOption {
 // it, because a log that is never checkpointed grows without bound.
 func WithWALAutocheckpointDisabled() OpenOption {
 	return func(o *openOptions) { o.walAutocheckpointDisabled = true }
+}
+
+// WithGenerationArtifacts wires the owned-artifact file store and the
+// per-session OS lock the V2 activation, snapshot and cleanup paths require.
+// Without it, V2 activation and generation snapshots fail closed rather than
+// falling back to a mutable native source.
+func WithGenerationArtifacts(artifacts GenerationArtifactStore, locker SessionLocker) OpenOption {
+	return func(o *openOptions) {
+		o.generationArtifacts = artifacts
+		o.sessionLocker = locker
+	}
 }
 
 // WithMigrationConsent supplies a callback that gates running the V33 harness
@@ -410,7 +425,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	return &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions}, nil
+	return &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}, nil
 }
 
 // readUserVersion returns the PRAGMA user_version value from the pool.

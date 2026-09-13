@@ -1,0 +1,559 @@
+package store
+
+import (
+	"context"
+	_ "embed"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite/sqlitex"
+)
+
+//go:embed testdata/projection_commit_recovery.yaml
+var projectionRecoveryYAML []byte
+
+//go:embed testdata/projection_commit_recovery.manifest.yaml
+var projectionRecoveryManifestYAML []byte
+
+type projectionRecoveryFixture struct {
+	Session struct {
+		ID      string `yaml:"id"`
+		Harness string `yaml:"harness"`
+	} `yaml:"session"`
+	Generation struct {
+		CompleteID      string `yaml:"complete_id"`
+		FailedID        string `yaml:"failed_id"`
+		LongTextPadding int    `yaml:"long_text_padding"`
+	} `yaml:"generation"`
+	Cases []struct {
+		Name     string `yaml:"name"`
+		Seam     string `yaml:"seam"`
+		Visible  string `yaml:"visible"`
+		Recovery string `yaml:"recovery"`
+	} `yaml:"cases"`
+	CorruptArtifact struct {
+		Name     string `yaml:"name"`
+		EntryRef string `yaml:"entry_ref"`
+	} `yaml:"corrupt_artifact"`
+}
+
+func loadProjectionRecoveryFixture(t *testing.T) projectionRecoveryFixture {
+	t.Helper()
+	var fixture projectionRecoveryFixture
+	decoder := yaml.NewDecoder(strings.NewReader(string(projectionRecoveryYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode projection_commit_recovery.yaml: %v", err)
+	}
+	manifest, err := decodeRecoveryRequiredNames(projectionRecoveryManifestYAML)
+	if err != nil {
+		t.Fatalf("decode projection_commit_recovery manifest: %v", err)
+	}
+	actual := make([]string, 0, len(fixture.Cases)+1)
+	for _, c := range fixture.Cases {
+		actual = append(actual, c.Name)
+	}
+	if fixture.CorruptArtifact.Name != "" {
+		actual = append(actual, fixture.CorruptArtifact.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest, actual, "projection commit recovery"); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+// decodeRecoveryRequiredNames strictly decodes the name-only manifest. The
+// store package cannot import internal/testutil (it imports store), so the same
+// exact-set rule is restated here over the same YAML shape.
+func decodeRecoveryRequiredNames(data []byte) ([]string, error) {
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
+		return nil, err
+	}
+	if len(manifest.RequiredNames) == 0 {
+		return nil, errors.New("required-names manifest declares no requiredNames")
+	}
+	return manifest.RequiredNames, nil
+}
+
+func validateRecoveryRequiredNames(required, actual []string, label string) error {
+	seenActual := make(map[string]struct{}, len(actual))
+	for _, name := range actual {
+		if _, duplicate := seenActual[name]; duplicate {
+			return fmt.Errorf("%s fixture repeats case name %q", label, name)
+		}
+		seenActual[name] = struct{}{}
+	}
+	seenRequired := make(map[string]struct{}, len(required))
+	for _, name := range required {
+		seenRequired[name] = struct{}{}
+	}
+	for _, name := range required {
+		if _, found := seenActual[name]; !found {
+			return fmt.Errorf("%s fixture is missing required case %q", label, name)
+		}
+	}
+	for _, name := range actual {
+		if _, declared := seenRequired[name]; !declared {
+			return fmt.Errorf("%s fixture carries undeclared case %q; add it to the required-names manifest", label, name)
+		}
+	}
+	return nil
+}
+
+// openGenerationStore opens a real store with the V2 format, the owned-artifact
+// file store and the OS session lock. It returns the store and the artifact root.
+func openGenerationStore(t *testing.T) (*Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	root := filepath.Join(dir, "artifacts")
+	artifacts, err := NewOSGenerationArtifactStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := NewFileSessionLocker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(filepath.Join(dir, "generations.db"), WithPoolSize(2), WithIndexFormats(generationIndexFormat{}), WithGenerationArtifacts(artifacts, locker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s, root
+}
+
+func execGenerationSQL(t *testing.T, s *Store, script string) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer s.pool.Put(conn)
+	if err := sqlitex.ExecuteScript(conn, script, nil); err != nil {
+		t.Fatalf("exec store SQL: %v", err)
+	}
+}
+
+func seedGenerationSession(t *testing.T, s *Store, sid string) {
+	t.Helper()
+	execGenerationSQL(t, s, `
+INSERT OR IGNORE INTO host_slugs(opaque_id, host_slug) VALUES('host-gen','host-gen');
+INSERT OR IGNORE INTO projects(project_hash, canonical_cwd, canonical_remote) VALUES('proj-gen','/tmp/gen','github.com/gen/gen');
+INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, schema_version)
+VALUES('`+sid+`','claude-code','model-gen','host-gen','proj-gen',1,2,3,'/tmp/gen/source.jsonl','jsonl',11);
+`)
+}
+
+// generationRefs are the deterministic refs the test generation emits.
+var generationRefs = []string{"e_u1", "e_call1", "e_result1"}
+
+// buildTestGeneration builds a valid, self-contained V2 candidate whose full
+// text and tool result are longer than the preview limit by more than 1024
+// characters. Content records carry only their refs; staging fills the managed
+// relative path, byte length and integrity digest.
+func buildTestGeneration(t *testing.T, sid schema.SessionID, genID, text, toolInput, toolOutput string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	entries := []schema.SessionEntry{
+		{
+			SessionID: sid, EntryIndex: 0, Harness: defaults.HarnessClaudeCode, EntryType: ingest.EntryTypeText,
+			Role: ingest.RoleUser, ContentPreview: &text, SourceEntryRef: schema.SourceEntryRef(generationRefs[0]),
+		},
+		{
+			SessionID: sid, EntryIndex: 1, Harness: defaults.HarnessClaudeCode, EntryType: ingest.EntryTypeToolUse,
+			Role: ingest.RoleAssistant, ToolInput: &toolInput, SourceEntryRef: schema.SourceEntryRef(generationRefs[1]),
+		},
+		{
+			SessionID: sid, EntryIndex: 2, Harness: defaults.HarnessClaudeCode, EntryType: ingest.EntryTypeToolResult,
+			Role: ingest.RoleTool, ToolOutput: &toolOutput, SourceEntryRef: schema.SourceEntryRef(generationRefs[2]),
+		},
+	}
+	inputCount := int64(1)
+	generation := indexformat.Generation{
+		ID:           genID,
+		Completeness: indexformat.GenerationCompletenessComplete,
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion,
+			SessionID:     sid,
+			ModelHarness:  defaults.HarnessClaudeCode,
+			Stats:         schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: &inputCount},
+		},
+		Main:                 indexformat.Partition{Entries: entries},
+		Content:              []indexformat.ContentRecord{{Ref: schema.SourceEntryRef(generationRefs[0])}, {Ref: schema.SourceEntryRef(generationRefs[1])}, {Ref: schema.SourceEntryRef(generationRefs[2])}},
+		Aliases:              []indexformat.NativeAlias{{NativeKey: "native-0", Ref: schema.SourceEntryRef(generationRefs[0])}},
+		SourceEvidenceDigest: strings.Repeat("a", 64),
+		TitleRefs:            []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])},
+	}
+	blobs := map[schema.SourceEntryRef][]byte{
+		schema.SourceEntryRef(generationRefs[0]): []byte(text),
+		schema.SourceEntryRef(generationRefs[1]): []byte(toolInput),
+		schema.SourceEntryRef(generationRefs[2]): []byte(toolOutput),
+	}
+	return indexformat.V2{Generation: generation}, blobs
+}
+
+type faultArtifacts struct {
+	GenerationArtifactStore
+	failRepair bool
+	failClear  bool
+}
+
+func (f faultArtifacts) RepairMetadata(ctx context.Context, id schema.SessionID, metadata []byte) error {
+	if f.failRepair {
+		return errors.New("injected fault after activation before metadata repair")
+	}
+	return f.GenerationArtifactStore.RepairMetadata(ctx, id, metadata)
+}
+
+func (f faultArtifacts) ClearIntent(ctx context.Context, id schema.SessionID) error {
+	if f.failClear {
+		return errors.New("injected fault after metadata before intent clear")
+	}
+	return f.GenerationArtifactStore.ClearIntent(ctx, id)
+}
+
+func installRecoveryFault(t *testing.T, s *Store, seam string) {
+	t.Helper()
+	switch seam {
+	case "before-temp-fsync", "after-fsync-before-rename", "after-rename-before-db":
+		osStore, ok := s.generationArtifacts.(*osGenerationArtifactStore)
+		if !ok {
+			t.Fatalf("stage seam requires the production artifact store, got %T", s.generationArtifacts)
+		}
+		osStore.seam = func(at string) error {
+			if at == seam {
+				return fmt.Errorf("injected fault at %s", at)
+			}
+			return nil
+		}
+	case "during-activation-transaction":
+		execGenerationSQL(t, s, `CREATE TRIGGER test_fail_activation BEFORE INSERT ON session_projection_generations BEGIN SELECT RAISE(ABORT, 'injected activation transaction fault'); END;`)
+	case "after-db-before-metadata":
+		s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failRepair: true}
+	case "after-metadata-before-intent-clear":
+		s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failClear: true}
+	default:
+		t.Fatalf("unknown recovery seam %q", seam)
+	}
+}
+
+func clearRecoveryFault(t *testing.T, s *Store, seam string) {
+	t.Helper()
+	switch seam {
+	case "before-temp-fsync", "after-fsync-before-rename", "after-rename-before-db":
+		osStore := s.generationArtifacts.(*osGenerationArtifactStore)
+		osStore.seam = nil
+	case "during-activation-transaction":
+		execGenerationSQL(t, s, `DROP TRIGGER IF EXISTS test_fail_activation;`)
+	case "after-db-before-metadata", "after-metadata-before-intent-clear":
+		s.generationArtifacts = s.generationArtifacts.(faultArtifacts).GenerationArtifactStore
+	}
+}
+
+// TestSessionSnapshotLegacyControl proves the snapshot API keeps the unchanged
+// V1 read: a session with no active generation yields a legacy snapshot that
+// names the retained transcript and carries no generation partitions, so the
+// caller uses the existing overlay callback and never a V2 path.
+func TestSessionSnapshotLegacyControl(t *testing.T) {
+	fixture := loadProjectionRecoveryFixture(t)
+	id, err := schema.NewSessionID(fixture.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := openGenerationStore(t)
+	seedGenerationSession(t, s, fixture.Session.ID)
+	err = s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
+		if snapshot.IndexVersion != 1 {
+			return fmt.Errorf("index version %d, want the legacy 1", snapshot.IndexVersion)
+		}
+		if snapshot.GenerationID != "" || len(snapshot.Main.Entries) != 0 || len(snapshot.Content) != 0 {
+			return fmt.Errorf("legacy snapshot carried generation state: %+v", snapshot)
+		}
+		if snapshot.LegacySource.IsZero() || snapshot.LegacySource.Path == "" {
+			return fmt.Errorf("legacy snapshot did not name its retained transcript: %+v", snapshot.LegacySource)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func visibleGeneration(t *testing.T, s *Store, sid schema.SessionID) string {
+	t.Helper()
+	var generation string
+	err := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
+		if snapshot.IndexVersion != 2 {
+			return fmt.Errorf("snapshot index version %d, want 2", snapshot.IndexVersion)
+		}
+		generation = snapshot.GenerationID
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithSessionSnapshot: %v", err)
+	}
+	return generation
+}
+
+func activateTestGeneration(t *testing.T, s *Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) error {
+	t.Helper()
+	return s.ActivateGeneration(context.Background(), GenerationActivation{
+		Generation:     v2,
+		Blobs:          blobs,
+		IndexerVersion: 1,
+		IndexedAtMs:    1,
+	})
+}
+
+// TestProjectionCommitRecovery drives the real activation through all six
+// crash seams. After the interruption exactly G1 or G2 is visible, no success
+// is stamped before the commit, and recovery or retry settles on G2 with the
+// committed long content intact.
+func TestProjectionCommitRecovery(t *testing.T) {
+	fixture := loadProjectionRecoveryFixture(t)
+	id, err := schema.NewSessionID(fixture.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	padding := fixture.Generation.LongTextPadding
+	longText := "user input " + strings.Repeat("x", padding)
+	longToolInput := "rg parser " + strings.Repeat("y", padding)
+	longToolResult := "parser.go:12 " + strings.Repeat("z", padding)
+
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			s, _ := openGenerationStore(t)
+			seedGenerationSession(t, s, fixture.Session.ID)
+
+			complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput+" G1", longToolResult+" G1")
+			if err := activateTestGeneration(t, s, complete, completeBlobs); err != nil {
+				t.Fatalf("activate G1: %v", err)
+			}
+			if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
+				t.Fatalf("G1 visible = %q, want %q", got, fixture.Generation.CompleteID)
+			}
+
+			installRecoveryFault(t, s, tc.Seam)
+			failed, failedBlobs := buildTestGeneration(t, id, fixture.Generation.FailedID, longText+" G2", longToolInput+" G2", longToolResult+" G2")
+			if err := activateTestGeneration(t, s, failed, failedBlobs); err == nil {
+				t.Fatalf("activation across seam %s succeeded; a crash seam must interrupt it", tc.Seam)
+			}
+
+			want := fixture.Generation.CompleteID
+			if tc.Visible == "g2" {
+				want = fixture.Generation.FailedID
+			}
+			if got := visibleGeneration(t, s, id); got != want {
+				t.Fatalf("after seam %s visible = %q, want %q", tc.Seam, got, want)
+			}
+			intent, err := s.generationArtifacts.ReadIntent(context.Background(), id)
+			if err != nil {
+				t.Fatalf("read pending intent after seam %s: %v", tc.Seam, err)
+			}
+			if intent == nil || intent.GenerationID != fixture.Generation.FailedID {
+				t.Fatalf("after seam %s the pending activation intent was not retained: %+v", tc.Seam, intent)
+			}
+
+			clearRecoveryFault(t, s, tc.Seam)
+			switch tc.Recovery {
+			case "recover":
+				if err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
+					t.Fatalf("recover after seam %s: %v", tc.Seam, err)
+				}
+			case "retry":
+				if err := activateTestGeneration(t, s, failed, failedBlobs); err != nil {
+					t.Fatalf("retry after seam %s: %v", tc.Seam, err)
+				}
+			default:
+				t.Fatalf("unknown recovery %q", tc.Recovery)
+			}
+			if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
+				t.Fatalf("after recovery visible = %q, want %q", got, fixture.Generation.FailedID)
+			}
+			if intent, err := s.generationArtifacts.ReadIntent(context.Background(), id); err != nil || intent != nil {
+				t.Fatalf("after recovery the activation intent was not cleared: %+v (err %v)", intent, err)
+			}
+			assertFullContent(t, s, id, fixture.Generation.FailedID, schema.SourceEntryRef(generationRefs[0]), longText+" G2")
+		})
+	}
+
+	t.Run(fixture.CorruptArtifact.Name, func(t *testing.T) {
+		s, root := openGenerationStore(t)
+		seedGenerationSession(t, s, fixture.Session.ID)
+		complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText, longToolInput, longToolResult)
+		if err := activateTestGeneration(t, s, complete, completeBlobs); err != nil {
+			t.Fatalf("activate G1: %v", err)
+		}
+		ref := schema.SourceEntryRef(fixture.CorruptArtifact.EntryRef)
+		blobPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.CompleteID, blobName(ref))
+		if err := os.Remove(blobPath); err != nil {
+			t.Fatalf("damage committed blob: %v", err)
+		}
+		content, err := s.ReadFullContent(context.Background(), id, fixture.Generation.CompleteID, indexformat.ContentRecord{
+			Ref: ref, RelativeBlob: blobName(ref), ByteLength: int64(len(longText)), Digest: strings.Repeat("0", 64),
+		})
+		if err == nil {
+			t.Fatal("damaged committed artifact resolved without an error")
+		}
+		if len(content) != 0 {
+			t.Fatalf("damaged artifact returned %d bytes; partial content must never be served", len(content))
+		}
+		if !strings.Contains(err.Error(), "managed recovery") || !strings.Contains(err.Error(), "corrupt") {
+			t.Fatalf("damaged artifact error is not actionable: %v", err)
+		}
+	})
+}
+
+func assertFullContent(t *testing.T, s *Store, sid schema.SessionID, generationID string, ref schema.SourceEntryRef, want string) {
+	t.Helper()
+	var record indexformat.ContentRecord
+	err := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
+		for _, candidate := range snapshot.Content {
+			if candidate.Ref == ref {
+				record = candidate
+				return nil
+			}
+		}
+		return fmt.Errorf("content ref %q is not in the captured snapshot", ref)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ByteLength <= int64(defaults.ContentPreviewLimit)+1024 {
+		t.Fatalf("committed content for %q is %d bytes, not longer than preview+1024", ref, record.ByteLength)
+	}
+	content, err := s.ReadFullContent(context.Background(), sid, generationID, record)
+	if err != nil {
+		t.Fatalf("ReadFullContent: %v", err)
+	}
+	if string(content) != want {
+		t.Fatalf("resolved content for %q = %q, want %q", ref, string(content), want)
+	}
+}
+
+// TestConcurrentReadAcrossActivation pauses a reader inside its snapshot
+// callback while holding the shared lock, starts a G2 candidate with changed
+// content, and proves the activation waits until the reader releases. The
+// reader sees exactly G1; after release the activation commits and the next
+// reader sees exactly G2.
+func TestConcurrentReadAcrossActivation(t *testing.T) {
+	fixture := loadProjectionRecoveryFixture(t)
+	id, err := schema.NewSessionID(fixture.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := openGenerationStore(t)
+	seedGenerationSession(t, s, fixture.Session.ID)
+	longText := "user input " + strings.Repeat("x", fixture.Generation.LongTextPadding)
+	longToolInput := "rg parser " + strings.Repeat("y", fixture.Generation.LongTextPadding)
+	longToolResult := "parser.go:12 " + strings.Repeat("z", fixture.Generation.LongTextPadding)
+
+	g1, g1Blobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput, longToolResult)
+	if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
+		t.Fatalf("activate G1: %v", err)
+	}
+
+	readerEntered := make(chan string, 1)
+	readerRelease := make(chan struct{})
+	readerDone := make(chan error, 1)
+	go func() {
+		readerDone <- s.WithSessionSnapshot(context.Background(), id, func(snapshot indexformat.ReadSnapshot) error {
+			readerEntered <- snapshot.GenerationID
+			<-readerRelease
+			return nil
+		})
+	}()
+	select {
+	case got := <-readerEntered:
+		if got != fixture.Generation.CompleteID {
+			t.Fatalf("reader entered with generation %q, want G1", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reader did not enter its snapshot callback")
+	}
+
+	g2, g2Blobs := buildTestGeneration(t, id, fixture.Generation.FailedID, longText+" G2", longToolInput, longToolResult)
+	activationDone := make(chan error, 1)
+	go func() { activationDone <- activateTestGeneration(t, s, g2, g2Blobs) }()
+	select {
+	case err := <-activationDone:
+		close(readerRelease)
+		t.Fatalf("activation completed while the reader held the shared lock (err=%v)", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(readerRelease)
+	if err := <-readerDone; err != nil {
+		t.Fatalf("reader: %v", err)
+	}
+	select {
+	case err := <-activationDone:
+		if err != nil {
+			t.Fatalf("activation after reader release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("activation did not complete after the reader released the shared lock")
+	}
+	if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
+		t.Fatalf("after activation visible = %q, want G2", got)
+	}
+	assertFullContent(t, s, id, fixture.Generation.FailedID, schema.SourceEntryRef(generationRefs[0]), longText+" G2")
+
+	// Cleanup of an inactive generation takes the same exclusive lock, so it
+	// also waits for a reader that is still holding the shared lock.
+	cleanupReaderEntered := make(chan struct{}, 1)
+	cleanupReaderRelease := make(chan struct{})
+	cleanupReaderDone := make(chan error, 1)
+	go func() {
+		cleanupReaderDone <- s.WithSessionSnapshot(context.Background(), id, func(indexformat.ReadSnapshot) error {
+			cleanupReaderEntered <- struct{}{}
+			<-cleanupReaderRelease
+			return nil
+		})
+	}()
+	select {
+	case <-cleanupReaderEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second reader did not enter its snapshot callback")
+	}
+	cleanupDone := make(chan error, 1)
+	go func() {
+		cleanupDone <- s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.CompleteID)
+	}()
+	select {
+	case err := <-cleanupDone:
+		close(cleanupReaderRelease)
+		t.Fatalf("cleanup removed the inactive generation while a reader held the shared lock (err=%v)", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(cleanupReaderRelease)
+	if err := <-cleanupReaderDone; err != nil {
+		t.Fatalf("second reader: %v", err)
+	}
+	select {
+	case err := <-cleanupDone:
+		if err != nil {
+			t.Fatalf("cleanup after reader release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not complete after the reader released the shared lock")
+	}
+	// Cleanup must never remove the active generation.
+	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err == nil {
+		t.Fatal("cleanup removed the active generation")
+	}
+}
