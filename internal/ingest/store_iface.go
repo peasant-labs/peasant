@@ -34,6 +34,19 @@ type SessionLocation struct {
 	SchemaVersion           int    // 0 if unknown; populated from DB schema_version column
 	SourceFingerprint       []byte // nil for rows created before captured-source evidence
 	SourceEvidenceSupported bool   // true when the backing schema carries source_fingerprint
+	// ContentFailureCode is the stored session_content_captures.failure_code,
+	// the empty code when no capture row exists. The DIFF classifier reads it
+	// with the two fields below to recognize a refusal this build cannot lift
+	// without opening the pair.
+	ContentFailureCode ContentCaptureFailureCode
+	// IndexerVersion is the stored sessions.index_version: the revision of the
+	// parser that produced the stored index.
+	IndexerVersion int
+	// IndexedInputHash is the stored sessions.indexed_input_hash. It is the
+	// proof that the stored index consumed a specific captured input; nil means
+	// the write recorded no proof, so nothing anchors the stored result to the
+	// bytes it claims to describe.
+	IndexedInputHash *string
 }
 
 // MetricSeedStore reads retained adapter statistics independently of computed
@@ -512,10 +525,9 @@ type ModelsSyncer interface {
 }
 
 // IngestLogger records pipeline audit log entries.
-// NOTE: The impl plan (S9-L1) specified adding LogIngestRun to MetricsStore.
-// A separate interface was chosen for single-responsibility: audit logging
-// is orthogonal to metrics storage, and independent injection makes testing
-// easier. Both are satisfied by *store.Store in production.
+// It is a separate interface rather than a MetricsStore method so audit
+// logging stays single-responsibility and independently injectable; both
+// are satisfied by *store.Store in production.
 type IngestLogger interface {
 	LogIngestRun(ctx context.Context, entry IngestLogEntry) error
 }

@@ -647,7 +647,8 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
 CASE WHEN ` + publicationBindingSQL + ` AND p.schema_version=? THEN 1 ELSE 0 END,
 p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint,
-c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version
+c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),s.adapter_version,
+s.index_version,s.indexed_input_hash
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
@@ -684,6 +685,20 @@ WHERE s.session_id IN (` +
 				sourceFingerprint = make([]byte, stmt.ColumnLen(15))
 				stmt.ColumnBytes(15, sourceFingerprint)
 			}
+			// The capture failure code is read in the same bulk snapshot as the
+			// rest of the location. An unknown code fails the whole lookup: the
+			// DIFF classifier acts on this value, so a code this build cannot
+			// name must never read as "no refusal" and let a refusal be
+			// re-parsed on every harvest.
+			failureCode, codeErr := ingest.NewContentCaptureFailureCode(stmt.ColumnText(19))
+			if codeErr != nil {
+				return fmt.Errorf("bulk lookup session locations: stored content capture failure code for session %s is not recognized: %w; restore valid capture state", id, codeErr)
+			}
+			var indexedInputHash *string
+			if stmt.ColumnType(23) != sqlite.TypeNull {
+				hash := stmt.ColumnText(23)
+				indexedInputHash = &hash
+			}
 			result[id] = ingest.SessionLocation{
 				ProjectHash:             projectHash,
 				OpaqueHostID:            stmt.ColumnText(6),
@@ -697,6 +712,9 @@ WHERE s.session_id IN (` +
 				SchemaVersion:           schemaVersion,
 				SourceFingerprint:       sourceFingerprint,
 				SourceEvidenceSupported: true,
+				ContentFailureCode:      failureCode,
+				IndexerVersion:          stmt.ColumnInt(22),
+				IndexedInputHash:        indexedInputHash,
 			}
 			return nil
 		},

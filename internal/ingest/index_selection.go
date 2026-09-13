@@ -98,6 +98,20 @@ func permanentRefusalIsSettled(expected *SessionIndexState, target HarvesterVers
 		expected.IndexedInputHash != nil
 }
 
+// permanentRefusalSettled reports whether a stored session location carries a
+// refusal this build cannot lift, using the same predicate the index selector
+// uses. The location carries the raw stored columns and the caller supplies
+// the harness target; the store computes no part of the decision, so a caller
+// with no target (a discovery hint outside the pipeline) keeps the previous
+// readiness-triggered behaviour rather than guessing one.
+func (loc SessionLocation) permanentRefusalSettled(target HarvesterVersions) bool {
+	return permanentRefusalIsSettled(&SessionIndexState{
+		ContentFailureCode: loc.ContentFailureCode,
+		IndexerVersion:     loc.IndexerVersion,
+		IndexedInputHash:   loc.IndexedInputHash,
+	}, target)
+}
+
 // permanentCaptureRefusal reports whether a recorded failure code is one this
 // build can never clear on its own. A capture nothing refused, and a capture
 // that predates content capture, are both PENDING work rather than settled:

@@ -2336,7 +2336,20 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 	// compatibility check above still inspects any existing metadata artifact so
 	// stale DB mirror state cannot authorize overwriting a future file version.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
-		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		// A refusal this build cannot lift is a steady state, not change
+		// evidence. Its stored readiness stays "needs ingest" forever, so
+		// leaving it in the readiness trigger would re-open the session on
+		// every harvest: the worker reads the native source and the index
+		// writes the same refusal again. The trigger still fires for a legacy
+		// preview (no recorded refusal), for changed bytes (the fingerprint
+		// comparison below stays first), and once a newer indexer or a missing
+		// input proof lifts the steady state.
+		refusalSettled := loc.permanentRefusalSettled(p.versionTargets()[session.Harness])
+		freshness := loc
+		if refusalSettled {
+			freshness.PublicationReadiness = PublicationReady
+		}
+		status := ClassifyAgainstStore(session, freshness, p.config.StalenessThreshold)
 		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest {
 			// Publication readiness is a repair hint, not change evidence.
 			// Before any capture it re-reads native input only for a session
@@ -2356,7 +2369,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		}
 		if captured != nil && loc.SourceEvidenceSupported {
 			status = DiffUnchanged
-			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) || loc.PublicationReadiness == PublicationNeedsIngest {
+			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
+				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) {
 				status = DiffUpdated
 			}
 		}
@@ -2365,16 +2379,18 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		// hint cannot prove a source that already holds a fingerprint
 		// unchanged: an append can land between the previous capture and its
 		// ingest stamp, so that row goes to the worker, whose captured
-		// comparison above is the authority. A store that cannot hold the
-		// evidence at all cannot prove the source unchanged either, so its
-		// supported sources go to the worker as well. A row in an
-		// evidence-holding store that has no fingerprint has nothing to
-		// compare, so the clock hint stands and the session is left alone: no
-		// native read, no stat. The first capture any clock, schema or force
-		// reason triggers acquires the evidence. After a capture, a row that
-		// still holds no fingerprint records what it read.
+		// comparison above is the authority. A refusal this build already
+		// recorded is the one exception: re-reading the same source refuses
+		// the same record again, so the clock hint stands and the steady state
+		// is left alone. A store that cannot hold the evidence at all cannot
+		// prove the source unchanged either, so its supported sources go to
+		// the worker as well. A row in an evidence-holding store that has no
+		// fingerprint has nothing to compare, so the clock hint stands and the
+		// session is left alone: no native read, no stat. The first capture any
+		// clock, schema or force reason triggers acquires the evidence. After a
+		// capture, a row that still holds no fingerprint records what it read.
 		if status == DiffUnchanged && supportsSessionCapture(session) &&
-			(captured == nil && (!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0) ||
+			(captured == nil && !refusalSettled && (!loc.SourceEvidenceSupported || len(loc.SourceFingerprint) > 0) ||
 				captured != nil && loc.SourceEvidenceSupported && len(loc.SourceFingerprint) == 0) {
 			if isActive {
 				return DiffActive, nil
