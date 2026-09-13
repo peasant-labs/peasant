@@ -1,4 +1,4 @@
-expectedCaseCount: 14
+expectedCaseCount: 17
 expectedNames:
   - unrelated-project-action-preserves-visible-policies
   - unrelated-project-action-preserves-scanner-absent-policy
@@ -14,6 +14,9 @@ expectedNames:
   - grouped-shared-branch-clear-denies-all-descendant-worktrees
   - select-all-cycle-restore-mixed-baseline-rederives-partial-branches
   - select-all-selects-unknown-harness-sibling-project
+  - remote-less-unnamed-project-toggle-persists-clone-path
+  - remote-less-unnamed-session-toggle-persists-explicit-session
+  - mixed-project-branch-toggle-persists-explicit-session
 cases:
   - name: unrelated-project-action-preserves-visible-policies
     paths:
@@ -378,3 +381,71 @@ cases:
       projects:
         - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
         - {harness: acme-agent, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-b]}
+
+  # A plain non-Git directory whose discovery carries no project name, no
+  # remote, and no branch. The scanner has no Git cohort for it, so the
+  # resolver reports none and the project identity is the resolved physical
+  # path. Because the branchless group is the project's only branch group, the
+  # tree omits that level: the session renders directly under the project. The
+  # row must render the shortest distinct path suffix and the placeholder must
+  # never appear. Each grain gets its own from-empty toggle: the project row
+  # persists the exact clone path, and the session row (a direct child)
+  # persists an explicit session selection.
+  - name: remote-less-unnamed-project-toggle-persists-clone-path
+    paths:
+      - {key: notes/plain, state: directory}
+    listings:
+      - {harness: claude-code, pathKey: notes/plain, sessionId: 88888888-8888-4888-8888-888888888888, title: plain notes session}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectedProjectLabel: notes/plain
+    expectedFlatProject: true
+    actions: [toggle]
+    refresh: true
+    expectedCheckedSessions: [88888888-8888-4888-8888-888888888888]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, name: notes/plain, pathKeys: [notes/plain]}
+
+  - name: remote-less-unnamed-session-toggle-persists-explicit-session
+    paths:
+      - {key: notes/plain, state: directory}
+    listings:
+      - {harness: claude-code, pathKey: notes/plain, sessionId: 88888888-8888-4888-8888-888888888888, title: plain notes session}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectedProjectLabel: notes/plain
+    expectedFlatProject: true
+    # The root has no imported session and opens collapsed; expand it, then walk
+    # onto the session row that now renders directly under the project.
+    actions: [expand, down, toggle]
+    refresh: true
+    expectedCheckedSessions: [88888888-8888-4888-8888-888888888888]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      sessions:
+        - {harness: claude-code, ids: [88888888-8888-4888-8888-888888888888]}
+
+  # A project that records both a named branch and a branchless session keeps
+  # the branch level: the "(no branch detected)" row still exists beside the named
+  # one, and toggling it expands to the branchless session's explicit ID.
+  - name: mixed-project-branch-toggle-persists-explicit-session
+    paths:
+      - {key: mixed/repo, state: directory}
+    listings:
+      - {harness: claude-code, projectName: mixed, gitRemote: "git@github.com:acme/mixed.git", pathKey: mixed/repo, branch: main, sessionId: 77777777-7777-4777-8777-777777777777, title: main session}
+      - {harness: claude-code, projectName: mixed, gitRemote: "git@github.com:acme/mixed.git", pathKey: mixed/repo, sessionId: 99999999-9999-4999-8999-999999999999, title: branchless session}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectedProjectBranches: ["(no branch detected)", "main"]
+    # The root opens collapsed; expand it, then walk onto the "(no branch detected)"
+    # row, whose toggle expands to the branchless session's explicit ID.
+    actions: [expand, down, toggle]
+    refresh: true
+    expectedCheckedSessions: [99999999-9999-4999-8999-999999999999]
+    expectedUncheckedSessions: [77777777-7777-4777-8777-777777777777]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      sessions:
+        - {harness: claude-code, ids: [99999999-9999-4999-8999-999999999999]}

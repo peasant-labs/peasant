@@ -290,6 +290,13 @@ func prepareSessionListings(
 	return cohort
 }
 
+// branchlessPlaceholder labels the session group discovery could not resolve
+// a Git branch for. It is display-only: settings recognizes this label and the
+// legacy label earlier versions rendered, never persists either, and a project
+// whose ONLY branch group is this one renders its sessions directly under the
+// project row.
+const branchlessPlaceholder = "(no branch detected)"
+
 // buildForest folds a fully resolved and annotated scanner cohort into the ordered
 // PROJECT -> BRANCH -> SESSION forest, matching the original FTUE
 // ProjectScopePage hierarchy: project-first, with NO harness grouping axis (the
@@ -302,8 +309,11 @@ func prepareSessionListings(
 //     root. Remote/name/multiplicity metadata is carried separately for the
 //     canonical matcher and config round-trip. A remote label never becomes an
 //     identity key.
-//   - branch node: keyed by branch (or "(unknown branch)" when discovery could
-//     not resolve one) with the branch carried in Meta.
+//   - branch node: keyed by branch (or "(no branch detected)" when discovery
+//     could not resolve one) with the branch carried in Meta. A project whose
+//     ONLY branch group is the unresolved one omits the branch level entirely:
+//     its sessions become direct children of the project node, because a
+//     placeholder level that separates nothing is noise.
 //   - session node: keyed by the raw session ID, carrying its harness in Meta so
 //     settings.FromTreeNodes can rebuild the harness-keyed SelectionConfig.
 //
@@ -394,16 +404,14 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, rela
 		p.rows = append(p.rows, row)
 
 		bKey := sess.Branch
-		branchLabel := sess.Branch
 		if bKey == "" {
-			bKey = "(unknown branch)"
-			branchLabel = "(unknown branch)"
+			bKey = branchlessPlaceholder
 		}
 		b, ok := p.branches[bKey]
 		if !ok {
 			node := &kit.TreeNode{
 				ID:    scannerBranchID(pKey, bKey),
-				Label: branchLabel,
+				Label: bKey,
 				Meta:  map[string]string{settings.MetaBranch: bKey},
 			}
 			b = &scannerBranchAgg{node: node}
@@ -425,6 +433,18 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, rela
 			Meta:  scannerProjectMeta(representative, p.identity, p.rows),
 		}
 		sort.Strings(p.order)
+		if len(p.order) == 1 && p.order[0] == branchlessPlaceholder {
+			// The only branch group is the unresolved one: attach its sessions
+			// directly to the project so the placeholder level, which separates
+			// nothing, is not rendered. Ordering is the same as inside a branch.
+			b := p.branches[p.order[0]]
+			sortListings(b.sessions)
+			for _, row := range groupByImportState(b.sessions, ingested) {
+				pNode.Children = append(pNode.Children, sessionNode(row, counts, ingested))
+			}
+			roots = append(roots, pNode)
+			continue
+		}
 		for _, bKey := range p.order {
 			b := p.branches[bKey]
 			sortListings(b.sessions)
@@ -504,8 +524,13 @@ func scannerPreviewContexts(roots []*kit.TreeNode) map[string]ListingPreviewCont
 	contexts := make(map[string]ListingPreviewContext)
 	for _, root := range roots {
 		contexts[root.ID] = scannerPreviewContext(root, nil)
-		for _, branch := range root.Children {
-			contexts[branch.ID] = scannerPreviewContext(root, branch)
+		for _, child := range root.Children {
+			// A flattened project's direct children are session rows. Only a real
+			// branch row publishes a branch preview context.
+			if child.Meta[settings.MetaBranch] == "" {
+				continue
+			}
+			contexts[child.ID] = scannerPreviewContext(root, child)
 		}
 	}
 	return contexts
@@ -513,11 +538,11 @@ func scannerPreviewContexts(roots []*kit.TreeNode) map[string]ListingPreviewCont
 
 func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewContext {
 	kind := ListingPreviewProject
-	branches := root.Children
+	children := root.Children
 	branchName := ""
 	if selectedBranch != nil {
 		kind = ListingPreviewBranch
-		branches = []*kit.TreeNode{selectedBranch}
+		children = []*kit.TreeNode{selectedBranch}
 		branchName = selectedBranch.Meta[settings.MetaBranch]
 	}
 
@@ -526,21 +551,21 @@ func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewCon
 	clonePathSet := map[string]struct{}{}
 	branchSet := map[string]struct{}{}
 	sessionCount := 0
-	for _, branch := range branches {
-		if name := branch.Meta[settings.MetaBranch]; name != "" {
+	for _, child := range children {
+		if name := child.Meta[settings.MetaBranch]; name != "" {
 			branchSet[name] = struct{}{}
 		}
-		for _, session := range branch.Children {
-			sessionCount++
-			if harness := session.Meta[settings.MetaHarness]; harness != "" {
-				harnessSet[harness] = struct{}{}
-			}
-			if remote := scannerPreviewRemote(session.Meta[settings.MetaRemote]); remote != "" {
-				remoteSet[remote] = struct{}{}
-			}
-			if clonePath := session.Meta[settings.MetaClonePath]; clonePath != "" {
-				clonePathSet[clonePath] = struct{}{}
-			}
+	}
+	for _, session := range scannerPreviewSessions(children) {
+		sessionCount++
+		if harness := session.Meta[settings.MetaHarness]; harness != "" {
+			harnessSet[harness] = struct{}{}
+		}
+		if remote := scannerPreviewRemote(session.Meta[settings.MetaRemote]); remote != "" {
+			remoteSet[remote] = struct{}{}
+		}
+		if clonePath := session.Meta[settings.MetaClonePath]; clonePath != "" {
+			clonePathSet[clonePath] = struct{}{}
 		}
 	}
 	if len(remoteSet) == 0 {
@@ -554,7 +579,7 @@ func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewCon
 		Project:        root.Label,
 		Harnesses:      sortedScannerPreviewValues(harnessSet),
 		Remotes:        sortedScannerPreviewValues(remoteSet),
-		GitDirectories: scannerPreviewGitDirectories(branches),
+		GitDirectories: scannerPreviewGitDirectories(children),
 		ClonePaths:     sortedScannerPreviewValues(clonePathSet),
 		Branches:       sortedScannerPreviewValues(branchSet),
 		Branch:         branchName,
@@ -562,13 +587,26 @@ func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewCon
 	}
 }
 
-func scannerPreviewGitDirectories(branches []*kit.TreeNode) []string {
+// scannerPreviewSessions returns the session rows one project preview or one
+// selected branch covers: a branch row contributes its children, while a direct
+// session child of a flattened project is itself a session row.
+func scannerPreviewSessions(children []*kit.TreeNode) []*kit.TreeNode {
+	var sessions []*kit.TreeNode
+	for _, child := range children {
+		if child.Meta[settings.MetaHarness] != "" {
+			sessions = append(sessions, child)
+			continue
+		}
+		sessions = append(sessions, child.Children...)
+	}
+	return sessions
+}
+
+func scannerPreviewGitDirectories(children []*kit.TreeNode) []string {
 	set := make(map[string]struct{})
-	for _, branch := range branches {
-		for _, session := range branch.Children {
-			if gitDirectory := session.Meta[settings.MetaGitDirectory]; gitDirectory != "" {
-				set[gitDirectory] = struct{}{}
-			}
+	for _, session := range scannerPreviewSessions(children) {
+		if gitDirectory := session.Meta[settings.MetaGitDirectory]; gitDirectory != "" {
+			set[gitDirectory] = struct{}{}
 		}
 	}
 	return sortedScannerPreviewValues(set)
@@ -619,34 +657,54 @@ func multiplicityText(value ingest.DiscoveryIdentityMultiplicity) string {
 	}
 }
 
-// scannerProjectLabels keeps identity and row text separate. Git projects use
-// their canonical remote label. Non-Git projects use the shortest path suffix
-// that distinguishes equal names in this load, so common duplicate names remain
-// clear without rendering an absolute physical path by default.
+// scannerProjectLabels keeps identity and row text separate. A remote that
+// yields a canonical label always names the project. Otherwise a named project
+// keeps "name (short path)" for a non-Git project and the bare name for an
+// unparseable remote, while an unnamed project renders only the shortest path
+// suffix that distinguishes it from the other unnamed projects in this load.
+// Path suffixes widen within a group, so equal project names and unnamed path
+// collisions stay distinct without rendering an absolute physical path by
+// default.
 func scannerProjectLabels(order []string, projects map[string]*scannerProjectAgg) map[string]string {
 	labels := make(map[string]string, len(order))
-	nonGitByName := map[string][]string{}
+	// Named non-Git projects widen per name; unnamed projects share one group
+	// so their suffixes widen against each other.
+	pathGroups := map[string][]string{}
 	for _, key := range order {
 		representative := projectRepresentative(projects[key].rows)
-		if representative.Listing.GitRemote != "" {
-			labels[key] = projectlabel.Label(representative.Listing.GitRemote, projectFallbackName(representative.Listing))
+		remote := representative.Listing.GitRemote
+		if label, ok := projectlabel.FromRemote(remote); ok {
+			labels[key] = label
 			continue
 		}
-		name := projectFallbackName(representative.Listing)
-		nonGitByName[name] = append(nonGitByName[name], key)
+		name := normalizedProjectName(representative.Listing)
+		if remote != "" && name != "" {
+			// An unparseable remote still names the project when discovery
+			// resolved a name; there is no canonical label to add.
+			labels[key] = name
+			continue
+		}
+		pathGroups[name] = append(pathGroups[name], key)
 	}
-	for name, keys := range nonGitByName {
+	for name, keys := range pathGroups {
 		paths := make([]ingest.ClonePath, len(keys))
 		for index, key := range keys {
 			paths[index] = representativeClonePath(projects[key].rows, projects[key].identity.GitDirectory)
 		}
 		for index, key := range keys {
 			shortPath := selectionprojection.ShortestDistinctCloneSuffix(paths[index], paths)
-			if shortPath == "" {
+			switch {
+			case name == "" && shortPath == "":
+				// A resolved path with no relative suffix (for example a
+				// filesystem root) is itself the only displayable identity.
+				labels[key] = paths[index].String()
+			case name == "":
+				labels[key] = shortPath
+			case shortPath == "":
 				labels[key] = name
-				continue
+			default:
+				labels[key] = fmt.Sprintf("%s (%s)", name, shortPath)
 			}
-			labels[key] = fmt.Sprintf("%s (%s)", name, shortPath)
 		}
 	}
 	return labels
@@ -661,12 +719,11 @@ func representativeClonePath(rows []PreparedSessionListing, fallback ingest.Repo
 	return ingest.ClonePath(fallback.String())
 }
 
-func projectFallbackName(sess ftue.SessionListing) string {
-	fallback := ingest.NormalizeProjectNameForMatch(sess.ProjectName)
-	if fallback == "" {
-		fallback = "(unknown project)"
-	}
-	return fallback
+// normalizedProjectName returns the discovery project name in the canonical
+// match form, or "" when discovery resolved none. Callers choose the display
+// fallback; an absent name is never replaced by a placeholder here.
+func normalizedProjectName(sess ftue.SessionListing) string {
+	return ingest.NormalizeProjectNameForMatch(sess.ProjectName)
 }
 
 // sortListings orders a branch's sessions by date (oldest first), then by ID

@@ -161,11 +161,14 @@ cases:
       - /fixtures/acme-tool
       - /fixtures/acme-tool-linked
       - "branches: 2"
-      - (unknown branch)
+      - (no branch detected)
       - main
       - "sessions: 5"
     wantMissing:
       - select a session to preview it
+      # The legacy label must not render anywhere, even though saved files may
+      # still carry it.
+      - (unknown branch)
 
   - name: a-branch-row-shows-combined-branch-context
     highlightKind: branch

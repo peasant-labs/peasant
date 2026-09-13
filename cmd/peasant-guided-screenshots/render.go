@@ -253,7 +253,11 @@ func renderSelectionCapture(
 	capture selectionCaptureFixture,
 	state selectionStateFixture,
 ) (string, error) {
-	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("selection-%02d", index), false)
+	// Every selection state reviews the mode-all conversion except the
+	// remote-less project, whose point is a from-empty project selection: its
+	// draft starts in selected mode with nothing chosen, so the spacebar press
+	// is what checks the path-labeled project.
+	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("selection-%02d", index), state.Key == selectionStateRemoteLess)
 	if err != nil {
 		return "", err
 	}
@@ -311,10 +315,23 @@ func renderSelectionCapture(
 		}
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
-	if state.Key == selectionStateBranchPreview {
-		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if state.Key == selectionStateRemoteLess {
+		// The remote-less project is the first root (a resolved path sorts
+		// before the fixture's synthetic submodule cohort). Spacebar on its row
+		// is the state under review: the checked, path-labeled project whose
+		// sessions render directly beneath it, with no branch row. Expanding
+		// the row makes those flattened session rows part of the capture, and
+		// the validation markers then prove the toggle applied.
+		program = advanceToMarkers(program, []string{selectionRemoteLessPathSuffix})
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: ' '})
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'l', Text: "l"})
 	}
-	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview || state.Key == selectionStateBudgetPreview || state.Key == selectionStatePiPreview {
+	// Preview states navigate by their own required markers, so a fixture that
+	// adds or reorders a project root cannot silently leave a capture on the
+	// wrong row.
+	if state.Key == selectionStateProjectPreview || state.Key == selectionStateBranchPreview ||
+		state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview ||
+		state.Key == selectionStateBudgetPreview || state.Key == selectionStatePiPreview {
 		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil

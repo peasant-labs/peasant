@@ -61,7 +61,7 @@ func TestPiUsageCarrierBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(u.Completeness) != c.Completeness || u.SourceEntryRef != ingest.PiPublicRef(testutil.TestSessionUUID, "entry", "native-entry") || string(u.OwnerID) != ingest.PiPublicRef(testutil.TestSessionUUID, "owner", "native-entry") {
+			if string(u.Completeness) != c.Completeness || string(u.SourceEntryRef) != ingest.PiPublicRef(testutil.TestSessionUUID, "entry", "native-entry") || string(u.OwnerID) != ingest.PiPublicRef(testutil.TestSessionUUID, "owner", "native-entry") {
 				t.Fatalf("usage owner/completeness mismatch: %+v", u)
 			}
 			cost := ""
@@ -71,7 +71,7 @@ func TestPiUsageCarrierBoundaries(t *testing.T) {
 			if cost != c.Cost {
 				t.Fatalf("recorded cost=%q want %q", cost, c.Cost)
 			}
-			extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraUsage, Harness: schema.HarnessPi, SourceRef: u.SourceEntryRef, Usage: &u})
+			extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraUsage, Harness: schema.HarnessPi, SourceRef: string(u.SourceEntryRef), Usage: &u})
 			if err != nil {
 				t.Fatal(err)
 			}

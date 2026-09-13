@@ -16,10 +16,10 @@ cases:
     topic: session_detail
     accepted: false
     raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":"one","n\u0061mespace":"two","arguments":"{}","result":""}]}]}}'
-  - name: legacy detail accepts nullable turns and scorecard
+  - name: legacy detail accepts nullable turns and omitted scorecard
     topic: session_detail
     accepted: true
-    raw: '{"type":"session_detail","data":{$DETAIL_LEGACY,"turns":null,"scorecard":null}}'
+    raw: '{"type":"session_detail","data":{$DETAIL_LEGACY,"turns":null}}'
   - name: duplicate envelope type rejects before dispatch
     topic: session_detail
     accepted: false
