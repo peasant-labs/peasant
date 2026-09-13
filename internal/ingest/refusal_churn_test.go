@@ -1,8 +1,10 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
+	"io"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -18,31 +20,49 @@ import (
 //go:embed testdata/refusal_churn.yaml
 var refusalChurnYAML []byte
 
+type refusalChurnCase struct {
+	Name              string `yaml:"name"`
+	Stored            string `yaml:"stored"`
+	Mutate            string `yaml:"mutate"`
+	SecondSourceReads int    `yaml:"second_source_reads"`
+	SecondUpdated     int    `yaml:"second_updated"`
+	SecondUnchanged   int    `yaml:"second_unchanged"`
+}
+
+// refusalChurnFixture is the whole-harvest view of the shared fixture document.
+// The settled-refusal predicate matrix in the same document is loaded by the
+// internal test beside this one, so its section is captured raw here: the
+// shared document passes the known-field check, and each section's fields are
+// validated by the loader that actually reads them.
 type refusalChurnFixture struct {
-	SessionID           string   `yaml:"session_id"`
-	Required            []string `yaml:"required_names"`
-	Transcript          string   `yaml:"transcript"`
-	UnrepresentedRecord string   `yaml:"unrepresented_record"`
-	Cases               []struct {
-		Name              string `yaml:"name"`
-		Stored            string `yaml:"stored"`
-		Mutate            string `yaml:"mutate"`
-		SecondSourceReads int    `yaml:"second_source_reads"`
-		SecondUpdated     int    `yaml:"second_updated"`
-		SecondUnchanged   int    `yaml:"second_unchanged"`
-	} `yaml:"cases"`
+	SessionID            string             `yaml:"session_id"`
+	Required             []string           `yaml:"required_names"`
+	Transcript           string             `yaml:"transcript"`
+	UnrepresentedRecord  string             `yaml:"unrepresented_record"`
+	Cases                []refusalChurnCase `yaml:"cases"`
+	SettledRequiredNames []string           `yaml:"settled_required_names"`
+	SettledCases         yaml.Node          `yaml:"settled_cases"`
 }
 
 func loadRefusalChurnFixture(t *testing.T) refusalChurnFixture {
 	t.Helper()
 	var fixture refusalChurnFixture
-	if err := yaml.Unmarshal(refusalChurnYAML, &fixture); err != nil {
-		t.Fatalf("decode refusal churn fixture: %v", err)
+	decoder := yaml.NewDecoder(bytes.NewReader(refusalChurnYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode the refusal churn fixture: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("the refusal churn fixture must hold exactly one YAML document: %v", err)
+	}
+	if len(fixture.Required) == 0 {
+		t.Fatal("refusal churn fixture declares no required cases")
 	}
 	names := make(map[string]bool, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {
 		if testCase.Name == "" || names[testCase.Name] {
-			t.Fatalf("empty or duplicate refusal churn fixture %q", testCase.Name)
+			t.Fatalf("the refusal churn fixture has an empty or repeated case name %q", testCase.Name)
 		}
 		names[testCase.Name] = true
 	}
@@ -50,9 +70,6 @@ func loadRefusalChurnFixture(t *testing.T) refusalChurnFixture {
 		if !names[name] {
 			t.Fatalf("missing refusal churn fixture %s", name)
 		}
-	}
-	if len(fixture.Required) == 0 {
-		t.Fatal("refusal churn fixture declares no required cases")
 	}
 	return fixture
 }
