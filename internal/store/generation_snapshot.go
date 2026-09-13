@@ -230,6 +230,13 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	if err != nil {
 		return indexformat.ReadSnapshot{}, err
 	}
+	// The snapshot content map is the DISPLAY map: every record must belong to
+	// an emitted main or earlier entry, so the snapshot stays self-contained. A
+	// generation can also retain immutable content for captured context segments
+	// it never emits; those rows stay in session_projection_content and their
+	// blobs stay on disk, so inherited evidence survives reopen without entering
+	// the display map.
+	content = emittedContentRecords(partitions.main, partitions.earlier, content)
 	// The snapshot is candidate-derived: timestamps and tool counts come from
 	// the committed generation metadata, and the logical parent comes from
 	// durable relationship evidence, never from the availability cache. This
@@ -359,6 +366,35 @@ func readGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 		return nil, fmt.Errorf("store: read generation content for session %s generation %s: %w", sessionID, generationID, err)
 	}
 	return records, nil
+}
+
+// emittedContentRecords keeps only the content records whose refs an emitted
+// main or earlier entry owns. It reconciles a stored generation, which retains
+// content for captured context segments, with the read snapshot, whose content
+// map must stay self-contained. The retained generation rows and immutable
+// blobs are untouched.
+func emittedContentRecords(main indexformat.Partition, earlier []indexformat.EarlierPartition, content []indexformat.ContentRecord) []indexformat.ContentRecord {
+	emitted := make(map[schema.SourceEntryRef]struct{}, len(main.Entries))
+	for i := range main.Entries {
+		if ref := main.Entries[i].SourceEntryRef; ref != "" {
+			emitted[ref] = struct{}{}
+		}
+	}
+	for i := range earlier {
+		entries := earlier[i].Content.Entries
+		for j := range entries {
+			if ref := entries[j].SourceEntryRef; ref != "" {
+				emitted[ref] = struct{}{}
+			}
+		}
+	}
+	display := make([]indexformat.ContentRecord, 0, len(content))
+	for _, record := range content {
+		if _, ok := emitted[record.Ref]; ok {
+			display = append(display, record)
+		}
+	}
+	return display
 }
 
 // snapshotLogicalParent derives the snapshot's logical parent from durable
