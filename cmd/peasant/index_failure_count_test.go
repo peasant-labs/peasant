@@ -29,13 +29,9 @@ var (
 
 const indexFailureCountFixturePath = "cmd/peasant/testdata/index_failure_counts.yaml"
 
-// indexFailureCountFloor is the row count this corpus must not fall below.
-const indexFailureCountFloor = 14
-
 type indexFailureCountDocument struct {
-	ExpectedCaseCount int                     `yaml:"expectedCaseCount"`
-	RequiredCases     []string                `yaml:"required_cases"`
-	Cases             []indexFailureCountCase `yaml:"cases"`
+	RequiredCases []string                `yaml:"required_cases"`
+	Cases         []indexFailureCountCase `yaml:"cases"`
 }
 
 type indexFailureCountCase struct {
@@ -83,11 +79,10 @@ func loadIndexFailureCountFixture(data []byte) (indexFailureCountDocument, error
 		return document, indexFailureCountRuleError("exactly one YAML document is allowed",
 			"loader=end-of-document check", fmt.Sprintf("fix=remove the second document: %v", err))
 	}
-	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {
+	if len(document.Cases) == 0 {
 		return document, indexFailureCountRuleError(
-			fmt.Sprintf("declared and actual case counts must match and be non-zero, got expectedCaseCount=%d cases=%d",
-				document.ExpectedCaseCount, len(document.Cases)),
-			"loader=case-count validation", "fix=set expectedCaseCount to the number of cases present")
+			"the corpus holds no cases", "loader=nonempty validation",
+			"fix=add at least one case; an empty corpus pins nothing")
 	}
 	seen := map[string]bool{}
 	coveredOutcomes := map[ingest.IndexOutcome]bool{}
@@ -437,20 +432,26 @@ func TestIndexFailureCountFixture_RequiresNamedCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document.RequiredCases) != len(indexFailureRequiredCases) {
-		t.Fatalf("required_cases holds %d name(s), want %d; add the new case to the manifest in %s and to indexFailureRequiredCases together",
-			len(document.RequiredCases), len(indexFailureRequiredCases), indexFailureCountFixturePath)
+	if len(document.RequiredCases) == 0 {
+		t.Fatalf("required_cases is empty in %s; a corpus with no manifest protects nothing", indexFailureCountFixturePath)
+	}
+	inFixture := map[string]bool{}
+	for _, name := range document.RequiredCases {
+		inFixture[name] = true
+	}
+	inCode := map[string]bool{}
+	for _, name := range indexFailureRequiredCases {
+		inCode[name] = true
 	}
 	for _, name := range indexFailureRequiredCases {
-		found := false
-		for _, required := range document.RequiredCases {
-			if required == name {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !inFixture[name] {
 			t.Errorf("required case %q is missing from required_cases in %s; restore it - a corpus that never names a success arm stays green when that arm is deleted",
+				name, indexFailureCountFixturePath)
+		}
+	}
+	for _, name := range document.RequiredCases {
+		if !inCode[name] {
+			t.Errorf("required case %q is named in required_cases in %s but not pinned in indexFailureRequiredCases; a deletion that edits both the cases and the manifest together must still show in the diff, so pin the name here too",
 				name, indexFailureCountFixturePath)
 		}
 	}
@@ -463,9 +464,6 @@ func TestCountIndexFailures_CountsSessionsNotLogRows(t *testing.T) {
 	document, err := loadIndexFailureCountFixture(indexFailureCountFixtureData)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(document.Cases) < indexFailureCountFloor {
-		t.Fatalf("the corpus holds %d cases, below the floor of %d", len(document.Cases), indexFailureCountFloor)
 	}
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

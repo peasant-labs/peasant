@@ -36,12 +36,12 @@
 # numbers at the surface, so at least one warning case must hold more rows than
 # the count it warns about.
 #
-# Measured by deleting each row with expectedCaseCount decremented in the same
-# edit: every row is caught. With the row-count floor relaxed so the LOADER's
-# requirements are what is under test, the count drops sharply - most rows are
-# held by the floor alone. The per-row figures are deliberately not repeated
-# here: they went stale the moment a row was added, which is the same staleness
-# this corpus exists to catch elsewhere. Re-measure rather than trust a number.
+# Deletion protection is by NAME only. Every case is listed in required_cases
+# below and in the required list the test pins, so removing a case goes red
+# without any count to decrement. The per-case figures are deliberately not
+# repeated here: a number goes stale the moment a case is added, which is the
+# same staleness this corpus exists to catch elsewhere. Re-measure rather than
+# trust a number.
 #
 # What each row is the SOLE carrier of, which is the part worth stating: the
 # reindexed outcome has one row; the fallback outcome has two rows (both orders
@@ -50,10 +50,9 @@
 # count above 1; and one row is a skipped session with no error beside it. A
 # corpus that only says "N rows" reads as N independent proofs and is not.
 #
-# required_cases names the cases that must stay present; removing one goes red
-# even when the counts are decremented to match. A bare count cannot tell a
-# deleted success arm from a corpus that never had it, so deletion protection
-# is by NAME here, not by number.
+# required_cases names the cases that must stay present; removing one goes red.
+# A bare count cannot tell a deleted success arm from a corpus that never had it,
+# so deletion protection is by NAME here, not by number.
 #
 # rows        the index log, in order: sessionId and outcome.
 # wantCount   sessions the summary must report as not indexed.
@@ -73,7 +72,6 @@
 #             the classified membership behind the split, in first-seen order:
 #             which failed sessions are empty and which retained.
 
-expectedCaseCount: 14
 required_cases:
   - a-clean-run-reports-nothing
   - one-session-failing-once-is-one-session
