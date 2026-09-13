@@ -142,6 +142,17 @@ func loadIndexCoverageIntegrationCases(t *testing.T) []indexCoverageIntegrationC
 	return document.Cases
 }
 
+// TestLoadIndexCoverageIntegrationFixture_RejectsAManifestThatDoesNotMatchTheCases
+// proves the required-name manifest is enforced: renaming a required name
+// without renaming its case goes red.
+func TestLoadIndexCoverageIntegrationFixture_RejectsAManifestThatDoesNotMatchTheCases(t *testing.T) {
+	t.Parallel()
+	mutated := bytes.Replace(indexCoverageIntegrationFixtureData, []byte("mixed-retained-and-empty"), []byte("mixed-retained-renamed"), 1)
+	if _, err := loadIndexCoverageIntegrationFixture(mutated); err == nil {
+		t.Fatal("the loader accepted a manifest whose names do not match its cases; a deletion could then hide behind the counts")
+	}
+}
+
 // coverageFailIndexer refuses every parse. The pipeline records a failed index
 // attempt for every targeted session while the entries the store already holds
 // stay exactly as seeded, which is the shape the coverage report exists to

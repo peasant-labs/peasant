@@ -148,6 +148,18 @@ func loadIndexCoverageCases(t *testing.T) []indexCoverageCaseSpec {
 	return document.Cases
 }
 
+// TestLoadIndexCoverageFixture_RejectsAManifestThatDoesNotMatchTheCases proves
+// the required-name manifest is enforced: renaming a required name without
+// renaming its case goes red, so a deletion or swap cannot hide behind the
+// numbers.
+func TestLoadIndexCoverageFixture_RejectsAManifestThatDoesNotMatchTheCases(t *testing.T) {
+	t.Parallel()
+	mutated := bytes.Replace(indexCoverageFixtureData, []byte("chunk-boundary-membership-is-exact"), []byte("chunk-boundary-membership-renamed"), 1)
+	if _, err := loadIndexCoverageFixture(mutated); err == nil {
+		t.Fatal("the loader accepted a manifest whose names do not match its cases; a deletion could then hide behind the counts")
+	}
+}
+
 // coverageSessionID returns a deterministic valid session UUID for index i.
 // Generated, not fixture-listed: the chunk-boundary case needs more sessions
 // than any readable manifest should carry, and every ID here is shaped only by

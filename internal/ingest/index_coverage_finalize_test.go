@@ -150,6 +150,17 @@ func loadIndexCoverageFinalizeCases(t *testing.T) []indexCoverageFinalizeCaseSpe
 	return document.Cases
 }
 
+// TestLoadIndexCoverageFinalizeFixture_RejectsAManifestThatDoesNotMatchTheCases
+// proves the required-name manifest is enforced: renaming a required name
+// without renaming its case goes red.
+func TestLoadIndexCoverageFinalizeFixture_RejectsAManifestThatDoesNotMatchTheCases(t *testing.T) {
+	t.Parallel()
+	mutated := bytes.Replace(indexCoverageFinalizeFixtureData, []byte("finalize-splits-failed-attempts"), []byte("finalize-splits-renamed"), 1)
+	if _, err := loadIndexCoverageFinalizeFixture(mutated); err == nil {
+		t.Fatal("the loader accepted a manifest whose names do not match its cases; a deletion could then hide behind the counts")
+	}
+}
+
 func buildIndexCoverageFinalizeLog(rows []indexCoverageLogRow) []IndexLogEntry {
 	log := make([]IndexLogEntry, 0, len(rows))
 	for _, row := range rows {

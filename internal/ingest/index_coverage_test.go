@@ -131,6 +131,17 @@ func loadIndexCoverageComputeCases(t *testing.T) []indexCoverageComputeCaseSpec 
 	return document.Cases
 }
 
+// TestLoadIndexCoverageComputeFixture_RejectsAManifestThatDoesNotMatchTheCases
+// proves the required-name manifest is enforced: renaming a required name
+// without renaming its case goes red.
+func TestLoadIndexCoverageComputeFixture_RejectsAManifestThatDoesNotMatchTheCases(t *testing.T) {
+	t.Parallel()
+	mutated := bytes.Replace(indexCoverageComputeFixtureData, []byte("empty-failed-set-measures-zero"), []byte("empty-failed-set-renamed"), 1)
+	if _, err := loadIndexCoverageComputeFixture(mutated); err == nil {
+		t.Fatal("the loader accepted a manifest whose names do not match its cases; a deletion could then hide behind the counts")
+	}
+}
+
 func parseCoverageSessionIDs(t *testing.T, raws []string) []ingest.SessionID {
 	t.Helper()
 	ids := make([]ingest.SessionID, 0, len(raws))
