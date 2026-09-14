@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -91,26 +92,102 @@ var _ VersionedTranscriptIndexer = (*CodexIndexer)(nil)
 
 // IndexTranscriptResult verifies completion before authorizing persistent replacement.
 func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
-	completion := &indexCompletion{ctx: ctx, session: session}
-	if err := ctx.Err(); err != nil {
-		return nil, completion.failure(err)
-	}
-	// The native provenance candidate path returns the validated V2 generation
-	// the maintenance activation consumes. It stays disabled until that path
+	// The native provenance candidate exit owns a safe refusal boundary of its
+	// own: it never goes through the path-bearing V1 completion wrapper, so a
+	// capture, classifier, projection, or dependency failure cannot surface the
+	// private source locator. It stays disabled until the maintenance activation
 	// composes it with a real generation identity; while disabled the retained
 	// entry parsing below keeps its exact behavior.
 	if idx.provenanceCapture.Enabled {
-		candidate, err := idx.IndexCodexCandidateV2(ctx, session)
-		if err != nil {
-			return nil, completion.failure(err)
-		}
-		return candidate, nil
+		return idx.indexCodexCandidateResult(ctx, session)
+	}
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
 	}
 	data, identified, err := idx.readCurrentSource(ctx, session)
 	if err != nil {
 		return nil, completion.failure(err)
 	}
 	return idx.IndexTranscriptBytesResult(ctx, identified, data)
+}
+
+// indexCodexCandidateResult is the registered Codex candidate exit. On success
+// it returns the validated V2 generation the maintenance activation consumes.
+// On refusal it returns a fixed completion diagnostic that names the validated
+// harness and session identity plus the fixed operation, reason, effect, and
+// recovery categories; the native source locator and the underlying failure are
+// never carried, even when a capture or dependency error is path-bearing.
+func (idx *CodexIndexer) indexCodexCandidateResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, codexCandidateCompletionFailure(session, err)
+	}
+	candidate, err := idx.IndexCodexCandidateV2(ctx, session)
+	if err != nil {
+		return nil, codexCandidateCompletionFailure(session, err)
+	}
+	return candidate, nil
+}
+
+// codexCandidateCompletionRefusal is the safe completion diagnostic for the
+// registered Codex candidate exit. It carries a validated harness and session
+// identity beside the fixed operation, reason, effect, and recovery categories
+// and never contains the native source locator, a raw validator value, or a
+// wrapped dependency, capture, classifier, or filesystem error.
+type codexCandidateCompletionRefusal struct {
+	Operation string
+	Harness   string
+	SessionID string
+	Reason    string
+	Effect    string
+	Recovery  string
+}
+
+func (e *codexCandidateCompletionRefusal) Error() string {
+	return fmt.Sprintf("ingest.%s: harness %s session %s could not emit a native Codex candidate because %s; %s; %s", e.Operation, e.Harness, e.SessionID, e.Reason, e.Effect, e.Recovery)
+}
+
+// codexCandidateCompletionFailure translates a provenance candidate failure
+// into the safe completion diagnostic. A typed candidate refusal keeps its
+// fixed categories; every other failure receives the fixed capture category.
+// The underlying failure is classified here and then dropped, so nothing it
+// carries can reach the diagnostic.
+func codexCandidateCompletionFailure(session DiscoveredSession, failure error) error {
+	refusal := &codexCandidateCompletionRefusal{
+		Operation: "CodexIndexer.IndexTranscriptResult",
+		Harness:   string(HarnessCodex),
+		SessionID: validatedCompletionSessionReference(session),
+		Reason:    "the native Codex source could not be read as a complete candidate",
+		Effect:    "no candidate was emitted and the retained generation and producer stamps are unchanged",
+		Recovery:  "restore the native Codex source and retry harvest",
+	}
+	var candidateRefusal *codexCandidateRefusal
+	if errors.As(failure, &candidateRefusal) {
+		if candidateRefusal.Operation != "" {
+			refusal.Operation = candidateRefusal.Operation
+		}
+		if candidateRefusal.Reason != "" {
+			refusal.Reason = candidateRefusal.Reason
+		}
+		if candidateRefusal.Effect != "" {
+			refusal.Effect = candidateRefusal.Effect
+		}
+		if candidateRefusal.Recovery != "" {
+			refusal.Recovery = candidateRefusal.Recovery
+		}
+	}
+	return refusal
+}
+
+// validatedCompletionSessionReference returns the session identity only when it
+// is a canonical identifier. An absent or malformed identity reports itself as
+// unidentified rather than echoing the raw value, which may be a private path.
+func validatedCompletionSessionReference(session DiscoveredSession) string {
+	identifier, err := NewSessionID(session.SessionID.String())
+	if err != nil {
+		return "unidentified"
+	}
+	return string(identifier)
 }
 
 // readCurrentSource returns the transcript bytes for the completion-gated
