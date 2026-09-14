@@ -1,0 +1,916 @@
+cases:
+  - name: aligned-user-context-media-unknown
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-aligned-user-context-media-unknown
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"fix parser"},{"type":"input_text","text":"AGENTS.md instructions"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_text","text":"future bytes"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions","user.image","future.kind"]}},"metadata":{"user_input_order":7}}
+        
+    entryRefs:
+      - e_u1
+      - e_ctx1
+      - e_media1
+      - e_unknown1
+    submissionRefs:
+      - s_u1
+    expected:
+      purpose: interaction
+      turnCount: 4
+      inputSubmissionCount: 1
+      titleRefs:
+        - e_u1
+      main:
+        - ref: e_u1
+          role: "user"
+          entryType: "text"
+          content: "fix parser"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx1
+          role: "system"
+          entryType: "system"
+          content: "AGENTS.md instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_media1
+          role: "user"
+          entryType: "text"
+          content: "[media input_image]"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: media}
+        - ref: e_unknown1
+          role: "user"
+          entryType: "text"
+          content: "future bytes"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+  - name: context-kind-modality-conflict
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-context-kind-modality-conflict
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"conflicting bytes"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.image"]}},"metadata":{"user_input_order":1}}
+        
+    entryRefs:
+      - e_conflict1
+    submissionRefs:
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_conflict1
+          role: "system"
+          entryType: "system"
+          content: "conflicting bytes"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: conflict, inputModality: text}
+  - name: unusable-kind-vector
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-unusable-kind-vector
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"absent"}]}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m2","content":[{"type":"input_text","text":"null vector"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":null}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"nonarray"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":{}}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"nonstring"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":[1]}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m5","content":[{"type":"input_text","text":"short one"},{"type":"input_text","text":"short two"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m6","content":[{"type":"input_text","text":"long"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions"]}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m7","content":[{"type":"input_text","text":"empty"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":[]}}}
+        
+    entryRefs:
+      - e_v1
+      - e_v2
+      - e_v3
+      - e_v4
+      - e_v5
+      - e_v6
+      - e_v7
+      - e_v8
+    submissionRefs:
+    expected:
+      purpose: interaction
+      turnCount: 8
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_v1
+          role: "user"
+          entryType: "text"
+          content: "absent"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v2
+          role: "user"
+          entryType: "text"
+          content: "null vector"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v3
+          role: "user"
+          entryType: "text"
+          content: "nonarray"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v4
+          role: "user"
+          entryType: "text"
+          content: "nonstring"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v5
+          role: "user"
+          entryType: "text"
+          content: "short one"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v6
+          role: "user"
+          entryType: "text"
+          content: "short two"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v7
+          role: "user"
+          entryType: "text"
+          content: "long"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_v8
+          role: "user"
+          entryType: "text"
+          content: "empty"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+  - name: history-envelope-provenance
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-history-envelope-provenance
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"developer","id":"d1","content":[{"type":"input_text","text":"dev config"}]},"metadata":{"client_authored":true}}
+        {"type":"response_item","payload":{"type":"message","role":"developer","id":"d2","content":[{"type":"input_text","text":"harness config"}]},"metadata":{"harness_authored_configuration":true}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"inherited"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"inherited_user_message":true,"user_input_order":5}}
+        {"type":"response_item","payload":{"type":"message","role":"developer","id":"d3","content":[{"type":"input_text","text":"dev config malformed"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions"]}},"metadata":{"client_authored":true}}
+        
+    entryRefs:
+      - e_dev1
+      - e_dev2
+      - e_inh1
+      - e_dev3
+    submissionRefs:
+    expected:
+      purpose: interaction
+      turnCount: 4
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_dev1
+          role: "system"
+          entryType: "system"
+          content: "dev config"
+          provenance: {origin: harness_context, actor: unknown, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_dev2
+          role: "system"
+          entryType: "system"
+          content: "harness config"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_inh1
+          role: "user"
+          entryType: "text"
+          content: "inherited"
+          provenance: {origin: submitted_input, actor: unknown, delivery: inherited_context, ownership: inherited, evidence: native_typed, inputModality: text}
+        - ref: e_dev3
+          role: "system"
+          entryType: "system"
+          content: "dev config malformed"
+          provenance: {origin: harness_context, actor: unknown, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+  - name: checkpoint-metadata-alignment
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-checkpoint-metadata-alignment
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"aligned inherited"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"inherited_user_message":true,"user_input_order":1}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"no vector"}]}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"unequal one"},{"type":"input_text","text":"unequal two"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+        
+    entryRefs:
+      - e_ck1
+      - e_ck2
+      - e_ck3
+      - e_ck4
+    submissionRefs:
+    expected:
+      purpose: interaction
+      turnCount: 4
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_ck1
+          role: "user"
+          entryType: "text"
+          content: "aligned inherited"
+          provenance: {origin: submitted_input, actor: unknown, delivery: inherited_context, ownership: inherited, evidence: native_typed, inputModality: text}
+        - ref: e_ck2
+          role: "user"
+          entryType: "text"
+          content: "no vector"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_ck3
+          role: "user"
+          entryType: "text"
+          content: "unequal one"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+        - ref: e_ck4
+          role: "user"
+          entryType: "text"
+          content: "unequal two"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+  - name: exact-pasted-wrapper-three-ways
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-exact-pasted-wrapper-three-ways
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"<thinking>literal excerpt</thinking>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":2}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"<thinking>literal excerpt</thinking>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["agents_md.instructions"]}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"<thinking>literal excerpt</thinking>"}]}}
+        
+    entryRefs:
+      - e_wrap1
+      - e_wrap2
+      - e_wrap3
+    submissionRefs:
+      - s_wrap1
+    expected:
+      purpose: interaction
+      turnCount: 3
+      inputSubmissionCount: 1
+      titleRefs:
+        - e_wrap1
+      main:
+        - ref: e_wrap1
+          role: "user"
+          entryType: "text"
+          content: "<thinking>literal excerpt</thinking>"
+          submissionRef: "s_wrap1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_wrap2
+          role: "system"
+          entryType: "system"
+          content: "<thinking>literal excerpt</thinking>"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_wrap3
+          role: "user"
+          entryType: "text"
+          content: "<thinking>literal excerpt</thinking>"
+          provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+  - name: guardian-user-text
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-guardian-user-text
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"guardian_review"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"review this"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":4}}
+        
+    entryRefs:
+      - e_g1
+    submissionRefs:
+      - s_g1
+    expected:
+      purpose: helper_review
+      turnCount: 1
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_g1
+          role: "user"
+          entryType: "text"
+          content: "review this"
+          provenance: {origin: submitted_input, actor: unknown, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+  - name: generic-child-user-text-unknown
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-generic-child-user-text-unknown
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"subagent"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"child text"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+        
+    entryRefs:
+      - e_c1
+    submissionRefs:
+    expected:
+      purpose: delegated_work
+      turnCount: 1
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_c1
+          role: "user"
+          entryType: "text"
+          content: "child text"
+          provenance: {origin: submitted_input, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+  - name: media-only-action-answer-framing
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-media-only-action-answer-framing
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.image"]}},"metadata":{"user_input_order":1}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m2","content":[{"type":"input_text","text":"ls -la"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["shell.user_command"]}},"metadata":{"user_input_order":2}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"Question framing"},{"type":"input_text","text":"the actual answer"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.answered_question","user.text"]}},"metadata":{"user_input_order":3}}
+        
+    entryRefs:
+      - e_media1
+      - e_action1
+      - e_frame1
+      - e_answer1
+    submissionRefs:
+      - s_media1
+      - s_action1
+      - s_answer1
+    expected:
+      purpose: interaction
+      turnCount: 4
+      inputSubmissionCount: 3
+      titleRefs:
+        - e_answer1
+      main:
+        - ref: e_media1
+          role: "user"
+          entryType: "text"
+          content: "[media input_image]"
+          submissionRef: "s_media1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: media}
+        - ref: e_action1
+          role: "user"
+          entryType: "text"
+          content: "ls -la"
+          submissionRef: "s_action1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: user_action}
+        - ref: e_frame1
+          role: "system"
+          entryType: "system"
+          content: "Question framing"
+          provenance: {origin: harness_context, actor: harness, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_answer1
+          role: "user"
+          entryType: "text"
+          content: "the actual answer"
+          submissionRef: "s_answer1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+  - name: native-section4-count
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-native-section4-count
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"fix parser"},{"type":"input_text","text":"injected AGENTS content"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions","user.image"]}},"metadata":{"user_input_order":1}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"I will inspect."}]}}
+        {"type":"response_item","payload":{"type":"reasoning","content":[{"type":"reasoning_text","text":"I will inspect."}]}}
+        {"type":"response_item","payload":{"type":"function_call","name":"rg","call_id":"call_1","arguments":"{\"cmd\":\"rg parser\"}"}}
+        {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"parser.go:12 plus fixture long output"}}
+        
+    entryRefs:
+      - e_u1
+      - e_ctx1
+      - e_media1
+      - e_a1
+      - e_reason1
+      - e_call1
+      - e_result1
+    submissionRefs:
+      - s_u1
+    expected:
+      purpose: interaction
+      turnCount: 5
+      inputSubmissionCount: 1
+      titleRefs:
+        - e_u1
+      main:
+        - ref: e_u1
+          role: "user"
+          entryType: "text"
+          content: "fix parser"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx1
+          role: "system"
+          entryType: "system"
+          content: "injected AGENTS content"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_media1
+          role: "user"
+          entryType: "text"
+          content: "[media input_image]"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: media}
+        - ref: e_a1
+          role: "assistant"
+          entryType: "text"
+          content: "I will inspect."
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_reason1
+          role: "assistant"
+          entryType: "thinking"
+          content: "I will inspect."
+          provenance: {origin: agent_output, actor: unknown, delivery: unknown, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_call1
+          role: "assistant"
+          entryType: "tool_use"
+          toolInput: "{\"cmd\":\"rg parser\"}"
+          depth: 1
+          parentIndex: 3
+          provenance: {origin: tool_activity, actor: unknown, delivery: tool_delivery, ownership: local, evidence: native_typed, inputModality: none}
+        - ref: e_result1
+          role: "tool"
+          entryType: "tool_result"
+          toolOutput: "parser.go:12 plus fixture long output"
+          depth: 1
+          parentIndex: 3
+          provenance: {origin: tool_activity, actor: unknown, delivery: tool_delivery, ownership: local, evidence: native_typed, inputModality: none}
+  - name: typed-context-kinds
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-typed-context-kinds
+    completeness: complete
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"ctx-user.answered_question"},{"type":"input_text","text":"ctx-agents_md.instructions"},{"type":"input_text","text":"ctx-environments.environment_context"},{"type":"input_text","text":"ctx-environments.instructions"},{"type":"input_text","text":"ctx-model.base_instructions"},{"type":"input_text","text":"ctx-generic.developer_instructions"},{"type":"input_text","text":"ctx-managed_config.developer_instructions"},{"type":"input_text","text":"ctx-permissions.instructions"},{"type":"input_text","text":"ctx-persistent_mode.instructions"},{"type":"input_text","text":"ctx-personality.spec_instructions"},{"type":"input_text","text":"ctx-collaboration_mode.instructions"},{"type":"input_text","text":"ctx-model_switch.instructions"},{"type":"input_text","text":"ctx-hooks.additional_context"},{"type":"input_text","text":"ctx-skills.catalog"},{"type":"input_text","text":"ctx-skills.selected_skill_instructions"},{"type":"input_text","text":"ctx-memories.instructions"},{"type":"input_text","text":"ctx-notes.thread_hint"},{"type":"input_text","text":"ctx-apps.instructions"},{"type":"input_text","text":"ctx-plugins.instructions"},{"type":"input_text","text":"ctx-plugins.usage_instructions"},{"type":"input_text","text":"ctx-plugins.recommendations"},{"type":"input_text","text":"ctx-tools.deferred_namespaces"},{"type":"input_text","text":"ctx-multi_agent.inter_agent_message"},{"type":"input_text","text":"ctx-multi_agent.inter_agent_completion_message"},{"type":"input_text","text":"ctx-multi_agent.subagent_notification"},{"type":"input_text","text":"ctx-multi_agent.role_instructions"},{"type":"input_text","text":"ctx-multi_agent.mode_instructions"},{"type":"input_text","text":"ctx-multi_agent.usage_hint"},{"type":"input_text","text":"ctx-guardian.policy"},{"type":"input_text","text":"ctx-guardian.node_repl_policy"},{"type":"input_text","text":"ctx-guardian.review_evidence"},{"type":"input_text","text":"ctx-guardian.node_repl_review_evidence"},{"type":"input_text","text":"ctx-guardian.trusted_tool"},{"type":"input_text","text":"ctx-guardian.trusted_skills"},{"type":"input_text","text":"ctx-guardian.approved_action"},{"type":"input_text","text":"ctx-guardian.followup_review_reminder"},{"type":"input_text","text":"ctx-compaction.summary"},{"type":"input_text","text":"ctx-generic.turn_aborted"},{"type":"input_text","text":"ctx-current_time.reminder"},{"type":"input_text","text":"ctx-token_budget.context_window"},{"type":"input_text","text":"ctx-token_budget.context_window_guidance"},{"type":"input_text","text":"ctx-token_budget.remaining_tokens"},{"type":"input_text","text":"ctx-token_budget.reminder"},{"type":"input_text","text":"ctx-rollout_budget.remaining_tokens"},{"type":"input_text","text":"ctx-compaction.auto_fallback_prompt"},{"type":"input_text","text":"ctx-permissions.approved_command_prefix_saved"},{"type":"input_text","text":"ctx-network_proxy.rule_saved"},{"type":"input_text","text":"ctx-user_verification.notice"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.answered_question","agents_md.instructions","environments.environment_context","environments.instructions","model.base_instructions","generic.developer_instructions","managed_config.developer_instructions","permissions.instructions","persistent_mode.instructions","personality.spec_instructions","collaboration_mode.instructions","model_switch.instructions","hooks.additional_context","skills.catalog","skills.selected_skill_instructions","memories.instructions","notes.thread_hint","apps.instructions","plugins.instructions","plugins.usage_instructions","plugins.recommendations","tools.deferred_namespaces","multi_agent.inter_agent_message","multi_agent.inter_agent_completion_message","multi_agent.subagent_notification","multi_agent.role_instructions","multi_agent.mode_instructions","multi_agent.usage_hint","guardian.policy","guardian.node_repl_policy","guardian.review_evidence","guardian.node_repl_review_evidence","guardian.trusted_tool","guardian.trusted_skills","guardian.approved_action","guardian.followup_review_reminder","compaction.summary","generic.turn_aborted","current_time.reminder","token_budget.context_window","token_budget.context_window_guidance","token_budget.remaining_tokens","token_budget.reminder","rollout_budget.remaining_tokens","compaction.auto_fallback_prompt","permissions.approved_command_prefix_saved","network_proxy.rule_saved","user_verification.notice"]}},"metadata":{"user_input_order":7}}
+        
+    entryRefs:
+      - e_ctx01
+      - e_ctx02
+      - e_ctx03
+      - e_ctx04
+      - e_ctx05
+      - e_ctx06
+      - e_ctx07
+      - e_ctx08
+      - e_ctx09
+      - e_ctx10
+      - e_ctx11
+      - e_ctx12
+      - e_ctx13
+      - e_ctx14
+      - e_ctx15
+      - e_ctx16
+      - e_ctx17
+      - e_ctx18
+      - e_ctx19
+      - e_ctx20
+      - e_ctx21
+      - e_ctx22
+      - e_ctx23
+      - e_ctx24
+      - e_ctx25
+      - e_ctx26
+      - e_ctx27
+      - e_ctx28
+      - e_ctx29
+      - e_ctx30
+      - e_ctx31
+      - e_ctx32
+      - e_ctx33
+      - e_ctx34
+      - e_ctx35
+      - e_ctx36
+      - e_ctx37
+      - e_ctx38
+      - e_ctx39
+      - e_ctx40
+      - e_ctx41
+      - e_ctx42
+      - e_ctx43
+      - e_ctx44
+      - e_ctx45
+      - e_ctx46
+      - e_ctx47
+      - e_ctx48
+    submissionRefs:
+    expected:
+      purpose: interaction
+      turnCount: 48
+      inputSubmissionCount: 0
+      titleRefs:
+      main:
+        - ref: e_ctx01
+          role: "system"
+          entryType: "system"
+          content: "ctx-user.answered_question"
+          provenance: {origin: harness_context, actor: harness, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx02
+          role: "system"
+          entryType: "system"
+          content: "ctx-agents_md.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx03
+          role: "system"
+          entryType: "system"
+          content: "ctx-environments.environment_context"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx04
+          role: "system"
+          entryType: "system"
+          content: "ctx-environments.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx05
+          role: "system"
+          entryType: "system"
+          content: "ctx-model.base_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx06
+          role: "system"
+          entryType: "system"
+          content: "ctx-generic.developer_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx07
+          role: "system"
+          entryType: "system"
+          content: "ctx-managed_config.developer_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx08
+          role: "system"
+          entryType: "system"
+          content: "ctx-permissions.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx09
+          role: "system"
+          entryType: "system"
+          content: "ctx-persistent_mode.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx10
+          role: "system"
+          entryType: "system"
+          content: "ctx-personality.spec_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx11
+          role: "system"
+          entryType: "system"
+          content: "ctx-collaboration_mode.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx12
+          role: "system"
+          entryType: "system"
+          content: "ctx-model_switch.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx13
+          role: "system"
+          entryType: "system"
+          content: "ctx-hooks.additional_context"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx14
+          role: "system"
+          entryType: "system"
+          content: "ctx-skills.catalog"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx15
+          role: "system"
+          entryType: "system"
+          content: "ctx-skills.selected_skill_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx16
+          role: "system"
+          entryType: "system"
+          content: "ctx-memories.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx17
+          role: "system"
+          entryType: "system"
+          content: "ctx-notes.thread_hint"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx18
+          role: "system"
+          entryType: "system"
+          content: "ctx-apps.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx19
+          role: "system"
+          entryType: "system"
+          content: "ctx-plugins.instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx20
+          role: "system"
+          entryType: "system"
+          content: "ctx-plugins.usage_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx21
+          role: "system"
+          entryType: "system"
+          content: "ctx-plugins.recommendations"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx22
+          role: "system"
+          entryType: "system"
+          content: "ctx-tools.deferred_namespaces"
+          provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx23
+          role: "system"
+          entryType: "system"
+          content: "ctx-multi_agent.inter_agent_message"
+          provenance: {origin: agent_communication, actor: unknown, delivery: subagent_delivery, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx24
+          role: "system"
+          entryType: "system"
+          content: "ctx-multi_agent.inter_agent_completion_message"
+          provenance: {origin: agent_communication, actor: unknown, delivery: subagent_delivery, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx25
+          role: "system"
+          entryType: "system"
+          content: "ctx-multi_agent.subagent_notification"
+          provenance: {origin: harness_context, actor: harness, delivery: subagent_delivery, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx26
+          role: "system"
+          entryType: "system"
+          content: "ctx-multi_agent.role_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: subagent_delivery, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx27
+          role: "system"
+          entryType: "system"
+          content: "ctx-multi_agent.mode_instructions"
+          provenance: {origin: harness_context, actor: harness, delivery: subagent_delivery, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx28
+          role: "system"
+          entryType: "system"
+          content: "ctx-multi_agent.usage_hint"
+          provenance: {origin: harness_context, actor: harness, delivery: subagent_delivery, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx29
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.policy"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx30
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.node_repl_policy"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx31
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.review_evidence"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx32
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.node_repl_review_evidence"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx33
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.trusted_tool"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx34
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.trusted_skills"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx35
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.approved_action"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx36
+          role: "system"
+          entryType: "system"
+          content: "ctx-guardian.followup_review_reminder"
+          provenance: {origin: harness_context, actor: harness, delivery: guardian_review, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx37
+          role: "system"
+          entryType: "system"
+          content: "ctx-compaction.summary"
+          provenance: {origin: generated_summary, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx38
+          role: "system"
+          entryType: "system"
+          content: "ctx-generic.turn_aborted"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx39
+          role: "system"
+          entryType: "system"
+          content: "ctx-current_time.reminder"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx40
+          role: "system"
+          entryType: "system"
+          content: "ctx-token_budget.context_window"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx41
+          role: "system"
+          entryType: "system"
+          content: "ctx-token_budget.context_window_guidance"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx42
+          role: "system"
+          entryType: "system"
+          content: "ctx-token_budget.remaining_tokens"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx43
+          role: "system"
+          entryType: "system"
+          content: "ctx-token_budget.reminder"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx44
+          role: "system"
+          entryType: "system"
+          content: "ctx-rollout_budget.remaining_tokens"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx45
+          role: "system"
+          entryType: "system"
+          content: "ctx-compaction.auto_fallback_prompt"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx46
+          role: "system"
+          entryType: "system"
+          content: "ctx-permissions.approved_command_prefix_saved"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx47
+          role: "system"
+          entryType: "system"
+          content: "ctx-network_proxy.rule_saved"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+        - ref: e_ctx48
+          role: "system"
+          entryType: "system"
+          content: "ctx-user_verification.notice"
+          provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+  - name: graph-current-parent-supersedes-projection
+    thread:
+      hasSessionMeta: true
+      threadSource: "user"
+      topParentID: "22222222-2222-4222-8222-222222222222"
+    prior:
+      parentUUID: "55555555-5555-4555-8555-555555555555"
+      relationships:
+        - kind: started_by
+          targetState: target_known_retained
+          targetLocalID: 55555555-5555-4555-8555-555555555555
+          evidence: retained_last_good
+    expected:
+      purpose: interaction
+      parentUUID: "22222222-2222-4222-8222-222222222222"
+      relationships:
+        - kind: started_by
+          targetState: target_known
+          targetLocalID: 22222222-2222-4222-8222-222222222222
+          evidence: native_typed
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-nested-parent-fallback
+    thread:
+      hasSessionMeta: true
+      threadSource: "subagent"
+      nestedParentID: "22222222-2222-4222-8222-222222222222"
+    expected:
+      purpose: delegated_work
+      parentUUID: "22222222-2222-4222-8222-222222222222"
+      relationships:
+        - kind: started_by
+          targetState: target_known
+          targetLocalID: 22222222-2222-4222-8222-222222222222
+          evidence: native_typed
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-conflicting-current-parents-clear-target
+    thread:
+      hasSessionMeta: true
+      threadSource: "user"
+      topParentID: "22222222-2222-4222-8222-222222222222"
+      nestedParentID: "55555555-5555-4555-8555-555555555555"
+    prior:
+      parentUUID: "55555555-5555-4555-8555-555555555555"
+      relationships:
+        - kind: started_by
+          targetState: target_known_retained
+          targetLocalID: 55555555-5555-4555-8555-555555555555
+          evidence: retained_last_good
+    expected:
+      purpose: interaction
+      relationships:
+        - kind: started_by
+          targetState: conflicting_current_native_evidence
+          evidence: conflict
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-explicit-none-clears-cache
+    thread:
+      hasSessionMeta: true
+      threadSource: "user"
+    prior:
+      parentUUID: "55555555-5555-4555-8555-555555555555"
+      relationships:
+        - kind: started_by
+          targetState: target_known_retained
+          targetLocalID: 55555555-5555-4555-8555-555555555555
+          evidence: retained_last_good
+    expected:
+      purpose: interaction
+      relationships:
+        - kind: started_by
+          targetState: explicit_none
+          evidence: native_typed
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-retained-known-without-current
+    thread:
+      hasSessionMeta: false
+      threadSource: "user"
+    prior:
+      parentUUID: "55555555-5555-4555-8555-555555555555"
+      relationships:
+        - kind: started_by
+          targetState: target_known
+          targetLocalID: 55555555-5555-4555-8555-555555555555
+          evidence: native_typed
+    expected:
+      purpose: interaction
+      relationships:
+        - kind: started_by
+          targetState: target_known_retained
+          targetLocalID: 55555555-5555-4555-8555-555555555555
+          evidence: retained_last_good
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-context-from-independent-anchor
+    thread:
+      hasSessionMeta: true
+      threadSource: "user"
+      topParentID: "22222222-2222-4222-8222-222222222222"
+      forkSourceID: "33333333-3333-4333-8333-333333333333"
+    expected:
+      purpose: interaction
+      parentUUID: "22222222-2222-4222-8222-222222222222"
+      relationships:
+        - kind: started_by
+          targetState: target_known
+          targetLocalID: 22222222-2222-4222-8222-222222222222
+          evidence: native_typed
+        - kind: context_from
+          targetState: target_known
+          targetLocalID: 33333333-3333-4333-8333-333333333333
+          evidence: native_typed
+          anchorKind: general_source_session
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-purpose-variants
+    thread:
+      hasSessionMeta: true
+      sourceInternalGuardian: true
+    expected:
+      purpose: helper_review
+      relationships:
+        - kind: started_by
+          targetState: explicit_none
+          evidence: native_typed
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
+  - name: graph-no-evidence-omitted
+    thread:
+      hasSessionMeta: false
+    expected:
+      purpose: 
+      relationships: []
+      turnCount: 0
+      inputSubmissionAbsent: true
+      titleRefs:
+      main: []
