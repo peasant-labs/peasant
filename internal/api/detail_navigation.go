@@ -77,9 +77,12 @@ func resolveRelationshipNavigation(ctx context.Context, relationships []schema.S
 			entry.Status = schema.RelationshipNavigationConflicting
 		case relationship.TargetState == schema.RelationshipTargetUnknown:
 			entry.Status = schema.RelationshipNavigationUnknown
-		default:
+		case relationship.TargetState == schema.RelationshipTargetExplicitNone:
 			// explicit_none names no linkable target; nothing to navigate to.
 			continue
+		default:
+			return nil, fmt.Errorf("api.resolveRelationshipNavigation: relationship %s carries target state %q outside the closed set; no navigation was emitted; repair the stored generation before reading its links",
+				relationship.Kind, relationship.TargetState)
 		}
 		if err := entry.Validate(); err != nil {
 			return nil, fmt.Errorf("api.resolveRelationshipNavigation: emit navigation for %s relationship: %w; the link was withheld rather than routed to the wrong session",
