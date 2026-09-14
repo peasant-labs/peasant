@@ -37,7 +37,10 @@ func TestParentCacheReverseLookupSeeksTargetIndexes(t *testing.T) {
 	defer db.pool.Put(conn)
 
 	harnesses := []ingest.Harness{ingest.HarnessCodex, ingest.HarnessOpenCode}
-	harnessArgs := []any{"codex", "opencode"}
+	harnessArgs := make([]any, len(harnesses))
+	for i, harness := range harnesses {
+		harnessArgs[i] = string(harness)
+	}
 	const (
 		libraryTarget = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 		absentTarget  = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
