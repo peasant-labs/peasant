@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -18,60 +20,145 @@ var _ ingest.OrphanParentReconciler = (*Store)(nil)
 // An independently admitted child can be stored while its logical parent is
 // missing, unselected or otherwise unavailable: the child keeps its managed
 // logical ParentUUID while the sessions.parent_id availability cache stays
-// NULL. When a later harvest stores that logical parent, the cache is healed
-// here in one transaction. Only the cache moves: the child's content,
+// NULL. When a later harvest makes that logical parent available, the cache is
+// healed here in one transaction. Only the cache moves: the child's content,
 // location, origin, selection and managed metadata are untouched, and an
 // update that would close a parent-cache cycle is refused.
+//
+// The reverse lookup is target-scoped: the caller names the parents this
+// harvest made available, and the query returns only the stored children whose
+// PERSISTED logical-parent evidence names one of those targets. It reads the
+// database's durable relationship evidence and publication metadata snapshot,
+// never the managed metadata files, so it opens nothing belonging to an
+// unrelated stored root.
 
-// ListUncachedIndependentChildren returns the stored sessions of the given
-// harnesses whose parent cache is NULL, ordered by session id. It reads
-// identifiers only; the caller resolves each child's logical parent from its
-// own managed evidence.
-func (s *Store) ListUncachedIndependentChildren(ctx context.Context, harnesses []ingest.Harness) ([]ingest.SessionID, error) {
-	if len(harnesses) == 0 {
+// ListUncachedChildrenOfParents returns the stored, still-uncached
+// independently admitted children whose durable logical-parent evidence names
+// one of the given parents. The child side is the FK-availability cache:
+// only rows with parent_id IS NULL are returned, because a populated cache is
+// authoritative and is never overwritten from this reverse pass.
+//
+// Durable evidence is read from two persisted sources, in this order of
+// authority: the active generation's started_by relationship evidence (the V2
+// contract), and the session publication metadata snapshot's legacy
+// parentUuid (the V1 pair). The result is deduplicated and ordered by child,
+// then parent. The query is scoped to the given parents, so a stored
+// independent root that does not name one of them is never considered and its
+// managed metadata is never opened.
+func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ingest.SessionID, harnesses []ingest.Harness) ([]ingest.ParentCacheReconcile, error) {
+	if len(parents) == 0 || len(harnesses) == 0 {
 		return nil, nil
 	}
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("store: take connection to list uncached independent children: %w", err)
-	}
-	defer s.pool.Put(conn)
 
-	seen := make(map[string]struct{}, len(harnesses))
-	placeholders := make([]string, 0, len(harnesses))
-	args := make([]any, 0, len(harnesses))
+	harnessNames := make([]string, 0, len(harnesses))
+	seenHarness := make(map[string]struct{}, len(harnesses))
 	for _, harness := range harnesses {
 		name := harness.String()
 		if name == "" {
-			return nil, fmt.Errorf("store: list uncached independent children: harness name is empty; supply a named harness before enumerating uncached children")
+			return nil, fmt.Errorf("store: list uncached children of stored parents: harness name is empty; supply a named harness before enumerating uncached children")
 		}
-		if _, duplicate := seen[name]; duplicate {
+		if _, duplicate := seenHarness[name]; duplicate {
 			continue
 		}
-		seen[name] = struct{}{}
-		placeholders = append(placeholders, "?")
-		args = append(args, name)
+		seenHarness[name] = struct{}{}
+		harnessNames = append(harnessNames, name)
 	}
-	if len(args) == 0 {
+	if len(harnessNames) == 0 {
 		return nil, nil
 	}
 
-	query := `SELECT session_id FROM sessions WHERE parent_id IS NULL AND model_harness IN (` + strings.Join(placeholders, ",") + `) ORDER BY session_id`
-	var ids []ingest.SessionID
-	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
-		Args: args,
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			id, parseErr := ingest.NewSessionID(stmt.ColumnText(0))
-			if parseErr != nil {
-				return parseErr
-			}
-			ids = append(ids, id)
-			return nil
-		},
-	}); err != nil {
-		return nil, fmt.Errorf("store: list uncached independent children: %w", err)
+	targets := make([]string, 0, len(parents))
+	seenTarget := make(map[string]struct{}, len(parents))
+	for _, parent := range parents {
+		value := string(parent)
+		if value == "" {
+			return nil, fmt.Errorf("store: list uncached children of stored parents: parent id is empty; name the sessions this harvest made available before reconciling")
+		}
+		if _, duplicate := seenTarget[value]; duplicate {
+			continue
+		}
+		seenTarget[value] = struct{}{}
+		targets = append(targets, value)
 	}
-	return ids, nil
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	targetsJSON, err := json.Marshal(targets)
+	if err != nil {
+		return nil, fmt.Errorf("store: encode stored parent targets for cache reconciliation: %w", err)
+	}
+
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection to list uncached children of stored parents: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	harnessPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(harnessNames)), ",")
+	harnessArgs := make([]any, 0, len(harnessNames))
+	for _, name := range harnessNames {
+		harnessArgs = append(harnessArgs, name)
+	}
+	targetArgs := append(append([]any{}, harnessArgs...), string(targetsJSON))
+
+	pairs := make(map[ingest.SessionID]ingest.SessionID)
+	collect := func(stmt *sqlite.Stmt) error {
+		child, parseErr := ingest.NewSessionID(stmt.ColumnText(0))
+		if parseErr != nil {
+			return parseErr
+		}
+		parent, parseErr := ingest.NewSessionID(stmt.ColumnText(1))
+		if parseErr != nil {
+			return parseErr
+		}
+		pairs[child] = parent
+		return nil
+	}
+
+	legacyEvidence := `SELECT s.session_id, json_extract(p.metadata_json, '$.parentUuid')
+FROM sessions s
+JOIN session_publication_metadata p ON p.session_id = s.session_id
+WHERE s.parent_id IS NULL
+  AND s.model_harness IN (` + harnessPlaceholders + `)
+  AND json_valid(p.metadata_json)
+  AND json_extract(p.metadata_json, '$.parentUuid') IN (SELECT value FROM json_each(?))`
+	if err := sqlitex.ExecuteTransient(conn, legacyEvidence, &sqlitex.ExecOptions{
+		Args:       targetArgs,
+		ResultFunc: collect,
+	}); err != nil {
+		return nil, fmt.Errorf("store: list uncached children from stored publication metadata: %w", err)
+	}
+
+	durableEvidence := `SELECT r.session_id, r.target_local_id
+FROM session_relationship_evidence r
+JOIN sessions s ON s.session_id = r.session_id AND s.active_generation_id = r.generation_id
+WHERE r.kind = 'started_by'
+  AND r.target_state IN ('target_known','target_known_retained')
+  AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  AND s.parent_id IS NULL
+  AND s.model_harness IN (` + harnessPlaceholders + `)
+  AND r.target_local_id IN (SELECT value FROM json_each(?))`
+	if err := sqlitex.ExecuteTransient(conn, durableEvidence, &sqlitex.ExecOptions{
+		Args:       targetArgs,
+		ResultFunc: collect,
+	}); err != nil {
+		return nil, fmt.Errorf("store: list uncached children from stored relationship evidence: %w", err)
+	}
+
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	updates := make([]ingest.ParentCacheReconcile, 0, len(pairs))
+	for child, parent := range pairs {
+		updates = append(updates, ingest.ParentCacheReconcile{Child: child, Parent: parent})
+	}
+	sort.Slice(updates, func(i, j int) bool {
+		if updates[i].Child != updates[j].Child {
+			return updates[i].Child < updates[j].Child
+		}
+		return updates[i].Parent < updates[j].Parent
+	})
+	return updates, nil
 }
 
 // ReconcileParentCache atomically applies a bounded set of child-to-parent
