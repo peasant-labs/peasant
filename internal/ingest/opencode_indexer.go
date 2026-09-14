@@ -48,20 +48,19 @@ var _ SessionTranscriptSourceResolver = (*OpenCodeIndexer)(nil)
 // IndexTranscriptResult refuses incomplete native trees and validates managed
 // projections through their existing bounded, strict decoder.
 func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
-	completion := &indexCompletion{ctx: ctx, session: session}
-	if err := ctx.Err(); err != nil {
-		return nil, completion.failure(err)
-	}
 	// The provenance candidate path returns the validated V2 generation the
 	// native repair activation consumes. It stays disabled until that repair
 	// path enables it with a real snapshot; while disabled every V1 flow below
 	// keeps its exact retained behavior.
 	if idx.provenanceCapture.Enabled {
-		// The V2 candidate exit already reduces every refusal to a fixed
-		// category against validated identities. It is returned unchanged: the
-		// path-bearing completion wrapper below belongs to the retained V1
-		// transcript flow, and wrapping the sanitized candidate here would add
-		// the private source path back to a clean refusal.
+		// The whole V2 exit is sanitized: no refusal on this path carries the
+		// private source path, a raw dependency cause, or a native identifier.
+		// The path-bearing completion wrapper below belongs to the retained V1
+		// transcript flow and must never touch this branch, including the
+		// before-start context check.
+		if err := ctx.Err(); err != nil {
+			return nil, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
+		}
 		provenance, err := idx.IndexOpenCodeProvenanceV2(ctx, session)
 		if err != nil {
 			return nil, err
@@ -70,6 +69,10 @@ func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session D
 			return nil, sanitizeOpenCodeRefusal(session.SessionID.String(), "return candidate result", "the candidate finished but the caller context ended", "retry the candidate with a live context", err)
 		}
 		return provenance, nil
+	}
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
 	}
 	switch session.TranscriptOrigin {
 	case TranscriptOriginFile:
