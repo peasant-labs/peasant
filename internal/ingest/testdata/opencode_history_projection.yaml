@@ -15,7 +15,7 @@ cases:
           throughSeq: 5
           throughCompleted: true
         allocator:
-          entries: [e_c1, e_c2, e_c5, e_own6]
+          entries: [e_c1, e_c2, e_c4cmd, e_c4out, e_c5, e_own6]
           submissions: []
         own:
           - id: child_own_6
@@ -46,6 +46,13 @@ cases:
             timeCreated: 1004
             timeUpdated: 1004
             data: '{"id":"src_3","type":"shell","callID":"call_src_3","command":"sleep 5","output":"","time":{"created":1004}}'
+          - id: child_copy_4
+            sourceId: src_4
+            type: shell
+            seq: 4
+            timeCreated: 1004
+            timeUpdated: 1005
+            data: '{"id":"src_4","type":"shell","callID":"call_src_4","command":"rg parser","output":"parser.go:12","time":{"created":1004,"completed":1005}}'
           - id: child_copy_5
             sourceId: src_5
             type: user
@@ -56,50 +63,14 @@ cases:
         want:
           completeness: complete
           own: 0
-          turnCount: 4
+          turnCount: 1
           titleRefs: []
-          segmentRefs: [[e_c1, e_c2, e_c5]]
+          segmentRefs: [[e_c1, e_c2, e_c4cmd, e_c4out, e_c5]]
           earlierStates: []
           earlier: []
           main:
-            - ref: e_c1
-              index: 0
-              role: user
-              entryType: text
-              depth: 0
-              content: source first question
-              origin: submitted_input
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: text
-            - ref: e_c2
-              index: 1
-              role: assistant
-              entryType: text
-              depth: 0
-              content: source assistant answer
-              origin: agent_output
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: none
-            - ref: e_c5
-              index: 2
-              role: user
-              entryType: text
-              depth: 0
-              content: source next question
-              origin: submitted_input
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: text
             - ref: e_own6
-              index: 3
+              index: 0
               role: user
               entryType: text
               depth: 0
@@ -155,38 +126,14 @@ cases:
         want:
           completeness: complete
           own: 0
-          turnCount: 3
+          turnCount: 1
           titleRefs: []
           segmentRefs: [[e_c1, e_c2]]
           earlierStates: []
           earlier: []
           main:
-            - ref: e_c1
-              index: 0
-              role: user
-              entryType: text
-              depth: 0
-              content: source first question
-              origin: submitted_input
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: text
-            - ref: e_c2
-              index: 1
-              role: assistant
-              entryType: text
-              depth: 0
-              content: source assistant answer
-              origin: agent_output
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: none
             - ref: e_own6
-              index: 2
+              index: 0
               role: user
               entryType: text
               depth: 0
@@ -361,38 +308,14 @@ cases:
         want:
           completeness: complete
           own: 0
-          turnCount: 3
+          turnCount: 1
           titleRefs: []
           segmentRefs: [[e_c1, e_c2]]
           earlierStates: []
           earlier: []
           main:
-            - ref: e_c1
-              index: 0
-              role: user
-              entryType: text
-              depth: 0
-              content: source first question
-              origin: submitted_input
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: text
-            - ref: e_c2
-              index: 1
-              role: assistant
-              entryType: text
-              depth: 0
-              content: source assistant answer
-              origin: agent_output
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: none
             - ref: e_own3
-              index: 2
+              index: 0
               role: user
               entryType: text
               depth: 0
@@ -455,38 +378,14 @@ cases:
         want:
           completeness: complete
           own: 0
-          turnCount: 5
+          turnCount: 3
           titleRefs: []
           segmentRefs: [[e_c1, e_c2]]
           earlierStates: []
           earlier: []
           main:
-            - ref: e_c1
-              index: 0
-              role: user
-              entryType: text
-              depth: 0
-              content: source first question
-              origin: submitted_input
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: text
-            - ref: e_c2
-              index: 1
-              role: assistant
-              entryType: text
-              depth: 0
-              content: source assistant answer
-              origin: agent_output
-              actor: unknown
-              delivery: inherited_context
-              ownership: inherited
-              evidence: native_typed
-              modality: none
             - ref: e_own3
-              index: 2
+              index: 0
               role: user
               entryType: text
               depth: 0
@@ -498,7 +397,7 @@ cases:
               evidence: native_typed
               modality: text
             - ref: e_own6
-              index: 3
+              index: 1
               role: user
               entryType: text
               depth: 0
@@ -510,7 +409,7 @@ cases:
               evidence: native_typed
               modality: text
             - ref: e_compact7
-              index: 4
+              index: 2
               role: system
               entryType: system
               depth: 0

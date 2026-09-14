@@ -83,10 +83,10 @@ type ClassifiedBlock struct {
 	UncertainSubtree bool
 	// Retained marks inherited evidence that is preserved locally without
 	// becoming a main or earlier conversational entry. A retained block keeps
-	// its full content in the generation catalog, receives a stable ref, and is
-	// attached to the captured context segment named by SegmentOrdinal, so the
-	// copied bytes stay recoverable while they never inflate the main stream,
-	// the turn count, or a prose title.
+	// its full content in the generation catalog, receives a stable ref and
+	// alias, and is attached to the captured context segment named by
+	// SegmentOrdinal, so the copied bytes stay recoverable while they never
+	// inflate the main stream, the turn count, or a prose title.
 	Retained bool
 	// SegmentOrdinal names the captured context segment a retained block's ref
 	// is attached to. It is required when Retained is set and must match one of
@@ -152,8 +152,10 @@ type ClassifiedCapture struct {
 // resolvedBlock is one classified block with its effective partition and its
 // allocated identities.
 type resolvedBlock struct {
-	block      ClassifiedBlock
-	section    int
+	block   ClassifiedBlock
+	section int
+	// retained marks a block captured as inherited evidence: allocated and
+	// aliased, but never emitted into a partition.
 	retained   bool
 	ref        schema.SourceEntryRef
 	dropped    bool
@@ -934,7 +936,7 @@ func attachProjectionNativeMetadata(partitions *projectionPartitions, resolved [
 		toolIDs[callKey{partition: rb.section, native: rb.block.ToolCallKey}] = string(rb.ref)
 	}
 	for _, rb := range resolved {
-		if rb.dropped || len(rb.block.NativeAttachments) == 0 {
+		if rb.dropped || rb.retained || len(rb.block.NativeAttachments) == 0 {
 			continue
 		}
 		for j := range rb.block.NativeAttachments {
