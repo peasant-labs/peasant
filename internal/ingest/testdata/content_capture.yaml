@@ -226,7 +226,7 @@ cases:
   - name: claude-control-ai-title
     harness: claude-code
     control: true
-    source: '{"type":"ai-title","title":"Synthetic fixture session","uuid":"t-1"}'
+    source: '{"type":"ai-title","aiTitle":"Synthetic fixture session","uuid":"t-1"}'
     want_part_type: ai-title
     want_role: system
     want_preview: "session title: Synthetic fixture session"
@@ -240,17 +240,18 @@ cases:
   - name: claude-control-attachment
     harness: claude-code
     control: true
-    source: '{"type":"attachment","attachmentType":"hook_success","hookName":"post-tool","uuid":"at-1"}'
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool"},"agentId":"agent-7","isSidechain":true,"uuid":"at-1"}'
     want_part_type: attachment
     want_role: system
     want_preview_absent: true
     want_extra_contains:
-      - '"attachmentType":"hook_success"'
+      - '"attachment":{"type":"hook_success"'
+      - '"agentId":"agent-7"'
   - name: claude-control-attachment-oversized
     harness: claude-code
     control: true
     oversized: true
-    source: '{"type":"attachment","attachmentType":"hook_success","hookData":TEXT,"uuid":"at-big"}'
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookData":TEXT},"uuid":"at-big"}'
     want_part_type: attachment
     want_role: system
     want_preview_absent: true
@@ -268,17 +269,17 @@ cases:
   - name: claude-control-started
     harness: claude-code
     control: true
-    source: '{"type":"started","key":"main","agent":"lead","uuid":"st-1"}'
+    source: '{"type":"started","agentId":"agent-7","key":"v2:deadbeef","uuid":"st-1"}'
     want_part_type: started
     want_role: system
-    want_preview: "started: main"
+    want_preview: "started: agent-7"
   - name: claude-control-cost-state
     harness: claude-code
     control: true
-    source: '{"type":"cost-state","costUsd":0.12,"durationMs":1500,"linesAdded":12,"linesRemoved":3,"uuid":"cs-1"}'
+    source: '{"type":"cost-state","totalCostUSD":0.12,"totalDuration":1500,"totalLinesAdded":12,"totalLinesRemoved":3,"uuid":"cs-1"}'
     want_part_type: cost-state
     want_role: system
-    want_preview: "cost: 0.12, duration: 1500ms, lines: +12/-3"
+    want_preview: "cost: $0.12, duration: 1.5s, lines: +12/-3"
   - name: claude-control-custom-title
     harness: claude-code
     control: true
@@ -324,7 +325,7 @@ cases:
   - name: claude-control-pr-link
     harness: claude-code
     control: true
-    source: '{"type":"pr-link","number":42,"repository":"peasant-labs/peasant","uuid":"pr-1"}'
+    source: '{"type":"pr-link","prNumber":42,"prRepository":"peasant-labs/peasant","prUrl":"https://github.com/peasant-labs/peasant/pull/42","uuid":"pr-1"}'
     want_part_type: pr-link
     want_role: system
     want_preview: "PR #42 (peasant-labs/peasant)"

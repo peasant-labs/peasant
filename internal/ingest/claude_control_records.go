@@ -140,12 +140,34 @@ func claudeControlIdentity(kind string, payload map[string]json.RawMessage, rawB
 	}
 	identity["kind"] = encodedKind
 	if kind == "attachment" {
-		if attachmentType, ok := payload["attachmentType"]; ok {
-			identity["attachmentType"] = attachmentType
+		if attachmentType := claudeAttachmentType(payload); attachmentType != "" {
+			if encoded, err := json.Marshal(attachmentType); err == nil {
+				identity["attachmentType"] = encoded
+			}
 		}
 	}
 	identity["rawBytes"] = json.RawMessage(strconv.Itoa(rawBytes))
 	return json.Marshal(identity)
+}
+
+// claudeAttachmentType returns an attachment's own kind: the nested attachment
+// object's type in the real Claude shape, or the flat fallback key.
+func claudeAttachmentType(payload map[string]json.RawMessage) string {
+	if raw, ok := payload["attachment"]; ok {
+		var attachment struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &attachment) == nil && attachment.Type != "" {
+			return attachment.Type
+		}
+	}
+	if raw, ok := payload["attachmentType"]; ok {
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			return value
+		}
+	}
+	return ""
 }
 
 // claudeControlPreview builds the short, factual preview for a control kind. An
@@ -179,8 +201,8 @@ func claudeControlPreview(kind string, payload map[string]json.RawMessage) strin
 		}
 		return "session title set"
 	case "pr-link":
-		number := claudeControlValue(payload, "number", "prNumber", "pr")
-		repository := claudeControlValue(payload, "repository", "repo", "repositoryName")
+		number := claudeControlValue(payload, "prNumber", "number", "pr")
+		repository := claudeControlValue(payload, "prRepository", "repository", "repo", "repositoryName")
 		switch {
 		case number != "" && repository != "":
 			return "PR #" + number + " (" + repository + ")"
@@ -195,7 +217,7 @@ func claudeControlPreview(kind string, payload map[string]json.RawMessage) strin
 	case "cost-state":
 		return claudeCostStatePreview(payload)
 	case "started":
-		if value := claudeControlValue(payload, "key", "agent", "name", "id"); value != "" {
+		if value := claudeControlValue(payload, "agentId", "agent", "name", "key"); value != "" {
 			return "started: " + value
 		}
 		return "started"
@@ -244,14 +266,14 @@ func claudeCompactBoundaryPreview(payload map[string]json.RawMessage) string {
 // changes, joining only the parts the payload carries.
 func claudeCostStatePreview(payload map[string]json.RawMessage) string {
 	var parts []string
-	if value := claudeControlValue(payload, "costUsd", "totalCostUsd", "cost"); value != "" {
-		parts = append(parts, "cost: "+value)
+	if value := claudeControlValue(payload, "totalCostUSD", "costUsd", "totalCostUsd", "cost"); value != "" {
+		parts = append(parts, "cost: $"+claudeCostText(value))
 	}
-	if value := claudeControlValue(payload, "durationMs", "duration"); value != "" {
-		parts = append(parts, "duration: "+value+"ms")
+	if value := claudeControlValue(payload, "totalDuration", "totalAPIDuration", "durationMs", "duration"); value != "" {
+		parts = append(parts, "duration: "+claudeDurationText(value))
 	}
-	added := claudeControlValue(payload, "linesAdded", "added")
-	removed := claudeControlValue(payload, "linesRemoved", "removed")
+	added := claudeControlValue(payload, "totalLinesAdded", "linesAdded", "added")
+	removed := claudeControlValue(payload, "totalLinesRemoved", "linesRemoved", "removed")
 	switch {
 	case added != "" && removed != "":
 		parts = append(parts, "lines: +"+added+"/-"+removed)
@@ -264,6 +286,34 @@ func claudeCostStatePreview(payload map[string]json.RawMessage) string {
 		return "cost state updated"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// claudeCostText renders a monetary amount with cent precision. A value the
+// payload did not record as a number is kept as it appeared.
+func claudeCostText(value string) string {
+	amount, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return value
+	}
+	return strconv.FormatFloat(amount, 'f', 2, 64)
+}
+
+// claudeDurationText renders a millisecond duration in the largest unit that
+// keeps the preview short. A value the payload did not record as a number is
+// kept as it appeared.
+func claudeDurationText(value string) string {
+	ms, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return value
+	}
+	switch {
+	case ms >= 60000:
+		return strconv.FormatFloat(ms/60000, 'f', 1, 64) + "m"
+	case ms >= 1000:
+		return strconv.FormatFloat(ms/1000, 'f', 1, 64) + "s"
+	default:
+		return strconv.FormatFloat(ms, 'f', 0, 64) + "ms"
+	}
 }
 
 // claudeControlValue returns the first non-empty scalar among the named keys.
