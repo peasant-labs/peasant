@@ -1218,9 +1218,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	}
 
 	// Heal the FK availability cache of stored independently admitted children
-	// whose logical parent this harvest just made available. Only the cache
+	// whose logical parent this harvest made available. The discovered
+	// independent sessions are the reconciliation targets, so an already-stored
+	// parent whose earlier reconciliation failed is retried on this harvest
+	// without waiting for a new session. A child rewritten this harvest already
+	// had its cache decided by the write path and is left alone. Only the cache
 	// moves; the children were never re-extracted, relocated or re-selected.
-	p.reconcileOrphanParentCaches(ctx, toProcessEntries)
+	p.reconcileOrphanParentCaches(ctx, diffResult.Sessions, toProcessEntries)
 
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
 	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream)

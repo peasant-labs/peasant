@@ -14,3 +14,5 @@ requiredNames:
   - stored-parent-keeps-available-edge
   - other-harness-legacy-inheritance
   - other-harness-legacy-orphan-skip
+  - parent-only-backfill-retries-after-transient-failure
+  - incremental-harvest-reads-no-unrelated-root-metadata

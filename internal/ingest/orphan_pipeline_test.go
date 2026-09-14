@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,15 @@ type orphanCaseFixture struct {
 	// managed-byte survival claims are proven on the production filesystem and
 	// not only in the in-memory double.
 	OSControl bool `yaml:"osControl"`
+	// FailReconcileOnce injects one transient parent-cache reconciliation
+	// failure through a store decorator that otherwise delegates to the real
+	// SQLite store. The case proves the next harvest retries the failed
+	// reconciliation and heals the cache without another new session.
+	FailReconcileOnce bool `yaml:"failReconcileOnce"`
+	// UnrelatedRoots names sessions an earlier run stored but the final run no
+	// longer discovers. The final run must not open their managed metadata
+	// files: only the persistence-backed target-scoped reconciliation runs.
+	UnrelatedRoots []string `yaml:"unrelatedRoots"`
 }
 
 type orphanCorpusFixture struct {
@@ -86,6 +96,98 @@ type orphanCorpusFixture struct {
 }
 
 var errOrphanParentFailure = errors.New("synthetic parent extraction failure")
+
+// errOrphanTransientReconcile is the one injected fault of a retry case: the
+// reverse parent-cache reconciliation fails once, and the next harvest must
+// heal it without another new session.
+var errOrphanTransientReconcile = errors.New("synthetic transient parent-cache reconciliation failure")
+
+// orphanTransientReconcileStore delegates every store method to the real
+// SQLite store and fails only the first reverse parent-cache reconciliation
+// when a case asks for it. It changes no stored row; it exists to prove the
+// pipeline retries a transiently failed reconciliation on a later harvest.
+type orphanTransientReconcileStore struct {
+	*store.Store
+	failNext   bool
+	injections int
+}
+
+var _ ingest.OrphanParentReconciler = (*orphanTransientReconcileStore)(nil)
+
+func (s *orphanTransientReconcileStore) ReconcileParentCache(ctx context.Context, updates []ingest.ParentCacheReconcile) error {
+	if s.failNext {
+		s.failNext = false
+		s.injections++
+		return errOrphanTransientReconcile
+	}
+	return s.Store.ReconcileParentCache(ctx, updates)
+}
+
+// orphanMetadataReadCounter wraps a filesystem and records which managed
+// metadata files were opened. The no-unrelated-read case uses it to prove the
+// reconciliation never opens a stored root's metadata.
+type orphanMetadataReadCounter struct {
+	ingest.FileSystem
+	reads map[string]int
+}
+
+func (c *orphanMetadataReadCounter) ReadFile(path string) ([]byte, error) {
+	if strings.HasSuffix(path, defaults.MetadataSuffix) {
+		c.reads[path]++
+	}
+	return c.FileSystem.ReadFile(path)
+}
+
+func (c *orphanMetadataReadCounter) reset() {
+	c.reads = make(map[string]int)
+}
+
+func (c *orphanMetadataReadCounter) readsForSession(id string) int {
+	total := 0
+	for path, count := range c.reads {
+		if strings.HasSuffix(path, id+defaults.MetadataSuffix) {
+			total += count
+		}
+	}
+	return total
+}
+
+func orphanSummaryNew(result *ingest.PipelineResult) int {
+	if result == nil {
+		return -1
+	}
+	return result.Summary.New
+}
+
+// seedOrphanUnrelatedRoots stores independent-harness roots a case's harvests
+// do not discover. They are settled (current index revision, no artifact
+// identity, no publication capture) so ordinary maintenance selection does not
+// read them either. That leaves the parent-cache reconciliation as the only
+// way an incremental harvest could open their metadata, which is exactly what
+// the case measures.
+func seedOrphanUnrelatedRoots(t *testing.T, ctx context.Context, db *store.Store, byID map[string]orphanSessionFixture, ids []string) {
+	t.Helper()
+	for _, raw := range ids {
+		fixture, ok := byID[raw]
+		if !ok {
+			t.Fatalf("unknown unrelated root %q", raw)
+		}
+		meta := makeMinimalMeta(t, raw)
+		meta.ModelHarness = orphanHarness(t, fixture.Harness)
+		meta.ParentUUID = nil
+		if err := db.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta, CWDProvenance: ingest.CWDNotRecovered}}); err != nil {
+			t.Fatalf("seed unrelated root %q: %v", raw, err)
+		}
+		sid, err := ingest.NewSessionID(raw)
+		if err != nil {
+			t.Fatalf("unrelated root %q: %v", raw, err)
+		}
+		target := ingest.HarvesterVersionRegistry[meta.ModelHarness].IndexerVersion
+		if err := db.UpdateIndexState(ctx, sid, target, time.Now().UnixMilli()); err != nil {
+			t.Fatalf("settle unrelated root %q: %v", raw, err)
+		}
+	}
+}
 
 type orphanErrorAdapter struct {
 	harness  ingest.Harness
@@ -237,7 +339,8 @@ func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphan
 func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc orphanCaseFixture, env orphanEnv) {
 	t.Helper()
 	ctx := t.Context()
-	fs := env.fs
+	counter := &orphanMetadataReadCounter{FileSystem: env.fs, reads: make(map[string]int)}
+	fs := ingest.FileSystem(counter)
 	if err := fs.MkdirAll(env.sourceDir, 0o755); err != nil {
 		t.Fatalf("create source directory %q: %v", env.sourceDir, err)
 	}
@@ -249,6 +352,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err != nil {
 		t.Fatal(err)
 	}
+	reconcileStore := &orphanTransientReconcileStore{Store: db, failNext: tc.FailReconcileOnce}
 
 	selfParents := make(map[string]bool, len(tc.SelfParent))
 	for _, id := range tc.SelfParent {
@@ -269,7 +373,18 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	filtered := orphanFilteredSet(tc.Filtered)
 	byteBaselines := make(map[string]map[string][]byte, len(tc.UnchangedBytes))
 
+	if len(tc.UnrelatedRoots) > 0 {
+		seedOrphanUnrelatedRoots(t, ctx, db, byID, tc.UnrelatedRoots)
+	}
+
+	var finalResult *ingest.PipelineResult
 	for runIndex, run := range runs {
+		if len(tc.UnrelatedRoots) > 0 && runIndex == len(runs)-1 {
+			// The final run is the incremental harvest: only its metadata
+			// reads are observed, so a stored unrelated root opened by the
+			// reconciliation is caught.
+			counter.reset()
+		}
 		for id, parent := range run.Reparent {
 			cp := parent
 			reparents[id] = cp
@@ -300,14 +415,16 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 			}
 		}
 		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
-			ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db),
+			ingest.WithStore(reconcileStore), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db),
 			ingest.WithIndexers(indexers))
 		if err != nil {
 			t.Fatalf("run %d NewPipeline: %v", runIndex, err)
 		}
-		if _, err := pipeline.Run(ctx); err != nil {
+		result, err := pipeline.Run(ctx)
+		if err != nil {
 			t.Fatalf("run %d Run: %v", runIndex, err)
 		}
+		finalResult = result
 		for _, id := range tc.UnchangedBytes {
 			pair := orphanManagedPairBytes(t, env, id)
 			if runIndex == 0 {
@@ -320,6 +437,22 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 			}
 			if !orphanBytesEqual(baseline, pair) {
 				t.Fatalf("case %q: managed bytes of %q changed after run %d; a later parent must reconcile the cache without rewriting the child", tc.Name, id, runIndex)
+			}
+		}
+	}
+
+	if tc.FailReconcileOnce {
+		if reconcileStore.injections != 1 {
+			t.Fatalf("case %q: injected reconciliation failures = %d, want exactly 1: the transient failure must fire before the retry proves itself", tc.Name, reconcileStore.injections)
+		}
+		if finalResult == nil || finalResult.Summary.New != 0 {
+			t.Fatalf("case %q: the retry harvest must not discover a new session, got new=%d", tc.Name, orphanSummaryNew(finalResult))
+		}
+	}
+	if len(tc.UnrelatedRoots) > 0 {
+		for _, id := range tc.UnrelatedRoots {
+			if reads := counter.readsForSession(id); reads != 0 {
+				t.Fatalf("case %q: the incremental harvest opened %d managed metadata file(s) of unrelated stored root %q; parent-cache reconciliation must read persisted evidence, never unrelated metadata", tc.Name, reads, id)
 			}
 		}
 	}

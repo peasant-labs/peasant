@@ -2,13 +2,8 @@ package ingest
 
 import (
 	"context"
-	"errors"
-	"io/fs"
 	"log/slog"
-	"path/filepath"
 	"sort"
-
-	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 // Reverse logical-target cache reconciliation for independently admitted
@@ -17,16 +12,22 @@ import (
 // An independently admitted child admitted while its logical parent was
 // missing, unselected or otherwise unavailable is stored with a nil FK
 // availability cache while its managed metadata keeps the logical ParentUUID.
-// When a later harvest stores that logical parent, this pass heals the cache.
-// It reads the child's own managed evidence for the logical target and writes
-// only the cache: the child is never re-extracted, relocated, re-indexed or
-// re-selected, and its content and managed metadata stay byte-identical.
+// When a later harvest makes that logical parent available, this pass heals the
+// cache. It reconciles only children whose PERSISTED logical-parent evidence
+// names a parent this harvest discovered, and the store reads that evidence
+// from the database: no managed metadata file of an unrelated stored root is
+// opened, and the pass never re-extracts, relocates, re-indexes or re-selects a
+// child.
 //
-// The pass runs only when this harvest newly stores an independently admitted
-// session, and the store refuses any update that would close a parent-cache
+// The target set is the independently admitted session ids this harvest
+// discovered, whether they were just stored or were already stored. Naming an
+// already-stored parent is deliberate: a reconciliation that failed
+// transiently on the harvest that first made the parent available is retried on
+// the next harvest that discovers the same parent, without waiting for another
+// new session. The store refuses any update that would close a parent-cache
 // cycle. A store without the reconciliation capability keeps the cache
 // unchanged.
-func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, admitted []DiffEntry) {
+func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, written []DiffEntry) {
 	if p.store == nil || p.config.DryRun {
 		return
 	}
@@ -34,87 +35,41 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, admitted []D
 	if !ok {
 		return
 	}
-	admittedIDs := make(map[SessionID]bool, len(admitted))
-	newlyAvailable := false
-	for i := range admitted {
-		id := admitted[i].Session.SessionID
-		admittedIDs[id] = true
-		if !IndependentAdmissionHarness(admitted[i].Session.Harness) {
+	targets := make([]SessionID, 0, len(discovered))
+	seen := make(map[SessionID]struct{}, len(discovered))
+	for i := range discovered {
+		if !IndependentAdmissionHarness(discovered[i].Session.Harness) {
 			continue
 		}
-		if _, stored := p.locationCache[id]; !stored {
-			newlyAvailable = true
+		id := discovered[i].Session.SessionID
+		if _, duplicate := seen[id]; duplicate {
+			continue
 		}
+		seen[id] = struct{}{}
+		targets = append(targets, id)
 	}
-	if !newlyAvailable {
+	if len(targets) == 0 {
 		return
 	}
+	// A child written this harvest already had its FK cache decided by the
+	// write path, including the in-batch cycle and unavailable-parent cases.
+	// Only children that were not rewritten are healed from the reverse pass.
+	rewritten := make(map[SessionID]struct{}, len(written))
+	for i := range written {
+		rewritten[written[i].Session.SessionID] = struct{}{}
+	}
 
-	candidates, err := reconciler.ListUncachedIndependentChildren(ctx, []Harness{HarnessCodex, HarnessOpenCode})
+	candidates, err := reconciler.ListUncachedChildrenOfParents(ctx, targets, []Harness{HarnessCodex, HarnessOpenCode})
 	if err != nil {
 		p.warnParentReconcile("list uncached independent children", storeLookupReasonCode(err))
 		return
 	}
-	locations, err := p.store.BulkLookupSessionLocations(ctx, candidates)
-	if err != nil {
-		p.warnParentReconcile("resolve stored child locations", storeLookupReasonCode(err))
-		return
-	}
-
-	output := string(p.config.OutputDir)
-	logical := make(map[SessionID]SessionID)
-	parentNeeded := make(map[SessionID]bool)
-	for _, child := range candidates {
-		if admittedIDs[child] {
+	updates := make([]ParentCacheReconcile, 0, len(candidates))
+	for _, update := range candidates {
+		if _, justWritten := rewritten[update.Child]; justWritten {
 			continue
 		}
-		location, found := locations[child]
-		if !found || location.HostSlug == "" {
-			continue
-		}
-		metaPath := filepath.Join(output, location.HostSlug, string(child), string(child)+defaults.MetadataSuffix)
-		data, readErr := p.fs.ReadFile(metaPath)
-		if readErr != nil {
-			if !errors.Is(readErr, fs.ErrNotExist) {
-				p.warnParentReconcile("read stored child metadata", storeLookupReasonCode(readErr))
-			}
-			continue
-		}
-		meta, decodeErr := decodeManagedMetadata(data, p.managedRelativePath(metaPath))
-		if decodeErr != nil {
-			continue
-		}
-		if meta.ParentUUID == nil || *meta.ParentUUID == child {
-			continue
-		}
-		logical[child] = *meta.ParentUUID
-		parentNeeded[*meta.ParentUUID] = true
-	}
-	if len(logical) == 0 {
-		return
-	}
-
-	needed := make([]SessionID, 0, len(parentNeeded))
-	for id := range parentNeeded {
-		needed = append(needed, id)
-	}
-	stored := map[SessionID]SessionLocation{}
-	if len(needed) > 0 {
-		stored, err = p.store.BulkLookupSessionLocations(ctx, needed)
-		if err != nil {
-			p.warnParentReconcile("resolve stored parent locations", storeLookupReasonCode(err))
-			return
-		}
-	}
-
-	updates := make([]ParentCacheReconcile, 0, len(logical))
-	for child, parent := range logical {
-		if !admittedIDs[parent] {
-			if _, found := stored[parent]; !found {
-				continue // the logical parent is still not available
-			}
-		}
-		updates = append(updates, ParentCacheReconcile{Child: child, Parent: parent})
+		updates = append(updates, update)
 	}
 	if len(updates) == 0 {
 		return
@@ -139,6 +94,6 @@ func (p *Pipeline) warnParentReconcile(step, reason string) {
 		"reason", reason,
 		"what", "could not reconcile the FK availability cache of a stored independently admitted child",
 		"why", "the stored cache reconciliation step failed",
-		"user_impact", "the child keeps a nil FK cache while its managed metadata keeps the logical parent; it is retried on the next harvest",
+		"user_impact", "the child keeps a nil FK cache while its managed metadata keeps the logical parent; it is retried on the next harvest that discovers the same parent",
 		"how_to_fix", "restore database access and rerun harvest")
 }

@@ -100,12 +100,15 @@ type ParentCacheReconcile struct {
 
 // OrphanParentReconciler is the optional store capability that heals the FK
 // availability cache of an independently admitted child after a later harvest
-// stores its logical parent. The production store implements it; a store that
-// does not keeps the cache unchanged.
+// makes its logical parent available. The production store implements it; a
+// store that does not keeps the cache unchanged.
 type OrphanParentReconciler interface {
-	// ListUncachedIndependentChildren returns the stored sessions of the given
-	// harnesses whose parent cache is NULL. It reads identifiers only.
-	ListUncachedIndependentChildren(ctx context.Context, harnesses []Harness) ([]SessionID, error)
+	// ListUncachedChildrenOfParents returns the stored, still-uncached
+	// independently admitted children whose durable logical-parent evidence
+	// names one of the given parents. The lookup is scoped to the named
+	// targets and reads persisted evidence only: it never opens a managed
+	// metadata file and never enumerates unrelated stored roots.
+	ListUncachedChildrenOfParents(ctx context.Context, parents []SessionID, harnesses []Harness) ([]ParentCacheReconcile, error)
 	// ReconcileParentCache applies the given cache updates in one transaction.
 	// An update whose child or parent is not stored, whose edge is a
 	// self-parent, or that would close a parent-cache cycle is skipped; every
