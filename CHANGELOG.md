@@ -86,6 +86,8 @@ Release, which holds the signed artifacts and checksums.
 ### Tests
 - End-to-end runs reap orphaned test containers whose owner process has exited
   and enforce a local memory cap (#331, #347).
+- The Pi round-trip e2e test compiles against the schema v0.20.0 entry-ref
+  type (#413).
 
 ### CI
 - The release e2e gates check out the Village peer at a revision that pins the
