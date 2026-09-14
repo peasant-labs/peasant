@@ -537,7 +537,7 @@ func mountedChooserIDs(t *testing.T, fixture mountedSelectionSafetyCase, world m
 	assertMountedIDSet(t, "mounted chooser display", displayed, want)
 	selected := make(map[string]bool)
 	// A nil preview read: the assertion is the selected set, not the pane.
-	for _, sessionID := range push.NewPushWizard(theme.New(theme.ModeDark), wizardSessions, nil).SelectedSessionIDs() {
+	for _, sessionID := range push.NewPushWizard(theme.New(theme.ModeDark), wizardSessions, nil, "").SelectedSessionIDs() {
 		selected[sessionID] = true
 	}
 	return selected

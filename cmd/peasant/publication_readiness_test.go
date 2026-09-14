@@ -72,7 +72,7 @@ func TestPublicationWizardAndReportUseDatabaseReadiness(t *testing.T) {
 			if row.NeedsIngest == tc.Ready || (row.Meta != nil) != tc.Ready {
 				t.Fatalf("wizard readiness=%+v want ready=%v", row, tc.Ready)
 			}
-			model := push.NewPushWizard(theme.New(theme.ModeDark), wizardSessions, nil)
+			model := push.NewPushWizard(theme.New(theme.ModeDark), wizardSessions, nil, "")
 			if (len(model.SelectedSessionIDs()) == 1) != tc.Ready {
 				t.Fatal("wizard admitted incomplete capture or excluded ready capture")
 			}

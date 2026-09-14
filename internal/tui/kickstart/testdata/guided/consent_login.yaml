@@ -1,4 +1,4 @@
-expectedConsentCount: 3
+expectedConsentCount: 4
 consent:
   - name: local-all-no-license
     selectionMode: all
@@ -11,6 +11,8 @@ consent:
       - 'selection: all discovered sessions'
       - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: none; all rights remain and reuse requires permission'
+      - 'a later push under this default reads "publish without a license"'
+      - 'https://village.peasantlabs.org/privacy'
       - save the visible choices to peasant configuration
       - import the selected transcripts into the local peasant store
       - publish nothing; sharing requires a later explicit push
@@ -31,6 +33,8 @@ consent:
       - 'auto-ingest future branches in fully-selected projects: on'
       - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: CC-BY-SA-4.0'
+      - 'a later push under this default reads "publish under CC BY-SA 4.0"'
+      - 'https://village.peasantlabs.org/privacy'
       - 'default visibility after a later publish: group'
       - 'claude code source retention: 90 days'
       - save the visible choices to peasant configuration
@@ -49,11 +53,30 @@ consent:
       - 'auto-ingest future branches in fully-selected projects: off'
       - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: CC-BY-4.0'
+      - 'a later push under this default reads "publish under CC BY 4.0"'
+      - 'https://village.peasantlabs.org/privacy'
       - save the visible choices to peasant configuration
       - import the selected transcripts into the local peasant store
       - publish nothing; sharing requires a later explicit push
     wantMissing:
       - 'default visibility after a later publish:'
+      - apply claude code retention
+
+  - name: selected-local-cc0-public
+    selectionMode: selected
+    autoIngestNewBranches: false
+    license: CC0-1.0
+    visibility: public
+    connected: false
+    claudeSessionsPresent: false
+    wantContains:
+      - 'selection: only the buffered projects, branches, and sessions'
+      - 'later publish license: CC0-1.0'
+      - 'a later push under this default reads "publish under CC0 1.0"'
+      - 'https://village.peasantlabs.org/privacy'
+      - save the visible choices to peasant configuration
+      - publish nothing; sharing requires a later explicit push
+    wantMissing:
       - apply claude code retention
 
 expectedLoginCount: 3

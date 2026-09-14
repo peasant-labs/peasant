@@ -104,6 +104,7 @@ rows:
       hints:
         - no license is the default unless your loaded config already chose one.
         - no license keeps all rights; anyone who wants to reuse the transcript must ask.
+        - 'a later push under the chosen license reads on the privacy notice: https://village.peasantlabs.org/privacy'
 
   - name: destination-guide
     surface: registry-section

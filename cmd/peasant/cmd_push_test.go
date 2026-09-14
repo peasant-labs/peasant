@@ -361,7 +361,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceHarnes
 	}
 	// A nil preview read: this case asserts the selected set, and never draws
 	// the preview pane.
-	model := push.NewPushWizard(theme.New(theme.ModeDark), wiz, nil)
+	model := push.NewPushWizard(theme.New(theme.ModeDark), wiz, nil, "")
 	ids := map[string]bool{}
 	for _, id := range model.SelectedSessionIDs() {
 		ids[id] = true
@@ -527,7 +527,7 @@ func TestBuildPushWizardSessions_SelectionAware(t *testing.T) {
 
 	// Approved (unlocked) set == kept set == {selectedID}.
 	// A nil preview read: the assertion is the approved set, not the pane.
-	approved := push.NewPushWizard(theme.New(theme.ModeDark), wiz, nil).SelectedSessionIDs()
+	approved := push.NewPushWizard(theme.New(theme.ModeDark), wiz, nil, "").SelectedSessionIDs()
 	if len(approved) != 1 || approved[0] != selectedID {
 		t.Fatalf("approved set should be exactly [%s]; got %v", selectedID, approved)
 	}
@@ -1740,7 +1740,7 @@ func TestPromptPublicConsent_AutoConfirm(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
 	// Reader is empty — autoConfirm should not read from it at all.
-	consented, err := promptPublicConsent(bytes.NewBufferString(""), &w, true /* autoConfirm */, false /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString(""), &w, true /* autoConfirm */, false /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1753,7 +1753,7 @@ func TestPromptPublicConsent_AutoConfirm(t *testing.T) {
 func TestPromptPublicConsent_NonTTYWithoutYes(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
-	consented, err := promptPublicConsent(bytes.NewBufferString(""), &w, false /* autoConfirm */, false /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString(""), &w, false /* autoConfirm */, false /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1769,7 +1769,7 @@ func TestPromptPublicConsent_NonTTYWithoutYes(t *testing.T) {
 func TestPromptPublicConsent_TTY_AcceptsY(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
-	consented, err := promptPublicConsent(bytes.NewBufferString("y\n"), &w, false /* autoConfirm */, true /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString("y\n"), &w, false /* autoConfirm */, true /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1782,7 +1782,7 @@ func TestPromptPublicConsent_TTY_AcceptsY(t *testing.T) {
 func TestPromptPublicConsent_TTY_AcceptsUpperY(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
-	consented, err := promptPublicConsent(bytes.NewBufferString("Y\n"), &w, false /* autoConfirm */, true /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString("Y\n"), &w, false /* autoConfirm */, true /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1795,7 +1795,7 @@ func TestPromptPublicConsent_TTY_AcceptsUpperY(t *testing.T) {
 func TestPromptPublicConsent_TTY_DeclineN(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
-	consented, err := promptPublicConsent(bytes.NewBufferString("N\n"), &w, false /* autoConfirm */, true /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString("N\n"), &w, false /* autoConfirm */, true /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1808,7 +1808,7 @@ func TestPromptPublicConsent_TTY_DeclineN(t *testing.T) {
 func TestPromptPublicConsent_TTY_DeclineEmpty(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
-	consented, err := promptPublicConsent(bytes.NewBufferString("\n"), &w, false /* autoConfirm */, true /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString("\n"), &w, false /* autoConfirm */, true /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1821,7 +1821,7 @@ func TestPromptPublicConsent_TTY_DeclineEmpty(t *testing.T) {
 func TestPromptPublicConsent_TTY_EOF(t *testing.T) {
 	t.Parallel()
 	var w bytes.Buffer
-	consented, err := promptPublicConsent(bytes.NewBufferString(""), &w, false /* autoConfirm */, true /* isTTY */)
+	consented, err := promptPublicConsent(bytes.NewBufferString(""), &w, false /* autoConfirm */, true /* isTTY */, "" /* no license */)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

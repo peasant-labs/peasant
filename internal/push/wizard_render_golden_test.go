@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
@@ -173,7 +174,7 @@ func loadWizardRenderDoc(t *testing.T) wizardRenderDoc {
 // state and returns it ready to render.
 func buildWizardScreen(t *testing.T, c wizardRenderCase) PushWizardModel {
 	t.Helper()
-	m := NewPushWizard(theme.New(c.Theme.mode()), testSessions(), testPublishedTurns())
+	m := NewPushWizard(theme.New(c.Theme.mode()), testSessions(), testPublishedTurns(), config.LicenseCCBY)
 	updated, _ := m.Update(windowSize(c.Width, c.Height))
 	m = updated.(PushWizardModel)
 	switch c.State {

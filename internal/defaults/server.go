@@ -32,7 +32,11 @@ const (
 	RouteWS                 Route = "/api/v1/ws"
 	RouteConfigMock         Route = "/api/v1/config/mock"
 	RouteConfigCapabilities Route = "/api/v1/config/capabilities"
-	RouteSessions           Route = "/api/v1/sessions"
+	// RouteConfigPublish reports the effective default push license so the web
+	// Share flow can name the license choice and link the privacy notice before
+	// submit. Read-only; peasant-owned (not a schema wire type).
+	RouteConfigPublish Route = "/api/v1/config/publish"
+	RouteSessions      Route = "/api/v1/sessions"
 	// RouteSessionSummaries resolves links: it returns summaries for an explicit
 	// set of session identifiers named in ?ids=, applying neither origin scope
 	// nor selection scope. A sibling RESOURCE rather than a path under

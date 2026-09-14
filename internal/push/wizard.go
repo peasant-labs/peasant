@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -175,6 +176,12 @@ type PushWizardModel struct {
 	page     wizardPage
 	sessions []PushWizardSession
 
+	// license is the content license this push will apply, resolved by the
+	// caller (the --license flag or the stored default; empty means no
+	// license). The notice page names it, so the consent copy states the
+	// grant the user is actually about to make.
+	license config.License
+
 	// tree is held by pointer because the split drives the SAME forest; both
 	// must never work on diverging copies.
 	tree   *kit.Tree
@@ -200,12 +207,13 @@ type PushWizardModel struct {
 // turns is the preview read: it returns the transcript of one session as the
 // push will publish it. The selection page draws it beside the tree, loaded
 // asynchronously per highlighted row.
-func NewPushWizard(th theme.Theme, sessions []PushWizardSession, turns PublishedTurnsFunc) PushWizardModel {
+func NewPushWizard(th theme.Theme, sessions []PushWizardSession, turns PublishedTurnsFunc, license config.License) PushWizardModel {
 	tree, leaves := newSelectionTree(th, sessions)
 	m := PushWizardModel{
 		th:       th,
 		page:     pageInitialConfirm,
 		sessions: sessions,
+		license:  license,
 		tree:     tree,
 		leaves:   leaves,
 		confirm:  kit.NewConfirm(th, startPrompt(publishableSessionCount(sessions))),
@@ -904,6 +912,13 @@ func (m PushWizardModel) noticePanel(width int) kit.Panel {
 	panel.Wrapped(styles.Warning, "source code is published with matched tokens replaced, so a published transcript can differ from what you see locally. read what you share.")
 	panel.Blank()
 	panel.Wrapped(styles.Base, "if a session holds something you do not want published, deselect it: press esc to go back, then space to toggle it off.")
+	panel.Blank()
+	// The license this push applies, and the notice that states what that
+	// grant is. Named here, at the last screen before the confirm, so the
+	// consent copy reflects the ACTUAL effective license the model carries
+	// rather than a value asserted somewhere earlier.
+	panel.Wrapped(styles.Base, "this push will "+config.PublishConsentPhrase(m.license)+".")
+	panel.Wrapped(styles.Base, "read the privacy notice: "+defaults.CommonsNoticeURL())
 	return panel
 }
 

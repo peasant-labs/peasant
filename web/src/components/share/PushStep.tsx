@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { WhereDoesThisGo, Button } from '@/lib/ft-ui';
 import { displayProject } from '@/lib/quality/utils';
 import { runPush } from '@/lib/share/push';
+import { getApiBaseUrl } from '@/lib/api/base';
+import {
+  licensePhrase,
+  licenseButtonLabel,
+  type EffectiveLicense,
+} from '@/lib/share/publishLicense';
 import type { ShareSession, LabelSelection } from '@/lib/share/types';
 import {
   DEFAULT_REDACTION_LEVEL,
@@ -20,6 +26,38 @@ import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 function commonsUrl(): string {
   return process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
+}
+
+// The privacy notice for the commons, whatever host the commons resolves to.
+function noticeUrl(): string {
+  return `${commonsUrl().replace(/\/$/, '')}/privacy`;
+}
+
+/**
+ * The effective default push license, read once from the local server so the
+ * submit step can name what a push will license before the user commits.
+ * Returns null until it loads (and on any failure): the notice link renders
+ * without it, so a fetch error never blocks publishing.
+ */
+function usePublishLicense(): EffectiveLicense {
+  const [license, setLicense] = useState<EffectiveLicense>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(`${getApiBaseUrl()}/api/v1/config/publish`);
+        if (!resp.ok) return;
+        const body = (await resp.json()) as { license?: string };
+        if (!cancelled) setLicense(typeof body.license === 'string' ? body.license : '');
+      } catch {
+        // Deliberately ignored: the notice link does not depend on this value.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return license;
 }
 
 // Where the local copy stays after a push under the default XDG data directory.
@@ -280,15 +318,18 @@ export function PushStep({
 
   const { states, phase, topError, start, summary } = usePush(sessionIds, redactionLevel, useMock);
   const destination = commonsUrl();
+  const effectiveLicense = usePublishLicense();
+  const consentPhrase = licensePhrase(effectiveLicense);
+  const submitLabel = licenseButtonLabel(effectiveLicense);
 
   useEffect(() => {
     onFooterActionsChange(
       phase === 'idle' || phase === 'error'
-        ? { primary: { label: phase === 'error' ? 'Try again' : 'Submit', onClick: start } }
+        ? { primary: { label: phase === 'error' ? 'Try again' : (submitLabel ?? 'Submit'), onClick: start } }
         : null,
     );
     return () => onFooterActionsChange(null);
-  }, [onFooterActionsChange, phase, start]);
+  }, [onFooterActionsChange, phase, start, submitLabel]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -313,6 +354,24 @@ export function PushStep({
           <p className="px-1 text-xs text-ink-3">
             Annotations and commit links travel with the transcript — minus whatever
             redaction removed.
+          </p>
+
+          {/* License + privacy notice — named before submit so a person knows
+              what a push licenses and where the terms are written down. The
+              phrase is absent until the effective license loads; the notice
+              link always renders. */}
+          <p className="px-1 text-xs text-ink-3">
+            {consentPhrase ? <>This push will {consentPhrase}. </> : null}
+            Read the{' '}
+            <a
+              href={noticeUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-ink-4 underline-offset-2 hover:decoration-ink"
+            >
+              privacy notice
+            </a>{' '}
+            before you publish.
           </p>
 
           {/* Post-publish note — kept as app chrome; the local copy is untouched. */}
