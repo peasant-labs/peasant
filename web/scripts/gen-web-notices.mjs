@@ -37,8 +37,16 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // --- policy (documented, minimal) -----------------------------------------
-// Packages verified absent from peasant's client-only static export.
-const EXCLUDE = (name) => name === 'sharp' || name.startsWith('@img/');
+// Packages absent from peasant's client-only static export (output:'export'
+// ships no native binaries): the server-side image stack (sharp + its @img/*
+// natives, one LGPL) and platform-specific native binaries such as @next/swc-*
+// (Next's build-time SWC compiler). Excluding every platform-native package also
+// keeps this file ARCHITECTURE-INDEPENDENT — pnpm licenses list reports only the
+// installed platform's optional natives, so without this the committed file
+// (generated on x64) would not match a CI regen on arm64.
+const PLATFORM_NATIVE = /-(?:linux|darwin|win32|freebsd|android)-(?:x64|arm64|arm|ia32|s390x|ppc64le?|riscv64)(?:-\w+)?$/;
+const EXCLUDE = (name) =>
+  name === 'sharp' || name.startsWith('@img/') || PLATFORM_NATIVE.test(name);
 
 // The app's own package is not a third-party notice. Derived from package.json
 // so this generator ports to other web apps (e.g. the village frontend) without

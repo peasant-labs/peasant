@@ -3186,13 +3186,6 @@ is the identifier declared in its package.json.
 ================================================================================
 
 ================================================================================
-Package: @next/swc-linux-x64-gnu@15.5.19
-License: MIT
-No license file is distributed with this package; the license above
-is the identifier declared in its package.json.
-================================================================================
-
-================================================================================
 Package: @peasant-labs/fairtrade@0.0.19
 File:    LICENSE
 ================================================================================
