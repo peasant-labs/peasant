@@ -1,0 +1,34 @@
+requiredNames:
+  - both-halves-in-memory-uses-no-disk-read
+  - missing-transcript-reads-both-halves
+  - missing-metadata-reads-both-halves
+  - neither-half-reads-both-halves
+sessionID: "99d59925-36bc-424c-a789-8be54d9702ba"
+hostSlug: "github.com--testuser--testrepo"
+firstTranscript: |
+  {"type":"user","message":{"role":"user","content":"first generation alpha"}}
+secondTranscript: |
+  {"type":"user","message":{"role":"user","content":"second generation beta"}}
+extraMetadataField: "retainedNote"
+extraMetadataValue: "carried outside the decoded projection"
+captureReads:
+  - name: both-halves-in-memory-uses-no-disk-read
+    transcriptPresent: true
+    metadataPresent: true
+    expectMetadataReads: 0
+    expectTranscriptReads: 0
+  - name: missing-transcript-reads-both-halves
+    transcriptPresent: false
+    metadataPresent: true
+    expectMetadataReads: 1
+    expectTranscriptReads: 1
+  - name: missing-metadata-reads-both-halves
+    transcriptPresent: true
+    metadataPresent: false
+    expectMetadataReads: 1
+    expectTranscriptReads: 1
+  - name: neither-half-reads-both-halves
+    transcriptPresent: false
+    metadataPresent: false
+    expectMetadataReads: 1
+    expectTranscriptReads: 1

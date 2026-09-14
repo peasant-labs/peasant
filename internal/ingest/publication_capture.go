@@ -13,7 +13,11 @@ import (
 // the write transaction. Keep the verified bytes, not a path to reread later.
 func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTarget) indexedMeta {
 	im := indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath}
-	data, err := p.fs.ReadFile(target.transcriptPath)
+	// One validated read of both halves. The index must never pair bytes
+	// from two different reads, and the decoded publication projection has
+	// already dropped the fields the metadata document carries outside the
+	// struct, so re-encoding it as the pair's metadata would be lossy.
+	artifact, err := readArtifactPair(p.fs, string(p.config.OutputDir), adapterTargetMetadataPath(target), target.session.SessionID)
 	if err != nil {
 		slog.Warn("reindex: cannot read managed capture", "session_id", target.session.SessionID, "error", err,
 			"impact", "no publication proof will be assigned", "fix", "restore the retained source and run peasant ingest")
@@ -21,7 +25,8 @@ func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTar
 		im.transcriptData = []byte{}
 		return im
 	}
-	im.transcriptData = data
+	im.transcriptData = artifact.Transcript
+	im.metadataData = artifact.MetadataJSON
 	reader, ok := p.store.(PublicationMetadataReader)
 	if !ok {
 		return im
@@ -31,7 +36,7 @@ func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTar
 	// lightweight even when publication loads full entry bodies.
 	snapshots, err := reader.LoadPublicationMetadata(ctx, []SessionID{target.session.SessionID})
 	snapshot := snapshots[target.session.SessionID]
-	if err != nil || snapshot.Error != nil || snapshot.Readiness != PublicationReady || snapshot.Metadata.ModelHarness != target.session.Harness || snapshot.Metadata.Source.Format != target.session.SourceFormat || snapshot.Metadata.ContentHash != schema.ComputeTranscriptHash(data) {
+	if err != nil || snapshot.Error != nil || snapshot.Readiness != PublicationReady || snapshot.Metadata.ModelHarness != target.session.Harness || snapshot.Metadata.Source.Format != target.session.SourceFormat || snapshot.Metadata.ContentHash != schema.ComputeTranscriptHash(artifact.Transcript) {
 		return im
 	}
 	indexer, ok := p.indexers[target.session.Harness]
