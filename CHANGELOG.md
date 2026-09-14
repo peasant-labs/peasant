@@ -67,6 +67,11 @@ Release, which holds the signed artifacts and checksums.
   mismatch; transcript and metadata are read as one validated pair (#395).
 - `--dry-run` opens the analytics database read-only instead of loading the
   whole file into memory (#406).
+- Sessions stored before publication captures existed, including every
+  session a v0.5.0 database holds, are captured again by an ordinary `peasant
+  ingest` and can publish. The harvest previously settled such a session from
+  its retained transcript pair, which cannot bind a capture, so `push` kept
+  asking for an ingest that changed nothing (#413).
 
 ### Database
 - Store migrations V50 through V61: captured-source fingerprints and
