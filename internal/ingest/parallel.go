@@ -50,15 +50,24 @@ func topoLevels(entries []DiffEntry) [][]DiffEntry {
 	maxLevel := 0
 
 	changed := true
-	for changed {
+	// The pass bound guarantees termination even for a pathological logical
+	// cycle a legacy caller reintroduced: an acyclic graph converges in at most
+	// one pass per node, so the bound never changes an acyclic result.
+	for pass := 0; changed && pass <= len(entries); pass++ {
 		changed = false
 		for i, e := range entries {
 			parent := OperationalParentID(e.Session)
 			if parent == nil {
-				// Fall back to the logical evidence only when the operational
-				// edge was never derived (legacy callers). New Codex/OpenCode
-				// entries always carry the edge.
-				if e.Session.SchedulingParentID != nil || e.Session.ParentUUID == nil {
+				// A nil operational edge is a deliberate dispatch root for an
+				// independently admitted Codex/OpenCode entry: the entry was
+				// admitted with its own selection decision, and the graph may
+				// have removed an internal cycle edge. Falling back to the
+				// logical ParentUUID here would restore that removed cycle and
+				// make this fixed point loop forever, so never fall back for an
+				// independently admitted harness. Every other harness keeps the
+				// legacy logical fallback for callers that never derived an
+				// edge.
+				if IndependentAdmissionHarness(e.Session.Harness) || e.Session.ParentUUID == nil {
 					continue // root — always level 0
 				}
 				parent = e.Session.ParentUUID
