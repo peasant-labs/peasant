@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1352,6 +1353,11 @@ type jsonPushSession struct {
 	Title     string `json:"title,omitempty"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
+	// RequiredCapabilities lists the exact receiver capability tokens this
+	// session's durable payload requires, derived locally without any network
+	// call. It is populated on a dry-run scan and on a real push; it describes
+	// the payload, never a receiver.
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 }
 
 // printPushJSON outputs the push result as JSON including annotation summary.
@@ -1370,6 +1376,9 @@ func printPushJSON(w io.Writer, result *push.PushResult, annSummary *push.Annota
 			HostSlug:  sr.HostSlug,
 			Title:     sr.Title,
 			Status:    sr.Status.String(),
+		}
+		for _, capability := range sr.RequiredCapabilities {
+			js.RequiredCapabilities = append(js.RequiredCapabilities, string(capability))
 		}
 		if sr.Error != nil {
 			js.Error = sr.Error.Error()
@@ -1896,10 +1905,38 @@ func printPushSummary(w io.Writer, result *push.PushResult, dryRun bool, verbose
 		wouldPush := result.New + result.Updated
 		fmt.Fprintf(w, "Dry run summary: %d would push, %d unchanged (0 errors — no HTTP calls made)\n",
 			wouldPush, result.Skipped)
+		if required := requiredCapabilitiesAcross(result); len(required) > 0 {
+			fmt.Fprintf(w, "Dry run: receiver support was not checked; this selection requires: %s\n", strings.Join(required, ", "))
+		}
 	} else {
 		fmt.Fprintf(w, "Summary: %d new, %d updated, %d error(s), %d skipped, %d held\n",
 			result.New, result.Updated, result.Errors, result.Skipped, result.Held)
 	}
+}
+
+// requiredCapabilitiesAcross returns the sorted, deduplicated union of the
+// receiver capability tokens the run's durable payloads require. It is derived
+// from the offline scan, so it reflects the payloads alone and never a
+// receiver's support.
+func requiredCapabilitiesAcross(result *push.PushResult) []string {
+	if result == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, session := range result.Sessions {
+		for _, capability := range session.RequiredCapabilities {
+			seen[string(capability)] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	required := make([]string, 0, len(seen))
+	for token := range seen {
+		required = append(required, token)
+	}
+	sort.Strings(required)
+	return required
 }
 
 // printErrorSummaryTable prints an "Errors by type:" breakdown grouping the

@@ -125,6 +125,13 @@ type SessionPushResult struct {
 	Status    PushStatus
 	// Error is non-nil when Status == PushStatusError.
 	Error error
+	// RequiredCapabilities is the exact receiver capability inventory the
+	// session's durable payload requires, derived locally by the offline scan.
+	// It is populated on every path that reaches the scan — a dry-run forecast,
+	// a successful upload, and a capability refusal — so a caller can report what
+	// a receiver must advertise before any negotiation and can explain a refusal
+	// in terms of the payload. It is never a statement about a receiver's support.
+	RequiredCapabilities []schema.ContentCapability
 }
 
 // PushResult is the aggregate outcome of a complete push run.

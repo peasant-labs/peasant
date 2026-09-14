@@ -263,7 +263,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	// contract version; no audit log.
 	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
 		for _, sess := range sessions {
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil, perf.ParentSpanFromContext(ctx))
+			// The offline scan passes an explicitly UNKNOWN support value: it
+			// derives local requirements but performs no negotiation, so it can
+			// neither refuse for an unqueried receiver nor authorize an upload.
+			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, RemoteCapabilitySupport{}, perf.ParentSpanFromContext(ctx))
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
@@ -288,10 +291,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	sessions = outcome.valid
 
 	// 6b. Version-negotiation preflight: query the village's accepted
-	// contract window and decide the emit version. Aborts the whole push on an
-	// upgrade-CLI or non-downgradable mismatch; downgrade-emits (with a one-line
-	// warning) when the CLI is ahead. Skipped above for dry-run (no HTTP).
-	emit, capabilities, err := p.negotiate(ctx)
+	// contract window and freshly fetch its capability advertisement, then
+	// decide the emit version. Aborts the whole push on an upgrade-CLI or
+	// non-downgradable mismatch; downgrade-emits (with a one-line warning) when
+	// the CLI is ahead. Skipped above for dry-run (no HTTP). The fresh
+	// advertisement is what every session in this run is checked against; a
+	// cached scan result is never consulted.
+	emit, support, err := p.negotiate(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -326,7 +332,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 			if rec.Enabled() {
 				tracker.Enter()
 			}
-			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities, perf.ParentSpanFromContext(gctx))
+			sr := p.pushSession(gctx, sess, visibility, license, emit, support, perf.ParentSpanFromContext(gctx))
 			if rec.Enabled() {
 				tracker.Exit()
 			}
@@ -852,7 +858,7 @@ func (p *Pipeline) pushSession(
 	visibility schema.Visibility,
 	license schema.License,
 	emit schema.PushContractVersion,
-	contentCapabilities []schema.ContentCapability,
+	support RemoteCapabilitySupport,
 	parentSpanID string,
 ) (sr SessionPushResult) {
 	// Profile spans for this session. The session span is the parent for every
@@ -1006,7 +1012,14 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
 	}
-	requiredCapabilities := schema.RequiredContentCapabilities(*content.SessionDetail)
+	// Derive the receiver capabilities this durable payload requires BEFORE
+	// anything can be uploaded. The scan is local (no network) and validates the
+	// exact content that will be uploaded; it neither consults nor caches any
+	// receiver's support, so it can never refuse for a receiver it did not query.
+	scan, err := ScanPublication(content)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("session %s: %w: %w", sess.SessionID, ErrInvalidPublishBody, err)}
+	}
 	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
@@ -1017,9 +1030,11 @@ func (p *Pipeline) pushSession(
 	}
 
 	// 5. DRY-RUN DIVERGENCE. Everything above — read metadata, the metadata/model
-	// guards, redaction, mapping, and the client-side schema validation — is the
-	// SAME code path the real push runs; --dry-run forecasts the outcome WITHOUT
-	// performing the side effects (no content upload, receipt persistence, or audit log).
+	// guards, redaction, mapping, the client-side schema validation, and the
+	// local capability scan — is the SAME code path the real push runs; --dry-run
+	// forecasts the outcome WITHOUT performing the side effects (no content
+	// upload, receipt persistence, or audit log) and WITHOUT negotiating with any
+	// receiver. It reports the derived requirements, not a receiver's answer.
 	// The forecast status mirrors the real classify: a previously-pushed session
 	// would be an update, otherwise a new upload.
 	if p.runCfg.DryRun {
@@ -1028,21 +1043,26 @@ func (p *Pipeline) pushSession(
 			status = PushStatusUpdated
 		}
 		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Title:     title,
-			Status:    status,
+			SessionID:            sess.SessionID,
+			HostSlug:             sess.HostSlug,
+			Title:                title,
+			Status:               status,
+			RequiredCapabilities: scan.Required,
 		}
 	}
-	missingCapabilities := missingContentCapabilities(contentCapabilities, requiredCapabilities)
+	// The freshly fetched receiver must advertise every token this payload
+	// requires. There is no stripping fallback: a payload carrying graph
+	// evidence is either uploaded whole to a capable receiver or refused whole.
+	missingCapabilities := support.Shortfall(scan.Required)
 	if len(missingCapabilities) > 0 {
 		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
+			SessionID:            sess.SessionID,
+			HostSlug:             sess.HostSlug,
+			Status:               PushStatusError,
+			RequiredCapabilities: scan.Required,
 			Error: fmt.Errorf(
-				"enriched transcript push refused\n  what: session %s carries capability-bearing source evidence\n  why: the target Village did not advertise the exact %q capability tokens\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would lose recorded attribution\n  fix: use a Village target that advertises these capabilities after its preservation proof passes, then retry",
-				sess.SessionID, missingCapabilities,
+				"enriched transcript push refused\n  what: session %s carries capability-bearing source evidence that the receiver may discard\n  why: %s\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would lose recorded attribution; missing tokens: %q\n  fix: %s",
+				sess.SessionID, support.UnsupportedReason(), missingCapabilities, capabilityRefusalRecovery(support),
 			),
 		}
 	}
@@ -1200,10 +1220,11 @@ func (p *Pipeline) pushSession(
 	}
 
 	return SessionPushResult{
-		SessionID: sess.SessionID,
-		HostSlug:  sess.HostSlug,
-		Title:     title,
-		Status:    status,
+		SessionID:            sess.SessionID,
+		HostSlug:             sess.HostSlug,
+		Title:                title,
+		Status:               status,
+		RequiredCapabilities: scan.Required,
 	}
 }
 
