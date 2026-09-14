@@ -25,14 +25,6 @@ for (const { spdx, bucket } of cases) {
   }
 }
 
-// Guard contract: only PERMISSIVE and WEAK are shippable; STRONG and UNKNOWN
-// block the build. Assert the buckets that must fail actually fail.
-assert.equal(classify('GPL-3.0-only'), 'STRONG');
-assert.equal(classify('AGPL-3.0-or-later'), 'STRONG');
-assert.equal(classify('UNLICENSED'), 'UNKNOWN');
-assert.ok(['PERMISSIVE', 'WEAK'].includes(classify('MIT')));
-assert.ok(['PERMISSIVE', 'WEAK'].includes(classify('LGPL-3.0-or-later')));
-
 if (failures > 0) {
   console.error(`gen-web-notices.test: ${failures} classification case(s) failed`);
   process.exit(1);

@@ -77,6 +77,9 @@ dashboard's npm package notices follow in the WEB DASHBOARD section below.
 
 HEADER
 
+  # Fence the Go block so future tooling can extract it independently of the
+  # appended web block (which carries its own BEGIN/END markers).
+  printf '%s\n\n' '<!-- BEGIN GENERATED go-module-notices -->'
   while IFS= read -r mod; do
     path="${mod%@*}"
     [ "${path}" = "${main_module}" ] && continue
@@ -111,6 +114,8 @@ HEADER
       printf '\n'
     done
   done < "${mods_tmp}"
+
+  printf '%s\n' '<!-- END GENERATED go-module-notices -->'
 } > "${buf_tmp}"
 
 # Append the embedded web dashboard's npm notices. web/out is compiled into the

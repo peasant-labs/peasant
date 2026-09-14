@@ -40,6 +40,13 @@ import { fileURLToPath } from 'node:url';
 // Packages verified absent from peasant's client-only static export.
 const EXCLUDE = (name) => name === 'sharp' || name.startsWith('@img/');
 
+// The app's own package is not a third-party notice. Derived from package.json
+// so this generator ports to other web apps (e.g. the village frontend) without
+// editing a hardcoded name.
+const SELF = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+).name;
+
 const PERMISSIVE = new Set([
   'MIT', 'ISC', '0BSD', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0',
   'CC0-1.0', 'CC-BY-4.0', 'Unlicense', 'Zlib', 'BlueOak-1.0.0',
@@ -56,29 +63,67 @@ const STRONG_COPYLEFT = new Set([
   'AGPL-3.0-only', 'AGPL-3.0-or-later', 'SSPL-1.0',
 ]);
 
-// Classify one dependency's SPDX license string into a bucket. Handles simple
-// SPDX expressions: "A OR B" takes the most permissive branch; "A AND B" takes
-// the most restrictive.
-export function classify(spdx) {
-  if (!spdx || spdx === 'UNLICENSED' || /SEE LICENSE/i.test(spdx)) return 'UNKNOWN';
-  const expr = spdx.replace(/[()]/g, ' ').trim();
-  if (/\bOR\b/.test(expr)) {
-    const parts = expr.split(/\bOR\b/).map((p) => classify(p.trim()));
-    for (const rank of ['PERMISSIVE', 'WEAK', 'STRONG', 'UNKNOWN']) {
-      if (parts.includes(rank)) return rank;
-    }
-  }
-  if (/\bAND\b/.test(expr)) {
-    const parts = expr.split(/\bAND\b/).map((p) => classify(p.trim()));
-    for (const rank of ['UNKNOWN', 'STRONG', 'WEAK', 'PERMISSIVE']) {
-      if (parts.includes(rank)) return rank;
-    }
-  }
-  const t = expr.replace(/\s+WITH\s+.*/i, '').trim();
+// Classify one bare SPDX license id (ignoring any "WITH <exception>").
+function classifyId(id) {
+  const t = id.replace(/\s+WITH\s+.*/i, '').trim();
   if (PERMISSIVE.has(t)) return 'PERMISSIVE';
   if (WEAK_COPYLEFT.has(t)) return 'WEAK';
   if (STRONG_COPYLEFT.has(t)) return 'STRONG';
   return 'UNKNOWN';
+}
+
+// Restrictiveness order; higher = more restrictive.
+const RANK = { PERMISSIVE: 0, WEAK: 1, STRONG: 2, UNKNOWN: 3 };
+const mostPermissive = (a, b) => (RANK[b] < RANK[a] ? b : a); // OR: may choose the least restrictive
+const mostRestrictive = (a, b) => (RANK[b] > RANK[a] ? b : a); // AND: must satisfy all
+
+// Classify an SPDX license expression into a bucket, respecting parentheses and
+// SPDX precedence (AND binds tighter than OR). A recursive-descent parse — NOT a
+// global paren-strip — so a paren'd OR inside an AND (e.g.
+// "GPL-3.0-only AND (MIT OR Apache-2.0)") stays STRONG. Anything that does not
+// parse cleanly falls through to UNKNOWN, so the guard fails closed.
+export function classify(spdx) {
+  if (!spdx || spdx === 'UNLICENSED' || /SEE LICENSE/i.test(spdx)) return 'UNKNOWN';
+  // Tokenize: parens are their own tokens; AND/OR are operators; any other run
+  // of words is one license id ("Apache-2.0 WITH LLVM-exception").
+  const words = spdx.replace(/([()])/g, ' $1 ').trim().split(/\s+/);
+  const toks = [];
+  let cur = [];
+  const flush = () => { if (cur.length) { toks.push({ t: 'id', v: cur.join(' ') }); cur = []; } };
+  for (const w of words) {
+    if (w === '(' || w === ')') { flush(); toks.push({ t: w }); }
+    else if (w === 'AND' || w === 'OR') { flush(); toks.push({ t: w }); }
+    else cur.push(w);
+  }
+  flush();
+
+  let pos = 0;
+  const peek = () => toks[pos];
+  const parseOr = () => {
+    let v = parseAnd();
+    while (peek() && peek().t === 'OR') { pos += 1; v = mostPermissive(v, parseAnd()); }
+    return v;
+  };
+  function parseAnd() {
+    let v = parseAtom();
+    while (peek() && peek().t === 'AND') { pos += 1; v = mostRestrictive(v, parseAtom()); }
+    return v;
+  }
+  function parseAtom() {
+    const tk = peek();
+    if (!tk) return 'UNKNOWN';
+    if (tk.t === '(') {
+      pos += 1;
+      const v = parseOr();
+      if (peek() && peek().t === ')') { pos += 1; return v; }
+      return 'UNKNOWN'; // unbalanced -> fail closed
+    }
+    if (tk.t === 'id') { pos += 1; return classifyId(tk.v); }
+    return 'UNKNOWN'; // stray operator -> fail closed
+  }
+
+  const result = parseOr();
+  return pos === toks.length ? result : 'UNKNOWN'; // trailing tokens -> fail closed
 }
 
 const LICENSE_FILE = /^(LICENSE|LICENCE|COPYING|NOTICE)/i;
@@ -113,7 +158,7 @@ const pkgs = [];
 for (const entries of Object.values(grouped)) {
   for (const e of entries) {
     if (EXCLUDE(e.name)) continue;
-    if (e.name === 'peasant-web') continue; // the app itself
+    if (e.name === SELF) continue; // the app itself
     pkgs.push(e);
   }
 }
@@ -137,22 +182,37 @@ if (blocked.length) {
 }
 
 // --- render -----------------------------------------------------------------
+// NOTE (porting to another web app, e.g. the village frontend): SELF (the app's
+// own package) is read from package.json, and the sharp/@img EXCLUDE assumes a
+// client-only static export. An app that ships server code (a standalone image)
+// bundles sharp and must NOT exclude it — its LGPL then ships and is handled by
+// the WEAK / source-availability path. The header lines below say "web/out" and
+// "browser"; adjust them for a server bundle.
 const RULE = '='.repeat(80);
 const out = [];
+out.push('<!-- BEGIN GENERATED npm-web-notices -->');
 out.push('THIRD-PARTY SOFTWARE NOTICES — WEB DASHBOARD (npm)');
 out.push('');
 out.push('The embedded web dashboard (web/out) bundles the npm packages below.');
-out.push('This reproduces their license texts as their licenses require. It lists');
-out.push("the web app's production dependency closure, a superset of what the client");
-out.push('bundle includes. Generated from web/pnpm-lock.yaml; do not edit by hand');
-out.push('(run: make third-party-notices).');
+out.push('This reproduces their license texts as their licenses require. The list');
+out.push('includes every production dependency of the web app — more packages than');
+out.push('the browser loads, which is safe for attribution. Generated from the pnpm');
+out.push('lockfile; do not edit by hand (run: make third-party-notices).');
 out.push('');
 
 const weak = pkgs.filter((p) => p.bucket === 'WEAK');
 
 for (const p of pkgs) {
-  const dir = p.paths[0];
-  const files = dir ? readLicenseText(dir) : [];
+  // Collect license files across ALL installed paths (a multi-version package
+  // installs more than one), de-duplicated by text so distinct notices are all
+  // reproduced rather than only the first version's.
+  const seenText = new Set();
+  const files = [];
+  for (const dir of p.paths) {
+    for (const f of readLicenseText(dir)) {
+      if (!seenText.has(f.text)) { seenText.add(f.text); files.push(f); }
+    }
+  }
   if (files.length === 0) {
     // No license file shipped: fall back to the declared SPDX id + author.
     out.push(RULE);
@@ -174,37 +234,48 @@ for (const p of pkgs) {
   }
   // Carry a bundled @peasant-labs/* package's own third-party notices (e.g.
   // fairtrade reproduces the Pi brand-mark attribution) — redistributed too.
-  if (p.name.startsWith('@peasant-labs/') && dir) {
-    for (const n of ['THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES']) {
-      try {
-        const text = readFileSync(join(dir, n), 'utf8');
-        out.push(RULE);
-        out.push(`Package: ${p.name}@${p.versions.join(',')} — bundled ${n}`);
-        out.push(RULE);
-        out.push(text.replace(/\s+$/, ''));
-        out.push('');
-        break;
-      } catch { /* none */ }
+  if (p.name.startsWith('@peasant-labs/')) {
+    let carried = false;
+    for (const dir of p.paths) {
+      for (const n of ['THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES']) {
+        try {
+          const text = readFileSync(join(dir, n), 'utf8');
+          out.push(RULE);
+          out.push(`Package: ${p.name}@${p.versions.join(',')} — bundled ${n}`);
+          out.push(RULE);
+          out.push(text.replace(/\s+$/, ''));
+          out.push('');
+          carried = true;
+          break;
+        } catch { /* none */ }
+      }
+      if (carried) break;
     }
   }
 }
 
 if (weak.length) {
   out.push(RULE);
-  out.push('COPYLEFT COMPONENTS — SOURCE AVAILABILITY');
+  out.push('COPYLEFT COMPONENTS — WRITTEN OFFER OF SOURCE');
   out.push(RULE);
-  out.push('The components below are covered by a weak-copyleft (LGPL) license.');
-  out.push('They are separable, dynamically-loaded libraries; you may replace them');
-  out.push('with a modified version. Their license text appears above. The');
-  out.push('corresponding source is available from each project, and Peasant Labs');
-  out.push('will provide the exact source for the bundled version on request at');
-  out.push('admin@peasantlabs.org.');
+  out.push('The components below are covered by a weak-copyleft (LGPL) license,');
+  out.push('reproduced above. Each is a separable, dynamically-loaded library that');
+  out.push('you may replace with your own modified version.');
+  out.push('');
+  out.push('WRITTEN OFFER: For at least three (3) years from the date this software');
+  out.push('was distributed, Peasant Labs will give any third party, on request at');
+  out.push('admin@peasantlabs.org, the complete corresponding source code of each');
+  out.push('component below (for the exact version distributed), for no more than the');
+  out.push('cost of physically performing the distribution. The source is also');
+  out.push('available from each project at the location listed.');
   out.push('');
   for (const p of weak) {
     out.push(`- ${p.name}@${p.versions.join(',')} — ${p.license} — source: ${p.homepage || '(see package repository)'}`);
   }
   out.push('');
 }
+
+out.push('<!-- END GENERATED npm-web-notices -->');
 
 process.stdout.write(out.join('\n'));
 }
