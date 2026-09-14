@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -74,6 +75,32 @@ type codexEarlierFixture struct {
 	Entries []codexEntryFixture `yaml:"entries"`
 }
 
+// codexRetainedFixture is one inherited evidence block that must stay
+// recoverable from the managed generation catalog without being emitted as a
+// main or earlier conversational entry.
+type codexRetainedFixture struct {
+	Ref     string `yaml:"ref"`
+	Content string `yaml:"content"`
+	// SegmentInclusion names the captured context segment the retained ref must
+	// be attached to, so the inherited evidence keeps its segment provenance.
+	SegmentInclusion string `yaml:"segmentInclusion"`
+}
+
+// codexReferenceFixture is one declared native history dependency of the
+// captured current source.
+type codexReferenceFixture struct {
+	Pointer          string `yaml:"pointer"`
+	PhysicalSourceID string `yaml:"physicalSourceID"`
+	Mode             string `yaml:"mode"`
+	HistoryKind      string `yaml:"historyKind"`
+	ThroughCompleted bool   `yaml:"throughCompleted"`
+	Inclusion        string `yaml:"inclusion"`
+	CoordinateKind   string `yaml:"coordinateKind"`
+	Start            *int64 `yaml:"start"`
+	EndExclusive     *int64 `yaml:"endExclusive"`
+	LogicalSessionID string `yaml:"logicalSessionID"`
+}
+
 type codexExpectFixture struct {
 	Purpose               string                     `yaml:"purpose"`
 	RootSessionID         string                     `yaml:"rootSessionID"`
@@ -85,6 +112,8 @@ type codexExpectFixture struct {
 	TitleRefs             []string                   `yaml:"titleRefs"`
 	Main                  []codexEntryFixture        `yaml:"main"`
 	Earlier               []codexEarlierFixture      `yaml:"earlier"`
+	Retained              []codexRetainedFixture     `yaml:"retained"`
+	MetadataCWD           string                     `yaml:"metadataCWD"`
 }
 
 type codexThreadFixture struct {
@@ -99,19 +128,26 @@ type codexThreadFixture struct {
 }
 
 type codexProvenanceCase struct {
-	Name             string              `yaml:"name"`
-	StableThreadID   string              `yaml:"stableThreadID"`
-	Pointer          string              `yaml:"pointer"`
-	PhysicalSourceID string              `yaml:"physicalSourceID"`
-	GenerationID     string              `yaml:"generationID"`
-	Completeness     string              `yaml:"completeness"`
-	HistoryMode      string              `yaml:"historyMode"`
-	Sources          map[string]string   `yaml:"sources"`
-	Prior            *codexPriorFixture  `yaml:"prior"`
-	Thread           *codexThreadFixture `yaml:"thread"`
-	EntryRefs        []string            `yaml:"entryRefs"`
-	SubmissionRefs   []string            `yaml:"submissionRefs"`
-	Expected         codexExpectFixture  `yaml:"expected"`
+	Name             string                  `yaml:"name"`
+	StableThreadID   string                  `yaml:"stableThreadID"`
+	Pointer          string                  `yaml:"pointer"`
+	PhysicalSourceID string                  `yaml:"physicalSourceID"`
+	GenerationID     string                  `yaml:"generationID"`
+	Completeness     string                  `yaml:"completeness"`
+	HistoryMode      string                  `yaml:"historyMode"`
+	CopyBoundary     *int64                  `yaml:"copyBoundary"`
+	OwnershipProven  bool                    `yaml:"ownershipProven"`
+	References       []codexReferenceFixture `yaml:"references"`
+	Sources          map[string]string       `yaml:"sources"`
+	Prior            *codexPriorFixture      `yaml:"prior"`
+	Thread           *codexThreadFixture     `yaml:"thread"`
+	EntryRefs        []string                `yaml:"entryRefs"`
+	SubmissionRefs   []string                `yaml:"submissionRefs"`
+	ExpectRefusal    bool                    `yaml:"expectRefusal"`
+	PrivateSentinel  string                  `yaml:"privateSentinel"`
+	MutationBarrier  bool                    `yaml:"mutationBarrier"`
+	MutatedSources   map[string]string       `yaml:"mutatedSources"`
+	Expected         codexExpectFixture      `yaml:"expected"`
 }
 
 type codexProvenanceFixtureDoc struct {
@@ -208,6 +244,40 @@ func codexHistoryMode(t *testing.T, raw string) []byte {
 	}
 }
 
+func codexReferencesForCase(t *testing.T, fixtures []codexReferenceFixture) []ingest.CodexReference {
+	t.Helper()
+	references := make([]ingest.CodexReference, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		inclusion, err := indexformat.NewSegmentInclusion(fixture.Inclusion)
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinateKind, err := indexformat.NewCoordinateKind(fixture.CoordinateKind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reference := ingest.CodexReference{
+			Pointer:          fixture.Pointer,
+			PhysicalSourceID: fixture.PhysicalSourceID,
+			Mode:             ingest.CodexHistoryMode(fixture.Mode),
+			HistoryKind:      fixture.HistoryKind,
+			ThroughCompleted: fixture.ThroughCompleted,
+			Inclusion:        inclusion,
+			Coordinates: indexformat.SegmentCoordinates{
+				Kind:         coordinateKind,
+				Start:        fixture.Start,
+				EndExclusive: fixture.EndExclusive,
+			},
+		}
+		if fixture.LogicalSessionID != "" {
+			id := schema.SessionID(fixture.LogicalSessionID)
+			reference.LogicalSessionID = &id
+		}
+		references = append(references, reference)
+	}
+	return references
+}
+
 func codexAuthorityForCase(t *testing.T, c codexProvenanceCase) ingest.CodexSourceAuthority {
 	t.Helper()
 	kind, err := ingest.NewCodexSourceAuthorityKind(string(ingest.CodexAuthorityDetachedFile))
@@ -215,11 +285,14 @@ func codexAuthorityForCase(t *testing.T, c codexProvenanceCase) ingest.CodexSour
 		t.Fatal(err)
 	}
 	return ingest.CodexSourceAuthority{
-		StableThreadID:   c.StableThreadID,
-		Kind:             kind,
-		CurrentPointer:   c.Pointer,
-		PhysicalSourceID: c.PhysicalSourceID,
-		HistoryMode:      codexHistoryMode(t, c.HistoryMode),
+		StableThreadID:          c.StableThreadID,
+		Kind:                    kind,
+		CurrentPointer:          c.Pointer,
+		PhysicalSourceID:        c.PhysicalSourceID,
+		HistoryMode:             codexHistoryMode(t, c.HistoryMode),
+		CopyBoundary:            c.CopyBoundary,
+		OriginalOwnershipProven: c.OwnershipProven,
+		References:              codexReferencesForCase(t, c.References),
 	}
 }
 
@@ -276,7 +349,7 @@ func codexReferenceStrings(refs []schema.SourceEntryRef) []string {
 	return out
 }
 
-func runCodexProvenanceCandidate(t *testing.T, c codexProvenanceCase) ingest.CodexCandidate {
+func runCodexProvenanceCandidate(t *testing.T, c codexProvenanceCase) (ingest.CodexCandidate, error) {
 	t.Helper()
 	source := &codexProvenanceSource{authority: codexAuthorityForCase(t, c), sources: map[string][]byte{}}
 	for pointer, data := range c.Sources {
@@ -304,7 +377,7 @@ func runCodexProvenanceCandidate(t *testing.T, c codexProvenanceCase) ingest.Cod
 		GenerationID: c.GenerationID,
 	})
 	if err != nil {
-		t.Fatalf("BuildCodexCandidate: %v", err)
+		return ingest.CodexCandidate{}, err
 	}
 	if completeness != "" && candidate.V2.Generation.Completeness != completeness {
 		t.Fatalf("completeness = %q, want %q", candidate.V2.Generation.Completeness, completeness)
@@ -321,7 +394,7 @@ func runCodexProvenanceCandidate(t *testing.T, c codexProvenanceCase) ingest.Cod
 	if candidate.Proof.GenerationID != c.GenerationID {
 		t.Errorf("proof.generationID = %q, want %q", candidate.Proof.GenerationID, c.GenerationID)
 	}
-	return candidate
+	return candidate, nil
 }
 
 func codexAssertProvenance(t *testing.T, label string, want codexProvenanceFixture, got *schema.ContentProvenance) {
@@ -475,6 +548,75 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 		}
 		codexAssertEntries(t, fmt.Sprintf("earlier[%d]", i), want.Entries, generation.Earlier[i].Content.Entries)
 	}
+	codexAssertRetained(t, candidate, c.Expected.Retained)
+}
+
+// codexAssertRetained proves that inherited evidence stays recoverable from the
+// managed generation catalog while never entering a main or earlier
+// conversational partition. A retained ref must carry full content, must be
+// attached to a captured context segment, and must not appear in either the
+// main or the earlier entry streams. The retained set is derived from the
+// generation itself, never from a bare count.
+func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []codexRetainedFixture) {
+	t.Helper()
+	generation := candidate.V2.Generation
+	emitted := make(map[schema.SourceEntryRef]struct{}, len(generation.Main.Entries))
+	for _, entry := range generation.Main.Entries {
+		emitted[entry.SourceEntryRef] = struct{}{}
+	}
+	for i := range generation.Earlier {
+		for _, entry := range generation.Earlier[i].Content.Entries {
+			emitted[entry.SourceEntryRef] = struct{}{}
+		}
+	}
+	segmentInclusions := make(map[schema.SourceEntryRef]map[indexformat.SegmentInclusion]struct{})
+	for _, segment := range generation.Segments {
+		for _, ref := range segment.CapturedRefs {
+			if segmentInclusions[ref] == nil {
+				segmentInclusions[ref] = make(map[indexformat.SegmentInclusion]struct{})
+			}
+			segmentInclusions[ref][segment.Inclusion] = struct{}{}
+		}
+	}
+	retained := make(map[schema.SourceEntryRef]struct{})
+	for _, record := range generation.Content {
+		if _, ok := emitted[record.Ref]; !ok {
+			retained[record.Ref] = struct{}{}
+		}
+	}
+	if len(retained) != len(want) {
+		t.Fatalf("retained refs = %v, want %d named retained entries", codexReferenceStrings(mapKeysOfSet(retained)), len(want))
+	}
+	for _, expected := range want {
+		ref := schema.SourceEntryRef(expected.Ref)
+		if _, ok := retained[ref]; !ok {
+			t.Errorf("ref %q is not retained inherited evidence; inherited content would be lost", expected.Ref)
+			continue
+		}
+		if _, ok := emitted[ref]; ok {
+			t.Errorf("ref %q is emitted as a main or earlier entry; inherited content must not reach a conversational partition", expected.Ref)
+		}
+		inclusions := segmentInclusions[ref]
+		if len(inclusions) == 0 {
+			t.Errorf("retained ref %q is not attached to any captured context segment; the evidence is not recoverable", expected.Ref)
+		} else if expected.SegmentInclusion != "" {
+			if _, ok := inclusions[indexformat.SegmentInclusion(expected.SegmentInclusion)]; !ok {
+				t.Errorf("retained ref %q is not captured by a %q segment; its segment provenance was lost", expected.Ref, expected.SegmentInclusion)
+			}
+		}
+		if got := string(candidate.Content[ref]); got != expected.Content {
+			t.Errorf("retained content for %q = %q, want %q", expected.Ref, got, expected.Content)
+		}
+	}
+}
+
+func mapKeysOfSet(set map[schema.SourceEntryRef]struct{}) []schema.SourceEntryRef {
+	out := make([]schema.SourceEntryRef, 0, len(set))
+	for ref := range set {
+		out = append(out, ref)
+	}
+	slices.Sort(out)
+	return out
 }
 
 func codexThreadFromFixture(f codexThreadFixture) ingest.CodexThreadEvidence {
@@ -540,9 +682,165 @@ func TestCodexProvenanceFixtures(t *testing.T) {
 				codexAssertGraph(t, testCase)
 				return
 			}
-			candidate := runCodexProvenanceCandidate(t, testCase)
+			if testCase.MutationBarrier {
+				codexAssertMetadataMutationBarrier(t, testCase)
+				return
+			}
+			candidate, err := runCodexProvenanceCandidate(t, testCase)
+			if testCase.ExpectRefusal {
+				codexAssertCandidateRefusal(t, testCase, err)
+				return
+			}
+			if err != nil {
+				t.Fatalf("BuildCodexCandidate: %v", err)
+			}
 			codexAssertCase(t, testCase, candidate)
 		})
+	}
+}
+
+// codexAssertCandidateRefusal proves a candidate refusal is safe: it names its
+// fixed operation, reason, effect and recovery, and never echoes a private
+// native locator or a raw validator value.
+func codexAssertCandidateRefusal(t *testing.T, c codexProvenanceCase, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("candidate for %q was accepted, want a safe refusal", c.Name)
+	}
+	if c.PrivateSentinel != "" && strings.Contains(err.Error(), c.PrivateSentinel) {
+		t.Errorf("candidate refusal leaked the private locator %q: %v", c.PrivateSentinel, err)
+	}
+	if !strings.Contains(err.Error(), "no candidate was emitted") {
+		t.Errorf("candidate refusal does not name its fixed effect category: %v", err)
+	}
+}
+
+// codexMutatingFileSystem serves the verified G1 bytes for the captured path
+// until the configured read, then serves G2. Every other path delegates to the
+// real filesystem.
+type codexMutatingFileSystem struct {
+	ingest.FileSystem
+	path     string
+	g1       []byte
+	g2       []byte
+	reads    int
+	mutateAt int
+}
+
+func (m *codexMutatingFileSystem) ReadFile(path string) ([]byte, error) {
+	if filepath.Clean(path) != filepath.Clean(m.path) {
+		return m.FileSystem.ReadFile(path)
+	}
+	m.reads++
+	if m.mutateAt > 0 && m.reads >= m.mutateAt {
+		return append([]byte(nil), m.g2...), nil
+	}
+	return append([]byte(nil), m.g1...), nil
+}
+
+// codexAssertMetadataMutationBarrier proves the candidate's metadata comes from
+// the verified capture, never a reopened source: the source is replaced after
+// the verified incarnation and the candidate must still carry the captured
+// working directory, with exactly the capture's own read count and no second
+// full read.
+func codexAssertMetadataMutationBarrier(t *testing.T, c codexProvenanceCase) {
+	t.Helper()
+	if len(c.Sources) != 1 || len(c.MutatedSources) != 1 {
+		t.Fatalf("mutation barrier case %q needs exactly one source and one mutated source", c.Name)
+	}
+	var g1, g2 []byte
+	for _, data := range c.Sources {
+		g1 = []byte(data)
+	}
+	for _, data := range c.MutatedSources {
+		g2 = []byte(data)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2024-01-02T00-00-00-"+c.StableThreadID+".jsonl")
+	if err := os.WriteFile(path, g1, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := ingest.DiscoveredSession{
+		SessionID:  schema.SessionID(c.StableThreadID),
+		Harness:    ingest.HarnessCodex,
+		SourcePath: ingest.ResolvedPath(path),
+	}
+	probe := &codexMutatingFileSystem{FileSystem: &ingest.OSFileSystem{}, path: path, g1: g1, g2: g2}
+	if _, err := ingest.CaptureCodexHistoryWithRetry(t.Context(), ingest.NewCodexFileSource(probe), session, nil); err != nil {
+		t.Fatalf("probe capture: %v", err)
+	}
+	budget := probe.reads
+	if budget == 0 {
+		t.Fatalf("probe capture read the authoritative source zero times")
+	}
+	mutating := &codexMutatingFileSystem{FileSystem: &ingest.OSFileSystem{}, path: path, g1: g1, g2: g2, mutateAt: budget + 1}
+	indexer := ingest.NewCodexIndexer(mutating)
+	candidate, err := indexer.BuildCodexCandidateForSession(t.Context(), session, nil, ingest.NewProjectionPriorState(), &codexScriptedAllocator{entries: c.EntryRefs, submissions: c.SubmissionRefs}, c.GenerationID)
+	if err != nil {
+		t.Fatalf("BuildCodexCandidateForSession: %v", err)
+	}
+	if mutating.reads != budget {
+		t.Fatalf("post-capture reads = %d, want the capture's %d; a second full read occurred after verification", mutating.reads, budget)
+	}
+	if candidate.V2.Generation.Metadata.CWD != c.Expected.MetadataCWD {
+		t.Errorf("metadata cwd = %q, want the captured %q", candidate.V2.Generation.Metadata.CWD, c.Expected.MetadataCWD)
+	}
+	// The whole candidate, entries included, must be the captured incarnation.
+	codexAssertCase(t, c, candidate)
+}
+
+// TestCodexInheritedPrefixConversionKeepsChildMain drives the same
+// fixture-produced candidate through the real transcript conversion and title
+// selection: the inherited copied prefix never reaches a rendered turn or a
+// detail payload, and the surviving own input is the only title seed.
+func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
+	fixture := loadCodexProvenanceFixture(t)
+	var testCase codexProvenanceCase
+	for _, candidateCase := range fixture.Cases {
+		if candidateCase.Name == "inherited-copied-prefix-retained" {
+			testCase = candidateCase
+			break
+		}
+	}
+	if testCase.Name == "" {
+		t.Fatal("fixture case inherited-copied-prefix-retained is missing")
+	}
+	candidate, err := runCodexProvenanceCandidate(t, testCase)
+	if err != nil {
+		t.Fatalf("BuildCodexCandidate: %v", err)
+	}
+	generation := candidate.V2.Generation
+	turns := transcript.EntriesToTurns(generation.Main.Entries)
+	if len(turns) != testCase.Expected.TurnCount {
+		t.Fatalf("converted turns = %d, want %d", len(turns), testCase.Expected.TurnCount)
+	}
+	for _, turn := range turns {
+		for _, retained := range testCase.Expected.Retained {
+			if strings.Contains(turn.Content, retained.Content) {
+				t.Errorf("rendered turn %d leaked inherited content %q", turn.Index, retained.Content)
+			}
+		}
+	}
+	if len(generation.TitleRefs) != 1 || string(generation.TitleRefs[0]) != "e_u1" {
+		t.Errorf("title refs = %v, want the surviving own input e_u1", codexReferenceStrings(generation.TitleRefs))
+	}
+	detail := transcript.SessionToDetail(&ingest.Session{
+		ID:      ingest.SessionID(generation.Metadata.SessionID),
+		Harness: ingest.Harness(generation.Metadata.ModelHarness),
+		Turns:   turns,
+	})
+	if detail == nil {
+		t.Fatal("converted detail payload is nil")
+	}
+	if len(detail.Turns) != testCase.Expected.TurnCount {
+		t.Errorf("detail turns = %d, want %d", len(detail.Turns), testCase.Expected.TurnCount)
+	}
+	for _, turn := range detail.Turns {
+		for _, retained := range testCase.Expected.Retained {
+			if strings.Contains(turn.Content, retained.Content) {
+				t.Errorf("detail turn %d leaked inherited content %q", turn.Index, retained.Content)
+			}
+		}
 	}
 }
 

@@ -9,7 +9,7 @@ cases:
       /synthetic/current.jsonl: |
         {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"fix parser"},{"type":"input_text","text":"AGENTS.md instructions"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"},{"type":"input_text","text":"future bytes"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions","user.image","future.kind"]}},"metadata":{"user_input_order":7}}
-        
+
     entryRefs:
       - e_u1
       - e_ctx1
@@ -56,7 +56,7 @@ cases:
       /synthetic/current.jsonl: |
         {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"conflicting bytes"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.image"]}},"metadata":{"user_input_order":1}}
-        
+
     entryRefs:
       - e_conflict1
     submissionRefs:
@@ -87,7 +87,7 @@ cases:
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m5","content":[{"type":"input_text","text":"short one"},{"type":"input_text","text":"short two"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m6","content":[{"type":"input_text","text":"long"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions"]}}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m7","content":[{"type":"input_text","text":"empty"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":[]}}}
-        
+
     entryRefs:
       - e_v1
       - e_v2
@@ -157,16 +157,16 @@ cases:
         {"type":"response_item","payload":{"type":"message","role":"developer","id":"d2","content":[{"type":"input_text","text":"harness config"}]},"metadata":{"harness_authored_configuration":true}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"inherited"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"inherited_user_message":true,"user_input_order":5}}
         {"type":"response_item","payload":{"type":"message","role":"developer","id":"d3","content":[{"type":"input_text","text":"dev config malformed"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text","agents_md.instructions"]}},"metadata":{"client_authored":true}}
-        
+
     entryRefs:
       - e_dev1
       - e_dev2
-      - e_inh1
       - e_dev3
+      - e_inh1
     submissionRefs:
     expected:
       purpose: interaction
-      turnCount: 4
+      turnCount: 3
       inputSubmissionCount: 0
       titleRefs:
       main:
@@ -180,16 +180,15 @@ cases:
           entryType: "system"
           content: "harness config"
           provenance: {origin: harness_context, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
-        - ref: e_inh1
-          role: "user"
-          entryType: "text"
-          content: "inherited"
-          provenance: {origin: submitted_input, actor: unknown, delivery: inherited_context, ownership: inherited, evidence: native_typed, inputModality: text}
         - ref: e_dev3
           role: "system"
           entryType: "system"
           content: "dev config malformed"
           provenance: {origin: harness_context, actor: unknown, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+      retained:
+        - ref: e_inh1
+          content: "inherited"
+          segmentInclusion: same_thread_surviving_own
   - name: checkpoint-metadata-alignment
     stableThreadID: "11111111-1111-4111-8111-111111111111"
     pointer: /synthetic/current.jsonl
@@ -202,7 +201,7 @@ cases:
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"aligned inherited"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"inherited_user_message":true,"user_input_order":1}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"no vector"}]}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"unequal one"},{"type":"input_text","text":"unequal two"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
-        
+
     entryRefs:
       - e_ck1
       - e_ck2
@@ -211,30 +210,29 @@ cases:
     submissionRefs:
     expected:
       purpose: interaction
-      turnCount: 4
+      turnCount: 3
       inputSubmissionCount: 0
       titleRefs:
       main:
         - ref: e_ck1
           role: "user"
           entryType: "text"
-          content: "aligned inherited"
-          provenance: {origin: submitted_input, actor: unknown, delivery: inherited_context, ownership: inherited, evidence: native_typed, inputModality: text}
-        - ref: e_ck2
-          role: "user"
-          entryType: "text"
           content: "no vector"
           provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
-        - ref: e_ck3
+        - ref: e_ck2
           role: "user"
           entryType: "text"
           content: "unequal one"
           provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
-        - ref: e_ck4
+        - ref: e_ck3
           role: "user"
           entryType: "text"
           content: "unequal two"
           provenance: {origin: unknown, actor: unknown, delivery: unknown, ownership: local, evidence: unknown, inputModality: text}
+      retained:
+        - ref: e_ck4
+          content: "aligned inherited"
+          segmentInclusion: same_thread_surviving_own
   - name: exact-pasted-wrapper-three-ways
     stableThreadID: "11111111-1111-4111-8111-111111111111"
     pointer: /synthetic/current.jsonl
@@ -247,7 +245,7 @@ cases:
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"<thinking>literal excerpt</thinking>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":2}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"<thinking>literal excerpt</thinking>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["agents_md.instructions"]}}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u3","content":[{"type":"input_text","text":"<thinking>literal excerpt</thinking>"}]}}
-        
+
     entryRefs:
       - e_wrap1
       - e_wrap2
@@ -287,7 +285,7 @@ cases:
       /synthetic/current.jsonl: |
         {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"guardian_review"}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"review this"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":4}}
-        
+
     entryRefs:
       - e_g1
     submissionRefs:
@@ -313,7 +311,7 @@ cases:
       /synthetic/current.jsonl: |
         {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"subagent"}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"child text"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
-        
+
     entryRefs:
       - e_c1
     submissionRefs:
@@ -340,7 +338,7 @@ cases:
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.image"]}},"metadata":{"user_input_order":1}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m2","content":[{"type":"input_text","text":"ls -la"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["shell.user_command"]}},"metadata":{"user_input_order":2}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"Question framing"},{"type":"input_text","text":"the actual answer"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.answered_question","user.text"]}},"metadata":{"user_input_order":3}}
-        
+
     entryRefs:
       - e_media1
       - e_action1
@@ -394,7 +392,7 @@ cases:
         {"type":"response_item","payload":{"type":"reasoning","content":[{"type":"reasoning_text","text":"I will inspect."}]}}
         {"type":"response_item","payload":{"type":"function_call","name":"rg","call_id":"call_1","arguments":"{\"cmd\":\"rg parser\"}"}}
         {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"parser.go:12 plus fixture long output"}}
-        
+
     entryRefs:
       - e_u1
       - e_ctx1
@@ -463,7 +461,7 @@ cases:
       /synthetic/current.jsonl: |
         {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
         {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"ctx-user.answered_question"},{"type":"input_text","text":"ctx-agents_md.instructions"},{"type":"input_text","text":"ctx-environments.environment_context"},{"type":"input_text","text":"ctx-environments.instructions"},{"type":"input_text","text":"ctx-model.base_instructions"},{"type":"input_text","text":"ctx-generic.developer_instructions"},{"type":"input_text","text":"ctx-managed_config.developer_instructions"},{"type":"input_text","text":"ctx-permissions.instructions"},{"type":"input_text","text":"ctx-persistent_mode.instructions"},{"type":"input_text","text":"ctx-personality.spec_instructions"},{"type":"input_text","text":"ctx-collaboration_mode.instructions"},{"type":"input_text","text":"ctx-model_switch.instructions"},{"type":"input_text","text":"ctx-hooks.additional_context"},{"type":"input_text","text":"ctx-skills.catalog"},{"type":"input_text","text":"ctx-skills.selected_skill_instructions"},{"type":"input_text","text":"ctx-memories.instructions"},{"type":"input_text","text":"ctx-notes.thread_hint"},{"type":"input_text","text":"ctx-apps.instructions"},{"type":"input_text","text":"ctx-plugins.instructions"},{"type":"input_text","text":"ctx-plugins.usage_instructions"},{"type":"input_text","text":"ctx-plugins.recommendations"},{"type":"input_text","text":"ctx-tools.deferred_namespaces"},{"type":"input_text","text":"ctx-multi_agent.inter_agent_message"},{"type":"input_text","text":"ctx-multi_agent.inter_agent_completion_message"},{"type":"input_text","text":"ctx-multi_agent.subagent_notification"},{"type":"input_text","text":"ctx-multi_agent.role_instructions"},{"type":"input_text","text":"ctx-multi_agent.mode_instructions"},{"type":"input_text","text":"ctx-multi_agent.usage_hint"},{"type":"input_text","text":"ctx-guardian.policy"},{"type":"input_text","text":"ctx-guardian.node_repl_policy"},{"type":"input_text","text":"ctx-guardian.review_evidence"},{"type":"input_text","text":"ctx-guardian.node_repl_review_evidence"},{"type":"input_text","text":"ctx-guardian.trusted_tool"},{"type":"input_text","text":"ctx-guardian.trusted_skills"},{"type":"input_text","text":"ctx-guardian.approved_action"},{"type":"input_text","text":"ctx-guardian.followup_review_reminder"},{"type":"input_text","text":"ctx-compaction.summary"},{"type":"input_text","text":"ctx-generic.turn_aborted"},{"type":"input_text","text":"ctx-current_time.reminder"},{"type":"input_text","text":"ctx-token_budget.context_window"},{"type":"input_text","text":"ctx-token_budget.context_window_guidance"},{"type":"input_text","text":"ctx-token_budget.remaining_tokens"},{"type":"input_text","text":"ctx-token_budget.reminder"},{"type":"input_text","text":"ctx-rollout_budget.remaining_tokens"},{"type":"input_text","text":"ctx-compaction.auto_fallback_prompt"},{"type":"input_text","text":"ctx-permissions.approved_command_prefix_saved"},{"type":"input_text","text":"ctx-network_proxy.rule_saved"},{"type":"input_text","text":"ctx-user_verification.notice"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.answered_question","agents_md.instructions","environments.environment_context","environments.instructions","model.base_instructions","generic.developer_instructions","managed_config.developer_instructions","permissions.instructions","persistent_mode.instructions","personality.spec_instructions","collaboration_mode.instructions","model_switch.instructions","hooks.additional_context","skills.catalog","skills.selected_skill_instructions","memories.instructions","notes.thread_hint","apps.instructions","plugins.instructions","plugins.usage_instructions","plugins.recommendations","tools.deferred_namespaces","multi_agent.inter_agent_message","multi_agent.inter_agent_completion_message","multi_agent.subagent_notification","multi_agent.role_instructions","multi_agent.mode_instructions","multi_agent.usage_hint","guardian.policy","guardian.node_repl_policy","guardian.review_evidence","guardian.node_repl_review_evidence","guardian.trusted_tool","guardian.trusted_skills","guardian.approved_action","guardian.followup_review_reminder","compaction.summary","generic.turn_aborted","current_time.reminder","token_budget.context_window","token_budget.context_window_guidance","token_budget.remaining_tokens","token_budget.reminder","rollout_budget.remaining_tokens","compaction.auto_fallback_prompt","permissions.approved_command_prefix_saved","network_proxy.rule_saved","user_verification.notice"]}},"metadata":{"user_input_order":7}}
-        
+
     entryRefs:
       - e_ctx01
       - e_ctx02
@@ -760,6 +758,150 @@ cases:
           entryType: "system"
           content: "ctx-user_verification.notice"
           provenance: {origin: system_control, actor: harness, delivery: system_lifecycle, ownership: local, evidence: native_typed, inputModality: text}
+  - name: inherited-copied-prefix-retained
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-inherited-copied-prefix-retained
+    completeness: complete
+    historyMode: paginated
+    copyBoundary: 4
+    ownershipProven: true
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied parent question"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied parent answer"}]}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"run the copied command"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["shell.user_command"]}}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"child surviving input"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+    entryRefs:
+      - e_u1
+      - e_inh1
+      - e_inh2
+      - e_inh3
+    submissionRefs:
+      - s_u1
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 1
+      titleRefs:
+        - e_u1
+      main:
+        - ref: e_u1
+          role: "user"
+          entryType: "text"
+          content: "child surviving input"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+      retained:
+        - ref: e_inh1
+          content: "copied parent question"
+          segmentInclusion: same_thread_surviving_own
+        - ref: e_inh2
+          content: "copied parent answer"
+          segmentInclusion: same_thread_surviving_own
+        - ref: e_inh3
+          content: "run the copied command"
+          segmentInclusion: same_thread_surviving_own
+  - name: inherited-multi-segment-retained
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-inherited-multi-segment-retained
+    completeness: complete
+    historyMode: paginated
+    references:
+      - pointer: /synthetic/parent.jsonl
+        physicalSourceID: phys-parent
+        mode: paginated
+        inclusion: inherited
+        coordinateKind: codex_ordinal_range
+        start: 1
+        endExclusive: 3
+    sources:
+      /synthetic/parent.jsonl: |
+        {"type":"session_meta","payload":{"id":"parent-thread","history_mode":"paginated"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"p1","content":[{"type":"input_text","text":"ancestor copied input"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+        {"type":"response_item","payload":{"type":"message","role":"assistant","id":"p2","content":[{"type":"output_text","text":"ancestor copied answer"}]}}
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"c1","content":[{"type":"input_text","text":"current surviving input"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+    entryRefs:
+      - e_u1
+      - e_inh1
+      - e_inh2
+    submissionRefs:
+      - s_u1
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 1
+      titleRefs:
+        - e_u1
+      main:
+        - ref: e_u1
+          role: "user"
+          entryType: "text"
+          content: "current surviving input"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
+      retained:
+        - ref: e_inh1
+          content: "ancestor copied input"
+          segmentInclusion: inherited
+        - ref: e_inh2
+          content: "ancestor copied answer"
+          segmentInclusion: inherited
+  - name: candidate-refusal-keeps-private-location-safe
+    stableThreadID: /synthetic/private/PROJECT/rollout.jsonl
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-candidate-refusal
+    completeness: complete
+    expectRefusal: true
+    privateSentinel: /synthetic/private/PROJECT
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","thread_source":"user"}}
+    entryRefs: []
+    submissionRefs: []
+    expected:
+      turnCount: 0
+  - name: metadata-mutation-barrier
+    stableThreadID: "11111111-1111-4111-8111-111111111111"
+    pointer: /synthetic/current.jsonl
+    physicalSourceID: phys-current
+    generationID: gen-metadata-mutation-barrier
+    completeness: complete
+    historyMode: paginated
+    mutationBarrier: true
+    sources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user","cwd":"/synthetic/g1"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"g1","content":[{"type":"input_text","text":"captured incarnation one"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+    mutatedSources:
+      /synthetic/current.jsonl: |
+        {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user","cwd":"/synthetic/g2"}}
+        {"type":"response_item","payload":{"type":"message","role":"user","id":"g2","content":[{"type":"input_text","text":"replacement incarnation two"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":9}}
+    entryRefs:
+      - e_u1
+    submissionRefs:
+      - s_u1
+    expected:
+      purpose: interaction
+      turnCount: 1
+      inputSubmissionCount: 1
+      metadataCWD: /synthetic/g1
+      titleRefs:
+        - e_u1
+      main:
+        - ref: e_u1
+          role: "user"
+          entryType: "text"
+          content: "captured incarnation one"
+          submissionRef: "s_u1"
+          provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}
   - name: graph-current-parent-supersedes-projection
     thread:
       hasSessionMeta: true
@@ -908,7 +1050,7 @@ cases:
     thread:
       hasSessionMeta: false
     expected:
-      purpose: 
+      purpose:
       relationships: []
       turnCount: 0
       inputSubmissionAbsent: true

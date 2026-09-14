@@ -10,6 +10,10 @@ requiredNames:
   - generic-child-user-text-unknown
   - media-only-action-answer-framing
   - native-section4-count
+  - inherited-copied-prefix-retained
+  - inherited-multi-segment-retained
+  - candidate-refusal-keeps-private-location-safe
+  - metadata-mutation-barrier
   - graph-current-parent-supersedes-projection
   - graph-nested-parent-fallback
   - graph-conflicting-current-parents-clear-target
