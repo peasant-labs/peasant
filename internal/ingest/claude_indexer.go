@@ -529,21 +529,6 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 		entry.Extra = removeModelObservation(entry.Extra)
 	}
 
-	// Control records carry harness state rather than conversation content.
-	// Retain their provider kind and payload, and surface a short preview so the
-	// record stays visible in the transcript. Setting the preview only when the
-	// entry has none keeps any represented content, except a compaction boundary
-	// whose summary is the record's whole point.
-	if partType, extra, controlPreview := claudeControlRecordFields(raw, line); partType != nil {
-		entry.PartType = partType
-		if extra != nil {
-			entry.Extra = extra
-		}
-		if controlPreview != nil && (entry.ContentPreview == nil || *partType == "compact-boundary") {
-			entry.ContentPreview = controlPreview
-		}
-	}
-
 	// Content preview — truncate to configured limit unless fullContent is set.
 	if preview.Len() > 0 {
 		var p string
@@ -553,6 +538,21 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 			p = truncateString(preview.String(), defaults.ContentPreviewLimit)
 		}
 		entry.ContentPreview = &p
+	}
+
+	// Control records carry harness state rather than conversation content.
+	// Retain their provider kind and payload, and surface a short preview so the
+	// record stays visible in the transcript. Keeping an existing preview
+	// preserves any represented content, except a compaction boundary whose
+	// summary is the record's whole point.
+	if partType, extra, controlPreview := claudeControlRecordFields(raw, line); partType != nil {
+		entry.PartType = partType
+		if extra != nil {
+			entry.Extra = extra
+		}
+		if controlPreview != nil && (entry.ContentPreview == nil || *partType == "compact-boundary") {
+			entry.ContentPreview = controlPreview
+		}
 	}
 
 	// Tokens from usage.

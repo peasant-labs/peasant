@@ -56,12 +56,13 @@ type captureFixture struct {
 	// Control marks a record that carries harness state rather than readable
 	// conversation text, so the shared tail search does not apply to it and the
 	// shape assertions below do.
-	Control           bool   `yaml:"control"`
-	WantPartType      string `yaml:"want_part_type"`
-	WantRole          string `yaml:"want_role"`
-	WantPreview       string `yaml:"want_preview"`
-	WantPreviewAbsent bool   `yaml:"want_preview_absent"`
-	WantExtra         string `yaml:"want_extra"`
+	Control           bool     `yaml:"control"`
+	Oversized         bool     `yaml:"oversized"`
+	WantPartType      string   `yaml:"want_part_type"`
+	WantRole          string   `yaml:"want_role"`
+	WantPreview       string   `yaml:"want_preview"`
+	WantPreviewAbsent bool     `yaml:"want_preview_absent"`
+	WantExtraContains []string `yaml:"want_extra_contains"`
 }
 
 func captureFixtureSource(t *testing.T, fixture captureFixture, fs *testutil.MemFS, text string) (ingest.DiscoveredSession, []byte) {
@@ -383,7 +384,11 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
-			session, data := captureFixtureSource(t, fixture, fs, "shape fixture")
+			text := "shape fixture"
+			if fixture.Oversized {
+				text = strings.Repeat("x", 9000)
+			}
+			session, data := captureFixtureSource(t, fixture, fs, text)
 			idx, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[fixture.Harness].(ingest.AuthoritativeTranscriptIndexer)
 			if !ok {
 				t.Fatalf("missing capture indexer for %s", fixture.Harness)
@@ -408,8 +413,10 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 			if fixture.WantPreview != "" && (entry.ContentPreview == nil || *entry.ContentPreview != fixture.WantPreview) {
 				t.Fatalf("preview = %v, want %q", entry.ContentPreview, fixture.WantPreview)
 			}
-			if fixture.WantExtra != "" && (entry.Extra == nil || !strings.Contains(*entry.Extra, fixture.WantExtra)) {
-				t.Fatalf("extra = %v, want substring %q", entry.Extra, fixture.WantExtra)
+			for _, want := range fixture.WantExtraContains {
+				if entry.Extra == nil || !strings.Contains(*entry.Extra, want) {
+					t.Fatalf("extra = %v, want substring %q", entry.Extra, want)
+				}
 			}
 		})
 	}

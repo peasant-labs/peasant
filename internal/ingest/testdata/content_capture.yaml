@@ -39,6 +39,7 @@ required_names:
   - claude-control-ai-title
   - claude-control-atis-latch
   - claude-control-attachment
+  - claude-control-attachment-oversized
   - claude-control-bridge-session
   - claude-control-started
   - claude-control-cost-state
@@ -196,7 +197,8 @@ cases:
     want_part_type: permission-mode
     want_role: system
     want_preview: "permission mode: acceptEdits"
-    want_extra: '"permissionMode":"acceptEdits"'
+    want_extra_contains:
+      - '"permissionMode":"acceptEdits"'
   - name: claude-control-mode
     harness: claude-code
     control: true
@@ -211,7 +213,9 @@ cases:
     want_part_type: agent-setting
     want_role: system
     want_preview: "agent: reviewer"
-    want_extra: '"agentId":"agent-7"'
+    want_extra_contains:
+      - '"agentId":"agent-7"'
+      - '"agentSetting":"reviewer"'
   - name: claude-control-agent-name
     harness: claude-code
     control: true
@@ -240,7 +244,20 @@ cases:
     want_part_type: attachment
     want_role: system
     want_preview_absent: true
-    want_extra: '"attachmentType":"hook_success"'
+    want_extra_contains:
+      - '"attachmentType":"hook_success"'
+  - name: claude-control-attachment-oversized
+    harness: claude-code
+    control: true
+    oversized: true
+    source: '{"type":"attachment","attachmentType":"hook_success","hookData":TEXT,"uuid":"at-big"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_contains:
+      - '"kind":"attachment"'
+      - '"attachmentType":"hook_success"'
+      - '"rawBytes":'
   - name: claude-control-bridge-session
     harness: claude-code
     control: true
@@ -325,7 +342,8 @@ cases:
     want_part_type: compact-boundary
     want_role: system
     want_preview: "Context compacted (auto): 120000 -> 40000 tokens"
-    want_extra: '"compactMetadata"'
+    want_extra_contains:
+      - '"compactMetadata"'
   - name: claude-control-last-prompt
     harness: claude-code
     control: true

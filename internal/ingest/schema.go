@@ -60,7 +60,7 @@ type Turn struct {
 	StopReason  *schema.StopReason // why the turn ended (end_turn, max_tokens, cancelled, etc.)
 	TokensIn    *int               // input tokens for this turn
 	TokensOut   *int               // output tokens for this turn
-	PartType    *string            // provider's original part type label (nil for depth=0)
+	PartType    *string            // provider's original part type label; a depth=0 control record keeps its kind here
 }
 
 // ToolCall represents a tool invocation within a turn.
