@@ -95,6 +95,8 @@ Release, which holds the signed artifacts and checksums.
 ### CI
 - The release e2e gates check out the Village peer at a revision that pins the
   same schema contract, v0.20.0 (#413).
+- The full-stack e2e pulls MinIO from Quay by digest, since the Docker Hub
+  image is no longer served (#413).
 
 ### Dependencies
 - Contract pins: schema `v0.20.0` (Village API 0.18.0, Local API 0.13.0,
