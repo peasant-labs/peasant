@@ -1,0 +1,40 @@
+# One real ordinary harvest of a mixed conversation/control Claude session,
+# plus its unknown-kind counterpart. Both cases run the production adapter, the
+# production pipeline and the production store writer; the assertions then read
+# the reopened store, the export path and the publication preparation.
+#
+# The control case must certify complete and stay readable by the complete-
+# content readers export and publication use: a control record dropped or
+# stored incomplete would still preview, so only the durable read proves it.
+# The unknown-kind case must stay refused at the same boundaries.
+required_names:
+  - control-records-certify
+  - unknown-record-refused
+cases:
+  - name: control-records-certify
+    transcript: |
+      {"sessionId":"SESSION_ID","type":"user","uuid":"entry-first","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"inspect the fixture"}}
+      {"sessionId":"SESSION_ID","type":"assistant","uuid":"entry-second","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"I will inspect the fixture now."}]}}
+      {"sessionId":"SESSION_ID","type":"permission-mode","permissionMode":"acceptEdits","uuid":"entry-third","timestamp":"2026-01-01T00:00:02Z"}
+      {"sessionId":"SESSION_ID","type":"attachment","attachment":{"type":"hook_success"},"uuid":"entry-fourth","timestamp":"2026-01-01T00:00:03Z"}
+    capture_status: complete
+    capture_format: full
+    failure_code: ""
+    control_part_type: permission-mode
+    control_preview: "permission mode: acceptEdits"
+    control_extra_members:
+      permissionMode: acceptEdits
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true
+  - name: unknown-record-refused
+    transcript: |
+      {"sessionId":"SESSION_ID","type":"user","uuid":"entry-first","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"inspect the fixture"}}
+      {"sessionId":"SESSION_ID","type":"assistant","uuid":"entry-second","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"I will inspect the fixture now."}]}}
+      {"sessionId":"SESSION_ID","type":"future-record","payload":"a record kind no shipped build represents","uuid":"entry-third","timestamp":"2026-01-01T00:00:02Z"}
+    capture_status: incomplete
+    capture_format: preview_only
+    failure_code: strict_capture_refused
+    export_accepted: false
+    publication_ready: false
+    preflight_accepts: false
