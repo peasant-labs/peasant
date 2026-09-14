@@ -121,6 +121,12 @@ cases:
     sentinel: PRIVATE_OPEN_SENTINEL
     expectStep: open snapshot source
 
+  - name: opencode-native-large-row-retained
+    kind: large-row
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    largeRowPrefix: synthetic large row prefix
+    largeRowPadding: 4000000
+
   - name: opencode-native-decode-refusal-sanitized
     kind: decode-refusal
     sessionId: ses_synthetic_scope

@@ -242,27 +242,27 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 	options.readSnapshot = true
 	source, err := a.openOpenCodeSQLiteSourceWithOptions(ctx, candidatePath, options)
 	if err != nil {
-		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeAcquisitionError(sessionID, "open snapshot source", "the read-only native source could not be opened", "verify the native database exists, is readable, and is not blocked by permissions, then retry without modifying it", err)
+		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "open snapshot source", "the read-only native source could not be opened", "verify the native database exists, is readable, and is not blocked by permissions, then retry without modifying it", err)
 	}
 	read, readErr := SnapshotOpenCodeHistory(ctx, source, sessionID, opts)
 	closeErr := source.Close(ctx)
 	if readErr != nil {
-		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeAcquisitionError(sessionID, "read snapshot rows", "the snapshot read failed against the native store", "verify the source remains a supported OpenCode store and retry; no partial capture is certified", readErr)
+		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read snapshot rows", "the snapshot read failed against the native store", "verify the source remains a supported OpenCode store and retry; no partial capture is certified", readErr)
 	}
 	if closeErr != nil {
-		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeAcquisitionError(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr)
+		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr)
 	}
 	return read, nil
 }
 
-// sanitizeOpenCodeAcquisitionError reduces any failure on the snapshot or
+// sanitizeOpenCodeRefusal reduces any failure on the snapshot or
 // candidate boundary to a fixed-category OpenCodeSnapshotError. An
 // already-typed snapshot or incomplete-candidate refusal passes through because
 // its category is fixed and free of native content; a cancellation or deadline
 // keeps its safe classification; everything else — a raw SQLite opener cause, a
 // private candidate path, a URI, or a shared-projection refusal that prints a
 // native key — becomes a bounded step and reason with no wrapped text.
-func sanitizeOpenCodeAcquisitionError(sessionID, step, reason, recovery string, err error) error {
+func sanitizeOpenCodeRefusal(sessionID, step, reason, recovery string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -507,13 +507,13 @@ func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, sessi
 		return indexformat.V2{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its snapshot, metadata, or generation dependency", Recovery: "wire all three dependencies before requesting a V2 candidate"}
 	}
 	if err := ctx.Err(); err != nil {
-		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
+		return indexformat.V2{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
 	}
 	prior := OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}
 	if config.Prior != nil {
 		loaded, err := config.Prior(ctx, session)
 		if err != nil {
-			return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "load prior evidence", "the last-good alias and captured-prefix evidence could not be loaded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", err)
+			return indexformat.V2{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "load prior evidence", "the last-good alias and captured-prefix evidence could not be loaded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", err)
 		}
 		prior = loaded
 		if prior.Aliases.Entries == nil {
@@ -522,16 +522,16 @@ func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, sessi
 	}
 	snapshot, err := config.Snapshot(ctx, session)
 	if err != nil {
-		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "snapshot native history", "the read-only native snapshot failed", "verify the native source and retry; no candidate was produced", err)
+		return indexformat.V2{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "snapshot native history", "the read-only native snapshot failed", "verify the native source and retry; no candidate was produced", err)
 	}
 	metadata, err := config.Metadata(session)
 	if err != nil {
-		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata dependency and retry; no candidate was produced", err)
+		return indexformat.V2{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata dependency and retry; no candidate was produced", err)
 	}
 	generationID := config.GenerationID(session)
 	capture, err := BuildOpenCodeProvenanceCapture(snapshot, generationID, metadata, prior)
 	if err != nil {
-		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
+		return indexformat.V2{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
 	}
 	allocator := config.Allocator
 	if allocator == nil {
@@ -539,7 +539,7 @@ func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, sessi
 	}
 	built, err := BuildV2(capture, allocator)
 	if err != nil {
-		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
+		return indexformat.V2{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
 	}
 	if built.Generation.Completeness != indexformat.GenerationCompletenessComplete {
 		if prior.HasCompleteGeneration {

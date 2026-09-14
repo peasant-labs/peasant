@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"io"
 	"path/filepath"
@@ -65,6 +66,8 @@ type ocFlowCase struct {
 	DeliveryMessageIDs []string      `yaml:"deliveryMessageIds"`
 	PayloadEditID      string        `yaml:"payloadEditId"`
 	PayloadEditData    string        `yaml:"payloadEditData"`
+	LargeRowPrefix     string        `yaml:"largeRowPrefix"`
+	LargeRowPadding    int           `yaml:"largeRowPadding"`
 	ExpectCopies       int           `yaml:"expectCopies"`
 	ExpectStep         string        `yaml:"expectStep"`
 }
@@ -141,6 +144,10 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 		if row.Sentinel == "" || len(row.DecodeRows) == 0 {
 			return errors.New("the decode-refusal kind requires a sentinel and native decode rows")
 		}
+	case "large-row":
+		if row.LargeRowPrefix == "" || row.LargeRowPadding <= 0 {
+			return errors.New("the large-row kind requires a prefix and a positive padding size")
+		}
 	default:
 		return errors.New("kind is outside the closed set")
 	}
@@ -174,6 +181,8 @@ func TestOpenCodeProvenanceFlow(t *testing.T) {
 				runOpenCodeFlowDependencyRefusal(t, source, row)
 			case "missing-source":
 				runOpenCodeFlowMissingSource(t, source, row)
+			case "large-row":
+				runOpenCodeFlowLargeRow(t, source, row)
 			case "decode-refusal":
 				runOpenCodeFlowDecodeRefusal(t, row)
 			default:
@@ -344,6 +353,52 @@ func runOpenCodeFlowMissingSource(t *testing.T, source testfixture.MaterializedS
 		t.Fatal("a missing native database produced a snapshot instead of a refusal")
 	}
 	assertOpenCodeSanitizedRefusal(t, err, row)
+}
+
+// runOpenCodeFlowLargeRow proves that a single large OpenCode row is read and
+// retained in full. OpenCode rows have no per-record size limit, so no snapshot
+// or whole-capture bound may refuse or drop this row.
+func runOpenCodeFlowLargeRow(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	text := row.LargeRowPrefix + strings.Repeat("x", row.LargeRowPadding)
+	payload, err := json.Marshal(map[string]any{
+		"id":   "msg_large_row",
+		"type": "user",
+		"text": text,
+		"time": map[string]any{"created": 1000},
+	})
+	if err != nil {
+		t.Fatalf("encode large native row: %v", err)
+	}
+	applyOpenCodeFlowRowsReplacing(t, source, row.SessionID, []ocFlowRow{{
+		ID: "msg_large_row", Type: "user", Seq: 0, TimeCreated: 1000, TimeUpdated: 1000, Data: string(payload),
+	}})
+	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, row.SessionID, ingest.OpenCodeSnapshotOptions{})
+	if err != nil {
+		t.Fatalf("large-row snapshot: %v", err)
+	}
+	if len(snapshot.Messages) != 1 {
+		t.Fatalf("large-row snapshot messages = %d, want 1", len(snapshot.Messages))
+	}
+	if got := snapshot.Messages[0].Message.Text; got != text {
+		t.Fatalf("large-row text length = %d, want %d; the row was truncated or dropped", len(got), len(text))
+	}
+	metadata := schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: schema.SessionID(row.SessionID), ModelHarness: schema.HarnessOpenCode}
+	capture, err := ingest.BuildOpenCodeProvenanceCapture(snapshot, "gen-large-row", metadata, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()})
+	if err != nil {
+		t.Fatalf("large-row capture: %v", err)
+	}
+	built, err := ingest.BuildV2(capture, ingest.RandomRefAllocator{})
+	if err != nil {
+		t.Fatalf("large-row generation: %v", err)
+	}
+	for _, record := range built.Generation.Content {
+		if record.ByteLength == int64(len(text)) {
+			return
+		}
+	}
+	t.Fatalf("large-row content of %d bytes was not retained in the generation", len(text))
 }
 
 // runOpenCodeFlowDecodeRefusal drives the real row decoder with the named

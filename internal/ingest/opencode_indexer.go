@@ -67,7 +67,7 @@ func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session D
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "return candidate result", "the candidate finished but the caller context ended", "retry the candidate with a live context", err)
+			return nil, sanitizeOpenCodeRefusal(session.SessionID.String(), "return candidate result", "the candidate finished but the caller context ended", "retry the candidate with a live context", err)
 		}
 		return provenance, nil
 	}
