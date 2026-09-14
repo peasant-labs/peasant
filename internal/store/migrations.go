@@ -261,6 +261,8 @@ var migrationV24 = createSessionCommands + ";\n" +
 
 // migrationV50 adds nullable captured-source evidence. See schema_v50.go.
 // migrationV53 widens the two local harness CHECK mirrors to admit Pi. See schema_v53.go.
+// migrationV61 adds the reverse logical-target indexes the independent-child
+// cache reconciliation seeks by target. See schema_v61.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -325,6 +327,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV58,
 		migrationV59,
 		migrationV60,
+		migrationV61,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -379,5 +382,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V58: retained annotation retirement
 		{DisableForeignKeys: true}, // V59: rebuild session_content_captures for the closed capture-format set
 		nil,                        // V60: managed-generation catalog (new tables, no data rewrite)
+		nil,                        // V61: reverse logical-target lookup indexes (additive, no data rewrite)
 	},
 }

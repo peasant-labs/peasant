@@ -215,7 +215,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 
 	// Verify the index catalog by exact name as well (v1-v24 base + the later
 	// lesson/injection/annotation/association indexes + the V60 generation entry
-	// partition index).
+	// partition index + the V61 reverse logical-target lookup indexes).
 	indexes := map[string]struct{}{}
 	err = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
