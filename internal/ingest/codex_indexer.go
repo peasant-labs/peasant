@@ -27,6 +27,10 @@ type CodexIndexer struct {
 	fs             FileSystem
 	fullContent    bool
 	historyCapture bool
+	// provenanceCapture wires the native provenance candidate path. It stays
+	// disabled until the maintenance activation composes it with a real
+	// generation identity; while disabled every retained V1 flow is untouched.
+	provenanceCapture CodexProvenanceIndexerConfig
 	// pointerStore is the injected native current-rollout pointer store for
 	// the capture path. Nil means the capture derives the native state
 	// database from the session's sessions tree.
@@ -65,6 +69,15 @@ func WithCodexCaptureNativePointerStore(store CodexNativePointerStore) CodexInde
 	return func(idx *CodexIndexer) { idx.pointerStore = store }
 }
 
+// WithCodexProvenanceCapture enables the native provenance candidate path with
+// its injected prior-state, generation-identity and reference-allocator
+// dependencies. A caller enables it only when it can assign a real generation
+// identity and persist the validated V2 candidate; while disabled every
+// retained V1 flow is untouched.
+func WithCodexProvenanceCapture(config CodexProvenanceIndexerConfig) CodexIndexerOption {
+	return func(idx *CodexIndexer) { idx.provenanceCapture = config }
+}
+
 // WithCodexMaxRecordBytes sets the per-record read limit. Zero keeps the
 // production limit defaults.MaxJSONLRecordBytes. Passing the limit here
 // keeps it out of any global, so tests that inject a small one stay safe
@@ -81,6 +94,17 @@ func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session Disc
 	completion := &indexCompletion{ctx: ctx, session: session}
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
+	}
+	// The native provenance candidate path returns the validated V2 generation
+	// the maintenance activation consumes. It stays disabled until that path
+	// composes it with a real generation identity; while disabled the retained
+	// entry parsing below keeps its exact behavior.
+	if idx.provenanceCapture.Enabled {
+		candidate, err := idx.IndexCodexCandidateV2(ctx, session)
+		if err != nil {
+			return nil, completion.failure(err)
+		}
+		return candidate, nil
 	}
 	data, identified, err := idx.readCurrentSource(ctx, session)
 	if err != nil {
@@ -140,6 +164,14 @@ func (idx *CodexIndexer) captureCurrentSource(ctx context.Context, session Disco
 
 // IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
 func (idx *CodexIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	// The native provenance candidate cannot be built from the supplied bytes
+	// alone: it needs the captured native node graph, ordered segments, proven
+	// correlations and the verified source authority. The candidate path
+	// therefore re-runs the bounded read-only capture over the same session
+	// instead of treating one file read as a complete native graph.
+	if idx.provenanceCapture.Enabled {
+		return idx.IndexTranscriptResult(ctx, session)
+	}
 	completion := &indexCompletion{ctx: ctx, session: session}
 	entries, err := idx.parseRolloutWithCompletion(session.SessionID, data, completion)
 	return completion.result(entries, err)
