@@ -76,8 +76,8 @@ type Server struct {
 	hub    *Hub
 	ln     net.Listener
 
-	// groupedMu guards groupedVariants. Registration happens during Listen
-	// (and, for route owners outside this slice, before Serve); handlers read it.
+	// groupedMu guards groupedVariants. Registration happens during Listen and,
+	// for a route owner that registers later, before Serve; handlers read it.
 	groupedMu       sync.RWMutex
 	groupedVariants map[GroupedRouteVariant]GroupedVariantSource
 	// groupedRevision is the selection revision captured at startup. A member

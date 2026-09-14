@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -171,6 +172,52 @@ func TestMemberRouteRefusesChangedSelectionRevision(t *testing.T) {
 	}
 	if code := helperGroupErrorCode(body); code != "group_scope_expired" {
 		t.Fatalf("changed-revision error code = %q, want group_scope_expired", code)
+	}
+}
+
+// TestRegisteredRouteVariantSeamServesMembers proves the exported registration
+// seam: a route owner outside this package's built-in variants can register its
+// predicate and row callback, and the single member operation replays it with
+// the same scope validation as the built-in routes.
+func TestRegisteredRouteVariantSeamServesMembers(t *testing.T) {
+	db := storetest.Open(t)
+	seedGroupedRouteBoundarySessions(t, db)
+	policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := NewStoreDataProvider(db, policy)
+	server, base := startHelperGroupServerHandle(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{}, Provider: provider})
+
+	candidates, err := provider.GroupedCandidates(context.Background(), GroupedFilters{Variant: GroupedRouteSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.RegisterGroupedRouteVariant(GroupedVariantSource{
+		Variant: GroupedRouteSync,
+		Gather: func(context.Context, GroupedFilters) ([]GroupedCandidate, error) {
+			return candidates, nil
+		},
+	}); err != nil {
+		t.Fatalf("register route variant seam: %v", err)
+	}
+	view := buildGroupedView(candidates)
+	if len(view.groups) == 0 {
+		t.Fatal("seeded candidates rendered no group")
+	}
+	group := view.groups[0]
+	scope, err := server.memberScopes.issue(group.groupID, GroupedRouteSync, GroupedFilters{Variant: GroupedRouteSync}, server.groupedRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	members := helperGroupMembers(t, base, group.groupID, scope, 1, 20)
+	want := make([]string, 0, len(group.members))
+	for _, member := range group.members {
+		want = append(want, member.StableID)
+	}
+	if got := helperGroupMemberIDs(members); !reflect.DeepEqual(got, want) {
+		t.Fatalf("registered variant members = %v, want %v", got, want)
 	}
 }
 
