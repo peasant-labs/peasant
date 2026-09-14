@@ -1,0 +1,9 @@
+# Required case names for the native repair maintenance oracle. The test
+# asserts this set equals the fixture's case names exactly, so a deleted or
+# renamed case fails instead of silently shrinking the oracle.
+requiredNames:
+  - codex_stale_v1_maintenance_repair
+  - codex_failed_capture_retains_last_good
+  - codex_future_state_refused
+  - codex_unrelated_harness_unchanged
+  - opencode_stale_v1_native_activation
