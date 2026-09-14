@@ -1,0 +1,50 @@
+# Stored-entry membership cases for the real analytics store.
+#
+# Each case drives the production SessionsWithoutEntries against a real SQLite
+# store. The chunk-boundary and later-chunk-failure populations are generated
+# from the named parameters below: the boundary needs more sessions than any
+# readable manifest should carry, and every generated id is shaped only by its
+# position (requested, seeded, duplicated), never by an individual value.
+#
+# required_cases is a NAME manifest: every case here must be listed, and every
+# listed name must be a case. Deleting a case, or swapping it for a filler of
+# the same shape, goes red without any count to decrement.
+
+required_cases:
+  - empty-request-is-answered-without-a-query
+  - chunk-boundary-membership-is-exact
+  - unknown-sessions-hold-no-entries
+  - later-chunk-failure-discards-partial-membership
+
+cases:
+  # An empty request answers empty without touching a connection.
+  - name: empty-request-is-answered-without-a-query
+    kind: empty-request
+    empty_requests: [nil, empty]
+
+  # More than one variable-limit chunk: every requested session is reported,
+  # duplicates collapse, unrequested sessions never appear, and seeded entries
+  # flip exactly their own sessions. The split is also fed through the
+  # production coverage computation and must satisfy
+  # FailedAttempts == Empty + FailedRetained.
+  - name: chunk-boundary-membership-is-exact
+    kind: boundary
+    requested: 1200
+    retained_every: 3
+    duplicate_first: 10
+    unrequested_retained: 5
+
+  # Sessions the store never saw hold no entries: no row anywhere means no
+  # session_entries rows, so each is reported without.
+  - name: unknown-sessions-hold-no-entries
+    kind: unknown
+    requested: 2
+    first_position: 9001
+
+  # A chunk that fails AFTER an earlier chunk succeeded must discard the rows
+  # the earlier chunk accumulated: the read is all-or-nothing, so no caller
+  # ever sees a partial membership or a partial count.
+  - name: later-chunk-failure-discards-partial-membership
+    kind: later-chunk-failure
+    requested: 1200
+    successful_chunks: 1

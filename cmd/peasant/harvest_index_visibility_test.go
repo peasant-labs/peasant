@@ -112,10 +112,10 @@ func TestHarvestSummary_PrintsTheNumberOfSessionsItCounted(t *testing.T) {
 				id := ingest.SessionID(row.Session)
 				log = append(log, ingest.IndexLogEntry{SessionID: id, Outcome: logOutcomes[row.Outcome]})
 				sessions[id] = true
-				// Built through the production classifier so the summary counts
+				// Built through the shared ingest classifier so the summary counts
 				// this run reports agree with the log it is handed, rather than
 				// with a second opinion written here.
-				if IndexOutcomeEndedIndexed(logOutcomes[row.Outcome]) {
+				if ingest.IndexOutcomeCompleted(logOutcomes[row.Outcome]) {
 					indexed[id] = true
 				}
 			}

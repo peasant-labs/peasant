@@ -1,0 +1,64 @@
+# Finalize cases: the production index finalize computes optional coverage from
+# the run's index log plus the store's membership answer.
+#
+# Each named case carries the log rows, the store behavior, and the independent
+# expectations (measured counts, or unavailable with exactly one actionable
+# diagnostic). Case names are pinned by required_cases.
+
+required_cases:
+  - finalize-splits-failed-attempts
+  - finalize-clean-run-measures-zero
+  - finalize-missing-capability-is-unavailable
+  - finalize-membership-error-is-unavailable
+  - finalize-partial-membership-error-is-unavailable
+
+cases:
+  # Two failed attempts and one completion: the split is measured.
+  - name: finalize-splits-failed-attempts
+    logPrefix: pipeline
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s2, outcome: error}
+      - {session: s3, outcome: indexed}
+    without: [s1]
+    wantFailedAttempts: 2
+    wantEmpty: 1
+    wantRetained: 1
+
+  # No failed attempts: a measured zero, and the store is never consulted
+  # (the store double is configured to fail if it is).
+  - name: finalize-clean-run-measures-zero
+    logPrefix: pipeline
+    rows:
+      - {session: s1, outcome: indexed}
+    storeError: true
+    wantFailedAttempts: 0
+    wantEmpty: 0
+    wantRetained: 0
+
+  # The store has no membership capability: unavailable, one diagnostic.
+  - name: finalize-missing-capability-is-unavailable
+    logPrefix: pipeline
+    rows:
+      - {session: s1, outcome: error}
+    absentStore: true
+    wantUnavailable: true
+
+  # The membership read fails: unavailable, one diagnostic, no partial count.
+  - name: finalize-membership-error-is-unavailable
+    logPrefix: reindex
+    rows:
+      - {session: s1, outcome: error}
+    storeError: true
+    wantUnavailable: true
+
+  # A read that fails AFTER accumulating rows: the partial map must be
+  # discarded, so finalize still reports unavailable with no partial count.
+  - name: finalize-partial-membership-error-is-unavailable
+    logPrefix: reindex
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s2, outcome: error}
+    storeError: true
+    partialWithout: [s1]
+    wantUnavailable: true

@@ -1,0 +1,36 @@
+# Real-store coverage cases for the harvest summary and JSON.
+#
+# Each case seeds a real SQLite store, drives the production pipeline finalize
+# with a forced index refusal, and pins the split the run reports against the
+# entries the store actually holds. Session positions generate the ids; the
+# expected memberships are named by position so the test asserts the classified
+# membership, not only the numbers.
+
+required_cases:
+  - mixed-retained-and-empty
+  - all-retained-measured-zero
+
+cases:
+  - name: mixed-retained-and-empty
+    outputDir: /coverage-integration-output
+    sessions:
+      - {position: 1, hasEntries: true}
+      - {position: 2, hasEntries: false}
+    wantFailedAttempts: 2
+    wantEmpty: 1
+    wantRetained: 1
+    wantEmptyPositions: [2]
+    wantRetainedPositions: [1]
+
+  # Every failed attempt kept its entries: Empty is a carried measured zero,
+  # not an omitted field, and the empty sentence is omitted.
+  - name: all-retained-measured-zero
+    outputDir: /coverage-integration-all-retained
+    sessions:
+      - {position: 11, hasEntries: true}
+      - {position: 12, hasEntries: true}
+    wantFailedAttempts: 2
+    wantEmpty: 0
+    wantRetained: 2
+    wantEmptyPositions: []
+    wantRetainedPositions: [11, 12]

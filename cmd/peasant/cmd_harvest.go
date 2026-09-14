@@ -188,27 +188,6 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 var BuildIngestCommand = BuildHarvestCommand
 
 // runHarvest is the shared implementation for all harvest modes.
-// IndexOutcomeEndedIndexed reports whether an outcome means the session came out
-// of the INDEX stage with its entries.
-//
-// It is exported so the corpus that drives countIndexFailures classifies outcomes
-// through the SAME function production does. It was written twice - once here as
-// a switch, once in the test as its own list - and nothing bound the two, so the
-// corpus agreed with production only by coincidence: it used two of the five
-// outcomes, and deleting the other two success arms from production was green.
-//
-// Reindexed and Fallback are successes and are reachable: `--reindex` records
-// both. Skipped is deliberately NOT a success - the session ended without
-// entries, it simply ended that way without an error - so it neither clears a
-// failure nor counts as one.
-func IndexOutcomeEndedIndexed(outcome ingest.IndexOutcome) bool {
-	switch outcome {
-	case ingest.IndexOutcomeIndexed, ingest.IndexOutcomeReindexed, ingest.IndexOutcomeFallback:
-		return true
-	}
-	return false
-}
-
 // countIndexFailures counts SESSIONS the INDEX stage could not index, not log
 // rows.
 //
@@ -224,32 +203,13 @@ func IndexOutcomeEndedIndexed(outcome ingest.IndexOutcome) bool {
 //
 // A session that fails one attempt and SUCCEEDS on another is not a failure at
 // all, so a later success clears an earlier error. That sequence is reachable:
-// the drain loop can lose what the sweep then resolves.
+// the drain loop can lose what the sweep then resolves. Completion is the
+// shared ingest.IndexOutcomeCompleted rule: only indexed and reindexed end
+// with entries. A fallback row is a routing diagnostic emitted before
+// indexing, so it clears nothing; skipped ends without entries and without an
+// error, so it is neither a completion nor a failure.
 func countIndexFailures(log []ingest.IndexLogEntry) int {
-	// Both maps are allocated unconditionally, and the failure map is lazy only
-	// because writing to a nil map panics - not as an optimisation. An earlier
-	// comment here claimed the common case allocates nothing, directly above a map
-	// allocated on every call and populated on every clean run.
-	var failed map[ingest.SessionID]bool
-	succeeded := map[ingest.SessionID]bool{}
-	for _, entry := range log {
-		switch {
-		case entry.Outcome == ingest.IndexOutcomeError:
-			if failed == nil {
-				failed = map[ingest.SessionID]bool{}
-			}
-			failed[entry.SessionID] = true
-		case IndexOutcomeEndedIndexed(entry.Outcome):
-			succeeded[entry.SessionID] = true
-		}
-	}
-	count := 0
-	for session := range failed {
-		if !succeeded[session] {
-			count++
-		}
-	}
-	return count
+	return len(ingest.FailedIndexSessions(log))
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
@@ -1262,6 +1222,7 @@ type jsonPipelineResult struct {
 	Sessions             []jsonSessionResult          `json:"sessions"`
 	Duration             string                       `json:"duration"`
 	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
+	IndexCoverage        *ingest.IndexCoverage        `json:"indexCoverage,omitempty"`
 	DiscoveryDiagnostics []ingest.DiscoveryDiagnostic `json:"discoveryDiagnostics,omitempty"`
 }
 
@@ -1281,6 +1242,7 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 		Summary:              result.Summary,
 		Duration:             result.Duration.Round(100 * time.Millisecond).String(),
 		IndexLog:             result.IndexLog,
+		IndexCoverage:        result.IndexCoverage,
 		DiscoveryDiagnostics: result.DiscoveryDiagnostics,
 	}
 	for _, sr := range result.Sessions {
@@ -1371,9 +1333,29 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 			fmt.Fprintf(w, "  %s: adapter_version=%d indexer_version=%d index_version=%d\n", harness, versions.AdapterVersion, versions.IndexerVersion, versions.IndexVersion)
 		}
 	}
-	if indexFailures > 0 {
-		fmt.Fprintf(w, "  warning: %d session(s) were imported but NOT indexed, so they are empty in the viewer, in "+
-			"search, in metrics, and in anything published.\n",
+	// The coverage breakdown replaces the bare attempt count whenever the
+	// run measured it. Each sentence is omitted at its own zero: a run
+	// whose failures all kept their entries says nothing about empty
+	// sessions, and vice versa. When coverage is unavailable the run falls
+	// back to the attempt count without claiming any session is empty,
+	// since that is exactly what the run could not check.
+	if coverage := result.IndexCoverage; coverage != nil {
+		if coverage.Empty > 0 {
+			fmt.Fprintf(w, "  warning: %d session(s) have no stored entries, so they are empty in the viewer, in "+
+				"search, in metrics, and in anything published.\n",
+				coverage.Empty)
+		}
+		if coverage.FailedRetained > 0 {
+			fmt.Fprintf(w, "  warning: %d session(s) failed to re-index but kept their previous entries, so they are "+
+				"still readable. Rerun 'peasant harvest' to retry them.\n",
+				coverage.FailedRetained)
+		}
+		if coverage.Empty > 0 || coverage.FailedRetained > 0 {
+			fmt.Fprintln(w, "  Run 'peasant harvest --json' for the reason on each.")
+		}
+	} else if indexFailures > 0 {
+		fmt.Fprintf(w, "  warning: %d session(s) were imported but NOT indexed; the run could not check whether "+
+			"they kept their previous entries.\n",
 			indexFailures)
 		fmt.Fprintln(w, "  Run 'peasant harvest --json' for the reason on each.")
 	}

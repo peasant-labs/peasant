@@ -1,0 +1,105 @@
+# Coverage-computation cases: the failed set folded against the store's
+# entries-membership answer.
+#
+# Each named case carries its inputs and the expectations the test asserts.
+# The counts and the FailedAttempts == Empty + FailedRetained identity are
+# asserted against the production computation, not a second arithmetic. The
+# membership lists are a fixture-consistency check: ComputeIndexCoverage
+# reports counts only, so the test recomputes the split from the reader answer
+# the fixture supplies and confirms the lists agree with it; real-store
+# membership is covered end-to-end by the integration test. Case names are
+# pinned by required_cases, so deleting a case (or swapping it for a filler)
+# goes red with no count to decrement.
+
+required_cases:
+  - empty-failed-set-measures-zero
+  - mixed-failures-split-empty-and-retained
+  - all-retained
+  - all-empty
+  - unnamed-session-counts-as-retained
+  - missing-capability-is-unavailable
+  - query-error-is-unavailable
+
+cases:
+  # No failed sessions is a measured zero, not an unavailable answer: the
+  # store is never consulted.
+  - name: empty-failed-set-measures-zero
+    kind: empty-set
+    wantStoreCalls: 0
+
+  # Three failed sessions, two with no stored entries and one retained.
+  - name: mixed-failures-split-empty-and-retained
+    kind: split
+    failed:
+      - 11111111-1111-4111-8111-000000000001
+      - 11111111-1111-4111-8111-000000000002
+      - 11111111-1111-4111-8111-000000000003
+    without:
+      - 11111111-1111-4111-8111-000000000001
+      - 11111111-1111-4111-8111-000000000003
+    wantEmpty: 2
+    wantRetained: 1
+    wantEmptyMembership:
+      - 11111111-1111-4111-8111-000000000001
+      - 11111111-1111-4111-8111-000000000003
+    wantRetainedMembership:
+      - 11111111-1111-4111-8111-000000000002
+
+  # Every failed session kept its entries: a measured Empty zero.
+  - name: all-retained
+    kind: split
+    failed:
+      - 11111111-1111-4111-8111-000000000004
+      - 11111111-1111-4111-8111-000000000005
+    without: []
+    wantEmpty: 0
+    wantRetained: 2
+    wantEmptyMembership: []
+    wantRetainedMembership:
+      - 11111111-1111-4111-8111-000000000004
+      - 11111111-1111-4111-8111-000000000005
+
+  # Every failed session has no stored entries: a measured Retained zero.
+  - name: all-empty
+    kind: split
+    failed:
+      - 11111111-1111-4111-8111-000000000006
+    without:
+      - 11111111-1111-4111-8111-000000000006
+    wantEmpty: 1
+    wantRetained: 0
+    wantEmptyMembership:
+      - 11111111-1111-4111-8111-000000000006
+    wantRetainedMembership: []
+
+  # A session the answer does not name counts as retained: emptiness is only
+  # ever reported on the store's explicit word. An answer for a session that
+  # was never requested must be ignored.
+  - name: unnamed-session-counts-as-retained
+    kind: split
+    failed:
+      - 11111111-1111-4111-8111-000000000010
+      - 11111111-1111-4111-8111-000000000011
+    without:
+      - 11111111-1111-4111-8111-000000000010
+      - 11111111-1111-4111-8111-000000000012
+    wantEmpty: 1
+    wantRetained: 1
+    wantEmptyMembership:
+      - 11111111-1111-4111-8111-000000000010
+    wantRetainedMembership:
+      - 11111111-1111-4111-8111-000000000011
+
+  # No membership capability: unavailable (nil), never zero.
+  - name: missing-capability-is-unavailable
+    kind: missing-capability
+    failed:
+      - 11111111-1111-4111-8111-000000000007
+
+  # A membership read that fails: unavailable with the store error wrapped, and
+  # no partial count.
+  - name: query-error-is-unavailable
+    kind: query-error
+    failed:
+      - 11111111-1111-4111-8111-000000000008
+      - 11111111-1111-4111-8111-000000000009
