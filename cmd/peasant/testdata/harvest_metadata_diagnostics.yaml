@@ -7,8 +7,10 @@ sessionID: 11111111-1111-1111-1111-111111111111
 transcript: |
   {"type":"user","sessionId":"11111111-1111-1111-1111-111111111111","message":{"role":"user","content":"synthetic retained session"},"timestamp":"2024-01-01T00:00:00Z"}
 # Keys the document always carries. wantIndexLog adds "indexLog" for the cases
-# that index something.
-expectedRootKeys: [duration, sessions, summary]
+# that index something. indexCoverage is always carried here: these runs use a
+# store that answers stored-entry membership, so the coverage is measured even
+# when it is a measured zero.
+expectedRootKeys: [duration, indexCoverage, sessions, summary]
 #
 # Every case states BOTH of the two things that are easy to get wrong by
 # inference, rather than leaving them to whatever the run happens to produce:

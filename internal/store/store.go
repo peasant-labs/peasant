@@ -265,6 +265,10 @@ type Store struct {
 	salt                salt.Salt
 	annotationWriteMu   sync.Mutex
 	closed              atomic.Bool
+	// sessionMembershipChunk is the per-store seam described in
+	// index_coverage.go. Production leaves it nil, and SessionsWithoutEntries
+	// then runs the real SQLite query.
+	sessionMembershipChunk sessionMembershipChunkQuery
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,

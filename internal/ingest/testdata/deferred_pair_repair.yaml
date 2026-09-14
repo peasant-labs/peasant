@@ -1,0 +1,137 @@
+# A session already queued for other work reads its saved pair at the point of
+# use, not during pair-repair selection, when the queue reason is a real native
+# content or producer-version change: such a session is re-acquired from native
+# input, which rewrites the pair and recreates a missing sidecar, so a
+# selection-stage damage verdict would duplicate a read the queued path does not
+# need. A session queued only for index readiness keeps the selection read and
+# the repair flag, because its queued path can settle without touching the pair
+# (the legacy provider recovery class).
+#
+# Each case seeds one stored row with an intact or damaged saved pair and a
+# native source, then runs the production pipeline (real SQLite store, real
+# indexer registry; only the source adapter and filesystem are substituted).
+# queueReason selects the queue signal for a discovered session:
+#   native-change   the discovered source mod time is newer than the recorded
+#                   ingest clock.
+#   index-readiness the source is unchanged and the row has no bound
+#                   publication capture, so only index readiness queues it.
+#
+#   - queued, native-change, healthy, native unavailable: retained fallback
+#     indexes the pair.
+#   - queued, native-change, damaged, native unavailable: the fallback refuses
+#     it; no index and no write.
+#   - queued, native-change, healthy, native available: native rewrites it.
+#   - queued, index-readiness, damaged, native available: the kept repair flag
+#     forces the native re-ingest that restores the pair.
+#   - unqueued, damaged, native available: selection appends a repair entry.
+#
+# The selection_reads cases run a dry run so no worker processes the row, and
+# count reads of the managed pair. A native-change-queued candidate must not be
+# read during selection; an index-readiness-queued candidate and an unqueued
+# damaged candidate must still be read, proving the count. A native-change
+# candidate that already holds a stored source fingerprint keeps the selection
+# read, because the post-capture comparison can overrule the clock hint with an
+# unchanged verdict before the pair is republished.
+required_names:
+  - queued-healthy-native-unavailable-retains
+  - queued-damaged-native-unavailable-refuses
+  - queued-healthy-native-available-rewrites
+  - queued-readiness-missing-metadata-native-available-repairs
+  - queued-unchanged-source-damaged-pair-repairs
+  - unqueued-damaged-native-available-repairs
+  - selection-queued-native-change-reads-none
+  - selection-queued-readiness-reads-pair
+  - selection-queued-stored-fingerprint-reads-pair
+  - selection-unqueued-damaged-reads-pair
+native_transcript: |
+  {"type":"user","message":{"role":"user","content":"inspect the deferred native fixture"},"uuid":"u1"}
+  {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]},"uuid":"a1"}
+damaged_transcript: |
+  {"type":"user","message":{"role":"user","content":"a transcript that no longer matches its recorded identity"},"uuid":"u1"}
+cases:
+  - name: queued-healthy-native-unavailable-retains
+    discovered: true
+    queueReason: native-change
+    pairState: healthy
+    nativeAvailable: false
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: true
+  # The damaged pair must not become a successful fallback: the fallback read
+  # refuses it, nothing is written, and the refusal names the failed checksum.
+  - name: queued-damaged-native-unavailable-refuses
+    discovered: true
+    queueReason: native-change
+    pairState: damaged
+    nativeAvailable: false
+    wantIndexed: false
+    wantChecksumRefusal: true
+    wantPairUnchanged: true
+  - name: queued-healthy-native-available-rewrites
+    discovered: true
+    queueReason: native-change
+    pairState: healthy
+    nativeAvailable: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+  # Queued only for index readiness, with the metadata sidecar gone so the
+  # readiness queue signal survives (a present sidecar settles the row): the
+  # pair damage must still drive the native re-ingest, because this queued path
+  # can settle without a pair read.
+  - name: queued-readiness-missing-metadata-native-available-repairs
+    discovered: true
+    queueReason: index-readiness
+    pairState: missing-metadata
+    nativeAvailable: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+  # A newer source clock on a row that already recorded the source fingerprint:
+  # the post-capture comparison overrules the clock with an unchanged verdict,
+  # so the queued worker would exit without republishing. The damaged pair must
+  # still be repaired.
+  - name: queued-unchanged-source-damaged-pair-repairs
+    discovered: true
+    queueReason: native-change
+    pairState: damaged
+    nativeAvailable: true
+    storedFingerprint: true
+    publicationReady: true
+    staleProducer: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+  # Not queued: selection detects the damage and appends the repair entry,
+  # which re-ingests the pair from the native source.
+  - name: unqueued-damaged-native-available-repairs
+    discovered: false
+    pairState: damaged
+    nativeAvailable: true
+    wantIndexed: true
+    wantChecksumRefusal: false
+    wantPairUnchanged: false
+selection_reads:
+  - name: selection-queued-native-change-reads-none
+    discovered: true
+    queueReason: native-change
+    pairState: healthy
+    nativeAvailable: true
+    wantPairReads: 0
+  - name: selection-queued-readiness-reads-pair
+    discovered: true
+    queueReason: index-readiness
+    pairState: missing-metadata
+    wantPairReadsAtLeast: 1
+  - name: selection-queued-stored-fingerprint-reads-pair
+    discovered: true
+    queueReason: native-change
+    pairState: healthy
+    storedFingerprint: true
+    publicationReady: true
+    staleProducer: true
+    wantPairReadsAtLeast: 1
+  - name: selection-unqueued-damaged-reads-pair
+    discovered: false
+    pairState: damaged
+    wantPairReadsAtLeast: 1

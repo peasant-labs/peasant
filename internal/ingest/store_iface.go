@@ -212,6 +212,23 @@ type MetricsStore interface {
 	LookupSourceInfo(ctx context.Context, sessionID SessionID) (sourcePath string, sourceFormat SourceFormat, provider string, err error)
 }
 
+// IndexCoverageReader is the optional store capability that answers which of
+// the given sessions hold no session_entries rows.
+//
+// The pipeline uses it at finalize to split failed index attempts into truly
+// empty sessions and sessions that kept their previous entries. A store that
+// does not implement it leaves the run's coverage unavailable rather than
+// guessed: the pipeline reports no empty count at all.
+//
+// The returned map carries every distinct requested session: true means the
+// session holds no entries rows, false means it holds at least one. Sessions
+// never requested are never present. Callers treat a missing key as retained
+// (false): a session is only ever reported empty on the store's explicit word,
+// never on an absence.
+type IndexCoverageReader interface {
+	SessionsWithoutEntries(ctx context.Context, sessionIDs []SessionID) (map[SessionID]bool, error)
+}
+
 // SessionEntryWrite is one session's replacement entry set for the INDEX stage.
 // Result is the sole payload; IndexVersion must match its concrete format.
 // IndexerVersion zero preserves the producing parser and its timestamp while

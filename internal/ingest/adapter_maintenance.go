@@ -322,12 +322,51 @@ func (p *Pipeline) cacheRepairLocations(ctx context.Context, ids []SessionID) {
 	}
 }
 
+// queuedForNativeChange reports whether an entry already queued for other work
+// was queued for a reason that proves the queued path rewrites the pair from
+// native input: a forced run, a schema this build re-extracts from native
+// input, or a newer clock on a row with no supported stored fingerprint that
+// could overrule it. Such a session recreates a missing sidecar and republishes
+// the pair, so a selection-stage damage verdict for it would duplicate a read
+// the queued path does not need. It deliberately does not prove the native
+// bytes changed, and it does not defer arbitrary producer-version queues. The
+// stored row is read from the location cache, so the decision reads no file.
+func (p *Pipeline) queuedForNativeChange(session DiscoveredSession) bool {
+	// A forced run re-acquires native input for every queued session.
+	if p.config.Force {
+		return true
+	}
+	loc, ok := p.locationCache[session.SessionID]
+	if !ok || loc.SchemaVersion > CurrentSchemaVersion {
+		return false
+	}
+	// A schema this build re-extracts from native input forces the update.
+	if metadataNeedsNativeRefresh(loc.SchemaVersion) {
+		return true
+	}
+	if loc.IngestedMs == nil || *loc.IngestedMs <= 0 || !session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
+		return false
+	}
+	// The newer mod time is only a clock hint. For a supported captured source
+	// that already holds a fingerprint, the post-capture comparison can overrule
+	// it with an unchanged verdict before anything is published, and the queued
+	// worker then exits without rewriting the pair. Deferring detection there
+	// would let a damaged pair on unchanged bytes lose its repair, so keep the
+	// detection read whenever a stored fingerprint can overrule the hint. An
+	// empty fingerprint cannot: the capture is forced to update.
+	return !(loc.SourceEvidenceSupported && len(loc.SourceFingerprint) > 0)
+}
+
 // appendPairRepairWork appends the stored sessions whose saved pair is missing
 // or damaged as native re-ingest work. The repair used to be an explicit
 // `--force --session` action; a session with no usable retained input has
 // nothing to protect, so the ordinary harvest performs it automatically. A
 // session already queued for other work is marked for repair in place, so a
-// database-first "unchanged" verdict cannot leave the damaged pair behind.
+// database-first "unchanged" verdict cannot leave the damaged pair behind. The
+// one exception is a session whose queue reason proves the queued path rewrites
+// the pair from native input: a forced run, a schema this build re-extracts, or
+// a newer clock on a row with no stored fingerprint that could overrule it.
+// Selection does not read the pair for those.
 func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry, discovered []DiscoveredSession) []DiffEntry {
 	if p.metricsStore == nil {
 		return entries
@@ -347,18 +386,34 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 	}
 	var repaired []SessionID
 	for _, sid := range ids {
-		if !p.pairNeedsRepair(ctx, sid) {
-			continue
-		}
-		metadataPath, _ := p.storedMetadataPath(ctx, sid)
-		if i, ok := entryIndex[sid]; ok {
-			// Already queued for other work: carry the repair verdict onto the
-			// existing entry instead of skipping it.
+		if i, queued := entryIndex[sid]; queued {
+			if p.queuedForNativeChange(entries[i].Session) {
+				// Queued for a proven rewrite reason (a forced run, a
+				// native-refresh schema, or a clock hint no stored fingerprint
+				// can overrule): the queued path re-acquires native input and
+				// rewrites the pair, recreating a missing sidecar, so a
+				// selection-stage damage verdict would only add a read the path
+				// does not need.
+				continue
+			}
+			if !p.pairNeedsRepair(ctx, sid) {
+				continue
+			}
+			// Queued for a reason that can settle without republishing the
+			// pair: index readiness, or a newer clock that captured fingerprint
+			// comparison may classify unchanged before any write. Carry the
+			// damage verdict onto the existing entry so a database-first no-op
+			// cannot leave the damaged pair behind.
+			metadataPath, _ := p.storedMetadataPath(ctx, sid)
 			entries[i].pairRepair = true
 			entries[i].repairMetadataPath = metadataPath
 			repaired = append(repaired, sid)
 			continue
 		}
+		if !p.pairNeedsRepair(ctx, sid) {
+			continue
+		}
+		metadataPath, _ := p.storedMetadataPath(ctx, sid)
 		session, found := native[sid]
 		if !found {
 			reconstructed, startMs, _ := p.reconstructFromSourceInfo(ctx, sid)
@@ -506,6 +561,12 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	// guards independently verify that this retained pair matches its stored state.
 	result.meta = &retained.Metadata
 	result.transcriptData = retained.Transcript
+	// Carry the exact metadata bytes this read validated, beside the
+	// transcript from the same read, so the index forms one snapshot. This
+	// field deliberately does not set result.artifact: the run committed no
+	// pair, and claiming one would mirror a phantom pair and report a false
+	// publication.
+	result.retainedMetadataJSON = retained.MetadataJSON
 	result.result.OutputPath = filepath.Dir(metadataPath)
 	result.outputTranscriptPath = filepath.Join(result.result.OutputPath, string(entry.Session.SessionID)+"--transcript."+string(retained.Metadata.Source.Format))
 	result.originalRoot = entry.Session.OriginalRoot

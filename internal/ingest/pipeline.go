@@ -87,6 +87,12 @@ type PipelineResult struct {
 	Sessions []SessionResult
 	Duration time.Duration
 	IndexLog []IndexLogEntry // per-session indexing outcomes (populated during INDEX stage)
+	// IndexCoverage splits the failed index attempts into sessions with no
+	// stored entries and sessions that kept their previous entries. Nil
+	// means unavailable, never zero: the store could not answer, or a
+	// membership chunk failed. Computed at finalize from FailedIndexSessions
+	// plus the entries-membership capability.
+	IndexCoverage *IndexCoverage `json:"indexCoverage,omitempty"`
 	// DiscoveryDiagnostics names source locations an adapter could not fully
 	// enumerate. Discovery stayed non-fatal per location, so the run continued;
 	// these records make each skipped location visible to the caller.
@@ -3423,10 +3429,14 @@ func indexWithSourceKind(
 // sessionFromWorkerResult reconstructs the DiscoveredSession carried by a workerResult.
 // The session fields needed downstream (SessionID, Harness, ParentUUID, SourceFormat,
 // SourcePath) are preserved on result and meta; we recover them here.
-// workerMetadataJSON returns the metadata bytes the worker committed for this
-// session, when it published a pair this run. The index path uses them directly
-// instead of reading the metadata file back.
+// workerMetadataJSON returns the metadata bytes the index path uses directly
+// instead of reading the metadata file back: the bytes the worker committed
+// when it published a pair this run, or the exact bytes a retained fallback
+// already validated when it committed nothing.
 func workerMetadataJSON(wr *workerResult) []byte {
+	if len(wr.retainedMetadataJSON) != 0 {
+		return wr.retainedMetadataJSON
+	}
 	if wr.artifact != nil {
 		return wr.artifact.MetadataJSON
 	}
@@ -4041,6 +4051,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
 	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
+	pipelineResult.IndexCoverage = p.resolveIndexCoverage(ctx, indexLogEntries, logPrefix)
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
 			pipelineResult.Summary.Errors++

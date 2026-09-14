@@ -207,23 +207,34 @@ detects content-only changes even when file size and modification time match.
 
 Per-run **uniqueness** remains load-bearing hygiene: every run gets a unique
 sandbox path and S3 bucket/container name, so a live sibling run does not share
-state with this run. The Go reaper is only a garbage collector for already-stopped
-leftovers from hard-crashed runs; it must never be the mechanism that makes active
-runs safe.
+state with this run. The Go reaper is a garbage collector for old terminal
+containers and running containers whose owner PID (embedded in the generated
+name) no longer exists. This covers hard-crashed test processes whose `t.Cleanup`
+callbacks could not run; it must never be the mechanism that makes active runs
+safe.
 
-The discriminators for deleting podman infra are terminal status plus age, not PR
-number or workflow run id. PR/run scoping is the wrong axis because stale
-containers can outlive the run that created them, while an unrelated live run can
-briefly create a same-prefix container. The bash workflow cleanup therefore only
-removes terminal `exited`/`stopped` containers (NOT `dead` — podman 4.9.3 rejects
-that Docker-only state, which broke the cleanup; see Podman version parity below).
-Age gating belongs in the Go reaper
-(`staleE2ETTL`, 24h), where the parser sees podman status and generated timestamp
-together; duplicating that policy in bash would create a second cleanup contract.
+The Go reaper has two deletion branches, neither based on PR number or workflow
+run ID. Terminal containers (`created`, `configured`, `exited`, `dead`, or
+`removing`) are eligible only after the timestamp in their generated name is
+older than `staleE2ETTL` (24h). Running containers bypass that age gate only when
+the owner PID encoded in the generated name no longer exists. Thus a newly
+created or configured sibling is protected within the TTL, while an old one is
+removable. PR/run scoping is the wrong axis because stale containers can outlive
+the run that created them, while an unrelated live run can briefly create a
+same-prefix container.
 
-Cleanup safety does not rely on a particular hosted-runner reuse model. A newly
-created sibling container is not stale, so cleanup never treats `status=created`
-as removable.
+The bash workflow cleanup intentionally implements only its terminal
+`exited`/`stopped` branch (NOT `dead` — podman 4.9.3 rejects that Docker-only
+state, which broke the cleanup; see Podman version parity below). Duplicating the
+Go reaper's timestamp and PID policy in bash would create a second cleanup
+contract.
+
+The owner-PID check assumes the test process and Podman harness use the same host
+and PID namespace. PID reuse conservatively retains the container because the
+reaper cannot prove that the live process is a different owner. Platforms that
+cannot safely probe process liveness also retain running containers; normal test
+cleanup remains responsible for them. These conservative cases may leave
+garbage, but they do not risk deleting an active sibling run.
 
 ### Podman version parity (local ↔ CI)
 
