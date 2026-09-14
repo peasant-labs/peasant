@@ -92,17 +92,17 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 	data = normalized
 	switch row.Type {
 	case "user":
-		return decodeOpenCodeProvenanceUser(row, scope, msg, data)
+		return decodeOpenCodeProvenanceUser(row, msg, data)
 	case "shell":
-		return decodeOpenCodeProvenanceShell(row, scope, msg, data, envelope)
+		return decodeOpenCodeProvenanceShell(row, msg, data, envelope)
 	case "assistant":
-		return decodeOpenCodeProvenanceAssistant(row, scope, msg, data)
+		return decodeOpenCodeProvenanceAssistant(row, msg, data)
 	case "synthetic", "system", "skill":
-		return decodeOpenCodeProvenanceSystem(row, scope, msg, data)
+		return decodeOpenCodeProvenanceSystem(row, msg, data)
 	case "compaction":
-		return decodeOpenCodeProvenanceCompaction(row, scope, msg, data, envelope)
+		return decodeOpenCodeProvenanceCompaction(row, msg, data, envelope)
 	case "agent-switched", "model-switched":
-		return decodeOpenCodeProvenanceControl(row, scope, msg, data)
+		return decodeOpenCodeProvenanceControl(row, msg, data)
 	default:
 		hasID := requireOpenCodeCurrentFields(data, "id") == nil
 		hasTime := requireOpenCodeCurrentFields(data, "time") == nil
@@ -129,7 +129,7 @@ func OpenCodeCurrentMessageRowForDecode(row OpenCodeProvenanceRow) OpenCodeCurre
 	}
 }
 
-func decodeOpenCodeProvenanceUser(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceUser(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
 	var value openCodeCurrentUser
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q user payload failed to decode: %v; verify the source row and retry", row.ID, err)
@@ -161,11 +161,10 @@ func decodeOpenCodeProvenanceUser(row OpenCodeProvenanceRow, scope OpenCodeProve
 		}
 		msg.SkillTexts = append(msg.SkillTexts, text)
 	}
-	_ = scope
 	return msg, true, nil
 }
 
-func decodeOpenCodeProvenanceShell(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceShell(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
 	var value openCodeCurrentShell
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q shell payload failed to decode: %v; verify the source row and retry", row.ID, err)
@@ -188,11 +187,10 @@ func decodeOpenCodeProvenanceShell(row OpenCodeProvenanceRow, scope OpenCodeProv
 	if strings.TrimSpace(value.CallID) == "" {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q shell action requires a call id; the action cannot be correlated; verify the source row and retry", row.ID)
 	}
-	_ = scope
 	return msg, value.Time.Completed > 0 || value.Output != "", nil
 }
 
-func decodeOpenCodeProvenanceAssistant(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceAssistant(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
 	var value openCodeCurrentAssistant
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q assistant payload failed to decode: %v; verify the source row and retry", row.ID, err)
@@ -215,7 +213,6 @@ func decodeOpenCodeProvenanceAssistant(row OpenCodeProvenanceRow, scope OpenCode
 	}
 	msg.Parts = collector.parts
 	msg.TimeCompleted = value.Time.Completed
-	_ = scope
 	return msg, collector.settled(), nil
 }
 
@@ -262,7 +259,7 @@ func (c *openCodeAssistantPartCollector) settled() bool {
 	return !c.running
 }
 
-func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
 	if row.Type == "synthetic" {
 		var value openCodeCurrentSynthetic
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
@@ -277,7 +274,6 @@ func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, scope OpenCodePro
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q synthetic session disagrees with its row session; the row cannot be trusted; verify the source row and retry", row.ID)
 		}
 		msg.SystemText = value.Text
-		_ = scope
 		return msg, true, nil
 	}
 	if row.Type == "skill" {
@@ -292,7 +288,6 @@ func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, scope OpenCodePro
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q skill payload requires skill and name; verify the source row and retry", row.ID)
 		}
 		msg.SystemText = value.Text
-		_ = scope
 		return msg, true, nil
 	}
 	var value openCodeCurrentTextMessage
@@ -303,11 +298,10 @@ func decodeOpenCodeProvenanceSystem(row OpenCodeProvenanceRow, scope OpenCodePro
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q system payload misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	msg.SystemText = value.Text
-	_ = scope
 	return msg, true, nil
 }
 
-func decodeOpenCodeProvenanceCompaction(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceCompaction(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte, envelope map[string]json.RawMessage) (OpenCodeProvenanceMessage, bool, error) {
 	var value openCodeCurrentCompaction
 	if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction payload failed to decode: %v; verify the source row and retry", row.ID, err)
@@ -342,11 +336,10 @@ func decodeOpenCodeProvenanceCompaction(row OpenCodeProvenanceRow, scope OpenCod
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction status %q is outside the running/completed/failed set; verify the source row and retry", row.ID, status)
 		}
 	}
-	_ = scope
 	return msg, settled, nil
 }
 
-func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
+func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, msg OpenCodeProvenanceMessage, data []byte) (OpenCodeProvenanceMessage, bool, error) {
 	if row.Type == "agent-switched" {
 		var value openCodeCurrentAgentSwitched
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
@@ -356,7 +349,6 @@ func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, scope OpenCodePr
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q agent switch misses a required field: %v; verify the source row and retry", row.ID, err)
 		}
 		msg.SystemText = value.Agent
-		_ = scope
 		return msg, true, nil
 	}
 	var value openCodeCurrentModelSwitched
@@ -367,7 +359,6 @@ func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, scope OpenCodePr
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q model switch misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	msg.SystemText = value.Model.ID
-	_ = scope
 	return msg, true, nil
 }
 
