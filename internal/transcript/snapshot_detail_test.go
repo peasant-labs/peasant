@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -463,7 +464,7 @@ func TestBuildSnapshotDetailBytes(t *testing.T) {
 	if _, _, err := BuildSnapshotDetailBytes(context.Background(), stubSnapshotReader{err: errors.New("snapshot unavailable")}, resolver, sessionID); err == nil {
 		t.Fatal("snapshot read failure must fail the boundary")
 	}
-	legacy, _ := buildHydrationSnapshot(t, snapshotHydrationCase{Legacy: true, Harness: "codex"})
+	legacy, _ := buildHydrationSnapshot(t, snapshotHydrationCase{Legacy: true, Harness: string(defaults.HarnessCodex)})
 	if _, _, err := BuildSnapshotDetailBytes(context.Background(), stubSnapshotReader{snapshot: legacy}, resolver, sessionID); !errors.Is(err, ErrLegacySnapshot) {
 		t.Fatalf("legacy snapshot must report the legacy path, got %v", err)
 	}
