@@ -73,9 +73,11 @@ jobs:
   # while release-validate.yml is workflow_call-only. Call all of them here as
   # reusable workflows, gated on the same release( title as `validate`, so every
   # release PR proves the full gate before merge.
-  # (On the bootstrap PR that EDITS tests.yml, tests also fires standalone via its
-  # own path filter; cancel-in-progress collapses the two — the called run, which
-  # starts after `validate`, is the survivor. Future release PRs run it once.)
+  # A push also fires the path-filtered standalone Tests/E2E runs. Their jobs
+  # skip release(...) PRs through caller-aware guards, so the called copies here
+  # are the single execution of each suite and of the harvester guard — exactly
+  # once per push, after `validate`. Keep those guards in tests.yml/e2e.yml in
+  # step with this workflow's `name:` (the guards compare against it).
   tests:
     name: tests (release PR)
     needs: validate

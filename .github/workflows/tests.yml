@@ -86,24 +86,39 @@ on:
   workflow_call:
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref to save minutes.
+# Cancel superseded runs on the same ref to save minutes. The group is scoped by
+# the workflow name: in a called reusable workflow the github context belongs to
+# the caller, so the standalone copy (github.workflow == 'Tests') and the
+# release-pr.yml-called copy (github.workflow == 'Release PR') would otherwise
+# share a group and cancel each other instead of running their own copies. See
+# the per-job guards below.
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  # Exactly-once contract: every job below carries the same guard so the
+  # path-filtered standalone run skips release(...) PRs, where release-pr.yml
+  # calls this workflow as the single authority. Inside a called reusable
+  # workflow the github context belongs to the caller, so github.workflow is
+  # 'Release PR' for that copy and 'Tests' for the standalone one. Keep the
+  # guard on EVERY job: one unguarded job re-creates the cancellation race.
   check:
     name: make check
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 30  # fail fast instead of wedging if the run hangs
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          fetch-depth: 0 # The behavior guard compares actual base and candidate code.
+          fetch-depth: 1
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
@@ -121,12 +136,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: ${{ runner.os }}-go-
 
-      - name: Require harvester version bumps for changed behavior
-        if: github.event_name == 'pull_request'
-        env:
-          GUARD_BASE: ${{ github.event.pull_request.base.sha }}
-        run: nix develop -c make check-harvester-versions BASE="$GUARD_BASE" CANDIDATE=HEAD
-
       # RACE=1 (the race detector on) only for release PRs, release tags, and
       # on-demand dispatch; RACE=0 (detector off) for ordinary feature PRs AND
       # post-merge pushes to develop/main, where -race amplifies this 2-vCPU job
@@ -137,6 +146,44 @@ jobs:
       # (RACE defaults to 1 locally) before pushing. See CONTRIBUTING.md.
       - name: make check
         run: nix develop -c make check RACE=${{ (startsWith(github.event.pull_request.title, 'release(') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+
+  # The cross-revision harvester guard compiles the reviewed base and the
+  # candidate as separate trees and probes both. On a 2-vCPU runner that is
+  # ~15 minutes, so it gets its own job and its own budget in parallel with
+  # `make check`: serialized inside `check` it consumed half of that job's 30
+  # minutes and starved the -race suite. Same predicate as the old step (PRs
+  # only) plus the release-PR guard above.
+  harvester-version-guard:
+    name: harvester version guard
+    if: >-
+      github.event_name == 'pull_request' &&
+      (!startsWith(github.event.pull_request.title, 'release(') ||
+       github.workflow == 'Release PR')
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0 # The guard archives and compiles the exact base revision.
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      # Share the `make check` cache key: both jobs compile the same module set.
+      - name: Cache Go build + modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Require harvester version bumps for changed behavior
+        env:
+          GUARD_BASE: ${{ github.event.pull_request.base.sha }}
+        run: nix develop -c make check-harvester-versions BASE="$GUARD_BASE" CANDIDATE=HEAD
 
   # CGO=0 build mode gate. The release binaries are built CGO_ENABLED=0 (static,
   # portable) — that is the mode the goreleaser/nix/distro builds ship. This job
@@ -150,12 +197,17 @@ jobs:
   cgo0:
     name: CGO=0 consumer/e2e + module-zip proxy
     # Release only, same policy as the podman e2e job: a release PR (title starts
-    # with "release(", via release-pr.yml or the pull_request trigger), a release
-    # tag, or an on-demand dispatch. Ordinary feature PRs and post-merge pushes to
-    # develop/main skip this. make check, the real web build, and the lockfile
-    # check keep running on every PR and push; only this consumer/e2e job is
-    # release-gated.
-    if: startsWith(github.event.pull_request.title, 'release(') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    # with "release(", reached through release-pr.yml's call — the standalone
+    # copy skips), a release tag, or an on-demand dispatch. Ordinary feature PRs
+    # and post-merge pushes to develop/main skip this. make check, the real web
+    # build, and the lockfile check keep running on every PR and push; only this
+    # consumer/e2e job is release-gated.
+    if: >-
+      (startsWith(github.event.pull_request.title, 'release(') ||
+       startsWith(github.ref, 'refs/tags/') ||
+       github.event_name == 'workflow_dispatch') &&
+      (!startsWith(github.event.pull_request.title, 'release(') ||
+       github.workflow == 'Release PR')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 20
     steps:
@@ -231,6 +283,10 @@ jobs:
   # //go:embed all:web/out directive so `go list ./cmd/peasant` can load.
   third-party-notices:
     name: third-party license notices
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     steps:
@@ -265,6 +321,10 @@ jobs:
   # regenerating the lockfile.
   web-lockfiles-in-sync:
     name: web lockfiles in sync
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     steps:
@@ -293,6 +353,10 @@ jobs:
   # (not the web-stub notice). Artifact workflows enforce the same invariant.
   web-pnpm-build:
     name: web real pnpm build (no stub fallback)
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 20
     steps:
