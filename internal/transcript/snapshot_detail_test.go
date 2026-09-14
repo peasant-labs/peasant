@@ -99,23 +99,23 @@ func loadSnapshotHydrationFixture(t *testing.T) snapshotHydrationFixture {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("snapshot hydration fixture must contain exactly one YAML document: %v", err)
 	}
-	var manifest struct {
-		RequiredNames []string `yaml:"requiredNames"`
-	}
-	if err := yaml.Unmarshal(snapshotDetailHydrationManifestYAML, &manifest); err != nil {
+	manifest, err := testutil.DecodeRequiredNamesManifest(snapshotDetailHydrationManifestYAML, "snapshot hydration")
+	if err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool, len(fixture.Cases))
+	caseNames := make([]string, 0, len(fixture.Cases))
 	for _, fixtureCase := range fixture.Cases {
 		if fixtureCase.Name == "" || names[fixtureCase.Name] {
 			t.Fatalf("snapshot hydration fixture case %q is missing or duplicated", fixtureCase.Name)
 		}
 		names[fixtureCase.Name] = true
+		caseNames = append(caseNames, fixtureCase.Name)
 		if !fixtureCase.ExpectError && !fixtureCase.ExpectLegacy && len(fixtureCase.ExpectedMainIndices) == 0 {
 			t.Fatalf("snapshot hydration fixture case %q asserts no main turns", fixtureCase.Name)
 		}
 	}
-	if err := testutil.RequireFixtureNames("snapshot hydration", "case", manifest.RequiredNames, names); err != nil {
+	if err := testutil.ValidateRequiredNames(manifest, caseNames, "snapshot hydration"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture

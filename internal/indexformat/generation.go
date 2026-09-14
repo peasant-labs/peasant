@@ -3,6 +3,7 @@ package indexformat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"reflect"
@@ -11,6 +12,13 @@ import (
 
 	"github.com/peasant-labs/schema"
 )
+
+// ErrSnapshotNotFound reports that a validated session identifier names no
+// stored session metadata row, so no read snapshot can be built. A reader
+// boundary that knows this returns the sentinel so callers answer with an
+// honest not-found result instead of a server error; it never means the caller
+// lacked permission.
+var ErrSnapshotNotFound = errors.New("indexformat: session has no stored metadata row")
 
 // MaxNativeAliasKeyBytes bounds one opaque native alias key. Native identity
 // is encoded into this key before it is persisted; the raw private path stays

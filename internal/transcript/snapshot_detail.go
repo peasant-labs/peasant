@@ -38,7 +38,15 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
-	mainEntries, err := hydratePartitionEntries(ctx, snapshot, snapshot.Main.Entries, resolver)
+	// Index the captured content map ONCE for the whole snapshot. Every
+	// partition (main and each earlier section) resolves its entries against
+	// this one index, so adding earlier history never re-indexes the captured
+	// content records for every partition.
+	contentByRef := make(map[schema.SourceEntryRef]indexformat.ContentRecord, len(snapshot.Content))
+	for _, record := range snapshot.Content {
+		contentByRef[record.Ref] = record
+	}
+	mainEntries, err := hydratePartitionEntries(ctx, snapshot, snapshot.Main.Entries, contentByRef, resolver)
 	if err != nil {
 		return fail(err)
 	}
@@ -51,7 +59,7 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 	session.NativeMetadata = append([]schema.NativeMetadataRecord(nil), snapshot.Main.NativeMetadata...)
 	for i := range snapshot.Earlier {
 		section := snapshot.Earlier[i]
-		entries, err := hydratePartitionEntries(ctx, snapshot, section.Content.Entries, resolver)
+		entries, err := hydratePartitionEntries(ctx, snapshot, section.Content.Entries, contentByRef, resolver)
 		if err != nil {
 			return fail(err)
 		}
@@ -73,17 +81,13 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 }
 
 // hydratePartitionEntries resolves one partition's entries against the
-// snapshot's captured content map. Every entry that names a source ref reads
+// snapshot's captured content index. Every entry that names a source ref reads
 // its full bytes from the immutable managed blob addressed by the captured
 // generation identity; ref-less legacy rows pass through unchanged. The blob
 // selects its target field by entry type: tool_use hydrates arguments,
 // tool_result hydrates the result, every other block hydrates display text in
 // the transient conversion input. Integrity failures refuse the partition.
-func hydratePartitionEntries(ctx context.Context, snapshot indexformat.ReadSnapshot, entries []schema.SessionEntry, resolver indexformat.ContentResolver) ([]schema.SessionEntry, error) {
-	byRef := make(map[schema.SourceEntryRef]indexformat.ContentRecord, len(snapshot.Content))
-	for _, record := range snapshot.Content {
-		byRef[record.Ref] = record
-	}
+func hydratePartitionEntries(ctx context.Context, snapshot indexformat.ReadSnapshot, entries []schema.SessionEntry, contentByRef map[schema.SourceEntryRef]indexformat.ContentRecord, resolver indexformat.ContentResolver) ([]schema.SessionEntry, error) {
 	out := make([]schema.SessionEntry, len(entries))
 	for i := range entries {
 		if err := ctx.Err(); err != nil {
@@ -94,7 +98,7 @@ func hydratePartitionEntries(ctx context.Context, snapshot indexformat.ReadSnaps
 			out[i] = entry
 			continue
 		}
-		record, ok := byRef[entry.SourceEntryRef]
+		record, ok := contentByRef[entry.SourceEntryRef]
 		if !ok {
 			return nil, fmt.Errorf("entry %d names source ref %q with no captured content record in generation %q; the snapshot is not self-contained; no partial transcript was emitted",
 				entry.EntryIndex, entry.SourceEntryRef, snapshot.GenerationID)
@@ -167,8 +171,8 @@ func unixMilliToTime(ms int64) time.Time {
 }
 
 // BuildSnapshotDetailBytes is the single durable payload-construction boundary
-// shared by detail reads, export and publication packaging (IP-P8). It holds
-// the snapshot's shared lock through hydration, folding, validation AND final
+// shared by detail reads, export and publication packaging. It holds the
+// snapshot's shared lock through hydration, folding, validation AND final
 // serialization, then releases the lock before returning owned bytes. Callers
 // perform no store access and no remote network while holding the lock; they
 // send or write the returned bytes after the lock is released.

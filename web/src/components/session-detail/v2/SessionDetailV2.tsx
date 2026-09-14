@@ -21,7 +21,13 @@ import '@xyflow/react/dist/style.css';
 import { FeedbackPanel, Skeleton } from '@/lib/ft-ui';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { subscribe } from '@/types/messages';
-import type { SessionDetailPayload, QualityPayload } from '@/types/messages';
+import type {
+  SessionDetailPayload,
+  SessionDetailReadPayload,
+  SessionRelationshipNavigation,
+  QualityPayload,
+} from '@/types/messages';
+import { RelationshipNavigationStatus } from '@peasant-labs/schema';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
 import { sessionsHref, transcriptHref, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
@@ -54,6 +60,25 @@ interface SessionDetailV2Props {
   projectName: string;
   routeQuery: TranscriptRouteQuery;
 }
+
+/**
+ * The mounted `session_detail` payload: the durable validated detail with the
+ * local read's additive relationship navigation at the JSON root. The generated
+ * flat-read type marks its inherited durable fields optional, so the durable
+ * contract is intersected back in here rather than weakening every consumer.
+ */
+type SessionDetailWire = SessionDetailPayload &
+  Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
+
+/**
+ * The adapter options the host owns today. `AdaptTranscriptOptions` is the
+ * published Fairtrade boundary; `relationshipNavigation` is the canonical
+ * local-read field the adapter consumes once the canonical Fairtrade package
+ * publishes that option, and is inert against the currently pinned package.
+ */
+type HostAdapterOptions = NonNullable<Parameters<typeof adaptTranscript>[3]> & {
+  relationshipNavigation?: SessionDetailReadPayload['relationshipNavigation'];
+};
 
 /**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
@@ -92,7 +117,7 @@ export function SessionDetailV2(props: SessionDetailV2Props) {
 }
 
 function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery }: SessionDetailV2Props) {
-  const { data: detail, error } = useChannel<SessionDetailPayload>(
+  const { data: detail, error } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
   // The canonical wire permits `null` for an empty turn collection. Normalize
@@ -108,6 +133,19 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const clearScope = useCallback(() => {
     router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
   }, [router, pathname, searchParams]);
+
+  // The host's exact-ID current-target route callback: an authorized navigation
+  // entry whose target resolves to a stored session routes to that session.
+  // known-unavailable / unknown / conflicting entries never navigate. The
+  // mounted click + Back restoration is pending the canonical Fairtrade package
+  // publishing the relationshipNavigation option and callback.
+  const navigateToRelationship = useCallback(
+    (entry: SessionRelationshipNavigation) => {
+      if (entry.status !== RelationshipNavigationStatus.Resolved || !entry.localId) return;
+      router.push(transcriptHref(projectHash, entry.localId));
+    },
+    [router, projectHash],
+  );
 
   // The quality channel feeds the personal-median comparison line on the
   // scorecard. The package never fetches it — peasant computes the medians and
@@ -232,10 +270,17 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
+    // The flat local read's authorized navigation rides beside the durable
+    // detail. It is passed through the published adapter-options boundary; the
+    // pinned package ignores the field until the canonical release publishes it.
+    const adapterOptions: HostAdapterOptions = {
+      relationshipNavigation: detail.relationshipNavigation,
+    };
     const adapted = adaptTranscript(
       { ...detail, turns: visibleTurns },
       undefined,
       analytics,
+      adapterOptions,
     );
     // `SessionVM.title` is documented as "render-when-present; else the consumer
     // derives one from the first prompt". Deriving is never right here: the
@@ -302,6 +347,19 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     }
     return <SessionDetailSkeleton />;
   }
+
+  // The callbacks the host wires into the composite. `onNavigateRelationship`
+  // carries the authorized navigation above; the pinned package does not invoke
+  // it until the canonical release publishes the matching callback, so the
+  // mounted link/Back behavior stays gated without faking it here.
+  const viewerCallbacks = {
+    onCopyLink: () => {
+      void navigator.clipboard?.writeText(
+        `${window.location.origin}${transcriptHref(projectHash, detail.id)}`,
+      );
+    },
+    onNavigateRelationship: navigateToRelationship,
+  };
 
   // Relativizes touched-file paths to repo-relative Map node ids.
   const workingDirectory = detail.workingDirectory;
@@ -407,13 +465,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             canChangeVisibility: false,
             canExport: false,
           }}
-          callbacks={{
-            onCopyLink: () => {
-              void navigator.clipboard?.writeText(
-                `${window.location.origin}${transcriptHref(projectHash, detail.id)}`,
-              );
-            },
-          }}
+          callbacks={viewerCallbacks}
           // Origin-aware host trail through the app router.
           breadcrumb={breadcrumb}
           LinkComponent={Link}
