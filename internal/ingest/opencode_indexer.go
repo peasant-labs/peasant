@@ -17,9 +17,10 @@ import (
 
 // OpenCodeIndexer parses legacy JSON trees and Peasant-managed OpenCode projections into SessionEntry slices.
 type OpenCodeIndexer struct {
-	fs          FileSystem
-	fullDepth   bool
-	fullContent bool
+	fs                FileSystem
+	fullDepth         bool
+	fullContent       bool
+	provenanceCapture OpenCodeProvenanceIndexerConfig
 }
 
 // OpenCodeIndexerOption configures an OpenCodeIndexer.
@@ -50,6 +51,20 @@ func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session D
 	completion := &indexCompletion{ctx: ctx, session: session}
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
+	}
+	// The provenance candidate path returns the validated V2 generation the
+	// native repair activation consumes. It stays disabled until that repair
+	// path enables it with a real snapshot; while disabled every V1 flow below
+	// keeps its exact retained behavior.
+	if idx.provenanceCapture.Enabled {
+		provenance, err := idx.IndexOpenCodeProvenanceV2(ctx, session)
+		if err != nil {
+			return nil, completion.failure(err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, completion.failure(err)
+		}
+		return provenance, nil
 	}
 	switch session.TranscriptOrigin {
 	case TranscriptOriginFile:

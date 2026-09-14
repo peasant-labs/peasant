@@ -1,0 +1,398 @@
+# Typed OpenCode provenance fixture. Every case drives the real provenance row
+# decoder, the section 3.2 classifier, and the shared projection builder. The
+# rows are sanitized native JSON, never private transcript data.
+cases:
+  - name: opencode-current-typed-user
+    scope:
+      sessionId: ses_opencodeCurrentChild
+      shape: current
+      parentNullProven: true
+      hasParent: false
+    allocator:
+      entries: [e_otext, e_ofile]
+      submissions: [s_o]
+    rows:
+      - id: msg_o_user
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_o_user","type":"user","text":"open the parser","time":{"created":1000},"files":[{"name":"parser.go","uri":"file://parser.go","mime":"text/plain"}]}'
+    want:
+      own: 1
+      turnCount: 2
+      titleRefs: [e_otext]
+      main:
+        - ref: e_otext
+          index: 0
+          role: user
+          entryType: text
+          depth: 0
+          content: open the parser
+          submission: s_o
+          origin: submitted_input
+          actor: unknown
+          delivery: session_admission
+          ownership: local
+          evidence: native_typed
+          modality: text
+        - ref: e_ofile
+          index: 1
+          role: user
+          entryType: text
+          depth: 0
+          content: parser.go
+          submission: s_o
+          origin: submitted_input
+          actor: unknown
+          delivery: session_admission
+          ownership: local
+          evidence: native_typed
+          modality: media
+
+  - name: opencode-agent-delivery
+    scope:
+      sessionId: ses_opencodeCurrentChild
+      shape: current
+      parentNullProven: false
+      hasParent: true
+    agentDelivered: true
+    allocator:
+      entries: [e_otext]
+      submissions: []
+    rows:
+      - id: msg_o_user
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_o_user","type":"user","text":"delegated instruction","time":{"created":1000}}'
+    want:
+      own: 0
+      turnCount: 1
+      titleRefs: []
+      main:
+        - ref: e_otext
+          index: 0
+          role: user
+          entryType: text
+          depth: 0
+          content: delegated instruction
+          origin: submitted_input
+          actor: agent_delegate
+          delivery: subagent_delivery
+          ownership: local
+          evidence: native_typed
+          modality: text
+
+  - name: opencode-unproved-child-delivery
+    scope:
+      sessionId: ses_opencodeChildNoProof
+      shape: current
+      parentNullProven: false
+      hasParent: true
+    allocator:
+      entries: [e_otext]
+      submissions: []
+    rows:
+      - id: msg_o_child
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_o_child","type":"user","text":"child text without per-input proof","time":{"created":1000}}'
+    want:
+      own: 0
+      turnCount: 1
+      titleRefs: []
+      main:
+        - ref: e_otext
+          index: 0
+          role: user
+          entryType: text
+          depth: 0
+          content: child text without per-input proof
+          origin: submitted_input
+          actor: unknown
+          delivery: unknown
+          ownership: local
+          evidence: native_typed
+          modality: text
+
+  - name: opencode-synthetic-system-skill-shell-compaction
+    scope:
+      sessionId: ses_opencodeCurrentChild
+      shape: current
+      parentNullProven: true
+      hasParent: false
+    allocator:
+      entries: [e_osyn, e_osys, e_oskill, e_oshell, e_oshellout, e_ocompact]
+      submissions: [s_oshell]
+    rows:
+      - id: msg_o_syn
+        type: synthetic
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_o_syn","type":"synthetic","text":"injected harness note","time":{"created":1000}}'
+      - id: msg_o_sys
+        type: system
+        seq: 1
+        timeCreated: 1001
+        timeUpdated: 1001
+        data: '{"id":"msg_o_sys","type":"system","text":"system rule","time":{"created":1001}}'
+      - id: msg_o_skill
+        type: skill
+        seq: 2
+        timeCreated: 1002
+        timeUpdated: 1002
+        data: '{"id":"msg_o_skill","type":"skill","skill":"review","name":"Review","text":"skill instructions","time":{"created":1002}}'
+      - id: msg_o_shell
+        type: shell
+        seq: 3
+        timeCreated: 1003
+        timeUpdated: 1004
+        data: '{"id":"msg_o_shell","type":"shell","callID":"call_o_shell","command":"rg parser","output":"parser.go:12","time":{"created":1003,"completed":1004}}'
+      - id: msg_o_compact
+        type: compaction
+        seq: 4
+        timeCreated: 1005
+        timeUpdated: 1005
+        data: '{"id":"msg_o_compact","type":"compaction","reason":"auto","summary":"summary text","recent":"recent tail","time":{"created":1005}}'
+    want:
+      own: 1
+      turnCount: 6
+      titleRefs: []
+      main:
+        - ref: e_osyn
+          index: 0
+          role: system
+          entryType: system
+          depth: 0
+          content: injected harness note
+          origin: harness_context
+          actor: harness
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: text
+        - ref: e_osys
+          index: 1
+          role: system
+          entryType: system
+          depth: 0
+          content: system rule
+          origin: harness_context
+          actor: harness
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: text
+        - ref: e_oskill
+          index: 2
+          role: system
+          entryType: system
+          depth: 0
+          content: skill instructions
+          origin: harness_context
+          actor: harness
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: text
+        - ref: e_oshell
+          index: 3
+          role: user
+          entryType: text
+          depth: 0
+          content: rg parser
+          submission: s_oshell
+          origin: submitted_input
+          actor: unknown
+          delivery: session_admission
+          ownership: local
+          evidence: native_typed
+          modality: user_action
+        - ref: e_oshellout
+          index: 4
+          role: assistant
+          entryType: text
+          depth: 0
+          content: parser.go:12
+          origin: agent_output
+          actor: unknown
+          delivery: session_admission
+          ownership: local
+          evidence: native_typed
+          modality: none
+        - ref: e_ocompact
+          index: 5
+          role: system
+          entryType: system
+          depth: 0
+          content: summary text
+          origin: generated_summary
+          actor: harness
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: text
+
+  - name: opencode-tool-part-ids
+    scope:
+      sessionId: ses_opencodeCurrentChild
+      shape: current
+      parentNullProven: true
+      hasParent: false
+    allocator:
+      entries: [e_a1, e_reason1, e_call1, e_result1]
+      submissions: []
+    rows:
+      - id: msg_o_assistant
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_o_assistant","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_text","text":"I will inspect."},{"type":"reasoning","id":"prt_reason","text":"I will inspect."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"parser.go"},"content":[{"type":"text","text":"parser.go:12"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
+    want:
+      own: 0
+      turnCount: 2
+      titleRefs: []
+      main:
+        - ref: e_a1
+          index: 0
+          role: assistant
+          entryType: text
+          depth: 0
+          content: I will inspect.
+          origin: agent_output
+          actor: unknown
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: none
+        - ref: e_reason1
+          index: 1
+          role: assistant
+          entryType: thinking
+          depth: 0
+          content: I will inspect.
+          origin: agent_output
+          actor: unknown
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: none
+        - ref: e_call1
+          index: 2
+          role: assistant
+          entryType: tool_use
+          depth: 1
+          parentIndex: 0
+          toolInput: '{"path":"parser.go"}'
+          toolCallId: e_call1
+          origin: tool_activity
+          actor: unknown
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: none
+        - ref: e_result1
+          index: 3
+          role: tool
+          entryType: tool_result
+          depth: 1
+          parentIndex: 0
+          toolOutput: '"parser.go:12"'
+          toolCallId: e_call1
+          origin: tool_activity
+          actor: unknown
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: none
+
+  - name: opencode-unsupported-type-unknown
+    scope:
+      sessionId: ses_opencodeCurrentChild
+      shape: current
+      parentNullProven: true
+      hasParent: false
+    allocator:
+      entries: [e_ounknown]
+      submissions: []
+    rows:
+      - id: msg_o_future
+        type: future-widget
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_o_future","type":"future-widget","time":{"created":1000}}'
+    want:
+      own: 0
+      turnCount: 1
+      titleRefs: []
+      main:
+        - ref: e_ounknown
+          index: 0
+          role: system
+          entryType: system
+          depth: 0
+          content: '{"id":"msg_o_future","type":"future-widget","time":{"created":1000}}'
+          origin: unknown
+          actor: unknown
+          delivery: unknown
+          ownership: local
+          evidence: unknown
+          modality: unknown
+
+# Historical-shape controls. These drive the real JSON message/part readers,
+# the pinned semantic parsers, the section 3.2 classifier, and the shared
+# projection builder. A historical shape proves no typed admission route, so
+# delivery stays unknown and no input or title is claimed.
+historicalCases:
+  - name: opencode-historical-user-and-synthetic
+    sessionId: ses_opencodeHistorical
+    allocator:
+      entries: [e_hist, e_hist_syn]
+      submissions: []
+    messages:
+      - id: hist_msg_a_user
+        data: '{"id":"hist_msg_a_user","role":"user","time":{"created":1000}}'
+        parts:
+          - id: prt_hist_a_text
+            data: '{"id":"prt_hist_a_text","messageID":"hist_msg_a_user","type":"text","text":"historical user text","time":{"created":1000}}'
+      - id: hist_msg_b_synth
+        data: '{"id":"hist_msg_b_synth","role":"user","time":{"created":1001}}'
+        parts:
+          - id: prt_hist_b_syn
+            data: '{"id":"prt_hist_b_syn","messageID":"hist_msg_b_synth","type":"text","synthetic":true,"text":"injected harness note","time":{"created":1001}}'
+    want:
+      own: 0
+      turnCount: 2
+      titleRefs: []
+      main:
+        - ref: e_hist
+          index: 0
+          role: user
+          entryType: text
+          depth: 0
+          content: historical user text
+          origin: submitted_input
+          actor: unknown
+          delivery: unknown
+          ownership: local
+          evidence: existing_adapter
+          modality: text
+        - ref: e_hist_syn
+          index: 1
+          role: system
+          entryType: system
+          depth: 0
+          content: injected harness note
+          origin: harness_context
+          actor: harness
+          delivery: system_lifecycle
+          ownership: local
+          evidence: existing_adapter
+          modality: text
