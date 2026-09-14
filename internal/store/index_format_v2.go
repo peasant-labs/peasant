@@ -24,6 +24,12 @@ type generationIndexFormat struct{}
 
 var _ IndexFormat = generationIndexFormat{}
 
+// V2IndexFormat returns the concrete managed-generation index-format handler. A
+// store that installs or reads managed generations must register it with
+// WithIndexFormats; without it, activation and generation snapshots fail closed
+// instead of pretending an unknown representation is an empty transcript.
+func V2IndexFormat() IndexFormat { return generationIndexFormat{} }
+
 // Version reports the concrete managed-generation format version.
 func (generationIndexFormat) Version() int { return 2 }
 

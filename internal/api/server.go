@@ -123,6 +123,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
 	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
+	mux.HandleFunc("GET "+defaults.RouteSessionDetail.String(), s.handleSessionDetail)
 	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
@@ -310,6 +311,48 @@ func (s *Server) handleUICapabilities(w http.ResponseWriter, _ *http.Request) {
 
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	w.Header().Set(defaults.HeaderCacheControl, defaults.CacheControlNoStore)
+	w.Write(data)
+}
+
+// handleSessionDetail serves the flat local single-session read: the validated
+// durable detail fields at the JSON root plus authorized
+// relationshipNavigation. It applies no discovery or selection scope, because
+// a caller holding an identifier is not browsing and a stored session stays
+// reachable through a direct deep link. A malformed identifier is the caller's
+// mistake; a valid identifier that names no stored session is an honest 404.
+func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+
+	if s.cfg.Provider == nil {
+		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, `{"error":"missing session ID"}`, http.StatusBadRequest)
+		return
+	}
+	if _, err := ingest.NewSessionID(sessionID); err != nil {
+		http.Error(w, `{"error":"invalid session ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	detail, err := SessionDetailReadForProvider(r.Context(), s.cfg.Provider, sessionID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+			return
+		}
+		writeDiscoveryError(w, "failed to load session detail", err)
+		return
+	}
+
+	data, err := json.Marshal(detail)
+	if err != nil {
+		http.Error(w, `{"error":"failed to marshal session detail"}`, http.StatusInternalServerError)
+		return
+	}
 	w.Write(data)
 }
 

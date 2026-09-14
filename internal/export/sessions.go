@@ -2,19 +2,49 @@ package export
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
 
+// ExportSnapshotPayload builds one export payload through the durable
+// snapshot boundary. It is the export half of the single payload-construction
+// boundary shared with detail reads and publication packaging: the snapshot's
+// shared lock covers hydration through final serialization, and the caller
+// writes the returned payload after the lock is released.
+func ExportSnapshotPayload(ctx context.Context, reader indexformat.SnapshotReader, resolver indexformat.ContentResolver, sessionID schema.SessionID) (*schema.SessionDetailPayload, error) {
+	_, payload, err := transcript.BuildSnapshotDetailBytes(ctx, reader, resolver, sessionID)
+	return payload, err
+}
+
 // ExportSession reads verified full database content and context in one snapshot.
 // Filesystem and managed-root arguments remain for caller compatibility only.
+//
+// A session with a committed managed generation is exported through the durable
+// snapshot boundary: immutable blobs hydrate full arguments/results before
+// folding, and the shared lock covers hydration through serialization. Legacy
+// sessions without a generation use the preserved content-capture path. A
+// corrupt managed artifact fails the export; it never falls back to truncated
+// content.
 func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, managedRoots ...string) (*schema.SessionDetailPayload, error) {
+	if db.GenerationSnapshotsSupported() {
+		sid, err := ingest.NewSessionID(sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("export session %s: %w", sessionID, err)
+		}
+		if payload, err := ExportSnapshotPayload(ctx, db, db, sid); err == nil {
+			return payload, nil
+		} else if !errors.Is(err, transcript.ErrLegacySnapshot) {
+			return nil, fmt.Errorf("export session %s: %w", sessionID, err)
+		}
+	}
 	snapshot, err := db.ReadSessionContent(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("export session %s: %w", sessionID, err)

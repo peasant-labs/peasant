@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -16,6 +17,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
+
+// ErrSessionNotFound reports that a validated session identifier names no
+// stored session. Callers map it to an honest not-found response rather than a
+// server error; it never means the caller lacked permission.
+var ErrSessionNotFound = errors.New("session not found")
 
 // displayProjectName prefers the row's git remote (formatted "host:owner/repo"
 // by projectlabel) over its already-coalesced canonical-cwd-or-hash value, so
@@ -340,7 +346,7 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}
 	if snapshot == nil {
-		return nil, fmt.Errorf("session not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
 	}
 	detailRow := snapshot.Detail
 	s := sessionRowToSession(&detailRow.SessionRow)

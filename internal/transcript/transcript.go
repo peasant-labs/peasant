@@ -29,6 +29,20 @@ type toolResultData struct {
 	Output    string
 	IsError   bool
 	Timestamp int64
+	// ResultRef is the durable source ref carried on the tool_result entry.
+	ResultRef string
+	// Provenance is the durable evidence carried on the tool_result entry.
+	Provenance *schema.ContentProvenance
+}
+
+// copyProvenance returns an independent copy of a source-entry provenance
+// record so folded turns never alias stored entry memory.
+func copyProvenance(p *schema.ContentProvenance) *schema.ContentProvenance {
+	if p == nil {
+		return nil
+	}
+	dupe := *p
+	return &dupe
 }
 
 type commandWrapperKind uint8
@@ -252,7 +266,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		}
 		// Depth=1 tool_result entries are the primary source.
 		if e.Depth == 1 && e.EntryType == schema.EntryTypeToolResult {
-			rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
+			rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e), ResultRef: string(e.SourceEntryRef), Provenance: copyProvenance(e.Provenance)}
 			if e.TimestampMs != nil {
 				rd.Timestamp = *e.TimestampMs
 			}
@@ -263,7 +277,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		// Explicit depth-1 results above take precedence in either entry order.
 		if e.ToolOutput != nil || (e.Depth == 0 && e.EntryType == schema.EntryTypeToolResult) {
 			if _, exists := resultMap[*e.ToolCallID]; !exists {
-				rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e)}
+				rd := toolResultData{IsError: e.IsError, Output: toolResultOutput(e), ResultRef: string(e.SourceEntryRef), Provenance: copyProvenance(e.Provenance)}
 				if e.TimestampMs != nil {
 					rd.Timestamp = *e.TimestampMs
 				}
@@ -290,6 +304,13 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			tc := ingest.ToolCall{
 				ID: *e.ToolCallID,
 			}
+			// A managed generation carries the durable source ref on the
+			// entry itself; Pi rows carry it in typed Extra instead and leave
+			// the entry ref empty, so the entry value is only a fallback.
+			if e.SourceEntryRef != "" {
+				tc.CallEntryRef = string(e.SourceEntryRef)
+			}
+			tc.CallProvenance = copyProvenance(e.Provenance)
 			if e.ToolNamesCSV != nil {
 				tc.Name = *e.ToolNamesCSV
 			}
@@ -305,6 +326,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			if rd, ok := resultMap[*e.ToolCallID]; ok {
 				tc.Result = rd.Output
 				tc.IsError = rd.IsError
+				if tc.ResultEntryRef == "" {
+					tc.ResultEntryRef = rd.ResultRef
+				}
+				if tc.ResultProvenance == nil {
+					tc.ResultProvenance = copyProvenance(rd.Provenance)
+				}
 				// Compute duration from tool_use → tool_result timestamps.
 				if e.TimestampMs != nil && rd.Timestamp > 0 {
 					dur := int(rd.Timestamp - *e.TimestampMs)
@@ -414,6 +441,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		t := ingest.Turn{
 			SourceEntryRef: evidence[e.EntryIndex].SourceRef,
 			Usage:          evidence[e.EntryIndex].Usage,
+			Provenance:     copyProvenance(e.Provenance),
 			Index:          e.EntryIndex,
 			Role:           role,
 			Command:        command,
@@ -427,6 +455,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			TokensIn:       e.TokensIn,
 			TokensOut:      e.TokensOut,
 			PartType:       e.PartType,
+		}
+		// A managed generation carries the durable source ref on the entry
+		// itself. Pi rows keep it in typed Extra and leave the entry ref
+		// empty, so the entry value only fills the gap Pi evidence leaves.
+		if t.SourceEntryRef == "" {
+			t.SourceEntryRef = string(e.SourceEntryRef)
 		}
 		observation := modelObservation(e)
 		projectedObservation := projectModelObservation(observation)
@@ -451,6 +485,20 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			tc := ingest.ToolCall{
 				ID: *e.ToolCallID,
 			}
+			// Old-style single-level rows share one entry for call and
+			// result. A tool_result row owns the result ref; any other row
+			// owns the call ref.
+			if e.EntryType == schema.EntryTypeToolResult {
+				if e.SourceEntryRef != "" {
+					tc.ResultEntryRef = string(e.SourceEntryRef)
+				}
+				tc.ResultProvenance = copyProvenance(e.Provenance)
+			} else {
+				if e.SourceEntryRef != "" {
+					tc.CallEntryRef = string(e.SourceEntryRef)
+				}
+				tc.CallProvenance = copyProvenance(e.Provenance)
+			}
 			if e.ToolNamesCSV != nil {
 				tc.Name = *e.ToolNamesCSV
 			}
@@ -466,6 +514,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			if rd, ok := resultMap[*e.ToolCallID]; ok && e.EntryType == schema.EntryTypeToolUse {
 				tc.Result = rd.Output
 				tc.IsError = rd.IsError
+				if tc.ResultEntryRef == "" {
+					tc.ResultEntryRef = rd.ResultRef
+				}
+				if tc.ResultProvenance == nil {
+					tc.ResultProvenance = copyProvenance(rd.Provenance)
+				}
 			}
 
 			// Compute duration from tool_use → tool_result timestamps.
@@ -641,45 +695,7 @@ func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, 
 
 // sessionToDetail converts a full Session to a SessionDetailPayload.
 func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
-	turns := make([]schema.TurnDetail, len(s.Turns))
-	for i, t := range s.Turns {
-		toolCalls := make([]schema.ToolCallDetail, len(t.ToolCalls))
-		for j, tc := range t.ToolCalls {
-			toolCalls[j] = schema.ToolCallDetail{
-				CallEntryRef:   schema.SourceEntryRef(tc.CallEntryRef),
-				ResultEntryRef: schema.SourceEntryRef(tc.ResultEntryRef),
-				Usage:          tc.Usage,
-				ID:             tc.ID,
-				Name:           tc.Name,
-				Namespace:      tc.Namespace,
-				Arguments:      tc.Arguments,
-				Result:         tc.Result,
-				DurationMs:     tc.DurationMs,
-				ExitCode:       tc.ExitCode,
-				FilePath:       tc.FilePath,
-				IsError:        tc.IsError,
-				ToolKind:       tc.ToolKind,
-			}
-		}
-		turns[i] = schema.TurnDetail{
-			SourceEntryRef: schema.SourceEntryRef(t.SourceEntryRef),
-			Usage:          t.Usage,
-			Index:          t.Index,
-			Role:           t.Role,
-			Command:        t.Command,
-			Content:        t.Content,
-			ToolCalls:      toolCalls,
-			Timestamp:      t.Timestamp.UTC(),
-			Depth:          t.Depth,
-			ParentIndex:    t.ParentIndex,
-			EntryType:      t.EntryType,
-			HasThinking:    t.HasThinking,
-			StopReason:     t.StopReason,
-			TokensIn:       t.TokensIn,
-			TokensOut:      t.TokensOut,
-			ObservedModel:  t.ObservedModel,
-		}
-	}
+	turns := turnsToDetail(s.Turns)
 
 	model := sessionModelSeed(s)
 
@@ -701,27 +717,33 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	scorecard := qualityMetricsToScorecard(s.Metadata.Quality)
 
 	detail := &schema.SessionDetailPayload{
-		NativeMetadata:   s.NativeMetadata,
-		ID:               string(s.ID),
-		Harness:          s.Harness,
-		StartTime:        s.StartTime.UTC(),
-		EndTime:          s.EndTime.UTC(),
-		DurationMins:     s.Metadata.Duration.Minutes(),
-		TotalTokens:      s.Metadata.TotalTokens,
-		TokensIn:         s.Metadata.TokensIn,
-		TokensOut:        s.Metadata.TokensOut,
-		TurnCount:        s.Metadata.TurnCount,
-		ToolCallCount:    s.Metadata.ToolCallCount,
-		Turns:            turns,
-		Source:           source,
-		Status:           status,
-		Project:          s.Project,
-		Model:            model,
-		WorkingDirectory: s.ProjectPath,
-		GitBranch:        s.GitBranch,
-		GitRemote:        s.GitRemote,
-		Outcome:          outcome,
-		Scorecard:        scorecard,
+		NativeMetadata:       s.NativeMetadata,
+		ID:                   string(s.ID),
+		Harness:              s.Harness,
+		StartTime:            s.StartTime.UTC(),
+		EndTime:              s.EndTime.UTC(),
+		DurationMins:         s.Metadata.Duration.Minutes(),
+		TotalTokens:          s.Metadata.TotalTokens,
+		TokensIn:             s.Metadata.TokensIn,
+		TokensOut:            s.Metadata.TokensOut,
+		TurnCount:            s.Metadata.TurnCount,
+		ToolCallCount:        s.Metadata.ToolCallCount,
+		Turns:                turns,
+		Source:               source,
+		Status:               status,
+		Project:              s.Project,
+		Model:                model,
+		WorkingDirectory:     s.ProjectPath,
+		GitBranch:            s.GitBranch,
+		GitRemote:            s.GitRemote,
+		Outcome:              outcome,
+		Scorecard:            scorecard,
+		Relationships:        s.Relationships,
+		Purpose:              s.Purpose,
+		RootSessionID:        s.RootSessionID,
+		ParentSessionID:      s.ParentSessionID,
+		InputSubmissionCount: s.InputSubmissionCount,
+		EarlierHistory:       earlierHistoryToDetail(s.EarlierHistory),
 	}
 	// Every served detail leaves this one producer bounded for display. A stored
 	// record may be far larger than the contract's document policy allows the
@@ -736,4 +758,74 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	// through here.
 	BoundServedDetail(detail, DefaultServedDocumentBudget())
 	return detail
+}
+
+// turnsToDetail converts folded turns to wire turns. It is the single
+// turn-projection site for main turns and every earlier-history partition, so
+// the two cannot drift in what a turn carries.
+func turnsToDetail(folded []ingest.Turn) []schema.TurnDetail {
+	turns := make([]schema.TurnDetail, len(folded))
+	for i, t := range folded {
+		toolCalls := make([]schema.ToolCallDetail, len(t.ToolCalls))
+		for j, tc := range t.ToolCalls {
+			toolCalls[j] = schema.ToolCallDetail{
+				CallEntryRef:     schema.SourceEntryRef(tc.CallEntryRef),
+				ResultEntryRef:   schema.SourceEntryRef(tc.ResultEntryRef),
+				CallProvenance:   tc.CallProvenance,
+				ResultProvenance: tc.ResultProvenance,
+				Usage:            tc.Usage,
+				ID:               tc.ID,
+				Name:             tc.Name,
+				Namespace:        tc.Namespace,
+				Arguments:        tc.Arguments,
+				Result:           tc.Result,
+				DurationMs:       tc.DurationMs,
+				ExitCode:         tc.ExitCode,
+				FilePath:         tc.FilePath,
+				IsError:          tc.IsError,
+				ToolKind:         tc.ToolKind,
+			}
+		}
+		turns[i] = schema.TurnDetail{
+			SourceEntryRef: schema.SourceEntryRef(t.SourceEntryRef),
+			Provenance:     t.Provenance,
+			Usage:          t.Usage,
+			Index:          t.Index,
+			Role:           t.Role,
+			Command:        t.Command,
+			Content:        t.Content,
+			ToolCalls:      toolCalls,
+			Timestamp:      t.Timestamp.UTC(),
+			Depth:          t.Depth,
+			ParentIndex:    t.ParentIndex,
+			EntryType:      t.EntryType,
+			HasThinking:    t.HasThinking,
+			StopReason:     t.StopReason,
+			TokensIn:       t.TokensIn,
+			TokensOut:      t.TokensOut,
+			ObservedModel:  t.ObservedModel,
+		}
+	}
+	return turns
+}
+
+// earlierHistoryToDetail converts retained earlier-history partitions to wire
+// sections. Nil input stays nil so sessions without retained history omit the
+// field; an explicitly empty retained set is preserved as-is by the caller.
+func earlierHistoryToDetail(sections []ingest.EarlierHistorySection) []schema.EarlierHistorySection {
+	if sections == nil {
+		return nil
+	}
+	out := make([]schema.EarlierHistorySection, len(sections))
+	for i, section := range sections {
+		out[i] = schema.EarlierHistorySection{
+			State:          section.State,
+			Turns:          turnsToDetail(section.Turns),
+			NativeMetadata: section.NativeMetadata,
+		}
+		if out[i].Turns == nil {
+			out[i].Turns = []schema.TurnDetail{}
+		}
+	}
+	return out
 }

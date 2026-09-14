@@ -1,0 +1,85 @@
+# Local authorized relationship-navigation oracle.
+#
+# Each case drives the real production resolver (resolveRelationshipNavigation)
+# with one durable relationship set and a stored-target lookup that reports the
+# listed identifiers as present. The resolver is the ONE navigation-decorating
+# site shared by the WebSocket session_detail read and the HTTP detail route.
+#
+# Resolution uses the stored exact target identifier and applies neither origin
+# scope nor selection scope. A stored identifier that is not in the list is an
+# absent target: it becomes known_unavailable with NO identifier, so a link can
+# never leak a hidden title or route to the wrong session. An explicit-none
+# relationship names nothing linkable and contributes no navigation entry.
+cases:
+  - name: resolved-known-target
+    relationships:
+      - {kind: started_by, targetState: target_known, targetLocalId: "11111111-1111-4111-8111-111111111111", evidence: native_typed}
+    stored: ["11111111-1111-4111-8111-111111111111"]
+    expectedLookupIDs: ["11111111-1111-4111-8111-111111111111"]
+    expected:
+      - {kind: started_by, status: resolved, localId: "11111111-1111-4111-8111-111111111111"}
+
+  - name: resolved-retained-target
+    relationships:
+      - {kind: context_from, targetState: target_known_retained, targetLocalId: "22222222-2222-4222-8222-222222222222", evidence: native_typed}
+    stored: ["22222222-2222-4222-8222-222222222222"]
+    expectedLookupIDs: ["22222222-2222-4222-8222-222222222222"]
+    expected:
+      - {kind: context_from, status: resolved, localId: "22222222-2222-4222-8222-222222222222"}
+
+  - name: absent-known-target-is-unavailable
+    relationships:
+      - {kind: started_by, targetState: target_known, targetLocalId: "33333333-3333-4333-8333-333333333333", evidence: native_typed}
+    stored: []
+    expectedLookupIDs: ["33333333-3333-4333-8333-333333333333"]
+    expected:
+      - {kind: started_by, status: known_unavailable}
+
+  - name: unknown-target-stays-explicit
+    relationships:
+      - {kind: context_from, targetState: unknown, evidence: native_typed}
+    stored: []
+    expectedLookupIDs: []
+    expected:
+      - {kind: context_from, status: unknown}
+
+  - name: conflicting-target-stays-explicit
+    relationships:
+      - {kind: started_by, targetState: conflicting_current_native_evidence, evidence: native_typed}
+    stored: []
+    expectedLookupIDs: []
+    expected:
+      - {kind: started_by, status: conflicting}
+
+  - name: explicit-none-contributes-no-navigation
+    relationships:
+      - {kind: context_from, targetState: explicit_none, evidence: native_typed}
+    stored: []
+    expectedLookupIDs: []
+    expected: []
+
+  - name: context-and-starter-pair-stay-distinct
+    relationships:
+      - {kind: context_from, targetState: target_known, targetLocalId: "44444444-4444-4444-8444-444444444444", evidence: native_typed}
+      - {kind: started_by, targetState: target_known, targetLocalId: "55555555-5555-4555-8555-555555555555", evidence: native_typed}
+    stored: ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]
+    expectedLookupIDs: ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]
+    expected:
+      - {kind: context_from, status: resolved, localId: "44444444-4444-4444-8444-444444444444"}
+      - {kind: started_by, status: resolved, localId: "55555555-5555-4555-8555-555555555555"}
+
+  - name: known-and-unavailable-pair-separate
+    relationships:
+      - {kind: started_by, targetState: target_known, targetLocalId: "66666666-6666-4666-8666-666666666666", evidence: native_typed}
+      - {kind: context_from, targetState: target_known, targetLocalId: "77777777-7777-4777-8777-777777777777", evidence: native_typed}
+    stored: ["66666666-6666-4666-8666-666666666666"]
+    expectedLookupIDs: ["66666666-6666-4666-8666-666666666666", "77777777-7777-4777-8777-777777777777"]
+    expected:
+      - {kind: started_by, status: resolved, localId: "66666666-6666-4666-8666-666666666666"}
+      - {kind: context_from, status: known_unavailable}
+
+  - name: no-relationships-yield-no-navigation
+    relationships: []
+    stored: []
+    expectedLookupIDs: []
+    expected: []

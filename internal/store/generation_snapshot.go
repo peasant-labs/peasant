@@ -19,6 +19,14 @@ var (
 	_ indexformat.ContentResolver = (*Store)(nil)
 )
 
+// GenerationSnapshotsSupported reports whether this store was opened with the
+// managed-generation file store and session lock namespace. Detail, export
+// and publication prefer the snapshot boundary when true and use the preserved
+// legacy content path otherwise. It is a support probe, never a content gate.
+func (s *Store) GenerationSnapshotsSupported() bool {
+	return s != nil && s.generationArtifacts != nil && s.sessionLocker != nil
+}
+
 // WithSessionSnapshot loads ONE immutable read snapshot for a session. It takes
 // the shared per-session OS lock BEFORE the SQLite read transaction, loads the
 // metadata, active generation, main and earlier partitions, contexts and

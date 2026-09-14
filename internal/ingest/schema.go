@@ -23,18 +23,44 @@ type Session struct {
 	GitRemote   string // from host_slugs.git_remote
 	ProjectPath string // from projects.project_path (working directory)
 	PushedAt    *int64 // from sessions.pushed_at (nil = not pushed)
+
+	// Managed graph fields — populated from a committed generation snapshot
+	// (ReadSnapshot metadata) on the durable detail path. Nil/zero means the
+	// source has no durable graph evidence; they are omitted from the wire
+	// payload in that case and never backfilled from turn counts.
+	Relationships        []schema.SessionRelationship
+	Purpose              schema.SessionPurpose
+	RootSessionID        *schema.SessionID
+	ParentSessionID      *schema.SessionID
+	InputSubmissionCount *int64
+	EarlierHistory       []EarlierHistorySection
+}
+
+// EarlierHistorySection is one retained uncertain-history partition carried on
+// a Session into the detail builder. State names the retention reason; Turns
+// holds that partition's folded turns; NativeMetadata holds attachments owned
+// by that partition. It never contributes to input counts or titles.
+type EarlierHistorySection struct {
+	State          schema.EarlierHistoryState
+	Turns          []Turn
+	NativeMetadata []schema.NativeMetadataRecord
 }
 
 // Turn represents a single interaction turn within a session.
 type Turn struct {
 	SourceEntryRef string
 	Usage          *schema.UsageDetail
-	Index          int
-	Role           Role
-	Content        string
-	ToolCalls      []ToolCall
-	Timestamp      time.Time
-	Depth          int // 0 = main agent, 1+ = subagent nesting levels
+	// Provenance is the durable content-provenance evidence carried on the
+	// source entry. Nil for legacy rows without managed evidence; present
+	// values (including all-unknown) are emitted verbatim and mark the turn
+	// as protected against legacy text/noise filtering downstream.
+	Provenance *schema.ContentProvenance
+	Index      int
+	Role       Role
+	Content    string
+	ToolCalls  []ToolCall
+	Timestamp  time.Time
+	Depth      int // 0 = main agent, 1+ = subagent nesting levels
 	// ParentIndex is the entry_index of the parent entry. At depth 1 and deeper
 	// it names the enclosing depth-0 turn. At depth 0 it is nil. A harness
 	// message graph, when one exists, is carried on the entry ParentEntryID
@@ -69,10 +95,15 @@ type ToolCall struct {
 	CallEntryRef   string
 	ResultEntryRef string
 	Usage          *schema.UsageDetail
-	ID             string
-	Name           string
-	Arguments      string
-	Result         string
+	// CallProvenance is the durable evidence carried on the tool_use entry;
+	// ResultProvenance is the evidence carried on the tool_result entry. Nil
+	// for legacy rows; emitted verbatim when present.
+	CallProvenance   *schema.ContentProvenance
+	ResultProvenance *schema.ContentProvenance
+	ID               string
+	Name             string
+	Arguments        string
+	Result           string
 
 	// Enrichment fields — computed from session_entries data.
 	DurationMs *int                // wall-clock duration from tool_use to tool_result
