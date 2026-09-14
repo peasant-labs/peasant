@@ -14,6 +14,56 @@ import (
 
 var _ ingest.OrphanParentReconciler = (*Store)(nil)
 
+// parentCacheLegacyLookupTemplate is the V1 half of the reverse lookup: the
+// legacy publication metadata snapshot's retained parentUuid. The CROSS JOIN
+// keeps the target list as the fixed outer loop, so the query seeks the
+// parentUuid expression index by target rather than scanning the harness
+// population; it reads only the stored children that name a target. A session
+// with active managed-generation relationship authority is excluded entirely:
+// the legacy snapshot may predate the active generation and must never
+// resurrect a parent that generation cleared, marked unknown or conflicting, or
+// pointed elsewhere. The trailing %s is the harness placeholder list.
+const parentCacheLegacyLookupTemplate = `
+SELECT s.session_id, json_extract(p.metadata_json, '$.parentUuid')
+FROM json_each(?) AS target
+CROSS JOIN session_publication_metadata p
+CROSS JOIN sessions s
+WHERE json_extract(p.metadata_json, '$.parentUuid') = target.value
+  AND s.session_id = p.session_id
+  AND json_extract(p.metadata_json, '$.parentUuid') IS NOT NULL
+  AND target.value IS NOT NULL
+  AND s.parent_id IS NULL
+  AND s.model_harness IN (%s)
+  AND NOT EXISTS (
+    SELECT 1 FROM session_relationship_evidence r
+    WHERE r.session_id = s.session_id
+      AND r.generation_id = s.active_generation_id
+  )`
+
+// parentCacheDurableLookupTemplate is the V2 half: the active generation's
+// started_by relationship evidence. Its CROSS JOIN likewise keeps the target
+// list as the fixed outer loop and seeks the relationship-evidence target
+// index. The trailing %s is the harness placeholder list.
+const parentCacheDurableLookupTemplate = `
+SELECT r.session_id, r.target_local_id
+FROM json_each(?) AS target
+CROSS JOIN session_relationship_evidence r
+CROSS JOIN sessions s
+WHERE r.kind = 'started_by' AND r.target_local_id = target.value
+  AND s.session_id = r.session_id AND s.active_generation_id = r.generation_id
+  AND target.value IS NOT NULL
+  AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  AND r.target_state IN ('target_known','target_known_retained')
+  AND s.parent_id IS NULL
+  AND s.model_harness IN (%s)`
+
+// parentCacheLookupSQL renders one reverse-lookup template for the given number
+// of harness placeholders. Production and its query-plan guard share it so the
+// guarded statement is the statement production runs.
+func parentCacheLookupSQL(template string, harnessCount int) string {
+	return fmt.Sprintf(template, strings.TrimSuffix(strings.Repeat("?,", harnessCount), ","))
+}
+
 // Reverse logical-target cache reconciliation for independently admitted
 // children.
 //
@@ -39,11 +89,18 @@ var _ ingest.OrphanParentReconciler = (*Store)(nil)
 // authoritative and is never overwritten from this reverse pass.
 //
 // Durable evidence is read from two persisted sources, in this order of
-// authority: the active generation's started_by relationship evidence (the V2
-// contract), and the session publication metadata snapshot's legacy
-// parentUuid (the V1 pair). The result is deduplicated and ordered by child,
-// then parent. The query is scoped to the given parents, so a stored
-// independent root that does not name one of them is never considered and its
+// authority. The active generation's started_by relationship evidence (the V2
+// contract) is authoritative: a session that carries relationship evidence for
+// its active generation is excluded from the legacy pass entirely, so a legacy
+// publication snapshot can never resurrect a parent the active generation
+// cleared (explicit_none), marked unknown or conflicting, or pointed at a
+// different target. The publication metadata snapshot's legacy parentUuid (the
+// V1 pair) is consulted only for sessions with no active relationship
+// evidence. The result is deduplicated and ordered by child, then parent.
+//
+// Both queries are driven from the named parents: the target list is the outer
+// loop and each persisted evidence form is seeked by target, so a stored
+// independent root that does not name one of them is never touched and its
 // managed metadata is never opened.
 func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ingest.SessionID, harnesses []ingest.Harness) ([]ingest.ParentCacheReconcile, error) {
 	if len(parents) == 0 || len(harnesses) == 0 {
@@ -94,12 +151,13 @@ func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ing
 	}
 	defer s.pool.Put(conn)
 
-	harnessPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(harnessNames)), ",")
 	harnessArgs := make([]any, 0, len(harnessNames))
 	for _, name := range harnessNames {
 		harnessArgs = append(harnessArgs, name)
 	}
-	targetArgs := append(append([]any{}, harnessArgs...), string(targetsJSON))
+	// The target list is the driving argument: json_each(?) is the first
+	// placeholder in both templates, so it binds before the harness names.
+	targetArgs := append([]any{string(targetsJSON)}, harnessArgs...)
 
 	pairs := make(map[ingest.SessionID]ingest.SessionID)
 	collect := func(stmt *sqlite.Stmt) error {
@@ -115,30 +173,14 @@ func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ing
 		return nil
 	}
 
-	legacyEvidence := `SELECT s.session_id, json_extract(p.metadata_json, '$.parentUuid')
-FROM sessions s
-JOIN session_publication_metadata p ON p.session_id = s.session_id
-WHERE s.parent_id IS NULL
-  AND s.model_harness IN (` + harnessPlaceholders + `)
-  AND json_valid(p.metadata_json)
-  AND json_extract(p.metadata_json, '$.parentUuid') IN (SELECT value FROM json_each(?))`
-	if err := sqlitex.ExecuteTransient(conn, legacyEvidence, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, parentCacheLookupSQL(parentCacheLegacyLookupTemplate, len(harnessNames)), &sqlitex.ExecOptions{
 		Args:       targetArgs,
 		ResultFunc: collect,
 	}); err != nil {
 		return nil, fmt.Errorf("store: list uncached children from stored publication metadata: %w", err)
 	}
 
-	durableEvidence := `SELECT r.session_id, r.target_local_id
-FROM session_relationship_evidence r
-JOIN sessions s ON s.session_id = r.session_id AND s.active_generation_id = r.generation_id
-WHERE r.kind = 'started_by'
-  AND r.target_state IN ('target_known','target_known_retained')
-  AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
-  AND s.parent_id IS NULL
-  AND s.model_harness IN (` + harnessPlaceholders + `)
-  AND r.target_local_id IN (SELECT value FROM json_each(?))`
-	if err := sqlitex.ExecuteTransient(conn, durableEvidence, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, parentCacheLookupSQL(parentCacheDurableLookupTemplate, len(harnessNames)), &sqlitex.ExecOptions{
 		Args:       targetArgs,
 		ResultFunc: collect,
 	}); err != nil {

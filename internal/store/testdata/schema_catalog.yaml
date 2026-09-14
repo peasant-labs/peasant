@@ -100,6 +100,7 @@ indexes:
   - idx_publication_attempts_target
   - idx_pulled_annotations_local_session
   - idx_pulled_annotations_transcript
+  - idx_relationship_evidence_started_by_target
   - idx_session_commands_name
   - idx_session_commit_associations_session
   - idx_session_commits_author
@@ -112,6 +113,7 @@ indexes:
   - idx_session_entries_type
   - idx_session_files_path
   - idx_session_projection_entries_partition
+  - idx_session_publication_parent_uuid
   - idx_session_publications_project
   - idx_sessions_harness
   - idx_sessions_host
