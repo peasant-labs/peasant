@@ -233,10 +233,11 @@ type DiscoveredSession struct {
 	OriginalRoot   ResolvedPath // Harness root for multi-directory access (e.g. OpenCode message/part)
 	ParentUUID     *SessionID   // nil for root sessions
 	// SchedulingParentID is the local operational scheduling edge derived after
-	// the admission decision. It names the available acyclic processing parent
-	// when one exists in the admitted cohort, and is nil for dispatch roots
-	// (missing, unselected, unavailable, cyclic, or failed parents). It is never
-	// serialized semantic provenance; ParentUUID keeps the logical evidence.
+	// the admission decision. It names an available acyclic processing target:
+	// a parent in the admitted cohort or one already committed to the store. It
+	// is nil for dispatch roots (missing, unselected, unavailable, cyclic,
+	// self, or failed parents). It is never serialized semantic provenance;
+	// ParentUUID keeps the logical evidence.
 	SchedulingParentID *SessionID     // nil for operational roots
 	SubagentPaths      []ResolvedPath // Child session transcript paths
 	DebugPaths         []ResolvedPath // Debug artifact paths

@@ -518,8 +518,8 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 // stored keeps its available operational edge, stable nested location and FK
 // cache instead of being treated as an orphan. The pre-DIFF location cache
 // already covers discovered parents; sessions not discovered this run are
-// resolved by one bulk lookup. A lookup failure falls back to the location
-// cache rather than declaring every stored parent missing.
+// resolved by one bulk lookup. On a lookup failure the pending targets keep
+// their legacy available edge rather than being re-homed as orphans.
 func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map[SessionID]bool {
 	cohort := make(map[SessionID]bool, len(entries))
 	for i := range entries {
@@ -547,6 +547,19 @@ func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map
 	}
 	locations, err := p.store.BulkLookupSessionLocations(ctx, ids)
 	if err != nil {
+		// A transient store failure must not re-home an admitted child under a
+		// root it does not own. Keep the legacy available-parent edge for the
+		// unresolved targets; the next successful harvest resolves them.
+		slog.Warn("pipeline: resolve stored scheduling parents",
+			"error", err,
+			"pending_parents", len(ids),
+			"what", "could not confirm stored logical parents for independent child scheduling",
+			"why", "the session-location lookup failed",
+			"user_impact", "an independently admitted child keeps its previous nested location and FK cache until the next harvest",
+			"how_to_fix", "restore database access and rerun harvest")
+		for id := range needed {
+			stored[id] = true
+		}
 		return stored
 	}
 	for id := range locations {
