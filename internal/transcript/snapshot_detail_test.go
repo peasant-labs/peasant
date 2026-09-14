@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -98,8 +99,7 @@ func loadSnapshotHydrationFixture(t *testing.T) snapshotHydrationFixture {
 		t.Fatalf("snapshot hydration fixture must contain exactly one YAML document: %v", err)
 	}
 	var manifest struct {
-		ExpectedCaseCount int      `yaml:"expectedCaseCount"`
-		RequiredNames     []string `yaml:"requiredNames"`
+		RequiredNames []string `yaml:"requiredNames"`
 	}
 	if err := yaml.Unmarshal(snapshotDetailHydrationManifestYAML, &manifest); err != nil {
 		t.Fatal(err)
@@ -113,9 +113,6 @@ func loadSnapshotHydrationFixture(t *testing.T) snapshotHydrationFixture {
 		if !fixtureCase.ExpectError && !fixtureCase.ExpectLegacy && len(fixtureCase.ExpectedMainIndices) == 0 {
 			t.Fatalf("snapshot hydration fixture case %q asserts no main turns", fixtureCase.Name)
 		}
-	}
-	if len(fixture.Cases) != manifest.ExpectedCaseCount {
-		t.Fatalf("snapshot hydration fixture holds %d cases, manifest requires %d", len(fixture.Cases), manifest.ExpectedCaseCount)
 	}
 	if err := testutil.RequireFixtureNames("snapshot hydration", "case", manifest.RequiredNames, names); err != nil {
 		t.Fatal(err)
@@ -402,5 +399,72 @@ func TestSnapshotToDetailValidated(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// stubSnapshotReader serves one canned snapshot through the production
+// SnapshotReader contract. The callback runs synchronously, so the test proves
+// the boundary's lock-scoped hydration and serialization without a database.
+type stubSnapshotReader struct {
+	snapshot indexformat.ReadSnapshot
+	err      error
+}
+
+func (s stubSnapshotReader) WithSessionSnapshot(_ context.Context, _ schema.SessionID, fn func(indexformat.ReadSnapshot) error) error {
+	if s.err != nil {
+		return s.err
+	}
+	return fn(s.snapshot)
+}
+
+var _ indexformat.SnapshotReader = stubSnapshotReader{}
+
+// TestBuildSnapshotDetailBytes proves the single payload-construction boundary:
+// hydration, folding, validation and final serialization happen inside the
+// snapshot callback, and the returned bytes decode to the returned payload.
+// Callers therefore send or write owned bytes after the lock is released, with
+// no store access and no network inside the lock.
+func TestBuildSnapshotDetailBytes(t *testing.T) {
+	fixture := loadSnapshotHydrationFixture(t)
+	var section4 snapshotHydrationCase
+	for _, fixtureCase := range fixture.Cases {
+		if fixtureCase.Name == "section4_exact_layout" {
+			section4 = fixtureCase
+		}
+	}
+	if section4.Name == "" {
+		t.Fatal("section4_exact_layout case is missing from the hydration fixture")
+	}
+	snapshot, resolver := buildHydrationSnapshot(t, section4)
+	sessionID := snapshot.Metadata.SessionID
+
+	owned, payload, err := BuildSnapshotDetailBytes(context.Background(), stubSnapshotReader{snapshot: snapshot}, resolver, sessionID)
+	if err != nil {
+		t.Fatalf("BuildSnapshotDetailBytes: %v", err)
+	}
+	var decoded schema.SessionDetailPayload
+	if err := json.Unmarshal(owned, &decoded); err != nil {
+		t.Fatalf("owned bytes do not decode to a detail payload: %v", err)
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("re-encode decoded payload: %v", err)
+	}
+	if !bytes.Equal(owned, encoded) {
+		t.Fatal("owned bytes differ from the re-encoded payload; serialization is not stable")
+	}
+	if len(payload.Turns) != 5 || len(decoded.Turns) != 5 {
+		t.Fatalf("turns = %d/%d, want 5/5", len(payload.Turns), len(decoded.Turns))
+	}
+	if payload.InputSubmissionCount == nil || *payload.InputSubmissionCount != 1 {
+		t.Fatalf("inputSubmissionCount = %v, want 1", payload.InputSubmissionCount)
+	}
+
+	if _, _, err := BuildSnapshotDetailBytes(context.Background(), stubSnapshotReader{err: errors.New("snapshot unavailable")}, resolver, sessionID); err == nil {
+		t.Fatal("snapshot read failure must fail the boundary")
+	}
+	legacy, _ := buildHydrationSnapshot(t, snapshotHydrationCase{Legacy: true, Harness: "codex"})
+	if _, _, err := BuildSnapshotDetailBytes(context.Background(), stubSnapshotReader{snapshot: legacy}, resolver, sessionID); !errors.Is(err, ErrLegacySnapshot) {
+		t.Fatalf("legacy snapshot must report the legacy path, got %v", err)
 	}
 }

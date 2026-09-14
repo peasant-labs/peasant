@@ -1,4 +1,7 @@
-expectedCaseCount: 6
+# Required-NAME manifest for the captured-generation hydration oracle.
+# Membership is asserted by required-name presence, so a listed case can only be
+# deleted by removing it from this manifest on purpose. A count is deliberately
+# not asserted: counts churn on every added case and protect nothing.
 requiredNames:
   - section4_exact_layout
   - long_tool_result_survives_hydration
