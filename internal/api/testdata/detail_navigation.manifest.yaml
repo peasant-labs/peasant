@@ -1,0 +1,13 @@
+# Required-NAME manifest for the local relationship-navigation oracle.
+# Membership is asserted by exact set equality, so a case can only be deleted
+# or added by changing this manifest on purpose. Counts are not the contract.
+requiredNames:
+  - resolved-known-target
+  - resolved-retained-target
+  - absent-known-target-is-unavailable
+  - unknown-target-stays-explicit
+  - conflicting-target-stays-explicit
+  - explicit-none-contributes-no-navigation
+  - context-and-starter-pair-stay-distinct
+  - known-and-unavailable-pair-separate
+  - no-relationships-yield-no-navigation
