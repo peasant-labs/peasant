@@ -126,6 +126,12 @@ type StoreEntry struct {
 	Metadata           *UnifiedMetadata
 	Session            DiscoveredSession
 	SourceFingerprint  []byte
+	// SchedulingParentResolved marks that SchedulingParentID is the operational
+	// edge derived after child admission, so a nil value means a dispatch root
+	// rather than "not derived". The writer resolves the FK availability cache
+	// from it for independently admitted harnesses.
+	SchedulingParentResolved bool
+	SchedulingParentID       *SessionID
 	// EventSeq is the OpenCode event cursor this write ACQUIRED, or nil when
 	// the materialization observed none.
 	//
