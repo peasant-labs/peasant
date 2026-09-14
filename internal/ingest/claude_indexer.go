@@ -551,7 +551,14 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 			entry.Extra = extra
 		}
 		if controlPreview != nil && (entry.ContentPreview == nil || *partType == "compact-boundary") {
-			entry.ContentPreview = controlPreview
+			// A generated control preview obeys the same bound as every other
+			// preview. The full-content path keeps it whole for export and
+			// publication, exactly as it does for conversation content.
+			p := *controlPreview
+			if !fullContent {
+				p = truncateString(p, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &p
 		}
 	}
 
