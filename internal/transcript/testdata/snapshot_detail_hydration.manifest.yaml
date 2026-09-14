@@ -1,0 +1,8 @@
+expectedCaseCount: 6
+requiredNames:
+  - section4_exact_layout
+  - long_tool_result_survives_hydration
+  - main_earlier_separate_identities
+  - corrupt_blob_fails_detail
+  - missing_content_record_fails_detail
+  - legacy_snapshot_reports_legacy_path
