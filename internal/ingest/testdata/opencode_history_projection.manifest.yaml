@@ -1,0 +1,6 @@
+requiredNames:
+  - opencode-before-through
+  - opencode-parent-only
+  - opencode-compaction-revert-parent-deleted
+  - opencode-before-only
+  - opencode-unproven-copy-boundary
