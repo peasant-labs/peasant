@@ -76,19 +76,34 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 	}
 	run("village", "push", "--dry-run", "--timing", "--json")
 
-	// An active WAL is a prerequisite, never silently omitted from the view.
+	// A live WAL is a normal state, not something dry-run refuses: the read-only
+	// open participates in the -shm but never rewrites the database file.
 	db, err = store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	dbBefore, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	before = dryRunFileState(t, directory)
-	if readOnly, err := store.OpenReadOnly(dbPath); err == nil {
-		readOnly.Close()
-		t.Fatal("dry-run accepted active WAL state")
+	readOnly, err := store.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("dry-run refused a live WAL: %v", err)
+	}
+	if err := readOnly.Close(); err != nil {
+		t.Fatalf("close read-only store: %v", err)
 	}
 	if after := dryRunFileState(t, directory); !reflect.DeepEqual(before, after) {
-		t.Fatal("refusing active WAL changed existing files")
+		t.Fatal("read-only inspection changed non-journal files")
+	}
+	dbAfter, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(dbBefore, dbAfter) {
+		t.Fatal("read-only inspection rewrote the database file")
 	}
 }
 
@@ -101,6 +116,12 @@ func dryRunFileState(t *testing.T, root string) map[string][32]byte {
 		}
 		if entry.IsDir() {
 			state[path] = sha256.Sum256([]byte("directory"))
+			return nil
+		}
+		// SQLite -shm/-wal/-journal files are transient read coordination, not
+		// user data: a read-only open may create or update them. Every other
+		// file, including the database itself, must be byte-identical.
+		if name := filepath.Base(path); strings.HasSuffix(name, "-shm") || strings.HasSuffix(name, "-wal") || strings.HasSuffix(name, "-journal") {
 			return nil
 		}
 		data, err := os.ReadFile(path)
