@@ -59,11 +59,9 @@ func generationStoreOptions(ownedRoot string) ([]store.OpenOption, error) {
 }
 
 // openRunStore opens the analytics store for an ingestion or publication run.
-// ownedRoot is the run's resolved output directory. It is accepted so a run can
-// read the managed-generation representation; managed-generation ACTIVATION
-// stays closed until the activation's metadata export reconciling with the
-// stored publication capture is resolved, so a discovery-driven second run is
-// still an unchanged no-op.
+// ownedRoot is the run's resolved output directory; when it is set the store
+// can stage, activate and read managed generations. Dry-run never writes, so it
+// stays read-only and leaves the native-generation targets unadvertised.
 func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Store, error) {
 	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if dryRun {
@@ -73,8 +71,11 @@ func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Sto
 	if err := os.MkdirAll(directory, defaults.PrivateDirPerm); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
-	_ = ownedRoot
-	return store.Open(path, store.WithIndexFormats(store.V2IndexFormat()))
+	options, err := generationStoreOptions(ownedRoot)
+	if err != nil {
+		return nil, err
+	}
+	return store.Open(path, options...)
 }
 
 // runStoreIsAbsent reports whether the analytics database this run would use does
