@@ -1,5 +1,11 @@
 package ingest
 
+import (
+	"context"
+	"errors"
+	"io/fs"
+)
+
 // Independent child admission and operational parent scheduling.
 //
 // A child session receives its own selection decision. No parent is rescued
@@ -20,6 +26,30 @@ func IndependentAdmissionHarness(h Harness) bool {
 // It is nil for operational roots. Callers must not substitute ParentUUID.
 func OperationalParentID(session DiscoveredSession) *SessionID {
 	return session.SchedulingParentID
+}
+
+// storeLookupReasonCode classifies a stored scheduling-parent lookup failure
+// into a bounded, safe reason code.
+//
+// The raw dependency error can embed a private filesystem path or a stored
+// value, so it is never logged, wrapped into the message, or rendered into a
+// diagnostic. Only this closed-set code names why the lookup failed; the
+// caller keeps the operation, effect and recovery wording.
+func storeLookupReasonCode(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, fs.ErrPermission):
+		return "permission_denied"
+	case errors.Is(err, fs.ErrNotExist):
+		return "not_found"
+	default:
+		return "unavailable"
+	}
 }
 
 // BuildSchedulingParents derives the operational edge for every admitted entry.
