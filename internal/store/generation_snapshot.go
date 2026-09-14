@@ -163,7 +163,7 @@ func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID)
 		return snapshotSessionRow{}, fmt.Errorf("store: read session %s for its snapshot: %w; no read was authorized", sessionID, err)
 	}
 	if !found {
-		return snapshotSessionRow{}, fmt.Errorf("store: session %s has no metadata row; import the session before reading its snapshot", sessionID)
+		return snapshotSessionRow{}, fmt.Errorf("%w: session %s has no metadata row; import the session before reading its snapshot", indexformat.ErrSnapshotNotFound, sessionID)
 	}
 	return row, nil
 }

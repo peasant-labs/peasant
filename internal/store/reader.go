@@ -268,6 +268,53 @@ func (s *Store) AllSessions(ctx context.Context) ([]SessionRow, error) {
 	return rows, nil
 }
 
+// SessionsByIDs returns the stored rows for exactly the named session
+// identifiers, bounded to that identifier set by a parameterized IN query. It
+// applies NEITHER selection scope NOR origin scope: its callers already hold
+// the identifiers (a deep link or a relationship target) and are not browsing.
+// Identifiers that name no stored row are omitted; the caller decides how to
+// report an unresolved target. The whole-library AllSessions scan is
+// deliberately not used here, so resolving at most a couple of link targets
+// never materializes the entire stored library. It shares scanSessionRow with
+// the list path, so a row's projection cannot drift between the two.
+func (s *Store) SessionsByIDs(ctx context.Context, sessionIDs []string) ([]SessionRow, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: sessions by ids take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	// Read through the same base projection the list path uses, so both paths
+	// see one shape of a session rather than two that can disagree. Batch the
+	// IN lists to stay below SQLite's bound-variable limit.
+	rows := make([]SessionRow, 0, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		end := min(start+indexFormatReadBatchSize, len(sessionIDs))
+		selected := sessionIDs[start:end]
+		placeholders := make([]string, len(selected))
+		args := make([]any, len(selected))
+		for i, id := range selected {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		query := sqlAllSessions + ` WHERE s.session_id IN (` + strings.Join(placeholders, ", ") + `)`
+		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				rows = append(rows, scanSessionRow(stmt))
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: sessions by ids query: %w", err)
+		}
+	}
+	return rows, nil
+}
+
 // ChildSessionsForParent returns child (subagent) sessions for a given parent session ID.
 func (s *Store) ChildSessionsForParent(ctx context.Context, parentID string) ([]ChildSessionRow, error) {
 	conn, err := s.pool.Take(ctx)

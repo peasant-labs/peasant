@@ -36,8 +36,9 @@ func (p *StoreDataProvider) DetailPayload(ctx context.Context, id string) (*sche
 // DetailPayloadWithReader serves one validated detail payload through the
 // durable snapshot boundary when the reader supports it, and through the
 // preserved legacy callback otherwise. A legacy V1 snapshot explicitly selects
-// the legacy path; any other snapshot failure is returned, never hidden behind
-// truncated content.
+// the legacy path; a session with no stored metadata is reported as the API
+// not-found sentinel; any other snapshot failure is returned, never hidden
+// behind truncated content.
 func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotReader, resolver indexformat.ContentResolver, id string, legacy func(context.Context, string) (*schema.SessionDetailPayload, error)) (*schema.SessionDetailPayload, error) {
 	sessionID, err := ingest.NewSessionID(id)
 	if err != nil {
@@ -48,6 +49,9 @@ func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotRea
 		if _, payload, err := transcript.BuildSnapshotDetailBytes(ctx, reader, resolver, sessionID); err == nil {
 			return payload, nil
 		} else if !errors.Is(err, transcript.ErrLegacySnapshot) {
+			if errors.Is(err, indexformat.ErrSnapshotNotFound) {
+				return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, ErrSessionNotFound)
+			}
 			return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, err)
 		}
 	}

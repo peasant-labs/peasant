@@ -166,10 +166,12 @@ func (p *StoreDataProvider) SessionSummariesByID(ctx context.Context, ids []stri
 	if len(ids) == 0 {
 		return []SessionSummary{}, nil
 	}
-	// Read through the same stored-row query the list path uses, so both paths
-	// see one projection of a session rather than two that can disagree. The
-	// preview lookup below is already scoped to the requested identifiers.
-	rows, err := p.store.AllSessions(ctx)
+	// Resolve through one parameterized exact-ID query, bounded to the named
+	// identifiers. Link resolution must never scan or materialize the whole
+	// stored library to test at most a couple of targets; the shared
+	// summariesFromRows below keeps this path's projection identical to the
+	// list path. The preview lookup is likewise scoped to the requested IDs.
+	rows, err := p.store.SessionsByIDs(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session summaries by id: %w", err)
 	}
