@@ -1,0 +1,31 @@
+# Named OpenCode durable-prior fixture. The one case drives the real managed
+# generation store, the real owned-artifact file store and the real OpenCode
+# provenance candidate: an initial generation is activated into persisted
+# storage, the store is closed and reopened, the activation-owned prior evidence
+# is reloaded from persisted storage, the native parent is deleted, and the real
+# refresh path must rebuild the captured prefix with its exact refs and bytes.
+# Rows are sanitized synthetic values. The sibling required-names manifest
+# guards against deleting the case.
+cases:
+  - name: opencode-durable-prior-recovery
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+    parent_id: ses_opencodeDurableParent
+    generation_id: gen-opencode-durable-g1
+    refresh_generation_id: gen-opencode-durable-g2
+    fork:
+      source_session_id: ses_opencodeDurableParent
+      through_seq: 1
+      through_completed: true
+    parent_rows:
+      - id: msg_durable_parent_user
+        type: user
+        seq: 0
+        time_created: 500
+        time_updated: 500
+        data: '{"id":"msg_durable_parent_user","type":"user","text":"captured durable parent question","time":{"created":500}}'
+      - id: msg_durable_parent_assistant
+        type: assistant
+        seq: 1
+        time_created: 500
+        time_updated: 600
+        data: '{"id":"msg_durable_parent_assistant","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_durable_parent","text":"captured durable parent answer"}],"time":{"created":500,"completed":600}}'

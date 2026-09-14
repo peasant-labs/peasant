@@ -1,0 +1,7 @@
+requiredNames:
+  - legacy-only-child-reconciles
+  - active-explicit-none-does-not-resurrect-legacy
+  - active-unknown-does-not-resurrect-legacy
+  - active-conflicting-does-not-resurrect-legacy
+  - active-different-target-does-not-resurrect-legacy
+  - active-target-known-reconciles

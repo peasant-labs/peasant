@@ -152,6 +152,18 @@ func (p *ProgressiveProvider) ChildSessionsForParent(ctx context.Context, parent
 	return prov.ChildSessionsForParent(ctx, parentID)
 }
 
+// DetailReadPayload forwards the flat local detail read to the provider that
+// backs the sessions section, so the production progressive provider serves
+// the durable snapshot boundary and resolved navigation rather than falling
+// back to the bounded SessionByID conversion.
+func (p *ProgressiveProvider) DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error) {
+	prov, err := p.getProvider(defaults.MockSections.Sessions)
+	if err != nil {
+		return nil, err
+	}
+	return SessionDetailReadForProvider(ctx, prov, id)
+}
+
 func (p *ProgressiveProvider) ProjectSummaries(ctx context.Context) (*codemap.ProjectSummariesResult, error) {
 	prov, err := p.getProvider(defaults.MockSections.Map)
 	if err != nil {

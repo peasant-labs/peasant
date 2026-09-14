@@ -100,7 +100,12 @@ func checkManagedIdentity(meta *UnifiedMetadata) error {
 			return err
 		}
 		if *meta.ParentUUID == meta.SessionID {
-			return fmt.Errorf("capture managed artifact for session %s: session cannot be its own parent; restore the recorded parent before retrying", meta.SessionID)
+			// A self-parent edge is a degenerate cycle. Independently admitted
+			// Codex and OpenCode sessions retain the logical evidence and store
+			// with a nil FK cache; every other harness keeps the refusal.
+			if !IndependentAdmissionHarness(meta.ModelHarness) {
+				return fmt.Errorf("capture managed artifact for session %s: session cannot be its own parent; restore the recorded parent before retrying", meta.SessionID)
+			}
 		}
 	}
 	if _, err := NewHostSlug(string(meta.HostSlug)); err != nil {
@@ -210,6 +215,16 @@ type ArtifactMirrorRequest struct {
 	Artifact              *ManagedArtifact
 	EventSeq              *int64
 	Origin                *sessionorigin.Origin
+	// SchedulingParentResolved marks that SchedulingParentID is the operational
+	// edge derived after child admission. A nil edge then means a dispatch root
+	// (missing, unselected, unavailable, cyclic or failed parent), not "not
+	// derived". Callers that never derive an edge leave it false and keep the
+	// legacy logical-parent resolution.
+	SchedulingParentResolved bool
+	// SchedulingParentID is the local operational parent edge. It is never
+	// serialized semantic provenance; the managed metadata keeps the logical
+	// ParentUUID.
+	SchedulingParentID *SessionID
 }
 
 // ArtifactMirrorResult reports committed success for one session, including
@@ -252,8 +267,15 @@ func readArtifactPair(filesystem FileSystem, output, metadataPath string, sid Se
 	if meta.ParentUUID != nil {
 		parent = string(*meta.ParentUUID)
 	}
-	if filepath.Clean(filepath.Dir(metadataPath)) != filepath.Clean(SessionDir(output, string(meta.HostSlug), string(sid), parent)) {
-		return nil, fmt.Errorf("capture session %s: metadata host/parent disagrees with its owned locator; no files were changed", sid)
+	actualDir := filepath.Clean(filepath.Dir(metadataPath))
+	if actualDir != filepath.Clean(SessionDir(output, string(meta.HostSlug), string(sid), parent)) {
+		// Independently admitted Codex and OpenCode orphans install at the
+		// stable root-owned location while their managed metadata keeps the
+		// logical parent evidence. Accept that root location as owned; every
+		// other harness keeps the exact locator check.
+		if !IndependentAdmissionHarness(meta.ModelHarness) || actualDir != filepath.Clean(SessionDir(output, string(meta.HostSlug), string(sid), "")) {
+			return nil, fmt.Errorf("capture session %s: metadata host/parent disagrees with its owned locator; no files were changed", sid)
+		}
 	}
 	if meta.Source.Format != SourceFormatJSON && meta.Source.Format != SourceFormatJSONL {
 		return nil, fmt.Errorf("capture session %s: unsupported transcript format %q; no transcript was read", sid, meta.Source.Format)

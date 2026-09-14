@@ -1,0 +1,501 @@
+# Typed OpenCode history materialization fixture. Every case drives the real
+# fork/revert materializer, the section 3.2 classifier, and the shared
+# projection builder over sanitized native JSON rows. Copied rows decode under
+# their captured source identity and receive the child identity the copy proof
+# records, exactly as the read-only native fork read does.
+cases:
+  - name: opencode-before-through
+    steps:
+      - sessionId: ses_opencodeChildFork
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        fork:
+          sourceSessionId: ses_opencodeParent
+          throughSeq: 5
+          throughCompleted: true
+        allocator:
+          entries: [e_c1, e_c2, e_c4cmd, e_c4out, e_c5, e_own6]
+          submissions: []
+        own:
+          - id: child_own_6
+            type: user
+            seq: 6
+            timeCreated: 1006
+            timeUpdated: 1006
+            data: '{"id":"child_own_6","type":"user","text":"child own question","time":{"created":1006}}'
+        copied:
+          - id: child_copy_1
+            sourceId: src_1
+            type: user
+            seq: 1
+            timeCreated: 1001
+            timeUpdated: 1001
+            data: '{"id":"src_1","type":"user","text":"source first question","time":{"created":1001}}'
+          - id: child_copy_2
+            sourceId: src_2
+            type: assistant
+            seq: 2
+            timeCreated: 1002
+            timeUpdated: 1003
+            data: '{"id":"src_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_src_2","text":"source assistant answer"}],"time":{"created":1002,"completed":1003}}'
+          - id: child_running_3
+            sourceId: src_3
+            type: shell
+            seq: 3
+            timeCreated: 1004
+            timeUpdated: 1004
+            data: '{"id":"src_3","type":"shell","callID":"call_src_3","command":"sleep 5","output":"","time":{"created":1004}}'
+          - id: child_copy_4
+            sourceId: src_4
+            type: shell
+            seq: 4
+            timeCreated: 1004
+            timeUpdated: 1005
+            data: '{"id":"src_4","type":"shell","callID":"call_src_4","command":"rg parser","output":"parser.go:12","time":{"created":1004,"completed":1005}}'
+          - id: child_copy_5
+            sourceId: src_5
+            type: user
+            seq: 5
+            timeCreated: 1005
+            timeUpdated: 1005
+            data: '{"id":"src_5","type":"user","text":"source next question","time":{"created":1005}}'
+        want:
+          completeness: complete
+          own: 0
+          turnCount: 1
+          titleRefs: []
+          segmentRefs: [[e_c1, e_c2, e_c4cmd, e_c4out, e_c5]]
+          earlierStates: []
+          earlier: []
+          main:
+            - ref: e_own6
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: child own question
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+
+  - name: opencode-before-only
+    steps:
+      - sessionId: ses_opencodeChildFork
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        fork:
+          sourceSessionId: ses_opencodeParent
+          beforeSeq: 5
+        allocator:
+          entries: [e_c1, e_c2, e_own6]
+          submissions: []
+        own:
+          - id: child_own_6
+            type: user
+            seq: 6
+            timeCreated: 1006
+            timeUpdated: 1006
+            data: '{"id":"child_own_6","type":"user","text":"child own question","time":{"created":1006}}'
+        copied:
+          - id: child_copy_1
+            sourceId: src_1
+            type: user
+            seq: 1
+            timeCreated: 1001
+            timeUpdated: 1001
+            data: '{"id":"src_1","type":"user","text":"source first question","time":{"created":1001}}'
+          - id: child_copy_2
+            sourceId: src_2
+            type: assistant
+            seq: 2
+            timeCreated: 1002
+            timeUpdated: 1003
+            data: '{"id":"src_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_src_2","text":"source assistant answer"}],"time":{"created":1002,"completed":1003}}'
+          - id: child_copy_5
+            sourceId: src_5
+            type: user
+            seq: 5
+            timeCreated: 1005
+            timeUpdated: 1005
+            data: '{"id":"src_5","type":"user","text":"source next question","time":{"created":1005}}'
+        want:
+          completeness: complete
+          own: 0
+          turnCount: 1
+          titleRefs: []
+          segmentRefs: [[e_c1, e_c2]]
+          earlierStates: []
+          earlier: []
+          main:
+            - ref: e_own6
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: child own question
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+
+  - name: opencode-parent-only
+    steps:
+      - sessionId: ses_opencodeChildNoFork
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        allocator:
+          entries: [e_own6]
+          submissions: []
+        own:
+          - id: child_own_6
+            type: user
+            seq: 6
+            timeCreated: 1006
+            timeUpdated: 1006
+            data: '{"id":"child_own_6","type":"user","text":"child own question","time":{"created":1006}}'
+        want:
+          completeness: complete
+          own: 0
+          turnCount: 1
+          titleRefs: []
+          segmentRefs: []
+          earlierStates: []
+          earlier: []
+          main:
+            - ref: e_own6
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: child own question
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+
+  - name: opencode-unproven-copy-boundary
+    steps:
+      - sessionId: ses_opencodeChildFork
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        fork:
+          sourceSessionId: ses_opencodeParent
+        allocator:
+          entries: [e_c1, e_c2, e_own6]
+          submissions: []
+        own:
+          - id: child_own_6
+            type: user
+            seq: 6
+            timeCreated: 1006
+            timeUpdated: 1006
+            data: '{"id":"child_own_6","type":"user","text":"child own question","time":{"created":1006}}'
+        copied:
+          - id: child_copy_1
+            sourceId: src_1
+            type: user
+            seq: 1
+            timeCreated: 1001
+            timeUpdated: 1001
+            data: '{"id":"src_1","type":"user","text":"source first question","time":{"created":1001}}'
+          - id: child_copy_2
+            sourceId: src_2
+            type: assistant
+            seq: 2
+            timeCreated: 1002
+            timeUpdated: 1003
+            data: '{"id":"src_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_src_2","text":"source assistant answer"}],"time":{"created":1002,"completed":1003}}'
+        want:
+          completeness: incomplete_new
+          turnCount: 1
+          titleRefs: []
+          segmentRefs: []
+          earlierStates: [uncertain_unresolved]
+          earlier:
+            - - ref: e_c1
+                index: 0
+                role: user
+                entryType: text
+                depth: 0
+                content: source first question
+                origin: submitted_input
+                actor: unknown
+                delivery: inherited_context
+                ownership: uncertain
+                evidence: native_typed
+                modality: text
+              - ref: e_c2
+                index: 1
+                role: assistant
+                entryType: text
+                depth: 0
+                content: source assistant answer
+                origin: agent_output
+                actor: unknown
+                delivery: inherited_context
+                ownership: uncertain
+                evidence: native_typed
+                modality: none
+          main:
+            - ref: e_own6
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: child own question
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+
+  - name: opencode-compaction-revert-parent-deleted
+    steps:
+      - sessionId: ses_opencodeChildRevert
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        fork:
+          sourceSessionId: ses_opencodeParent
+          throughSeq: 2
+          throughCompleted: true
+        revert:
+          targetSeq: 5
+          committed: true
+        allocator:
+          entries: [e_c1, e_c2, e_own3]
+          submissions: []
+        copied:
+          - id: child_copy_1
+            sourceId: src_1
+            type: user
+            seq: 1
+            timeCreated: 1001
+            timeUpdated: 1001
+            data: '{"id":"src_1","type":"user","text":"source first question","time":{"created":1001}}'
+          - id: child_copy_2
+            sourceId: src_2
+            type: assistant
+            seq: 2
+            timeCreated: 1002
+            timeUpdated: 1003
+            data: '{"id":"src_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_src_2","text":"source assistant answer"}],"time":{"created":1002,"completed":1003}}'
+        own:
+          - id: child_own_3
+            type: user
+            seq: 3
+            timeCreated: 1003
+            timeUpdated: 1003
+            data: '{"id":"child_own_3","type":"user","text":"kept before the revert","time":{"created":1003}}'
+          - id: child_own_7
+            type: user
+            seq: 7
+            timeCreated: 1007
+            timeUpdated: 1007
+            data: '{"id":"child_own_7","type":"user","text":"removed by the committed revert","time":{"created":1007}}'
+        want:
+          completeness: complete
+          own: 0
+          turnCount: 1
+          titleRefs: []
+          segmentRefs: [[e_c1, e_c2]]
+          earlierStates: []
+          earlier: []
+          main:
+            - ref: e_own3
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: kept before the revert
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+
+      - sessionId: ses_opencodeChildRevert
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        fork:
+          sourceSessionId: ses_opencodeParent
+          throughSeq: 2
+          throughCompleted: true
+        revert:
+          targetSeq: 5
+          committed: false
+        allocator:
+          entries: [e_c1, e_c2, e_own3, e_own6, e_compact7]
+          submissions: []
+        copied:
+          - id: child_copy_1
+            sourceId: src_1
+            type: user
+            seq: 1
+            timeCreated: 1001
+            timeUpdated: 1001
+            data: '{"id":"src_1","type":"user","text":"source first question","time":{"created":1001}}'
+          - id: child_copy_2
+            sourceId: src_2
+            type: assistant
+            seq: 2
+            timeCreated: 1002
+            timeUpdated: 1003
+            data: '{"id":"src_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_src_2","text":"source assistant answer"}],"time":{"created":1002,"completed":1003}}'
+        own:
+          - id: child_own_3
+            type: user
+            seq: 3
+            timeCreated: 1003
+            timeUpdated: 1003
+            data: '{"id":"child_own_3","type":"user","text":"kept before the revert","time":{"created":1003}}'
+          - id: child_own_6
+            type: user
+            seq: 6
+            timeCreated: 1006
+            timeUpdated: 1006
+            data: '{"id":"child_own_6","type":"user","text":"append after the revert","time":{"created":1006}}'
+          - id: child_compact_7
+            type: compaction
+            seq: 7
+            timeCreated: 1007
+            timeUpdated: 1007
+            data: '{"id":"child_compact_7","type":"compaction","reason":"auto","summary":"baseline summary","recent":"recent tail","time":{"created":1007}}'
+        want:
+          completeness: complete
+          own: 0
+          turnCount: 3
+          titleRefs: []
+          segmentRefs: [[e_c1, e_c2]]
+          earlierStates: []
+          earlier: []
+          main:
+            - ref: e_own3
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: kept before the revert
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+            - ref: e_own6
+              index: 1
+              role: user
+              entryType: text
+              depth: 0
+              content: append after the revert
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+            - ref: e_compact7
+              index: 2
+              role: system
+              entryType: system
+              depth: 0
+              content: baseline summary
+              origin: generated_summary
+              actor: harness
+              delivery: system_lifecycle
+              ownership: local
+              evidence: native_typed
+              modality: text
+
+      - sessionId: ses_opencodeChildRevert
+        parentId: ses_opencodeParent
+        hasParent: true
+        parentNullProven: false
+        fork:
+          sourceSessionId: ses_opencodeParent
+          throughSeq: 2
+          throughCompleted: true
+        revert:
+          targetSeq: 5
+          committed: false
+        allocator:
+          entries: [e_own3, e_own6, e_compact7]
+          submissions: []
+        own:
+          - id: child_own_3
+            type: user
+            seq: 3
+            timeCreated: 1003
+            timeUpdated: 1003
+            data: '{"id":"child_own_3","type":"user","text":"kept before the revert","time":{"created":1003}}'
+          - id: child_own_6
+            type: user
+            seq: 6
+            timeCreated: 1006
+            timeUpdated: 1006
+            data: '{"id":"child_own_6","type":"user","text":"append after the revert","time":{"created":1006}}'
+          - id: child_compact_7
+            type: compaction
+            seq: 7
+            timeCreated: 1007
+            timeUpdated: 1007
+            data: '{"id":"child_compact_7","type":"compaction","reason":"auto","summary":"baseline summary","recent":"recent tail","time":{"created":1007}}'
+        want:
+          completeness: complete
+          own: 0
+          turnCount: 3
+          titleRefs: []
+          segmentRefs: []
+          earlierStates: []
+          earlier: []
+          main:
+            - ref: e_own3
+              index: 0
+              role: user
+              entryType: text
+              depth: 0
+              content: kept before the revert
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+            - ref: e_own6
+              index: 1
+              role: user
+              entryType: text
+              depth: 0
+              content: append after the revert
+              origin: submitted_input
+              actor: unknown
+              delivery: unknown
+              ownership: local
+              evidence: native_typed
+              modality: text
+            - ref: e_compact7
+              index: 2
+              role: system
+              entryType: system
+              depth: 0
+              content: baseline summary
+              origin: generated_summary
+              actor: harness
+              delivery: system_lifecycle
+              ownership: local
+              evidence: native_typed
+              modality: text
