@@ -16,10 +16,11 @@ import (
 //
 // A V60 database is migrated to V61 after seeding the two evidence stores the
 // reconciliation reads. The migration must create the parentUuid expression
-// index and the relationship-evidence target index as partial indexes, leave
-// every stored row untouched, and run on a SQLite that supports expression
-// indexes (the migration itself is the functional check; the version assertion
-// records the floor).
+// index (partial on a retained value) and the relationship-evidence composite
+// target index (kind first, then the target, then the child and state; not
+// partial), leave every stored row untouched, and run on a SQLite that supports
+// expression indexes (the migration itself is the functional check; the version
+// assertion records the floor).
 func TestMigrationV61AddsReverseLookupIndexes(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -63,17 +64,19 @@ VALUES('v61-child','v61-gen','started_by','target_known','v61-parent');`, nil); 
 		t.Fatalf("legacy target index is not a parentUuid expression index: %s", legacySQL)
 	}
 	durableSQL := indexDefinition(t, conn, "idx_relationship_evidence_started_by_target")
-	if !strings.Contains(durableSQL, "session_relationship_evidence") ||
-		!strings.Contains(durableSQL, "target_local_id") || !strings.Contains(durableSQL, "kind") {
-		t.Fatalf("durable target index is not a kind/target_local_id index: %s", durableSQL)
-	}
-	for _, index := range []struct{ table, name string }{
-		{"session_publication_metadata", "idx_session_publication_parent_uuid"},
-		{"session_relationship_evidence", "idx_relationship_evidence_started_by_target"},
-	} {
-		if partial := indexPartialFlag(t, conn, index.table, index.name); partial != 1 {
-			t.Errorf("index %s partial flag = %d, want 1", index.name, partial)
+	for _, want := range []string{"session_relationship_evidence", "kind", "target_local_id", "session_id", "target_state"} {
+		if !strings.Contains(durableSQL, want) {
+			t.Fatalf("durable target index is missing %q in its definition: %s", want, durableSQL)
 		}
+	}
+	if partial := indexPartialFlag(t, conn, "session_publication_metadata", "idx_session_publication_parent_uuid"); partial != 1 {
+		t.Errorf("legacy parentUuid index partial flag = %d, want 1", partial)
+	}
+	if partial := indexPartialFlag(t, conn, "session_relationship_evidence", "idx_relationship_evidence_started_by_target"); partial != 0 {
+		t.Errorf("durable target index partial flag = %d, want 0 (a stable kind equality leads it)", partial)
+	}
+	if strings.Contains(durableSQL, "WHERE") {
+		t.Errorf("durable target index must not be partial: %s", durableSQL)
 	}
 
 	// The migration is additive: the seeded evidence is unchanged.
