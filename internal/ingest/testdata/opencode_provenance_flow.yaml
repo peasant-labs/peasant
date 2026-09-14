@@ -121,6 +121,12 @@ cases:
     sentinel: PRIVATE_OPEN_SENTINEL
     expectStep: open snapshot source
 
+  - name: opencode-native-unreadable-source-sanitized
+    kind: unreadable-source
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    sentinel: PRIVATE_UNREADABLE_SENTINEL
+    expectStep: open snapshot source
+
   - name: opencode-native-large-row-retained
     kind: large-row
     sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1

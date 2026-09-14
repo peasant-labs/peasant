@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -136,9 +137,9 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 		if row.Sentinel == "" || row.ExpectStep == "" {
 			return errors.New("a refusal kind requires a sentinel and the expected refusal step")
 		}
-	case "missing-source":
+	case "missing-source", "unreadable-source":
 		if row.Sentinel == "" || row.ExpectStep == "" {
-			return errors.New("the missing-source kind requires a sentinel and the expected refusal step")
+			return errors.New("a source-refusal kind requires a sentinel and the expected refusal step")
 		}
 	case "decode-refusal":
 		if row.Sentinel == "" || len(row.DecodeRows) == 0 {
@@ -181,6 +182,8 @@ func TestOpenCodeProvenanceFlow(t *testing.T) {
 				runOpenCodeFlowDependencyRefusal(t, source, row)
 			case "missing-source":
 				runOpenCodeFlowMissingSource(t, source, row)
+			case "unreadable-source":
+				runOpenCodeFlowUnreadableSource(t, source, row)
 			case "large-row":
 				runOpenCodeFlowLargeRow(t, source, row)
 			case "decode-refusal":
@@ -351,6 +354,23 @@ func runOpenCodeFlowMissingSource(t *testing.T, source testfixture.MaterializedS
 	_, err := adapter.SnapshotOpenCodeProvenance(context.Background(), missing, row.SessionID, ingest.OpenCodeSnapshotOptions{})
 	if err == nil {
 		t.Fatal("a missing native database produced a snapshot instead of a refusal")
+	}
+	assertOpenCodeSanitizedRefusal(t, err, row)
+}
+
+// runOpenCodeFlowUnreadableSource points the production adapter at a real
+// directory in place of a native database. The real SQLite open fails and the
+// returned refusal must stay free of the private locator.
+func runOpenCodeFlowUnreadableSource(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	directory := filepath.Join(filepath.Dir(source.Path), row.Sentinel+".dir")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatalf("create unreadable-source locator: %v", err)
+	}
+	_, err := adapter.SnapshotOpenCodeProvenance(context.Background(), directory, row.SessionID, ingest.OpenCodeSnapshotOptions{})
+	if err == nil {
+		t.Fatal("a directory used as the native database produced a snapshot instead of a refusal")
 	}
 	assertOpenCodeSanitizedRefusal(t, err, row)
 }

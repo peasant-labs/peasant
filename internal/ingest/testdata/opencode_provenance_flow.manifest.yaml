@@ -6,6 +6,7 @@ requiredNames:
   - opencode-native-projection-refusal-sanitized
   - opencode-native-allocator-refusal-sanitized
   - opencode-native-dependency-refusal-sanitized
+  - opencode-native-unreadable-source-sanitized
   - opencode-native-large-row-retained
   - opencode-native-missing-source-sanitized
   - opencode-native-decode-refusal-sanitized
