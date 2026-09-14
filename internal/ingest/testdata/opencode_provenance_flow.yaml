@@ -1,0 +1,147 @@
+# Named OpenCode provenance flow fixture. Each case drives the real read-only
+# snapshot, section 3.2 classification, shared projection and registered
+# indexer entry point against real synthetic native SQLite. Row payloads,
+# sentinels and mutations are sanitized fixture data; no private transcript
+# content or filesystem path appears here. The loader is strict: unknown keys
+# and a case that omits the fields its kind needs are refused, and the required
+# names in the sibling manifest guard deletion.
+cases:
+  - name: opencode-native-unchanged-and-append
+    kind: identity
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    appendRows:
+      - id: msg_native_append
+        type: user
+        seq: 2
+        timeCreated: 2000
+        timeUpdated: 2000
+        data: '{"id":"msg_native_append","type":"user","text":"appended question","time":{"created":2000}}'
+
+  - name: opencode-native-first-incomplete-install
+    kind: incomplete
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    fork:
+      sourceSessionId: ses_opencodeFlowParent
+    forkParent:
+      id: ses_opencodeFlowParent
+      rows:
+        - id: msg_flow_parent_user
+          type: user
+          seq: 0
+          timeCreated: 500
+          timeUpdated: 500
+          data: '{"id":"msg_flow_parent_user","type":"user","text":"captured parent question","time":{"created":500}}'
+        - id: msg_flow_parent_assistant
+          type: assistant
+          seq: 1
+          timeCreated: 500
+          timeUpdated: 600
+          data: '{"id":"msg_flow_parent_assistant","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_flow_parent","text":"captured parent answer"}],"time":{"created":500,"completed":600}}'
+
+  - name: opencode-native-fork-bounded-cutoff
+    kind: bounded-fork
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    forkParent:
+      id: ses_opencodeFlowParent
+      rows:
+        - id: msg_flow_prefix
+          type: user
+          seq: 0
+          timeCreated: 500
+          timeUpdated: 500
+          data: '{"id":"msg_flow_prefix","type":"user","text":"captured prefix before the cutoff","time":{"created":500}}'
+        - id: msg_flow_suffix_valid
+          type: user
+          seq: 50
+          timeCreated: 700
+          timeUpdated: 700
+          data: '{"id":"msg_flow_suffix_valid","type":"user","text":"suffix after the cutoff","time":{"created":700}}'
+        - id: msg_flow_suffix_malformed
+          type: user
+          seq: 100
+          timeCreated: 800
+          timeUpdated: 800
+          data: '{not json'
+    boundedFork:
+      sourceSessionId: ses_opencodeFlowParent
+      beforeSeq: 1
+    unprovenFork:
+      sourceSessionId: ses_opencodeFlowParent
+    expectCopies: 1
+    appendRows:
+      - id: msg_flow_suffix_later
+        type: user
+        seq: 150
+        timeCreated: 900
+        timeUpdated: 900
+        data: '{"id":"msg_flow_suffix_later","type":"user","text":"later suffix","time":{"created":900}}'
+
+  - name: opencode-native-digest-binds-content
+    kind: digest
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    deliveryMessageIds: [msg_native_user]
+    payloadEditId: msg_native_user
+    payloadEditData: '{"text":"mutated native question","time":{"created":1000}}'
+
+  - name: opencode-native-projection-refusal-sanitized
+    kind: projection-refusal
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    sentinel: PRIVATE_PART_SENTINEL
+    expectStep: validate managed generation
+    replaceRows:
+      - id: msg_native_dup
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"PRIVATE_PART_SENTINEL","text":"first"},{"type":"text","id":"PRIVATE_PART_SENTINEL","text":"second"}],"time":{"created":1000,"completed":2000}}'
+
+  - name: opencode-native-allocator-refusal-sanitized
+    kind: allocator-refusal
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    sentinel: PRIVATE_ALLOC_SENTINEL
+    expectStep: validate managed generation
+    replaceRows:
+      - id: msg_PRIVATE_ALLOC_SENTINEL
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_PRIVATE_ALLOC_SENTINEL","type":"user","text":"allocator refusal source","time":{"created":1000}}'
+
+  - name: opencode-native-dependency-refusal-sanitized
+    kind: dependency-refusal
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    sentinel: PRIVATE_DEPENDENCY_SENTINEL
+    expectStep: load prior evidence
+
+  - name: opencode-native-missing-source-sanitized
+    kind: missing-source
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    sentinel: PRIVATE_OPEN_SENTINEL
+    expectStep: open snapshot source
+
+  - name: opencode-native-unreadable-source-sanitized
+    kind: unreadable-source
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    sentinel: PRIVATE_UNREADABLE_SENTINEL
+    expectStep: open snapshot source
+
+  - name: opencode-native-large-row-retained
+    kind: large-row
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    largeRowPrefix: synthetic large row prefix
+    largeRowPadding: 4000000
+
+  - name: opencode-native-decode-refusal-sanitized
+    kind: decode-refusal
+    sessionId: ses_synthetic_scope
+    sentinel: PRIVATE_NATIVE_SENTINEL
+    decodeRows:
+      - id: msg_row_identity
+        type: user
+        data: '{"id":"PRIVATE_NATIVE_SENTINEL","type":"user","text":"synthetic","time":{"created":1}}'
+      - id: msg_row_type
+        type: user
+        data: '{"id":"msg_row_type","type":"PRIVATE_NATIVE_SENTINEL","text":"synthetic","time":{"created":1}}'
+
