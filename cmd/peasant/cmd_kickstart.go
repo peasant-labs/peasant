@@ -664,11 +664,8 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 		if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 			return nil, fmt.Errorf("create data directory: %w", err)
 		}
-		generationOptions, generationErr := generationStoreOptions(string(resolvedOutput))
-		if generationErr != nil {
-			return nil, generationErr
-		}
-		db, err := store.Open(string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd))), generationOptions...)
+		db, err := store.Open(string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd))),
+			store.WithIndexFormats(store.V2IndexFormat()))
 		if err != nil {
 			return nil, fmt.Errorf("open analytics store: %w", err)
 		}
