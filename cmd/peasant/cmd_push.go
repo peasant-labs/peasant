@@ -241,17 +241,17 @@ func BuildPushCommand() *cobra.Command {
 						noteCfgPath, noteCfgPath)
 				}
 
-				db, err := openRunStore(cmd, dryRun)
-				if err != nil {
-					return fmt.Errorf("open analytics store: %w", err)
-				}
-				defer db.Close()
-
 				resolvedOutput, resolveErr := ingest.NewResolvedPath(cfg.Output.BasePath)
 				if resolveErr != nil {
 					return fmt.Errorf("resolve output path: %w", resolveErr)
 				}
 				cfg.Output.BasePath = string(resolvedOutput)
+
+				db, err := openRunStore(cmd, dryRun, string(resolvedOutput))
+				if err != nil {
+					return fmt.Errorf("open analytics store: %w", err)
+				}
+				defer db.Close()
 
 				// Fail fast on a bad --license flag: an invalid value would otherwise be
 				// rejected per-session at the client-side schema pre-flight, failing every

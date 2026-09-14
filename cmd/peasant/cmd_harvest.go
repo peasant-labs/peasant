@@ -453,7 +453,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun)
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput))
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}

@@ -271,6 +271,17 @@ type Pipeline struct {
 	store    SessionStore // nil = skip DB insert (backward compatible)
 	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
 
+	// nativeGenerationIDs optionally assigns the installed identity of each
+	// managed generation candidate. Production leaves it nil and mints a fresh
+	// opaque identity per attempt; a deterministic caller injects its own.
+	nativeGenerationIDs func(DiscoveredSession) string
+
+	// resolvedVersions caches the effective harness targets once, after the
+	// store capability gate has decided whether native generations are enabled.
+	// versionTargets is read in hot per-session loops, so the overlay is
+	// resolved once rather than on every lookup.
+	resolvedVersions map[Harness]HarvesterVersions
+
 	// contentRecoveries holds this run's completed retained-content repairs,
 	// keyed by session, so the index log and summary can report them.
 	contentRecoveries map[SessionID]contentRecovery
@@ -410,6 +421,14 @@ func WithStore(s SessionStore) PipelineOption {
 	return func(p *Pipeline) { p.store = s }
 }
 
+// WithNativeGenerationID overrides the installed identity assigned to native
+// managed-generation candidates. Production leaves it unset so every attempt
+// mints a fresh opaque identity; a deterministic caller injects a stable
+// source. The identity must be a single confined path component.
+func WithNativeGenerationID(assign func(DiscoveredSession) string) PipelineOption {
+	return func(p *Pipeline) { p.nativeGenerationIDs = assign }
+}
+
 // WithSalt injects a per-installation HMAC salt for project hash derivation.
 // When set, DeriveProjectIdentifiers uses HMAC-SHA256(salt, normalizedRemote)
 // instead of the zero salt, making project hashes opaque and
@@ -513,6 +532,7 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 	for _, opt := range opts {
 		opt(p)
 	}
+	p.resolvedVersions = p.resolveVersionTargets()
 	if err := p.validateHarvesterVersions(); err != nil {
 		return nil, err
 	}
@@ -1535,11 +1555,16 @@ type indexParseResult struct {
 	im                indexedMeta
 	input             *CapturedIndexInput
 	output            indexformat.Result
-	entryCount        int
-	startedAt         int64
-	logEntry          IndexLogEntry
-	parseDuration     time.Duration
-	bytes             int64
+	// nativeCandidate carries a validated managed-generation candidate with its
+	// captured content when the harness's declared output format is a managed
+	// generation. The write path stages and activates it instead of committing
+	// a bare entry replacement.
+	nativeCandidate *NativeGenerationCandidate
+	entryCount      int
+	startedAt       int64
+	logEntry        IndexLogEntry
+	parseDuration   time.Duration
+	bytes           int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -1805,7 +1830,27 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		}
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
-			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
+			// A harness whose declared output format is a managed generation is
+			// produced through its own native candidate exit, which carries the
+			// captured bytes and prior evidence the activation stages. Only the
+			// strict format-1 path keeps the retained parser dispatch.
+			usedNativeCandidate := false
+			if declared != strictIndexFormat {
+				candidate, native, candidateErr := p.buildNativeCandidate(ctx, im, input, indexer)
+				if native {
+					usedNativeCandidate = true
+					if candidateErr != nil {
+						err = candidateErr
+					} else {
+						candidateCopy := candidate
+						result.nativeCandidate = &candidateCopy
+						output = candidate.Result
+					}
+				}
+			}
+			if !usedNativeCandidate {
+				output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
+			}
 			// A refusal NOTHING ABOUT THIS BUILD CAN LIFT is not an empty store:
 			// the represented entries are stored as an incomplete capture, the
 			// refusal is recorded with the capture and reported once, and
@@ -1926,12 +1971,19 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	}
 	writes := make([]SessionEntryWrite, 0, len(results))
 	writePositions := make([]int, 0, len(results))
+	nativePositions := make([]int, 0)
 	nowMs := time.Now().UnixMilli()
 	for i, result := range results {
 		if result.output == nil || p.metricsStore == nil {
 			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
 			flush.logEntries[i] = result.logEntry
 			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
+			continue
+		}
+		if result.nativeCandidate != nil {
+			// Managed generations stage and activate their own files and rows;
+			// they never travel through the entry-replacement batch.
+			nativePositions = append(nativePositions, i)
 			continue
 		}
 		if result.input == nil {
@@ -2036,6 +2088,13 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			writeDuration += writeDurations[i]
 		}
 		flush.writeDuration = writeDuration
+	}
+	for _, position := range nativePositions {
+		indexed, logEntry, profileSession := p.activateNativeGenerationResult(ctx, results[position], outcome, logPrefix, writeLane)
+		flush.indexed[position] = indexed
+		flush.logEntries[position] = logEntry
+		flush.profileSessions[position] = profileSession
+		flush.writeDuration += profileSession.WriteDuration
 	}
 	for i, writeResult := range writeResults {
 		perSessionWriteDuration := writeDurations[i]

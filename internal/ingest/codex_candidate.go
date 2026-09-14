@@ -217,6 +217,42 @@ func (idx *CodexIndexer) IndexCodexCandidateV2(ctx context.Context, session Disc
 	return candidate.V2, nil
 }
 
+// BuildNativeGeneration runs the production Codex candidate exit and returns
+// the validated generation together with the full captured bytes its content
+// records address and its source diagnostics. The maintenance composition uses
+// this exit so it can stage a self-contained generation; the concrete-V2 exit
+// above is the same candidate without the content map.
+func (idx *CodexIndexer) BuildNativeGeneration(ctx context.Context, session DiscoveredSession) (NativeGenerationCandidate, error) {
+	config := idx.provenanceCapture
+	if !config.Enabled {
+		return NativeGenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildNativeGeneration: the provenance candidate path is disabled for session %s; the retained entry path is unchanged; enable it with a real generation identity before requesting a candidate", session.SessionID)
+	}
+	if config.GenerationID == nil {
+		return NativeGenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildNativeGeneration: no generation identity source was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", session.SessionID)
+	}
+	var prior *schema.UnifiedMetadata
+	priorState := NewProjectionPriorState()
+	if config.Prior != nil {
+		loadedPrior, loadedState, err := config.Prior(session)
+		if err != nil {
+			return NativeGenerationCandidate{}, err
+		}
+		prior = loadedPrior
+		priorState = loadedState
+	}
+	candidate, err := idx.BuildCodexCandidateForSession(ctx, session, prior, priorState, config.Allocator, config.GenerationID(session))
+	if err != nil {
+		return NativeGenerationCandidate{}, err
+	}
+	return NativeGenerationCandidate{
+		Result:      candidate.V2,
+		Blobs:       candidate.Content,
+		Diagnostics: candidate.Diagnostics,
+	}, nil
+}
+
+var _ NativeGenerationBuilder = (*CodexIndexer)(nil)
+
 // codexCandidateRefusal is the safe refusal for the Codex candidate boundary.
 // It names a fixed operation, reason, caller effect, and recovery, and never
 // carries a native locator, a raw validator value, or a wrapped filesystem
