@@ -1,0 +1,10 @@
+requiredNames:
+  - opencode-native-unchanged-and-append
+  - opencode-native-first-incomplete-install
+  - opencode-native-fork-bounded-cutoff
+  - opencode-native-digest-binds-content
+  - opencode-native-projection-refusal-sanitized
+  - opencode-native-allocator-refusal-sanitized
+  - opencode-native-dependency-refusal-sanitized
+  - opencode-native-missing-source-sanitized
+  - opencode-native-decode-refusal-sanitized

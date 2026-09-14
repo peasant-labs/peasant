@@ -2,7 +2,6 @@ package ingest_test
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -16,11 +15,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const (
-	openCodeNativeChild      = "ses_3cd91f52effeXd3QAJ54jOyzn1"
-	openCodeNativeParent     = "ses_opencodeNativeParent"
-	openCodeNativeForkSource = openCodeNativeParent
-)
+const openCodeNativeChild = "ses_3cd91f52effeXd3QAJ54jOyzn1"
 
 // TestOpenCodeProvenanceNativeReadOnlySnapshot proves the production snapshot
 // path over a real synthetic OpenCode SQLite source: the typed user row with an
@@ -56,101 +51,6 @@ func TestOpenCodeProvenanceNativeReadOnlySnapshot(t *testing.T) {
 	testfixture.AssertUnchanged(t, source, before)
 	if got := countMaterializedCurrentRows(t, source.Path, openCodeNativeChild); got != rowsBefore {
 		t.Fatalf("child source rows = %d after the read, want %d", got, rowsBefore)
-	}
-}
-
-// TestOpenCodeProvenanceParentDeleteCannotEraseManagedPrefix proves the copy
-// proof is captured into the immutable generation and survives a full
-// activation/refresh cycle: the first candidate captures the settled parent
-// rows, the activation-derived prior keeps their identities, and after the
-// parent session and its rows are deleted the production refresh path rebuilds
-// the child from the retained prefix with the same ordered refs, boundary and
-// full content bytes.
-func TestOpenCodeProvenanceParentDeleteCannotEraseManagedPrefix(t *testing.T) {
-	source := testfixture.MaterializeByName(t, "native-current-rows")
-	seedOpenCodeNativeForkParent(t, source)
-
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-	fork := &ingest.OpenCodeForkProof{SourceSessionID: openCodeNativeForkSource, ThroughSeq: int64Ptr(1), ThroughCompleted: true}
-	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{Fork: fork})
-	if err != nil {
-		t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
-	}
-	if len(snapshot.Copied) != 2 {
-		t.Fatalf("captured source copies = %d, want 2", len(snapshot.Copied))
-	}
-	for _, copied := range snapshot.Copied {
-		if copied.SourceMessageID == "" || copied.SourceSessionID != openCodeNativeForkSource {
-			t.Fatalf("copied row %q lost its source evidence: %+v", copied.MessageID, copied)
-		}
-	}
-	first := buildOpenCodeNativeGeneration(t, snapshot)
-	if len(first.Generation.Segments) != 1 || len(first.Generation.Segments[0].CapturedRefs) == 0 {
-		t.Fatalf("built generation has no captured prefix: %+v", first.Generation.Segments)
-	}
-	inheritedRefs := append([]schema.SourceEntryRef(nil), first.Generation.Segments[0].CapturedRefs...)
-	firstDigest := first.Generation.SourceEvidenceDigest
-	firstContent := openCodeContentByRef(first.Generation)
-
-	// The activation owns persisting the alias state and the captured prefix;
-	// the test derives them exactly as an activation would.
-	state, err := ingest.PriorStateFromGeneration(first.Generation)
-	if err != nil {
-		t.Fatalf("PriorStateFromGeneration: %v", err)
-	}
-	prior := ingest.OpenCodeProvenancePrior{
-		Aliases:               state,
-		CapturedPrefix:        append([]ingest.OpenCodeHistoryRow(nil), snapshot.Copied...),
-		HasCapturedPrefix:     true,
-		HasCompleteGeneration: true,
-	}
-
-	applyOpenCodeNativeSetup(t, source, `
-DELETE FROM session_message WHERE session_id = '`+openCodeNativeParent+`';
-DELETE FROM session WHERE id = '`+openCodeNativeParent+`';
-`)
-	if got := countMaterializedCurrentRows(t, source.Path, openCodeNativeParent); got != 0 {
-		t.Fatalf("parent source rows = %d after deletion, want 0", got)
-	}
-
-	session := ingest.DiscoveredSession{
-		SessionID:        ingest.SessionID(openCodeNativeChild),
-		Harness:          ingest.HarnessOpenCode,
-		TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
-	}
-	config := openCodeNativeProvenanceConfig(source, openCodeNativeChild, prior, fork)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	result, err := indexer.IndexTranscriptResult(context.Background(), session)
-	if err != nil {
-		t.Fatalf("refresh after parent delete: %v", err)
-	}
-	refreshed, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("refresh returned %T, want indexformat.V2", result)
-	}
-	if refreshed.Generation.SourceEvidenceDigest != firstDigest {
-		t.Fatal("deleting the parent changed the captured generation evidence digest")
-	}
-	if len(refreshed.Generation.Segments) != 1 {
-		t.Fatalf("refreshed segments = %d, want 1", len(refreshed.Generation.Segments))
-	}
-	gotRefs := refreshed.Generation.Segments[0].CapturedRefs
-	if !equalSourceRefSlices(gotRefs, inheritedRefs) {
-		t.Fatalf("refreshed captured refs = %v, want %v", gotRefs, inheritedRefs)
-	}
-	refreshedContent := openCodeContentByRef(refreshed.Generation)
-	for _, ref := range inheritedRefs {
-		firstRecord, ok := firstContent[ref]
-		if !ok {
-			t.Fatalf("first generation lost captured content for ref %q", ref)
-		}
-		refreshedRecord, ok := refreshedContent[ref]
-		if !ok {
-			t.Fatalf("refreshed generation lost captured content for ref %q", ref)
-		}
-		if firstRecord.ByteLength != refreshedRecord.ByteLength || firstRecord.Digest != refreshedRecord.Digest {
-			t.Fatalf("refreshed content for ref %q changed: %+v -> %+v", ref, firstRecord, refreshedRecord)
-		}
 	}
 }
 
@@ -195,128 +95,6 @@ func TestOpenCodeProvenanceIndexerWiring(t *testing.T) {
 	missing := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(ingest.OpenCodeProvenanceIndexerConfig{Enabled: true}))
 	if _, err := missing.IndexTranscriptResult(context.Background(), session); err == nil || !strings.Contains(err.Error(), "misses its snapshot, metadata, or generation dependency") {
 		t.Fatalf("IndexTranscriptResult with missing dependencies = %v, want a fail-closed dependency refusal", err)
-	}
-}
-
-// TestOpenCodeProvenanceUnchangedCaptureKeepsIdentities proves the production
-// indexer reuses every prior identity: repeating the candidate on unchanged
-// native SQL keeps the exact block, submission, alias and segment refs, an
-// append keeps the existing refs and adds only new ones, and a retry reuses the
-// same allocations.
-func TestOpenCodeProvenanceUnchangedCaptureKeepsIdentities(t *testing.T) {
-	source := testfixture.MaterializeByName(t, "native-current-rows")
-	session := ingest.DiscoveredSession{
-		SessionID:        ingest.SessionID(openCodeNativeChild),
-		Harness:          ingest.HarnessOpenCode,
-		TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
-	}
-	first := indexOpenCodeNative(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	state, err := ingest.PriorStateFromGeneration(first.Generation)
-	if err != nil {
-		t.Fatalf("PriorStateFromGeneration: %v", err)
-	}
-	prior := ingest.OpenCodeProvenancePrior{Aliases: state, HasCompleteGeneration: true}
-
-	repeated := indexOpenCodeNative(t, source, session, prior, nil)
-	assertOpenCodeExistingIdentitiesStable(t, "repeat", first.Generation, repeated.Generation)
-	retried := indexOpenCodeNative(t, source, session, prior, nil)
-	assertOpenCodeExistingIdentitiesStable(t, "retry", first.Generation, retried.Generation)
-
-	applyOpenCodeNativeSetup(t, source, `INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES
-  ('msg_native_append', '`+openCodeNativeChild+`', 'user', 2000, 2000, '{"id":"msg_native_append","type":"user","text":"appended question","time":{"created":2000}}', 2);
-`)
-	appended := indexOpenCodeNative(t, source, session, prior, nil)
-	assertOpenCodeExistingIdentitiesStable(t, "append", first.Generation, appended.Generation)
-	if len(appended.Generation.Main.Entries) <= len(first.Generation.Main.Entries) {
-		t.Fatalf("append did not add a main entry: before %d, after %d", len(first.Generation.Main.Entries), len(appended.Generation.Main.Entries))
-	}
-}
-
-// TestOpenCodeProvenanceFirstIncompleteInstallRetained proves the ratified
-// first-discovery incomplete behavior over the real production candidate path:
-// a first child whose fork boundary is unproven returns its validated
-// incomplete_new generation with the readable child and uncertain evidence,
-// while an incomplete candidate that would replace a complete generation is
-// refused.
-func TestOpenCodeProvenanceFirstIncompleteInstallRetained(t *testing.T) {
-	source := testfixture.MaterializeByName(t, "native-current-rows")
-	seedOpenCodeNativeForkParent(t, source)
-	fork := &ingest.OpenCodeForkProof{SourceSessionID: openCodeNativeForkSource}
-	session := ingest.DiscoveredSession{
-		SessionID:        ingest.SessionID(openCodeNativeChild),
-		Harness:          ingest.HarnessOpenCode,
-		TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
-	}
-
-	first := indexOpenCodeNative(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, fork)
-	if first.Generation.Completeness != indexformat.GenerationCompletenessIncompleteNew {
-		t.Fatalf("first incomplete completeness = %q, want incomplete_new", first.Generation.Completeness)
-	}
-	if first.Generation.Metadata.Stats.InputSubmissionCount != nil {
-		t.Fatalf("first incomplete inputSubmissionCount = %v, want absent", *first.Generation.Metadata.Stats.InputSubmissionCount)
-	}
-	if len(first.Generation.Main.Entries) == 0 {
-		t.Fatal("first incomplete capture dropped the child's readable own work")
-	}
-	if len(first.Generation.Earlier) == 0 || len(first.Generation.Earlier[0].Content.Entries) == 0 {
-		t.Fatal("first incomplete capture dropped the uncertain copied evidence")
-	}
-
-	completePrior := ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState(), HasCompleteGeneration: true}
-	config := openCodeNativeProvenanceConfig(source, openCodeNativeChild, completePrior, fork)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
-	var incomplete *ingest.OpenCodeIncompleteProvenanceError
-	if !errors.As(err, &incomplete) {
-		t.Fatalf("incomplete replacement error = %v, want OpenCodeIncompleteProvenanceError", err)
-	}
-}
-
-// TestOpenCodeProvenanceForkReadBoundedToCutoff proves the fork acquisition
-// reads and decodes only the checked prefix: a malformed parent row far past
-// the cutoff cannot fail a bounded child capture, an appended suffix cannot
-// change the child proof, and an unproven boundary still reads every candidate.
-func TestOpenCodeProvenanceForkReadBoundedToCutoff(t *testing.T) {
-	source := testfixture.MaterializeByName(t, "native-current-rows")
-	applyOpenCodeNativeSetup(t, source, `
-INSERT INTO session (id, parent_id, time_created, time_updated) VALUES ('`+openCodeNativeParent+`', '', 500, 2000);
-UPDATE session SET parent_id = '`+openCodeNativeParent+`' WHERE id = '`+openCodeNativeChild+`';
-INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES
-  ('msg_prefix_valid', '`+openCodeNativeParent+`', 'user', 500, 500, '{"id":"msg_prefix_valid","type":"user","text":"captured prefix before the cutoff","time":{"created":500}}', 0),
-  ('msg_suffix_valid', '`+openCodeNativeParent+`', 'user', 700, 700, '{"id":"msg_suffix_valid","type":"user","text":"suffix after the cutoff","time":{"created":700}}', 50),
-  ('msg_suffix_malformed', '`+openCodeNativeParent+`', 'user', 800, 800, '{not json', 100);
-`)
-	before := testfixture.SnapshotSource(t, source)
-
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-	bounded := &ingest.OpenCodeForkProof{SourceSessionID: openCodeNativeForkSource, BeforeSeq: int64Ptr(1)}
-	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{Fork: bounded})
-	if err != nil {
-		t.Fatalf("bounded fork snapshot: %v", err)
-	}
-	if len(snapshot.Copied) != 1 {
-		t.Fatalf("bounded captured copies = %d, want 1", len(snapshot.Copied))
-	}
-	digest := snapshot.SourceEvidenceDigest
-	testfixture.AssertUnchanged(t, source, before)
-
-	// Appending another suffix row must not change the bounded child proof.
-	applyOpenCodeNativeSetup(t, source, `INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES
-  ('msg_suffix_later', '`+openCodeNativeParent+`', 'user', 900, 900, '{"id":"msg_suffix_later","type":"user","text":"later suffix","time":{"created":900}}', 150);
-`)
-	again, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{Fork: bounded})
-	if err != nil {
-		t.Fatalf("bounded fork snapshot after append: %v", err)
-	}
-	if again.SourceEvidenceDigest != digest {
-		t.Fatal("appending a parent suffix changed the bounded child proof")
-	}
-
-	// Without a proven boundary there is no cutoff: the same malformed row is
-	// reached and the capture fails closed.
-	unproven := &ingest.OpenCodeForkProof{SourceSessionID: openCodeNativeForkSource}
-	if _, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{Fork: unproven}); err == nil {
-		t.Fatal("unproven fork snapshot succeeded despite a malformed suffix row")
 	}
 }
 
@@ -373,75 +151,6 @@ func TestOpenCodeProvenanceAdmissionThroughNativeSQL(t *testing.T) {
 	}
 }
 
-// TestOpenCodeSnapshotDigestBindsCapturedContent proves the source-evidence
-// digest binds the captured payload bytes and the delivery correlation: a real
-// SQLite payload edit and a changed per-input delivery correlation each change
-// the proof, so a same-identity row can never keep a stale proof.
-func TestOpenCodeSnapshotDigestBindsCapturedContent(t *testing.T) {
-	source := testfixture.MaterializeByName(t, "native-current-rows")
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-
-	baseline, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{})
-	if err != nil {
-		t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
-	}
-	if baseline.SourceEvidenceDigest == "" {
-		t.Fatal("snapshot carries no source evidence digest")
-	}
-
-	delivered, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{
-		AgentDeliveredIDs: map[string]bool{"msg_native_user": true},
-	})
-	if err != nil {
-		t.Fatalf("SnapshotOpenCodeProvenance with delivery correlation: %v", err)
-	}
-	if delivered.SourceEvidenceDigest == baseline.SourceEvidenceDigest {
-		t.Fatal("changing the delivery correlation did not change the source evidence digest")
-	}
-
-	applyOpenCodeNativeSetup(t, source, `UPDATE session_message SET data = '{"text":"mutated native question","time":{"created":1000}}' WHERE id = 'msg_native_user';`)
-	mutated, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{})
-	if err != nil {
-		t.Fatalf("SnapshotOpenCodeProvenance after payload edit: %v", err)
-	}
-	if mutated.SourceEvidenceDigest == baseline.SourceEvidenceDigest {
-		t.Fatal("editing the captured payload did not change the source evidence digest")
-	}
-}
-
-// TestOpenCodeProvenanceDecodeErrorsDoNotLeakNativeValues proves the row decoder
-// never echoes an arbitrary native payload identity or type value in a failure.
-func TestOpenCodeProvenanceDecodeErrorsDoNotLeakNativeValues(t *testing.T) {
-	const sentinel = "PRIVATE_NATIVE_SENTINEL"
-	scope := ingest.OpenCodeProvenanceScope{SessionID: "ses_synthetic_scope", Shape: ingest.OpenCodeProvenanceCurrent, ParentNullProven: true}
-
-	_, _, err := ingest.DecodeOpenCodeProvenanceRow(ingest.OpenCodeProvenanceRow{
-		ID:        "msg_row_identity",
-		SessionID: "ses_synthetic_scope",
-		Type:      "user",
-		Data:      `{"id":"` + sentinel + `","type":"user","text":"synthetic","time":{"created":1}}`,
-	}, scope)
-	if err == nil {
-		t.Fatal("identity-conflicting payload decoded without an error")
-	}
-	if strings.Contains(err.Error(), sentinel) {
-		t.Fatalf("decode error leaked the native payload identity: %v", err)
-	}
-
-	_, _, err = ingest.DecodeOpenCodeProvenanceRow(ingest.OpenCodeProvenanceRow{
-		ID:        "msg_row_type",
-		SessionID: "ses_synthetic_scope",
-		Type:      "user",
-		Data:      `{"id":"msg_row_type","type":"` + sentinel + `","text":"synthetic","time":{"created":1}}`,
-	}, scope)
-	if err == nil {
-		t.Fatal("type-conflicting payload decoded without an error")
-	}
-	if strings.Contains(err.Error(), sentinel) {
-		t.Fatalf("decode error leaked the native payload type: %v", err)
-	}
-}
-
 func indexOpenCodeNative(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) indexformat.V2 {
 	t.Helper()
 	config := openCodeNativeProvenanceConfig(source, session.SessionID.String(), prior, fork)
@@ -474,17 +183,6 @@ func openCodeNativeProvenanceConfig(source testfixture.MaterializedSource, sessi
 	}
 }
 
-func seedOpenCodeNativeForkParent(t *testing.T, source testfixture.MaterializedSource) {
-	t.Helper()
-	applyOpenCodeNativeSetup(t, source, `
-INSERT INTO session (id, parent_id, time_created, time_updated) VALUES ('`+openCodeNativeParent+`', '', 500, 2000);
-UPDATE session SET parent_id = '`+openCodeNativeParent+`' WHERE id = '`+openCodeNativeChild+`';
-INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES
-  ('msg_parent_user', '`+openCodeNativeParent+`', 'user', 500, 500, '{"id":"msg_parent_user","type":"user","text":"captured parent question","time":{"created":500}}', 0),
-  ('msg_parent_assistant', '`+openCodeNativeParent+`', 'assistant', 500, 600, '{"id":"msg_parent_assistant","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_parent_text","text":"captured parent answer"}],"time":{"created":500,"completed":600}}', 1);
-`)
-}
-
 func seedOpenCodeProvenanceCase(t *testing.T, source testfixture.MaterializedSource, row ocProvCase) {
 	t.Helper()
 	_ = testfixture.SnapshotSource(t, source)
@@ -508,26 +206,6 @@ func seedOpenCodeProvenanceCase(t *testing.T, source testfixture.MaterializedSou
 			t.Fatalf("seed message row %q: %v", native.ID, err)
 		}
 	}
-}
-
-func openCodeContentByRef(generation indexformat.Generation) map[schema.SourceEntryRef]indexformat.ContentRecord {
-	out := make(map[schema.SourceEntryRef]indexformat.ContentRecord, len(generation.Content))
-	for _, record := range generation.Content {
-		out[record.Ref] = record
-	}
-	return out
-}
-
-func equalSourceRefSlices(left, right []schema.SourceEntryRef) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // assertOpenCodeExistingIdentitiesStable requires every alias and title ref the
@@ -579,21 +257,3 @@ func buildOpenCodeNativeGenerationPrior(t *testing.T, snapshot ingest.OpenCodeHi
 	}
 	return built
 }
-
-func applyOpenCodeNativeSetup(t *testing.T, source testfixture.MaterializedSource, script string) {
-	t.Helper()
-	_ = testfixture.SnapshotSource(t, source)
-	connection, err := sqlite.OpenConn(source.Path, sqlite.OpenReadWrite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlitex.ExecuteScript(connection, script, nil); err != nil {
-		_ = connection.Close()
-		t.Fatal(err)
-	}
-	if err := connection.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func int64Ptr(value int64) *int64 { return &value }

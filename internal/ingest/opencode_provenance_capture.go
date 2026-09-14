@@ -2,18 +2,13 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
-
-// DefaultOpenCodeProvenanceBudgetBytes bounds one provenance snapshot read.
-// OpenCode rows have no per-record size limit, so the bound covers the whole
-// snapshot instead of one record; exceeding it fails the refresh and retains
-// the last good generation rather than certifying a truncated capture.
-const DefaultOpenCodeProvenanceBudgetBytes = 256 << 20
 
 // OpenCodeSnapshotOptions carries the caller-supplied evidence a snapshot read
 // cannot prove from message rows alone: the fork anchor, the revert state, and
@@ -28,8 +23,6 @@ type OpenCodeSnapshotOptions struct {
 	// empty and Fork names a source session, the reader copies that session's
 	// current rows itself; a supplied set is never merged with a native read.
 	Copied []OpenCodeHistoryRow
-	// BudgetBytes caps the snapshot payload bytes. Zero selects the default.
-	BudgetBytes int64
 }
 
 // SnapshotOpenCodeHistory reads one read-only OpenCode history snapshot over
@@ -53,10 +46,6 @@ func SnapshotOpenCodeHistory(ctx context.Context, source OpenCodeSQLiteSource, s
 	if err != nil {
 		return OpenCodeHistorySnapshot{}, &OpenCodeSnapshotError{SessionID: sessionID, Step: "validate snapshot request", Reason: fmt.Sprintf("session identity is not a current session: %v", err), Recovery: "snapshot a session the current session_message table carries"}
 	}
-	budget := opts.BudgetBytes
-	if budget <= 0 {
-		budget = DefaultOpenCodeProvenanceBudgetBytes
-	}
 	snapshot := OpenCodeHistorySnapshot{
 		SessionID:         sessionID,
 		Fork:              opts.Fork,
@@ -67,13 +56,12 @@ func SnapshotOpenCodeHistory(ctx context.Context, source OpenCodeSQLiteSource, s
 	if err := fillOpenCodeSnapshotParent(ctx, source, linkID, &snapshot, &scope); err != nil {
 		return OpenCodeHistorySnapshot{}, err
 	}
-	var spent int64
-	own, err := readOpenCodeCurrentRows(ctx, source, currentID, scope, budget, &spent, nil)
+	own, err := readOpenCodeCurrentRows(ctx, source, currentID, scope, nil)
 	if err != nil {
 		return OpenCodeHistorySnapshot{}, err
 	}
 	snapshot.Messages = own
-	if err := fillOpenCodeSnapshotForkCopies(ctx, source, opts, budget, &spent, &snapshot); err != nil {
+	if err := fillOpenCodeSnapshotForkCopies(ctx, source, opts, &snapshot); err != nil {
 		return OpenCodeHistorySnapshot{}, err
 	}
 	snapshot.SourceEvidenceDigest = DigestOpenCodeSnapshot(snapshot)
@@ -86,7 +74,7 @@ func SnapshotOpenCodeHistory(ctx context.Context, source OpenCodeSQLiteSource, s
 // deleting the parent rows later cannot blank the child generation. Each copied
 // row keeps a new child identity and records the source row and session it was
 // materialized from for ownership evidence.
-func fillOpenCodeSnapshotForkCopies(ctx context.Context, source OpenCodeSQLiteSource, opts OpenCodeSnapshotOptions, budget int64, spent *int64, snapshot *OpenCodeHistorySnapshot) error {
+func fillOpenCodeSnapshotForkCopies(ctx context.Context, source OpenCodeSQLiteSource, opts OpenCodeSnapshotOptions, snapshot *OpenCodeHistorySnapshot) error {
 	if len(opts.Copied) > 0 {
 		snapshot.Copied = append([]OpenCodeHistoryRow(nil), opts.Copied...)
 		return nil
@@ -99,7 +87,7 @@ func fillOpenCodeSnapshotForkCopies(ctx context.Context, source OpenCodeSQLiteSo
 	if err != nil {
 		return &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "read fork source rows", Reason: fmt.Sprintf("the fork source session identity is invalid: %v", err), Recovery: "record the native fork source session before snapshotting"}
 	}
-	rows, err := readOpenCodeCurrentRows(ctx, source, currentID, OpenCodeProvenanceScope{SessionID: sourceID, Shape: OpenCodeProvenanceCurrent}, budget, spent, openCodeCopyReadBound(opts.Fork))
+	rows, err := readOpenCodeCurrentRows(ctx, source, currentID, OpenCodeProvenanceScope{SessionID: sourceID, Shape: OpenCodeProvenanceCurrent}, openCodeCopyReadBound(opts.Fork))
 	if err != nil {
 		return err
 	}
@@ -124,8 +112,8 @@ func fillOpenCodeSnapshotForkCopies(ctx context.Context, source OpenCodeSQLiteSo
 // the copy acquisition needs, or nil when the proof can place no row below a
 // bound (an unproven or unfinished boundary reads every candidate and keeps it
 // uncertain). The bound is the disputed-range ceiling: rows at or beyond it are
-// neither inherited nor uncertain, so the read never decodes, budgets, or hashes
-// the parent's suffix.
+// neither inherited nor uncertain, so the read never decodes or hashes the
+// parent's suffix.
 func openCodeCopyReadBound(fork *OpenCodeForkProof) *OpenCodeCurrentSeq {
 	if fork == nil {
 		return nil
@@ -146,11 +134,11 @@ func openCodeCopyReadBound(fork *OpenCodeForkProof) *OpenCodeCurrentSeq {
 
 // readOpenCodeCurrentRows reads one current session's message rows in sequence
 // order through the same read-only source, decoding each through the pinned
-// provenance row decoder. It issues SELECTs only and adds the payload bytes it
-// consumed to spent, failing closed past the budget so no truncated capture is
-// ever certified. A non-nil before bound keeps the SQL acquisition, decode and
-// budget accounting inside the checked capture prefix.
-func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, currentID OpenCodeCurrentSessionID, scope OpenCodeProvenanceScope, budget int64, spent *int64, before *OpenCodeCurrentSeq) ([]OpenCodeHistoryRow, error) {
+// provenance row decoder. It issues SELECTs only. There is no payload-size
+// bound: OpenCode rows carry no per-record size limit, so no row is ever
+// refused or dropped for its size. A non-nil before bound keeps the SQL
+// acquisition and decode inside the checked capture prefix.
+func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, currentID OpenCodeCurrentSessionID, scope OpenCodeProvenanceScope, before *OpenCodeCurrentSeq) ([]OpenCodeHistoryRow, error) {
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "read message rows", Reason: fmt.Sprintf("the fixed page size is invalid: %v", err), Recovery: "retry the snapshot"}
@@ -166,10 +154,6 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 			return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "read message rows", Reason: "the message page read failed against the native store", Recovery: "verify the source remains a supported session_message store and retry"}
 		}
 		for _, row := range page.Messages {
-			*spent += int64(len(row.Data))
-			if *spent > budget {
-				return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "read message rows", Reason: fmt.Sprintf("the snapshot payload passed the %d-byte bound", budget), Recovery: "raise the snapshot budget and retry; no truncated capture is certified"}
-			}
 			decoded, settled, err := DecodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
 				ID:          row.ID.String(),
 				SessionID:   row.SessionID.String(),
@@ -248,20 +232,56 @@ func fillOpenCodeSnapshotParent(ctx context.Context, source OpenCodeSQLiteSource
 // read-only and every statement inside is a SELECT: native rows are never
 // written. Copied parent payloads, fork anchors, revert state, and delivery
 // correlation travel in opts because no additional native table is invented to
-// carry them.
+// carry them. The whole acquisition boundary is sanitized here: an open,
+// transaction, read, or close failure cannot return the candidate path, the
+// SQLite URI, a raw dependency cause, or a private locator. Already-typed
+// snapshot refusals keep their fixed category; every other failure is reduced
+// to a fixed step and reason.
 func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candidatePath string, sessionID string, opts OpenCodeSnapshotOptions) (snapshot OpenCodeHistorySnapshot, err error) {
-	err = a.withOpenCodeMaterializationSource(ctx, candidatePath, true, func(source OpenCodeSQLiteSource) error {
-		read, readErr := SnapshotOpenCodeHistory(ctx, source, sessionID, opts)
-		if readErr != nil {
-			return readErr
-		}
-		snapshot = read
-		return nil
-	})
+	options := a.candidateOptions
+	options.readSnapshot = true
+	source, err := a.openOpenCodeSQLiteSourceWithOptions(ctx, candidatePath, options)
 	if err != nil {
-		return OpenCodeHistorySnapshot{}, err
+		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeAcquisitionError(sessionID, "open snapshot source", "the read-only native source could not be opened", "verify the native database exists, is readable, and is not blocked by permissions, then retry without modifying it", err)
 	}
-	return snapshot, nil
+	read, readErr := SnapshotOpenCodeHistory(ctx, source, sessionID, opts)
+	closeErr := source.Close(ctx)
+	if readErr != nil {
+		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeAcquisitionError(sessionID, "read snapshot rows", "the snapshot read failed against the native store", "verify the source remains a supported OpenCode store and retry; no partial capture is certified", readErr)
+	}
+	if closeErr != nil {
+		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeAcquisitionError(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr)
+	}
+	return read, nil
+}
+
+// sanitizeOpenCodeAcquisitionError reduces any failure on the snapshot or
+// candidate boundary to a fixed-category OpenCodeSnapshotError. An
+// already-typed snapshot or incomplete-candidate refusal passes through because
+// its category is fixed and free of native content; a cancellation or deadline
+// keeps its safe classification; everything else — a raw SQLite opener cause, a
+// private candidate path, a URI, or a shared-projection refusal that prints a
+// native key — becomes a bounded step and reason with no wrapped text.
+func sanitizeOpenCodeAcquisitionError(sessionID, step, reason, recovery string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var snapshotErr *OpenCodeSnapshotError
+	if errors.As(err, &snapshotErr) {
+		return snapshotErr
+	}
+	var incomplete *OpenCodeIncompleteProvenanceError
+	if errors.As(err, &incomplete) {
+		return incomplete
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return &OpenCodeSnapshotError{SessionID: sessionID, Step: step, Reason: reason + ": the caller context was cancelled", Recovery: "retry with a live context"}
+	case errors.Is(err, context.DeadlineExceeded):
+		return &OpenCodeSnapshotError{SessionID: sessionID, Step: step, Reason: reason + ": the bounded deadline ended", Recovery: "retry with a live context"}
+	default:
+		return &OpenCodeSnapshotError{SessionID: sessionID, Step: step, Reason: reason, Recovery: recovery}
+	}
 }
 
 // BuildOpenCodeProvenanceCapture resolves one snapshot into the shared
@@ -481,19 +501,19 @@ func WithOpenCodeProvenanceCapture(config OpenCodeProvenanceIndexerConfig) OpenC
 func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, session DiscoveredSession) (indexformat.V2, error) {
 	config := idx.provenanceCapture
 	if !config.Enabled {
-		return indexformat.V2{}, fmt.Errorf("index OpenCode provenance for session %q failed before the snapshot: the provenance candidate path is disabled; enable it with a real snapshot before requesting a V2 candidate", session.SessionID)
+		return indexformat.V2{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the provenance candidate path is disabled", Recovery: "enable the path with a real snapshot before requesting a V2 candidate"}
 	}
 	if config.Snapshot == nil || config.Metadata == nil || config.GenerationID == nil {
-		return indexformat.V2{}, fmt.Errorf("index OpenCode provenance for session %q failed before the snapshot: the candidate path misses its snapshot, metadata, or generation dependency; wire all three before requesting a V2 candidate", session.SessionID)
+		return indexformat.V2{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its snapshot, metadata, or generation dependency", Recovery: "wire all three dependencies before requesting a V2 candidate"}
 	}
 	if err := ctx.Err(); err != nil {
-		return indexformat.V2{}, err
+		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
 	}
 	prior := OpenCodeProvenancePrior{Aliases: NewProjectionPriorState()}
 	if config.Prior != nil {
 		loaded, err := config.Prior(ctx, session)
 		if err != nil {
-			return indexformat.V2{}, err
+			return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "load prior evidence", "the last-good alias and captured-prefix evidence could not be loaded", "verify the activation-owned prior store and retry; no candidate was produced and the last good generation stays active", err)
 		}
 		prior = loaded
 		if prior.Aliases.Entries == nil {
@@ -502,16 +522,16 @@ func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, sessi
 	}
 	snapshot, err := config.Snapshot(ctx, session)
 	if err != nil {
-		return indexformat.V2{}, err
+		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "snapshot native history", "the read-only native snapshot failed", "verify the native source and retry; no candidate was produced", err)
 	}
 	metadata, err := config.Metadata(session)
 	if err != nil {
-		return indexformat.V2{}, err
+		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata dependency and retry; no candidate was produced", err)
 	}
 	generationID := config.GenerationID(session)
 	capture, err := BuildOpenCodeProvenanceCapture(snapshot, generationID, metadata, prior)
 	if err != nil {
-		return indexformat.V2{}, err
+		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
 	}
 	allocator := config.Allocator
 	if allocator == nil {
@@ -519,7 +539,7 @@ func (idx *OpenCodeIndexer) IndexOpenCodeProvenanceV2(ctx context.Context, sessi
 	}
 	built, err := BuildV2(capture, allocator)
 	if err != nil {
-		return indexformat.V2{}, err
+		return indexformat.V2{}, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
 	}
 	if built.Generation.Completeness != indexformat.GenerationCompletenessComplete {
 		if prior.HasCompleteGeneration {

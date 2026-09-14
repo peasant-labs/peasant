@@ -57,12 +57,17 @@ func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session D
 	// path enables it with a real snapshot; while disabled every V1 flow below
 	// keeps its exact retained behavior.
 	if idx.provenanceCapture.Enabled {
+		// The V2 candidate exit already reduces every refusal to a fixed
+		// category against validated identities. It is returned unchanged: the
+		// path-bearing completion wrapper below belongs to the retained V1
+		// transcript flow, and wrapping the sanitized candidate here would add
+		// the private source path back to a clean refusal.
 		provenance, err := idx.IndexOpenCodeProvenanceV2(ctx, session)
 		if err != nil {
-			return nil, completion.failure(err)
+			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, completion.failure(err)
+			return nil, sanitizeOpenCodeAcquisitionError(session.SessionID.String(), "return candidate result", "the candidate finished but the caller context ended", "retry the candidate with a live context", err)
 		}
 		return provenance, nil
 	}
