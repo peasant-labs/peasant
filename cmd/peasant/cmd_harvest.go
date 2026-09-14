@@ -171,7 +171,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)")
 	} else {
 		// Native source overrides are relevant only for logs and all modes.
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike, pi)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Limit discovery to one harness, using its configured or default path (claude-code, opencode, codex, cursor, strike, pi)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
@@ -268,27 +268,26 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 			}
 		}
 	} else {
-		if flags.sourceHarness != "" || flags.sourcePath != "" {
-			if flags.sourceHarness == "" {
-				return fmt.Errorf("--source-path requires --source-harness")
-			}
-			if flags.sourcePath == "" {
-				return fmt.Errorf("--source-harness requires --source-path")
-			}
+		if flags.sourcePath != "" && flags.sourceHarness == "" {
+			return fmt.Errorf("--source-path requires --source-harness")
+		}
+		if flags.sourceHarness != "" {
 			provider, err := resolveHarnessFlag(flags.sourceHarness)
 			if err != nil {
 				return err
 			}
-			resolved, err := ingest.NewResolvedPath(flags.sourcePath)
-			if err != nil {
-				return fmt.Errorf("resolve source path: %w", err)
+			if flags.sourcePath != "" {
+				resolved, err := ingest.NewResolvedPath(flags.sourcePath)
+				if err != nil {
+					return fmt.Errorf("resolve source path: %w", err)
+				}
+				applySourceOverride(cfg, provider, resolved)
+			} else {
+				applyDefaultSourcePath(cfg, provider)
 			}
-			applySourceOverride(cfg, provider, resolved)
-			// --source-path (which requires --source-harness) scopes the run to
-			// the NAMED provider as the SOLE active source: disable default
-			// discovery of the OTHER providers so "ingest from THIS path" does not
-			// also read their real default dirs (~/.claude, opencode, codex) — the
-			// isolation leak exposed by the source-scoped integration path.
+			// --source-harness scopes the run to the named provider as the sole
+			// active source, whether its path comes from config, the default, or
+			// an explicit --source-path override.
 			isolateSourceHarness(cfg, provider)
 		}
 	}
@@ -1146,6 +1145,32 @@ func applySourceOverride(cfg *config.Config, provider defaults.Harness, path ing
 		cfg.Sources.Pi.Enabled = true
 		cfg.Sources.Pi.Paths = []string{string(path)}
 	}
+}
+
+// applyDefaultSourcePath fills an empty configured path list for a selected
+// provider. Non-empty configured paths remain authoritative.
+func applyDefaultSourcePath(cfg *config.Config, provider defaults.Harness) {
+	configured, ok := cfg.Sources.Provider(provider)
+	if !ok || len(configured.Paths) != 0 {
+		return
+	}
+
+	var fallback defaults.SourcePath
+	switch provider {
+	case defaults.HarnessClaudeCode:
+		fallback = defaults.DefaultClaudePath
+	case defaults.HarnessOpenCode:
+		fallback = defaults.DefaultOpenCodePath
+	case defaults.HarnessCodex:
+		fallback = defaults.DefaultCodexPath
+	case defaults.HarnessCursor:
+		fallback = defaults.DefaultCursorPath
+	case defaults.HarnessStrike:
+		fallback = defaults.DefaultStrikePath
+	case defaults.HarnessPi:
+		fallback = defaults.DefaultPiPath
+	}
+	configured.Paths = []string{fallback.String()}
 }
 
 type sourcePathIssue struct {
