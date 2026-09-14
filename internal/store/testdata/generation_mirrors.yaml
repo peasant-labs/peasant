@@ -1,0 +1,26 @@
+# Candidate-derived mirror oracle: activation installs title, input count,
+# adapter, timestamps, logical parent and tool counts atomically so ordinary
+# store reads and snapshots agree without a prior metadata upsert. The logical
+# parent comes from relationship evidence, not the availability cache.
+session:
+  id: "66666666-6666-4666-8666-666666666666"
+  harness: claude-code
+parent:
+  id: "77777777-7777-4777-8777-777777777777"
+generation:
+  first_id: gen_mirror_g1
+  second_id: gen_mirror_g2
+cases:
+  - name: mirrors-change-between-generations
+    first_title: "first user request"
+    second_title: "second user request follows"
+    first_input_count: 1
+    second_input_count: 3
+    first_adapter: 11
+    second_adapter: 12
+  - name: missing-parent-preserved
+    relationship: started_by-missing
+  - name: absent-input-count-preserved
+    input_count: absent
+  - name: zero-input-count-measured
+    input_count: zero

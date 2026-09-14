@@ -1,0 +1,68 @@
+# Captured-generation export boundary corpus.
+#
+# Each case activates real managed generations in a real generation-capable
+# store and drives them through the production export exit,
+# export.ExportSnapshotPayload, which shares transcript.BuildSnapshotDetailBytes
+# with the detail reads. The case data selects the captured bodies and the
+# expected outcome; the test keeps the real generation activation, the real
+# content resolver and the real export function.
+#
+# A blob spec is either a `literal`, or a `prefix`/`fill`/`suffix` where `fill`
+# repeats `fillOverPreviewBy` bytes beyond the display preview limit, so the
+# captured body is provably longer than a bounded preview and can only arrive
+# through full managed-blob hydration.
+cases:
+  - name: held_generation_survives_activation_and_cleanup
+    operation: lockLifetime
+    sessionId: "45454545-4545-4545-4545-454545454548"
+    baseline:
+      id: g-export-0
+      text: { literal: baseline }
+      toolInput: { literal: baseline call }
+      toolOutput: { literal: baseline result }
+      includeResult: true
+    held:
+      id: g-export-1
+      text: { prefix: "user input ", fill: x, fillOverPreviewBy: 1024, suffix: " G1" }
+      toolInput: { prefix: "rg parser ", fill: y, fillOverPreviewBy: 1024 }
+      toolOutput: { prefix: "g1-result-sentinel ", fill: z, fillOverPreviewBy: 1024 }
+      includeResult: true
+    later:
+      id: g-export-2
+      text: { prefix: "user input ", fill: x, fillOverPreviewBy: 1024, suffix: " G2" }
+      toolInput: { prefix: "rg parser g2 ", fill: w, fillOverPreviewBy: 1024 }
+      includeResult: false
+    expectations:
+      heldGenerationId: g-export-1
+      heldCallbackActive: true
+      heldResultMarker: "g1-result-sentinel "
+      laterResultRemoved: true
+
+  - name: same_length_corruption_refused
+    operation: corruptArtifact
+    sessionId: "45454545-4545-4545-4545-454545454549"
+    held:
+      id: g-corrupt
+      text: { literal: hello }
+      toolInput: { literal: call }
+      toolOutput: { literal: "the full tool result" }
+      includeResult: true
+    corruption:
+      ref: e_result1
+      replacementFill: X
+      expectErrorContains: "integrity digest"
+    expectations:
+      refuseExport: true
+
+  - name: native_source_deleted_keeps_captured_bytes
+    operation: nativeDeletion
+    sessionId: "45454545-4545-4545-4545-454545454550"
+    held:
+      id: g-native
+      text: { prefix: "user input ", fill: x, fillOverPreviewBy: 1024 }
+      toolInput: { prefix: "rg parser ", fill: y, fillOverPreviewBy: 1024 }
+      toolOutput: { prefix: "parser.go:12 ", fill: z, fillOverPreviewBy: 1024 }
+      includeResult: true
+    nativeSource: true
+    expectations:
+      keepCapturedBytes: true

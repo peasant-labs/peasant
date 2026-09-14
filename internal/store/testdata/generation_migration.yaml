@@ -1,0 +1,33 @@
+# Exact migration catalog oracle for the V60 managed-generation tables. Each
+# named count check must accept every listed nullable/in-range value and reject
+# every out-of-range, fractional or non-numeric value at the SQL boundary. The
+# relationship target-state CHECK is compared for exact set equality against
+# schema.AllRelationshipTargetStates in the test, not sampled.
+cases:
+  - name: generation-input-count
+    accepted:
+      - null
+      - 0
+      - 1
+      - 9007199254740991
+    rejected:
+      - -1
+      - 9007199254740992
+      - 1.5
+      - not-a-number
+  - name: sessions-input-count
+    accepted:
+      - null
+      - 0
+      - 1
+      - 9007199254740991
+    rejected:
+      - -1
+      - 9007199254740992
+      - 1.5
+# Sample strings the target_state CHECK must reject; the test additionally
+# proves exact set equality with schema.AllRelationshipTargetStates.
+target_state_rejects:
+  - made_up_state
+  - TARGET_KNOWN
+  - ""

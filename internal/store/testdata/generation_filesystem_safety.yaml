@@ -1,0 +1,53 @@
+# Owned-root filesystem safety and ownership oracle. A symlink at any ancestor
+# inside the owned root cannot redirect staging, reading, repair, removal or
+# locking outside the root. Recursive removal proves owned identity first:
+# the directory name and a decodable manifest are not ownership, so an empty,
+# malformed, mismatched or foreign-owner candidate is left in place. A RELATIVE
+# symlink that stays inside the root is not refused by confinement alone, so an
+# anchored no-follow component walk must refuse it before removal, including
+# when the link's target manifest names the same owner. No diagnostic echoes an
+# unvalidated manifest identifier, and unrelated content survives.
+session:
+  id: "88888888-8888-4888-8888-888888888888"
+  harness: claude-code
+foreign_session:
+  id: "99999999-9999-4999-8999-999999999999"
+generation:
+  complete_id: gen_fs_g1
+  inactive_id: gen_fs_old
+  foreign_id: gen_fs_foreign
+layout:
+  holding_dir: unrelated-holding
+  foreign_holding_dir: foreign-holding
+cases:
+  - name: session-symlink-preserves-external-sentinel
+    ancestor: session
+  - name: generations-symlink-preserves-external-sentinel
+    ancestor: generations
+  - name: unrelated-file-preserved-on-cleanup
+    ancestor: unrelated
+  - name: lock-namespace-confined
+    ancestor: locks
+  - name: empty-manifest-preserves-sentinel
+    ancestor: empty-manifest
+  - name: malformed-manifest-preserves-sentinel
+    ancestor: malformed-manifest
+  - name: unknown-manifest-preserves-sentinel
+    ancestor: unknown-manifest
+  - name: mismatched-manifest-preserves-sentinel
+    ancestor: mismatched-manifest
+  - name: foreign-session-symlink-preserves-sentinel
+    ancestor: foreign-owner-symlink
+  - name: relative-generations-ancestor-matching-owner-preserves-sentinel
+    ancestor: relative-ancestor-matching-owner
+  - name: relative-generations-ancestor-foreign-owner-preserves-sentinel
+    ancestor: relative-ancestor-foreign-owner
+  - name: private-identity-manifest-refused-without-echo
+    ancestor: private-identity-manifest
+  - name: private-content-path-manifest-refused-without-echo
+    ancestor: private-content-path-manifest
+sentinel:
+  outside_file: sentinel-outside-do-not-delete
+  unrelated_file: sentinel-unrelated-keep
+  candidate_file: sentinel-candidate-keep
+  private_identity: "/home/runner/private-sentinel-3f9a/leaked-generation"

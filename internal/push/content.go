@@ -76,6 +76,26 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 	}, nil
 }
 
+// BuildTranscriptContentFromDetail wraps an already-validated detail payload
+// in the versioned push envelope. It is the publication half of the single
+// durable payload-construction boundary shared with detail reads and export:
+// the detail comes from the snapshot boundary (hydration through serialization
+// under the shared lock), and this constructor only stamps the negotiated
+// emit contract version and the stored origin declaration. Redaction,
+// capability negotiation and upload remain with the publish path that calls
+// it; this function performs no network access and mutates no store.
+func BuildTranscriptContentFromDetail(detail *schema.SessionDetailPayload, emit schema.PushContractVersion, origin sessionorigin.Origin) schema.TranscriptContent {
+	if detail != nil {
+		detail.SchemaVersion = emit
+		detail.SessionOrigin = declaredOrigin(origin)
+	}
+	return schema.TranscriptContent{
+		ContractVersion: emit,
+		Kind:            schema.ContentKindSessionDetail,
+		SessionDetail:   detail,
+	}
+}
+
 // RedactEntries returns the stored entries with every string value redacted at
 // the level the push applies.
 //

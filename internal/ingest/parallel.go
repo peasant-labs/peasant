@@ -20,9 +20,13 @@ import (
 // ---------------------------------------------------------------------------
 
 // topoLevels partitions a flat slice of DiffEntries into topological levels.
-// All entries in level 0 have no parent in the batch (roots). Entries in level
-// N depend only on entries in levels < N, so each level can be processed
-// concurrently after the previous level's DB writes are committed.
+// All entries in level 0 have no operational parent in the batch (roots).
+// Entries in level N depend only on entries in levels < N, so each level can
+// be processed concurrently after the previous level's DB writes are committed.
+//
+// The gate reads only the operational scheduling edge. A nil edge is a root
+// even when the logical ParentUUID names another session, so missing,
+// unselected, and cyclic parents never block an admitted child.
 //
 // The algorithm uses a simple iterative fixed-point that converges in
 // O(depth) passes. Real transcript trees almost never exceed depth 1
@@ -46,13 +50,29 @@ func topoLevels(entries []DiffEntry) [][]DiffEntry {
 	maxLevel := 0
 
 	changed := true
-	for changed {
+	// The pass bound guarantees termination even for a pathological logical
+	// cycle a legacy caller reintroduced: an acyclic graph converges in at most
+	// one pass per node, so the bound never changes an acyclic result.
+	for pass := 0; changed && pass <= len(entries); pass++ {
 		changed = false
 		for i, e := range entries {
-			if e.Session.ParentUUID == nil {
-				continue // root — always level 0
+			parent := OperationalParentID(e.Session)
+			if parent == nil {
+				// A nil operational edge is a deliberate dispatch root for an
+				// independently admitted Codex/OpenCode entry: the entry was
+				// admitted with its own selection decision, and the graph may
+				// have removed an internal cycle edge. Falling back to the
+				// logical ParentUUID here would restore that removed cycle and
+				// make this fixed point loop forever, so never fall back for an
+				// independently admitted harness. Every other harness keeps the
+				// legacy logical fallback for callers that never derived an
+				// edge.
+				if IndependentAdmissionHarness(e.Session.Harness) || e.Session.ParentUUID == nil {
+					continue // root — always level 0
+				}
+				parent = e.Session.ParentUUID
 			}
-			parentIdx, ok := sessionIndex[*e.Session.ParentUUID]
+			parentIdx, ok := sessionIndex[*parent]
 			if !ok {
 				continue // parent not in batch — treat as root
 			}
@@ -182,6 +202,14 @@ type workerResult struct {
 	originalRoot     ResolvedPath
 	transcriptOrigin TranscriptOrigin
 	startMs          int64
+	// schedulingParentID is the operational edge derived after admission. The
+	// staging gate reads only this edge; the logical ParentUUID on the result
+	// and metadata keeps the durable evidence. Nil means a dispatch root.
+	// schedulingResolved distinguishes a derived nil edge (a dispatch root:
+	// missing, unselected, unavailable, cyclic or failed parent) from a result
+	// that never derived an edge and must fall back to the logical evidence.
+	schedulingParentID *SessionID
+	schedulingResolved bool
 	// metaFilename and sessionDir are set by processSession so that drainLoop
 	// can write metadata.json after DB INSERT (DB-as-SOT write order, v8+).
 	// metaFilename is the bare filename (e.g. "{sessionId}--metadata.json").
@@ -509,6 +537,10 @@ type StagingBuffer struct {
 	// read only from the single drainer goroutine (no lock needed for reads).
 	commitMu  sync.Mutex
 	committed map[SessionID]struct{}
+	// failed set — sessions whose processing failed this run. Admitted children
+	// of a failed parent drain independently instead of waiting forever. A
+	// failed parent is never added to committed.
+	failed map[SessionID]struct{}
 }
 
 // NewStagingBuffer allocates a StagingBuffer with the given slot capacity and
@@ -529,6 +561,7 @@ func NewStagingBuffer(capacity int, arenaSizeBytes int64) *StagingBuffer {
 		state:     make([]atomic.Int32, capacity),
 		arena:     make([]byte, arenaSizeBytes),
 		committed: make(map[SessionID]struct{}),
+		failed:    make(map[SessionID]struct{}),
 	}
 }
 
@@ -644,14 +677,60 @@ func (b *StagingBuffer) Commit(ids ...SessionID) {
 	b.commitMu.Unlock()
 }
 
+// MarkFailed records sessions whose processing failed. Their admitted children
+// are released as independent sessions with a nil parent cache instead of
+// waiting on a parent that will never commit. A failed parent is never added
+// to the committed set. Must be called from the single drainer goroutine.
+func (b *StagingBuffer) MarkFailed(ids ...SessionID) {
+	b.commitMu.Lock()
+	if b.failed == nil {
+		b.failed = make(map[SessionID]struct{})
+	}
+	for _, id := range ids {
+		b.failed[id] = struct{}{}
+	}
+	b.commitMu.Unlock()
+}
+
 // isEligible reports whether r is ready to be drained.
+// The gate reads only the operational scheduling edge. A nil edge is a
+// dispatch root. A child whose operational parent committed drains in order.
+// A child whose operational parent failed drains independently with a nil
+// parent cache instead of waiting forever.
 // Must be called from the single drainer goroutine (reads committed without lock).
 func (b *StagingBuffer) isEligible(r workerResult) bool {
+	if r.schedulingResolved {
+		// A derived nil edge is a dispatch root. Otherwise the child waits for
+		// its operational parent to commit (or to fail, which releases it).
+		if r.schedulingParentID == nil {
+			return true
+		}
+		if _, ok := b.committed[*r.schedulingParentID]; ok {
+			return true
+		}
+		if b.failed != nil {
+			if _, ok := b.failed[*r.schedulingParentID]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	// Compatibility for results produced before the operational edge existed:
+	// fall back to the logical evidence only when no operational edge was
+	// derived. New Codex/OpenCode results always carry the edge, so this path
+	// serves legacy callers and focused staging tests.
 	if r.meta == nil || r.meta.ParentUUID == nil {
 		return true
 	}
-	_, ok := b.committed[*r.meta.ParentUUID]
-	return ok
+	if _, ok := b.committed[*r.meta.ParentUUID]; ok {
+		return true
+	}
+	if b.failed != nil {
+		if _, ok := b.failed[*r.meta.ParentUUID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Drain returns all currently ready and eligible entries (roots and children

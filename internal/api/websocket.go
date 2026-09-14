@@ -10,7 +10,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
-	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
 
@@ -282,14 +281,9 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 				msg = ServerMessage{Type: MsgQuality, Data: &QualityPayload{Sessions: sessions}}
 			}
 		case TopicSessionDetail:
-			session, findErr := h.provider.SessionByID(ctx, sub.ID)
-			if findErr != nil {
-				conn.Send(topicError(sub, "failed to load session detail", findErr))
-				continue
-			}
-			detail, validationErr := transcript.SessionToDetailValidated(session)
-			if validationErr != nil {
-				conn.Send(topicError(sub, "failed to emit session detail because observed model evidence is invalid; repair and re-index the source session before retrying", validationErr))
+			detail, detailErr := SessionDetailReadForProvider(ctx, h.provider, sub.ID)
+			if detailErr != nil {
+				conn.Send(topicError(sub, "failed to load session detail", detailErr))
 				continue
 			}
 			refs, childErr := h.provider.ChildSessionsForParent(ctx, sub.ID)

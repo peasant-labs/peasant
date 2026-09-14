@@ -1,0 +1,18 @@
+requiredNames:
+  - single-detached-candidate
+  - single-detached-flat-directory
+  - native-current-versus-stale
+  - native-missing-current-old-present
+  - native-detached-fallback-no-row
+  - missing-current-file-no-document
+  - conflicting-detached-candidates
+  - copied-boundary-native-S
+  - reference-history-native-siblings
+  - history-base-native-sibling
+  - malformed-history-envelope-incomplete
+  - native-ambiguous-referenced-dependency
+  - native-cycle-self-reference
+  - native-nested-cycle-incomplete
+  - native-nested-malformed-incomplete
+  - native-depth-bounded-incomplete
+  - native-segment-budget-bounded-incomplete

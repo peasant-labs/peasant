@@ -84,24 +84,48 @@ func validatePublicationCapture(entry ingest.StoreEntry) error {
 // before publishing its capture revision. Receipts are not changed by ingest.
 // The shared host dimension retains its first remote spelling; compare remote
 // identity like ingest does, without discarding the capture's source spelling.
+//
+// Independently admitted Codex/OpenCode orphans store a nil FK cache while
+// their managed metadata keeps the logical ParentUUID. A stored empty parent
+// with a logical parent that names no stored session is the valid orphan
+// state, not a mismatch; the old read origin and relationships remain
+// canonical and are never inferred from the nil.
 func validateStoredPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) error {
 	m := entry.Metadata
-	return sqlitex.ExecuteTransient(conn, `SELECT s.project_hash, COALESCE(s.parent_id,''), h.host_slug, COALESCE(h.git_remote,'')
+	var storedParent, storedProject, storedSlug, storedRemote string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT s.project_hash, COALESCE(s.parent_id,''), h.host_slug, COALESCE(h.git_remote,'')
 FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(m.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
-			parent, remote := "", ""
-			if m.ParentUUID != nil {
-				parent = string(*m.ParentUUID)
-			}
-			if m.Git.Remote != nil {
-				remote = *m.Git.Remote
-			}
-			if stmt.ColumnText(0) != string(m.Project.Hash) || stmt.ColumnText(1) != parent || stmt.ColumnText(2) != string(m.HostSlug) || ingest.NormalizeRemoteForMatch(stmt.ColumnText(3)) != ingest.NormalizeRemoteForMatch(remote) {
-				return publicationRepairError("captured metadata disagrees with stored attribution")
-			}
+			storedProject, storedParent, storedSlug, storedRemote = stmt.ColumnText(0), stmt.ColumnText(1), stmt.ColumnText(2), stmt.ColumnText(3)
 			return nil
 		},
-	})
+	}); err != nil {
+		return err
+	}
+	parent, remote := "", ""
+	if m.ParentUUID != nil {
+		parent = string(*m.ParentUUID)
+	}
+	if m.Git.Remote != nil {
+		remote = *m.Git.Remote
+	}
+	if storedProject == string(m.Project.Hash) && storedSlug == string(m.HostSlug) && ingest.NormalizeRemoteForMatch(storedRemote) == ingest.NormalizeRemoteForMatch(remote) {
+		if storedParent == parent {
+			return nil
+		}
+		// For an independently admitted child the FK cache is nullable
+		// availability, not the durable relation. Missing, unselected,
+		// unavailable, self-parent, cyclic and failed targets all resolve to a
+		// nil cache while the managed metadata keeps the logical ParentUUID, so
+		// an empty stored cache with a named logical parent is the valid
+		// orphan state. A populated cache that disagrees is still a mismatch
+		// that holds publication, and the old read origin and relationships
+		// remain canonical rather than being inferred from the nil.
+		if storedParent == "" && parent != "" && ingest.IndependentAdmissionHarness(m.ModelHarness) {
+			return nil
+		}
+	}
+	return publicationRepairError("captured metadata disagrees with stored attribution")
 }
 
 // publicationCaptureSnapshot is the capture state as it stood BEFORE a session

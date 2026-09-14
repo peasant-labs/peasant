@@ -1,0 +1,262 @@
+# Named snapshot-validation cases. Each case builds a ReadSnapshot through the
+# real typed loader and calls indexformat.ReadSnapshot.Validate.
+cases:
+  - name: generation-snapshot-equal
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 1, inputSubmissionCount: 1}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, inputSubmissionCount: 1, turnCount: 1}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      content:
+        - {ref: e-main-0, relativeBlob: generations/gen-0001/e-main-0, byteLength: 12, digest: sha3-256:content-0001}
+      titleRefs: [e-main-0]
+
+  - name: legacy-snapshot-with-source
+    snapshot:
+      indexVersion: 1
+      legacyHarness: claude-code
+      legacyPath: fixtures/legacy/session.jsonl
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+
+  - name: session-id-mismatch
+    wantError: session.id
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 33333333-3333-4333-8333-333333333333, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: harness-mismatch
+    wantError: session.harness
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: codex, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: turn-count-mismatch
+    wantError: session.turnCount
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 2}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 1}
+      main: {}
+
+  - name: input-count-absent-versus-zero-mismatch
+    wantError: inputSubmissionCount
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: input-count-zero-versus-absent-mismatch
+    wantError: inputSubmissionCount
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main: {}
+
+  - name: root-session-id-mismatch
+    wantError: rootSessionId
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, rootSessionId: 22222222-2222-4222-8222-222222222222}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, rootSessionId: 44444444-4444-4444-8444-444444444444}
+      main: {}
+
+  - name: purpose-mismatch
+    wantError: session.purpose
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, purpose: interaction}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, purpose: delegated_work}
+      main: {}
+
+  - name: relationships-mismatch
+    wantError: relationships
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session:
+        id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        turnCount: 0
+        relationships:
+          - {kind: started_by, targetState: target_known, targetLocalId: 22222222-2222-4222-8222-222222222222, evidence: native_typed}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: v2-snapshot-with-legacy-source
+    wantError: must never fall back
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      legacyHarness: claude-code
+      legacyPath: fixtures/legacy/session.jsonl
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: v1-snapshot-with-generation-partitions
+    wantError: generation partitions
+    snapshot:
+      indexVersion: 1
+      legacyHarness: claude-code
+      legacyPath: fixtures/legacy/session.jsonl
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+
+  - name: v2-snapshot-empty-generation-id
+    wantError: empty generationId
+    snapshot:
+      indexVersion: 2
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: v2-snapshot-invalid-completeness
+    wantError: completeness
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: partial
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: v1-snapshot-missing-legacy-source
+    wantError: no legacy source
+    snapshot:
+      indexVersion: 1
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+
+  - name: v2-snapshot-content-ref-outside-partitions
+    wantError: does not appear in any partition
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      content:
+        - {ref: e-missing, relativeBlob: generations/gen-0001/e-missing, byteLength: 1, digest: sha3-256:content-0001}
+
+  - name: v2-snapshot-title-ref-outside-main
+    wantError: not a main entry
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-main-0}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-earlier-0}
+      titleRefs: [e-earlier-0]
+
+  - name: invalid-index-version
+    wantError: not 1 or 2
+    snapshot:
+      indexVersion: 3
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+
+  - name: v2-snapshot-main-entry-invalid-role
+    wantError: closed role set
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: not-a-role, sourceEntryRef: e-main-0}
+
+  - name: v2-snapshot-earlier-entry-invalid-role
+    wantError: closed role set
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main: {}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: not-a-role, sourceEntryRef: e-earlier-0}
+
+  - name: v2-snapshot-duplicate-ref-across-partitions
+    wantError: one owner per ref across the whole snapshot
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main:
+        entries:
+          - {entryIndex: 0, role: user, sourceEntryRef: e-dup-0}
+      earlier:
+        - state: uncertain_migrated
+          content:
+            entries:
+              - {entryIndex: 0, role: assistant, sourceEntryRef: e-dup-0}
+
+  - name: v2-snapshot-complete-absent-count-rejected
+    wantError: measured its submissions
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: complete
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0}
+      main: {}
+
+  - name: v2-snapshot-incomplete-new-with-count-rejected
+    wantError: omits the scalar
+    snapshot:
+      indexVersion: 2
+      generationId: gen-0001
+      completeness: incomplete_new
+      session: {id: 11111111-1111-4111-8111-111111111111, harness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      metadata: {sessionId: 11111111-1111-4111-8111-111111111111, modelHarness: claude-code, turnCount: 0, inputSubmissionCount: 0}
+      main: {}

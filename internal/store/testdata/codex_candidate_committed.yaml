@@ -1,0 +1,36 @@
+session:
+  id: "11111111-1111-4111-8111-111111111111"
+  harness: codex
+generation:
+  id: gen-codex-committed-inherited
+  stableThreadID: "11111111-1111-4111-8111-111111111111"
+  pointer: /synthetic/current.jsonl
+  physicalSourceID: phys-current
+  historyMode: paginated
+  copyBoundary: 4
+  ownershipProven: true
+  source: |
+    {"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated","thread_source":"user"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"copied parent question"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+    {"type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"copied parent answer"}]}}
+    {"type":"response_item","payload":{"type":"message","role":"user","id":"m3","content":[{"type":"input_text","text":"run the copied command"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["shell.user_command"]}}}
+    {"type":"response_item","payload":{"type":"message","role":"user","id":"m4","content":[{"type":"input_text","text":"child surviving input"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+  entryRefs:
+    - e_u1
+    - e_inh1
+    - e_inh2
+    - e_inh3
+  submissionRefs:
+    - s_u1
+expected:
+  mainRefs:
+    - e_u1
+  retainedRefs:
+    - e_inh1
+    - e_inh2
+    - e_inh3
+  inheritedText: copied parent question
+  turnCount: 1
+  title: child surviving input
+cases:
+  - name: inherited-prefix-excluded-from-committed-detail

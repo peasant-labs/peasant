@@ -1,0 +1,35 @@
+# Named closed-set membership cases. Each case names one local enum and its
+# exact published member set; the test asserts exact set equality and that no
+# out-of-set value is accepted.
+cases:
+  - set: coordinate-kind
+    values:
+      - codex_ordinal_range
+      - codex_reference_range
+      - opencode_sequence_range
+      - snapshot_only
+      - unknown
+    invalid:
+      - ""
+      - codex_ordinal_span
+      - snapshot-only
+      - FUTURE
+  - set: segment-inclusion
+    values:
+      - inherited
+      - same_thread_surviving_own
+      - uncertain_earlier_history
+      - excluded_reverted
+      - invalid_incomplete
+    invalid:
+      - ""
+      - same_thread_own
+      - future_inclusion
+  - set: generation-completeness
+    values:
+      - complete
+      - incomplete_new
+    invalid:
+      - ""
+      - partial
+      - complete_new

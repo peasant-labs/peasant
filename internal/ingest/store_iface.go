@@ -88,6 +88,34 @@ type OpenCodeSeqCursorStore interface {
 	UpsertOpenCodeSeqCursor(ctx context.Context, sessionID SessionID, seq int64) error
 }
 
+// ParentCacheReconcile names one stored independently admitted child whose
+// logical parent became available after the child was admitted. The store
+// applies it as an FK availability-cache update only when both rows exist and
+// no parent-cache cycle would form. It never re-extracts, relocates, or
+// re-selects the child, and it never rewrites the managed logical evidence.
+type ParentCacheReconcile struct {
+	Child  SessionID
+	Parent SessionID
+}
+
+// OrphanParentReconciler is the optional store capability that heals the FK
+// availability cache of an independently admitted child after a later harvest
+// makes its logical parent available. The production store implements it; a
+// store that does not keeps the cache unchanged.
+type OrphanParentReconciler interface {
+	// ListUncachedChildrenOfParents returns the stored, still-uncached
+	// independently admitted children whose durable logical-parent evidence
+	// names one of the given parents. The lookup is scoped to the named
+	// targets and reads persisted evidence only: it never opens a managed
+	// metadata file and never enumerates unrelated stored roots.
+	ListUncachedChildrenOfParents(ctx context.Context, parents []SessionID, harnesses []Harness) ([]ParentCacheReconcile, error)
+	// ReconcileParentCache applies the given cache updates in one transaction.
+	// An update whose child or parent is not stored, whose edge is a
+	// self-parent, or that would close a parent-cache cycle is skipped; every
+	// other update commits or the whole reconciliation rolls back.
+	ReconcileParentCache(ctx context.Context, updates []ParentCacheReconcile) error
+}
+
 // SessionStore abstracts SQLite persistence for the pipeline.
 // Defined in ingest (not store) to maintain the DI direction:
 // store implements this interface; pipeline depends on it.
@@ -126,6 +154,12 @@ type StoreEntry struct {
 	Metadata           *UnifiedMetadata
 	Session            DiscoveredSession
 	SourceFingerprint  []byte
+	// SchedulingParentResolved marks that SchedulingParentID is the operational
+	// edge derived after child admission, so a nil value means a dispatch root
+	// rather than "not derived". The writer resolves the FK availability cache
+	// from it for independently admitted harnesses.
+	SchedulingParentResolved bool
+	SchedulingParentID       *SessionID
 	// EventSeq is the OpenCode event cursor this write ACQUIRED, or nil when
 	// the materialization observed none.
 	//

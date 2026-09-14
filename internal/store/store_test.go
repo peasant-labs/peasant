@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	_ "embed"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,9 +14,53 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
 	"go.uber.org/goleak"
+	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+//go:embed testdata/schema_catalog.yaml
+var schemaCatalogYAML []byte
+
+type schemaCatalogFixture struct {
+	Tables  []string `yaml:"tables"`
+	Indexes []string `yaml:"indexes"`
+}
+
+// loadSchemaCatalog decodes the exact final-schema name inventory.
+func loadSchemaCatalog(t *testing.T) schemaCatalogFixture {
+	t.Helper()
+	var fixture schemaCatalogFixture
+	decoder := yaml.NewDecoder(strings.NewReader(string(schemaCatalogYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode schema_catalog.yaml: %v", err)
+	}
+	if len(fixture.Tables) == 0 || len(fixture.Indexes) == 0 {
+		t.Fatal("schema_catalog.yaml carries no table or index names")
+	}
+	return fixture
+}
+
+// requireExactNameSet fails on any missing OR undeclared name, so the catalog
+// guard is exact membership rather than a count that a rename can satisfy.
+func requireExactNameSet(t *testing.T, label string, want []string, got map[string]struct{}) {
+	t.Helper()
+	wantSet := make(map[string]struct{}, len(want))
+	for _, name := range want {
+		wantSet[name] = struct{}{}
+	}
+	for _, name := range want {
+		if _, ok := got[name]; !ok {
+			t.Errorf("%s is missing required name %q", label, name)
+		}
+	}
+	for name := range got {
+		if _, ok := wantSet[name]; !ok {
+			t.Errorf("%s carries undeclared name %q; add it to testdata/schema_catalog.yaml", label, name)
+		}
+	}
+}
 
 func TestMain(m *testing.M) {
 	// Open a 2-connection pool instead of the default 10: every store.Open
@@ -147,51 +192,41 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	conn := takeConn(t, s.PoolForTest())
 	defer s.PoolForTest().Put(conn)
 
-	// Verify all expected tables exist:
-	// 34 from v1-v22 + _install_salt from V23 + session_commands from V24
-	// + lessons from V28 + memory_injection_log from V30 + lesson_sources from V32
-	// + pulled_transcripts + pulled_annotations from V34
-	// + session_entries_fts external-content FTS5 virtual table + its shadow tables
-	//   (_data/_idx/_docsize/_config — _content is NOT created in external-content
-	//   mode) from V35. V36 (user.custom_label seed) and V39 (turn_outcome/turn_flag
-	//   seed) are data-only. V40 adds the durable association ledger and V41 adds
-	//   its normalized annotation target table. V43 adds the publication receipt
-	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
-	//   cache. V45 adds the OpenCode change cursor. V48 adds annotation_run_state.
-	//   V49 adds annotation_target_anchors. V51 adds publication metadata.
-	//   V52 adds three full-content tables.
-	var tableCount int
-	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
+	// Verify the final schema carries exactly the expected catalog: 34 base
+	// tables from v1-v22 + _install_salt from V23 + session_commands from V24
+	// + lessons from V28 + memory_injection_log from V30 + lesson_sources from
+	// V32 + pulled_transcripts/pulled_annotations from V34 + session_entries_fts
+	// and its FTS5 shadow tables from V35, plus the later projection, publication,
+	// annotation and V60 managed-generation tables. The required NAME set lives
+	// in testdata/schema_catalog.yaml, so a rename, drop or undeclared addition
+	// fails loudly instead of being absorbed by a count.
+	catalog := loadSchemaCatalog(t)
+	tables := map[string]struct{}{}
+	err := sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			tableCount = stmt.ColumnInt(0)
+			tables[stmt.ColumnText(0)] = struct{}{}
 			return nil
 		},
 	})
 	if err != nil {
-		t.Fatalf("count tables: %v", err)
+		t.Fatalf("list tables: %v", err)
 	}
-	if tableCount != 58 {
-		t.Errorf("expected 58 tables including publication metadata and full content storage, got %d", tableCount)
-	}
+	requireExactNameSet(t, "final schema tables", catalog.Tables, tables)
 
-	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
-	// + idx_injection_log_project from V30 + idx_lessons_dedup from V31
-	// + idx_lesson_sources_lesson/session from V32
-	// + idx_pulled_annotations_transcript/local_session from V34 + association
-	// ledger and association-target indexes from V40/V41).
-	var indexCount int
-	err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';`, &sqlitex.ExecOptions{
+	// Verify the index catalog by exact name as well (v1-v24 base + the later
+	// lesson/injection/annotation/association indexes + the V60 generation entry
+	// partition index + the V61 reverse logical-target lookup indexes).
+	indexes := map[string]struct{}{}
+	err = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			indexCount = stmt.ColumnInt(0)
+			indexes[stmt.ColumnText(0)] = struct{}{}
 			return nil
 		},
 	})
 	if err != nil {
-		t.Fatalf("count indexes: %v", err)
+		t.Fatalf("list indexes: %v", err)
 	}
-	if indexCount != 48 {
-		t.Errorf("expected 48 indexes including content capture status lookup, got %d", indexCount)
-	}
+	requireExactNameSet(t, "final schema indexes", catalog.Indexes, indexes)
 
 	// Verify STRICT mode by inserting TEXT into an INTEGER column on a table
 	// without FK constraints. Using daily_summary avoids FK violations that
