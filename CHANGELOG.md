@@ -82,6 +82,9 @@ Release, which holds the signed artifacts and checksums.
   `THIRD_PARTY_NOTICES`, and CI guards dependency licenses (#366).
 - Final releases publish the Homebrew cask to `peasant-labs/homebrew-tap`,
   verified by a macOS cask smoke job (#354).
+- The Homebrew cask clears the download quarantine attribute through
+  Homebrew's declarative `postflight_steps` stanza, which current `brew style`
+  requires in place of a `postflight` block (#413).
 
 ### Tests
 - End-to-end runs reap orphaned test containers whose owner process has exited
