@@ -45,6 +45,9 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 // no active generation returns (nil, nil), so a first discovery builds an empty
 // prior state instead of guessing.
 func (s *Store) ReadNativeGenerationPrior(ctx context.Context, sessionID schema.SessionID) (*ingest.NativeGenerationPrior, error) {
+	if s.generationArtifacts == nil {
+		return nil, fmt.Errorf("store: managed generation support is not configured; the active generation's prior evidence cannot be loaded for session %s; open the store with WithGenerationArtifacts before refreshing", sessionID)
+	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection to read the native generation prior for session %s: %w; no candidate was produced; restore database access and retry", sessionID, err)
