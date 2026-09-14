@@ -221,14 +221,18 @@ jobs:
             echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
           '
 
-  # Dependency-license gate. Two invariants on the third-party Go modules
-  # compiled into the binary:
-  #   1. THIRD_PARTY_NOTICES is fresh — regenerating it from the pinned module
-  #      set produces no diff (the file that ships with the binary matches the
-  #      deps).
-  #   2. No copyleft (forbidden/restricted) license has entered the module set.
-  # Both run via `make third-party-notices-check`. web-stub satisfies the
-  # //go:embed all:web/out directive so `go list ./cmd/peasant` can load.
+  # Dependency-license gate. Invariants on the third-party licenses compiled into
+  # the binary — both the Go modules AND the embedded web dashboard's npm packages
+  # (web/out is compiled in via //go:embed):
+  #   1. THIRD_PARTY_NOTICES is fresh — regenerating from the pinned Go module set
+  #      and the pinned web dependency closure produces no diff.
+  #   2. No disallowed license entered: the Go copyleft guard, and the web
+  #      generator failing closed on any strong-copyleft/unknown npm license
+  #      (weak-copyleft/LGPL is allowed with a source-availability notice).
+  #   3. The web license classifier's own unit test passes.
+  # All run via `make third-party-notices-check`. web-stub satisfies the
+  # //go:embed all:web/out directive so `go list ./cmd/peasant` can load; the web
+  # section needs pnpm + web/node_modules.
   third-party-notices:
     name: third-party license notices
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
@@ -244,6 +248,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+
+      # The notices now cover the embedded web dashboard's npm packages too, so
+      # the gate regenerates the web section (needs pnpm + web/node_modules).
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Notices are fresh + no copyleft dependency
         run: make third-party-notices-check
