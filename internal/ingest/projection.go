@@ -75,6 +75,13 @@ type ClassifiedBlock struct {
 	NativeCorrelationKey string
 	// Section is the adapter's requested partition.
 	Section ProjectionSection
+	// CapturedSegment, when non-nil, marks a block the adapter captured as
+	// retained inherited context instead of emitting it. The projection
+	// allocates the block's ref, content record and alias and records the ref
+	// under that ordered segment's captured refs, but never emits it into main
+	// or earlier history and never counts it. Proven inherited context stays
+	// local for integrity and reconstruction without becoming child-owned chat.
+	CapturedSegment *int
 	// Uncertain marks evidence whose ownership is not local and certain. It is
 	// only legal in a declared earlier-history section.
 	Uncertain bool
@@ -141,9 +148,12 @@ type ClassifiedCapture struct {
 // resolvedBlock is one classified block with its effective partition and its
 // allocated identities.
 type resolvedBlock struct {
-	block      ClassifiedBlock
-	section    int
-	ref        schema.SourceEntryRef
+	block   ClassifiedBlock
+	section int
+	ref     schema.SourceEntryRef
+	// retained marks a block captured as inherited evidence: allocated and
+	// aliased, but never emitted into a partition.
+	retained   bool
 	dropped    bool
 	dropTo     *resolvedBlock
 	entryIndex int
@@ -189,11 +199,15 @@ func BuildGeneration(capture ClassifiedCapture, allocator RefAllocator) (indexfo
 	if err := validateUniqueProjectionRefs(partitions); err != nil {
 		return indexformat.Generation{}, err
 	}
-	content, err := buildProjectionContent(partitions)
+	content, err := buildProjectionContent(partitions, resolved)
 	if err != nil {
 		return indexformat.Generation{}, err
 	}
 	aliases, err := buildProjectionAliases(resolved)
+	if err != nil {
+		return indexformat.Generation{}, err
+	}
+	segments, err := retainedProjectionSegments(capture.Segments, resolved)
 	if err != nil {
 		return indexformat.Generation{}, err
 	}
@@ -204,7 +218,7 @@ func BuildGeneration(capture ClassifiedCapture, allocator RefAllocator) (indexfo
 		Metadata:             capture.Metadata,
 		Main:                 partitions.main,
 		Earlier:              partitions.earlier,
-		Segments:             capture.Segments,
+		Segments:             segments,
 		Content:              content,
 		Aliases:              aliases,
 		SourceEvidenceDigest: capture.SourceEvidenceDigest,
@@ -272,6 +286,14 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 		}
 		if block.Uncertain && block.Section.Index == 0 {
 			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q is uncertain but placed in the main stream; uncertain evidence cannot count as local main content; place it in a declared earlier section", i, block.NativeKey)
+		}
+		if block.CapturedSegment != nil {
+			if block.Uncertain || block.Section.Earlier || block.Section.Index != 0 {
+				return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q is retained in a captured segment and also requests emission; retained inherited evidence never becomes child-owned chat; clear the section or emit the block", i, block.NativeKey)
+			}
+			if *block.CapturedSegment < 0 || *block.CapturedSegment >= len(capture.Segments) {
+				return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q names captured segment %d, outside the %d declared segments; retained evidence has no owner segment; record the segment ordinal", i, block.NativeKey, *block.CapturedSegment, len(capture.Segments))
+			}
 		}
 		if err := validateClassifiedUsage(i, block); err != nil {
 			return err
@@ -364,7 +386,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 		if _, duplicate := byKey[block.NativeKey]; duplicate {
 			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q repeats in one capture; a later capture could not tell the blocks apart; keep one block per native key", block.NativeKey)
 		}
-		rb := &resolvedBlock{block: block, section: block.Section.Index}
+		rb := &resolvedBlock{block: block, section: block.Section.Index, retained: block.CapturedSegment != nil}
 		resolved[i] = rb
 		byKey[block.NativeKey] = rb
 	}
@@ -631,7 +653,7 @@ func layoutProjectionPartitions(capture ClassifiedCapture, resolved []*resolvedB
 		out.earlier[i] = indexformat.EarlierPartition{State: state}
 	}
 	for _, rb := range resolved {
-		if rb.dropped {
+		if rb.dropped || rb.retained {
 			continue
 		}
 		entry, err := projectionEntry(capture, rb)
@@ -805,7 +827,7 @@ func attachProjectionNativeMetadata(partitions *projectionPartitions, resolved [
 		toolIDs[callKey{partition: rb.section, native: rb.block.ToolCallKey}] = string(rb.ref)
 	}
 	for _, rb := range resolved {
-		if rb.dropped || len(rb.block.NativeAttachments) == 0 {
+		if rb.dropped || rb.retained || len(rb.block.NativeAttachments) == 0 {
 			continue
 		}
 		for j := range rb.block.NativeAttachments {
@@ -891,43 +913,89 @@ func validateUniqueProjectionRefs(partitions projectionPartitions) error {
 	return nil
 }
 
-// buildProjectionContent records the full bytes once per emitted ref. The
-// relative blob path is a validated owned-generation path; the digest is local
-// integrity evidence only.
-func buildProjectionContent(partitions projectionPartitions) ([]indexformat.ContentRecord, error) {
+// buildProjectionContent records the full bytes once per emitted ref plus once
+// per retained inherited ref. The relative blob path is a validated
+// owned-generation path; the digest is local integrity evidence only.
+func buildProjectionContent(partitions projectionPartitions, resolved []*resolvedBlock) ([]indexformat.ContentRecord, error) {
 	var records []indexformat.ContentRecord
-	add := func(entries []schema.SessionEntry) error {
+	add := func(ref schema.SourceEntryRef, content string) error {
+		if content == "" {
+			return nil
+		}
+		relative := projectionContentPath(ref)
+		sum := sha256.Sum256([]byte(content))
+		record := indexformat.ContentRecord{
+			Ref:          ref,
+			RelativeBlob: relative,
+			ByteLength:   int64(len(content)),
+			Digest:       hex.EncodeToString(sum[:]),
+		}
+		if err := record.Validate(); err != nil {
+			return fmt.Errorf("ingest.BuildGeneration: content for ref %q is not a valid managed record; the candidate cannot hydrate it; fix the ref or content: %w", ref, err)
+		}
+		records = append(records, record)
+		return nil
+	}
+	addEntries := func(entries []schema.SessionEntry) error {
 		for i := range entries {
 			entry := entries[i]
-			content := projectionEntryContent(entry)
-			if content == "" {
-				continue
+			if err := add(entry.SourceEntryRef, projectionEntryContent(entry)); err != nil {
+				return err
 			}
-			relative := projectionContentPath(entry.SourceEntryRef)
-			sum := sha256.Sum256([]byte(content))
-			record := indexformat.ContentRecord{
-				Ref:          entry.SourceEntryRef,
-				RelativeBlob: relative,
-				ByteLength:   int64(len(content)),
-				Digest:       hex.EncodeToString(sum[:]),
-			}
-			if err := record.Validate(); err != nil {
-				return fmt.Errorf("ingest.BuildGeneration: content for ref %q is not a valid managed record; the candidate cannot hydrate it; fix the ref or content: %w", entry.SourceEntryRef, err)
-			}
-			records = append(records, record)
 		}
 		return nil
 	}
-	if err := add(partitions.main.Entries); err != nil {
+	if err := addEntries(partitions.main.Entries); err != nil {
 		return nil, err
 	}
 	for i := range partitions.earlier {
-		if err := add(partitions.earlier[i].Content.Entries); err != nil {
+		if err := addEntries(partitions.earlier[i].Content.Entries); err != nil {
+			return nil, err
+		}
+	}
+	for _, rb := range resolved {
+		if rb.dropped || !rb.retained {
+			continue
+		}
+		if err := add(rb.ref, projectionBlockContent(rb.block)); err != nil {
 			return nil, err
 		}
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].Ref < records[j].Ref })
 	return records, nil
+}
+
+// projectionBlockContent returns the full canonical content bytes one retained
+// inherited block owns. A retained block keeps its classified content exactly
+// as an emitted block would; only its partition membership differs.
+func projectionBlockContent(block ClassifiedBlock) string {
+	switch block.EntryType {
+	case schema.EntryTypeToolUse:
+		return block.ToolArguments
+	case schema.EntryTypeToolResult:
+		return block.ToolResult
+	default:
+		return block.Content
+	}
+}
+
+// retainedProjectionSegments copies the capture's segments and attaches every
+// retained inherited ref to its owning segment, so the generation validator can
+// see the captured evidence as self-contained. Emitted refs never enter a
+// segment; a retained ref is recorded exactly once.
+func retainedProjectionSegments(segments []indexformat.ContextSegment, resolved []*resolvedBlock) ([]indexformat.ContextSegment, error) {
+	out := append([]indexformat.ContextSegment(nil), segments...)
+	for _, rb := range resolved {
+		if rb.dropped || !rb.retained || rb.block.CapturedSegment == nil {
+			continue
+		}
+		index := *rb.block.CapturedSegment
+		if index < 0 || index >= len(out) {
+			return nil, fmt.Errorf("ingest.BuildGeneration: retained block %q names a segment outside the declared set; the captured evidence has no owner; record the segment ordinal", rb.block.NativeKey)
+		}
+		out[index].CapturedRefs = append(out[index].CapturedRefs, rb.ref)
+	}
+	return out, nil
 }
 
 // projectionContentPath names the owned-generation blob for one ref.

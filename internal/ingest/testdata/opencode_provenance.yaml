@@ -238,6 +238,100 @@ cases:
           evidence: native_typed
           modality: text
 
+  - name: opencode-child-shell-action
+    scope:
+      sessionId: ses_opencodeShellChild
+      shape: current
+      parentNullProven: false
+      hasParent: true
+    allocator:
+      entries: [e_shellcommand, e_shelloutput]
+      submissions: [s_shell]
+    rows:
+      - id: msg_o_child_shell
+        type: shell
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1200
+        data: '{"id":"msg_o_child_shell","type":"shell","callID":"call_o_child","command":"rg provenance","output":"provenance.go:10","time":{"created":1000,"completed":1200}}'
+    want:
+      own: 1
+      turnCount: 2
+      titleRefs: []
+      main:
+        - ref: e_shellcommand
+          index: 0
+          role: user
+          entryType: text
+          depth: 0
+          content: rg provenance
+          submission: s_shell
+          origin: submitted_input
+          actor: unknown
+          delivery: session_admission
+          ownership: local
+          evidence: native_typed
+          modality: user_action
+        - ref: e_shelloutput
+          index: 1
+          role: assistant
+          entryType: text
+          depth: 0
+          content: provenance.go:10
+          origin: agent_output
+          actor: unknown
+          delivery: session_admission
+          ownership: local
+          evidence: native_typed
+          modality: none
+
+  - name: opencode-agent-delivered-shell-action
+    scope:
+      sessionId: ses_opencodeShellChild
+      shape: current
+      parentNullProven: false
+      hasParent: true
+    agentDelivered: true
+    allocator:
+      entries: [e_shellcommand, e_shelloutput]
+      submissions: []
+    rows:
+      - id: msg_o_child_shell
+        type: shell
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1200
+        data: '{"id":"msg_o_child_shell","type":"shell","callID":"call_o_child","command":"rg provenance","output":"provenance.go:10","time":{"created":1000,"completed":1200}}'
+    want:
+      own: 0
+      turnCount: 2
+      titleRefs: []
+      main:
+        - ref: e_shellcommand
+          index: 0
+          role: user
+          entryType: text
+          depth: 0
+          content: rg provenance
+          origin: submitted_input
+          actor: agent_delegate
+          delivery: subagent_delivery
+          ownership: local
+          evidence: native_typed
+          modality: user_action
+        - ref: e_shelloutput
+          index: 1
+          role: assistant
+          entryType: text
+          depth: 0
+          content: provenance.go:10
+          origin: agent_output
+          actor: unknown
+          delivery: subagent_delivery
+          ownership: local
+          evidence: native_typed
+          modality: none
+
   - name: opencode-tool-part-ids
     scope:
       sessionId: ses_opencodeCurrentChild

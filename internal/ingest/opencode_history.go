@@ -85,10 +85,15 @@ type OpenCodeHistorySnapshot struct {
 // emitted main content, or retained uncertain evidence for a declared earlier
 // section.
 type OpenCodeMaterializedMessage struct {
-	Row          OpenCodeHistoryRow
-	Attribution  OpenCodeMessageAttribution
-	Emit         bool
-	EarlierIndex int // 1-based earlier section when Emit is false but retained
+	Row         OpenCodeHistoryRow
+	Attribution OpenCodeMessageAttribution
+	Emit        bool
+	// RetainedSegment names the ordered captured-context segment that owns this
+	// message's blocks when it is proven inherited context. It is set only for
+	// an emitted inherited copy; the builder retains those blocks as local
+	// evidence under the segment instead of emitting them as child chat.
+	RetainedSegment *int
+	EarlierIndex    int // 1-based earlier section when Emit is false but retained
 }
 
 // OpenCodeMaterializedHistory is the settled copy proof plus the emission
@@ -248,12 +253,23 @@ func resolveOpenCodeCopies(snapshot OpenCodeHistorySnapshot) ([]indexformat.Cont
 		}
 	}
 	var messages []OpenCodeMaterializedMessage
+	// OpenCode materialization records one inherited range at most; when any
+	// row is admitted, that segment is the single segment built below.
+	segmentIndex := -1
+	if len(admitted) > 0 {
+		segmentIndex = 0
+	}
 	for _, row := range admitted {
-		messages = append(messages, OpenCodeMaterializedMessage{
+		message := OpenCodeMaterializedMessage{
 			Row:         row,
 			Attribution: OpenCodeMessageAttribution{Ownership: schema.ContentOwnershipInherited, Inherited: true},
 			Emit:        true,
-		})
+		}
+		if segmentIndex >= 0 {
+			index := segmentIndex
+			message.RetainedSegment = &index
+		}
+		messages = append(messages, message)
 	}
 	incomplete := false
 	for _, row := range uncertain {
@@ -329,10 +345,13 @@ func needsOpenCodeUncertainSection(messages []OpenCodeMaterializedMessage) bool 
 }
 
 // DigestOpenCodeSnapshot computes the canonical source-evidence digest over the
-// snapshot's local identity fields: session and parent identities, row
-// identities with sequence positions and settled state, and the fork, revert,
-// and boundary evidence. Payload bytes never enter the digest: it proves what
-// was captured, not what it says.
+// complete captured snapshot: session and parent identities, every captured
+// row's identity, sequence, settled state and decoded payload bytes, the
+// per-input delivery correlation, and the fork, revert, and boundary evidence.
+// The digest binds the captured content to the capture, so a same-identity row
+// whose payload changed can never keep the same proof. It is deterministic,
+// length-framed and local-only; parent records outside the checked copy cutoff
+// never enter it.
 func DigestOpenCodeSnapshot(snapshot OpenCodeHistorySnapshot) string {
 	var sb strings.Builder
 	writeSnapshotField(&sb, "session", snapshot.SessionID)
@@ -343,6 +362,7 @@ func DigestOpenCodeSnapshot(snapshot OpenCodeHistorySnapshot) string {
 	if snapshot.ParentNullProven {
 		sb.WriteString("parent-null-proven;")
 	}
+	writeSnapshotDelivery(&sb, snapshot.AgentDeliveredIDs)
 	rows := append([]OpenCodeHistoryRow(nil), snapshot.Messages...)
 	rows = append(rows, snapshot.Copied...)
 	sort.Slice(rows, func(i, j int) bool {
@@ -353,11 +373,13 @@ func DigestOpenCodeSnapshot(snapshot OpenCodeHistorySnapshot) string {
 	})
 	for _, row := range rows {
 		writeSnapshotField(&sb, "row", row.MessageID)
-		fmt.Fprintf(&sb, "seq=%d settled=%t type=%s;", row.Seq, row.Settled, row.NativeType)
+		fmt.Fprintf(&sb, "seq=%d hasSeq=%t settled=%t shape=%s created=%d updated=%d completed=%d;", row.Seq, row.HasSeq, row.Settled, row.Shape, row.CreatedMs, row.UpdatedMs, row.CompletedMs)
+		writeSnapshotField(&sb, "native-type", row.NativeType)
 		if row.SourceMessageID != "" || row.SourceSessionID != "" {
 			writeSnapshotField(&sb, "source-row", row.SourceMessageID)
 			writeSnapshotField(&sb, "source-session", row.SourceSessionID)
 		}
+		writeSnapshotMessage(&sb, row.Message)
 	}
 	if snapshot.Fork != nil {
 		writeSnapshotField(&sb, "fork", snapshot.Fork.SourceSessionID)
@@ -373,6 +395,68 @@ func DigestOpenCodeSnapshot(snapshot OpenCodeHistorySnapshot) string {
 	}
 	sum := sha256.Sum256([]byte(sb.String()))
 	return hex.EncodeToString(sum[:])
+}
+
+// writeSnapshotDelivery frames the ordered per-input delivery correlation so a
+// changed delivery correlation changes the proof.
+func writeSnapshotDelivery(sb *strings.Builder, delivered map[string]bool) {
+	if len(delivered) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(delivered))
+	for key, value := range delivered {
+		if value {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	fmt.Fprintf(sb, "delivery=%d;", len(keys))
+	for _, key := range keys {
+		writeSnapshotField(sb, "delivered", key)
+	}
+}
+
+// writeSnapshotMessage frames every classification-relevant decoded payload
+// field of one captured message, so a payload edit changes the digest while the
+// canonical encoding stays deterministic across runs.
+func writeSnapshotMessage(sb *strings.Builder, msg OpenCodeProvenanceMessage) {
+	writeSnapshotField(sb, "m.msgid", msg.MessageID)
+	writeSnapshotField(sb, "m.session", msg.SessionID)
+	writeSnapshotField(sb, "m.shape", string(msg.Shape))
+	writeSnapshotField(sb, "m.type", msg.NativeType)
+	fmt.Fprintf(sb, "m.seq=%d hasSeq=%t times=%d,%d;", msg.Seq, msg.HasSeq, msg.TimeCreated, msg.TimeCompleted)
+	fmt.Fprintf(sb, "m.flags=%t,%t,%t,%t,%t,%t,%t;", msg.ParentNullProven, msg.HasParent, msg.AgentDelivered, msg.ShellCompleted, msg.HasShellID, msg.CompactionCompleted, msg.AllPartsSynthetic)
+	writeSnapshotField(sb, "m.role", string(msg.Role))
+	writeSnapshotField(sb, "m.text", msg.Text)
+	writeSnapshotField(sb, "m.system", msg.SystemText)
+	writeSnapshotField(sb, "m.shellcall", msg.ShellCallID)
+	writeSnapshotField(sb, "m.shellcmd", msg.ShellCommand)
+	writeSnapshotField(sb, "m.shellout", msg.ShellOutput)
+	writeSnapshotField(sb, "m.compaction", msg.CompactionSummary)
+	fmt.Fprintf(sb, "m.files=%d;", len(msg.Files))
+	for _, file := range msg.Files {
+		writeSnapshotField(sb, "m.file.name", file.Name)
+		writeSnapshotField(sb, "m.file.uri", file.URI)
+		writeSnapshotField(sb, "m.file.desc", file.Description)
+	}
+	fmt.Fprintf(sb, "m.agents=%d;", len(msg.AgentMentions))
+	for _, agent := range msg.AgentMentions {
+		writeSnapshotField(sb, "m.agent", agent)
+	}
+	fmt.Fprintf(sb, "m.skills=%d;", len(msg.SkillTexts))
+	for _, skill := range msg.SkillTexts {
+		writeSnapshotField(sb, "m.skill", skill)
+	}
+	fmt.Fprintf(sb, "m.parts=%d;", len(msg.Parts))
+	for _, part := range msg.Parts {
+		writeSnapshotField(sb, "m.part.id", part.ID)
+		writeSnapshotField(sb, "m.part.kind", part.Kind)
+		writeSnapshotField(sb, "m.part.text", part.Text)
+		writeSnapshotField(sb, "m.part.name", part.ToolName)
+		writeSnapshotField(sb, "m.part.input", part.ToolInput)
+		writeSnapshotField(sb, "m.part.result", part.ToolResult)
+		fmt.Fprintf(sb, "m.part.done=%t;", part.ToolCompleted)
+	}
 }
 
 func writeSnapshotField(sb *strings.Builder, name, value string) {

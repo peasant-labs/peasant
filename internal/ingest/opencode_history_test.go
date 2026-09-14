@@ -112,11 +112,11 @@ func TestOpenCodeHistoryMaterialization(t *testing.T) {
 			for stepIndex, step := range historyCase.Steps {
 				label := historyCase.Name + "/" + itoa(stepIndex)
 				snapshot := buildOpenCodeHistorySnapshot(t, step)
-				capture, segmentKeys, err := ingest.BuildOpenCodeProvenanceCapture(snapshot, "gen-"+label, schema.UnifiedMetadata{
+				capture, err := ingest.BuildOpenCodeProvenanceCapture(snapshot, "gen-"+label, schema.UnifiedMetadata{
 					SchemaVersion: 1,
 					SessionID:     schema.SessionID(step.SessionID),
 					ModelHarness:  schema.HarnessOpenCode,
-				})
+				}, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()})
 				if step.Want.ErrorContains != "" {
 					if err == nil || !strings.Contains(err.Error(), step.Want.ErrorContains) {
 						t.Fatalf("%s BuildOpenCodeProvenanceCapture() = %v, want error containing %q", label, err, step.Want.ErrorContains)
@@ -130,9 +130,6 @@ func TestOpenCodeHistoryMaterialization(t *testing.T) {
 				built, err := ingest.BuildV2(capture, allocator)
 				if err != nil {
 					t.Fatalf("%s BuildV2: %v", label, err)
-				}
-				if err := ingest.ResolveOpenCodeSegmentRefs(segmentKeys, &built.Generation); err != nil {
-					t.Fatalf("%s ResolveOpenCodeSegmentRefs: %v", label, err)
 				}
 				assertOpenCodeHistoryGeneration(t, label, built.Generation, step.Want)
 			}
@@ -243,6 +240,44 @@ func assertOpenCodeHistoryGeneration(t *testing.T, label string, generation inde
 		}
 		if !equalStringSlices(got, want.SegmentRefs[i]) {
 			t.Fatalf("%s segment[%d] capturedRefs = %v, want %v", label, i, got, want.SegmentRefs[i])
+		}
+	}
+	assertOpenCodeCapturedEvidenceLocal(t, label, generation)
+}
+
+// assertOpenCodeCapturedEvidenceLocal proves inherited context is retained
+// locally as content and alias evidence, and is never also emitted as child
+// main or earlier chat.
+func assertOpenCodeCapturedEvidenceLocal(t *testing.T, label string, generation indexformat.Generation) {
+	t.Helper()
+	contentRefs := make(map[schema.SourceEntryRef]struct{}, len(generation.Content))
+	for _, record := range generation.Content {
+		contentRefs[record.Ref] = struct{}{}
+	}
+	aliasRefs := make(map[schema.SourceEntryRef]struct{}, len(generation.Aliases))
+	for _, alias := range generation.Aliases {
+		aliasRefs[alias.Ref] = struct{}{}
+	}
+	emitted := make(map[schema.SourceEntryRef]struct{}, len(generation.Main.Entries))
+	for _, entry := range generation.Main.Entries {
+		emitted[entry.SourceEntryRef] = struct{}{}
+	}
+	for i := range generation.Earlier {
+		for _, entry := range generation.Earlier[i].Content.Entries {
+			emitted[entry.SourceEntryRef] = struct{}{}
+		}
+	}
+	for i := range generation.Segments {
+		for _, ref := range generation.Segments[i].CapturedRefs {
+			if _, ok := contentRefs[ref]; !ok {
+				t.Fatalf("%s captured ref %q has no retained content record; inherited evidence was not preserved locally", label, ref)
+			}
+			if _, ok := aliasRefs[ref]; !ok {
+				t.Fatalf("%s captured ref %q has no retained native alias; a reopen could not reuse the identity", label, ref)
+			}
+			if _, ok := emitted[ref]; ok {
+				t.Fatalf("%s captured ref %q is also emitted as child chat; inherited context must stay local, not become main", label, ref)
+			}
 		}
 	}
 }

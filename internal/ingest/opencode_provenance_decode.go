@@ -73,7 +73,7 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q payload id is not a string; the row cannot be identified; verify the source row and retry", row.ID)
 		}
 		if id != row.ID {
-			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: upstream message id %q conflicts with row id %q; the row cannot be trusted; verify the source row and retry", id, row.ID)
+			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: the payload message identity disagrees with its row identity; the row cannot be trusted; verify the source row and retry")
 		}
 	}
 	if raw, exists := envelope["type"]; exists {
@@ -82,7 +82,7 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q payload type is not a string; the row cannot be classified; verify the source row and retry", row.ID)
 		}
 		if rowType != row.Type {
-			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: upstream message type %q conflicts with row type %q; the row cannot be trusted; verify the source row and retry", rowType, row.Type)
+			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: the payload message type disagrees with its row type; the row cannot be trusted; verify the source row and retry")
 		}
 	}
 	normalized, err := normalizeOpenCodeV2StructuralRow(OpenCodeCurrentMessageRowForDecode(row), data, envelope)
@@ -310,7 +310,7 @@ func decodeOpenCodeProvenanceCompaction(row OpenCodeProvenanceRow, msg OpenCodeP
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction payload misses a required field: %v; verify the source row and retry", row.ID, err)
 	}
 	if value.Reason != "auto" && value.Reason != "manual" {
-		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction reason %q is outside the auto/manual set; verify the source row and retry", row.ID, value.Reason)
+		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction reason is outside the auto/manual set; verify the source row and retry", row.ID)
 	}
 	msg.CompactionSummary = value.Summary
 	// A failed native compaction contributes its error as system context but
@@ -333,7 +333,7 @@ func decodeOpenCodeProvenanceCompaction(row OpenCodeProvenanceRow, msg OpenCodeP
 			msg.CompactionCompleted = false
 			settled = false
 		default:
-			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction status %q is outside the running/completed/failed set; verify the source row and retry", row.ID, status)
+			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q compaction status is outside the running/completed/failed set; verify the source row and retry", row.ID)
 		}
 	}
 	return msg, settled, nil

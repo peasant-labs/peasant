@@ -254,6 +254,22 @@ func openCodeAdmission(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttrib
 	return schema.DeliveryOriginUnknown, schema.ActorOriginUnknown, ""
 }
 
+// openCodeShellAdmission decides the delivery and submission identity for one
+// native shell action. A settled local shell row carries its own positive
+// user-action evidence (section 3.2): it counts once without needing the chat
+// parent-null admission, even in a child session. Inherited copy evidence and
+// correlated subagent delivery still veto the count, and the actor stays
+// unknown because a native action is not a person proof.
+func openCodeShellAdmission(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttribution) (schema.DeliveryOrigin, schema.ActorOrigin, string) {
+	if attr.Inherited || attr.Ownership != schema.ContentOwnershipLocal {
+		return schema.DeliveryOriginInheritedContext, schema.ActorOriginUnknown, ""
+	}
+	if msg.AgentDelivered {
+		return schema.DeliveryOriginSubagentDelivery, schema.ActorOriginAgentDelegate, ""
+	}
+	return schema.DeliveryOriginSessionAdmission, schema.ActorOriginUnknown, openCodeSubmissionKey(msg.SessionID, msg.MessageID)
+}
+
 // classifyOpenCodeTypedUser classifies one typed user row: text and media keep
 // separate refs under one message submission ref, while native skill and agent
 // attachments stay harness context with no submission of their own.
@@ -358,7 +374,7 @@ func classifyOpenCodeTypedUser(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 // title. The output rides a second block with no submission of its own so the
 // action still counts exactly once while no output byte is lost.
 func classifyOpenCodeShellAction(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttribution) ([]ClassifiedBlock, error) {
-	delivery, actor, submission := openCodeAdmission(msg, attr)
+	delivery, actor, submission := openCodeShellAdmission(msg, attr)
 	evidence := openCodeProvenanceEvidence(msg.Shape)
 	key, err := openCodeNativeKey(msg.Shape, msg.MessageID, "shell")
 	if err != nil {

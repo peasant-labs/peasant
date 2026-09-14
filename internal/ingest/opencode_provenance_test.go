@@ -147,37 +147,6 @@ func loadOpenCodeProvenanceCases(t *testing.T) []ocProvCase {
 	return loadOpenCodeProvenanceDocument(t).Cases
 }
 
-func TestOpenCodeProvenanceClassificationAndCounts(t *testing.T) {
-	for _, row := range loadOpenCodeProvenanceCases(t) {
-		t.Run(row.Name, func(t *testing.T) {
-			blocks, skipped := decodeOpenCodeProvenanceBlocks(t, row)
-			capture := ingest.ClassifiedCapture{
-				ID:                   "gen-" + row.Name,
-				SessionID:            ingest.SessionID(row.Scope.SessionID),
-				Harness:              ingest.HarnessOpenCode,
-				SourceEvidenceDigest: "synthetic-evidence-digest",
-				Completeness:         indexformat.GenerationCompletenessComplete,
-				Metadata: schema.UnifiedMetadata{
-					SchemaVersion: 1,
-					SessionID:     schema.SessionID(row.Scope.SessionID),
-					ModelHarness:  schema.HarnessOpenCode,
-				},
-				Blocks: blocks,
-			}
-			allocator := &queueAllocator{entry: append([]string(nil), row.Allocator.Entries...), submission: append([]string(nil), row.Allocator.Submissions...)}
-			built, err := ingest.BuildV2(capture, allocator)
-			if err != nil {
-				t.Fatalf("BuildV2: %v", err)
-			}
-			if skipped != row.Want.SkippedRows {
-				t.Fatalf("skipped unfinished rows = %d, want %d", skipped, row.Want.SkippedRows)
-			}
-			assertOpenCodeCounts(t, built.Generation, row.Want)
-			assertOpenCodeEntries(t, built.Generation.Main.Entries, row.Want.Main)
-		})
-	}
-}
-
 func TestOpenCodeHistoricalProvenanceThroughFiles(t *testing.T) {
 	for _, row := range loadOpenCodeProvenanceDocument(t).HistoricalCase {
 		t.Run(row.Name, func(t *testing.T) {
@@ -246,49 +215,6 @@ func TestOpenCodeHistoricalProvenanceThroughFiles(t *testing.T) {
 			assertOpenCodeEntries(t, built.Generation.Main.Entries, row.Want.Main)
 		})
 	}
-}
-
-// decodeOpenCodeProvenanceBlocks drives each fixture row through the real
-// provenance row decoder and classifier, applying the case's native delivery
-// correlation. Unsettled rows are skipped exactly as the production snapshot
-// reader skips them.
-func decodeOpenCodeProvenanceBlocks(t *testing.T, row ocProvCase) ([]ingest.ClassifiedBlock, int) {
-	t.Helper()
-	scope := ingest.OpenCodeProvenanceScope{
-		SessionID:        row.Scope.SessionID,
-		Shape:            ingest.OpenCodeProvenanceShape(row.Scope.Shape),
-		ParentNullProven: row.Scope.ParentNullProven,
-		HasParent:        row.Scope.HasParent,
-	}
-	attribution := ingest.LocalOpenCodeAttribution()
-	var blocks []ingest.ClassifiedBlock
-	skipped := 0
-	for _, native := range row.Rows {
-		decoded, settled, err := ingest.DecodeOpenCodeProvenanceRow(ingest.OpenCodeProvenanceRow{
-			ID:          native.ID,
-			SessionID:   row.Scope.SessionID,
-			Type:        native.Type,
-			TimeCreated: native.TimeCreated,
-			TimeUpdated: native.TimeUpdated,
-			Seq:         native.Seq,
-			HasSeq:      true,
-			Data:        native.Data,
-		}, scope)
-		if err != nil {
-			t.Fatalf("row %q decode: %v", native.ID, err)
-		}
-		if !settled {
-			skipped++
-			continue
-		}
-		decoded.AgentDelivered = row.AgentDeliver
-		classified, err := ingest.ClassifyOpenCodeMessage(decoded, attribution)
-		if err != nil {
-			t.Fatalf("row %q classify: %v", native.ID, err)
-		}
-		blocks = append(blocks, classified...)
-	}
-	return blocks, skipped
 }
 
 func assertOpenCodeCounts(t *testing.T, generation indexformat.Generation, want ocProvWant) {
