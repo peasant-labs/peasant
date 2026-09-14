@@ -1,0 +1,5 @@
+requiredNames:
+  - missing-native-source-refusal-keeps-private-location-safe
+  - noncanonical-native-identity-refusal-keeps-private-value-safe
+  - noncanonical-session-reference-reports-unidentified
+  - dependency-refusal-keeps-private-cause-safe

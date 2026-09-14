@@ -844,6 +844,68 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 	}
 }
 
+// codexFindProvenanceCase returns one named fixture case and fails when the
+// manifest-guarded corpus does not carry it.
+func codexFindProvenanceCase(t *testing.T, name string) codexProvenanceCase {
+	t.Helper()
+	for _, testCase := range loadCodexProvenanceFixture(t).Cases {
+		if testCase.Name == name {
+			return testCase
+		}
+	}
+	t.Fatalf("fixture case %s is missing", name)
+	return codexProvenanceCase{}
+}
+
+// TestCodexExactPastedWrapperConversionKeepsLiteralBodies drives the exact
+// pasted wrapper three ways corpus through the real transcript conversion and
+// detail construction. Literal wrapper-looking text is never reinterpreted:
+// every main body survives with its role and stable ref, the injected
+// instructions stay a system turn, the unknown-vector entry keeps its user
+// turn, and only the eligible user submission remains a title seed.
+func TestCodexExactPastedWrapperConversionKeepsLiteralBodies(t *testing.T) {
+	testCase := codexFindProvenanceCase(t, "exact-pasted-wrapper-three-ways")
+	candidate, err := runCodexProvenanceCandidate(t, testCase)
+	if err != nil {
+		t.Fatalf("BuildCodexCandidate: %v", err)
+	}
+	generation := candidate.V2.Generation
+	turns := transcript.EntriesToTurns(generation.Main.Entries)
+	if len(turns) != testCase.Expected.TurnCount {
+		t.Fatalf("converted turns = %d, want %d", len(turns), testCase.Expected.TurnCount)
+	}
+	for i, want := range testCase.Expected.Main {
+		if string(turns[i].Role) != want.Role {
+			t.Errorf("turn %d role = %q, want %q", i, turns[i].Role, want.Role)
+		}
+		if turns[i].Content != want.Content {
+			t.Errorf("turn %d content = %q, want the literal %q", i, turns[i].Content, want.Content)
+		}
+	}
+	detail := transcript.SessionToDetail(&ingest.Session{
+		ID:      ingest.SessionID(generation.Metadata.SessionID),
+		Harness: ingest.Harness(generation.Metadata.ModelHarness),
+		Turns:   turns,
+	})
+	if detail == nil {
+		t.Fatal("converted detail payload is nil")
+	}
+	if len(detail.Turns) != testCase.Expected.TurnCount {
+		t.Fatalf("detail turns = %d, want %d", len(detail.Turns), testCase.Expected.TurnCount)
+	}
+	for i, want := range testCase.Expected.Main {
+		if string(detail.Turns[i].Role) != want.Role {
+			t.Errorf("detail turn %d role = %q, want %q", i, detail.Turns[i].Role, want.Role)
+		}
+		if detail.Turns[i].Content != want.Content {
+			t.Errorf("detail turn %d content = %q, want the literal %q", i, detail.Turns[i].Content, want.Content)
+		}
+	}
+	if len(generation.TitleRefs) != 1 || string(generation.TitleRefs[0]) != "e_wrap1" {
+		t.Errorf("title refs = %v, want the eligible user submission e_wrap1", codexReferenceStrings(generation.TitleRefs))
+	}
+}
+
 // TestCodexCandidateSourceProofIsIndependent proves the stable thread, explicit
 // root, generation identity and physical source incarnation stay separate
 // facts: none is derived from another.
