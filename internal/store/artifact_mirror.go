@@ -94,7 +94,17 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 			if next, waiting := pending[sid]; !waiting || next != index {
 				continue
 			}
-			if parent := request.Artifact.Metadata.ParentUUID; parent != nil {
+			// Parent-first ordering follows the operational scheduling edge when
+			// the write derived one after child admission, and the logical
+			// evidence otherwise. A nil operational edge (missing, unselected,
+			// unavailable, cyclic or failed parent, or a self-parent) never
+			// waits on a row that will not commit, so every admitted child is
+			// reconciled in this page.
+			parent := request.Artifact.Metadata.ParentUUID
+			if request.SchedulingParentResolved && ingest.IndependentAdmissionHarness(request.Artifact.Metadata.ModelHarness) {
+				parent = request.SchedulingParentID
+			}
+			if parent != nil {
 				if _, waiting := pending[*parent]; waiting {
 					continue
 				}
@@ -195,18 +205,27 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	if request.EventSeq != nil && (*request.EventSeq < 0 || meta.ModelHarness != ingest.HarnessOpenCode) {
 		return fmt.Errorf("mirror session %s: acquired event sequence is invalid for harness %s; all session changes were refused; supply a nonnegative cursor only when acquired from OpenCode", meta.SessionID, meta.ModelHarness)
 	}
-	if meta.ParentUUID != nil {
+	if meta.ParentUUID != nil && *meta.ParentUUID != meta.SessionID {
 		parentExists := false
 		if err := sqlitex.ExecuteTransient(conn, sqlSessionExists, &sqlitex.ExecOptions{
 			Args: []any{string(*meta.ParentUUID)}, ResultFunc: func(*sqlite.Stmt) error { parentExists = true; return nil },
 		}); err != nil {
 			return err
 		}
-		if !parentExists {
+		if !parentExists && !ingest.IndependentAdmissionHarness(meta.ModelHarness) {
 			return fmt.Errorf("mirror managed session %s after file commit: parent %s is not stored; this child was not reconciled; retain its committed files and reconcile the parent before retrying harvest", meta.SessionID, *meta.ParentUUID)
 		}
+		// Independently admitted Codex/OpenCode orphans proceed to the writer,
+		// which stores a nil FK cache while the managed metadata keeps the
+		// logical ParentUUID. Self-parent and cyclic edges are resolved to a
+		// nil cache at write time for the same reason.
 	}
-	entry := ingest.StoreEntry{Metadata: &meta, Session: ingest.DiscoveredSession{SessionID: meta.SessionID, Harness: meta.ModelHarness, Origin: origin}}
+	entry := ingest.StoreEntry{
+		Metadata:                 &meta,
+		Session:                  ingest.DiscoveredSession{SessionID: meta.SessionID, Harness: meta.ModelHarness, Origin: origin},
+		SchedulingParentResolved: request.SchedulingParentResolved,
+		SchedulingParentID:       request.SchedulingParentID,
+	}
 	entry.ArtifactHash = &request.Artifact.ArtifactHash
 	entry.CWDProvenance = request.CWDProvenance
 	entry.SourceFingerprint = request.SourceFingerprint

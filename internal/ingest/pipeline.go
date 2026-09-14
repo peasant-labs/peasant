@@ -513,6 +513,63 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 	return p, nil
 }
 
+// storedParentSet reports which out-of-cohort logical parents already exist in
+// the committed store. An independently admitted child whose parent is already
+// stored keeps its available operational edge, stable nested location and FK
+// cache instead of being treated as an orphan. The pre-DIFF location cache
+// already covers discovered parents; sessions not discovered this run are
+// resolved by one bulk lookup. On a lookup failure the pending targets keep
+// their legacy available edge rather than being re-homed as orphans.
+func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map[SessionID]bool {
+	cohort := make(map[SessionID]bool, len(entries))
+	for i := range entries {
+		cohort[entries[i].Session.SessionID] = true
+	}
+	needed := make(map[SessionID]bool)
+	stored := make(map[SessionID]bool)
+	for i := range entries {
+		parent := entries[i].Session.ParentUUID
+		if parent == nil || cohort[*parent] {
+			continue
+		}
+		if _, ok := p.locationCache[*parent]; ok {
+			stored[*parent] = true
+			continue
+		}
+		needed[*parent] = true
+	}
+	if len(needed) == 0 || p.store == nil {
+		return stored
+	}
+	ids := make([]SessionID, 0, len(needed))
+	for id := range needed {
+		ids = append(ids, id)
+	}
+	locations, err := p.store.BulkLookupSessionLocations(ctx, ids)
+	if err != nil {
+		// A transient store failure must not re-home an admitted child under a
+		// root it does not own. Keep the legacy available-parent edge for the
+		// unresolved targets; the next successful harvest resolves them.
+		slog.Warn("pipeline: resolve stored scheduling parents",
+			"error", err,
+			"pending_parents", len(ids),
+			"what", "could not confirm stored logical parents for independent child scheduling",
+			"why", "the session-location lookup failed",
+			"user_impact", "an independently admitted child keeps its previous nested location and FK cache until the next harvest",
+			"how_to_fix", "restore database access and rerun harvest")
+		for id := range needed {
+			stored[id] = true
+		}
+		return stored
+	}
+	for id := range locations {
+		if needed[id] {
+			stored[id] = true
+		}
+	}
+	return stored
+}
+
 // Run executes the full ingest pipeline and returns a summary result.
 //
 // Stages:
@@ -719,10 +776,27 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 
 		// SessionFilter: skip sessions rejected by the selection index filter.
-		// Root sessions are checked against the filter; subagents inherit their
-		// parent's result — if the parent was rejected, the subagent is too.
+		// Codex and OpenCode children receive their own selection decision: the
+		// filter runs against the child itself, and no parent is rescued or
+		// widened because a child exists. A positively selected child is not
+		// rescued from its own explicit exclusion or denied SessionFilter, and
+		// a selected child never admits its parent or siblings. Every other
+		// harness keeps its existing inheritance: root sessions are checked
+		// against the filter and subagents inherit their parent's result.
 		if p.config.SessionFilter != nil {
-			if entry.Session.ParentUUID == nil {
+			if IndependentAdmissionHarness(entry.Session.Harness) {
+				if !p.config.SessionFilter(entry.Session) {
+					recordDryRun(entry, DiffUnchanged)
+					sessionResults = append(sessionResults, SessionResult{
+						SessionID:  entry.Session.SessionID,
+						Harness:    entry.Session.Harness,
+						ParentUUID: entry.Session.ParentUUID,
+						Status:     DiffUnchanged,
+					})
+					advanceFilter()
+					continue
+				}
+			} else if entry.Session.ParentUUID == nil {
 				if !p.config.SessionFilter(entry.Session) {
 					recordDryRun(entry, DiffUnchanged)
 					sessionResults = append(sessionResults, SessionResult{
@@ -846,6 +920,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
 	toProcess := len(toProcessEntries)
 
+	// Derive the local operational scheduling edge after the admission
+	// decision. Missing, unselected, and cyclic parents yield no edge; each
+	// admitted child without an edge is an independent dispatch root. An
+	// already-stored parent stays available so a normal child keeps its stable
+	// location. The logical ParentUUID is retained untouched on every entry.
+	toProcessEntries = ApplySchedulingParents(toProcessEntries, p.storedParentSet(ctx, toProcessEntries))
+
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
 	// denial, and parent-inheritance decisions as a real run. It stops only after
 	// that shared FILTER pass and performs no extraction, write, or store action.
@@ -877,17 +958,19 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 
 	// Stage 4a: EXTRACT + WRITE — parallel pool, one goroutine per root session.
 	//
-	// Each root session owns its full subagent subtree. Within one goroutine,
+	// Each root session owns its full operational subtree. Within one goroutine,
 	// the root is processed first, then each child is processed in series.
 	// This eliminates the directory race where a parent's RemoveAll races with
 	// a child's MkdirAll on the same {hostSlug}/{parentID}/ path.
 	//
-	// Parent→children index: built in O(n). Only root entries (no in-batch
-	// parent) are dispatched to runParallel; children and all descendants are
-	// processed inline by the root's goroutine via BFS.
+	// Roots and children are derived from the operational scheduling edge, not
+	// the logical ParentUUID: an admitted child with no edge is a dispatch root
+	// even when its logical parent names another session. Cycles were already
+	// removed from the operational graph, so every admitted entry is reachable
+	// from exactly one root and no admitted child waits forever.
 	//
 	// The StagingBuffer still enforces parent-before-child ordering at DB
-	// INSERT time (FK constraint), just as before.
+	// INSERT time for available parents, just as before.
 	entryByID := make(map[SessionID]DiffEntry, len(toProcessEntries))
 	childrenOf := make(map[SessionID][]SessionID, len(toProcessEntries))
 	inBatch := make(map[SessionID]bool, len(toProcessEntries))
@@ -898,13 +981,16 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	}
 	var rootEntries []DiffEntry
 	for _, e := range toProcessEntries {
-		if e.Session.ParentUUID != nil {
-			pid := *e.Session.ParentUUID
-			if inBatch[pid] {
-				childrenOf[pid] = append(childrenOf[pid], e.Session.SessionID)
+		if parent := OperationalParentID(e.Session); parent != nil {
+			if inBatch[*parent] {
+				childrenOf[*parent] = append(childrenOf[*parent], e.Session.SessionID)
 				continue // child: will be processed by its root's goroutine
 			}
-			externalParents[pid] = struct{}{}
+		}
+		if e.Session.ParentUUID != nil {
+			if _, ok := inBatch[*e.Session.ParentUUID]; !ok {
+				externalParents[*e.Session.ParentUUID] = struct{}{}
+			}
 		}
 		rootEntries = append(rootEntries, e)
 	}
@@ -968,6 +1054,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 			// Process root.
 			wr := p.processSession(ctx, entry)
+			wr.schedulingParentID = OperationalParentID(entry.Session)
+			wr.schedulingResolved = true
 			extractDoneAtomic.Add(1)
 			emitAdvance(prog, StageExtract, 1, toProcess)
 			staging.Add(wr)
@@ -982,6 +1070,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				queue = queue[1:]
 				childEntry := entryByID[childID]
 				cwr := p.processSession(ctx, childEntry)
+				cwr.schedulingParentID = OperationalParentID(childEntry.Session)
+				cwr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, toProcess)
 				staging.Add(cwr)
@@ -1220,6 +1310,7 @@ func (p *Pipeline) drainLoop(
 		if len(batch.Results) > 0 {
 			var batchMetas []indexedMeta
 			var committedIDs []SessionID
+			var failedIDs []SessionID
 			mirrorFailed := p.mirrorDrainedBatch(ctx, batch.Results, writeLane, errCh)
 			for index := range batch.Results {
 				wr := &batch.Results[index]
@@ -1236,11 +1327,21 @@ func (p *Pipeline) drainLoop(
 					})
 				}
 				sessionResults = append(sessionResults, wr.result)
-				committedIDs = append(committedIDs, wr.result.SessionID)
+				// A failed parent is never marked committed: admitted children
+				// of a failed parent drain independently with a nil parent
+				// cache instead of waiting on a commit that never lands.
+				if wr.result.Error != nil || mirrorFailed[wr.result.SessionID] {
+					failedIDs = append(failedIDs, wr.result.SessionID)
+				} else {
+					committedIDs = append(committedIDs, wr.result.SessionID)
+				}
 			}
 
 			// Commit BEFORE Ack — unlocks children for next Drain sooner.
+			// Failed parents are recorded separately so their admitted
+			// children release without falsely claiming a DB commit.
 			staging.Commit(committedIDs...)
+			staging.MarkFailed(failedIDs...)
 
 			if len(batchMetas) == 0 {
 				staging.AckBatch(batch)
@@ -2820,7 +2921,11 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		return fail(&adapterAcquisitionError{cause: err})
 	}
 	if captured.Session != nil {
+		// Preserve the operational edge across the capture update: the capture
+		// refreshes logical discovery facts, never the scheduling decision.
+		schedulingEdge := session.SchedulingParentID
 		session = *captured.Session
+		session.SchedulingParentID = schedulingEdge
 		result.ParentUUID = session.ParentUUID
 	}
 	if supportsSessionCapture(session) && !p.config.Reindex && !entry.pairRepair {
@@ -2872,10 +2977,19 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	}
 	hostSlug := meta.HostSlug
 
-	// Compute output paths.
+	// Compute output paths. The stable owned location follows the operational
+	// scheduling edge for Codex and OpenCode sessions: an admitted child with
+	// no operational parent installs as a root instead of nesting blindly
+	// under an absent logical parent. Every other harness keeps its existing
+	// parent-nested location. A later move is handled by the relocation path
+	// below, which never deletes the child-owned subtree.
 	outputDir := string(p.config.OutputDir)
 	parentID := ""
-	if session.ParentUUID != nil {
+	if IndependentAdmissionHarness(session.Harness) {
+		if session.SchedulingParentID != nil {
+			parentID = string(*session.SchedulingParentID)
+		}
+	} else if session.ParentUUID != nil {
 		parentID = string(*session.ParentUUID)
 	}
 	sessionDir := SessionDir(outputDir, string(hostSlug), string(session.SessionID), parentID)
@@ -3327,8 +3441,11 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		SessionID:      wr.result.SessionID,
 		Harness:        wr.result.Harness,
 		ParentUUID:     parentUUID,
-		SourceFormat:   sourceFormat,
-		SourcePath:     sourcePath,
+		// The operational edge travels with the result so downstream stages
+		// never re-derive scheduling from the logical evidence.
+		SchedulingParentID: wr.schedulingParentID,
+		SourceFormat:       sourceFormat,
+		SourcePath:         sourcePath,
 		// Without this a directory-based harness indexes nothing on the drain-loop
 		// pass: the caller replaces SourcePath with the written copy's path, and a
 		// root derived from that points into the output tree. The stale-index sweep
@@ -4561,20 +4678,38 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		inBatch[sourceSession.SessionID] = true
 	}
 
-	// Identify root vs child entries for the extract batch. A parent outside
-	// the batch is committed for staging order before the workers start, so a
-	// child whose parent is already stored can be drained; without it the
-	// child's committed pair waits forever on a parent that never drains.
+	// Derive the operational scheduling edge for the maintenance batch. The
+	// logical ParentUUID is retained; missing, unselected, and cyclic parents
+	// yield no edge so every admitted entry stays drainable.
+	{
+		batch := make([]DiffEntry, 0, len(entryByID))
+		for _, e := range entryByID {
+			batch = append(batch, e)
+		}
+		batch = ApplySchedulingParents(batch, p.storedParentSet(ctx, batch))
+		for _, e := range batch {
+			entryByID[e.Session.SessionID] = e
+		}
+	}
+
+	// Identify root vs child entries for the extract batch using only the
+	// operational edge. A parent outside the batch is committed for staging
+	// order before the workers start, so a child whose parent is already
+	// stored can be drained; without it the child's committed pair waits
+	// forever on a parent that never drains.
 	var rootEntries []DiffEntry
 	externalParents := make(map[SessionID]struct{})
 	for _, e := range entryByID {
-		if e.Session.ParentUUID != nil {
-			pid := *e.Session.ParentUUID
-			if inBatch[pid] {
-				childrenOf[pid] = append(childrenOf[pid], e.Session.SessionID)
+		if parent := OperationalParentID(e.Session); parent != nil {
+			if inBatch[*parent] {
+				childrenOf[*parent] = append(childrenOf[*parent], e.Session.SessionID)
 				continue // child: will be processed by its root's goroutine
 			}
-			externalParents[pid] = struct{}{}
+		}
+		if e.Session.ParentUUID != nil {
+			if _, ok := inBatch[*e.Session.ParentUUID]; !ok {
+				externalParents[*e.Session.ParentUUID] = struct{}{}
+			}
 		}
 		rootEntries = append(rootEntries, e)
 	}
@@ -4625,6 +4760,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			extractProfileStart := time.Now()
 			runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 				wr := p.processSession(ctx, entry)
+				wr.schedulingParentID = OperationalParentID(entry.Session)
+				wr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 				staging.Add(wr)
@@ -4635,6 +4772,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 					queue = queue[1:]
 					childEntry := entryByID[childID]
 					cwr := p.processSession(ctx, childEntry)
+					cwr.schedulingParentID = OperationalParentID(childEntry.Session)
+					cwr.schedulingResolved = true
 					extractDoneAtomic.Add(1)
 					emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 					staging.Add(cwr)

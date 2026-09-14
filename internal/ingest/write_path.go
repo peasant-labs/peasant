@@ -378,11 +378,13 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 // mirrorRequestFor builds the database mirror request for one installed pair.
 func mirrorRequestFor(wr *workerResult) ArtifactMirrorRequest {
 	return ArtifactMirrorRequest{
-		Artifact:              wr.artifact,
-		EventSeq:              wr.acquiredEventSeq,
-		Origin:                wr.origin,
-		CWDProvenance:         wr.cwdProvenance,
-		SourceFingerprint:     wr.sourceFingerprint,
-		CommitCaptureComplete: wr.commitCaptureComplete,
+		Artifact:                 wr.artifact,
+		EventSeq:                 wr.acquiredEventSeq,
+		Origin:                   wr.origin,
+		CWDProvenance:            wr.cwdProvenance,
+		SourceFingerprint:        wr.sourceFingerprint,
+		CommitCaptureComplete:    wr.commitCaptureComplete,
+		SchedulingParentResolved: wr.schedulingResolved,
+		SchedulingParentID:       wr.schedulingParentID,
 	}
 }

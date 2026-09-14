@@ -287,6 +287,19 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		}
 	}
 	// Entries with nil Metadata are already skipped in the loop below.
+	// Detect in-batch parent cycles once: members keep their logical ParentUUID
+	// in metadata but receive a nil FK cache so every admitted child stores.
+	batchParents := make(map[ingest.SessionID]*ingest.SessionID, len(entries))
+	batchOrder := make([]ingest.SessionID, 0, len(entries))
+	for i := range entries {
+		if entries[i].Metadata == nil {
+			continue
+		}
+		id := entries[i].Metadata.SessionID
+		batchOrder = append(batchOrder, id)
+		batchParents[id] = entries[i].Metadata.ParentUUID
+	}
+	batchCycles := BatchParentCycles(batchOrder, batchParents)
 
 	for i := range sorted {
 		m := sorted[i].Metadata
@@ -360,20 +373,51 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		}
 
 		// 4. Insert session fact.
-		// For children whose parent is not in this batch, verify the parent
-		// exists in the DB from a prior ingest. If the parent is nowhere,
-		// skip this child to avoid an FK constraint failure that would roll
-		// back the entire transaction.
-		if m.ParentUUID != nil && !batchIDs[*m.ParentUUID] {
-			var parentExists bool
-			if err = sqlitex.ExecuteTransient(conn, sqlSessionExists, &sqlitex.ExecOptions{
-				Args:       []any{string(*m.ParentUUID)},
-				ResultFunc: func(stmt *sqlite.Stmt) error { parentExists = true; return nil },
-			}); err != nil {
-				return fmt.Errorf("store: check parent %s: %w", *m.ParentUUID, err)
+		// The FK availability cache follows the operational scheduling edge
+		// when the write derived one after child admission, and the logical
+		// evidence otherwise. Independently admitted Codex and OpenCode
+		// children are retained with a nil cache when their operational target
+		// is absent, so a missing, unselected, unavailable, cyclic or failed
+		// parent never drops an admitted child; the logical ParentUUID stays in
+		// the managed metadata. A cache is written only to a target that is
+		// available in this batch or already stored. Every other harness keeps
+		// the legacy logical resolution and orphan skip.
+		cacheParent := m.ParentUUID
+		if sorted[i].SchedulingParentResolved && ingest.IndependentAdmissionHarness(m.ModelHarness) {
+			scheduling := sorted[i].SchedulingParentID
+			available := false
+			if scheduling != nil && *scheduling != m.SessionID {
+				if batchIDs[*scheduling] {
+					available = true
+				} else {
+					var parentExists bool
+					if err = sqlitex.ExecuteTransient(conn, sqlSessionExists, &sqlitex.ExecOptions{
+						Args:       []any{string(*scheduling)},
+						ResultFunc: func(stmt *sqlite.Stmt) error { parentExists = true; return nil },
+					}); err != nil {
+						return fmt.Errorf("store: check parent %s: %w", *scheduling, err)
+					}
+					available = parentExists
+				}
 			}
-			if !parentExists {
-				continue // parent not in batch or DB; skip orphan child
+			cacheParent = DesiredParentCacheID(m.SessionID, scheduling, available)
+		} else if m.ParentUUID != nil {
+			if *m.ParentUUID == m.SessionID || batchCycles[m.SessionID] {
+				cacheParent = nil
+			} else if !batchIDs[*m.ParentUUID] {
+				var parentExists bool
+				if err = sqlitex.ExecuteTransient(conn, sqlSessionExists, &sqlitex.ExecOptions{
+					Args:       []any{string(*m.ParentUUID)},
+					ResultFunc: func(stmt *sqlite.Stmt) error { parentExists = true; return nil },
+				}); err != nil {
+					return fmt.Errorf("store: check parent %s: %w", *m.ParentUUID, err)
+				}
+				if !parentExists {
+					if !ingest.IndependentAdmissionHarness(m.ModelHarness) {
+						continue // parent not in batch or DB; skip orphan child
+					}
+					cacheParent = nil
+				}
 			}
 		}
 		// sessionOrigin is who drove the session, as the harness adapter's
@@ -388,9 +432,12 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		}
 
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
+		// The FK cache follows the resolved cacheParent, never the raw logical
+		// evidence: an orphaned Codex/OpenCode child stores NULL while its
+		// managed metadata keeps the logical ParentUUID.
 		sessionSQL := sqlInsertSession
 		sessionArgs := []any{
-			string(m.SessionID), derefSessionID(m.ParentUUID), m.ModelHarness.String(),
+			string(m.SessionID), derefSessionID(cacheParent), m.ModelHarness.String(),
 			string(m.Model), opaqueHostID, string(m.Project.Hash), m.Timestamp.Start,
 			m.Timestamp.End, derefInt64(m.Timestamp.Ingested), m.Source.FilePath,
 			string(m.Source.Format), m.SchemaVersion, derefString(m.Git.Branch),
