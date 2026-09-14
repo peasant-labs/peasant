@@ -87,6 +87,10 @@ Release, which holds the signed artifacts and checksums.
 - End-to-end runs reap orphaned test containers whose owner process has exited
   and enforce a local memory cap (#331, #347).
 
+### CI
+- The release e2e gates check out the Village peer at a revision that pins the
+  same schema contract, v0.20.0 (#413).
+
 ### Dependencies
 - Contract pins: schema `v0.20.0` (Village API 0.18.0, Local API 0.13.0,
   Types 0.20.0), redact `v0.1.6`, fairtrade `0.0.19` (#329, #361, #392).
