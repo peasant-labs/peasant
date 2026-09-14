@@ -197,6 +197,15 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 			if block.Type == "" {
 				return fmt.Errorf("content block lacks its type")
 			}
+			// Claude attaches a tool_reference block when it loads a deferred
+			// tool's schema. It is a control block with no conversation
+			// content, so it is accepted as long as it names its tool.
+			if harness == HarnessClaudeCode && block.Type == "tool_reference" {
+				if block.ToolName == "" && block.Name == "" {
+					return fmt.Errorf("tool_reference requires tool_name")
+				}
+				continue
+			}
 			if refusal == nil {
 				refusal = &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
 			}
@@ -259,11 +268,20 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 				return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
 			}
 			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
+		case "last-prompt":
+			// A mirror of the prompt already represented by the user turn. It
+			// carries no payload of its own, so it is recorded as metadata.
+			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordMetadata}, nil
 		default:
 			if line.Type == "" {
 				// A missing discriminator is corruption, not vocabulary:
 				// settling it would hide an actionable malformed record.
 				return nil, fmt.Errorf("record lacks its type")
+			}
+			// A represented control record. The indexer retains its kind and
+			// payload as a depth=0 row, so the capture can certify.
+			if isClaudeControlRecordType(line.Type) {
+				return nil, nil
 			}
 			// A well-formed record kind this build does not represent. The
 			// refusal is typed so the ordinary index path can store the

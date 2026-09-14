@@ -32,6 +32,30 @@ required_names:
   - claude-summary-full-text
   - claude-result-full-text
   - claude-error-full-text
+  - claude-control-permission-mode
+  - claude-control-mode
+  - claude-control-agent-setting
+  - claude-control-agent-name
+  - claude-control-ai-title
+  - claude-control-ai-title-oversized
+  - claude-control-atis-latch
+  - claude-control-attachment
+  - claude-control-attachment-oversized
+  - claude-control-bridge-session
+  - claude-control-started
+  - claude-control-cost-state
+  - claude-control-custom-title
+  - claude-control-file-history-delta
+  - claude-control-frame-link
+  - claude-control-fork-context-ref
+  - claude-control-worktree-state
+  - claude-control-launched
+  - claude-control-pr-link
+  - claude-control-artifact
+  - claude-control-compact-boundary
+  - claude-control-last-prompt
+  - claude-control-tool-reference
+  - claude-unknown-record-kind
   - codex-reasoning-full-text
 cases:
   - name: cursor-user-literal-query-whitespace
@@ -164,4 +188,253 @@ cases:
   - name: strike-unknown-event
     harness: strike
     source: '{"type":"assistant.future","data":{"text":"not represented"}}'
+    reject: true
+  # Control records: harness state rather than conversation content. Each must
+  # certify, keep its provider kind and payload, and surface a factual preview.
+  # The payload assertions decode Extra: an exact key set proves the transcript
+  # envelope was stripped, and absent keys prove a capped payload dropped its
+  # original data.
+  - name: claude-control-permission-mode
+    harness: claude-code
+    control: true
+    source: '{"type":"permission-mode","permissionMode":"acceptEdits","uuid":"pm-1"}'
+    want_part_type: permission-mode
+    want_role: system
+    want_preview: "permission mode: acceptEdits"
+    want_extra_keys: [permissionMode]
+    want_extra_members:
+      permissionMode: acceptEdits
+  - name: claude-control-mode
+    harness: claude-code
+    control: true
+    source: '{"type":"mode","mode":"plan","uuid":"mode-1"}'
+    want_part_type: mode
+    want_role: system
+    want_preview: "mode: plan"
+    want_extra_keys: [mode]
+    want_extra_members:
+      mode: plan
+  - name: claude-control-agent-setting
+    harness: claude-code
+    control: true
+    source: '{"type":"agent-setting","agentSetting":"reviewer","agentId":"agent-7","uuid":"as-1"}'
+    want_part_type: agent-setting
+    want_role: system
+    want_preview: "agent: reviewer"
+    want_extra_keys: [agentId, agentSetting]
+    want_extra_members:
+      agentId: agent-7
+      agentSetting: reviewer
+  - name: claude-control-agent-name
+    harness: claude-code
+    control: true
+    source: '{"type":"agent-name","agentName":"scout","uuid":"an-1"}'
+    want_part_type: agent-name
+    want_role: system
+    want_preview: "agent name: scout"
+    want_extra_keys: [agentName]
+    want_extra_members:
+      agentName: scout
+  - name: claude-control-ai-title
+    harness: claude-code
+    control: true
+    source: '{"type":"ai-title","aiTitle":"Synthetic fixture session","uuid":"t-1"}'
+    want_part_type: ai-title
+    want_role: system
+    want_preview: "session title: Synthetic fixture session"
+    want_extra_keys: [aiTitle]
+    want_extra_members:
+      aiTitle: "Synthetic fixture session"
+  - name: claude-control-ai-title-oversized
+    harness: claude-code
+    control: true
+    oversized: true
+    tolerant: true
+    source: '{"type":"ai-title","aiTitle":TEXT,"uuid":"ait-big","sessionId":"session-1"}'
+    want_part_type: ai-title
+    want_role: system
+    want_preview_unbounded: true
+    want_extra_keys: [kind, rawBytes]
+    want_extra_members:
+      kind: ai-title
+    want_extra_absent: [aiTitle, uuid, sessionId]
+    want_raw_bytes_min: 8192
+  - name: claude-control-atis-latch
+    harness: claude-code
+    control: true
+    source: '{"type":"atis-latch","state":"armed","uuid":"al-1"}'
+    want_part_type: atis-latch
+    want_role: system
+    want_preview: "atis-latch: armed"
+    want_extra_keys: [state]
+    want_extra_members:
+      state: armed
+  - name: claude-control-attachment
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool"},"agentId":"agent-7","agentName":"scout","isSidechain":true,"sessionId":"session-1","session_id":"session-2","uuid":"at-1","parentUuid":"parent-1","logicalParentUuid":"logical-1","timestamp":"2026-01-01T00:00:00Z","cwd":"/synthetic","gitBranch":"synthetic-branch","entrypoint":"cli","userType":"external","version":"1.0.0","slug":"synthetic"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [agentId, agentName, attachment, isSidechain]
+    want_extra_members:
+      agentId: agent-7
+      agentName: scout
+      attachment: '{"type":"hook_success","hookName":"post-tool"}'
+      isSidechain: "true"
+    want_extra_absent: [type, sessionId, session_id, uuid, parentUuid, logicalParentUuid, timestamp, cwd, gitBranch, entrypoint, userType, version, slug]
+  - name: claude-control-attachment-oversized
+    harness: claude-code
+    control: true
+    oversized: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookData":TEXT},"uuid":"at-big"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, hookData, uuid]
+    want_raw_bytes_min: 8192
+  - name: claude-control-bridge-session
+    harness: claude-code
+    control: true
+    source: '{"type":"bridge-session","bridgeSessionId":"bridge-1","uuid":"bs-1"}'
+    want_part_type: bridge-session
+    want_role: system
+    want_preview: "bridge-session: bridge-1"
+    want_extra_keys: [bridgeSessionId]
+    want_extra_members:
+      bridgeSessionId: bridge-1
+  - name: claude-control-started
+    harness: claude-code
+    control: true
+    source: '{"type":"started","agentId":"agent-7","key":"v2:deadbeef","uuid":"st-1"}'
+    want_part_type: started
+    want_role: system
+    want_preview: "started: agent-7"
+    want_extra_keys: [agentId, key]
+    want_extra_members:
+      agentId: agent-7
+      key: "v2:deadbeef"
+  - name: claude-control-cost-state
+    harness: claude-code
+    control: true
+    source: '{"type":"cost-state","totalCostUSD":0.12,"totalDuration":1500,"totalLinesAdded":12,"totalLinesRemoved":3,"uuid":"cs-1"}'
+    want_part_type: cost-state
+    want_role: system
+    want_preview: "cost: $0.12, duration: 1.5s, lines: +12/-3"
+    want_extra_keys: [totalCostUSD, totalDuration, totalLinesAdded, totalLinesRemoved]
+    want_extra_members:
+      totalCostUSD: "0.12"
+      totalDuration: "1500"
+      totalLinesAdded: "12"
+      totalLinesRemoved: "3"
+  - name: claude-control-custom-title
+    harness: claude-code
+    control: true
+    source: '{"type":"custom-title","title":"Synthetic title","uuid":"ct-1"}'
+    want_part_type: custom-title
+    want_role: system
+    want_preview: "custom-title: Synthetic title"
+    want_extra_keys: [title]
+    want_extra_members:
+      title: "Synthetic title"
+  - name: claude-control-file-history-delta
+    harness: claude-code
+    control: true
+    source: '{"type":"file-history-delta","path":"/synthetic/file.go","uuid":"fh-1"}'
+    want_part_type: file-history-delta
+    want_role: system
+    want_preview: "file-history-delta: /synthetic/file.go"
+    want_extra_keys: [path]
+    want_extra_members:
+      path: /synthetic/file.go
+  - name: claude-control-frame-link
+    harness: claude-code
+    control: true
+    source: '{"type":"frame-link","frameId":"frame-1","uuid":"fl-1"}'
+    want_part_type: frame-link
+    want_role: system
+    want_preview: "frame-link: frame-1"
+    want_extra_keys: [frameId]
+    want_extra_members:
+      frameId: frame-1
+  - name: claude-control-fork-context-ref
+    harness: claude-code
+    control: true
+    source: '{"type":"fork-context-ref","forkId":"fork-1","uuid":"fc-1"}'
+    want_part_type: fork-context-ref
+    want_role: system
+    want_preview: "fork-context-ref: fork-1"
+    want_extra_keys: [forkId]
+    want_extra_members:
+      forkId: fork-1
+  - name: claude-control-worktree-state
+    harness: claude-code
+    control: true
+    source: '{"type":"worktree-state","branch":"synthetic-branch","uuid":"ws-1"}'
+    want_part_type: worktree-state
+    want_role: system
+    want_preview: "worktree-state: synthetic-branch"
+    want_extra_keys: [branch]
+    want_extra_members:
+      branch: synthetic-branch
+  - name: claude-control-launched
+    harness: claude-code
+    control: true
+    source: '{"type":"launched","launchId":"launch-1","uuid":"l-1"}'
+    want_part_type: launched
+    want_role: system
+    want_preview: "launched: launch-1"
+    want_extra_keys: [launchId]
+    want_extra_members:
+      launchId: launch-1
+  - name: claude-control-pr-link
+    harness: claude-code
+    control: true
+    source: '{"type":"pr-link","prNumber":42,"prRepository":"peasant-labs/peasant","prUrl":"https://github.com/peasant-labs/peasant/pull/42","uuid":"pr-1"}'
+    want_part_type: pr-link
+    want_role: system
+    want_preview: "PR #42 (peasant-labs/peasant)"
+    want_extra_keys: [prNumber, prRepository, prUrl]
+    want_extra_members:
+      prNumber: "42"
+      prRepository: peasant-labs/peasant
+      prUrl: https://github.com/peasant-labs/peasant/pull/42
+  - name: claude-control-artifact
+    harness: claude-code
+    control: true
+    source: '{"type":"artifact-autoreact-ledger","artifactId":"ledger-1","uuid":"ar-1"}'
+    want_part_type: artifact-autoreact-ledger
+    want_role: system
+    want_preview: "artifact-autoreact-ledger: ledger-1"
+    want_extra_keys: [artifactId]
+    want_extra_members:
+      artifactId: ledger-1
+  - name: claude-control-compact-boundary
+    harness: claude-code
+    control: true
+    source: '{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":120000,"postTokens":40000},"uuid":"cb-1","sessionId":"session-1"}'
+    want_part_type: compact-boundary
+    want_role: system
+    want_preview: "Context compacted (auto): 120000 -> 40000 tokens"
+    want_extra_keys: [compactMetadata, subtype]
+    want_extra_members:
+      compactMetadata: '{"trigger":"auto","preTokens":120000,"postTokens":40000}'
+  - name: claude-control-last-prompt
+    harness: claude-code
+    control: true
+    source: '{"type":"last-prompt","prompt":"synthetic prompt","uuid":"lp-1"}'
+    want_preview_absent: true
+  - name: claude-control-tool-reference
+    harness: claude-code
+    control: true
+    source: '{"type":"user","message":{"role":"user","content":[{"type":"tool_reference","tool_name":"Bash"}]},"uuid":"tr-1"}'
+    want_part_type: tool_reference
+    want_role: user
+  - name: claude-unknown-record-kind
+    harness: claude-code
+    source: '{"type":"future-record","payload":"a record kind no shipped build represents"}'
     reject: true

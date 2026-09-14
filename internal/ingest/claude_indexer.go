@@ -540,6 +540,28 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 		entry.ContentPreview = &p
 	}
 
+	// Control records carry harness state rather than conversation content.
+	// Retain their provider kind and payload, and surface a short preview so the
+	// record stays visible in the transcript. Keeping an existing preview
+	// preserves any represented content, except a compaction boundary whose
+	// summary is the record's whole point.
+	if partType, extra, controlPreview := claudeControlRecordFields(raw, line); partType != nil {
+		entry.PartType = partType
+		if extra != nil {
+			entry.Extra = extra
+		}
+		if controlPreview != nil && (entry.ContentPreview == nil || *partType == "compact-boundary") {
+			// A generated control preview obeys the same bound as every other
+			// preview. The full-content path keeps it whole for export and
+			// publication, exactly as it does for conversation content.
+			p := *controlPreview
+			if !fullContent {
+				p = truncateString(p, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &p
+		}
+	}
+
 	// Tokens from usage.
 	// input_tokens in Claude's JSONL is only the non-cached portion;
 	// the bulk of input tokens are in cache_creation and cache_read fields.
