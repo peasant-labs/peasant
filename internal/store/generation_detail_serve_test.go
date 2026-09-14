@@ -32,7 +32,7 @@ func buildDetailServeGeneration(t *testing.T, sid schema.SessionID, genID string
 		SubmissionRef: submission,
 	}
 	strptr := func(s string) *string { return &s }
-	callID := "call-s22-serve"
+	callID := "call-detail-serve"
 	longResult := "parser.go:12 " + strings.Repeat("z", defaults.ContentPreviewLimit+1024)
 	text := func(index int, role schema.Role, entryType schema.EntryType, ref, body string) schema.SessionEntry {
 		preview := body
@@ -110,14 +110,14 @@ func TestGenerationServesDetailBoundaryReads(t *testing.T) {
 	}
 	s, _ := openGenerationStore(t)
 	seedGenerationSession(t, s, string(sid))
-	g1, g1Blobs := buildDetailServeGeneration(t, sid, "g-s22-serve")
+	g1, g1Blobs := buildDetailServeGeneration(t, sid, "g-detail-serve")
 	if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
 		t.Fatalf("activate section-4 generation: %v", err)
 	}
 
 	wantRefs := []schema.SourceEntryRef{"e_u1", "e_ctx1", "e_media1", "e_a1", "e_reason1", "e_call1", "e_result1"}
 	err = s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.IndexVersion != 2 || snapshot.GenerationID != "g-s22-serve" {
+		if snapshot.IndexVersion != 2 || snapshot.GenerationID != "g-detail-serve" {
 			return errTestDetailServe("snapshot is not the activated G1")
 		}
 		if len(snapshot.Main.Entries) != len(wantRefs) {
