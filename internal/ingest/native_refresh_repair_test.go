@@ -532,6 +532,30 @@ func TestNativeRefreshRepair(t *testing.T) {
 				if secondGenerationID != generationID {
 					t.Fatalf("second run replaced generation %q with %q", generationID, secondGenerationID)
 				}
+				// The repair's activation must preserve the recorded
+				// publication-capture agreement: pointing the session at its
+				// generation updates watched session facts, and a cleared
+				// provenance kind would re-ingest this session on every
+				// discovery run and leave it permanently unpublishable. The
+				// kind this session had before the repair is exactly the kind
+				// it must still carry afterwards; whether the activation
+				// should also BIND a session that had no captured metadata
+				// yet is a separate design decision, tracked on the slice.
+				bound, err := reopened.ReadIndexState(t.Context(), sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if bound == nil {
+					t.Fatal("repaired session has no readable index state")
+				}
+				metadataPath := ingest.SessionMetadataPath(outputDir, testutil.TestHostSlug, string(sid), "")
+				pair, pairErr := ingest.ReadManagedPair(fs, outputDir, metadataPath, ingest.SessionID(sid))
+				if pairErr != nil {
+					t.Fatalf("read repaired managed pair: %v", pairErr)
+				}
+				if pair.ArtifactHash == "" || bound.ArtifactHash == nil || pair.ArtifactHash != *bound.ArtifactHash {
+					t.Fatalf("repaired pair identity %q disagrees with the stored artifact hash %v", pair.ArtifactHash, bound.ArtifactHash)
+				}
 
 			case "failed_capture":
 				if got := indexedOutcomeFor(result, sid); got == ingest.IndexOutcomeIndexed || got == ingest.IndexOutcomeReindexed {
