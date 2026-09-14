@@ -7,7 +7,9 @@ requiredNames:
   - parent-extraction-failure-child-drains
   - changed-target-clears-old-cache
   - explicit-none-clears-cache
-  - later-parent-cache-only-backfill
+  - parent-and-child-rediscovered-relocates
+  - parent-only-backfill-reconciles-cache
+  - parent-only-backfill-refuses-cycle
   - no-sibling-parent-widening
   - stored-parent-keeps-available-edge
   - other-harness-legacy-inheritance

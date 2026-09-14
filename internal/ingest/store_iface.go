@@ -88,6 +88,31 @@ type OpenCodeSeqCursorStore interface {
 	UpsertOpenCodeSeqCursor(ctx context.Context, sessionID SessionID, seq int64) error
 }
 
+// ParentCacheReconcile names one stored independently admitted child whose
+// logical parent became available after the child was admitted. The store
+// applies it as an FK availability-cache update only when both rows exist and
+// no parent-cache cycle would form. It never re-extracts, relocates, or
+// re-selects the child, and it never rewrites the managed logical evidence.
+type ParentCacheReconcile struct {
+	Child  SessionID
+	Parent SessionID
+}
+
+// OrphanParentReconciler is the optional store capability that heals the FK
+// availability cache of an independently admitted child after a later harvest
+// stores its logical parent. The production store implements it; a store that
+// does not keeps the cache unchanged.
+type OrphanParentReconciler interface {
+	// ListUncachedIndependentChildren returns the stored sessions of the given
+	// harnesses whose parent cache is NULL. It reads identifiers only.
+	ListUncachedIndependentChildren(ctx context.Context, harnesses []Harness) ([]SessionID, error)
+	// ReconcileParentCache applies the given cache updates in one transaction.
+	// An update whose child or parent is not stored, whose edge is a
+	// self-parent, or that would close a parent-cache cycle is skipped; every
+	// other update commits or the whole reconciliation rolls back.
+	ReconcileParentCache(ctx context.Context, updates []ParentCacheReconcile) error
+}
+
 // SessionStore abstracts SQLite persistence for the pipeline.
 // Defined in ingest (not store) to maintain the DI direction:
 // store implements this interface; pipeline depends on it.

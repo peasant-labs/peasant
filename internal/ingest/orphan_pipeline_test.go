@@ -11,6 +11,7 @@ package ingest_test
 // and store paths under test are the production code.
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -26,7 +27,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/orphan_pipeline.yaml
@@ -68,6 +68,16 @@ type orphanCaseFixture struct {
 	// their available logical parent's subtree, because the operational edge
 	// keeps the stable nested location.
 	ExpectNested []string `yaml:"expectNested"`
+	// UnchangedBytes names stored sessions whose managed pair (metadata and
+	// transcript) must stay byte-identical across every run of the case. A
+	// later parent appearing reconciles only the FK cache; it never
+	// re-extracts, relocates or rewrites the child's managed bytes.
+	UnchangedBytes []string `yaml:"unchangedBytes"`
+	// OSControl marks a case that must also run against the real operating
+	// system filesystem on a temporary directory, so the managed-path and
+	// managed-byte survival claims are proven on the production filesystem and
+	// not only in the in-memory double.
+	OSControl bool `yaml:"osControl"`
 }
 
 type orphanCorpusFixture struct {
@@ -104,8 +114,8 @@ func (a *orphanErrorAdapter) ExtractMetadata(_ context.Context, s ingest.Discove
 func loadOrphanCorpus(t *testing.T) orphanCorpusFixture {
 	t.Helper()
 	var corpus orphanCorpusFixture
-	if err := yaml.Unmarshal(orphanPipelineYAML, &corpus); err != nil {
-		t.Fatalf("unmarshal orphan pipeline corpus: %v", err)
+	if err := testutil.DecodeFixtureYAML(orphanPipelineYAML, &corpus); err != nil {
+		t.Fatalf("decode orphan pipeline corpus: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(orphanPipelineManifestYAML, "orphan pipeline")
 	if err != nil {
@@ -129,6 +139,19 @@ func loadOrphanCorpus(t *testing.T) orphanCorpusFixture {
 	return corpus
 }
 
+// TestOrphanCorpusDecoderRejectsMalformedInput proves the corpus loader is
+// strict: an unknown case field or a trailing document is a hard failure
+// instead of silently disappearing.
+func TestOrphanCorpusDecoderRejectsMalformedInput(t *testing.T) {
+	var corpus orphanCorpusFixture
+	if err := testutil.DecodeFixtureYAML([]byte("sessions: []\ncases:\n  - name: x\n    misspelledField: 1\n"), &corpus); err == nil {
+		t.Fatal("orphan pipeline decoder accepted an unknown case field")
+	}
+	if err := testutil.DecodeFixtureYAML([]byte("sessions: []\ncases: []\n---\ncases: []\n"), &corpus); err == nil {
+		t.Fatal("orphan pipeline decoder accepted a trailing YAML document")
+	}
+}
+
 func orphanHarness(t *testing.T, raw ingest.Harness) ingest.Harness {
 	t.Helper()
 	switch raw {
@@ -143,13 +166,7 @@ func orphanHarness(t *testing.T, raw ingest.Harness) ingest.Harness {
 func TestOrphanPipelineIndependentAdmission(t *testing.T) {
 	t.Parallel()
 	corpus := loadOrphanCorpus(t)
-	byID := make(map[string]orphanSessionFixture, len(corpus.Sessions))
-	for _, s := range corpus.Sessions {
-		if _, dup := byID[s.ID]; dup {
-			t.Fatalf("duplicate orphan session %q", s.ID)
-		}
-		byID[s.ID] = s
-	}
+	byID := orphanSessionsByID(t, corpus)
 	for _, tc := range corpus.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
@@ -158,10 +175,75 @@ func TestOrphanPipelineIndependentAdmission(t *testing.T) {
 	}
 }
 
+// TestOrphanPipelineOSFileSystem runs every case the corpus marks for the real
+// operating system filesystem: the managed path and managed bytes must survive
+// a missing/unselected parent and a later parent backfill on the production
+// filesystem, across a SQLite reopen, exactly as the in-memory control.
+func TestOrphanPipelineOSFileSystem(t *testing.T) {
+	t.Parallel()
+	corpus := loadOrphanCorpus(t)
+	byID := orphanSessionsByID(t, corpus)
+	ran := false
+	for _, tc := range corpus.Cases {
+		if !tc.OSControl {
+			continue
+		}
+		ran = true
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			runOrphanCaseWith(t, byID, tc, orphanEnv{
+				fs:        &ingest.OSFileSystem{},
+				outputDir: filepath.Join(dir, "output"),
+				sourceDir: filepath.Join(dir, "sources"),
+			})
+		})
+	}
+	if !ran {
+		t.Fatal("orphan pipeline corpus declares no OS-filesystem control case")
+	}
+}
+
+func orphanSessionsByID(t *testing.T, corpus orphanCorpusFixture) map[string]orphanSessionFixture {
+	t.Helper()
+	byID := make(map[string]orphanSessionFixture, len(corpus.Sessions))
+	for _, s := range corpus.Sessions {
+		if _, dup := byID[s.ID]; dup {
+			t.Fatalf("duplicate orphan session %q", s.ID)
+		}
+		byID[s.ID] = s
+	}
+	return byID
+}
+
+// orphanEnv is the filesystem and directory set a case runs against. The
+// in-memory control uses MemFS; the OS control uses the real filesystem.
+type orphanEnv struct {
+	fs        ingest.FileSystem
+	outputDir string
+	sourceDir string
+}
+
 func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphanCaseFixture) {
 	t.Helper()
+	runOrphanCaseWith(t, byID, tc, orphanEnv{
+		fs:        testutil.NewMemFS(),
+		outputDir: testOutputDir,
+		sourceDir: testSourceDir,
+	})
+}
+
+func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc orphanCaseFixture, env orphanEnv) {
+	t.Helper()
 	ctx := t.Context()
-	mfs := testutil.NewMemFS()
+	fs := env.fs
+	if err := fs.MkdirAll(env.sourceDir, 0o755); err != nil {
+		t.Fatalf("create source directory %q: %v", env.sourceDir, err)
+	}
+	if err := fs.MkdirAll(env.outputDir, 0o755); err != nil {
+		t.Fatalf("create output directory %q: %v", env.outputDir, err)
+	}
 	dbPath := filepath.Join(t.TempDir(), "peasant.db")
 	db, err := store.Open(dbPath)
 	if err != nil {
@@ -185,6 +267,7 @@ func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphan
 	allowed := orphanAllowedSet(tc.Allowed)
 	excluded := orphanStringSet(tc.Excluded)
 	filtered := orphanFilteredSet(tc.Filtered)
+	byteBaselines := make(map[string]map[string][]byte, len(tc.UnchangedBytes))
 
 	for runIndex, run := range runs {
 		for id, parent := range run.Reparent {
@@ -195,12 +278,12 @@ func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphan
 		if runIndex == 0 && len(discovered) == 0 {
 			discovered = tc.Discovered
 		}
-		adapters, indexers := orphanAdapters(t, mfs, byID, discovered, reparents, selfParents, failIDs)
-		cfg := makePipelineConfig(testOutputDir)
+		adapters, indexers := orphanAdapters(t, env, byID, discovered, reparents, selfParents, failIDs)
+		cfg := makePipelineConfig(env.outputDir)
 		cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
-			ingest.HarnessClaudeCode: {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(testSourceDir)}, Enabled: true},
-			ingest.HarnessCodex:      {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(testSourceDir)}, Enabled: true},
-			ingest.HarnessOpenCode:   {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(testSourceDir)}, Enabled: true},
+			ingest.HarnessClaudeCode: {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(env.sourceDir)}, Enabled: true},
+			ingest.HarnessCodex:      {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(env.sourceDir)}, Enabled: true},
+			ingest.HarnessOpenCode:   {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(env.sourceDir)}, Enabled: true},
 		}
 		cfg.StalenessThreshold = 0
 		if allowed != nil {
@@ -216,7 +299,7 @@ func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphan
 				return filtered[string(s.SessionID)]
 			}
 		}
-		pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db),
 			ingest.WithIndexers(indexers))
 		if err != nil {
@@ -225,9 +308,23 @@ func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphan
 		if _, err := pipeline.Run(ctx); err != nil {
 			t.Fatalf("run %d Run: %v", runIndex, err)
 		}
+		for _, id := range tc.UnchangedBytes {
+			pair := orphanManagedPairBytes(t, env, id)
+			if runIndex == 0 {
+				byteBaselines[id] = pair
+				continue
+			}
+			baseline, ok := byteBaselines[id]
+			if !ok {
+				t.Fatalf("case %q: no managed-byte baseline for %q", tc.Name, id)
+			}
+			if !orphanBytesEqual(baseline, pair) {
+				t.Fatalf("case %q: managed bytes of %q changed after run %d; a later parent must reconcile the cache without rewriting the child", tc.Name, id, runIndex)
+			}
+		}
 	}
 
-	assertOrphanExpectations(t, ctx, db, mfs, byID, tc, reparents)
+	assertOrphanExpectations(t, ctx, db, env, byID, tc, reparents)
 
 	if err := db.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
@@ -237,7 +334,44 @@ func runOrphanCase(t *testing.T, byID map[string]orphanSessionFixture, tc orphan
 		t.Fatalf("reopen store: %v", err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	assertOrphanExpectations(t, ctx, reopened, mfs, byID, tc, reparents)
+	assertOrphanExpectations(t, ctx, reopened, env, byID, tc, reparents)
+	for _, id := range tc.UnchangedBytes {
+		if !orphanBytesEqual(byteBaselines[id], orphanManagedPairBytes(t, env, id)) {
+			t.Fatalf("case %q: managed bytes of %q changed across the SQLite reopen", tc.Name, id)
+		}
+	}
+}
+
+// orphanManagedPairBytes reads the managed metadata and transcript a stored
+// session owns at its stable root location. A relocation would make this fail,
+// which is the point: the case declares that the child must not move.
+func orphanManagedPairBytes(t *testing.T, env orphanEnv, id string) map[string][]byte {
+	t.Helper()
+	base := filepath.Join(env.outputDir, testutil.TestHostSlug, id)
+	out := make(map[string][]byte, 2)
+	metadata, err := env.fs.ReadFile(filepath.Join(base, id+defaults.MetadataSuffix))
+	if err != nil {
+		t.Fatalf("read managed metadata for %q at %q: %v", id, base, err)
+	}
+	out["metadata"] = metadata
+	transcript, err := env.fs.ReadFile(filepath.Join(base, id+"--transcript.jsonl"))
+	if err != nil {
+		t.Fatalf("read managed transcript for %q at %q: %v", id, base, err)
+	}
+	out["transcript"] = transcript
+	return out
+}
+
+func orphanBytesEqual(a, b map[string][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, data := range a {
+		if !bytes.Equal(data, b[name]) {
+			return false
+		}
+	}
+	return true
 }
 
 func orphanAllowedSet(raw *[]string) map[ingest.SessionID]bool {
@@ -272,7 +406,7 @@ func orphanFilteredSet(raw *[]string) map[string]bool {
 
 func orphanAdapters(
 	t *testing.T,
-	mfs *testutil.MemFS,
+	env orphanEnv,
 	byID map[string]orphanSessionFixture,
 	discovered []string,
 	reparents map[string]*string,
@@ -295,8 +429,8 @@ func orphanAdapters(
 			t.Fatalf("NewSessionID(%q): %v", fixture.ID, err)
 		}
 		harness := orphanHarness(t, fixture.Harness)
-		sourcePath := "/sources/" + fixture.ID + ".jsonl"
-		if err := mfs.WriteFile(sourcePath, []byte(fixture.Transcript+"\n"), 0o644); err != nil {
+		sourcePath := filepath.Join(env.sourceDir, fixture.ID+".jsonl")
+		if err := env.fs.WriteFile(sourcePath, []byte(fixture.Transcript+"\n"), 0o644); err != nil {
 			t.Fatalf("write source %q: %v", sourcePath, err)
 		}
 		session := ingest.DiscoveredSession{
@@ -383,7 +517,7 @@ func assertOrphanExpectations(
 	t *testing.T,
 	ctx context.Context,
 	db *store.Store,
-	mfs *testutil.MemFS,
+	env orphanEnv,
 	byID map[string]orphanSessionFixture,
 	tc orphanCaseFixture,
 	reparents map[string]*string,
@@ -431,8 +565,8 @@ func assertOrphanExpectations(
 		}
 	}
 	for _, id := range tc.ExpectRootOwned {
-		rootPath := filepath.Join(testOutputDir, testutil.TestHostSlug, id, id+defaults.MetadataSuffix)
-		if _, err := mfs.ReadFile(rootPath); err != nil {
+		rootPath := filepath.Join(env.outputDir, testutil.TestHostSlug, id, id+defaults.MetadataSuffix)
+		if _, err := env.fs.ReadFile(rootPath); err != nil {
 			t.Fatalf("case %q: expected %q to own its root location %q: %v", tc.Name, id, rootPath, err)
 		}
 	}
@@ -448,8 +582,8 @@ func assertOrphanExpectations(
 		if parent == nil {
 			t.Fatalf("case %q: nested expectation for %q has no logical parent", tc.Name, id)
 		}
-		nestedPath := filepath.Join(testOutputDir, testutil.TestHostSlug, *parent, "subagents", id, id+defaults.MetadataSuffix)
-		if _, err := mfs.ReadFile(nestedPath); err != nil {
+		nestedPath := filepath.Join(env.outputDir, testutil.TestHostSlug, *parent, "subagents", id, id+defaults.MetadataSuffix)
+		if _, err := env.fs.ReadFile(nestedPath); err != nil {
 			t.Fatalf("case %q: expected %q to install under its available parent at %q: %v", tc.Name, id, nestedPath, err)
 		}
 	}
@@ -472,7 +606,7 @@ func assertOrphanExpectations(
 		// V1 logical evidence for an orphan with a nil cache survives in the
 		// managed metadata file; the DB logical reader falls back to the cache.
 		// Assert the file evidence directly so the relation is proven retained.
-		fileParent := orphanMetadataParent(t, mfs, id)
+		fileParent := orphanMetadataParent(t, env, id)
 		if !orphanOptionalEqual(fileParent, wantLogical) {
 			t.Fatalf("case %q: managed metadata logical parent of %q = %v, want %v", tc.Name, id, orphanDisplay(fileParent), orphanDisplay(wantLogical))
 		}
@@ -503,17 +637,17 @@ func orphanDisplay(v *string) string {
 // metadata file in the test filesystem. It checks the stable root-owned
 // location first, then the parent-nested location, so orphans stored at the
 // root remain readable while nested children resolve normally.
-func orphanMetadataParent(t *testing.T, mfs *testutil.MemFS, id string) *string {
+func orphanMetadataParent(t *testing.T, env orphanEnv, id string) *string {
 	t.Helper()
 	metaName := id + "--metadata.json"
-	rootPath := filepath.Join(testOutputDir, testutil.TestHostSlug, id, metaName)
-	if data, err := mfs.ReadFile(rootPath); err == nil {
+	rootPath := filepath.Join(env.outputDir, testutil.TestHostSlug, id, metaName)
+	if data, err := env.fs.ReadFile(rootPath); err == nil {
 		return orphanParentFromMetadata(t, data)
 	}
 	// Fall back to a nested scan: the child may be stored under its available
 	// parent. Walk one level of the host directory for the session folder.
-	hostDir := filepath.Join(testOutputDir, testutil.TestHostSlug)
-	entries, err := mfs.ReadDir(hostDir)
+	hostDir := filepath.Join(env.outputDir, testutil.TestHostSlug)
+	entries, err := env.fs.ReadDir(hostDir)
 	if err != nil {
 		t.Fatalf("read host dir %q: %v", hostDir, err)
 	}
@@ -522,7 +656,7 @@ func orphanMetadataParent(t *testing.T, mfs *testutil.MemFS, id string) *string 
 			continue
 		}
 		nested := filepath.Join(hostDir, entry.Name(), "subagents", id, metaName)
-		if data, err := mfs.ReadFile(nested); err == nil {
+		if data, err := env.fs.ReadFile(nested); err == nil {
 			return orphanParentFromMetadata(t, data)
 		}
 	}

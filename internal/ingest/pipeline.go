@@ -550,8 +550,11 @@ func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map
 		// A transient store failure must not re-home an admitted child under a
 		// root it does not own. Keep the legacy available-parent edge for the
 		// unresolved targets; the next successful harvest resolves them.
+		// The cause is classified into a bounded reason code before logging:
+		// the raw dependency error can carry a private path or stored value,
+		// and this warning must never reproduce it.
 		slog.Warn("pipeline: resolve stored scheduling parents",
-			"error", err,
+			"reason", storeLookupReasonCode(err),
 			"pending_parents", len(ids),
 			"what", "could not confirm stored logical parents for independent child scheduling",
 			"why", "the session-location lookup failed",
@@ -1213,6 +1216,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			}
 		}
 	}
+
+	// Heal the FK availability cache of stored independently admitted children
+	// whose logical parent this harvest just made available. Only the cache
+	// moves; the children were never re-extracted, relocated or re-selected.
+	p.reconcileOrphanParentCaches(ctx, toProcessEntries)
 
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
 	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream)
