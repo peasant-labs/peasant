@@ -68,6 +68,7 @@ func (line cursorJSONLLine) content() json.RawMessage {
 type cursorContentBlock struct {
 	Type      string          `json:"type"`
 	Name      string          `json:"name"`
+	ToolName  string          `json:"tool_name"`
 	ID        string          `json:"id"`
 	ToolUseID string          `json:"tool_use_id"`
 	Text      string          `json:"text"`

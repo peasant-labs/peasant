@@ -32,6 +32,28 @@ required_names:
   - claude-summary-full-text
   - claude-result-full-text
   - claude-error-full-text
+  - claude-control-permission-mode
+  - claude-control-mode
+  - claude-control-agent-setting
+  - claude-control-agent-name
+  - claude-control-ai-title
+  - claude-control-atis-latch
+  - claude-control-attachment
+  - claude-control-bridge-session
+  - claude-control-started
+  - claude-control-cost-state
+  - claude-control-custom-title
+  - claude-control-file-history-delta
+  - claude-control-frame-link
+  - claude-control-fork-context-ref
+  - claude-control-worktree-state
+  - claude-control-launched
+  - claude-control-pr-link
+  - claude-control-artifact
+  - claude-control-compact-boundary
+  - claude-control-last-prompt
+  - claude-control-tool-reference
+  - claude-unknown-record-kind
   - codex-reasoning-full-text
 cases:
   - name: cursor-user-literal-query-whitespace
@@ -164,4 +186,158 @@ cases:
   - name: strike-unknown-event
     harness: strike
     source: '{"type":"assistant.future","data":{"text":"not represented"}}'
+    reject: true
+  # Control records: harness state rather than conversation content. Each must
+  # certify, keep its provider kind and payload, and surface a factual preview.
+  - name: claude-control-permission-mode
+    harness: claude-code
+    control: true
+    source: '{"type":"permission-mode","permissionMode":"acceptEdits","uuid":"pm-1"}'
+    want_part_type: permission-mode
+    want_role: system
+    want_preview: "permission mode: acceptEdits"
+    want_extra: '"permissionMode":"acceptEdits"'
+  - name: claude-control-mode
+    harness: claude-code
+    control: true
+    source: '{"type":"mode","mode":"plan","uuid":"mode-1"}'
+    want_part_type: mode
+    want_role: system
+    want_preview: "mode: plan"
+  - name: claude-control-agent-setting
+    harness: claude-code
+    control: true
+    source: '{"type":"agent-setting","agentSetting":"reviewer","agentId":"agent-7","uuid":"as-1"}'
+    want_part_type: agent-setting
+    want_role: system
+    want_preview: "agent: reviewer"
+    want_extra: '"agentId":"agent-7"'
+  - name: claude-control-agent-name
+    harness: claude-code
+    control: true
+    source: '{"type":"agent-name","agentName":"scout","uuid":"an-1"}'
+    want_part_type: agent-name
+    want_role: system
+    want_preview: "agent name: scout"
+  - name: claude-control-ai-title
+    harness: claude-code
+    control: true
+    source: '{"type":"ai-title","title":"Synthetic fixture session","uuid":"t-1"}'
+    want_part_type: ai-title
+    want_role: system
+    want_preview: "session title: Synthetic fixture session"
+  - name: claude-control-atis-latch
+    harness: claude-code
+    control: true
+    source: '{"type":"atis-latch","state":"armed","uuid":"al-1"}'
+    want_part_type: atis-latch
+    want_role: system
+    want_preview: "atis-latch: armed"
+  - name: claude-control-attachment
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachmentType":"hook_success","hookName":"post-tool","uuid":"at-1"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra: '"attachmentType":"hook_success"'
+  - name: claude-control-bridge-session
+    harness: claude-code
+    control: true
+    source: '{"type":"bridge-session","bridgeSessionId":"bridge-1","uuid":"bs-1"}'
+    want_part_type: bridge-session
+    want_role: system
+    want_preview: "bridge-session: bridge-1"
+  - name: claude-control-started
+    harness: claude-code
+    control: true
+    source: '{"type":"started","key":"main","agent":"lead","uuid":"st-1"}'
+    want_part_type: started
+    want_role: system
+    want_preview: "started: main"
+  - name: claude-control-cost-state
+    harness: claude-code
+    control: true
+    source: '{"type":"cost-state","costUsd":0.12,"durationMs":1500,"linesAdded":12,"linesRemoved":3,"uuid":"cs-1"}'
+    want_part_type: cost-state
+    want_role: system
+    want_preview: "cost: 0.12, duration: 1500ms, lines: +12/-3"
+  - name: claude-control-custom-title
+    harness: claude-code
+    control: true
+    source: '{"type":"custom-title","title":"Synthetic title","uuid":"ct-1"}'
+    want_part_type: custom-title
+    want_role: system
+    want_preview: "custom-title: Synthetic title"
+  - name: claude-control-file-history-delta
+    harness: claude-code
+    control: true
+    source: '{"type":"file-history-delta","path":"/synthetic/file.go","uuid":"fh-1"}'
+    want_part_type: file-history-delta
+    want_role: system
+    want_preview: "file-history-delta: /synthetic/file.go"
+  - name: claude-control-frame-link
+    harness: claude-code
+    control: true
+    source: '{"type":"frame-link","frameId":"frame-1","uuid":"fl-1"}'
+    want_part_type: frame-link
+    want_role: system
+    want_preview: "frame-link: frame-1"
+  - name: claude-control-fork-context-ref
+    harness: claude-code
+    control: true
+    source: '{"type":"fork-context-ref","forkId":"fork-1","uuid":"fc-1"}'
+    want_part_type: fork-context-ref
+    want_role: system
+    want_preview: "fork-context-ref: fork-1"
+  - name: claude-control-worktree-state
+    harness: claude-code
+    control: true
+    source: '{"type":"worktree-state","branch":"synthetic-branch","uuid":"ws-1"}'
+    want_part_type: worktree-state
+    want_role: system
+    want_preview: "worktree-state: synthetic-branch"
+  - name: claude-control-launched
+    harness: claude-code
+    control: true
+    source: '{"type":"launched","launchId":"launch-1","uuid":"l-1"}'
+    want_part_type: launched
+    want_role: system
+    want_preview: "launched: launch-1"
+  - name: claude-control-pr-link
+    harness: claude-code
+    control: true
+    source: '{"type":"pr-link","number":42,"repository":"peasant-labs/peasant","uuid":"pr-1"}'
+    want_part_type: pr-link
+    want_role: system
+    want_preview: "PR #42 (peasant-labs/peasant)"
+  - name: claude-control-artifact
+    harness: claude-code
+    control: true
+    source: '{"type":"artifact-autoreact-ledger","artifactId":"ledger-1","uuid":"ar-1"}'
+    want_part_type: artifact-autoreact-ledger
+    want_role: system
+    want_preview: "artifact-autoreact-ledger: ledger-1"
+  - name: claude-control-compact-boundary
+    harness: claude-code
+    control: true
+    source: '{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":120000,"postTokens":40000},"uuid":"cb-1"}'
+    want_part_type: compact-boundary
+    want_role: system
+    want_preview: "Context compacted (auto): 120000 -> 40000 tokens"
+    want_extra: '"compactMetadata"'
+  - name: claude-control-last-prompt
+    harness: claude-code
+    control: true
+    source: '{"type":"last-prompt","prompt":"synthetic prompt","uuid":"lp-1"}'
+    want_preview_absent: true
+  - name: claude-control-tool-reference
+    harness: claude-code
+    control: true
+    source: '{"type":"user","message":{"role":"user","content":[{"type":"tool_reference","tool_name":"Bash"}]},"uuid":"tr-1"}'
+    want_part_type: tool_reference
+    want_role: user
+  - name: claude-unknown-record-kind
+    harness: claude-code
+    source: '{"type":"future-record","payload":"a record kind no shipped build represents"}'
     reject: true

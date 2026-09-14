@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -52,6 +53,15 @@ type captureFixture struct {
 	Source         string         `yaml:"source"`
 	Reject         bool           `yaml:"reject"`
 	WantError      bool           `yaml:"want_error"`
+	// Control marks a record that carries harness state rather than readable
+	// conversation text, so the shared tail search does not apply to it and the
+	// shape assertions below do.
+	Control           bool   `yaml:"control"`
+	WantPartType      string `yaml:"want_part_type"`
+	WantRole          string `yaml:"want_role"`
+	WantPreview       string `yaml:"want_preview"`
+	WantPreviewAbsent bool   `yaml:"want_preview_absent"`
+	WantExtra         string `yaml:"want_extra"`
 }
 
 func captureFixtureSource(t *testing.T, fixture captureFixture, fs *testutil.MemFS, text string) (ingest.DiscoveredSession, []byte) {
@@ -132,6 +142,11 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if fixture.Control {
+					// Control records carry no conversation text; their entry
+					// shape is asserted by TestClaudeControlRecordEntryShape.
+					return
+				}
 				found := false
 				for _, entry := range result.Entries {
 					value := entry.ContentPreview
@@ -163,7 +178,7 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 
 func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 	for _, fixture := range loadCaptureFixtures(t) {
-		if fixture.Reject {
+		if fixture.Reject || fixture.Control {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -356,4 +371,65 @@ func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
 	if _, err := idx.IndexTranscriptForCapture(t.Context(), session); err == nil {
 		t.Fatal("native omitted row certified from retained file")
 	}
+}
+
+// TestClaudeControlRecordEntryShape certifies a Claude control record and
+// asserts the observable entry it produces: its provider kind, role, retained
+// payload and preview. The fixture declares one case per represented kind.
+func TestClaudeControlRecordEntryShape(t *testing.T) {
+	for _, fixture := range loadCaptureFixtures(t) {
+		if !fixture.Control {
+			continue
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			fs := testutil.NewMemFS()
+			session, data := captureFixtureSource(t, fixture, fs, "shape fixture")
+			idx, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[fixture.Harness].(ingest.AuthoritativeTranscriptIndexer)
+			if !ok {
+				t.Fatalf("missing capture indexer for %s", fixture.Harness)
+			}
+			result, err := idx.IndexTranscriptBytesForCapture(context.Background(), session, data)
+			if err != nil {
+				t.Fatalf("control record refused: %v", err)
+			}
+			entry := findControlEntry(result.Entries, fixture)
+			if entry == nil {
+				t.Fatalf("no entry for %s", fixture.Source)
+			}
+			if fixture.WantRole != "" && entry.Role != ingest.Role(fixture.WantRole) {
+				t.Fatalf("role = %q, want %q", entry.Role, fixture.WantRole)
+			}
+			if fixture.WantPartType != "" && (entry.PartType == nil || *entry.PartType != fixture.WantPartType) {
+				t.Fatalf("part type = %v, want %q", entry.PartType, fixture.WantPartType)
+			}
+			if fixture.WantPreviewAbsent && entry.ContentPreview != nil {
+				t.Fatalf("preview = %q, want none", *entry.ContentPreview)
+			}
+			if fixture.WantPreview != "" && (entry.ContentPreview == nil || *entry.ContentPreview != fixture.WantPreview) {
+				t.Fatalf("preview = %v, want %q", entry.ContentPreview, fixture.WantPreview)
+			}
+			if fixture.WantExtra != "" && (entry.Extra == nil || !strings.Contains(*entry.Extra, fixture.WantExtra)) {
+				t.Fatalf("extra = %v, want substring %q", entry.Extra, fixture.WantExtra)
+			}
+		})
+	}
+}
+
+// findControlEntry returns the entry a control fixture names: the entry with the
+// declared part type, or the first depth=0 entry for a record kind.
+func findControlEntry(entries []schema.SessionEntry, fixture captureFixture) *schema.SessionEntry {
+	if fixture.WantPartType != "" {
+		for i := range entries {
+			if entries[i].PartType != nil && *entries[i].PartType == fixture.WantPartType {
+				return &entries[i]
+			}
+		}
+		return nil
+	}
+	for i := range entries {
+		if entries[i].Depth == 0 {
+			return &entries[i]
+		}
+	}
+	return nil
 }

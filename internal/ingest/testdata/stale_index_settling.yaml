@@ -53,7 +53,7 @@ transcripts:
   claude-unrepresented: |
     {"type":"user","uuid":"u1","message":{"role":"user","content":"inspect the retained fixture"}}
     {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
-    {"type":"agent-setting","setting":"a record kind no shipped build represents"}
+    {"type":"future-record","payload":"a record kind no shipped build represents"}
   codex-unrepresented: |
     {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
     {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
@@ -65,7 +65,7 @@ transcripts:
     {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
     {"type":"progress","message":{"content":"a control record carrying unrepresented content"}}
   claude-corruption-after-refusal: |
-    {"type":"agent-setting","setting":"a record kind no shipped build represents"}
+    {"type":"future-record","payload":"a record kind no shipped build represents"}
     {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","name":"missing-id","input":{"path":"."}}]}}
   codex-unknown-record: |
     {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
