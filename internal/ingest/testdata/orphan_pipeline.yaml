@@ -1,0 +1,280 @@
+sessions:
+  - id: 11111111-1111-4111-8111-111111111111
+    harness: codex
+    parent: null
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic parent transcript"}}'
+  - id: 22222222-2222-4222-8222-222222222222
+    harness: codex
+    parent: 11111111-1111-4111-8111-111111111111
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic child transcript"}}'
+  - id: 33333333-3333-4333-8333-333333333333
+    harness: codex
+    parent: null
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic alternate parent transcript"}}'
+  - id: 44444444-4444-4434-8434-444444444444
+    harness: opencode
+    parent: 11111111-1111-4111-8111-111111111111
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic sibling transcript"}}'
+  - id: 55555555-5555-4535-8535-555555555555
+    harness: opencode
+    parent: null
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic opencode root transcript"}}'
+  - id: 66666666-6666-4636-8636-666666666666
+    harness: claude-code
+    parent: null
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic legacy parent transcript"}}'
+  - id: 77777777-7777-4737-8737-777777777777
+    harness: claude-code
+    parent: 66666666-6666-4636-8636-666666666666
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic legacy child transcript"}}'
+  - id: 88888888-8888-4838-8838-888888888888
+    harness: codex
+    parent: 99999999-9999-4939-8939-999999999999
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic cycle a transcript"}}'
+  - id: 99999999-9999-4939-8939-999999999999
+    harness: codex
+    parent: 88888888-8888-4838-8838-888888888888
+    transcript: '{"type":"user","message":{"role":"user","content":"synthetic cycle b transcript"}}'
+cases:
+  - name: child-missing-parent-retained
+    discovered:
+      - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored:
+      - 11111111-1111-4111-8111-111111111111
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: null
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectRootOwned:
+      - 22222222-2222-4222-8222-222222222222
+  - name: child-unselected-parent-retained
+    discovered:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded: []
+    filtered:
+      - 22222222-2222-4222-8222-222222222222
+    failParents: []
+    expectStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored:
+      - 11111111-1111-4111-8111-111111111111
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: null
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectRootOwned:
+      - 22222222-2222-4222-8222-222222222222
+  - name: denied-child-stays-denied
+    discovered:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded:
+      - 22222222-2222-4222-8222-222222222222
+    filtered: null
+    failParents: []
+    expectStored:
+      - 11111111-1111-4111-8111-111111111111
+    expectNotStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectParentCache: {}
+    expectLogicalParent: {}
+  - name: cycle-pair-both-drain-cache-nil
+    discovered:
+      - 88888888-8888-4838-8838-888888888888
+      - 99999999-9999-4939-8939-999999999999
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 88888888-8888-4838-8838-888888888888
+      - 99999999-9999-4939-8939-999999999999
+    expectNotStored: []
+    expectParentCache:
+      88888888-8888-4838-8838-888888888888: null
+      99999999-9999-4939-8939-999999999999: null
+    expectLogicalParent: {}
+    expectRootOwned:
+      - 88888888-8888-4838-8838-888888888888
+      - 99999999-9999-4939-8939-999999999999
+  - name: self-parent-conflict-clears-cache
+    discovered:
+      - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    selfParent:
+      - 22222222-2222-4222-8222-222222222222
+    expectStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored: []
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: null
+    expectLogicalParent: {}
+    expectRootOwned:
+      - 22222222-2222-4222-8222-222222222222
+  - name: parent-extraction-failure-child-drains
+    discovered:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents:
+      - 11111111-1111-4111-8111-111111111111
+    expectStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored:
+      - 11111111-1111-4111-8111-111111111111
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: null
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectNested:
+      - 22222222-2222-4222-8222-222222222222
+  - name: changed-target-clears-old-cache
+    runs:
+      - discovered:
+          - 11111111-1111-4111-8111-111111111111
+          - 22222222-2222-4222-8222-222222222222
+      - discovered:
+          - 33333333-3333-4333-8333-333333333333
+          - 22222222-2222-4222-8222-222222222222
+        reparent:
+          22222222-2222-4222-8222-222222222222: 33333333-3333-4333-8333-333333333333
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    expectNotStored: []
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: 33333333-3333-4333-8333-333333333333
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 33333333-3333-4333-8333-333333333333
+    expectNested:
+      - 22222222-2222-4222-8222-222222222222
+  - name: explicit-none-clears-cache
+    runs:
+      - discovered:
+          - 11111111-1111-4111-8111-111111111111
+          - 22222222-2222-4222-8222-222222222222
+      - discovered:
+          - 22222222-2222-4222-8222-222222222222
+        reparent:
+          22222222-2222-4222-8222-222222222222: null
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored: []
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: null
+    expectLogicalParent: {}
+    expectRootOwned:
+      - 22222222-2222-4222-8222-222222222222
+  - name: later-parent-cache-only-backfill
+    runs:
+      - discovered:
+          - 22222222-2222-4222-8222-222222222222
+      - discovered:
+          - 11111111-1111-4111-8111-111111111111
+          - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored: []
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectNested:
+      - 22222222-2222-4222-8222-222222222222
+  - name: no-sibling-parent-widening
+    discovered:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 44444444-4444-4434-8434-444444444444
+    allowed:
+      - 22222222-2222-4222-8222-222222222222
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 44444444-4444-4434-8434-444444444444
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: null
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectRootOwned:
+      - 22222222-2222-4222-8222-222222222222
+  - name: stored-parent-keeps-available-edge
+    runs:
+      - discovered:
+          - 11111111-1111-4111-8111-111111111111
+          - 22222222-2222-4222-8222-222222222222
+      - discovered:
+          - 22222222-2222-4222-8222-222222222222
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expectNotStored: []
+    expectParentCache:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectLogicalParent:
+      22222222-2222-4222-8222-222222222222: 11111111-1111-4111-8111-111111111111
+    expectNested:
+      - 22222222-2222-4222-8222-222222222222
+  - name: other-harness-legacy-inheritance
+    discovered:
+      - 66666666-6666-4636-8636-666666666666
+      - 77777777-7777-4737-8737-777777777777
+    allowed: null
+    excluded: []
+    filtered:
+      - 77777777-7777-4737-8737-777777777777
+    failParents: []
+    expectStored: []
+    expectNotStored:
+      - 66666666-6666-4636-8636-666666666666
+      - 77777777-7777-4737-8737-777777777777
+    expectParentCache: {}
+    expectLogicalParent: {}
+  - name: other-harness-legacy-orphan-skip
+    discovered:
+      - 77777777-7777-4737-8737-777777777777
+    allowed: null
+    excluded: []
+    filtered: null
+    failParents: []
+    expectStored: []
+    expectNotStored:
+      - 77777777-7777-4737-8737-777777777777
+    expectParentCache: {}
+    expectLogicalParent: {}
