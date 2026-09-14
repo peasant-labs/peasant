@@ -575,7 +575,13 @@ type codexBlockClassifier struct {
 	registry       map[string]codexKindAttribution
 	correlated     map[string]bool
 	blocks         []ClassifiedBlock
-	useKeys        map[string]bool
+	// retained holds inherited blocks whose bytes are preserved locally without
+	// becoming main or earlier conversational entries. They carry Retained and
+	// the captured segment ordinal instead of a projection section.
+	retained        []ClassifiedBlock
+	retaining       bool
+	retainedSegment int
+	useKeys         map[string]bool
 	// callCarriers maps one native call identity to the depth-0 assistant
 	// carrier its tool_use created. A matching tool_result attaches to that
 	// SAME carrier instead of inventing a second empty carrier, so one folded
@@ -590,10 +596,32 @@ type codexBlockClassifier struct {
 	uncertain  bool
 }
 
+// emit appends one classified block to the active stream. While the current
+// node is proven inherited, the block is held as retained local evidence
+// instead: it keeps its content, native key and provenance, is attached to the
+// captured segment it came from, and never enters a main or earlier
+// conversational partition.
+func (c *codexBlockClassifier) emit(block ClassifiedBlock) {
+	if !c.retaining {
+		c.blocks = append(c.blocks, block)
+		return
+	}
+	block.Retained = true
+	block.SegmentOrdinal = c.retainedSegment
+	block.Section = ProjectionSection{}
+	block.Uncertain = false
+	block.UncertainSubtree = false
+	block.AmbiguousPairKey = ""
+	block.SubmissionKey = ""
+	c.retained = append(c.retained, block)
+}
+
 // finish demotes orphan tool results to depth-0 entries and reports whether
 // an uncertain earlier section is declared. A result without its call block
 // in this capture keeps its content and identity at depth 0 instead of
 // failing the candidate: the pairing evidence is absent, not the content.
+// Retained inherited blocks are appended after the emitted blocks; they carry
+// no partition and need no orphan demotion.
 func (c *codexBlockClassifier) finish() ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
 	for i := range c.blocks {
 		block := &c.blocks[i]
@@ -610,7 +638,7 @@ func (c *codexBlockClassifier) finish() ([]ClassifiedBlock, []schema.EarlierHist
 	if c.uncertain {
 		earlier = append(earlier, schema.EarlierHistoryUncertainMigrated)
 	}
-	return c.blocks, earlier, nil
+	return append(append([]ClassifiedBlock(nil), c.blocks...), c.retained...), earlier, nil
 }
 
 // classifyNode converts one captured node into zero or more classified
@@ -624,6 +652,17 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		return fmt.Errorf("ingest.ClassifyCodexBlocks: captured node %q carries ownership %q outside the closed capture set; the block cannot be placed; replay the native history through the supported capture", node.NativeKey, node.Ownership)
 	}
 	metadata := decodeCodexEnvelopeMetadata(node.Metadata)
+	// A node whose captured ownership or per-record envelope proves it inherited
+	// is retained as local evidence, never emitted as a main or earlier
+	// conversational entry.
+	if ownershipOf(node, metadata) == schema.ContentOwnershipInherited {
+		c.retaining = true
+		c.retainedSegment = node.SegmentOrdinal
+	}
+	defer func() {
+		c.retaining = false
+		c.retainedSegment = 0
+	}()
 	payload := decodeCodexItemPayload(node.Payload)
 	switch node.NativeType {
 	case "message":
@@ -762,7 +801,7 @@ func (c *codexBlockClassifier) classifyContentBlock(node CodexCapturedNode, payl
 	section := sectionOf(ownership)
 	uncertain := ownership == schema.ContentOwnershipUncertain
 	if context, ok := c.envelopeContext(node, metadata, ownership); ok {
-		c.blocks = append(c.blocks, ClassifiedBlock{
+		c.emit(ClassifiedBlock{
 			NativeKey: nativeKey,
 			Section:   section,
 			Uncertain: uncertain,
@@ -787,7 +826,7 @@ func (c *codexBlockClassifier) classifyContentBlock(node CodexCapturedNode, payl
 		kind = codexKindAttribution{}
 	}
 	if known && codexKindContentConflict(block.Kind, block.ContentType) {
-		c.blocks = append(c.blocks, ClassifiedBlock{
+		c.emit(ClassifiedBlock{
 			NativeKey: nativeKey,
 			Section:   section,
 			Uncertain: uncertain,
@@ -812,7 +851,7 @@ func (c *codexBlockClassifier) classifyContentBlock(node CodexCapturedNode, payl
 		if origin != schema.ContentOriginUnknown {
 			evidence = schema.EvidenceNativeTyped
 		}
-		c.blocks = append(c.blocks, ClassifiedBlock{
+		c.emit(ClassifiedBlock{
 			NativeKey: nativeKey,
 			Section:   section,
 			Uncertain: uncertain,
@@ -927,7 +966,7 @@ func (c *codexBlockClassifier) emitKnownBlock(node CodexCapturedNode, payload co
 		}
 	}
 	evidence := schema.EvidenceNativeTyped
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey:     nativeKey,
 		SubmissionKey: submission,
 		Section:       sectionOf(ownership),
@@ -1026,7 +1065,7 @@ func (c *codexBlockClassifier) classifyEmptyMessage(node CodexCapturedNode, payl
 		delivery = schema.DeliveryOriginInheritedContext
 	}
 	nativeKey := fmt.Sprintf("%s/b0", node.NativeKey)
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey: nativeKey,
 		Section:   sectionOf(ownership),
 		Uncertain: ownership == schema.ContentOwnershipUncertain,
@@ -1081,7 +1120,7 @@ func (c *codexBlockClassifier) classifyCanonicalUserMessage(node CodexCapturedNo
 	if payload.Delivery.isCorrelated() {
 		actor = schema.ActorOriginAgentDelegate
 	}
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey:     nativeKey,
 		SubmissionKey: submission,
 		Section:       sectionOf(ownership),
@@ -1138,7 +1177,7 @@ func (c *codexBlockClassifier) classifyAgentMessage(node CodexCapturedNode, payl
 	}
 	text := codexJoinBlockTexts(payload.Content)
 	nativeKey := fmt.Sprintf("%s/b0", node.NativeKey)
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey: nativeKey,
 		Section:   sectionOf(ownership),
 		Uncertain: ownership == schema.ContentOwnershipUncertain,
@@ -1176,7 +1215,7 @@ func (c *codexBlockClassifier) classifyReasoning(node CodexCapturedNode, payload
 		if ownership == schema.ContentOwnershipInherited {
 			delivery = schema.DeliveryOriginInheritedContext
 		}
-		c.blocks = append(c.blocks, ClassifiedBlock{
+		c.emit(ClassifiedBlock{
 			NativeKey:   nativeKey,
 			Section:     sectionOf(ownership),
 			Role:        RoleAssistant,
@@ -1213,7 +1252,7 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 	}
 	if carrierKey == "" {
 		carrierKey = node.NativeKey + "/carrier"
-		c.blocks = append(c.blocks, ClassifiedBlock{
+		c.emit(ClassifiedBlock{
 			NativeKey: carrierKey,
 			Section:   sectionOf(ownership),
 			Uncertain: ownership == schema.ContentOwnershipUncertain,
@@ -1242,7 +1281,7 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 	}
 	c.callCarriers[callKey] = carrierKey
 	toolInput := codexToolBytes(payload.Arguments, payload.Input)
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey:        node.NativeKey + "/call",
 		Section:          sectionOf(ownership),
 		Uncertain:        ownership == schema.ContentOwnershipUncertain,
@@ -1316,7 +1355,7 @@ func (c *codexBlockClassifier) classifyToolResult(node CodexCapturedNode, payloa
 	} else {
 		block.Depth = 0
 	}
-	c.blocks = append(c.blocks, block)
+	c.emit(block)
 }
 
 // classifyUnlistedNative preserves a recognized native item type the kind
@@ -1331,7 +1370,7 @@ func (c *codexBlockClassifier) classifyUnlistedNative(node CodexCapturedNode, pa
 	}
 	role := codexPresentationRole(node.NativeRole)
 	nativeKey := fmt.Sprintf("%s/b0", node.NativeKey)
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey: nativeKey,
 		Section:   sectionOf(ownership),
 		Uncertain: ownership == schema.ContentOwnershipUncertain,
@@ -1357,7 +1396,7 @@ func (c *codexBlockClassifier) classifyUnlistedNative(node CodexCapturedNode, pa
 func (c *codexBlockClassifier) emitUncertainBlock(node CodexCapturedNode, block codexMessageBlock, index int) {
 	c.uncertain = true
 	nativeKey := fmt.Sprintf("%s/b%d", node.NativeKey, index)
-	c.blocks = append(c.blocks, ClassifiedBlock{
+	c.emit(ClassifiedBlock{
 		NativeKey: nativeKey,
 		Section:   ProjectionSection{Earlier: true, Index: 1},
 		Uncertain: true,

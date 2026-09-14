@@ -45,7 +45,12 @@ func MapCodexGraph(thread CodexThreadEvidence, prior *schema.UnifiedMetadata) (C
 		mapping.Relationships = append(mapping.Relationships, *contextFrom)
 	}
 	if err := schema.ValidateSessionRelationships(mapping.Relationships); err != nil {
-		return CodexGraphMapping{}, fmt.Errorf("ingest.MapCodexGraph: the mapped Codex relationships for thread %q are invalid; navigation could target the wrong session; retain the capture and correct the native parent evidence: %w", thread.StableThreadID, err)
+		return CodexGraphMapping{}, &codexCandidateRefusal{
+			Operation: "MapCodexGraph",
+			Reason:    "the mapped Codex relationships are not a valid navigation graph",
+			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Recovery:  "retain the capture, correct the native parent evidence, and retry harvest",
+		}
 	}
 	return mapping, nil
 }
@@ -212,6 +217,22 @@ func (idx *CodexIndexer) IndexCodexCandidateV2(ctx context.Context, session Disc
 	return candidate.V2, nil
 }
 
+// codexCandidateRefusal is the safe refusal for the Codex candidate boundary.
+// It names a fixed operation, reason, caller effect, and recovery, and never
+// carries a native locator, a raw validator value, or a wrapped filesystem
+// error, so a refusal can be logged or surfaced without leaking private
+// locations.
+type codexCandidateRefusal struct {
+	Operation string
+	Reason    string
+	Effect    string
+	Recovery  string
+}
+
+func (e *codexCandidateRefusal) Error() string {
+	return fmt.Sprintf("ingest.%s: %s; %s; %s", e.Operation, e.Reason, e.Effect, e.Recovery)
+}
+
 // CodexSourceProof is the source evidence a Codex candidate carries for
 // maintenance activation. It names the stable thread, the authoritative
 // pointer, the physical incarnation, the capture fingerprint, and the
@@ -227,13 +248,17 @@ type CodexSourceProof struct {
 }
 
 // CodexCandidate is one validated Codex managed-generation candidate with
-// its source proof. A complete candidate measures its input submissions; an
-// incomplete_new candidate omits the count until a complete inspection
-// exists. Activation, file staging, and database writes belong to
-// maintenance activation, not to this candidate.
+// its source proof and the full content bytes its generation names. A complete
+// candidate measures its input submissions; an incomplete_new candidate omits
+// the count until a complete inspection exists. Activation, file staging, and
+// database writes belong to maintenance activation, not to this candidate.
 type CodexCandidate struct {
-	V2          indexformat.V2
-	Proof       CodexSourceProof
+	V2    indexformat.V2
+	Proof CodexSourceProof
+	// Content holds the full bytes for every content record the generation
+	// names, including retained inherited evidence, so an activation can stage
+	// a self-contained candidate without reopening the native source.
+	Content     map[schema.SourceEntryRef][]byte
 	Diagnostics []DiagnosticEntry
 }
 
@@ -262,7 +287,12 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 		return CodexCandidate{}, fmt.Errorf("ingest.BuildCodexCandidate: the captured history carries no stable thread identity; the candidate cannot be addressed; capture the native history before projecting it")
 	}
 	if _, err := NewSessionID(input.History.StableThreadID); err != nil {
-		return CodexCandidate{}, fmt.Errorf("ingest.BuildCodexCandidate: the captured stable thread identity is malformed; the candidate cannot be stored; capture the native history before projecting it: %w", err)
+		return CodexCandidate{}, &codexCandidateRefusal{
+			Operation: "BuildCodexCandidate",
+			Reason:    "the captured stable thread identity is not a canonical identifier",
+			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Recovery:  "recapture the native history and retry harvest",
+		}
 	}
 	if input.GenerationID == "" {
 		return CodexCandidate{}, fmt.Errorf("ingest.BuildCodexCandidate: no generation id was supplied for thread %q; activation owns generation addressing and the projection invents none; assign the installed generation id", input.History.StableThreadID)
@@ -306,7 +336,7 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 		Segments:             input.History.Segments,
 		Prior:                input.PriorState,
 	}
-	result, err := BuildV2(capture, allocator)
+	result, content, err := BuildV2WithContent(capture, allocator)
 	if err != nil {
 		return CodexCandidate{}, err
 	}
@@ -320,6 +350,7 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 			Completeness:     input.History.Completeness,
 			GenerationID:     input.GenerationID,
 		},
+		Content:     content,
 		Diagnostics: input.History.Diagnostics,
 	}, nil
 }
@@ -350,7 +381,7 @@ func (idx *CodexIndexer) BuildCodexCandidateForSession(ctx context.Context, sess
 	if history.Pointer != "" {
 		identified.SourcePath = ResolvedPath(history.Pointer)
 	}
-	base, err := idx.extractCandidateMetadata(ctx, identified)
+	base, err := idx.extractCandidateMetadata(ctx, identified, history.RawBytes)
 	if err != nil {
 		return CodexCandidate{}, err
 	}
@@ -364,18 +395,16 @@ func (idx *CodexIndexer) BuildCodexCandidateForSession(ctx context.Context, sess
 	})
 }
 
-// extractCandidateMetadata extracts the metadata base over the verified
-// captured incarnation using the retained extraction kernel: model,
-// version, timestamps, token totals, and recorded working-directory and git
-// context. Counts, purpose, relationships, and identity come from the
-// candidate projection, never from this legacy extraction. Project identity
-// derivation needs the harvester's salt and git resolver, so it stays with
-// the retained path and maintenance activation.
-func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
-	data, err := idx.fs.ReadFile(string(session.SourcePath))
-	if err != nil {
-		return nil, fmt.Errorf("ingest.CodexIndexer.BuildCodexCandidateForSession: read %q for session %s: %w", session.SourcePath, session.SessionID, err)
-	}
+// extractCandidateMetadata extracts the metadata base from the verified
+// capture bytes using the retained extraction kernel: model, version,
+// timestamps, token totals, and recorded working-directory and git context.
+// Counts, purpose, relationships, and identity come from the candidate
+// projection, never from this legacy extraction. It never reopens the mutable
+// native source, so a replacement, append, or delete after verification cannot
+// mix one incarnation's entries with another incarnation's metadata. Project
+// identity derivation needs the harvester's salt and git resolver, so it stays
+// with the retained path and maintenance activation.
+func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session DiscoveredSession, data []byte) (*UnifiedMetadata, error) {
 	meta := NewUnifiedMetadata()
 	meta.SessionID = session.SessionID
 	meta.ModelHarness = HarnessCodex
@@ -385,7 +414,17 @@ func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session D
 	}
 	sessionMeta, err := parseCodexTranscriptMetadata(ctx, data, &meta)
 	if err != nil {
-		return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		// The extraction kernel text can name the captured identity. Refuse with
+		// a fixed safe reason instead of echoing the validator value.
+		return nil, &codexCandidateRefusal{
+			Operation: "CodexIndexer.extractCandidateMetadata",
+			Reason:    "the captured metadata is not self-consistent with the captured identity",
+			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Recovery:  "recapture the native history and retry harvest",
+		}
 	}
 	if sessionMeta != nil {
 		meta.CWD = sessionMeta.CWD
