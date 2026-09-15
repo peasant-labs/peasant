@@ -42,6 +42,9 @@ type GenerationIntent struct {
 	ContentCapture   ingest.SessionContentCaptureWrite `json:"contentCapture"`
 	IndexedInputHash *string                           `json:"indexedInputHash,omitempty"`
 	ArtifactIdentity *string                           `json:"artifactIdentity,omitempty"`
+	// PublicationCapture is the pipeline-certified capture agreement the replay
+	// records with the same guarded transaction. Nil records none.
+	PublicationCapture *ingest.PublicationCaptureWrite `json:"publicationCapture,omitempty"`
 	// PriorEvidence preserves the activation-owned harness document across a
 	// crash so recovery persists the same prior the successful path would have.
 	PriorEvidence []byte `json:"priorEvidence,omitempty"`

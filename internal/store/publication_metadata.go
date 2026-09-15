@@ -189,6 +189,39 @@ func (snapshot publicationCaptureSnapshot) unchangedCapture(entry ingest.StoreEn
 		snapshot.CWDProvenance == string(entry.CWDProvenance)
 }
 
+// persistActivationPublicationCapture records the certified publication-capture
+// agreement for one index write in the caller's transaction and reports whether
+// a capture was recorded. A kind the caller could not certify is not a capture:
+// it records nothing, so the ingest proceeds and the stored provenance is left
+// exactly as it was. Any other disagreement refuses the whole write, so a
+// half-bound state is never committed.
+func persistActivationPublicationCapture(conn *sqlite.Conn, sessionID ingest.SessionID, capture *ingest.PublicationCaptureWrite) (int64, bool, error) {
+	kind := capture.CWDProvenance
+	if kind == "" || kind == ingest.CWDNotRecovered {
+		return 0, false, nil
+	}
+	entry := ingest.StoreEntry{
+		Metadata:      &capture.Metadata,
+		CWDProvenance: kind,
+		Session:       ingest.DiscoveredSession{SessionID: sessionID},
+	}
+	if err := validatePublicationCapture(entry); err != nil {
+		return 0, false, err
+	}
+	if err := validateStoredPublicationCapture(conn, entry); err != nil {
+		return 0, false, err
+	}
+	prior, err := readPublicationCaptureSnapshot(conn, sessionID)
+	if err != nil {
+		return 0, false, err
+	}
+	revision, err := persistPublicationCapture(conn, entry, prior)
+	if err != nil {
+		return 0, false, err
+	}
+	return revision, true, nil
+}
+
 func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry, prior publicationCaptureSnapshot) (int64, error) {
 	m := entry.Metadata
 	body, err := json.Marshal(m)

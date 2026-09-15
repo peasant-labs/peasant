@@ -195,6 +195,21 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
+	// Record the certified publication-capture agreement in this same
+	// transaction, BEFORE the binding stamp: the revision it allocates (or
+	// restores) is the one this write must bind to. The compare-and-swap above
+	// deliberately ran first, against the state the caller captured, so the
+	// capture this write records cannot invalidate the caller's precondition.
+	if write.PublicationCapture != nil {
+		revision, recorded, captureErr := persistActivationPublicationCapture(conn, write.SessionID, write.PublicationCapture)
+		if captureErr != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, captureErr, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+		if recorded {
+			write.CaptureRevision = revision
+		}
+	}
 	if state.IndexVersion != nil && *state.IndexVersion != write.IndexVersion {
 		if err := s.indexFormats[*state.IndexVersion].Delete(ctx, conn, write.SessionID); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)

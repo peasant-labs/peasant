@@ -35,6 +35,7 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 		CaptureRevision:  activation.CaptureRevision,
 		IndexedInputHash: activation.IndexedInputHash,
 		ArtifactIdentity: activation.ArtifactIdentity,
+		Capture:          activation.Capture,
 	})
 }
 

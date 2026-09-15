@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -189,6 +190,39 @@ func (p *Pipeline) openCodeSnapshotLoader(input *CapturedIndexInput) func(contex
 	}
 }
 
+// managedActivationCapture builds the publication-capture agreement a managed
+// generation activation records for one session, or nil when this run cannot
+// certify one.
+//
+// The snapshot is the session's RECORDED managed metadata: that is the evidence
+// the ordinary write path publishes, and it is the metadata the installed
+// generation indexes. A generation's own projection metadata is derived from it
+// and may omit the local project, host and content identity the capture
+// contract requires, so it is not the snapshot.
+//
+// The provenance kind comes from the one rule the retained write path uses, and
+// the pipeline is what certifies it: the store records exactly what is supplied
+// here and never derives a kind of its own. A missing or mismatched snapshot, a
+// schema this build does not currently certify, or a candidate that proved no
+// complete generation is not certified: the activation then records no capture
+// and leaves the stored provenance exactly as it was.
+func managedActivationCapture(input *CapturedIndexInput, session DiscoveredSession, completeness indexformat.GenerationCompleteness) *PublicationCaptureWrite {
+	if input == nil || input.metadata == nil {
+		return nil
+	}
+	if completeness != indexformat.GenerationCompletenessComplete {
+		return nil
+	}
+	meta := *input.metadata
+	if meta.SessionID != session.SessionID || meta.ModelHarness != session.Harness {
+		return nil
+	}
+	if meta.SchemaVersion != CurrentSchemaVersion {
+		return nil
+	}
+	return &PublicationCaptureWrite{Metadata: meta, CWDProvenance: publicationCWDProvenance(&meta, session)}
+}
+
 // activateNativeGenerationResult stages and activates one validated managed
 // generation through the store's activation. It reuses the captured expected
 // state so a changed stored row refuses the replacement, stamps the producing
@@ -235,6 +269,7 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		CaptureRevision:  im.captureRevision,
 		IndexedInputHash: &result.input.inputHash,
 		ArtifactIdentity: artifactIdentity,
+		Capture:          managedActivationCapture(result.input, im.session, generation.Generation.Completeness),
 	}
 	var activationErr error
 	p.runStoreWrite(writeLane, func() {

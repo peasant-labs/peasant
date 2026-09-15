@@ -34,6 +34,10 @@ type GenerationActivation struct {
 	PriorEvidence []byte
 	// CaptureRevision binds the index write to its publication metadata capture.
 	CaptureRevision int64
+	// Capture is the pipeline-certified publication-capture agreement this
+	// activation records in the same transaction as the generation install.
+	// Nil records no capture and leaves the stored provenance unchanged.
+	Capture *ingest.PublicationCaptureWrite
 	// IndexedInputHash is the proof of the input this parser consumed. It is
 	// set only for complete candidates with a positive producer revision.
 	IndexedInputHash *string
@@ -143,6 +147,7 @@ reconciled:
 		CaptureRevision:    activation.CaptureRevision,
 		IndexedInputHash:   activation.IndexedInputHash,
 		ArtifactIdentity:   activation.ArtifactIdentity,
+		PublicationCapture: activation.Capture,
 	}})
 	for _, result := range results {
 		if result.Err != nil {
@@ -266,6 +271,7 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		CaptureRevision:    intent.CaptureRevision,
 		IndexedInputHash:   indexedInputHash,
 		ArtifactIdentity:   intent.ArtifactIdentity,
+		PublicationCapture: intent.PublicationCapture,
 	}})
 	for _, result := range results {
 		if result.Err != nil {
@@ -427,20 +433,21 @@ func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID,
 		indexedInputHash = nil
 	}
 	if err := s.generationArtifacts.WriteIntent(ctx, GenerationIntent{
-		SessionID:        sessionID,
-		GenerationID:     generation.ID,
-		ManifestPath:     "generations/" + generation.ID + "/manifest.json",
-		Completeness:     string(generation.Completeness),
-		StagedAtMs:       time.Now().UnixMilli(),
-		IndexerVersion:   indexerVersion,
-		IndexedAtMs:      indexedAtMs,
-		CaptureRevision:  activation.CaptureRevision,
-		ExpectedState:    activation.ExpectedState,
-		ContentCapture:   capture,
-		IndexedInputHash: indexedInputHash,
-		ArtifactIdentity: activation.ArtifactIdentity,
-		PriorEvidence:    activation.PriorEvidence,
-		CandidateDigest:  candidateDigest,
+		SessionID:          sessionID,
+		GenerationID:       generation.ID,
+		ManifestPath:       "generations/" + generation.ID + "/manifest.json",
+		Completeness:       string(generation.Completeness),
+		StagedAtMs:         time.Now().UnixMilli(),
+		IndexerVersion:     indexerVersion,
+		IndexedAtMs:        indexedAtMs,
+		CaptureRevision:    activation.CaptureRevision,
+		ExpectedState:      activation.ExpectedState,
+		ContentCapture:     capture,
+		IndexedInputHash:   indexedInputHash,
+		ArtifactIdentity:   activation.ArtifactIdentity,
+		PublicationCapture: activation.Capture,
+		PriorEvidence:      activation.PriorEvidence,
+		CandidateDigest:    candidateDigest,
 	}); err != nil {
 		return indexformat.Generation{}, err
 	}

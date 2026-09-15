@@ -248,6 +248,13 @@ type SessionEntryWrite struct {
 	// ExpectedState is the SQL snapshot captured before parsing. A nil value
 	// selects an unproven legacy write, which cannot retain an input proof.
 	ExpectedState *SessionIndexState
+	// PublicationCapture, when non-nil, records the certified
+	// publication-capture agreement for this session in the SAME transaction as
+	// this write, from the supplied metadata snapshot and provenance kind, and
+	// binds the write to the resulting revision. The caller certifies the
+	// provenance kind; the store records what it is given and never derives
+	// one. Nil leaves the stored agreement and CaptureRevision as they are.
+	PublicationCapture *PublicationCaptureWrite
 	// IndexedInputHash identifies the input actually consumed by this parser run.
 	// Supplying it requires an artifact identity: either the expected state
 	// records one, or this write establishes it from the pair it consumed.

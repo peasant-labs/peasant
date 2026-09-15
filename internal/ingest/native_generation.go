@@ -47,6 +47,11 @@ type NativeGenerationActivation struct {
 	CaptureRevision  int64
 	IndexedInputHash *string
 	ArtifactIdentity *string
+	// Capture is the publication-capture agreement this activation records in
+	// the same transaction as the generation install, from the metadata
+	// snapshot and the provenance kind the pipeline certifies. Nil records no
+	// capture and leaves the stored provenance exactly as it was.
+	Capture *PublicationCaptureWrite
 }
 
 // NativeGenerationActivator stages and activates one managed generation in ONE
