@@ -483,8 +483,14 @@ func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string
 	if err != nil {
 		return "", err
 	}
-	content, err := push.BuildTranscriptContentValidated(&input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
+	// The review scan must see the exact bytes the publish will carry, so it
+	// builds the same envelope through the shared durable-first builder and
+	// derives the same capability requirements the upload gate will enforce.
+	content, err := push.BuildPublishTranscriptContent(ctx, h.store, sessionIDStr, &input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
 	if err != nil {
+		return "", err
+	}
+	if _, err := push.ScanPublication(content); err != nil {
 		return "", err
 	}
 	data, err := json.Marshal(content)
