@@ -46,6 +46,13 @@ func (p *Pipeline) buildNativeCandidate(ctx context.Context, im indexedMeta, inp
 		candidate, err := clone.BuildNativeGeneration(ctx, input.session)
 		return candidate, true, err
 	case *OpenCodeIndexer:
+		// A stored layout with no readable native snapshot must not enter the
+		// native lane: its candidate cannot be produced, and failing here would
+		// discard an index the ordinary adapter refresh can still serve. The
+		// caller keeps the retained parse path for this session.
+		if !nativeGenerationSessionSupported(input.session) {
+			return NativeGenerationCandidate{}, false, nil
+		}
 		clone := *concrete
 		clone.provenanceCapture = OpenCodeProvenanceIndexerConfig{
 			Enabled:      true,

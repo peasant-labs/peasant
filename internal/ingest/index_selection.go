@@ -48,7 +48,7 @@ func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
 // a repair completes in one harvest and the next unchanged harvest does no
 // parser work.
 func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
-	target := p.versionTargets()[input.session.Harness]
+	target := p.sessionVersionTarget(input.session)
 	expected := input.expected
 	return p.config.Force ||
 		expected.IndexerVersion < target.IndexerVersion ||
@@ -158,7 +158,7 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	if stateErr != nil {
 		return true
 	}
-	return p.stateNeedsIndexWork(state)
+	return p.stateNeedsIndexWork(state, p.sessionVersionTarget(target.session))
 }
 
 // stateNeedsIndexWork decides from stored SQL state alone whether a session has
@@ -170,15 +170,17 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 // the ordinary index write can bind it; and a stored producer or index format
 // newer than this build is selected so the shared parse path reports the
 // refusal once. A session with no stored pair identity is selected so the
-// index path can establish it.
-func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState) bool {
+// index path can establish it. The caller supplies the session's effective
+// target, so a session with no readable native snapshot compares against the
+// retained baseline instead of being selected forever against the native
+// override.
+func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target HarvesterVersions) bool {
 	if state == nil || state.ArtifactHash == nil {
 		return true
 	}
 	if p.checkIndexProducer(state) != nil {
 		return true
 	}
-	target := p.versionTargets()[state.Harness]
 	return p.config.Force ||
 		state.IndexerVersion < target.IndexerVersion ||
 		state.IndexedInputHash == nil ||

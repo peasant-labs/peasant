@@ -1818,7 +1818,15 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	input, err := p.captureIndexInput(ctx, im, indexer)
 	var output indexformat.Result
 	parsed := false
-	declared := p.versionTargets()[im.session.Harness].IndexVersion
+	// The effective declared format follows the session's own captured layout:
+	// a session whose native snapshot this build cannot read keeps the retained
+	// baseline format and is served by the ordinary adapter refresh, even when
+	// the harness target is the managed-generation override.
+	declaredSession := im.session
+	if input != nil {
+		declaredSession = input.session
+	}
+	declared := p.sessionVersionTarget(declaredSession).IndexVersion
 	if err == nil {
 		result.input = input
 		// The write binds the index to the current metadata capture when the
@@ -1903,8 +1911,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	if err == nil && parsed {
 		var version int
 		version, err = indexformat.VersionOf(output)
-		if err == nil && version != p.versionTargets()[im.session.Harness].IndexVersion {
-			err = fmt.Errorf("indexer result format %d does not match declared format %d for harness %s; no entries were replaced; correct the indexer declaration or concrete output", version, p.versionTargets()[im.session.Harness].IndexVersion, im.session.Harness)
+		if err == nil && version != declared {
+			err = fmt.Errorf("indexer result format %d does not match declared format %d for harness %s; no entries were replaced; correct the indexer declaration or concrete output", version, declared, im.session.Harness)
 		}
 	}
 	if err != nil {
@@ -2026,14 +2034,15 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			identity := result.input.artifactHash
 			artifactIdentity = &identity
 		}
+		target := p.sessionVersionTarget(result.input.session)
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
 			RequireFullContent: requireFullContent,
 			ContentCapture:     capture,
 			SessionID:          result.im.session.SessionID,
 			Result:             result.output,
-			IndexVersion:       p.versionTargets()[result.im.session.Harness].IndexVersion,
-			IndexerVersion:     p.versionTargets()[result.im.session.Harness].IndexerVersion,
+			IndexVersion:       target.IndexVersion,
+			IndexerVersion:     target.IndexerVersion,
 			IndexedAtMs:        nowMs,
 			ExpectedState:      result.input.expected,
 			IndexedInputHash:   &result.input.inputHash,
@@ -4166,15 +4175,16 @@ func (p *Pipeline) makeIndexLogEntry(im indexedMeta, outcome IndexOutcome, entri
 	if or := string(im.session.OriginalRoot); or != "" {
 		originalRoot = &or
 	}
+	target := p.sessionVersionTarget(im.session)
 	var indexVersion *int
-	if declared := p.versionTargets()[im.session.Harness].IndexVersion; declared > 0 {
+	if declared := target.IndexVersion; declared > 0 {
 		indexVersion = &declared
 	}
 	return IndexLogEntry{
 		SessionID:      im.session.SessionID,
 		Harness:        im.session.Harness,
 		Outcome:        outcome,
-		IndexerVersion: p.versionTargets()[im.session.Harness].IndexerVersion,
+		IndexerVersion: target.IndexerVersion,
 		IndexVersion:   indexVersion,
 		EntriesCount:   entriesCount,
 		SourcePath:     sourcePath,

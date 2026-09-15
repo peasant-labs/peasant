@@ -37,6 +37,20 @@ var NativeGenerationRepairTargets = map[Harness]HarvesterVersions{
 	HarnessOpenCode: {AdapterVersion: 2, IndexerVersion: 17, IndexVersion: 2},
 }
 
+// nativeGenerationSessionSupported reports whether this build can read one
+// stored session's native layout into a managed generation. The OpenCode
+// candidate snapshot reads the current session_message projection; a session
+// stored from the older message/part layout, or from a JSON tree, has no
+// snapshot this build can read, so the retained adapter refresh serves it
+// instead of failing the native lane. A harness without a declared native
+// target is always served by its retained path.
+func nativeGenerationSessionSupported(session DiscoveredSession) bool {
+	if session.Harness != HarnessOpenCode {
+		return true
+	}
+	return session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite
+}
+
 // NativeGenerationTargets overlays the managed-generation targets on a baseline
 // registry for a store that supports them, leaving every other harness and any
 // harness without a declared native target exactly as the baseline states.
@@ -136,6 +150,23 @@ func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
 	// Internal stage tests and callers can construct Pipeline directly. Reading
 	// the defaults here does not mutate the registry or initialize shared state.
 	return p.resolveVersionTargets()
+}
+
+// sessionVersionTarget returns the effective harvester target for one stored
+// session. When the resolved target is the native-generation override but the
+// session's layout has no native snapshot this build can read, the session
+// keeps the retained baseline target so the ordinary adapter refresh serves it
+// instead of the native lane. An explicitly injected non-native target is
+// returned unchanged.
+func (p *Pipeline) sessionVersionTarget(session DiscoveredSession) HarvesterVersions {
+	target := p.versionTargets()[session.Harness]
+	native, declared := NativeGenerationRepairTargets[session.Harness]
+	if declared && target == native && !nativeGenerationSessionSupported(session) {
+		if baseline, ok := HarvesterVersionRegistry[session.Harness]; ok {
+			return baseline
+		}
+	}
+	return target
 }
 
 // managedGenerationSupport is the store capability probe the native-generation
