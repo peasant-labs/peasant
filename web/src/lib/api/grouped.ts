@@ -185,10 +185,11 @@ export function groupedSearchMatches(payload: LocalSessionListPayload): SearchRe
 
 /**
  * Flatten a grouped search into the individual transcript-hit rows the command
- * palette navigates. Ordinary items contribute their own matches; a helper-only
- * result is an owner context container, so its saved helpers are fetched from
- * the exact issued scope to surface their hits. An expired scope omits the
- * helper hits rather than widening the query — the ordinary hits still render.
+ * palette navigates. Each item's own matches are included, and every saved
+ * helper group is expanded from its exact issued scope so a matching helper is
+ * navigable whether its owner also matched or the result is a helper-only
+ * context container. An expired scope omits that group's helper hits rather
+ * than widening the query — the ordinary hits still render.
  */
 export async function fetchGroupedSearchMatches(
   query: string,
@@ -197,20 +198,20 @@ export async function fetchGroupedSearchMatches(
   const payload = await fetchGroupedLocalSearch(query, limit);
   const rows = groupedSearchMatches(payload);
   for (const item of payload.items) {
-    const group = item.helperGroups?.[0];
-    if (!item.context || !group) continue;
-    try {
-      const members = await fetchHelperGroupMembers({
-        groupId: group.groupId,
-        scope: group.memberScope,
-        page: 1,
-        limit: 20,
-      });
-      for (const member of members.members) {
-        if (member.transcript?.matches) rows.push(...member.transcript.matches);
+    for (const group of item.helperGroups ?? []) {
+      try {
+        const members = await fetchHelperGroupMembers({
+          groupId: group.groupId,
+          scope: group.memberScope,
+          page: 1,
+          limit: 20,
+        });
+        for (const member of members.members) {
+          if (member.transcript?.matches) rows.push(...member.transcript.matches);
+        }
+      } catch (cause) {
+        if (!isGroupScopeExpired(cause)) throw cause;
       }
-    } catch (cause) {
-      if (!isGroupScopeExpired(cause)) throw cause;
     }
   }
   return rows;

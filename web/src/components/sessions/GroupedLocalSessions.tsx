@@ -18,7 +18,6 @@ import {
 import { parseProjectHash, transcriptHref } from '@/lib/navigation/projectRoutes';
 import {
   firstHelperMemberPage,
-  gotoHelperMemberPage,
   helperMemberPageWindow,
   withHelperMemberTotal,
   type HelperMemberPaging,
@@ -186,10 +185,7 @@ function MountedHelperGroup({
         });
         setMembers(payload.members);
         setPaging((current) =>
-          withHelperMemberTotal(gotoHelperMemberPage(current, payload.page), {
-            page: payload.page,
-            total: payload.total,
-          }),
+          withHelperMemberTotal(current, { page: payload.page, total: payload.total }),
         );
       } catch (cause) {
         if (isGroupScopeExpired(cause)) {
@@ -213,7 +209,7 @@ function MountedHelperGroup({
     [scopeExpired, members, loading, load, paging.page],
   );
 
-  const window = helperMemberPageWindow(paging);
+  const pageWindow = helperMemberPageWindow(paging);
   const memberRows = members ?? [];
   const isMemberSelected =
     selection === undefined ? undefined : (row: unknown) => {
@@ -230,13 +226,13 @@ function MountedHelperGroup({
         data-helper-member-paging="true"
       >
         <span className="font-mono text-xs text-ink-4 tabular-nums">
-          page {paging.page} of {window.pageCount}
+          page {paging.page} of {pageWindow.pageCount}
         </span>
         <span className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void load(paging.page - 1)}
-            disabled={!window.hasPrevious || loading}
+            disabled={!pageWindow.hasPrevious || loading}
             className="border border-rule px-3 py-1 font-mono text-xs text-ink-2 hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none focus-mono cursor-pointer"
           >
             previous
@@ -244,7 +240,7 @@ function MountedHelperGroup({
           <button
             type="button"
             onClick={() => void load(paging.page + 1)}
-            disabled={!window.hasNext || loading}
+            disabled={!pageWindow.hasNext || loading}
             className="border border-rule px-3 py-1 font-mono text-xs text-ink-2 hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none focus-mono cursor-pointer"
           >
             next
