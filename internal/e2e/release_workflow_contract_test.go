@@ -31,9 +31,10 @@ const (
 	// routedRunnerExpression is the runs-on a routed reusable workflow uses to
 	// place an x86_64 job on the runner that its determine-runner job selects.
 	routedRunnerExpression = "${{ fromJson(needs.determine-runner.outputs.runner) }}"
-	// runnerRoutingSecret is read by the runner-fallback determine-runner job in
-	// every reusable workflow that routes runners. Secrets do not cross a
-	// reusable-workflow call unless the caller passes them explicitly.
+	// runnerRoutingSecret is read by the inline determine-runner job in every
+	// reusable workflow that routes runners; the job exports it as GH_TOKEN for
+	// its paginated runner-status query. Secrets do not cross a reusable-workflow
+	// call unless the caller passes them explicitly.
 	runnerRoutingSecret = "${{ secrets.RUNNER_STATUS_TOKEN }}"
 )
 
@@ -928,8 +929,8 @@ func assertReusableWorkflowCallerSecrets(t *testing.T) {
 }
 
 // calledWorkflowRoutesRunners reports whether the reusable workflow that a
-// caller job invokes defines a determine-runner job that hands the
-// runner-fallback action the routing secret. Only those callers may pass
+// caller job invokes defines a determine-runner job that runs the inline router
+// and exports the routing secret as GH_TOKEN. Only those callers may pass
 // `secrets: inherit`.
 func calledWorkflowRoutesRunners(t *testing.T, expectation workflowJobPermissionsExpectation) bool {
 	t.Helper()
@@ -944,7 +945,7 @@ func calledWorkflowRoutesRunners(t *testing.T, expectation workflowJobPermission
 		return false
 	}
 	for _, step := range steps.Content {
-		token := yamlMappingValue(yamlMappingValue(step, "with"), "github-token")
+		token := yamlMappingValue(yamlMappingValue(step, "env"), "GH_TOKEN")
 		if token != nil && token.Value == runnerRoutingSecret {
 			return true
 		}

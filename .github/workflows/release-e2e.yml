@@ -19,20 +19,31 @@ jobs:
   # with a Blacksmith amd64 fallback when the pool is offline.
   determine-runner:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
-      runner: ${{ steps.pick.outputs.use-runner }}
+      runner: ${{ steps.pick.outputs.runner }}
     steps:
       - name: Pick a runner
         id: pick
-        uses: mikehardy/runner-fallback-action@dc7732f9e532c451b2527b288ba8d58fd4b0a4ca # v1.1.0
-        with:
-          organization: peasant-labs
-          primary-runner: "self-hosted,nixos"
-          fallback-runner: "blacksmith-4vcpu-ubuntu-2404"
-          fallback-on-error: true
-          github-token: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+            echo "::warning::runner availability query failed; using the fallback"
+            online=0
+          fi
+          echo "online runners: ${online}"
+          if [ "${online}" -gt 0 ]; then
+            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
+          fi
       - name: Report chosen runner
-        run: 'echo "chosen: ${{ steps.pick.outputs.use-runner }}"'
+        env:
+          CHOSEN: ${{ steps.pick.outputs.runner }}
+        run: 'echo "chosen: $CHOSEN"'
 
   release-e2e:
     name: release e2e (installed packages)
