@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   annotateTranscript,
   computeAnalytics,
   computePersonalMedians,
+  type AdaptTranscriptOptions,
   type TranscriptInitialPosition,
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
@@ -27,10 +28,12 @@ import type {
   SessionRelationshipNavigation,
   QualityPayload,
 } from '@/types/messages';
+import { RelationshipNavigationStatus } from '@peasant-labs/schema';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
 import { sessionsHref, transcriptHref, EarlierHistoryParam, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
+import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
 import {
   clearScopeQuery,
   collectFileTouches,
@@ -68,13 +71,6 @@ interface SessionDetailV2Props {
  */
 type SessionDetailWire = SessionDetailPayload &
   Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
-
-/**
- * The adapter options the adapter boundary declares today. The published
- * `adaptTranscript` type is not re-exported from the `/ui` barrel, so the host
- * reads it off the exported function signature instead of restating it.
- */
-type AdapterOptions = NonNullable<Parameters<typeof adaptTranscript>[3]>;
 
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
@@ -116,6 +112,9 @@ export function SessionDetailV2(props: SessionDetailV2Props) {
 }
 
 function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery }: SessionDetailV2Props) {
+  // Host element for the mounted viewer; the per-session reading state replays
+  // the inner scroller offset against it on the way back.
+  const transcriptHostRef = useRef<HTMLDivElement | null>(null);
   const { data: detail, error } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
@@ -136,14 +135,21 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
   }, [router, pathname, searchParams]);
 
-  // The host's exact-ID current-target route callback. The viewer only offers a
-  // link for an authorized, usable target, and the contract permits a target
-  // identifier on a linkable status alone — so an identifier is exactly the
-  // authorization to route, and every withheld or unavailable target (which
-  // carries none) stays an honest reference on screen.
+  // The host's exact-ID current-target route callback: an authorized navigation
+  // entry whose target resolves to a stored session routes to that session. The
+  // authority is the stored exact target, never list selection, so a stored but
+  // unselected parent stays reachable. A usable target is either an exactly
+  // resolved boundary or a general source/parent link; both carry the one stored
+  // identifier. known-unavailable / unknown / conflicting entries carry NO
+  // identifier and are inert here, so an unresolved link can never route to the
+  // wrong session. The reading state of this session is kept per session by the
+  // hook below, so Back restores it.
   const navigateToRelationship = useCallback(
     (entry: SessionRelationshipNavigation) => {
-      if (!entry.localId) return;
+      const linkable =
+        entry.status === RelationshipNavigationStatus.Resolved ||
+        entry.status === RelationshipNavigationStatus.GeneralLinkOnly;
+      if (!linkable || !entry.localId) return;
       router.push(transcriptHref(projectHash, entry.localId));
     },
     [router, projectHash],
@@ -242,10 +248,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const requestedTurn = routeQuery.turn;
   const requestedTurnExists = requestedTurn == null || turns.some((turn) => turn.index === requestedTurn);
   const requestedTurnVisible = requestedTurn == null || (displayTurns ?? turns).some((turn) => turn.index === requestedTurn);
-  const initialPosition = useMemo<TranscriptInitialPosition | undefined>(() => {
+  // A turn target this view cannot render right now gets NO one-time position
+  // (explicitly `null`, not an absent contract): the reader stays put and the
+  // stream prelude offers the reveal. An absent contract would let the composite
+  // fall back to its own legacy mount position and move the reader somewhere the
+  // host never asked for.
+  const initialPosition = useMemo<TranscriptInitialPosition | null>(() => {
     if (requestedTurn == null) return { kind: 'top' };
     if (!requestedTurnExists) return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };
-    if (!requestedTurnVisible) return undefined;
+    if (!requestedTurnVisible) return null;
     return { kind: 'turn', turnIndex: requestedTurn };
   }, [requestedTurn, requestedTurnExists, requestedTurnVisible]);
 
@@ -294,15 +305,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read's authorized navigation rides BESIDE the durable
-    // detail, never inside it: the adapter validates the durable payload and
-    // refuses a payload that still carries the read-only field, because mixing
-    // authorization into preserved evidence lets a consumer attribute a link
-    // it was never granted.
-    const { relationshipNavigation: _readMetadata, ...durable } = detail;
-    const adapterOptions: AdapterOptions = { relationshipNavigation };
+    // The flat local read carries authorized navigation ALONGSIDE the durable
+    // detail. The durable payload boundary rejects that read-only field, so the
+    // host separates the two: only the durable detail reaches `adaptTranscript`
+    // as payload, and the navigation travels through the published
+    // adapter-options boundary, which cooks it into usable source/parent links.
+    const { relationshipNavigation, ...durableDetail } = detail;
+    const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     const adapted = adaptTranscript(
-      { ...durable, turns: visibleTurns },
+      { ...durableDetail, turns: visibleTurns },
       undefined,
       analytics,
       adapterOptions,
@@ -326,6 +337,20 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     () => new Map((vm?.turns ?? []).map((turn) => [turn.index, turn.toolCalls])),
     [vm],
   );
+
+  // Host-owned reading state for Back: the viewer is controlled from here so a
+  // reader who follows a stored context/parent link and returns finds the same
+  // selection and query, and the inner scroll offset is replayed. The
+  // retained-history disclosure is route-owned, not part of this record: the URL
+  // has to carry it for refresh and copied links, so it is restored above.
+  // A `?turn=` target owns the one-time scroll through the composite, so the
+  // replay stands down rather than moving the reader off the route's target.
+  const {
+    activeTurn,
+    setActiveTurn,
+    search,
+    setSearch,
+  } = useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm), requestedTurn == null);
 
   const { theme } = useTheme();
 
@@ -374,7 +399,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
-  // receives only authorized, usable entries (see `navigateToRelationship`).
+  // is invoked by the viewer's source/parent link with the authorized navigation
+  // above; the host owns the resulting route and the Back restoration that
+  // follows.
   const viewerCallbacks = {
     onCopyLink: () => {
       void navigator.clipboard?.writeText(
@@ -464,6 +491,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // The app shell publishes one responsive header height for both its main
     // offset and bounded viewers, including the mobile two-row header.
     <div
+      ref={transcriptHostRef}
       data-tour="transcript-view"
       className={[
         'flex h-[calc(100dvh-var(--app-header-height))] flex-col',
@@ -489,14 +517,21 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             canExport: false,
           }}
           callbacks={viewerCallbacks}
+          // Host-owned reading state. The earlier-history disclosure is
+          // controlled by the route, so Back, a reload, and a copied link all
+          // restore exactly the sections the reader had open. The selected turn
+          // and the search query come from the per-session record, so a reader
+          // who follows a stored link and returns finds what they left.
+          earlierHistoryOpen={earlierHistoryOpen}
+          onEarlierHistoryOpenChange={setEarlierHistoryOpen}
+          activeTurn={requestedTurn == null ? activeTurn : undefined}
+          onActiveTurnChange={setActiveTurn}
+          search={search}
+          onSearchChange={setSearch}
           // Origin-aware host trail through the app router.
           breadcrumb={breadcrumb}
           LinkComponent={Link}
           initialPosition={initialPosition}
-          // Retained-history disclosure is controlled by the route, so Back and
-          // reload restore exactly the sections the reader had open.
-          earlierHistoryOpen={earlierHistoryOpen}
-          onEarlierHistoryOpenChange={setEarlierHistoryOpen}
           // Per-turn copied anchors are full permalinks that keep the live
           // scope/origin params (replacing only `turn`), so a copied link
           // stays inside the scoped "room" — the pre-composite link shape.

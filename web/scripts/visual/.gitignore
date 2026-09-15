@@ -30,6 +30,8 @@
 !transcript-input-gate.mjs
 !validate-mock-coordinates.mjs
 !strike-smoke-fixture.mjs
+!current-parent-navigation.mjs
+!current-parent-navigation-fixture.mjs
 !search-share-visual.mjs
 !grouped-list-visual.mjs
 !testdata/
