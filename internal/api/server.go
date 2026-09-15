@@ -179,8 +179,20 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// Sync/push routes
 	sh := &syncHandler{
-		store:  s.cfg.Store,
-		config: s.cfg.Config,
+		store:       s.cfg.Store,
+		config:      s.cfg.Config,
+		scopeIssuer: s,
+	}
+	// The grouped sync chooser view registers the exact sync predicate on the
+	// same member seam the sessions and search routes use, so expanding a sync
+	// helper group replays the sync route rather than another route's set.
+	if s.cfg.Store != nil {
+		if err := s.RegisterGroupedRouteVariant(GroupedVariantSource{
+			Variant: GroupedRouteSync,
+			Gather:  sh.gatherGroupedSyncCandidates,
+		}); err != nil {
+			return fmt.Errorf("register grouped sync route variant: %w", err)
+		}
 	}
 	mux.HandleFunc("GET "+defaults.RouteSyncSessions.String(), sh.handleSyncSessions)
 	mux.HandleFunc("GET "+defaults.RouteSyncAuth.String(), sh.handleSyncAuth)
