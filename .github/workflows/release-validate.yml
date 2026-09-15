@@ -299,13 +299,12 @@ jobs:
   # subset; brew audit --cask is known-broken for macOS casks on Linux).
   brew-style:
     name: brew style (linux)
-    needs: [determine-runner, snapshot]
-    # Routed to the self-hosted x86_64 pool, Blacksmith amd64 fallback.
-    # Historically this ran on GitHub-hosted ubuntu-latest, NOT Blacksmith:
-    # setup-homebrew needs the preinstalled /home/linuxbrew tree owned by the
-    # job user; on Blacksmith it retry-looped on "could not lock config file
-    # .git/config: Permission denied" until the timeout killed it in CI.
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    needs: snapshot
+    # GitHub-hosted, NOT Blacksmith: setup-homebrew needs the preinstalled
+    # /home/linuxbrew tree owned by the job user; on Blacksmith it retry-looped
+    # on "could not lock config file .git/config: Permission denied" until the
+    # timeout killed it (PR #94 run 27316160405).
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Download dist/
