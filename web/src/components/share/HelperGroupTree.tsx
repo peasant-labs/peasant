@@ -87,6 +87,11 @@ export function HelperGroupTree({
   const [stateByGroup, setStateByGroup] = useState<Record<string, GroupState>>({});
   const [expandedByGroup, setExpandedByGroup] = useState<Record<string, boolean>>({});
 
+  // A changed scope is a different query: keying state by group AND scope means
+  // a refreshed list starts folded instead of reusing rows fetched for the old
+  // scope. The fairtrade group remounts on the same boundary.
+  const treeKey = useCallback((group: ShareHelperGroup) => `${group.groupId}:${group.memberScope}`, []);
+
   const stateOf = useCallback(
     (groupId: string): GroupState => stateByGroup[groupId] ?? EMPTY_GROUP,
     [stateByGroup],
@@ -95,15 +100,16 @@ export function HelperGroupTree({
   const fetchPage = useCallback(
     async (group: ShareHelperGroup, page: number) => {
       const limit = HELPER_MEMBERS_LIMIT;
+      const key = `${group.groupId}:${group.memberScope}`;
       setStateByGroup((previous) => ({
         ...previous,
-        [group.groupId]: { ...(previous[group.groupId] ?? EMPTY_GROUP), loading: true, expired: false, error: null },
+        [key]: { ...(previous[key] ?? EMPTY_GROUP), loading: true, expired: false, error: null },
       }));
       try {
         const result = await loadMembers(group, page, limit);
         setStateByGroup((previous) => ({
           ...previous,
-          [group.groupId]: {
+          [key]: {
             rows: result.members,
             total: result.total,
             page: result.page,
@@ -120,15 +126,15 @@ export function HelperGroupTree({
         if (error instanceof HelperScopeExpiredError) {
           setStateByGroup((previous) => ({
             ...previous,
-            [group.groupId]: { ...(previous[group.groupId] ?? EMPTY_GROUP), loading: false, loaded: false, expired: true, error: null },
+            [key]: { ...(previous[key] ?? EMPTY_GROUP), loading: false, loaded: false, expired: true, error: null },
           }));
           onScopeExpired();
           return;
         }
         setStateByGroup((previous) => ({
           ...previous,
-          [group.groupId]: {
-            ...(previous[group.groupId] ?? EMPTY_GROUP),
+          [key]: {
+            ...(previous[key] ?? EMPTY_GROUP),
             loading: false,
             loaded: false,
             expired: false,
@@ -142,13 +148,14 @@ export function HelperGroupTree({
 
   const handleExpandedChange = useCallback(
     (group: ShareHelperGroup, expanded: boolean) => {
-      setExpandedByGroup((previous) => ({ ...previous, [group.groupId]: expanded }));
+      const key = treeKey(group);
+      setExpandedByGroup((previous) => ({ ...previous, [key]: expanded }));
       if (!expanded) return;
-      const state = stateOf(group.groupId);
+      const state = stateByGroup[key] ?? EMPTY_GROUP;
       if (state.loaded || state.loading || state.expired) return;
       void fetchPage(group, 1);
     },
-    [fetchPage, stateOf],
+    [fetchPage, stateByGroup, treeKey],
   );
 
   const renderMember = useCallback(
@@ -170,18 +177,19 @@ export function HelperGroupTree({
   return (
     <HelperGroupListItem owner={owner} ownerStatus={owner ? undefined : ownerStatus}>
       {groups.map((group) => {
-        const state = stateOf(group.groupId);
+        const key = treeKey(group);
+        const state = stateOf(key);
         const pageCount = Math.max(1, Math.ceil(state.total / state.limit));
         return (
           <HelperGroup
-            key={group.groupId}
+            key={key}
             groupId={group.groupId}
             memberScope={group.memberScope}
             helperThreadCount={group.helperThreadCount}
             members={state.rows}
             renderMember={renderMember}
             getMemberKey={(row) => row.id}
-            expanded={expandedByGroup[group.groupId] ?? false}
+            expanded={expandedByGroup[key] ?? false}
             onExpandedChange={(expanded) => handleExpandedChange(group, expanded)}
             scopeExpired={state.expired}
             onRefreshList={onScopeExpired}
