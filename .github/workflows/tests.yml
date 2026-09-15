@@ -106,6 +106,10 @@ jobs:
   # reads the label array from this job's output. `check` and `cgo0` build and
   # test Go on arm64 and stay on their arm64 runner.
   determine-runner:
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick.outputs.use-runner }}
