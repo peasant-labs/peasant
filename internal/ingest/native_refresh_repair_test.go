@@ -532,21 +532,25 @@ func TestNativeRefreshRepair(t *testing.T) {
 				if secondGenerationID != generationID {
 					t.Fatalf("second run replaced generation %q with %q", generationID, secondGenerationID)
 				}
-				// The repair's activation must preserve the recorded
-				// publication-capture agreement: pointing the session at its
-				// generation updates watched session facts, and a cleared
-				// provenance kind would re-ingest this session on every
-				// discovery run and leave it permanently unpublishable. The
-				// kind this session had before the repair is exactly the kind
-				// it must still carry afterwards; whether the activation
-				// should also BIND a session that had no captured metadata
-				// yet is a separate design decision, tracked on the slice.
+				// The repair's activation records the publication capture in
+				// the same transaction as the generation install, so a session
+				// repaired from a stale V1 projection is publishable
+				// immediately instead of waiting for the next ordinary
+				// discovery write. The capture revision, the binding and
+				// readiness are read back through the registered store paths
+				// and must agree in one read.
 				bound, err := reopened.ReadIndexState(t.Context(), sid)
 				if err != nil {
 					t.Fatal(err)
 				}
 				if bound == nil {
 					t.Fatal("repaired session has no readable index state")
+				}
+				if bound.PublicationCaptureRevision == 0 {
+					t.Fatal("repaired session records no publication capture revision; the repair must be publishable without a further run")
+				}
+				if !bound.PublicationBound {
+					t.Fatal("repaired session is not bound to its publication capture")
 				}
 				metadataPath := ingest.SessionMetadataPath(outputDir, testutil.TestHostSlug, string(sid), "")
 				pair, pairErr := ingest.ReadManagedPair(fs, outputDir, metadataPath, ingest.SessionID(sid))
@@ -555,6 +559,45 @@ func TestNativeRefreshRepair(t *testing.T) {
 				}
 				if pair.ArtifactHash == "" || bound.ArtifactHash == nil || pair.ArtifactHash != *bound.ArtifactHash {
 					t.Fatalf("repaired pair identity %q disagrees with the stored artifact hash %v", pair.ArtifactHash, bound.ArtifactHash)
+				}
+				locations, err := reopened.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sid})
+				if err != nil {
+					t.Fatal(err)
+				}
+				location := locations[sid]
+				if location.PublicationReadiness != ingest.PublicationReady {
+					t.Fatalf("repaired readiness = %q, want ready", location.PublicationReadiness)
+				}
+				if location.CaptureRevision != bound.PublicationCaptureRevision {
+					t.Fatalf("capture revision disagrees between registered reads: location %d, index state %d", location.CaptureRevision, bound.PublicationCaptureRevision)
+				}
+				bundle, err := reopened.LoadPublicationInput(t.Context(), sid)
+				if err != nil {
+					t.Fatalf("load publication input: %v", err)
+				}
+				if bundle.Readiness != ingest.PublicationReady {
+					t.Fatalf("publication input readiness = %q, want ready", bundle.Readiness)
+				}
+				if len(bundle.Entries) == 0 {
+					t.Fatal("publication input carries no entries; the payload does not match the repaired generation")
+				}
+				if len(bundle.Entries) != mainEntries {
+					t.Fatalf("publication input carries %d entries, want the repaired generation's %d", len(bundle.Entries), mainEntries)
+				}
+				// A harvest immediately after the repair does no work: the
+				// recorded capture does not move, and the binding stays.
+				afterSecond, err := reopened.ReadIndexState(t.Context(), sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if afterSecond == nil {
+					t.Fatal("repaired session has no readable index state after the second run")
+				}
+				if afterSecond.PublicationCaptureRevision != bound.PublicationCaptureRevision {
+					t.Fatalf("second run moved the capture revision %d -> %d", bound.PublicationCaptureRevision, afterSecond.PublicationCaptureRevision)
+				}
+				if !afterSecond.PublicationBound {
+					t.Fatal("second run unbound the repaired publication capture")
 				}
 
 			case "failed_capture":
@@ -577,6 +620,20 @@ func TestNativeRefreshRepair(t *testing.T) {
 				}
 				if got := readEntryCount(t, db, sid); got != entriesBefore {
 					t.Fatalf("failed capture changed entries: %d -> %d", entriesBefore, got)
+				}
+				// The unproven source produces no candidate, so no activation
+				// and no publication capture: the ingest still proceeds with
+				// the retained projection, and the session's provenance stays
+				// exactly as it was (unbound, awaiting a real source).
+				state, stateErr := db.ReadIndexState(t.Context(), sid)
+				if stateErr != nil {
+					t.Fatal(stateErr)
+				}
+				if state == nil {
+					t.Fatal("failed capture left no readable index state")
+				}
+				if state.PublicationBound || state.PublicationCaptureRevision != 0 {
+					t.Fatalf("unproven source bound a publication capture: revision=%d bound=%v", state.PublicationCaptureRevision, state.PublicationBound)
 				}
 
 			case "future_state":
