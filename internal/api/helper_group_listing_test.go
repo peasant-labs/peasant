@@ -35,6 +35,11 @@ const helperGroupListingFixturePath = "internal/api/testdata/helper_group_listin
 
 var helperGroupFixtureProjectHash = schema.ProjectHash(strings.Repeat("a", 64))
 
+// helperGroupFixtureSiblingProjectHash is a second stored project. A
+// project-scoped grouped case uses it to prove an in-project request never sees
+// a sibling project's ordinary session or saved helper.
+var helperGroupFixtureSiblingProjectHash = schema.ProjectHash(strings.Repeat("b", 64))
+
 type helperGroupListingFixture struct {
 	RequiredNames []string                                                             `yaml:"requiredNames"`
 	NotApplicable []helperGroupListingNotApplicableCase                                `yaml:"notApplicableInThisRouteSet"`
@@ -50,19 +55,21 @@ type helperGroupListingInput struct {
 	Route       string                      `yaml:"route"`
 	SearchQuery string                      `yaml:"searchQuery"`
 	SearchLimit int                         `yaml:"searchLimit"`
+	Project     string                      `yaml:"project"`
 	Selection   string                      `yaml:"selection"`
 	SelectedIDs []string                    `yaml:"selectedIds"`
 	Sessions    []helperGroupListingSession `yaml:"sessions"`
 }
 
 type helperGroupListingSession struct {
-	ID         string `yaml:"id"`
-	StartMs    int64  `yaml:"startMs"`
-	Purpose    string `yaml:"purpose"`
-	Origin     string `yaml:"origin"`
-	Owner      string `yaml:"owner"`
-	OwnerState string `yaml:"ownerState"`
-	Text       string `yaml:"text"`
+	ID          string `yaml:"id"`
+	StartMs     int64  `yaml:"startMs"`
+	Purpose     string `yaml:"purpose"`
+	Origin      string `yaml:"origin"`
+	Owner       string `yaml:"owner"`
+	OwnerState  string `yaml:"ownerState"`
+	Text        string `yaml:"text"`
+	ProjectHash string `yaml:"projectHash"`
 }
 
 type helperGroupListingExpected struct {
@@ -83,9 +90,20 @@ type helperGroupListingExpected struct {
 }
 
 type helperGroupListingItem struct {
-	Kind              string   `yaml:"kind"`
+	Kind               string                          `yaml:"kind"`
+	SessionID          string                          `yaml:"sessionId"`
+	OwnerStatus        string                          `yaml:"ownerStatus"`
+	GroupCount         int                             `yaml:"groupCount"`
+	HelperThreadCount  int                             `yaml:"helperThreadCount"`
+	MemberIDs          []string                        `yaml:"memberIds"`
+	NestedMemberGroups []helperGroupListingNestedGroup `yaml:"nestedMemberGroups"`
+}
+
+// helperGroupListingNestedGroup asserts a helper that itself owns saved helpers:
+// its immediate group must render under the member row, with the same exact
+// count and member page the top-level group gets.
+type helperGroupListingNestedGroup struct {
 	SessionID         string   `yaml:"sessionId"`
-	OwnerStatus       string   `yaml:"ownerStatus"`
 	GroupCount        int      `yaml:"groupCount"`
 	HelperThreadCount int      `yaml:"helperThreadCount"`
 	MemberIDs         []string `yaml:"memberIds"`
@@ -257,6 +275,10 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 			if got := helperGroupMemberIDs(members); !reflect.DeepEqual(got, expected.MemberIDs) {
 				t.Fatalf("item[%d] members = %v, want %v", i, got, expected.MemberIDs)
 			}
+			assertNestedMemberGroups(t, base, i, members, expected.NestedMemberGroups)
+		}
+		if expected.GroupCount == 0 && len(expected.NestedMemberGroups) > 0 {
+			t.Fatalf("item[%d] declares nested member groups but renders no group to expand", i)
 		}
 	}
 	if tc.Expected.DistinctGroupIDs {
@@ -388,7 +410,11 @@ func helperGroupListURL(t *testing.T, base string, input helperGroupListingInput
 	t.Helper()
 	switch input.Route {
 	case "sessions":
-		return base + "/api/v1/sessions?view=grouped"
+		values := url.Values{"view": {groupedViewValue}}
+		if input.Project != "" {
+			values.Set("project", input.Project)
+		}
+		return base + "/api/v1/sessions?" + values.Encode()
 	case "search":
 		values := url.Values{"q": {input.SearchQuery}, "view": {groupedViewValue}}
 		if input.SearchLimit > 0 {
@@ -448,6 +474,42 @@ func helperGroupMemberIDs(payload schema.LocalHelperMembersPayload) []string {
 	return ids
 }
 
+// assertNestedMemberGroups asserts a helper that itself owns saved helpers: its
+// row on the member page carries exactly the declared immediate group, and that
+// group's own member page returns the declared exact members. It is the control
+// that keeps an owner chain rendered where the owner's row is instead of being
+// root-flattened.
+func assertNestedMemberGroups(t *testing.T, base string, itemIndex int, members schema.LocalHelperMembersPayload, expected []helperGroupListingNestedGroup) {
+	t.Helper()
+	for _, nested := range expected {
+		var row *schema.LocalSessionListItem
+		for i := range members.Members {
+			member := members.Members[i]
+			if member.Transcript != nil && member.Transcript.Session.ID == nested.SessionID {
+				row = &members.Members[i]
+				break
+			}
+		}
+		if row == nil {
+			t.Fatalf("item[%d] member page has no row for %q; a helper that owns helpers lost its disclosure", itemIndex, nested.SessionID)
+		}
+		if len(row.HelperGroups) != nested.GroupCount {
+			t.Fatalf("item[%d] member %q groups = %d, want %d", itemIndex, nested.SessionID, len(row.HelperGroups), nested.GroupCount)
+		}
+		if nested.GroupCount == 0 {
+			continue
+		}
+		group := row.HelperGroups[0]
+		if group.HelperThreadCount != nested.HelperThreadCount {
+			t.Fatalf("item[%d] member %q group count = %d, want %d", itemIndex, nested.SessionID, group.HelperThreadCount, nested.HelperThreadCount)
+		}
+		child := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 50)
+		if got := helperGroupMemberIDs(child); !reflect.DeepEqual(got, nested.MemberIDs) {
+			t.Fatalf("item[%d] member %q nested members = %v, want %v", itemIndex, nested.SessionID, got, nested.MemberIDs)
+		}
+	}
+}
+
 // helperGroupListShape extracts the identity/order/count projection that must be
 // stable across repeated identical queries. Opaque member scopes are excluded:
 // they are fresh lookups each time, not identity.
@@ -490,6 +552,16 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 	if spec.Origin != "" {
 		origin = sessionorigin.Origin(spec.Origin)
 	}
+	projectHash := helperGroupFixtureProjectHash
+	projectName := "fixture-project"
+	projectFilePath := "/fixture/project"
+	if spec.ProjectHash == helperGroupFixtureSiblingProjectHash.String() {
+		projectHash = helperGroupFixtureSiblingProjectHash
+		projectName = "fixture-sibling-project"
+		projectFilePath = "/fixture/sibling-project"
+	} else if spec.ProjectHash != "" {
+		projectHash = schema.ProjectHash(spec.ProjectHash)
+	}
 	metadata := &schema.UnifiedMetadata{
 		SchemaVersion: ingest.CurrentSchemaVersion,
 		SessionID:     schema.SessionID(spec.ID),
@@ -497,9 +569,9 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 		Model:         schema.ModelID("fixture-model"),
 		HostSlug:      schema.HostSlug("fixture-host"),
 		Project: schema.ProjectContext{
-			Hash:     helperGroupFixtureProjectHash,
-			Name:     "fixture-project",
-			FilePath: "/fixture/project",
+			Hash:     projectHash,
+			Name:     projectName,
+			FilePath: projectFilePath,
 		},
 		Timestamp: schema.TimestampInfo{Start: start, End: end, Ingested: &ingested},
 		Source:    schema.SourceInfo{FilePath: "/fixture/session.jsonl", Format: schema.SourceFormatJSONL},
