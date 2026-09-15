@@ -7,6 +7,7 @@ import {
   assertGroupedProjectScope,
   fetchGroupedLocalSearch,
   fetchGroupedLocalSessions,
+  isGroupedProjectScopeError,
   type LocalSessionListPayload,
 } from '@/lib/api/grouped';
 import { GroupedLocalSessions, type GroupedSelection } from './GroupedLocalSessions';
@@ -38,6 +39,13 @@ export interface GroupedSessionsSectionProps {
   heading?: string;
   /** Shown when the route returns no items. */
   emptyState?: ReactNode;
+  /**
+   * Called when a project-scoped read is refused because the server did not
+   * apply the grouped project filter. The section then renders NOTHING so the
+   * host can fall back to a project list it can trust; without this callback
+   * the refusal is shown as an error instead.
+   */
+  onScopeUnavailable?: () => void;
 }
 
 /**
@@ -57,10 +65,12 @@ export function GroupedSessionsSection({
   selection,
   heading,
   emptyState,
+  onScopeUnavailable,
 }: GroupedSessionsSectionProps) {
   const [payload, setPayload] = useState<LocalSessionListPayload | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const [scopeUnavailable, setScopeUnavailable] = useState(false);
   const [reload, setReload] = useState(0);
 
   const refresh = useCallback(() => setReload((value) => value + 1), []);
@@ -83,16 +93,25 @@ export function GroupedSessionsSection({
         setLoading(false);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) {
+        if (cancelled) return;
+        if (variant === 'sessions' && projectHash && onScopeUnavailable && isGroupedProjectScopeError(cause)) {
           setPayload(null);
-          setError(cause);
+          setError(null);
+          setScopeUnavailable(true);
           setLoading(false);
+          onScopeUnavailable?.();
+          return;
         }
+        setPayload(null);
+        setError(cause);
+        setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [variant, query, projectHash, invalidationKey, reload]);
+  }, [variant, query, projectHash, invalidationKey, reload, onScopeUnavailable]);
+
+  if (scopeUnavailable) return null;
 
   if (loading && payload === null) {
     return <SkeletonList rows={4} label="Loading grouped sessions" />;

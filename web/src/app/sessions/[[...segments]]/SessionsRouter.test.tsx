@@ -133,7 +133,7 @@ describe('SessionsRouter', () => {
     expect(screen.getByText('peasant ingest')).toBeInTheDocument();
   });
 
-  it('refuses a cross-project grouped response rather than misstating the project', async () => {
+  it('falls back to the flat project list when the server does not apply the grouped project filter', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = new URL(String(input));
       if (url.pathname === '/api/v1/sessions') {
@@ -152,7 +152,10 @@ describe('SessionsRouter', () => {
     });
     render(<SessionsRouter />);
 
-    expect(await screen.findByText(/carries other projects' sessions/i)).toBeInTheDocument();
+    // The cross-project grouped response is never rendered; the route falls
+    // back to the flat project list from the sessions channel instead.
+    expect(await screen.findByText('agent-a1')).toBeInTheDocument();
+    expect(screen.getByText('ingested session transcripts for this project.')).toBeInTheDocument();
     expect(screen.queryByText('agent-other')).not.toBeInTheDocument();
   });
 

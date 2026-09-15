@@ -112,6 +112,38 @@ describe('GroupedSessionsSection', () => {
     expect(screen.queryByText('other')).not.toBeInTheDocument();
   });
 
+  it('reports a server that did not apply the project filter so the host can fall back', async () => {
+    const onScopeUnavailable = vi.fn();
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') {
+        return okResponse({
+          ...listResponse(),
+          items: [
+            {
+              kind: 'transcript',
+              transcript: { session: { ...session('other'), projectHash: 'b'.repeat(64) } },
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
+    });
+    render(
+      <GroupedSessionsSection
+        variant="sessions"
+        projectHash={PROJECT_HASH}
+        heading="sessions"
+        onScopeUnavailable={onScopeUnavailable}
+      />,
+    );
+
+    await waitFor(() => expect(onScopeUnavailable).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('other')).not.toBeInTheDocument();
+    expect(screen.queryByText(/carries other projects' sessions/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('sessions')).not.toBeInTheDocument();
+  });
+
   it('refreshes the originating list when an expanded group scope expires, never a broader set', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = new URL(String(input));

@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
+import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
 import { useSessionTitles } from '@/hooks/useSessionTitles';
 import { SkeletonList } from '@/lib/skeleton';
@@ -58,6 +59,13 @@ export function SessionsRouter() {
   const pathname = usePathname();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  // A server that does not yet apply the grouped project filter refuses the
+  // scoped read (see assertGroupedProjectScope). Rather than show a broken
+  // route, fall back to the flat project list, which is exactly what this
+  // route served before the grouped mount. Once the scoped read succeeds, the
+  // grouped list is the only body.
+  const [groupedScopeUnavailable, setGroupedScopeUnavailable] = useState(false);
+  const handleScopeUnavailable = useCallback(() => setGroupedScopeUnavailable(true), []);
   const { data, error } = useChannel<SessionsPayload>(CHANNELS);
   const sessionTitles = useSessionTitles();
 
@@ -138,15 +146,17 @@ export function SessionsRouter() {
       {/* The project-scoped grouped list. It renders exactly the server's items
           and counts for THIS project; when the project has no sessions the
           section shows the ingest teaching state it owns. A project scope the
-          server did not apply fails closed (see assertGroupedProjectScope)
-          rather than showing another project's sessions. */}
-      {!error && data !== undefined && (
+          server did not apply is refused (see assertGroupedProjectScope) rather
+          than showing another project's sessions, and this route then falls
+          back to the flat project list below. */}
+      {!error && data !== undefined && !groupedScopeUnavailable && (
         <GroupedSessionsSection
           variant="sessions"
           projectHash={projectHash}
           invalidationKey={data}
           titles={sessionTitles}
           heading="sessions"
+          onScopeUnavailable={handleScopeUnavailable}
           emptyState={
             <TeachingEmptyState
               title="no sessions recorded for this project yet"
@@ -155,6 +165,26 @@ export function SessionsRouter() {
             />
           }
         />
+      )}
+
+      {/* Fallback body for a server that cannot scope the grouped read. This is
+          the project list this route served before the grouped mount: the same
+          table Home uses, filtered to the project from the sessions channel. */}
+      {!error && data !== undefined && groupedScopeUnavailable && (
+        scoped.length > 0 ? (
+          <AllSessions
+            sessions={scoped}
+            titles={sessionTitles}
+            title="sessions"
+            subtitle="ingested session transcripts for this project."
+          />
+        ) : (
+          <TeachingEmptyState
+            title="no sessions recorded for this project yet"
+            body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
+            command="peasant ingest"
+          />
+        )
       )}
     </div>
   );

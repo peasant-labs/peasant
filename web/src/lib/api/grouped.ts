@@ -139,15 +139,42 @@ export async function fetchGroupedLocalSessions(
 }
 
 /**
+ * The grouped project filter was not applied by the server: the response to a
+ * project-scoped request still carries another project's rows. A host that
+ * understands the missing seam can fall back to its flat project list; a host
+ * that does not must fail closed, because showing a cross-project response
+ * under one project heading misstates the project and its counts.
+ */
+export class GroupedProjectScopeError extends Error {
+  readonly projectHash: string;
+  readonly offendingSessionId: string;
+  readonly offendingProjectHash: string;
+
+  constructor(projectHash: string, sessionId: string, offendingProjectHash: string) {
+    super(
+      `The grouped list at /api/v1/sessions?view=grouped&project=${projectHash} included session ${sessionId} from project ${offendingProjectHash} in assertGroupedProjectScope. No project-scoped list was rendered, because a response built without the grouped project filter carries other projects' sessions and their cross-project counts, and showing it under one project heading would misstate that project. Confirm the Peasant server applies the grouped project filter, then retry.`,
+    );
+    this.name = 'GroupedProjectScopeError';
+    this.projectHash = projectHash;
+    this.offendingSessionId = sessionId;
+    this.offendingProjectHash = offendingProjectHash;
+  }
+}
+
+export function isGroupedProjectScopeError(error: unknown): error is GroupedProjectScopeError {
+  return error instanceof GroupedProjectScopeError;
+}
+
+/**
  * Refuse a grouped response that claims one project but carries another
  * project's rows.
  *
  * The project filter is applied by the SERVER. A server that does not implement
  * the grouped project filter answers with the cross-project list; rendering
  * that under a project heading would show other projects' sessions and print
- * the cross-project counts. This stops the surface with an actionable error
- * instead, and never folds or re-sorts the rows on the client. A row without a
- * recorded project hash is not a contradiction and is allowed through.
+ * the cross-project counts. This stops the surface instead, and never folds or
+ * re-sorts the rows on the client. A row without a recorded project hash is not
+ * a contradiction and is allowed through.
  */
 export function assertGroupedProjectScope(
   payload: LocalSessionListPayload,
@@ -158,9 +185,7 @@ export function assertGroupedProjectScope(
     if (!row) continue;
     const rowHash = row.session.projectHash;
     if (rowHash !== undefined && rowHash !== projectHash) {
-      throw new Error(
-        `The grouped list at /api/v1/sessions?view=grouped&project=${projectHash} included session ${row.session.id} from project ${rowHash} in assertGroupedProjectScope. No project-scoped list was rendered, because a response built without the grouped project filter carries other projects' sessions and their cross-project counts, and showing it under one project heading would misstate that project. Confirm the Peasant server applies the grouped project filter, then retry.`,
-      );
+      throw new GroupedProjectScopeError(projectHash, row.session.id, rowHash);
     }
   }
 }
