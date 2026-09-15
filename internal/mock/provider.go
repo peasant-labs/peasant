@@ -364,6 +364,38 @@ func (p *Provider) ChildSessionsForParent(_ context.Context, _ string) ([]schema
 	return nil, nil
 }
 
+// ResolveStoredTargets resolves mock sessions for parent/context navigation. It
+// deliberately applies NEITHER origin scope NOR selection scope, mirroring the
+// store-backed resolver: a stored session stays linkable through a direct
+// reference. An identifier that names no mock session resolves to an explicit
+// unavailable target rather than an error, so a stale reference renders
+// honestly and the child stays readable.
+func (p *Provider) ResolveStoredTargets(_ context.Context, ids []string) ([]api.StoredTarget, error) {
+	targets := make([]api.StoredTarget, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		target := api.StoredTarget{ID: id}
+		for i := range p.sessions {
+			if string(p.sessions[i].ID) == id {
+				target.Found = true
+				break
+			}
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+// Verify the mock provider can authorize stored-target navigation at compile
+// time: the flat local read decorates its fallback conversion from this method.
+var _ interface {
+	ResolveStoredTargets(ctx context.Context, ids []string) ([]api.StoredTarget, error)
+} = (*Provider)(nil)
+
 // isSourceFileMock is a simplified source file check for mock data.
 func isSourceFileMock(path string) bool {
 	excludeSuffixes := []string{".sum", ".mod", ".lock"}
