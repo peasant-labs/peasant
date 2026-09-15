@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
 
@@ -43,6 +44,53 @@ func (p *Provider) SessionByID(_ context.Context, id string) (*ingest.Session, e
 	}
 	return nil, fmt.Errorf("session not found: %s", id)
 }
+
+// DetailReadPayload serves the flat local read for the mock store: the
+// validated durable detail plus authorized current-target navigation resolved
+// against the mock's own stored sessions. It is the same decoration boundary
+// the generation-backed store uses, so a stored context/source or parent link
+// resolves identically on the mounted mock-served app and a real store. It
+// applies neither origin nor selection scope, matching the store contract.
+func (p *Provider) DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error) {
+	session, err := p.SessionByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	detail, err := transcript.SessionToDetailValidated(session)
+	if err != nil {
+		return nil, err
+	}
+	return api.DecorateDetailReadPayload(ctx, detail, p.resolveStoredTargets)
+}
+
+// resolveStoredTargets reports which requested identifiers name a stored mock
+// session. A missing identifier resolves to an explicit unavailable target
+// rather than an error, so one stale link cannot hide the sessions that exist.
+func (p *Provider) resolveStoredTargets(_ context.Context, ids []string) ([]api.StoredTarget, error) {
+	stored := make(map[string]struct{}, len(p.sessions))
+	for i := range p.sessions {
+		stored[string(p.sessions[i].ID)] = struct{}{}
+	}
+	targets := make([]api.StoredTarget, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		target := api.StoredTarget{ID: id}
+		if _, ok := stored[id]; ok {
+			target.Found = true
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+// compile-time guard: the mock store serves the flat local read projection.
+var _ interface {
+	DetailReadPayload(context.Context, string) (*schema.SessionDetailReadPayload, error)
+} = (*Provider)(nil)
 
 func (p *Provider) DashboardMetrics(_ context.Context) (*api.DashboardPayload, error) {
 	total := len(p.sessions)
