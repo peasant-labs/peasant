@@ -581,6 +581,9 @@ func TestNativeRefreshRepair(t *testing.T) {
 				if len(bundle.Entries) == 0 {
 					t.Fatal("publication input carries no entries; the payload does not match the repaired generation")
 				}
+				if len(bundle.Entries) != mainEntries {
+					t.Fatalf("publication input carries %d entries, want the repaired generation's %d", len(bundle.Entries), mainEntries)
+				}
 				// A harvest immediately after the repair does no work: the
 				// recorded capture does not move, and the binding stays.
 				afterSecond, err := reopened.ReadIndexState(t.Context(), sid)
