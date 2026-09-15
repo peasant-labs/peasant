@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { readTranscriptReadingState, transcriptReadingScrollTop, writeTranscriptReadingState } from './transcriptReadingState';
 
@@ -23,6 +23,12 @@ export function useTranscriptReadingState(
 ) {
   const [earlierHistoryOpen, setEarlierHistoryOpen] = useState<Record<string, boolean>>({});
   const [activeTurn, setActiveTurn] = useState<number | undefined>(undefined);
+  // The session that currently owns the mounted stream. A session change renders
+  // before its DOM effects, so the render-time assignment lets the outgoing
+  // session's still-attached scroll listener ignore the incoming session's
+  // position reset instead of writing it into the outgoing session's record.
+  const owningSession = useRef(sessionId);
+  owningSession.current = sessionId;
 
   // Hydrate the per-session disclosure + selection record on mount and on every
   // session change, so the state of the session being left never leaks into the
@@ -54,12 +60,18 @@ export function useTranscriptReadingState(
     let frame = 0;
     let stopped = false;
     let attempts = 0;
+    let stable = 0;
     let scroller: HTMLElement | null = null;
     const savedTop = transcriptReadingScrollTop(sessionId);
+    // The viewer resets its own reading position on a session change, so the
+    // replay keeps correcting the offset until it has held for a short settle
+    // window; stopping the moment it first sticks would let a later view reset
+    // win the race.
+    const SETTLE_FRAMES = 30;
     let restored = savedTop <= 0;
 
     const captureScrollTop = () => {
-      if (!scroller) return;
+      if (!scroller || owningSession.current !== sessionId) return;
       const current = readTranscriptReadingState(sessionId);
       writeTranscriptReadingState(sessionId, {
         scrollTop: scroller.scrollTop,
@@ -69,14 +81,19 @@ export function useTranscriptReadingState(
     };
 
     const tick = () => {
-      if (stopped) return;
+      if (stopped || owningSession.current !== sessionId) return;
       if (!scroller) {
         scroller = host.querySelector<HTMLElement>('.txn-stream');
         if (scroller) scroller.addEventListener('scroll', captureScrollTop, { passive: true });
       }
       if (scroller && !restored) {
-        if (Math.abs(scroller.scrollTop - savedTop) > 1) scroller.scrollTop = savedTop;
-        if (Math.abs(scroller.scrollTop - savedTop) <= 1) restored = true;
+        if (Math.abs(scroller.scrollTop - savedTop) > 1) {
+          scroller.scrollTop = savedTop;
+          stable = 0;
+        } else {
+          stable += 1;
+          if (stable >= SETTLE_FRAMES) restored = true;
+        }
       }
       attempts += 1;
       if ((!scroller || !restored) && attempts < 120) frame = window.requestAnimationFrame(tick);
