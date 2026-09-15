@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -27,10 +28,20 @@ var generationActivationProvenanceManifestYAML []byte
 // activation. provenance is the kind recorded before the activation;
 // corrupt_capture_hash breaks the captured metadata row's integrity digest so
 // the case carries a capture whose snapshot cannot certify readiness.
+// activation_capture is the kind the activation itself certifies, or empty for
+// an activation that supplies no capture; activation_foreign_project makes the
+// certified capture name a project the stored session does not carry. The
+// want_* fields are the stored agreement a discovery run compares afterwards.
 type generationProvenanceCase struct {
-	Name               string `yaml:"name"`
-	Provenance         string `yaml:"provenance"`
-	CorruptCaptureHash bool   `yaml:"corrupt_capture_hash"`
+	Name                     string `yaml:"name"`
+	Provenance               string `yaml:"provenance"`
+	CorruptCaptureHash       bool   `yaml:"corrupt_capture_hash"`
+	ActivationCapture        string `yaml:"activation_capture"`
+	ActivationForeignProject bool   `yaml:"activation_foreign_project"`
+	WantReadiness            string `yaml:"want_readiness"`
+	WantCaptureRevision      int64  `yaml:"want_capture_revision"`
+	WantBound                bool   `yaml:"want_bound"`
+	WantRefused              bool   `yaml:"want_refused"`
 }
 
 type generationProvenanceFixture struct {
@@ -71,6 +82,14 @@ func loadGenerationProvenanceFixture(t *testing.T) generationProvenanceFixture {
 		}
 		if _, err := ingest.NewCWDProvenanceKind(c.Provenance); err != nil {
 			t.Fatalf("case %q names an unknown provenance kind %q: %v", c.Name, c.Provenance, err)
+		}
+		if c.ActivationCapture != "" {
+			if _, err := ingest.NewCWDProvenanceKind(c.ActivationCapture); err != nil {
+				t.Fatalf("case %q names an unknown activation capture kind %q: %v", c.Name, c.ActivationCapture, err)
+			}
+		}
+		if c.WantReadiness != string(ingest.PublicationReady) && c.WantReadiness != string(ingest.PublicationNeedsIngest) {
+			t.Fatalf("case %q names an unknown readiness %q", c.Name, c.WantReadiness)
 		}
 		seen[c.Name] = true
 		names = append(names, c.Name)
@@ -131,6 +150,27 @@ func seedProvenanceSession(t *testing.T, s *Store, fixture generationProvenanceF
 		fixture.Session.ProjectHash, fixture.Session.CWD, string(sid))
 }
 
+// provenanceCaptureMetadata builds the captured metadata snapshot the fixture
+// records. A source_exact capture names the fixture's working directory; every
+// other kind records no working directory, which is the agreement the
+// capture-validation rule requires.
+func provenanceCaptureMetadata(fixture generationProvenanceFixture, sid schema.SessionID, kind ingest.CWDProvenanceKind) schema.UnifiedMetadata {
+	meta := schema.UnifiedMetadata{
+		SchemaVersion: ingest.CurrentSchemaVersion,
+		SessionID:     sid,
+		ModelHarness:  defaults.HarnessClaudeCode,
+		HostSlug:      schema.HostSlug(fixture.Session.HostSlug),
+		Project:       schema.ProjectContext{Hash: schema.ProjectHash(fixture.Session.ProjectHash)},
+		ContentHash:   fixture.Session.ContentHash,
+		Stats:         schema.SessionStats{TurnCount: 3},
+	}
+	if kind == ingest.CWDSourceExact {
+		meta.CWD = fixture.Session.CWD
+	}
+	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
+	return meta
+}
+
 // seedProvenanceCapture writes the captured publication metadata row and the
 // two revision columns the binding predicate compares against it, recording
 // provenance as the captured metadata's source evidence. corrupt replaces the
@@ -138,17 +178,11 @@ func seedProvenanceSession(t *testing.T, s *Store, fixture generationProvenanceF
 // longer certify readiness.
 func seedProvenanceCapture(t *testing.T, s *Store, fixture generationProvenanceFixture, sid schema.SessionID, provenance string, corrupt bool) schema.UnifiedMetadata {
 	t.Helper()
-	meta := schema.UnifiedMetadata{
-		SchemaVersion: ingest.CurrentSchemaVersion,
-		SessionID:     sid,
-		ModelHarness:  defaults.HarnessClaudeCode,
-		HostSlug:      schema.HostSlug(fixture.Session.HostSlug),
-		Project:       schema.ProjectContext{Hash: schema.ProjectHash(fixture.Session.ProjectHash)},
-		CWD:           fixture.Session.CWD,
-		ContentHash:   fixture.Session.ContentHash,
-		Stats:         schema.SessionStats{TurnCount: 3},
+	kind, err := ingest.NewCWDProvenanceKind(provenance)
+	if err != nil {
+		t.Fatalf("seed capture provenance %q: %v", provenance, err)
 	}
-	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
+	meta := provenanceCaptureMetadata(fixture, sid, kind)
 	encoded, err := json.Marshal(meta)
 	if err != nil {
 		t.Fatalf("marshal captured metadata: %v", err)
@@ -165,10 +199,14 @@ func seedProvenanceCapture(t *testing.T, s *Store, fixture generationProvenanceF
 
 // TestGenerationActivationPreservesPublicationCapture proves that pointing a
 // session at a managed generation preserves the recorded publication-capture
-// agreement. The pointing UPDATE names facts the row-version trigger watches,
-// so the activation must re-state the provenance it read instead of letting
-// the trigger clear it: a cleared kind re-ingests the session on every
-// discovery run and leaves it permanently unpublishable.
+// agreement and records a certified one that is missing. The pointing UPDATE
+// names facts the row-version trigger watches, so the activation must re-state
+// the provenance it read instead of letting the trigger clear it: a cleared
+// kind re-ingests the session on every discovery run and leaves it permanently
+// unpublishable. The activation also records the capture it certifies in the
+// SAME transaction as the generation install, so a repaired session is
+// publishable without a further run; an uncertified kind records nothing and
+// leaves the stored provenance exactly as it was.
 func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 	fixture := loadGenerationProvenanceFixture(t)
 	sid := schema.SessionID(fixture.Session.ID)
@@ -177,8 +215,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 			t.Parallel()
 			s, _ := openGenerationStore(t)
 			seedProvenanceSession(t, s, fixture, sid)
-			bound := tc.Provenance != string(ingest.CWDNotRecovered)
-			if bound {
+			if tc.Provenance != string(ingest.CWDNotRecovered) {
 				seedProvenanceCapture(t, s, fixture, sid, tc.Provenance, tc.CorruptCaptureHash)
 			} else {
 				runProvenanceSQL(t, s, `UPDATE sessions SET cwd_provenance_kind = ? WHERE session_id = ?`, tc.Provenance, string(sid))
@@ -197,16 +234,12 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 			// user entry whose full text it captures, so the activation's
 			// derived title mirror replaces the stale one.
 			complete.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])}
-			var captureRevision int64
-			if bound {
-				captureRevision = generationProvenanceCaptureRevision
-			}
-			if err := s.ActivateNativeGeneration(context.Background(), ingest.NativeGenerationActivation{
+			activation := ingest.NativeGenerationActivation{
 				Generation:      complete,
 				Blobs:           blobs,
 				IndexerVersion:  77,
 				IndexedAtMs:     777,
-				CaptureRevision: captureRevision,
+				CaptureRevision: before.PublicationCaptureRevision,
 				ContentCapture: ingest.SessionContentCaptureWrite{
 					Status:           ingest.ContentCaptureComplete,
 					SourceAuthority:  ingest.ContentSourceProviderSource,
@@ -214,40 +247,78 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 					CaptureFormat:    ingest.ContentCaptureFormatFull,
 					CapturedAtMs:     777,
 				},
-			}); err != nil {
-				t.Fatalf("activate managed generation: %v", err)
+			}
+			if tc.ActivationCapture != "" {
+				kind, kindErr := ingest.NewCWDProvenanceKind(tc.ActivationCapture)
+				if kindErr != nil {
+					t.Fatalf("activation capture kind %q: %v", tc.ActivationCapture, kindErr)
+				}
+				meta := provenanceCaptureMetadata(fixture, sid, kind)
+				if tc.ActivationForeignProject {
+					meta.Project.Hash = schema.ProjectHash(strings.Repeat("e", 64))
+					meta.MetadataHash = schema.ComputeMetadataHash(&meta)
+				}
+				activation.Capture = &ingest.PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 			}
 
-			if got := readProvenanceScalar(t, s, `SELECT cwd_provenance_kind FROM sessions WHERE session_id = '`+string(sid)+`'`); got != tc.Provenance {
-				t.Fatalf("activation changed the recorded provenance kind %q -> %q; pointing a session at a generation is not a new capture", tc.Provenance, got)
+			activateErr := s.ActivateNativeGeneration(context.Background(), activation)
+			if tc.WantRefused {
+				if activateErr == nil {
+					t.Fatal("activation with a publication capture that disagrees with the stored session was accepted; want refusal")
+				}
+			} else if activateErr != nil {
+				t.Fatalf("activate managed generation: %v", activateErr)
+			}
+
+			// A capture the activation certified replaces the stored provenance
+			// with the certified kind; every other activation must leave the
+			// stored provenance exactly as it was.
+			wantProvenance := tc.Provenance
+			if tc.ActivationCapture != "" && !tc.WantRefused && tc.ActivationCapture != string(ingest.CWDNotRecovered) {
+				wantProvenance = tc.ActivationCapture
+			}
+			if got := readProvenanceScalar(t, s, `SELECT cwd_provenance_kind FROM sessions WHERE session_id = '`+string(sid)+`'`); got != wantProvenance {
+				t.Fatalf("activation changed the recorded provenance kind %s -> %q, want %q", tc.Provenance, got, wantProvenance)
 			}
 			after, err := s.ReadIndexState(context.Background(), sid)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if after.PublicationBound != bound {
-				t.Fatalf("publication bound=%v, want %v", after.PublicationBound, bound)
+			if after == nil {
+				t.Fatal("activated session has no readable index state")
 			}
-			if after.PublicationCaptureRevision != before.PublicationCaptureRevision {
-				t.Fatalf("activation moved the capture revision %d -> %d; the recorded agreement must survive unchanged",
-					before.PublicationCaptureRevision, after.PublicationCaptureRevision)
+			if after.PublicationBound != tc.WantBound {
+				t.Fatalf("publication bound=%v, want %v", after.PublicationBound, tc.WantBound)
+			}
+			if after.PublicationCaptureRevision != tc.WantCaptureRevision {
+				t.Fatalf("capture revision = %d, want %d", after.PublicationCaptureRevision, tc.WantCaptureRevision)
 			}
 			locations, err := s.BulkLookupSessionLocations(context.Background(), []ingest.SessionID{sid})
 			if err != nil {
 				t.Fatal(err)
 			}
 			readiness := locations[sid].PublicationReadiness
-			// Ready requires a capture whose snapshot still certifies the
-			// session: the absent case has no capture at all, and the
-			// corrupted case carries a foreign integrity digest, so both must
-			// keep asking for ingest even though their provenance kind (where
-			// one exists) survived.
-			wantReady := bound && !tc.CorruptCaptureHash
-			if wantReady && readiness != ingest.PublicationReady {
-				t.Fatalf("bound capture readiness = %q, want ready", readiness)
+			if readiness != ingest.PublicationReadiness(tc.WantReadiness) {
+				t.Fatalf("readiness = %q, want %q", readiness, tc.WantReadiness)
 			}
-			if !wantReady && readiness != ingest.PublicationNeedsIngest {
-				t.Fatalf("case readiness = %q, want needs_ingest", readiness)
+			if tc.WantRefused {
+				// A refused activation installs nothing: the caller must not be
+				// able to read a half-written generation or capture.
+				var generationID string
+				snapshotErr := s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {
+					generationID = snapshot.GenerationID
+					return nil
+				})
+				if snapshotErr != nil {
+					t.Fatal(snapshotErr)
+				}
+				if generationID != "" {
+					t.Fatalf("refused activation installed generation %q, want none", generationID)
+				}
+				if before.PublicationCaptureRevision != after.PublicationCaptureRevision {
+					t.Fatalf("refused activation moved the capture revision %d -> %d", before.PublicationCaptureRevision, after.PublicationCaptureRevision)
+				}
+				return
 			}
 			turnCount := readProvenanceScalar(t, s, `SELECT COALESCE(turn_count,-1) FROM session_metrics WHERE session_id = '`+string(sid)+`'`)
 			if turnCount != "3" {
@@ -258,5 +329,62 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 				t.Fatalf("activation title = %q, want the generation's derived title", title)
 			}
 		})
+	}
+}
+
+// TestGenerationActivationRecoveryRecordsPublicationCapture proves a crash
+// between staging and the commit replays the certified capture: the durable
+// intent carries it, and recovery records it with the same guarded
+// transaction, so a repaired session is publishable after recovery too.
+func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
+	fixture := loadGenerationProvenanceFixture(t)
+	sid := schema.SessionID(fixture.Session.ID)
+	s, _ := openGenerationStore(t)
+	seedProvenanceSession(t, s, fixture, sid)
+	runProvenanceSQL(t, s, `UPDATE sessions SET cwd_provenance_kind = ? WHERE session_id = ?`, string(ingest.CWDNotRecovered), string(sid))
+
+	complete, blobs := buildTestGeneration(t, sid, fixture.Generation.ID, "recovered full text", "recovered tool input", "recovered tool output")
+	complete.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])}
+	kind := ingest.CWDSourceExact
+	activation := ingest.NativeGenerationActivation{
+		Generation:     complete,
+		Blobs:          blobs,
+		IndexerVersion: 77,
+		IndexedAtMs:    777,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			Status:           ingest.ContentCaptureComplete,
+			SourceAuthority:  ingest.ContentSourceProviderSource,
+			TranscriptOrigin: ingest.TranscriptOriginFile,
+			CaptureFormat:    ingest.ContentCaptureFormatFull,
+			CapturedAtMs:     777,
+		},
+		Capture: &ingest.PublicationCaptureWrite{Metadata: provenanceCaptureMetadata(fixture, sid, kind), CWDProvenance: kind},
+	}
+
+	installRecoveryFault(t, s, "after-rename-before-db")
+	if err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
+		t.Fatal("activation across the staging seam succeeded; the crash must interrupt it")
+	}
+	clearRecoveryFault(t, s, "after-rename-before-db")
+	if err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
+		t.Fatalf("recover interrupted activation: %v", err)
+	}
+
+	state, err := s.ReadIndexState(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("recovered session has no readable index state")
+	}
+	if state.PublicationCaptureRevision == 0 || !state.PublicationBound {
+		t.Fatalf("recovery did not record the certified capture: revision=%d bound=%v", state.PublicationCaptureRevision, state.PublicationBound)
+	}
+	locations, err := s.BulkLookupSessionLocations(context.Background(), []ingest.SessionID{sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := locations[sid].PublicationReadiness; got != ingest.PublicationReady {
+		t.Fatalf("recovered readiness = %q, want ready", got)
 	}
 }
