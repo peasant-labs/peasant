@@ -1,0 +1,17 @@
+expectedCount: 6
+requiredNames:
+  - nested-helper-reachable-through-nonmatching-owner
+  - owner-and-nested-helper-both-match-in-server-order
+  - every-required-member-page-is-followed
+  - expired-scope-omits-only-that-group
+  - shared-group-and-duplicate-match-are-collapsed
+  - unreachable-group-with-no-members-adds-no-hits
+requiredOutcomes:
+  - ok
+  - expired
+expectedLoaderMutationCount: 4
+loaderMutations:
+  - {name: traversal count drift is rejected, target: manifest, find: "expectedCount: 6\nrequiredNames:", replace: "expectedCount: 5\nrequiredNames:", expectedError: independent}
+  - {name: traversal duplicate case names are rejected, target: cases, find: "  - name: every-required-member-page-is-followed\n    query: guardian", replace: "  - name: shared-group-and-duplicate-match-are-collapsed\n    query: guardian", expectedError: duplicates}
+  - {name: traversal missing required case is rejected, target: manifest, find: "  - unreachable-group-with-no-members-adds-no-hits\n", replace: "  - unreachable-group-renamed\n", expectedError: required case}
+  - {name: traversal unknown response outcome is rejected, target: cases, find: "        scope: scope-live\n        page: 1\n        outcome: ok", replace: "        scope: scope-live\n        page: 1\n        outcome: unknown-outcome", expectedError: invalid outcome}
