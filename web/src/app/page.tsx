@@ -30,10 +30,10 @@ import {
   TeachingEmptyState,
   type TileSpec,
 } from "@/lib/ft-ui";
-import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
+import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp, List } from "lucide-react";
 import { AllSessions } from "@/components/sessions/AllSessions";
+import { GroupedSessionsSection } from "@/components/sessions/GroupedSessionsSection";
 import { useSessionTitles } from "@/hooks/useSessionTitles";
-import { UNASSIGNED_PROJECT } from "@/app/review/[[...segments]]/sessions";
 
 const CHANNELS: ["sessions"] = ["sessions"];
 
@@ -145,6 +145,51 @@ function SelectionNotice({
 }
 
 // ---------------------------------------------------------------------------
+// Flat all-sessions disclosure.
+//
+// The grouped list replaced the old flat table on Home, and with it the filter
+// over session identity fields (short id, harness, project) and the 25-row
+// top-level pager. Those are real flows, so they stay REACHABLE: a collapsed
+// disclosure mounts the unchanged AllSessions table over the same session set,
+// beside the grouped list rather than instead of it. The grouped list keeps its
+// own per-group disclosure/paging state; this table keeps the flat filter and
+// pager exactly as they were, and it is never widened by a helper membership.
+// ---------------------------------------------------------------------------
+
+function AllSessionsDisclosure({
+  sessions,
+  titles,
+}: {
+  sessions: SessionSummary[];
+  titles?: ReadonlyMap<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  if (sessions.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2" data-flat-sessions-disclosure="true">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="inline-flex w-fit items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
+      >
+        <List size={13} aria-hidden />
+        <span className="tabular-nums">filter and page through every session</span>
+        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+      </button>
+      {open && (
+        <AllSessions
+          sessions={sessions}
+          titles={titles}
+          title="every session"
+          subtitle="every ingested session across projects, filterable and paged."
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -248,23 +293,14 @@ export default function HomePage() {
     [summaries, sessions, sessionsError, summariesSelectionFailed, selectionRecovery],
   );
 
-  // Sessions the All Sessions table is allowed to render.
+  // Sessions the grouped REST list may render.
   //
-  // VISIBILITY IS DERIVED FROM `rows`, never from the sessions channel directly.
-  // `rows` already encodes the whole visibility policy — it empties on a
-  // discovery error, on a failed selection, and on selection recovery, and it
-  // carries only the projects a working kickstart selection permits. The
-  // sessions WS payload is NOT filtered by that selection, so listing it raw
-  // would surface projects and session identities the picker is deliberately
-  // withholding (regression covered by page.test.tsx's forbiddenIdentities).
-  // Intersecting with the visible project set means the table can never expose a
-  // project the picker is hiding, in any of those states.
-  const visibleProjectNames = useMemo(() => new Set(rows.map((r) => r.name)), [rows]);
-  const visibleSessions = useMemo(
-    () => sessions.filter((s) => visibleProjectNames.has(s.project ?? UNASSIGNED_PROJECT)),
-    [sessions, visibleProjectNames],
-  );
-
+  // VISIBILITY IS DERIVED FROM THE SERVER ROUTE, never from the sessions
+  // channel directly. `/api/v1/sessions?view=grouped` applies the SAME
+  // discovery/selection predicate the flat route applies, so the list can never
+  // surface a project or session identity the picker is withholding. A
+  // saved-selection failure stops the grouped section entirely (fail closed),
+  // and a selection-recovery state keeps the recovery panel as the only body.
   const totalSessions =
     sessionsError || summariesSelectionFailed || selectionRecovery
       ? 0
@@ -276,6 +312,9 @@ export default function HomePage() {
   // Nothing has resolved yet: summary fetch still in flight AND no sessions
   // message has arrived. Show a skeleton, not a teach/empty state.
   const loading = !summariesSettled && sessionsData === undefined;
+
+  const groupedSectionVisible =
+    !loading && !sessionsError && !summariesSelectionFailed && !selectionRecovery;
 
   // Pre-format coverage percentage for the KPI tile.
   const coveragePct =
@@ -434,13 +473,25 @@ export default function HomePage() {
         <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
       </DataState>
 
-      {/* Every ingested session, flat and cross-project, beneath the picker —
-          the pre-release archive's Projects page shape. Rows open the session
-          viewer. Rendered outside DataState because it has its own empty rule
-          (it returns null with no sessions) and must not replace the picker's
-          teach/empty state. */}
-      {!loading && !sessionsError && visibleSessions.length > 0 && (
-        <AllSessions sessions={visibleSessions} titles={sessionTitles} />
+      {/* Every ingested session, grouped by its saved helper threads, beneath
+          the picker. The list and its counts come from the SAME authorized,
+          selected route set, so grouping is server-driven rather than a
+          client-side cosmetic fold. Rendered outside DataState because it has
+          its own empty rule and must not replace the picker's teach/empty
+          state. */}
+      {groupedSectionVisible && (
+        <GroupedSessionsSection
+          variant="sessions"
+          invalidationKey={sessionsData}
+          titles={sessionTitles}
+          heading="all sessions"
+        />
+      )}
+
+      {/* The pre-existing cross-project filter and 25-row pager stay reachable
+          here, beside the grouped list. See AllSessionsDisclosure above. */}
+      {groupedSectionVisible && (
+        <AllSessionsDisclosure sessions={sessions} titles={sessionTitles} />
       )}
     </div>
   );

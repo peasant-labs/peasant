@@ -79,7 +79,11 @@ func OpenReadOnly(path string) (*Store, error) {
 	}
 	pool.Put(conn)
 
-	formats, _ := newIndexFormats(nil)
+	// Register the managed-generation reader so a dry run can inspect a store
+	// that already holds format-2 sessions. Dry-run configures no artifact file
+	// store or lock, so it never opens a snapshot or writes a file; it reports
+	// the stored representation as unsupported only for a genuinely unknown one.
+	formats, _ := newIndexFormats([]IndexFormat{generationIndexFormat{}})
 	conversions, _ := newIndexFormatConversions(nil, formats)
 	return &Store{pool: pool, salt: installationSalt, indexFormats: formats, indexConversions: conversions}, nil
 }

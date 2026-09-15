@@ -344,10 +344,34 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 			parent = string(*logicalParent)
 		}
 	}
+	// The pointing UPDATE names session facts the row-version trigger watches
+	// (parent_id, model_harness, start_ms, end_ms), so the trigger clears the
+	// recorded publication provenance. Read it first and re-state it right
+	// after the UPDATE: pointing a session at a generation is not a new
+	// capture, so it must not itself invalidate the session's recorded capture
+	// agreement. The capture revision is deliberately NOT re-stated here; the
+	// index writer's success stamp remains its only evidence.
+	var provenance string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT cwd_provenance_kind FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			provenance = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store: read recorded publication provenance before pointing session %s at generation %s: %w; no generation was activated; restore database access and retry activation", sessionID, generation.ID, err)
+	}
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
 		generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID),
 	}}); err != nil {
 		return fmt.Errorf("store: point session %s at generation %s: %w; no generation was activated", sessionID, generation.ID, err)
+	}
+	if provenance != "" {
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET cwd_provenance_kind = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{provenance, string(sessionID)},
+		}); err != nil {
+			return fmt.Errorf("store: retain recorded publication provenance after pointing session %s at generation %s: %w; the activation transaction rolled back and the prior generation is visible; repair database access and retry activation", sessionID, generation.ID, err)
+		}
 	}
 	// session_metrics.turn_count and tool_calls are derived mirrors of
 	// Metadata.Stats, never a second authority. The title is derived from the

@@ -48,9 +48,16 @@ func (s *Store) readMetricInputOnConn(conn *sqlite.Conn, sid ingest.SessionID, i
 	if err != nil {
 		return nil, err
 	}
-	err = sqlitex.ExecuteTransient(conn, "SELECT start_ms, end_ms FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
+	// The active generation binds this computation to the managed projection it
+	// captured. It is read in the same snapshot as the entries, so a save after
+	// an activation that replaced the generation is refused instead of folding
+	// one generation's metrics into another generation's title and counts.
+	err = sqlitex.ExecuteTransient(conn, "SELECT start_ms, end_ms, active_generation_id FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
 		Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			input.StartMS, input.EndMS = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				input.GenerationID = stmt.ColumnText(2)
+			}
 			return nil
 		},
 	})

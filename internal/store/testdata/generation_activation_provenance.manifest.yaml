@@ -1,0 +1,7 @@
+# Required case names for generation_activation_provenance.yaml — deletion
+# protection by name, never a count: a deleted or renamed case must fail
+# instead of silently shrinking the oracle.
+requiredNames:
+  - bound_capture_stays_bound
+  - absent_capture_stays_not_recovered
+  - mismatched_capture_stays_needs_ingest

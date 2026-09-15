@@ -1,0 +1,412 @@
+# Search-navigation traversal cases for the opt-in grouped search route.
+#
+# The command palette flattens a grouped search response into individual
+# transcript hits. A saved helper group is fetched from the exact opaque scope
+# the route issued, and a member row may itself own further helper groups, so the
+# traversal must follow the NESTED groups the server returns: when the server
+# suppresses a group from the top level because its owner is also a candidate,
+# the nested group is the only path to its hits.
+#
+# Each case drives the REAL fetchGroupedSearchMatches over a fetch boundary that
+# answers only the member requests named here; an unexpected request fails the
+# case. `expectedMemberRequests` pins every (groupId, scope, page) the traversal
+# is allowed to ask for, so paging, deduplication and fail-closed expiry are all
+# observable at the wire boundary.
+cases:
+  - name: nested-helper-reachable-through-nonmatching-owner
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 2
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-p1
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+            matches:
+              - {sessionId: agent-p1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: guardian hit, score: 1}
+          helperGroups:
+            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 1, memberScope: scope-g1}
+    responses:
+      - groupId: hg_g1
+        scope: scope-g1
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 20
+          total: 1
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-g1
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+              helperGroups:
+                - {groupId: hg_g2, purpose: helper_review, helperThreadCount: 1, memberScope: scope-g2}
+      - groupId: hg_g2
+        scope: scope-g2
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 20
+          total: 1
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-g2
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-g2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 4, role: assistant, snippet: guardian nested hit, score: 2}
+    expectedMemberRequests:
+      - {groupId: hg_g1, scope: scope-g1, page: 1}
+      - {groupId: hg_g2, scope: scope-g2, page: 1}
+    expectedSessionIds: [agent-p1, agent-g2]
+
+  - name: owner-and-nested-helper-both-match-in-server-order
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-p1
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+            matches:
+              - {sessionId: agent-p1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: user, snippet: owner hit, score: 1}
+          helperGroups:
+            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 1, memberScope: scope-g1}
+    responses:
+      - groupId: hg_g1
+        scope: scope-g1
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 20
+          total: 1
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-g1
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-g1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 2, role: assistant, snippet: helper hit, score: 2}
+              helperGroups:
+                - {groupId: hg_g2, purpose: helper_review, helperThreadCount: 1, memberScope: scope-g2}
+      - groupId: hg_g2
+        scope: scope-g2
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 20
+          total: 1
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-g2
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-g2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 3, role: assistant, snippet: nested hit, score: 3}
+    expectedMemberRequests:
+      - {groupId: hg_g1, scope: scope-g1, page: 1}
+      - {groupId: hg_g2, scope: scope-g2, page: 1}
+    expectedSessionIds: [agent-p1, agent-g1, agent-g2]
+
+  - name: every-required-member-page-is-followed
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      items:
+        - kind: context_container
+          context: {groupId: hg_g1, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 2, memberScope: scope-g1}
+    responses:
+      - groupId: hg_g1
+        scope: scope-g1
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 1
+          total: 2
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m1
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: first page, score: 1}
+      - groupId: hg_g1
+        scope: scope-g1
+        page: 2
+        outcome: ok
+        body:
+          page: 2
+          limit: 1
+          total: 2
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m2
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: assistant, snippet: second page, score: 2}
+    expectedMemberRequests:
+      - {groupId: hg_g1, scope: scope-g1, page: 1}
+      - {groupId: hg_g1, scope: scope-g1, page: 2}
+    expectedSessionIds: [agent-m1, agent-m2]
+
+  - name: expired-scope-omits-only-that-group
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 3
+      ordinarySessionTotal: 1
+      helperThreadTotal: 2
+      items:
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-p1
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+            matches:
+              - {sessionId: agent-p1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: ordinary hit, score: 1}
+          helperGroups:
+            - {groupId: hg_stale, purpose: helper_review, helperThreadCount: 1, memberScope: scope-stale}
+        - kind: context_container
+          context: {groupId: hg_live, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_live, purpose: helper_review, helperThreadCount: 1, memberScope: scope-live}
+    responses:
+      - groupId: hg_stale
+        scope: scope-stale
+        page: 1
+        outcome: expired
+        body: {error: scope expired, code: group_scope_expired}
+      - groupId: hg_live
+        scope: scope-live
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 20
+          total: 1
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-live
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-live, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 5, role: user, snippet: live hit, score: 2}
+    expectedMemberRequests:
+      - {groupId: hg_stale, scope: scope-stale, page: 1}
+      - {groupId: hg_live, scope: scope-live, page: 1}
+    expectedSessionIds: [agent-p1, agent-live]
+
+  - name: shared-group-and-duplicate-match-are-collapsed
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 2
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      items:
+        - kind: context_container
+          context: {groupId: hg_g1, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 1, memberScope: scope-g1}
+        - kind: context_container
+          context: {groupId: hg_g3, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 1, memberScope: scope-g1}
+    responses:
+      - groupId: hg_g1
+        scope: scope-g1
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 20
+          total: 1
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-shared
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-shared, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 7, role: user, snippet: shared hit, score: 1}
+    expectedMemberRequests:
+      - {groupId: hg_g1, scope: scope-g1, page: 1}
+    expectedSessionIds: [agent-shared]
+
+  - name: non-advancing-member-page-stops
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 5
+      items:
+        - kind: context_container
+          context: {groupId: hg_loop, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_loop, purpose: helper_review, helperThreadCount: 5, memberScope: scope-loop}
+    responses:
+      - groupId: hg_loop
+        scope: scope-loop
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 1
+          total: 5
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop1
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: loop first, score: 1}
+      - groupId: hg_loop
+        scope: scope-loop
+        page: 2
+        outcome: ok
+        body:
+          page: 1
+          limit: 1
+          total: 5
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop2
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: assistant, snippet: loop second, score: 2}
+    expectedMemberRequests:
+      - {groupId: hg_loop, scope: scope-loop, page: 1}
+      - {groupId: hg_loop, scope: scope-loop, page: 2}
+    expectedSessionIds: [agent-loop1, agent-loop2]
+
+  - name: unreachable-group-with-no-members-adds-no-hits
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - kind: context_container
+          context: {groupId: hg_empty, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_empty, purpose: helper_review, helperThreadCount: 1, memberScope: scope-empty}
+    responses:
+      - groupId: hg_empty
+        scope: scope-empty
+        page: 1
+        outcome: ok
+        body: {page: 1, limit: 20, total: 0, members: []}
+    expectedMemberRequests:
+      - {groupId: hg_empty, scope: scope-empty, page: 1}
+    expectedSessionIds: []

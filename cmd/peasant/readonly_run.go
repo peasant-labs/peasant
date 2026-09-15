@@ -37,7 +37,32 @@ func loadRunConfig(path string, dryRun bool) (*config.Config, error) {
 	return config.LoadDefaults(context.Background(), &ingest.ExecGitResolver{}), nil
 }
 
-func openRunStore(cmd *cobra.Command, dryRun bool) (*store.Store, error) {
+// generationStoreOptions wires the managed-generation writer, snapshot reader
+// and per-session lock namespace rooted at the owned output directory. The
+// root is the same owned-artifact tree the saved sessions live under; opening
+// it here is what lets a capable store activate and read a managed generation
+// instead of refusing format 2.
+func generationStoreOptions(ownedRoot string) ([]store.OpenOption, error) {
+	options := []store.OpenOption{store.WithIndexFormats(store.V2IndexFormat())}
+	if ownedRoot == "" {
+		return options, nil
+	}
+	artifacts, err := store.NewOSGenerationArtifactStore(ownedRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open managed generation store: %w", err)
+	}
+	locker, err := store.NewFileSessionLocker(ownedRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open managed generation lock: %w", err)
+	}
+	return append(options, store.WithGenerationArtifacts(artifacts, locker)), nil
+}
+
+// openRunStore opens the analytics store for an ingestion or publication run.
+// ownedRoot is the run's resolved output directory; when it is set the store
+// can stage, activate and read managed generations. Dry-run never writes, so it
+// stays read-only and leaves the native-generation targets unadvertised.
+func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Store, error) {
 	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if dryRun {
 		return store.OpenReadOnly(path)
@@ -46,7 +71,11 @@ func openRunStore(cmd *cobra.Command, dryRun bool) (*store.Store, error) {
 	if err := os.MkdirAll(directory, defaults.PrivateDirPerm); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
-	return store.Open(path)
+	options, err := generationStoreOptions(ownedRoot)
+	if err != nil {
+		return nil, err
+	}
+	return store.Open(path, options...)
 }
 
 // runStoreIsAbsent reports whether the analytics database this run would use does

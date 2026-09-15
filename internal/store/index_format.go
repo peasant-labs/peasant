@@ -81,6 +81,17 @@ func (s *Store) SupportsIndexFormat(version int) bool {
 	return supported
 }
 
+// targetVersionRegistry returns the harness targets this store's capability
+// supports. A store that can persist and read a managed generation reports the
+// native repair targets; every other store reports the retained baseline, so an
+// entry-only caller's safety ceiling never exceeds what this build can store.
+func (s *Store) targetVersionRegistry() map[ingest.Harness]ingest.HarvesterVersions {
+	if s.SupportsIndexFormat(2) && s.GenerationSnapshotsSupported() {
+		return ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
+	}
+	return ingest.HarvesterVersionRegistry
+}
+
 func nilIndexValue(value any) bool {
 	if value == nil {
 		return true
@@ -265,7 +276,7 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	if producer == 0 {
 		// Legacy entry-only callers do not claim a parser run. The current
 		// harness target is only a safety ceiling, never a provenance stamp.
-		target, registered := ingest.HarvesterVersionRegistry[state.Harness]
+		target, registered := s.targetVersionRegistry()[state.Harness]
 		if !registered {
 			return nil, nil, fmt.Errorf("store: session %s harness %q has no current indexer; entry-only replacement was refused; register a compatible indexer before retrying", write.SessionID, state.Harness)
 		}

@@ -22,8 +22,11 @@ mutations:
 sessionID: 77777777-7777-4777-8777-777777777777
 transcript: |
   {"sessionId":"77777777-7777-4777-8777-777777777777","type":"user","message":{"role":"user","content":"version summary fixture"},"timestamp":"2024-02-19T00:00:00Z","cwd":"/fixture/project"}
+# expectedTargets names the harvester targets the run must report: "retained"
+# is the baseline registry, and "activated" is the managed-generation overlay a
+# run advertises once it opens a store that can persist and read generations.
 cases:
-  - {name: logs_dry_run, command: logs, dryRun: true, indexed: 0}
-  - {name: all_dry_run, command: all, dryRun: true, indexed: 0}
-  - {name: logs_write, command: logs, dryRun: false, indexed: 0}
-  - {name: all_write, command: all, dryRun: false, indexed: 1}
+  - {name: logs_dry_run, command: logs, dryRun: true, indexed: 0, expectedTargets: retained}
+  - {name: all_dry_run, command: all, dryRun: true, indexed: 0, expectedTargets: retained}
+  - {name: logs_write, command: logs, dryRun: false, indexed: 0, expectedTargets: retained}
+  - {name: all_write, command: all, dryRun: false, indexed: 1, expectedTargets: activated}

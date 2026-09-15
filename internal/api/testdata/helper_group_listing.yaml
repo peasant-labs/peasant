@@ -1,0 +1,650 @@
+requiredNames:
+  - owner-retained-pages
+  - helper-only-search
+  - owner-excluded
+  - selected-helper-search
+  - search-limit-selected-backfill
+  - selected-search-beyond-first-window
+  - unresolved-independent
+  - identical-independent-helpers
+  - trunk-append-vs-replacement
+  - guardian-native-old-new
+  - guardian-like-title-negative
+  - selected-vs-pulled-ineligible
+  - scope-search-replay
+  - scope-expired
+  - authorization-changed
+  - denied-child-no-widening
+  - sync-ordinary-helper-pages
+  - sync-nonpushable-helper-absent
+  - sync-owner-not-pushable-context
+  - sync-selection-scope
+  - cyclic-owner-pair
+  - self-cycle-owner
+  - nested-helper-owner
+  - project-scoped-grouped
+  - project-invalid-refused
+# The collective/project/profile scope variant belongs to the transcript commons
+# route set, whose route owner registers its own predicate through the same
+# member seam. It is recorded here so the local corpus never silently drops it.
+notApplicableInThisRouteSet:
+  - name: scope-project-profile-collective
+    reason: The local installation has no collective, profile or project-collective route; that scope variant is registered by the transcript commons route owner against the same member operation.
+cases:
+  - name: owner-retained-pages
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 owner retained with nested helper groups and exact paging"}
+    mutation: {description: "two owners and one ordinary session, two saved helpers under the first owner and one under the second"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-a2, startMs: 400, purpose: interaction, origin: user}
+        - {id: agent-a3, startMs: 300, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b3, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known}
+    expected:
+      statusCode: 200
+      page: 1
+      limit: 3
+      totalItems: 3
+      ordinarySessionTotal: 3
+      helperThreadTotal: 3
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2]}
+        - {kind: transcript, sessionId: agent-a2, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
+        - {kind: transcript, sessionId: agent-a3, groupCount: 0}
+      topLevelPages:
+        - {page: 1, limit: 2, sessionIds: [agent-a1, agent-a2]}
+        - {page: 2, limit: 2, sessionIds: [agent-a3]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 1, total: 2, memberIds: [agent-b1]}
+            - {page: 2, limit: 1, total: 2, memberIds: [agent-b2]}
+      reListIdentical: true
+
+  - name: helper-only-search
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 helper-only search emits an owner context container"}
+    mutation: {description: "only saved helpers match the query, so no owner is an ordinary result"}
+    input:
+      route: search
+      searchQuery: needle
+      searchLimit: 20
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, text: "owner prose"}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle one"}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle two"}
+        - {id: agent-b3, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known, text: "unrelated text"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 2, memberIds: [agent-b1, agent-b2]}
+      reListIdentical: true
+
+  - name: selected-helper-search
+    classification: must-pass
+    provenance: {source: bug, ref: "grouped search ignored the persisted selection, so an unselected saved helper was listed and expandable"}
+    mutation: {description: "two matching saved helpers share one owner but only one is inside the persisted selection"}
+    input:
+      route: search
+      searchQuery: needle
+      searchLimit: 20
+      selection: selected
+      selectedIds: [agent-b1]
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, text: "owner prose"}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle one"}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle two"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+      reListIdentical: true
+
+  - name: search-limit-selected-backfill
+    classification: must-pass
+    provenance: {source: bug, ref: "grouped search paged the global ranked window before applying selection, so an unselected hit displaced the only selected one"}
+    mutation: {description: "two unselected short matches outrank the one selected long match while the page limit is one"}
+    input:
+      route: search
+      searchQuery: needle
+      searchLimit: 1
+      selection: selected
+      selectedIds: [agent-b3]
+      sessions:
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-b2, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle followed by a deliberately long stretch of extra prose so the ranked window prefers the shorter unselected matches"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
+
+  - name: selected-search-beyond-first-window
+    classification: must-pass
+    provenance: {source: bug, ref: "grouped search applied the flat route's global page bound to the ranked stream before the persisted selection, so a selected match ranked past that bound vanished from every grouped exit"}
+    mutation: {description: "fifty-one unselected short matches outrank the one selected long match while the page limit is one"}
+    input:
+      route: search
+      searchQuery: needle
+      searchLimit: 1
+      selection: selected
+      selectedIds: [agent-b3]
+      sessions:
+        - {id: agent-probe0, startMs: 700, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe1, startMs: 701, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe2, startMs: 702, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe3, startMs: 703, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe4, startMs: 704, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe5, startMs: 705, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe6, startMs: 706, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe7, startMs: 707, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe8, startMs: 708, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe9, startMs: 709, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe10, startMs: 710, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe11, startMs: 711, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe12, startMs: 712, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe13, startMs: 713, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe14, startMs: 714, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe15, startMs: 715, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe16, startMs: 716, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe17, startMs: 717, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe18, startMs: 718, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe19, startMs: 719, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe20, startMs: 720, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe21, startMs: 721, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe22, startMs: 722, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe23, startMs: 723, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe24, startMs: 724, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe25, startMs: 725, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe26, startMs: 726, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe27, startMs: 727, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe28, startMs: 728, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe29, startMs: 729, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe30, startMs: 730, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe31, startMs: 731, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe32, startMs: 732, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe33, startMs: 733, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe34, startMs: 734, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe35, startMs: 735, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe36, startMs: 736, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe37, startMs: 737, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe38, startMs: 738, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe39, startMs: 739, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe40, startMs: 740, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe41, startMs: 741, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe42, startMs: 742, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe43, startMs: 743, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe44, startMs: 744, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe45, startMs: 745, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe46, startMs: 746, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe47, startMs: 747, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe48, startMs: 748, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe49, startMs: 749, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe50, startMs: 750, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle followed by a deliberately long stretch of extra prose so the stream ranks the shorter unselected matches first"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b3]}
+
+  - name: owner-excluded
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 excluded owner renders a context container without a fake ordinary row"}
+    mutation: {description: "select only the saved helper so its owner is outside the route candidate set"}
+    input:
+      route: sessions
+      selection: selected
+      selectedIds: [agent-b1]
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+
+  - name: unresolved-independent
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 two independent unresolved helpers never coalesce"}
+    mutation: {description: "two saved helpers carry no started_by evidence and must keep distinct group identities"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-b1, startMs: 100, purpose: helper_review, origin: agent}
+        - {id: agent-b2, startMs: 90, purpose: helper_review, origin: agent}
+    expected:
+      statusCode: 200
+      totalItems: 2
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      distinctGroupIDs: true
+      items:
+        - {kind: context_container, ownerStatus: unknown, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+        - {kind: context_container, ownerStatus: unknown, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b2]}
+
+  - name: cyclic-owner-pair
+    classification: must-pass
+    provenance: {source: bug, ref: "two saved helpers that started each other were both suppressed and vanished from every grouped exit"}
+    mutation: {description: "helper A is started_by helper B and helper B is started_by helper A, so no ordinary owner exists"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-b1, startMs: 100, purpose: helper_review, origin: agent, owner: agent-b2, ownerState: target_known}
+        - {id: agent-b2, startMs: 90, purpose: helper_review, origin: agent, owner: agent-b1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 2
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      distinctGroupIDs: true
+      items:
+        - {kind: context_container, ownerStatus: conflicting, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+        - {kind: context_container, ownerStatus: conflicting, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b2]}
+
+  - name: self-cycle-owner
+    classification: must-pass
+    provenance: {source: bug, ref: "a saved helper started_by itself was suppressed and vanished from every grouped exit"}
+    mutation: {description: "one helper's started_by evidence names its own session"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-b1, startMs: 100, purpose: helper_review, origin: agent, owner: agent-b1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: conflicting, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+
+  - name: nested-helper-owner
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 a helper that owns another helper nests under it instead of root-flattening"}
+    mutation: {description: "ordinary owner P owns saved helper G1, which owns saved helper G2"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-p1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-g1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-p1, ownerState: target_known}
+        - {id: agent-g2, startMs: 460, purpose: helper_review, origin: agent, owner: agent-g1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 2
+      items:
+        - kind: transcript
+          sessionId: agent-p1
+          groupCount: 1
+          helperThreadCount: 1
+          memberIds: [agent-g1]
+          nestedMemberGroups:
+            - {sessionId: agent-g1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-g2]}
+
+  - name: identical-independent-helpers
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 equal text on distinct saved helpers does not merge them"}
+    mutation: {description: "two saved helpers under one owner carry identical text and stay two distinct members"}
+    input:
+      route: search
+      searchQuery: sameword
+      searchLimit: 20
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, text: "sameword owner"}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "sameword"}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "sameword"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 2
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2]}
+
+  - name: trunk-append-vs-replacement
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 a replacement saved helper is a new identity and increments its owner group"}
+    mutation: {description: "a third saved helper under the same owner is a distinct identity, not a refresh of an existing member"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b4, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 3
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 3, memberIds: [agent-b1, agent-b2, agent-b4]}
+      reListIdentical: true
+
+  - name: guardian-native-old-new
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 saved guardian identities group under their owner and stay distinct"}
+    mutation: {description: "two saved guardian-review identities under one owner keep ascending member order"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "guardian review two"}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "guardian review one"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 2
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2]}
+
+  - name: guardian-like-title-negative
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 a guardian-like title is not helper evidence"}
+    mutation: {description: "ordinary sessions whose text resembles a guardian review stay ordinary transcript items"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, text: "guardian review"}
+        - {id: agent-a2, startMs: 400, purpose: interaction, origin: user, text: "guardian"}
+    expected:
+      statusCode: 200
+      totalItems: 2
+      ordinarySessionTotal: 2
+      helperThreadTotal: 0
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 0}
+        - {kind: transcript, sessionId: agent-a2, groupCount: 0}
+
+  - name: selected-vs-pulled-ineligible
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 an unselected saved helper contributes zero rows and zero counts"}
+    mutation: {description: "one of two saved helpers is outside the persisted selection"}
+    input:
+      route: sessions
+      selection: selected
+      selectedIds: [agent-a1, agent-b1]
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+
+  - name: scope-search-replay
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 member fetch replays the exact search predicate and never widens it"}
+    mutation: {description: "one saved helper matches the query and a sibling does not; expansion must return only the match"}
+    input:
+      route: search
+      searchQuery: replayword
+      searchLimit: 20
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, text: "replayword owner"}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "replayword hit"}
+        - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "no match here"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+
+  - name: denied-child-no-widening
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 member expansion cannot widen to another owner's helper"}
+    mutation: {description: "two owners each have a saved helper; expanding the first never returns the second owner's member"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-a2, startMs: 400, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 2
+      ordinarySessionTotal: 2
+      helperThreadTotal: 2
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+        - {kind: transcript, sessionId: agent-a2, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b2]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+
+  - name: project-scoped-grouped
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.3 a project-scoped grouped request derives every count and member scope from that one project"}
+    mutation: {description: "the project filter selects one project's ordinary owner and saved helper while a sibling project's matching pair stays out"}
+    input:
+      route: sessions
+      project: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      selection: all
+      sessions:
+        - {id: agent-p1, startMs: 500, purpose: interaction, origin: user, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+        - {id: agent-r1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-p1, ownerState: target_known, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+        - {id: agent-s1, startMs: 400, purpose: interaction, origin: user, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+        - {id: agent-t1, startMs: 380, purpose: helper_review, origin: agent, owner: agent-s1, ownerState: target_known, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - {kind: transcript, sessionId: agent-p1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-r1]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-r1]}
+      reListIdentical: true
+
+  - name: project-invalid-refused
+    classification: must-fail
+    provenance: {source: boundary, ref: "a malformed project filter must be refused instead of widening the grouped list to every project"}
+    mutation: {description: "the project filter is not a 64-character lowercase project hash"}
+    input:
+      route: sessions
+      project: not-a-project-hash
+      selection: all
+      sessions:
+        - {id: agent-p1, startMs: 500, purpose: interaction, origin: user}
+    expected:
+      statusCode: 400
+      errorCode: grouped_project_invalid
+
+  - name: authorization-changed
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 a removed member vanishes on replay and the scope never broadens"}
+    mutation: {description: "after the list is issued one saved helper stops being eligible; expansion returns only the survivor"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 2
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2]}
+      afterList:
+        purposes: {agent-b2: interaction}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+
+  - name: scope-expired
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 an unknown member scope refuses with an actionable 409"}
+    mutation: {description: "a fabricated scope names no cached originating list"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+    expected:
+      statusCode: 409
+      errorCode: group_scope_expired
+      badScope: true
+
+  # Sync chooser segment. The sync route is the pushable-session set, not the
+  # discovery list, so these cases seed metrics (a session without metrics is
+  # not pushable) and assert the Sync mirror travels with each grouped row.
+  - name: sync-ordinary-helper-pages
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.3 the share chooser grouped sync route keeps owners and their helpers with exact paging"}
+    mutation: {description: "two pushable owners and one pushable ordinary session, two saved helpers under the first and one under the second"}
+    input:
+      route: sync
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, pushable: true}
+        - {id: agent-a2, startMs: 400, purpose: interaction, origin: user, pushable: true}
+        - {id: agent-a3, startMs: 300, purpose: interaction, origin: user, pushable: true}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
+        - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
+        - {id: agent-b3, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known, pushable: true}
+    expected:
+      statusCode: 200
+      totalItems: 3
+      ordinarySessionTotal: 3
+      helperThreadTotal: 3
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2], syncStatus: held}
+        - {kind: transcript, sessionId: agent-a2, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3], syncStatus: held}
+        - {kind: transcript, sessionId: agent-a3, groupCount: 0, syncStatus: held}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 1, total: 2, memberIds: [agent-b1]}
+            - {page: 2, limit: 1, total: 2, memberIds: [agent-b2]}
+      reListIdentical: true
+
+  - name: sync-nonpushable-helper-absent
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 a session outside the route predicate contributes zero rows and zero counts"}
+    mutation: {description: "one saved helper has no metrics and is not pushable, so it never reaches the sync chooser or its owner group"}
+    input:
+      route: sync
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, pushable: true}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
+        - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1], syncStatus: held}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+
+  - name: sync-owner-not-pushable-context
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 an owner outside the route predicate renders a context container without a fake ordinary row"}
+    mutation: {description: "the owner has no metrics while its saved helper is pushable, so only a context container is offered"}
+    input:
+      route: sync
+      selection: all
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+
+  - name: sync-selection-scope
+    classification: must-pass
+    provenance: {source: requirement, ref: "section9.2 the grouped view applies the persisted selection predicate to sync candidates"}
+    mutation: {description: "one pushable ordinary and one pushable helper are selected while a second pushable ordinary session stays outside the selection"}
+    input:
+      route: sync
+      selection: selected
+      selectedIds: [agent-a1, agent-b1]
+      sessions:
+        - {id: agent-a1, startMs: 500, purpose: interaction, origin: user, pushable: true}
+        - {id: agent-a2, startMs: 400, purpose: interaction, origin: user, pushable: true}
+        - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1], syncStatus: held}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
