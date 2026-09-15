@@ -260,13 +260,20 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
 do not re-run the whole workflow.
 
 - The GitHub UI action *Re-run failed jobs*, or `gh run rerun <run-id> --failed`,
-  re-runs the failed jobs and the jobs that depend on them. Jobs that already
-  succeeded — `guard`, `nix-vendor-hash`, `full-stack e2e`, `release e2e` — are
-  **not** re-run, so a failed smoke never rebuilds the release.
-- `release (goreleaser)` is safe to re-run: the existing Release keeps its notes
-  (`release.mode: keep-existing`) and re-uploaded assets replace the old ones
-  (`release.replace_existing_artifacts: true`), so a partial publish completes
-  instead of failing on duplicate artifacts. The Homebrew cask push is retried.
+  re-runs the failed jobs and their downstream dependents. Successful upstream
+  and unrelated jobs are retained — a failed smoke re-runs only the smoke, and
+  `guard`, `nix-vendor-hash`, `full-stack e2e`, `release e2e` are not re-run.
+- A gate that failed re-runs together with its dependents, so `release` and the
+  smokes run once the gate passes. That is the normal case: publication had been
+  skipped, not executed, when the gate failed.
+- `release (goreleaser)` is safe to re-run for the **current** release: the
+  existing Release keeps its notes (`release.mode: keep-existing`) and
+  re-uploaded assets replace the old ones (`release.replace_existing_artifacts:
+  true`), so a partial publish completes instead of failing on duplicate
+  artifacts. On a final tag the Homebrew cask push is retried as well; do not
+  re-run an older final's release job after a newer final has published, because
+  it would write the older cask back to the live tap. rc reruns never push the
+  cask (`skip_upload: auto`).
 - `smoke` / `macos-cask-smoke` only download and install the published artifacts;
   they are safe to re-run alone, in any order.
 - If `e2e` or `release-e2e` failed, its re-run also re-runs `release` and the
