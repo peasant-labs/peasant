@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   annotateTranscript,
   computeAnalytics,
   computePersonalMedians,
+  type AdaptTranscriptOptions,
   type TranscriptInitialPosition,
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
@@ -27,11 +28,15 @@ import type {
   SessionRelationshipNavigation,
   QualityPayload,
 } from '@/types/messages';
-import { RelationshipNavigationStatus } from '@peasant-labs/schema';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
 import { sessionsHref, transcriptHref, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
+import { relationshipLinkHref } from './lib/relationshipLink';
+import {
+  readTranscriptReadState,
+  writeTranscriptReadState,
+} from './lib/transcriptReadState';
 import {
   clearScopeQuery,
   collectFileTouches,
@@ -69,16 +74,6 @@ interface SessionDetailV2Props {
  */
 type SessionDetailWire = SessionDetailPayload &
   Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
-
-/**
- * The adapter options the host owns today. `AdaptTranscriptOptions` is the
- * published Fairtrade boundary; `relationshipNavigation` is the canonical
- * local-read field the adapter consumes once the canonical Fairtrade package
- * publishes that option, and is inert against the currently pinned package.
- */
-type HostAdapterOptions = NonNullable<Parameters<typeof adaptTranscript>[3]> & {
-  relationshipNavigation?: SessionDetailReadPayload['relationshipNavigation'];
-};
 
 /**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
@@ -124,6 +119,41 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // once at the mounted app boundary so every view/filter sees one stable list.
   const turns = useMemo(() => detail?.turns ?? [], [detail?.turns]);
 
+  // The child's reading state, restored per session. The route keeps the URL
+  // query, so browser Back returns the same scope/origin/turn; search,
+  // disclosure, selection, and scroll live only in component state and are
+  // rehydrated from the session-scoped store here.
+  const [restoredReadState] = useState(() => readTranscriptReadState(sessionId));
+  const [activeTurn, setActiveTurn] = useState<number | undefined>(
+    () => routeQuery.turn ?? restoredReadState.activeTurn ?? undefined,
+  );
+  const [search, setSearch] = useState<string>(restoredReadState.search);
+  const [earlierHistoryOpen, setEarlierHistoryOpen] = useState<Record<string, boolean>>(
+    restoredReadState.earlierHistoryOpen,
+  );
+
+  // The scroller the host restores after Back. Fairtrade owns the stream's own
+  // scroll behavior; peasant owns where the reader was.
+  const streamContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollTopRef = useRef<number>(restoredReadState.scrollTop);
+  const readStateRef = useRef({ search, activeTurn, earlierHistoryOpen });
+  useEffect(() => {
+    readStateRef.current = { search, activeTurn, earlierHistoryOpen };
+  }, [search, activeTurn, earlierHistoryOpen]);
+
+  const persistReadState = useCallback(() => {
+    writeTranscriptReadState(sessionId, {
+      search: readStateRef.current.search,
+      activeTurn: readStateRef.current.activeTurn ?? null,
+      earlierHistoryOpen: readStateRef.current.earlierHistoryOpen,
+      scrollTop: scrollTopRef.current,
+    });
+  }, [sessionId]);
+
+  // Persist the latest reading position when this session's route unmounts, so
+  // a later Back from a navigated-away target rehydrates it.
+  useEffect(() => () => persistReadState(), [persistReadState]);
+
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -134,17 +164,18 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
   }, [router, pathname, searchParams]);
 
-  // The host's exact-ID current-target route callback: an authorized navigation
-  // entry whose target resolves to a stored session routes to that session.
-  // known-unavailable / unknown / conflicting entries never navigate. The
-  // mounted click + Back restoration is pending the canonical Fairtrade package
-  // publishing the relationshipNavigation option and callback.
+  // The host's route decision for an authorized navigation entry: the exact
+  // stored target's own production transcript route, or nothing when the entry
+  // is not linkable. The child's reading state is persisted first, so Back
+  // restores it.
   const navigateToRelationship = useCallback(
     (entry: SessionRelationshipNavigation) => {
-      if (entry.status !== RelationshipNavigationStatus.Resolved || !entry.localId) return;
-      router.push(transcriptHref(projectHash, entry.localId));
+      const href = relationshipLinkHref(projectHash, entry);
+      if (!href) return;
+      persistReadState();
+      router.push(href);
     },
-    [router, projectHash],
+    [persistReadState, router, projectHash],
   );
 
   // The quality channel feeds the personal-median comparison line on the
@@ -218,10 +249,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const requestedTurn = routeQuery.turn;
   const requestedTurnExists = requestedTurn == null || turns.some((turn) => turn.index === requestedTurn);
   const requestedTurnVisible = requestedTurn == null || (displayTurns ?? turns).some((turn) => turn.index === requestedTurn);
-  const initialPosition = useMemo<TranscriptInitialPosition | undefined>(() => {
+  // A turn target this view cannot render right now gets NO one-time position
+  // (explicitly `null`, not an absent contract): the reader stays put and the
+  // stream prelude offers the reveal. An absent contract would let the
+  // composite fall back to its own legacy mount position and move the reader
+  // somewhere the host never asked for.
+  const initialPosition = useMemo<TranscriptInitialPosition | null>(() => {
     if (requestedTurn == null) return { kind: 'top' };
     if (!requestedTurnExists) return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };
-    if (!requestedTurnVisible) return undefined;
+    if (!requestedTurnVisible) return null;
     return { kind: 'turn', turnIndex: requestedTurn };
   }, [requestedTurn, requestedTurnExists, requestedTurnVisible]);
 
@@ -235,6 +271,23 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     const query = next.toString();
     router.replace(`${pathname}${query ? `?${query}` : ''}`);
   }, [pathname, router, searchParams]);
+
+  // Restore the reader's scroll when this session re-mounts after Back. A
+  // `?turn=` permalink owns the initial scroll through the composite's one-time
+  // position, so only a session without a turn target applies the saved offset;
+  // otherwise this restore would immediately undo that scroll.
+  useEffect(() => {
+    if (!detail) return;
+    const stream = streamContainerRef.current?.querySelector<HTMLElement>('.txn-stream');
+    if (!stream) return;
+    if (requestedTurn == null) stream.scrollTop = scrollTopRef.current;
+    const onScroll = () => {
+      scrollTopRef.current = stream.scrollTop;
+      persistReadState();
+    };
+    stream.addEventListener('scroll', onScroll, { passive: true });
+    return () => stream.removeEventListener('scroll', onScroll);
+  }, [detail, persistReadState, requestedTurn]);
 
   // Copy-as-Markdown (roadmap 4.7): copies exactly what's shown (focus/scope
   // respected), so it pastes cleanly into an issue/PR/doc.
@@ -270,14 +323,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read's authorized navigation rides beside the durable
-    // detail. It is passed through the published adapter-options boundary; the
-    // pinned package ignores the field until the canonical release publishes it.
-    const adapterOptions: HostAdapterOptions = {
-      relationshipNavigation: detail.relationshipNavigation,
-    };
+    // The flat local read's authorized navigation is read metadata, never
+    // durable content: separate it from the durable payload the adapter
+    // validates and cooks, exactly as the published adapter boundary requires.
+    const { relationshipNavigation, ...durableDetail } = detail;
+    const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     const adapted = adaptTranscript(
-      { ...detail, turns: visibleTurns },
+      { ...durableDetail, turns: visibleTurns },
       undefined,
       analytics,
       adapterOptions,
@@ -349,9 +401,8 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
-  // carries the authorized navigation above; the pinned package does not invoke
-  // it until the canonical release publishes the matching callback, so the
-  // mounted link/Back behavior stays gated without faking it here.
+  // carries the authorized navigation above; the host owns the route it opens
+  // and the Back restoration that follows.
   const viewerCallbacks = {
     onCopyLink: () => {
       void navigator.clipboard?.writeText(
@@ -450,12 +501,21 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
         .filter(Boolean)
         .join(' ')}
     >
-      <div className="flex-1 min-h-0">
+      <div ref={streamContainerRef} className="flex-1 min-h-0">
         <TranscriptViewer
           viewModel={vm!}
           theme={theme}
           activeTab={activeTab}
           onTabChange={setActiveTab}
+          // The host owns the child's transient reading state (its search
+          // query, selected turn, and earlier-history disclosure), so Back
+          // after following a source link restores them.
+          activeTurn={activeTurn}
+          onActiveTurnChange={setActiveTurn}
+          search={search}
+          onSearchChange={setSearch}
+          earlierHistoryOpen={earlierHistoryOpen}
+          onEarlierHistoryOpenChange={setEarlierHistoryOpen}
           // Local capabilities: labelling is supported (via renderTurnActions);
           // contribute / visibility / edit / export are village-only or absent.
           capabilities={{

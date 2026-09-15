@@ -96,7 +96,11 @@ function ResolvedProjectViewer({ projectLabel, sessionId, query, canonical }: { 
     if (!canonical && state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(transcriptHref(state.projectHash, sessionId, transcriptOptions(query)));
   }, [canonical, projectLabel, query, router, sessionId, state]);
   if (state.phase === 'missing' || state.phase === 'error') return <button type="button" onClick={retry}>{state.message} retry project resolution</button>;
-  if (canonical && state.phase === 'ready' && state.requestedIdentity === projectLabel) return <SessionDetailV2 sessionId={sessionId} projectHash={state.projectHash} projectName={state.label} routeQuery={query} />;
+  // Keyed by session: opening a different stored session (a followed context or
+  // starter link) is a new document, so its host-owned reading state must be
+  // rehydrated from that session's own persisted state instead of leaking the
+  // previous session's search, disclosure, selection, and scroll.
+  if (canonical && state.phase === 'ready' && state.requestedIdentity === projectLabel) return <SessionDetailV2 key={sessionId} sessionId={sessionId} projectHash={state.projectHash} projectName={state.label} routeQuery={query} />;
   return <ProjectsRouteSkeleton />;
 }
 
