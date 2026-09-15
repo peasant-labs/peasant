@@ -254,7 +254,36 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
 
 ---
 
-## 5. Release guard rules
+## 5. Re-running a failed release
+
+`release.yml` runs once per tag. When a job fails, re-run **only the failed jobs**;
+do not re-run the whole workflow.
+
+- The GitHub UI action *Re-run failed jobs*, or `gh run rerun <run-id> --failed`,
+  re-runs the failed jobs and the jobs that depend on them. Jobs that already
+  succeeded — `guard`, `nix-vendor-hash`, `full-stack e2e`, `release e2e` — are
+  **not** re-run, so a failed smoke never rebuilds the release.
+- `release (goreleaser)` is safe to re-run: the existing Release keeps its notes
+  (`release.mode: keep-existing`) and re-uploaded assets replace the old ones
+  (`release.replace_existing_artifacts: true`), so a partial publish completes
+  instead of failing on duplicate artifacts. The Homebrew cask push is retried.
+- `smoke` / `macos-cask-smoke` only download and install the published artifacts;
+  they are safe to re-run alone, in any order.
+- If `e2e` or `release-e2e` failed, its re-run also re-runs `release` and the
+  smokes, because publication depends on those gates. That dependency is
+  intentional: a gate failure must block publication.
+- A re-run consumes the workflow stored at the tag, not the current `develop`.
+  A fix to `release.yml` itself therefore does not reach an existing tag's
+  re-run. The `v0.1.0` startup record in §3 documents the only recovery exercise
+  of that shape; its one-time workflow was removed after it succeeded, so a
+  workflow-level failure at tag time needs a new, reviewed recovery path.
+
+After any re-run, repeat the §4 verification: the full artifact set,
+`checksums.txt`, and a fresh smoke on both architectures.
+
+---
+
+## 6. Release guard rules
 
 The `release.yml` **guard** job verifies that the tag push came from the release App
 and that the tag parses as a Peasant rc or final release. Final tags can publish full
@@ -276,7 +305,7 @@ pre-tag update because a tag must point at immutable, hash-current source.
 
 ---
 
-## 6. Publication checklist
+## 7. Publication checklist
 
 Run these, in order, when enabling external package publication.
 
@@ -354,7 +383,7 @@ Run these, in order, when enabling external package publication.
 
 ---
 
-## 7. Deferred ladder
+## 8. Deferred ladder
 
 The following are optional release-hardening improvements. RPM artifacts and WSL
 documentation are part of the current release contract rather than this list.
