@@ -310,11 +310,13 @@ export async function fetchGroupedSearchMatches(
     visitedGroups.add(groupKey);
 
     try {
-      for (let page = 1; ; ) {
+      let requestedPage = 1;
+      let highestServedPage = 0;
+      for (;;) {
         const members = await fetchHelperGroupMembers({
           groupId: group.groupId,
           scope: group.memberScope,
-          page,
+          page: requestedPage,
           limit: SEARCH_MEMBER_PAGE_LIMIT,
         });
         for (const member of members.members) {
@@ -327,9 +329,15 @@ export async function fetchGroupedSearchMatches(
           }
           pending.push(...(member.helperGroups ?? []));
         }
-        const servedThrough = members.page * members.limit;
-        if (members.members.length === 0 || servedThrough >= members.total) break;
-        page = members.page + 1;
+        // Stop on an empty page, a non-positive served limit, or a server page
+        // that did not advance (a shrunk set can return a lower page than
+        // requested), so a malformed or stale page cannot loop the traversal.
+        if (members.members.length === 0 || members.limit < 1 || members.page <= highestServedPage) {
+          break;
+        }
+        highestServedPage = members.page;
+        if (members.page * members.limit >= members.total) break;
+        requestedPage = members.page + 1;
       }
     } catch (cause) {
       if (!isGroupScopeExpired(cause)) throw cause;

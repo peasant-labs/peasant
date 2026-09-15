@@ -325,6 +325,68 @@ cases:
       - {groupId: hg_g1, scope: scope-g1, page: 1}
     expectedSessionIds: [agent-shared]
 
+  - name: non-advancing-member-page-stops
+    query: guardian
+    searchLimit: 20
+    searchPayload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 5
+      items:
+        - kind: context_container
+          context: {groupId: hg_loop, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_loop, purpose: helper_review, helperThreadCount: 5, memberScope: scope-loop}
+    responses:
+      - groupId: hg_loop
+        scope: scope-loop
+        page: 1
+        outcome: ok
+        body:
+          page: 1
+          limit: 1
+          total: 5
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop1
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: loop first, score: 1}
+      - groupId: hg_loop
+        scope: scope-loop
+        page: 2
+        outcome: ok
+        body:
+          page: 1
+          limit: 1
+          total: 5
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop2
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: assistant, snippet: loop second, score: 2}
+    expectedMemberRequests:
+      - {groupId: hg_loop, scope: scope-loop, page: 1}
+      - {groupId: hg_loop, scope: scope-loop, page: 2}
+    expectedSessionIds: [agent-loop1, agent-loop2]
+
   - name: unreachable-group-with-no-members-adds-no-hits
     query: guardian
     searchLimit: 20
