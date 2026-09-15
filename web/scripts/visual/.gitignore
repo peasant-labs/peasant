@@ -29,6 +29,7 @@
 !validate-mock-coordinates.mjs
 !strike-smoke-fixture.mjs
 !search-share-visual.mjs
+!grouped-list-visual.mjs
 !testdata/
 !testdata/transcript-input.yaml
 !testdata/search-share.yaml

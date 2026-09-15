@@ -223,14 +223,50 @@ function groupedSyncPayload(sessions) {
     helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups || []).reduce((count, group) => count + group.helperThreadCount, 0), 0),
   }
 }
+
+// The palette reads the opt-in grouped search view. Each flat fixture hit
+// becomes the owner transcript's own match, exactly how the grouped route
+// carries an ordinary result; the palette flattens it back for annotations.
+function groupedSearchEnvelope(search) {
+  const results = Array.isArray(search?.results) ? search.results : []
+  return {
+    items: results.map((result) => ({
+      kind: 'transcript',
+      transcript: {
+        session: {
+          id: result.sessionId,
+          harness: 'codex',
+          startTime: '2026-06-01T09:00:00Z',
+          durationMins: 1,
+          turnCount: 1,
+          totalTokens: 1,
+          toolCallCount: 0,
+          project: result.project,
+          projectHash: result.projectHash,
+        },
+        matches: [result],
+      },
+      helperGroups: [],
+    })),
+    page: 1,
+    limit: 20,
+    totalItems: results.length,
+    ordinarySessionTotal: results.length,
+    helperThreadTotal: 0,
+  }
+}
 function installMocks(page, fixture, diagnostics) {
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (url.origin !== ORIGIN) return void request.continue().catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/config/mock') return void request.respond(response({ enabled: false })).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/projects/summary') return void request.respond(response({ projects: [{ project: 'peasant-labs/engine', projectHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sessions: 4 }] })).catch((e) => diagnostics.push(e.message))
-    if (url.pathname === '/api/v1/search') return void request.respond(response({ query: fixture.search.query, results: fixture.search.results })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/search') return void request.respond(response(groupedSearchEnvelope(fixture.search))).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/sync/sessions') return void request.respond(response(groupedSyncPayload(fixture.sessions))).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/sessions') {
+      if (url.searchParams.get('view') === 'grouped') return void request.respond(response({ items: [], page: 1, limit: 20, totalItems: 0, ordinarySessionTotal: 0, helperThreadTotal: 0 })).catch((e) => diagnostics.push(e.message))
+      return void request.respond(response({ sessions: fixture.sessions })).catch((e) => diagnostics.push(e.message))
+    }
     if (url.pathname === '/api/v1/web/discovery') return void request.respond(response({ items: fixture.discovery })).catch((e) => diagnostics.push(e.message))
     return void request.continue().catch((e) => diagnostics.push(e.message))
   })

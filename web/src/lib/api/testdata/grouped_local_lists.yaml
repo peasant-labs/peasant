@@ -1,0 +1,200 @@
+# Decode cases for the opt-in grouped local list/search payload and the scoped
+# helper-member page. These exercise the REAL decoders against the generated
+# schema contract: a valid payload keeps its route fields, and an unknown closed
+# value stops the surface instead of being rendered as an approximating fold.
+#
+# The owner/helper fixtures mirror the backend corpus's section9.2 oracle
+# (P1/P2/O1 with saved helpers) so the web contract is pinned to the same
+# shapes the registered routes serve.
+cases:
+  - name: owner-retained-pages
+    kind: list
+    payload:
+      page: 1
+      limit: 20
+      totalItems: 3
+      ordinarySessionTotal: 3
+      helperThreadTotal: 3
+      items:
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-a1
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+              inputSubmissionCount: 1
+          helperGroups:
+            - {groupId: hg_p1, purpose: helper_review, helperThreadCount: 2, memberScope: scope-p1}
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-a2
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+          helperGroups:
+            - {groupId: hg_p2, purpose: helper_review, helperThreadCount: 1, memberScope: scope-p2}
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-a3
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+    expected:
+      valid: true
+      itemKinds: [transcript, transcript, transcript]
+      groupIds: [hg_p1, hg_p2]
+      totalItems: 3
+      ordinarySessionTotal: 3
+      helperThreadTotal: 3
+
+  - name: helper-only-search
+    kind: list
+    payload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      items:
+        - kind: context_container
+          context: {groupId: hg_p1, ownerStatus: known_unavailable}
+          helperGroups:
+            - {groupId: hg_p1, purpose: helper_review, helperThreadCount: 2, memberScope: scope-p1}
+    expected:
+      valid: true
+      itemKinds: [context_container]
+      groupIds: [hg_p1]
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+
+  - name: unresolved-independent
+    kind: list
+    payload:
+      page: 1
+      limit: 20
+      totalItems: 2
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+      items:
+        - kind: context_container
+          context: {groupId: hg_u1, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_u1, purpose: helper_review, helperThreadCount: 1, memberScope: scope-u1}
+        - kind: context_container
+          context: {groupId: hg_u2, ownerStatus: unknown}
+          helperGroups:
+            - {groupId: hg_u2, purpose: helper_review, helperThreadCount: 1, memberScope: scope-u2}
+    expected:
+      valid: true
+      itemKinds: [context_container, context_container]
+      groupIds: [hg_u1, hg_u2]
+      totalItems: 2
+      ordinarySessionTotal: 0
+      helperThreadTotal: 2
+
+  - name: member-page
+    kind: members
+    payload:
+      page: 1
+      limit: 1
+      total: 2
+      members:
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-b1
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+    expected:
+      valid: true
+      memberIds: [agent-b1]
+      total: 2
+
+  - name: invalid-item-kind
+    kind: list
+    payload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 0
+      items:
+        - kind: not_a_list_item_kind
+    expected:
+      valid: false
+
+  - name: unknown-owner-status
+    kind: list
+    payload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - kind: context_container
+          context: {groupId: hg_p1, ownerStatus: definitely_not_a_status}
+          helperGroups:
+            - {groupId: hg_p1, purpose: helper_review, helperThreadCount: 1, memberScope: scope-p1}
+    expected:
+      valid: false
+
+  - name: unknown-purpose
+    kind: list
+    payload:
+      page: 1
+      limit: 20
+      totalItems: 1
+      ordinarySessionTotal: 1
+      helperThreadTotal: 1
+      items:
+        - kind: transcript
+          transcript:
+            session:
+              id: agent-a1
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+          helperGroups:
+            - {groupId: hg_p1, purpose: not_a_purpose, helperThreadCount: 1, memberScope: scope-p1}
+    expected:
+      valid: false
+
+  - name: missing-session-id
+    kind: members
+    payload:
+      page: 1
+      limit: 20
+      total: 1
+      members:
+        - kind: transcript
+          transcript:
+            session:
+              harness: codex
+              startTime: "2026-01-01T00:00:00Z"
+              durationMins: 1
+              turnCount: 2
+              totalTokens: 10
+              toolCallCount: 0
+    expected:
+      valid: false
