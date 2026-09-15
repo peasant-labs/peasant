@@ -55,6 +55,12 @@ const (
 	ppeRemote     = "git@github.com:acme/repo.git"
 	ppeSecret     = "sk-ant-api03-PROVENANCEENVELOPE0000000000x"
 	ppeObserved   = "pi-observed-model-1"
+	// The recorded Pi assistant usage deliberately differs from the capture
+	// totals ppeBuild records (tokensIn 10, tokensOut 5). The published
+	// envelope must carry the usage-derived mirrors, so a publication that
+	// copied the capture totals instead fails the token assertions.
+	ppePiUsageTokensIn  = 7
+	ppePiUsageTokensOut = 3
 )
 
 var ppeSessionID = schema.SessionID(testutil.TestSessionUUID)
@@ -116,6 +122,14 @@ type ppeDetailExpect struct {
 	ToolArgumentBytes             int                          `yaml:"toolArgumentBytes"`
 	CallProvenanceRef             string                       `yaml:"callProvenanceRef"`
 	ResultProvenanceRef           string                       `yaml:"resultProvenanceRef"`
+	// DurationMins and the token members pin the session-level totals the
+	// consent overlay copies from the capture metadata. Duration has no
+	// usage-derived equivalent, so it must reach every harness; the token
+	// mirrors are usage-derived for Pi and must not be overwritten there.
+	DurationMins *float64 `yaml:"durationMins"`
+	TokensIn     *int     `yaml:"tokensIn"`
+	TokensOut    *int     `yaml:"tokensOut"`
+	TotalTokens  *int     `yaml:"totalTokens"`
 }
 
 type ppeEarlierExpect struct {
@@ -425,6 +439,7 @@ func ppeBuildPartitions(t *testing.T, built *ppeBuilt, c publishedProvenanceEnve
 		content = append(content, indexformat.ContentRecord{Ref: user.SourceEntryRef})
 		blobs[user.SourceEntryRef] = []byte(userText)
 		assistantSource := ingest.PiPublicRef(string(ppeSessionID), "usage", "main-assistant")
+		usageIn, usageOut := int64(ppePiUsageTokensIn), int64(ppePiUsageTokensOut)
 		assistantExtra, extraErr := ingest.EncodePiExtra(ingest.PiExtra{
 			Kind: ingest.PiExtraUsage, Harness: schema.HarnessPi, SourceRef: assistantSource,
 			ModelID: schema.ObservedModelID(ppeObserved),
@@ -432,7 +447,8 @@ func ppeBuildPartitions(t *testing.T, built *ppeBuilt, c publishedProvenanceEnve
 				OwnerID:        schema.UsageOwnerID(ingest.PiPublicRef(string(ppeSessionID), "owner", "main-assistant")),
 				SourceEntryRef: schema.SourceEntryRef(assistantSource),
 				Scope:          schema.UsageScopeAssistant,
-				Completeness:   schema.UsageUnknown,
+				Completeness:   schema.UsagePartial,
+				Tokens:         &schema.TokenUsageDetail{Input: &usageIn, Output: &usageOut},
 			},
 		})
 		if extraErr != nil {
@@ -797,6 +813,18 @@ func ppeAssertDetail(t *testing.T, expect ppeDetailExpect, built ppeBuilt, detai
 	}
 	if expect.GitRemote != nil && detail.GitRemote != *expect.GitRemote {
 		t.Fatalf("gitRemote=%q, want %q", detail.GitRemote, *expect.GitRemote)
+	}
+	if expect.DurationMins != nil && detail.DurationMins != *expect.DurationMins {
+		t.Fatalf("durationMins=%v, want %v", detail.DurationMins, *expect.DurationMins)
+	}
+	if expect.TokensIn != nil && detail.TokensIn != *expect.TokensIn {
+		t.Fatalf("tokensIn=%d, want %d (Pi mirrors come from per-turn usage, not capture totals)", detail.TokensIn, *expect.TokensIn)
+	}
+	if expect.TokensOut != nil && detail.TokensOut != *expect.TokensOut {
+		t.Fatalf("tokensOut=%d, want %d (Pi mirrors come from per-turn usage, not capture totals)", detail.TokensOut, *expect.TokensOut)
+	}
+	if expect.TotalTokens != nil && detail.TotalTokens != *expect.TotalTokens {
+		t.Fatalf("totalTokens=%d, want %d (Pi mirrors come from per-turn usage, not capture totals)", detail.TotalTokens, *expect.TotalTokens)
 	}
 	if expect.ToolArgumentEqualsManagedBlob {
 		var arguments string

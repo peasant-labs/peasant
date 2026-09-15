@@ -300,6 +300,16 @@ cases:
       mirrors: true
       secretAbsent: true
       observedModel: pi-observed-model-1
+      # The capture records a 60000 ms duration and 10/5 token totals. Duration
+      # has no usage-derived mirror on the Pi detail, so the recorded minute
+      # must survive publication; the token mirrors ARE usage-derived (the
+      # assistant usage records 7 in / 3 out), so a publication that copied the
+      # capture totals instead would fail these.
+      detail:
+        durationMins: 1
+        tokensIn: 7
+        tokensOut: 3
+        totalTokens: 10
 
   - name: receipt_binds_content_hash_to_published_bytes
     path: snapshot
