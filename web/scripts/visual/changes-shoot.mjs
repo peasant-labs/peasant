@@ -52,7 +52,9 @@ for (const theme of THEMES) {
     const page = await browser.newPage()
     await applyDeterminism(page) // BEFORE navigation: reduced-motion + frozen clock/PRNG → deterministic render
     await page.setViewport({ width: 1460, height: vh, deviceScaleFactor: 1 })
-    const url = `${ORIGIN}/dev/changes-harness?surface=${query}&theme=${theme}`
+    // `fb=off`: the app mounts a dev-only inspect + feedback tool; captures hold it off
+    // with the same switch the design-system demo's capture scripts use.
+    const url = `${ORIGIN}/dev/changes-harness?surface=${query}&theme=${theme}&fb=off`
     // Under `next dev` the dev-route client occasionally fails to hydrate within the
     // window (a flaky chunk fetch leaves only the app shell, `mounted` never flips), so
     // RE-NAVIGATE up to 3× until the surface mounts. domcontentloaded (not networkidle0):
