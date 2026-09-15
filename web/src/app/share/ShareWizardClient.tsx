@@ -1,8 +1,14 @@
 'use client';
 
-import { useCallback, useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import type {
+  HelperGroupSummary,
+  LocalSessionListItem,
+  LocalSessionListPayload,
+  LocalSessionRow,
+} from '@peasant-labs/schema';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import {
   Button,
@@ -24,10 +30,11 @@ import {
   DEFAULT_REDACTION_LEVEL,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
-import { groupByProject, isSelectable, isSelectableStatus } from '@/lib/share/group';
+import { isSelectable, isSelectableStatus } from '@/lib/share/group';
 import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
+import { decodeGroupedSyncList, decodeHelperMembers } from '@/lib/api/grouped-sync';
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 import type { ShareFooterActions } from '@/components/share/footer-actions';
 
@@ -54,48 +61,6 @@ interface BackendSessionSummary {
   shareStatus?: ShareSession['shareStatus'];
 }
 
-/** One grouped transcript row from GET /api/v1/sync/sessions?view=grouped. */
-interface BackendGroupedTranscriptRow {
-  session: BackendSessionSummary;
-  sync?: {
-    id: string;
-    harness: string;
-    projectName: string;
-    projectHash: string;
-    hostSlug: string;
-    startTime: string;
-    durationMs: number;
-    totalTokens: number;
-    turnCount: number;
-    model: string;
-    inputSubmissionCount?: number;
-    syncStatus: string;
-  };
-}
-
-interface BackendGroupedHelperGroup {
-  groupId: string;
-  purpose?: string;
-  helperThreadCount: number;
-  memberScope: string;
-}
-
-interface BackendGroupedItem {
-  kind: 'transcript' | 'context_container';
-  transcript?: BackendGroupedTranscriptRow;
-  context?: { groupId: string; ownerStatus: string };
-  helperGroups?: BackendGroupedHelperGroup[];
-}
-
-interface BackendGroupedPayload {
-  items?: BackendGroupedItem[];
-  page?: number;
-  limit?: number;
-  totalItems?: number;
-  ordinarySessionTotal?: number;
-  helperThreadTotal?: number;
-}
-
 /**
  * Map the sync route's status menu onto the chooser's contribution status.
  * Only new/updated are contributable; every other value, including an
@@ -112,7 +77,7 @@ function shareStatusFromSync(status: string | undefined): ShareSession['shareSta
   }
 }
 
-function mapHelperGroups(groups: BackendGroupedHelperGroup[] | undefined): ShareHelperGroup[] | undefined {
+function mapHelperGroups(groups: HelperGroupSummary[] | null | undefined): ShareHelperGroup[] | undefined {
   if (!groups || groups.length === 0) return undefined;
   return groups.map((group) => ({
     groupId: group.groupId,
@@ -144,7 +109,7 @@ function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession 
 }
 
 /** Map one grouped sync transcript row onto the chooser's session shape. */
-function mapGroupedToShareSession(row: BackendGroupedTranscriptRow): ShareSession {
+function mapGroupedToShareSession(row: LocalSessionRow): ShareSession {
   const backend = row.session;
   const projectHash = (row.sync?.projectHash ?? backend.projectHash)?.trim();
   if (!projectHash) {
@@ -190,8 +155,9 @@ async function fetchSessionSummaries(requestUrl: string, failure: string): Promi
   return payload.sessions ?? [];
 }
 
-async function fetchGroupedSyncSessions(): Promise<BackendGroupedPayload> {
-  const response = await fetch(`${getApiBaseUrl()}/api/v1/sync/sessions?view=grouped`);
+async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
+  const path = '/api/v1/sync/sessions?view=grouped';
+  const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
     try {
@@ -203,7 +169,7 @@ async function fetchGroupedSyncSessions(): Promise<BackendGroupedPayload> {
     }
     throw new Error(`Session discovery failed while loading the Share chooser: ${detail}`);
   }
-  return await response.json() as BackendGroupedPayload;
+  return decodeGroupedSyncList(await response.json(), path);
 }
 
 /**
@@ -234,7 +200,8 @@ async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDis
   ]);
   const byId = new Map<string, ShareHierarchySession>();
   const helperContexts: ShareHelperContext[] = [];
-  for (const item of grouped.items ?? []) {
+  const groupedItems: LocalSessionListItem[] = grouped.items;
+  for (const item of groupedItems) {
     if (item.kind === 'context_container') {
       if (!item.context) continue;
       helperContexts.push({
@@ -276,12 +243,27 @@ async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDis
  * Fetch one authorized helper member page for an exact scope. A refused scope
  * (409 group_scope_expired) is surfaced as a typed error so the tree can hide
  * its members and offer ONLY an originating-list refresh, never a broader load.
+ * Any other 409 is a plain failure: it never masquerades as a refresheable
+ * scope. Paging and totals come from the decoded contract, never a fabricated
+ * fallback.
  */
 async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> {
-  const url = `${getApiBaseUrl()}/api/v1/session-groups/${encodeURIComponent(group.groupId)}/members?scope=${encodeURIComponent(group.memberScope)}&page=${page}&limit=${limit}`;
+  const path = `/api/v1/session-groups/${encodeURIComponent(group.groupId)}/members`;
+  const url = `${getApiBaseUrl()}${path}?scope=${encodeURIComponent(group.memberScope)}&page=${page}&limit=${limit}`;
   const response = await fetch(url);
   if (response.status === 409) {
-    throw new HelperScopeExpiredError();
+    let code: string | undefined;
+    try {
+      const payload = await response.json() as { code?: unknown };
+      if (typeof payload.code === 'string') code = payload.code;
+    } catch {
+      // A 409 without a decodable body is still a refusal, never a refreshable
+      // scope; the fall-through below reports it as an actionable failure.
+    }
+    if (code === 'group_scope_expired') {
+      throw new HelperScopeExpiredError();
+    }
+    throw new Error(`Helper members for group ${group.groupId} could not be listed because the server refused the saved helper scope with HTTP 409 (${code ?? 'no error code'}). No members were returned and nothing broader was requested. Refresh the share chooser and retry.`);
   }
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
@@ -293,12 +275,11 @@ async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: n
     }
     throw new Error(`Helper members for group ${group.groupId} could not be listed because ${detail}. No members were returned. Refresh the share chooser and retry.`);
   }
-  const payload = await response.json() as { members?: BackendGroupedItem[]; total?: number; page?: number; limit?: number };
-  const members = (payload.members ?? []).flatMap((item) => {
+  const payload = decodeHelperMembers(await response.json(), path);
+  const members = payload.members.map((item) => {
     const row = item.transcript;
-    if (!row) return [];
     const session = mapGroupedToShareSession(row);
-    return [{
+    return {
       id: session.id,
       title: summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`,
       provider: session.provider,
@@ -306,9 +287,13 @@ async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: n
       turnCount: session.turnCount,
       selectable: isSelectableStatus(session.shareStatus),
       session,
-    }];
+      // A member may itself anchor saved helper groups. They are carried through
+      // verbatim so the tree can mount each nested scope independently; the
+      // scope is an opaque replay token, never an access grant.
+      helperGroups: mapHelperGroups(item.helperGroups),
+    };
   });
-  return { members, total: payload.total ?? members.length, page: payload.page ?? page, limit: payload.limit ?? limit };
+  return { members, total: payload.total, page: payload.page, limit: payload.limit };
 }
 
 
@@ -466,38 +451,42 @@ export function ShareWizardClient() {
     [allSessions],
   );
 
+  // The deep-link preselect is applied ONCE per linked identifier. It must not
+  // be re-applied when the chooser later accumulates lazily loaded helper
+  // members, or opening any helper page would silently reset the selection to
+  // the linked session.
+  const appliedDeepLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!discovery || !deepLinkSessionId) return;
+    if (appliedDeepLinkRef.current === deepLinkSessionId) return;
+    const linked = discovery.sessions.find((s) => s.id === deepLinkSessionId);
+    if (!linked || !isSelectable(linked)) return;
+    appliedDeepLinkRef.current = deepLinkSessionId;
+    // The deep-link is a drill-in: select exactly that one session, not its
+    // whole project.
+    setSelectedIds(new Set([linked.id]));
+  }, [discovery, deepLinkSessionId]);
+
+  // Reconciliation runs ONLY when a new originating-list revision arrives
+  // (initial load or an explicit refresh). Accumulating member pages is not a
+  // list revision, so it never prunes; a refreshed list prunes ids it can no
+  // longer confirm rather than pushing them blindly.
+  const reconciledListRef = useRef<ShareDiscoveryResult<ShareHierarchySession> | null>(null);
   useEffect(() => {
     if (!discovery) return;
+    if (reconciledListRef.current === discovery) return;
+    reconciledListRef.current = discovery;
+    setSelectedIds((previous) => {
+      if (previous.size === 0) return previous;
+      const confirmed = new Set(discovery.sessions.map((s) => s.id));
+      const next = new Set([...previous].filter((id) => confirmed.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [discovery]);
 
-    const linked =
-      deepLinkSessionId &&
-      discovery.sessions.find((s) => s.id === deepLinkSessionId);
-
-    if (linked && selectableIds.has(linked.id)) {
-      // The deep-link is a drill-in: select exactly that one session, not its
-      // whole project.
-      const project = groupByProject(discovery.sessions).find((p) =>
-        p.sessions.some((s) => s.id === linked.id),
-      );
-      void project; // grouping confirms the project exists; selection is the single session
-      setSelectedIds(new Set([linked.id]));
-    } else {
-      // No deep-link → keep the current picks. A refresh (for example after a
-      // member scope expired) must not silently drop a valid explicit
-      // selection, so the fresh list PRUNES ids it can no longer confirm
-      // instead of clearing everything; an id the fresh list cannot verify is
-      // removed rather than pushed blindly.
-      setSelectedIds((previous) => {
-        if (previous.size === 0) return previous;
-        const confirmed = new Set(discovery.sessions.map((s) => s.id));
-        return new Set([...previous].filter((id) => confirmed.has(id)));
-      });
-    }
-
-    if (deepLinkStep) {
-      setStep(deepLinkStep);
-    }
-  }, [discovery, deepLinkSessionId, deepLinkStep, selectableIds]);
+  useEffect(() => {
+    if (deepLinkStep) setStep(deepLinkStep);
+  }, [deepLinkStep]);
 
   // Explicit per-helper selection: a member toggle adds or removes exactly that
   // transcript id. It never widens to the owner, a sibling, or another group,
@@ -512,9 +501,12 @@ export function ShareWizardClient() {
   }, []);
 
   // A refused member scope refreshes the ORIGINATING grouped list. The refresh
-  // re-runs the loader, and the effect above prunes the selection to ids the
-  // fresh list confirms, so a stale or ineligible id is never pushed.
+  // re-runs the loader and deliberately invalidates every member page fetched
+  // for the old scopes; the reconciliation effect above then prunes the
+  // selection to ids the fresh list confirms, so a stale or ineligible id is
+  // never pushed.
   const refreshSessions = useCallback(() => {
+    setMemberSessions(new Map());
     setRetryCount((count) => count + 1);
   }, []);
 

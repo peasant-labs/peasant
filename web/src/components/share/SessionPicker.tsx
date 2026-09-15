@@ -312,13 +312,21 @@ export function SessionPicker({
     return descendantSelectionState(eligibleIds, selectionIndex.selectedCounts.get(key) ?? 0);
   }, [selectionIndex]);
 
+  const ordinaryIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const handleChange = useCallback(
     (next: Set<string>) => {
       const filtered = new Set<string>();
-      for (const id of next) if (selectableIds.has(id)) filtered.add(id);
+      for (const id of next) {
+        // A disabled ordinary row is never selectable. An id that is not an
+        // ordinary discovery row at all (a lazily loaded helper member) is kept:
+        // toggling the ordinary hierarchy must never silently drop an explicit
+        // helper pick.
+        if (ordinaryIds.has(id) && !selectableIds.has(id)) continue;
+        filtered.add(id);
+      }
       onSelectionChange(filtered);
     },
-    [selectableIds, onSelectionChange],
+    [ordinaryIds, selectableIds, onSelectionChange],
   );
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
@@ -360,17 +368,19 @@ export function SessionPicker({
       return ordinary;
     }
     return (
-      <HelperGroupTree
-        key={session.id}
-        groups={session.helperGroups}
-        owner={
-          <SessionRow session={session} checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} setRowElement={setRowElement} onToggle={toggleSession} />
-        }
-        selectedIds={selectedIds}
-        onMemberToggle={onMemberToggle}
-        loadMembers={loadMembers}
-        onScopeExpired={onScopeExpired}
-      />
+      <div className="share-helper-tree-scroll">
+        <HelperGroupTree
+          key={session.id}
+          groups={session.helperGroups}
+          owner={
+            <SessionRow session={session} checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} setRowElement={setRowElement} onToggle={toggleSession} />
+          }
+          selectedIds={selectedIds}
+          onMemberToggle={onMemberToggle}
+          loadMembers={loadMembers}
+          onScopeExpired={onScopeExpired}
+        />
+      </div>
     );
   };
 
@@ -426,15 +436,16 @@ export function SessionPicker({
           <div className="share-helper-contexts border-t border-rule" aria-label="helpers without a visible owner">
             <div className="px-4 py-3 border-b border-rule font-mono text-sm">helpers without a visible owner</div>
             {helperContexts.map((context) => (
-              <HelperGroupTree
-                key={context.groupId}
-                groups={context.helperGroups}
-                ownerStatus={context.ownerStatus}
-                selectedIds={selectedIds}
-                onMemberToggle={onMemberToggle}
-                loadMembers={loadMembers}
-                onScopeExpired={onScopeExpired}
-              />
+              <div className="share-helper-tree-scroll" key={context.groupId}>
+                <HelperGroupTree
+                  groups={context.helperGroups}
+                  ownerStatus={context.ownerStatus}
+                  selectedIds={selectedIds}
+                  onMemberToggle={onMemberToggle}
+                  loadMembers={loadMembers}
+                  onScopeExpired={onScopeExpired}
+                />
+              </div>
             ))}
           </div>
         ) : null}

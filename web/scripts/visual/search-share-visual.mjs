@@ -171,6 +171,13 @@ function readFixture() {
   if (fixture.marker !== undefined || fixture.search.results.length < 2 || fixture.sessions.length < 4 || fixture.discovery.length !== fixture.sessions.length || !projectHashesValid) {
     fail('fixture must omit feature markers, contain two search rows, four sessions with canonical projectHash values, and one discovery row per session')
   }
+  // Every session helper group must have a scoped member page to expand, and the
+  // corpus may not reuse a transcript id across pages.
+  const helperMembers = fixture.helperMembers ?? {}
+  const helperScopes = fixture.sessions.flatMap((session) => (session.helperGroups ?? []).map((group) => group.memberScope))
+  if (helperScopes.some((scope) => !Array.isArray(helperMembers[scope]))) fail('every session helper group needs a helperMembers page keyed by its memberScope')
+  const helperIds = Object.values(helperMembers).flat().map((member) => member.id)
+  if (new Set(helperIds).size !== helperIds.length) fail('helperMembers may not reuse a transcript id across scopes')
   return fixture
 }
 function assertProvenance() {
@@ -190,6 +197,7 @@ function assertProvenance() {
   return Object.values(featureChunks).map(({ path }) => path)
 }
 function response(body) { return { status: 200, contentType: 'application/json', body: JSON.stringify(body) } }
+const VISUAL_PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 // The share chooser reads the grouped sync route. Build the grouped envelope
 // from the same flat session rows so the harness stays a thin transport mock:
 // the route, shell, chooser, hierarchy and helper-group code remain real.
@@ -212,7 +220,7 @@ function groupedSyncPayload(sessions) {
         syncStatus: 'new',
       },
     },
-    helperGroups: session.helperGroups || [],
+    helperGroups: (session.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
   }))
   return {
     items,
@@ -255,12 +263,52 @@ function groupedSearchEnvelope(search) {
     helperThreadTotal: 0,
   }
 }
+
+// One scoped helper-member page, replayed from the fixture's exact scope. A
+// member may itself anchor a nested group, which the mounted chooser mounts
+// recursively with its own independent paging state.
+function helperMembersPayload(fixture, scope) {
+  const rows = (fixture.helperMembers || {})[scope] || []
+  const members = rows.map((row) => ({
+    kind: 'transcript',
+    transcript: {
+      session: {
+        id: row.id,
+        harness: 'codex',
+        startTime: '2026-02-24T09:15:00Z',
+        durationMins: 5,
+        totalTokens: 1000,
+        turnCount: row.turnCount,
+        toolCallCount: 1,
+        project: 'peasant-labs/engine',
+        projectHash: VISUAL_PROJECT_HASH,
+        preview: row.preview,
+      },
+      sync: {
+        id: row.id,
+        harness: 'codex',
+        projectName: 'peasant-labs/engine',
+        projectHash: VISUAL_PROJECT_HASH,
+        hostSlug: 'visual-host',
+        startTime: '2026-02-24T09:15:00Z',
+        durationMs: 300000,
+        totalTokens: 1000,
+        turnCount: row.turnCount,
+        model: 'visual-model',
+        syncStatus: row.syncStatus,
+      },
+    },
+    helperGroups: (row.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
+  }))
+  return { members, page: 1, limit: 20, total: members.length }
+}
+}
 function installMocks(page, fixture, diagnostics) {
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (url.origin !== ORIGIN) return void request.continue().catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/config/mock') return void request.respond(response({ enabled: false })).catch((e) => diagnostics.push(e.message))
-    if (url.pathname === '/api/v1/projects/summary') return void request.respond(response({ projects: [{ project: 'peasant-labs/engine', projectHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sessions: 4 }] })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/projects/summary') return void request.respond(response({ projects: [{ project: 'peasant-labs/engine', projectHash: VISUAL_PROJECT_HASH, sessions: 4 }] })).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/search') return void request.respond(response(groupedSearchEnvelope(fixture.search))).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/sync/sessions') return void request.respond(response(groupedSyncPayload(fixture.sessions))).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/sessions') {
@@ -268,6 +316,7 @@ function installMocks(page, fixture, diagnostics) {
       return void request.respond(response({ sessions: fixture.sessions })).catch((e) => diagnostics.push(e.message))
     }
     if (url.pathname === '/api/v1/web/discovery') return void request.respond(response({ items: fixture.discovery })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname.startsWith('/api/v1/session-groups/')) return void request.respond(response(helperMembersPayload(fixture, url.searchParams.get('scope') || ''))).catch((e) => diagnostics.push(e.message))
     return void request.continue().catch((e) => diagnostics.push(e.message))
   })
 }
@@ -512,6 +561,49 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     await pause(150)
     mkdirSync(join(OUT, theme, viewport.id), { recursive: true })
     await page.screenshot({ path: join(OUT, theme, viewport.id, 'share-list.png') })
+
+    // Nested helper disclosure evidence: expand the owner's saved-helper group,
+    // then the nested group its member anchors, and select the nested member.
+    // The two groups are independent scopes, and the nested selection must stay
+    // an explicit transcript id with no owner or parent widening.
+    await page.evaluate(() => { const b = document.querySelector('.swz-body'); if (b) b.scrollTop = 0 })
+    const ownerTrigger = '[data-group-id="hg_visual_owner1"] .helper-group-trigger'
+    await wait(page, ownerTrigger, 'share helper group trigger', false)
+    await page.$eval(ownerTrigger, (el) => el.click())
+    await wait(page, '[data-thread-id="sess-visual-helper-001"]', 'share helper member', false)
+    const nestedTrigger = '[data-thread-id="sess-visual-helper-001"] .helper-group-trigger'
+    await wait(page, nestedTrigger, 'share nested helper trigger', false)
+    await page.$eval(nestedTrigger, (el) => el.click())
+    await wait(page, '[data-thread-id="sess-visual-helper-003"]', 'share nested helper member', false)
+    await page.$eval('[data-thread-id="sess-visual-helper-003"] input[type="checkbox"]', (el) => el.click())
+    await page.waitForFunction(() => document.querySelector('[data-thread-id="sess-visual-helper-003"] input[type="checkbox"]')?.checked === true, { timeout: 10000 }).catch(() => fail('share: nested helper selection never registered'))
+    // The nested disclosure must stay reachable inside the bounded chooser: the
+    // tree may scroll horizontally in its own column, but it must never widen
+    // the chooser or push the member control out of the left edge.
+    const nestedFit = await page.evaluate(() => {
+      const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
+      const row = document.querySelector('[data-thread-id="sess-visual-helper-003"]')
+      const control = row?.querySelector('input[type="checkbox"]')
+      const scroller = row?.closest('.share-helper-tree-scroll')
+      if (!chooser || !row || !control) return { ok: false, why: 'nested row or chooser missing' }
+      const chooserRect = chooser.getBoundingClientRect()
+      const controlRect = control.getBoundingClientRect()
+      return {
+        ok: true,
+        chooserOverflow: chooser.scrollWidth - chooser.clientWidth,
+        controlLeftOverflow: chooserRect.left - controlRect.left,
+        controlWidth: controlRect.width,
+        inScroller: scroller !== null,
+      }
+    })
+    if (!nestedFit.ok || !nestedFit.inScroller || nestedFit.chooserOverflow > 1 || nestedFit.controlLeftOverflow > 1 || nestedFit.controlWidth <= 0) {
+      fail(`${theme}/${viewport.id}/share: nested helper disclosure fit ${JSON.stringify(nestedFit)}`)
+    }
+    // Bring the nested disclosure into the bounded chooser viewport so the
+    // evidence shows it on the narrow viewport too.
+    await page.$eval('[data-thread-id="sess-visual-helper-003"]', (el) => el.scrollIntoView({ block: 'center', inline: 'nearest' }))
+    await pause(200)
+    await capture(page, gate, join(OUT, theme, viewport.id, 'share-helper-nested.png'), 'main', `${theme}/${viewport.id}/share-helper-nested`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
 }

@@ -20,6 +20,13 @@ export interface HelperMemberRow {
   /** False when the row's route summary says it cannot be contributed. */
   selectable: boolean;
   session: ShareSession;
+  /**
+   * Saved helper groups this member itself anchors, from the member page's own
+   * `helperGroups`. Each carries its own opaque scope and is mounted as a
+   * separate, independently paged disclosure under this member's row. Selection
+   * stays per-transcript-id: a nested group never selects its owner or a scope.
+   */
+  helperGroups?: ShareHelperGroup[];
 }
 
 export interface HelperMembersPage {
@@ -67,40 +74,37 @@ export interface HelperGroupTreeProps {
   ownerStatus?: string;
 }
 
+interface HelperGroupBranchProps {
+  groups: ShareHelperGroup[];
+  selectedIds: Set<string>;
+  onMemberToggle: (id: string, checked: boolean) => void;
+  loadMembers: (group: ShareHelperGroup, page: number, limit: number) => Promise<HelperMembersPage>;
+  onScopeExpired: () => void;
+}
+
+/** One group's key is its identity AND its scope: a re-minted scope is a new query. */
+function groupKey(group: ShareHelperGroup): string {
+  return `${group.groupId}:${group.memberScope}`;
+}
+
 /**
- * One owner-anchored helper tree on the share chooser. It composes the
- * canonical fairtrade primitives and owns ONLY the host-side concerns the
- * design system deliberately leaves out: fetching each group's authorized page
- * for its exact scope, paging, and the fail-closed refresh when a scope
- * expires. Selection state stays with the chooser; members are explicit
- * transcript IDs and never a group or owner aggregate.
+ * The member rows and their own nested helper groups for ONE disclosure level.
+ *
+ * Each level owns the paging and expiry state of exactly the groups it renders,
+ * keyed by group id and scope, so paging a nested group never disturbs its
+ * parent or a sibling. A member that anchors further groups renders those under
+ * its own row, where the fairtrade tree deepens one more indent column. State
+ * lives here (never in the fairtrade components), and selection always stays an
+ * explicit transcript id with the chooser.
  */
-export function HelperGroupTree({
-  groups,
-  selectedIds,
-  onMemberToggle,
-  loadMembers,
-  onScopeExpired,
-  owner,
-  ownerStatus,
-}: HelperGroupTreeProps) {
+function HelperGroupBranch({ groups, selectedIds, onMemberToggle, loadMembers, onScopeExpired }: HelperGroupBranchProps) {
   const [stateByGroup, setStateByGroup] = useState<Record<string, GroupState>>({});
   const [expandedByGroup, setExpandedByGroup] = useState<Record<string, boolean>>({});
-
-  // A changed scope is a different query: keying state by group AND scope means
-  // a refreshed list starts folded instead of reusing rows fetched for the old
-  // scope. The fairtrade group remounts on the same boundary.
-  const treeKey = useCallback((group: ShareHelperGroup) => `${group.groupId}:${group.memberScope}`, []);
-
-  const stateOf = useCallback(
-    (groupId: string): GroupState => stateByGroup[groupId] ?? EMPTY_GROUP,
-    [stateByGroup],
-  );
 
   const fetchPage = useCallback(
     async (group: ShareHelperGroup, page: number) => {
       const limit = HELPER_MEMBERS_LIMIT;
-      const key = `${group.groupId}:${group.memberScope}`;
+      const key = groupKey(group);
       setStateByGroup((previous) => ({
         ...previous,
         [key]: { ...(previous[key] ?? EMPTY_GROUP), loading: true, expired: false, error: null },
@@ -148,14 +152,14 @@ export function HelperGroupTree({
 
   const handleExpandedChange = useCallback(
     (group: ShareHelperGroup, expanded: boolean) => {
-      const key = treeKey(group);
+      const key = groupKey(group);
       setExpandedByGroup((previous) => ({ ...previous, [key]: expanded }));
       if (!expanded) return;
       const state = stateByGroup[key] ?? EMPTY_GROUP;
       if (state.loaded || state.loading || state.expired) return;
       void fetchPage(group, 1);
     },
-    [fetchPage, stateByGroup, treeKey],
+    [fetchPage, stateByGroup],
   );
 
   const renderMember = useCallback(
@@ -169,16 +173,26 @@ export function HelperGroupTree({
         selected={selectedIds.has(row.id)}
         selectionDisabled={!row.selectable}
         onSelect={onMemberToggle}
-      />
+      >
+        {row.helperGroups?.length ? (
+          <HelperGroupBranch
+            groups={row.helperGroups}
+            selectedIds={selectedIds}
+            onMemberToggle={onMemberToggle}
+            loadMembers={loadMembers}
+            onScopeExpired={onScopeExpired}
+          />
+        ) : null}
+      </HelperThreadRow>
     ),
-    [onMemberToggle, selectedIds],
+    [loadMembers, onMemberToggle, onScopeExpired, selectedIds],
   );
 
   return (
-    <HelperGroupListItem owner={owner} ownerStatus={owner ? undefined : ownerStatus}>
+    <>
       {groups.map((group) => {
-        const key = treeKey(group);
-        const state = stateOf(key);
+        const key = groupKey(group);
+        const state = stateByGroup[key] ?? EMPTY_GROUP;
         const pageCount = Math.max(1, Math.ceil(state.total / state.limit));
         return (
           <HelperGroup
@@ -195,7 +209,11 @@ export function HelperGroupTree({
             onRefreshList={onScopeExpired}
             isMemberSelected={(row) => selectedIds.has(row.id as string)}
             memberFooter={
-              state.loaded && state.total > state.limit ? (
+              state.error ? (
+                <p className="share-helper-error text-xs text-danger" role="alert">
+                  {state.error}
+                </p>
+              ) : state.loaded && state.total > state.limit ? (
                 <div className="share-helper-paging flex items-center gap-3 font-mono text-xs text-ink-3">
                   <span className="tabular-nums">
                     page {state.page} of {pageCount}
@@ -222,6 +240,36 @@ export function HelperGroupTree({
           />
         );
       })}
+    </>
+  );
+}
+
+/**
+ * One owner-anchored helper tree on the share chooser. It composes the
+ * canonical fairtrade primitives and owns ONLY the host-side concerns the
+ * design system deliberately leaves out: fetching each group's authorized page
+ * for its exact scope, paging, and the fail-closed refresh when a scope
+ * expires. Selection state stays with the chooser; members are explicit
+ * transcript IDs and never a group or owner aggregate.
+ */
+export function HelperGroupTree({
+  groups,
+  selectedIds,
+  onMemberToggle,
+  loadMembers,
+  onScopeExpired,
+  owner,
+  ownerStatus,
+}: HelperGroupTreeProps) {
+  return (
+    <HelperGroupListItem owner={owner} ownerStatus={owner ? undefined : ownerStatus}>
+      <HelperGroupBranch
+        groups={groups}
+        selectedIds={selectedIds}
+        onMemberToggle={onMemberToggle}
+        loadMembers={loadMembers}
+        onScopeExpired={onScopeExpired}
+      />
     </HelperGroupListItem>
   );
 }
