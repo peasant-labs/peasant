@@ -302,7 +302,6 @@ function helperMembersPayload(fixture, scope) {
   }))
   return { members, page: 1, limit: 20, total: members.length }
 }
-}
 function installMocks(page, fixture, diagnostics) {
   page.on('request', (request) => {
     const url = new URL(request.url())
