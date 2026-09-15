@@ -1,0 +1,35 @@
+expectedCaseCount: 2
+requiredNames:
+  - stored-context-source-and-parent-links-route-to-exact-targets
+  - unavailable-parent-target-renders-no-active-link
+expectedTransitionCount: 1
+requiredTransitionNames:
+  - back-restores-scroll-disclosure-and-selection
+expectedLoaderMutationCount: 3
+loaderMutations:
+  - {name: current-parent case count drift is rejected, target: manifest, find: "expectedCaseCount: 2\nrequiredNames:", replace: "expectedCaseCount: 1\nrequiredNames:", expectedError: do not match}
+  - {name: current-parent case unknown fields are rejected, target: cases, find: "  - name: stored-context-source-and-parent-links-route-to-exact-targets\n    childSessionId: sess_contextchild", replace: "  - name: stored-context-source-and-parent-links-route-to-exact-targets\n    unknown: true\n    childSessionId: sess_contextchild", expectedError: fields}
+  - {name: current-parent multiple YAML documents are rejected, target: cases, find: "cases:", replace: "---\ncases:", expectedError: one YAML document}
+expectedMutationCount: 3
+mutations:
+  - name: host routes to the current session instead of the exact stored target
+    find: "router.push(transcriptHref(projectHash, entry.localId));"
+    replace: "router.push(transcriptHref(projectHash, sessionId));"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.currentParentNavigation.test.tsx
+    expectedFailedTestNames:
+      - stored-context-source-and-parent-links-route-to-exact-targets
+    expectedFailurePattern: exact stored target
+  - name: host stops controlling the earlier-history disclosure from the stored reading state
+    find: "earlierHistoryOpen={earlierHistoryOpen}"
+    replace: "earlierHistoryOpen={undefined}"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.currentParentNavigation.test.tsx
+    expectedFailedTestNames:
+      - back-restores-scroll-disclosure-and-selection
+    expectedFailurePattern: earlier-history disclosure was not restored
+  - name: host stops replaying the per-session reading state
+    find: "useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm));"
+    replace: "({ earlierHistoryOpen: {}, setEarlierHistoryOpen: () => {}, activeTurn: undefined, setActiveTurn: () => {} });"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.currentParentNavigation.test.tsx
+    expectedFailedTestNames:
+      - back-restores-scroll-disclosure-and-selection
+    expectedFailurePattern: earlier-history disclosure was not restored
