@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -62,6 +63,10 @@ type canonicalPersistenceCase struct {
 	OrphanEntry           string                        `yaml:"orphan_entry"`
 	OrphanContentContains string                        `yaml:"orphan_content_contains"`
 	ExpectedMetrics       canonicalPersistenceMetrics   `yaml:"expected_metrics"`
+	// ManagedExpectedMetrics declares the graph session's analytics under the
+	// activated managed representation, where one tool call is one tool_use
+	// block rather than a message row plus its folded part row.
+	ManagedExpectedMetrics canonicalPersistenceMetrics `yaml:"managed_expected_metrics"`
 }
 
 type canonicalPersistenceSession struct {
@@ -151,7 +156,7 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 	// real analytics until it was noticed. The rule is now enforced where it is
 	// written, and it names the bump as the reason so the fix is obvious.
 	for _, testCase := range fixture.Cases {
-		for _, declared := range append([]canonicalPersistenceMetrics{testCase.ExpectedMetrics}, canonicalPersistenceDeclaredMetrics(testCase)...) {
+		for _, declared := range append([]canonicalPersistenceMetrics{testCase.ExpectedMetrics, testCase.ManagedExpectedMetrics}, canonicalPersistenceDeclaredMetrics(testCase)...) {
 			if declared.ComputeVersion != metrics.CurrentComputeVersion {
 				return fixture, fmt.Errorf("canonical OpenCode persistence fixture case %q declares compute version %d but this build computes %d; a metrics bump updates every expected_metrics row in the corpus", testCase.Name, declared.ComputeVersion, metrics.CurrentComputeVersion)
 			}
@@ -161,6 +166,9 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 	for _, testCase := range fixture.Cases {
 		if testCase.Name == "" || seen[testCase.Name] || testCase.SourceFixture == "" || testCase.ExpectedSessions != expectedCanonicalPersistenceSessions+2 || len(testCase.JSONSessions) == 0 || len(testCase.CanonicalSessions) != expectedCanonicalPersistenceSessions || testCase.GraphSession == "" || testCase.ParentEntry == "" || testCase.ChildEntry == "" || testCase.MissingParentEntry == "" || testCase.ToolCallID == "" || testCase.ToolResultContains == "" || testCase.OrphanSession == "" || testCase.OrphanEntry == "" || testCase.OrphanContentContains == "" || testCase.ExpectedMetrics.TurnCount <= 0 || testCase.ExpectedMetrics.ToolCalls <= 0 || testCase.ExpectedMetrics.ComputeVersion <= 0 {
 			return fixture, fmt.Errorf("canonical OpenCode persistence fixture contains incomplete or duplicate case %+v", testCase)
+		}
+		if !testCase.ManagedExpectedMetrics.valid() {
+			return fixture, fmt.Errorf("canonical OpenCode persistence fixture case %q declares no valid managed_expected_metrics; the activated representation's analytics are not asserted", testCase.Name)
 		}
 		seen[testCase.Name] = true
 		wantedCombinations := map[canonicalPersistenceCombination]bool{
@@ -271,7 +279,20 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("mounted canonical harvest: %v\n%s", err, output)
 			}
-			database, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			// The run store activates the managed generation for a native
+			// (current session_message) OpenCode source. Open the assertion
+			// store the way production reads it: managed representation plus the
+			// generation artifact root, so the durable detail boundary can
+			// hydrate the captured generation.
+			artifacts, err := store.NewOSGenerationArtifactStore(outputRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			locker, err := store.NewFileSessionLocker(outputRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			database, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -282,21 +303,38 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			}
 			assertCanonicalPersistenceSessions(t, database, testCase.CanonicalSessions)
 			graphID := mustCanonicalPersistenceSessionID(t, testCase.GraphSession)
-			entries, err := database.ListEntries(t.Context(), graphID)
-			if err != nil {
-				t.Fatal(err)
+			graphManaged := canonicalManagedGenerationIndexFormat(t, database, graphID) == 2
+			if graphManaged {
+				// The managed representation keys entries by captured source
+				// refs and hangs tool parts below their carrier, so its graph
+				// and tool pairing are read through the durable detail boundary
+				// that rehydrates the committed generation.
+				assertManagedCanonicalDetail(t, database, graphID, testCase.ToolResultContains)
+			} else {
+				entries, err := database.ListEntries(t.Context(), graphID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parentIndex, childIndex, missingIndex := assertPersistedCanonicalGraph(t, entries, testCase)
+				turns := api.EntriesToTurns(entries)
+				assertCanonicalDetailGraph(t, turns, testCase, parentIndex, childIndex, missingIndex)
+				detail := api.SessionToDetail(&ingest.Session{ID: graphID, Harness: ingest.HarnessOpenCode, Turns: turns, Model: "synthetic-model"})
+				detailJSON, marshalErr := json.Marshal(detail)
+				if marshalErr != nil || detail == nil || !bytes.Contains(detailJSON, []byte(testCase.ToolResultContains)) {
+					t.Fatalf("production session detail omitted paired tool output %q: error=%v detail=%s", testCase.ToolResultContains, marshalErr, detailJSON)
+				}
 			}
-			parentIndex, childIndex, missingIndex := assertPersistedCanonicalGraph(t, entries, testCase)
-			turns := api.EntriesToTurns(entries)
-			assertCanonicalDetailGraph(t, turns, testCase, parentIndex, childIndex, missingIndex)
-			detail := api.SessionToDetail(&ingest.Session{ID: graphID, Harness: ingest.HarnessOpenCode, Turns: turns, Model: "synthetic-model"})
-			detailJSON, marshalErr := json.Marshal(detail)
-			if marshalErr != nil || detail == nil || !bytes.Contains(detailJSON, []byte(testCase.ToolResultContains)) {
-				t.Fatalf("production session detail omitted paired tool output %q: error=%v detail=%s", testCase.ToolResultContains, marshalErr, detailJSON)
+			// A tool call is one tool_use block under the managed representation
+			// and one folded part row under the retained one; the retained
+			// message entry and its part entry both carry has_tool_use, so the
+			// same single call is counted on each and the case declares both.
+			wantGraphMetrics := testCase.ExpectedMetrics
+			if graphManaged {
+				wantGraphMetrics = testCase.ManagedExpectedMetrics
 			}
 			metrics, err := database.GetMetrics(t.Context(), graphID)
-			if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != testCase.ExpectedMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != testCase.ExpectedMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != testCase.ExpectedMetrics.ComputeVersion {
-				t.Fatalf("real canonical analytics are incomplete: turns=%d tools=%d compute=%d error=%v", canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err)
+			if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != wantGraphMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != wantGraphMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != wantGraphMetrics.ComputeVersion {
+				t.Fatalf("real canonical analytics are incomplete: turns=%d tools=%d compute=%d error=%v, want %+v", canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err, wantGraphMetrics)
 			}
 			orphanID := mustCanonicalPersistenceSessionID(t, testCase.OrphanSession)
 			orphanEntries, err := database.ListEntries(t.Context(), orphanID)
@@ -308,10 +346,65 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 	}
 }
 
+// canonicalManagedGenerationIndexFormat reports the stored representation of
+// one session: 2 is the managed generation, every other value is the retained
+// relational representation. A session without a recorded format reads as 0.
+func canonicalManagedGenerationIndexFormat(t testing.TB, database *store.Store, sessionID ingest.SessionID) int {
+	t.Helper()
+	state, err := database.ReadIndexState(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("read stored representation for session %s: %v", sessionID, err)
+	}
+	if state == nil || state.IndexVersion == nil {
+		return 0
+	}
+	return *state.IndexVersion
+}
+
+// assertManagedCanonicalSession proves one activated session's content through
+// the durable detail boundary. The managed representation carries no
+// provider-native entry ids and hangs tool parts below their carrier, so the
+// selected content is the proof: the winning source's text or tool bytes are
+// hydrated from the committed generation and no losing source contributes.
+func assertManagedCanonicalDetail(t testing.TB, database *store.Store, sessionID ingest.SessionID, wantContent string) {
+	t.Helper()
+	encoded, detail, err := transcript.BuildSnapshotDetailBytes(t.Context(), database, database, schema.SessionID(sessionID))
+	if err != nil {
+		t.Fatalf("build durable detail for managed session %s: %v", sessionID, err)
+	}
+	if detail == nil || len(encoded) == 0 {
+		t.Fatalf("durable detail for managed session %s is empty", sessionID)
+	}
+	if wantContent != "" && !bytes.Contains(encoded, []byte(wantContent)) {
+		t.Fatalf("durable detail for managed session %s omitted %q: %s", sessionID, wantContent, encoded)
+	}
+}
+
 func assertCanonicalPersistenceSessions(t testing.TB, database *store.Store, sessions []canonicalPersistenceSession) {
 	t.Helper()
 	for _, expected := range sessions {
-		entries, err := database.ListEntries(t.Context(), mustCanonicalPersistenceSessionID(t, expected.SessionID))
+		sessionID := mustCanonicalPersistenceSessionID(t, expected.SessionID)
+		if canonicalManagedGenerationIndexFormat(t, database, sessionID) == 2 {
+			// Activated representation: assert the selected content is the
+			// managed generation's, that no losing source leaked, and the
+			// derived analytics match. Provider-native ids are a retained
+			// representation field and do not exist here.
+			encoded, _, err := transcript.BuildSnapshotDetailBytes(t.Context(), database, database, schema.SessionID(sessionID))
+			if err != nil {
+				t.Fatalf("build durable detail for managed session %q: %v", expected.Name, err)
+			}
+			if !bytes.Contains(encoded, []byte(expected.WinningMarker)) {
+				t.Fatalf("persisted canonical session %q detail lost marker %q: %s", expected.Name, expected.WinningMarker, encoded)
+			}
+			for _, marker := range expected.LosingMarkers {
+				if bytes.Contains(encoded, []byte(marker)) {
+					t.Fatalf("persisted canonical session %q leaked losing marker %q: %s", expected.Name, marker, encoded)
+				}
+			}
+			assertCanonicalPersistenceMetrics(t, database, sessionID, expected)
+			continue
+		}
+		entries, err := database.ListEntries(t.Context(), sessionID)
 		if err != nil {
 			t.Fatalf("list persisted canonical session %q: %v", expected.Name, err)
 		}
@@ -334,10 +427,7 @@ func assertCanonicalPersistenceSessions(t testing.TB, database *store.Store, ses
 				t.Fatalf("persisted canonical session %q leaked losing marker %q: %s", expected.Name, marker, encoded)
 			}
 		}
-		metrics, err := database.GetMetrics(t.Context(), mustCanonicalPersistenceSessionID(t, expected.SessionID))
-		if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != expected.ExpectedMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != expected.ExpectedMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != expected.ExpectedMetrics.ComputeVersion {
-			t.Fatalf("persisted canonical session %q metrics turns=%d tools=%d compute=%d error=%v, want %+v", expected.Name, canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err, expected.ExpectedMetrics)
-		}
+		assertCanonicalPersistenceMetrics(t, database, sessionID, expected)
 	}
 }
 
@@ -346,6 +436,17 @@ func canonicalMetricInt(metrics *ingest.SessionMetrics, field func(*ingest.Sessi
 		return -1
 	}
 	return *field(metrics)
+}
+
+// assertCanonicalPersistenceMetrics proves the derived analytics of one
+// persisted canonical session match the fixture, independent of which stored
+// representation carries its entries.
+func assertCanonicalPersistenceMetrics(t testing.TB, database *store.Store, sessionID ingest.SessionID, expected canonicalPersistenceSession) {
+	t.Helper()
+	metrics, err := database.GetMetrics(t.Context(), sessionID)
+	if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != expected.ExpectedMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != expected.ExpectedMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != expected.ExpectedMetrics.ComputeVersion {
+		t.Fatalf("persisted canonical session %q metrics turns=%d tools=%d compute=%d error=%v, want %+v", expected.Name, canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err, expected.ExpectedMetrics)
+	}
 }
 
 func assertPersistedCanonicalGraph(t testing.TB, entries []schema.SessionEntry, testCase canonicalPersistenceCase) (int, int, int) {
