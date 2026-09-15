@@ -32,6 +32,34 @@ export interface ShareHierarchySession extends ShareSession {
   locationLabel: string;
   repositoryLocationId: string;
   branch: string;
+  /**
+   * Collapsed helper groups this owner row anchors, from the grouped sync
+   * route. Empty or absent for an ordinary session. Each group carries its own
+   * opaque member scope; membership is fetched through the member operation,
+   * never inferred here.
+   */
+  helperGroups?: ShareHelperGroup[];
+}
+
+/** One collapsed helper group on the grouped chooser route. */
+export interface ShareHelperGroup {
+  groupId: string;
+  /** Saved helper threads, never reviews or messages. */
+  helperThreadCount: number;
+  /** Opaque originating-route scope; a member fetch replays it, and it is not
+   * an access grant. */
+  memberScope: string;
+}
+
+/**
+ * A helper-only grouped result: an owner context that is not an ordinary
+ * candidate. It carries no fake owner title and no owner action, and it is not
+ * a way to select the hidden owner.
+ */
+export interface ShareHelperContext {
+  groupId: string;
+  ownerStatus: string;
+  helperGroups: ShareHelperGroup[];
 }
 
 export interface ShareBranchGroup {
@@ -54,6 +82,8 @@ export interface ShareHierarchyProject {
 export interface ShareDiscoveryResult<TSession extends ShareSession = ShareSession> {
   sessions: TSession[];
   counts: Record<ShareStatus, number>;
+  /** Helper-only grouped results that name no ordinary owner row. */
+  helperContexts?: ShareHelperContext[];
 }
 
 /**

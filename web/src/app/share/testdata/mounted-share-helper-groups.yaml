@@ -1,0 +1,42 @@
+# Mounted helper-group chooser segment for the /share production path.
+#
+# Deletion protection is a required-NAME manifest, never a bare count: each name
+# below must be present and is asserted by the loader, and the resolver roles
+# (owner, eligible member, ineligible member) are named ids the test asserts by
+# exact membership.
+requiredNames:
+  - owner-with-helpers
+  - eligible-member
+  - ineligible-member
+  - helper-only-context
+owners:
+  - id: owner-1
+    project: alpha
+    projectHash: hash-alpha
+    startTime: '2026-08-12T09:00:00Z'
+    preview: owner one
+    syncStatus: new
+    groups:
+      - { groupId: hg_owner1, helperThreadCount: 3, memberScope: scope-owner1 }
+  - id: owner-2
+    project: alpha
+    projectHash: hash-alpha
+    startTime: '2026-08-12T08:00:00Z'
+    preview: owner two
+    syncStatus: new
+    groups:
+      - { groupId: hg_owner2, helperThreadCount: 1, memberScope: scope-owner2 }
+members:
+  - { groupId: hg_owner1, id: eligible-member, preview: eligible helper, turnCount: 1, syncStatus: new }
+  - { groupId: hg_owner1, id: other-member, preview: other helper, turnCount: 1, syncStatus: new }
+  - { groupId: hg_owner1, id: ineligible-member, preview: held helper, turnCount: 1, syncStatus: held }
+contexts:
+  - groupId: hg_context1
+    ownerStatus: known_unavailable
+    helperGroups:
+      - { groupId: hg_context1, helperThreadCount: 1, memberScope: scope-context1 }
+#
+# A helper-only grouped result names no ordinary owner row: the chooser must
+# render it honestly without inventing an owner title or an owner selection.
+contextMembers:
+  - { groupId: hg_context1, id: context-member, preview: context helper, turnCount: 1, syncStatus: new }
