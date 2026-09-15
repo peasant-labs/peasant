@@ -28,6 +28,38 @@ concurrency:
 permissions: {}
 
 jobs:
+  # Route the x86_64 release and smoke jobs to the self-hosted x86_64 runner
+  # pool, with a Blacksmith amd64 fallback when the pool is offline. `guard`,
+  # `nix-vendor-hash`, the arm64 `smoke` entry, and `macos-cask-smoke` keep
+  # their current runners.
+  determine-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+            echo "::warning::runner availability query failed; using the fallback"
+            online=0
+          fi
+          echo "online runners: ${online}"
+          if [ "${online}" -gt 0 ]; then
+            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Report chosen runner
+        env:
+          CHOSEN: ${{ steps.pick.outputs.runner }}
+        run: 'echo "chosen: $CHOSEN"'
+
   # Gate the build: reject tags not created by the release App and tags outside
   # the Peasant release grammar. Final releases no longer require a prior rc.
   guard:
@@ -106,6 +138,9 @@ jobs:
     needs: [guard, nix-vendor-hash]
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/release-e2e.yml
 
   # Build + publish: one Linux runner cross-compiles all four targets (pure-Go,
@@ -114,8 +149,8 @@ jobs:
   # (final tags only, never rc); the AUR push stays skip_upload:"true" (no-op).
   release:
     name: release (goreleaser)
-    needs: [guard, nix-vendor-hash, e2e, release-e2e]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [determine-runner, guard, nix-vendor-hash, e2e, release-e2e]
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
     permissions:
       contents: write # create the GitHub Release and upload assets
@@ -183,7 +218,7 @@ jobs:
   # (no QEMU) and assert the binary is static and reports the tag version.
   smoke:
     name: smoke (${{ matrix.arch }})
-    needs: release
+    needs: [determine-runner, release]
     strategy:
       fail-fast: false
       matrix:
@@ -192,7 +227,9 @@ jobs:
             arch: amd64
           - runs-on: blacksmith-2vcpu-ubuntu-2404-arm
             arch: arm64
-    runs-on: ${{ matrix.runs-on }}
+    # Only the amd64 entry routes to the pool; the arm64 entry keeps its arm64
+    # runner so the native arm64 archive still installs on arm64.
+    runs-on: ${{ matrix.arch == 'amd64' && fromJson(needs.determine-runner.outputs.runner) || matrix.runs-on }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -281,4 +318,7 @@ jobs:
     if: contains(github.ref_name, '-rc')
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/release-validate.yml

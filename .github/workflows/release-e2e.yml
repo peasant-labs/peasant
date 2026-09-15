@@ -15,11 +15,43 @@ permissions:
   contents: read
 
 jobs:
+  # Route the single warm-stack driver to the self-hosted x86_64 runner pool,
+  # with a Blacksmith amd64 fallback when the pool is offline.
+  determine-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+            echo "::warning::runner availability query failed; using the fallback"
+            online=0
+          fi
+          echo "online runners: ${online}"
+          if [ "${online}" -gt 0 ]; then
+            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Report chosen runner
+        env:
+          CHOSEN: ${{ steps.pick.outputs.runner }}
+        run: 'echo "chosen: $CHOSEN"'
+
   release-e2e:
     name: release e2e (installed packages)
     # Arch's official warm-stack image is amd64-only, so the single warm-stack
-    # driver runs on the amd64 Blacksmith runner.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # driver runs on the self-hosted amd64 pool, with the Blacksmith amd64
+    # runner as fallback.
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 90
     steps:
       - name: Checkout peasant

@@ -27,6 +27,38 @@ permissions:
   contents: read
 
 jobs:
+  # Route the x86_64 and architecture-neutral packaging jobs to the self-hosted
+  # x86_64 runner pool, with a Blacksmith amd64 fallback when the pool is
+  # offline. `classify`, `nix-build`, the arm64 `deb` entries, and `macos-cask`
+  # keep their current runners.
+  determine-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+            echo "::warning::runner availability query failed; using the fallback"
+            online=0
+          fi
+          echo "online runners: ${online}"
+          if [ "${online}" -gt 0 ]; then
+            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Report chosen runner
+        env:
+          CHOSEN: ${{ steps.pick.outputs.runner }}
+        run: 'echo "chosen: $CHOSEN"'
+
   # Decide whether this is a release CANDIDATE, from whichever signal the entry
   # point provides (PR title grammar, or the tag's -rc suffix on workflow_call).
   # Drives the rc-only macOS cask job from both supported entry points.
@@ -73,7 +105,8 @@ jobs:
   # Build the snapshot artifacts once; every install job consumes them.
   snapshot:
     name: goreleaser snapshot
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -144,7 +177,7 @@ jobs:
   # static binary pulls ZERO extra packages and the .deb installs/removes.
   deb:
     name: deb (${{ matrix.image }} / ${{ matrix.target.debarch }})
-    needs: snapshot
+    needs: [determine-runner, snapshot]
     strategy:
       fail-fast: false
       matrix:
@@ -156,7 +189,9 @@ jobs:
         target:
           - { runs-on: blacksmith-2vcpu-ubuntu-2404, debarch: amd64 }
           - { runs-on: blacksmith-2vcpu-ubuntu-2404-arm, debarch: arm64 }
-    runs-on: ${{ matrix.target.runs-on }}
+    # Only the amd64 entries route to the pool; the arm64 entries keep their
+    # arm64 runner so the native arm64 container still executes on arm64.
+    runs-on: ${{ matrix.target.debarch == 'amd64' && fromJson(needs.determine-runner.outputs.runner) || matrix.target.runs-on }}
     timeout-minutes: 15
     steps:
       - name: Download dist/
@@ -187,8 +222,8 @@ jobs:
   # rpm: Fedora (dnf) + openSUSE Leap (zypper --allow-unsigned-rpm). amd64 only.
   rpm:
     name: rpm (${{ matrix.image }})
-    needs: snapshot
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs: [determine-runner, snapshot]
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -224,11 +259,11 @@ jobs:
   # sha256 (NO --skipinteg) without any network/public URL.
   makepkg:
     name: makepkg (archlinux x86_64)
-    needs: snapshot
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [determine-runner, snapshot]
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     container:
-      # archlinux:base-devel is amd64-only, matching this explicit amd64 runner.
+      # archlinux:base-devel is amd64-only, matching this explicit amd64 job.
       image: archlinux@sha256:40d14ac9db5af04f695eacd82a53181ad685fecc2534a66e05a51182a077cbd5 # archlinux:base-devel
     steps:
       - name: Download dist/
@@ -271,7 +306,7 @@ jobs:
     # GitHub-hosted, NOT Blacksmith: setup-homebrew needs the preinstalled
     # /home/linuxbrew tree owned by the job user; on Blacksmith it retry-looped
     # on "could not lock config file .git/config: Permission denied" until the
-    # timeout killed it in CI.
+    # timeout killed it (PR #94 run 27316160405).
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
