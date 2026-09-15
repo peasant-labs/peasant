@@ -82,6 +82,7 @@ function transcriptOptions(query: TranscriptRouteQuery): TranscriptHrefOptions {
     originNode: query.originNode ?? undefined,
     originBranch: query.originBranch ?? undefined,
     returnLocation: query.returnLocation ?? undefined,
+    earlierHistoryOpen: query.earlierHistoryOpen,
   };
 }
 

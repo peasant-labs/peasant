@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:transcript-position:mutations": "node scripts/transcript-position.mutations.mjs",
+    "test:context-navigation:mutations": "node scripts/session-context-navigation.mutations.mjs",
     "test:contract-boundary:mutations": "node scripts/contract-boundary.mutations.mjs",
     "test:provider-build-provenance": "node scripts/provider-build-provenance-guidance.test.mjs && node scripts/provider-build-provenance.mjs",
     "test:watch": "vitest",

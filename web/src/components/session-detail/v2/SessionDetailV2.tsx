@@ -27,10 +27,9 @@ import type {
   SessionRelationshipNavigation,
   QualityPayload,
 } from '@/types/messages';
-import { RelationshipNavigationStatus } from '@peasant-labs/schema';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
-import { sessionsHref, transcriptHref, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
+import { sessionsHref, transcriptHref, EarlierHistoryParam, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
 import {
   clearScopeQuery,
@@ -71,14 +70,14 @@ type SessionDetailWire = SessionDetailPayload &
   Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
 
 /**
- * The adapter options the host owns today. `AdaptTranscriptOptions` is the
- * published Fairtrade boundary; `relationshipNavigation` is the canonical
- * local-read field the adapter consumes once the canonical Fairtrade package
- * publishes that option, and is inert against the currently pinned package.
+ * The adapter options the adapter boundary declares today. The published
+ * `adaptTranscript` type is not re-exported from the `/ui` barrel, so the host
+ * reads it off the exported function signature instead of restating it.
  */
-type HostAdapterOptions = NonNullable<Parameters<typeof adaptTranscript>[3]> & {
-  relationshipNavigation?: SessionDetailReadPayload['relationshipNavigation'];
-};
+type AdapterOptions = NonNullable<Parameters<typeof adaptTranscript>[3]>;
+
+/** The disclosed retained-history sections, keyed the way the viewer keys them. */
+type EarlierHistoryOpen = Record<string, boolean>;
 
 /**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
@@ -123,6 +122,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // The canonical wire permits `null` for an empty turn collection. Normalize
   // once at the mounted app boundary so every view/filter sees one stable list.
   const turns = useMemo(() => detail?.turns ?? [], [detail?.turns]);
+  // Authorized current-target navigation from the flat local read, kept separate
+  // from the durable payload it was read beside.
+  const relationshipNavigation = detail?.relationshipNavigation;
 
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -134,17 +136,39 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
   }, [router, pathname, searchParams]);
 
-  // The host's exact-ID current-target route callback: an authorized navigation
-  // entry whose target resolves to a stored session routes to that session.
-  // known-unavailable / unknown / conflicting entries never navigate. The
-  // mounted click + Back restoration is pending the canonical Fairtrade package
-  // publishing the relationshipNavigation option and callback.
+  // The host's exact-ID current-target route callback. The viewer only offers a
+  // link for an authorized, usable target, and the contract permits a target
+  // identifier on a linkable status alone — so an identifier is exactly the
+  // authorization to route, and every withheld or unavailable target (which
+  // carries none) stays an honest reference on screen.
   const navigateToRelationship = useCallback(
     (entry: SessionRelationshipNavigation) => {
-      if (entry.status !== RelationshipNavigationStatus.Resolved || !entry.localId) return;
+      if (!entry.localId) return;
       router.push(transcriptHref(projectHash, entry.localId));
     },
     [router, projectHash],
+  );
+
+  // Retained-history disclosure is READER state, and Back must restore it. The
+  // route carries exactly the sections the reader disclosed, so returning to
+  // this page (browser Back, a reload, or a copied link) re-opens them and the
+  // child comes back as it was left. Switching sections never re-positions the
+  // stream: the route's `turn` target is untouched.
+  const earlierHistoryOpen = useMemo<EarlierHistoryOpen>(
+    () => Object.fromEntries(routeQuery.earlierHistoryOpen.map((section) => [section, true])),
+    [routeQuery.earlierHistoryOpen],
+  );
+  const setEarlierHistoryOpen = useCallback(
+    (open: EarlierHistoryOpen) => {
+      const next = new URLSearchParams(searchParams);
+      next.delete(EarlierHistoryParam);
+      for (const section of Object.keys(open).filter((id) => open[id]).sort()) {
+        next.append(EarlierHistoryParam, section);
+      }
+      const query = next.toString();
+      router.replace(`${pathname}${query ? `?${query}` : ''}`);
+    },
+    [pathname, router, searchParams],
   );
 
   // The quality channel feeds the personal-median comparison line on the
@@ -270,14 +294,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read's authorized navigation rides beside the durable
-    // detail. It is passed through the published adapter-options boundary; the
-    // pinned package ignores the field until the canonical release publishes it.
-    const adapterOptions: HostAdapterOptions = {
-      relationshipNavigation: detail.relationshipNavigation,
-    };
+    // The flat local read's authorized navigation rides BESIDE the durable
+    // detail, never inside it: the adapter validates the durable payload and
+    // refuses a payload that still carries the read-only field, because mixing
+    // authorization into preserved evidence lets a consumer attribute a link
+    // it was never granted.
+    const { relationshipNavigation: _readMetadata, ...durable } = detail;
+    const adapterOptions: AdapterOptions = { relationshipNavigation };
     const adapted = adaptTranscript(
-      { ...detail, turns: visibleTurns },
+      { ...durable, turns: visibleTurns },
       undefined,
       analytics,
       adapterOptions,
@@ -294,7 +319,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, turns, sessionTitle]);
+  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -349,9 +374,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
-  // carries the authorized navigation above; the pinned package does not invoke
-  // it until the canonical release publishes the matching callback, so the
-  // mounted link/Back behavior stays gated without faking it here.
+  // receives only authorized, usable entries (see `navigateToRelationship`).
   const viewerCallbacks = {
     onCopyLink: () => {
       void navigator.clipboard?.writeText(
@@ -470,6 +493,10 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           breadcrumb={breadcrumb}
           LinkComponent={Link}
           initialPosition={initialPosition}
+          // Retained-history disclosure is controlled by the route, so Back and
+          // reload restore exactly the sections the reader had open.
+          earlierHistoryOpen={earlierHistoryOpen}
+          onEarlierHistoryOpenChange={setEarlierHistoryOpen}
           // Per-turn copied anchors are full permalinks that keep the live
           // scope/origin params (replacing only `turn`), so a copied link
           // stays inside the scoped "room" — the pre-composite link shape.

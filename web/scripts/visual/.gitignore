@@ -15,6 +15,7 @@
 !selection-recovery-probe.mjs
 !peasant-shoot.mjs
 !inspect-feedback-shoot.mjs
+!context-navigation-shoot.mjs
 !boot-peasant.mjs
 !shell-nav-gate.mjs
 !shell-nav-default-gate.mjs
