@@ -52,6 +52,41 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/api/map', () => api);
 
+// The grouped local list is a REST read driven by the live sessions channel.
+// These tests assert the picker/selection policy, so the grouped route stubs an
+// explicit empty payload; the grouped decode, grouping and member paging have
+// their own real-route tests.
+const groupedApi = vi.hoisted(() => ({
+  fetchGroupedLocalSessions: vi.fn(),
+  fetchGroupedLocalSearch: vi.fn(),
+}));
+vi.mock('@/lib/api/grouped', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api/grouped')>();
+  return { ...actual, ...groupedApi };
+});
+
+const GROUPED_HOME_PAYLOAD = {
+  items: [
+    {
+      kind: 'transcript',
+      transcript: { session: makeSession({ id: 'sg-owner' }) },
+      helperGroups: [
+        { groupId: 'hg_home', purpose: 'helper_review', helperThreadCount: 2, memberScope: 'scope-home' },
+      ],
+    },
+    {
+      kind: 'transcript',
+      transcript: { session: makeSession({ id: 'sg-ordinary' }) },
+      helperGroups: [],
+    },
+  ],
+  page: 1,
+  limit: 20,
+  totalItems: 2,
+  ordinarySessionTotal: 2,
+  helperThreadTotal: 2,
+};
+
 /** A pending promise — keeps the summaries fetch "loading" for a test. */
 function pending<T>(): Promise<T> {
   return new Promise<T>(() => {});
@@ -149,6 +184,11 @@ describe('HomePage — the changes-first picker', () => {
   beforeEach(() => {
     api.fetchProjectSummaries.mockReturnValue(pending());
     api.fetchReviewChanges.mockReturnValue(pending());
+    // Keep the grouped route pending: these tests assert the picker/selection
+    // policy, and a resolved grouped payload would commit an unrelated state
+    // update after the synchronous assertions.
+    groupedApi.fetchGroupedLocalSessions.mockReturnValue(pending());
+    groupedApi.fetchGroupedLocalSearch.mockReturnValue(pending());
   });
 
   afterEach(() => {
@@ -311,6 +351,19 @@ describe('HomePage — the changes-first picker', () => {
     expect(screen.getByText('40 of 100 files')).toBeInTheDocument();
     // "unmerged branches" labels BOTH the stat tile and the picker column.
     expect(screen.getAllByText('unmerged branches').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mounts the grouped local session list from the grouped REST route', async () => {
+    channelData = { sessions: [makeSession({ id: 'sg-owner', project: 'alpha-project' })] };
+    api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
+    groupedApi.fetchGroupedLocalSessions.mockResolvedValue(GROUPED_HOME_PAYLOAD);
+    render(<HomePage />);
+
+    expect(await screen.findByText('all sessions')).toBeInTheDocument();
+    expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
+    expect(screen.getByText('sg-owner')).toBeInTheDocument();
+    expect(screen.getByText('2 sessions · 2 helper threads')).toBeInTheDocument();
+    expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalled();
   });
 
   it('falls back to sessions-channel grouping with stats unavailable while the fetch loads', () => {

@@ -64,6 +64,10 @@ import {
   DataState as FtDataState,
   ConnectionPill as FtConnectionPill,
   TeachingEmptyState as FtTeachingEmptyState,
+  HelperGroup as FtHelperGroup,
+  HelperGroupListItem as FtHelperGroupListItem,
+  HelperThreadRow as FtHelperThreadRow,
+  useHelperSelection as ftUseHelperSelection,
 } from '@peasant-labs/fairtrade/ui';
 
 /**
@@ -605,3 +609,83 @@ export interface TeachingEmptyStateProps {
   className?: string;
 }
 export const TeachingEmptyState = FtTeachingEmptyState as unknown as ComponentType<TeachingEmptyStateProps>;
+
+// -- Helper groups: presentation-only owner/helper trees ----------------------
+//
+// Fairtrade owns the tree layout, the measured connector and the count chip;
+// the host owns fetching, member paging, selection state and authorized
+// navigation. The shipped `.d.ts` types the row slots as `any`/`unknown[]`
+// because a host passes its own typed rows; each component below keeps that
+// shape while naming the prop contract the host must satisfy.
+
+/** One owner-anchored helper group (count chip + disclosed member rows). */
+export interface HelperGroupComponentProps {
+  groupId: string;
+  /** Exact member scope the members belong to; a changed scope resets disclosure. */
+  memberScope: string;
+  /** Saved threads, never review/message totals. */
+  helperThreadCount: number;
+  /** The loaded member rows for the current page. */
+  members?: readonly unknown[];
+  renderMember: (row: any) => ReactNode;
+  getMemberKey: (row: any) => string;
+  /** Controlled disclosure so a host can restore it on Back. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** Fail-closed: hides members and offers only an originating-list refresh. */
+  scopeExpired?: boolean;
+  onRefreshList?: () => void;
+  isMemberSelected?: (row: any) => boolean;
+  /** Host-rendered paging controls, placed after the member rows. */
+  memberFooter?: ReactNode;
+}
+export const HelperGroup = FtHelperGroup as unknown as ComponentType<HelperGroupComponentProps>;
+
+/** An ordinary owner row (or explicit unavailable context) above its groups. */
+export interface HelperGroupListItemProps {
+  owner?: ReactNode;
+  ownerStatus?: string;
+  children: ReactNode;
+}
+export const HelperGroupListItem = FtHelperGroupListItem as unknown as ComponentType<HelperGroupListItemProps>;
+
+/** One helper member drawn as the ordinary list row it is. */
+export interface HelperThreadRowProps {
+  id: string;
+  /** Verbatim user content. */
+  title: string;
+  provider?: string;
+  inputSubmissionCount?: number;
+  turnCount?: number;
+  /** Host-created authorized route. */
+  href?: string;
+  onOpen?: (id: string, event: React.MouseEvent) => void;
+  selected?: boolean;
+  selectionDisabled?: boolean;
+  indeterminate?: boolean;
+  onSelect?: (id: string, selected: boolean) => void;
+  children?: ReactNode;
+}
+export const HelperThreadRow = FtHelperThreadRow as unknown as ComponentType<HelperThreadRowProps>;
+
+export type HelperOwnerState = 'checked' | 'unchecked' | 'partial';
+
+export interface HelperSelection {
+  selectedIds: string[];
+  isSelected: (id: string) => boolean;
+  ownerState: HelperOwnerState;
+  onSelect: (id: string, checked: boolean) => void;
+}
+
+/**
+ * Host-owned helper-tree selection. The displayed selection is the whole tree
+ * while the select-all override is active and the manual set otherwise; the
+ * state lives in the calling host, never in the components.
+ */
+export function useHelperSelection(config?: {
+  ownerId?: string;
+  memberIds?: string[];
+  initialSelectedIds?: string[];
+}): HelperSelection {
+  return ftUseHelperSelection(config) as HelperSelection;
+}
