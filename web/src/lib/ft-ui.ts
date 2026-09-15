@@ -67,9 +67,6 @@ import {
   DataState as FtDataState,
   ConnectionPill as FtConnectionPill,
   TeachingEmptyState as FtTeachingEmptyState,
-  HelperGroup as FtHelperGroup,
-  HelperGroupListItem as FtHelperGroupListItem,
-  HelperThreadRow as FtHelperThreadRow,
   useHelperSelection as ftUseHelperSelection,
 } from '@peasant-labs/fairtrade/ui';
 
@@ -208,7 +205,6 @@ export const Skeleton = FtSkeleton as unknown as ComponentType<SkeletonProps>;
 // These take only their declared props at this app's call-sites — re-export as
 // shipped (their declared types are sufficient).
 export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
-export { FtHelperGroup as HelperGroup, FtHelperGroupListItem as HelperGroupListItem, FtHelperThreadRow as HelperThreadRow };
 
 /**
  * A single-color real brand mark for a harness (never a generic glyph);
