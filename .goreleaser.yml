@@ -61,6 +61,10 @@ snapshot:
 release:
   # rc tags (vX.Y.Z-rcN) publish as GitHub prereleases; finals as full releases.
   prerelease: auto
+  # Re-runs must recover a partial publish: keep the existing release notes and
+  # replace assets that a re-run uploads again. See docs/release-runbook.md §5.
+  mode: keep-existing
+  replace_existing_artifacts: true
 
 nfpms:
   - id: packages
