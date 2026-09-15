@@ -94,6 +94,14 @@ func copyFile(dst, src string) error {
 // Cleanup (Close) is registered via t.Cleanup.
 func Open(t *testing.T) *store.Store {
 	t.Helper()
+	return OpenWith(t)
+}
+
+// OpenWith returns a *store.Store backed by a fresh copy of the golden DB with
+// additional open options, such as managed generation support. Cleanup (Close)
+// is registered via t.Cleanup.
+func OpenWith(t *testing.T, options ...store.OpenOption) *store.Store {
+	t.Helper()
 	golden := ensureGolden(t)
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	if err := copyFile(dbPath, golden); err != nil {
@@ -105,7 +113,8 @@ func Open(t *testing.T) *store.Store {
 	// (the internal/store concurrency tests deadlock on a 1-connection pool);
 	// single-threaded callers (the cmd/peasant CLI tests) opt into a small pool
 	// via the EnvPoolSize override in their TestMain.
-	s, err := store.Open(dbPath, store.WithSkipMigrations())
+	openOptions := append([]store.OpenOption{store.WithSkipMigrations()}, options...)
+	s, err := store.Open(dbPath, openOptions...)
 	if err != nil {
 		t.Fatalf("storetest.Open: %v", err)
 	}

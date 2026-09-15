@@ -1,0 +1,23 @@
+# The managed-generation activation must preserve the recorded publication
+# capture agreement. Pointing a session at a generation updates session facts
+# the row-version trigger watches, so the activation transaction re-states the
+# provenance it read instead of letting the trigger clear it. Each case seeds
+# one capture state, activates a real managed generation whose derived title
+# repairs the stored one, and asserts the stored agreement a discovery run
+# compares.
+session:
+  id: 'cccccccc-0001-4000-8000-000000000001'
+  host_slug: host-gen
+  project_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  cwd: /tmp/prov/cwd
+  content_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+generation:
+  id: gen-provenance-1
+cases:
+  - name: bound_capture_stays_bound
+    provenance: source_exact
+  - name: absent_capture_stays_not_recovered
+    provenance: not_recovered
+  - name: mismatched_capture_stays_needs_ingest
+    provenance: source_exact
+    corrupt_capture_hash: true

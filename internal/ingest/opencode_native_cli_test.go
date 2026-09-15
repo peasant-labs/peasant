@@ -213,7 +213,10 @@ type nativeCLIStored struct {
 
 func (run nativeCLIRun) assertStored(t *testing.T, c nativeCLICase, project, userText string) nativeCLIStored {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(run.dataDir)))
+	// The production harvest activates the managed-generation representation for
+	// a native OpenCode session, so the reader registers that representation and
+	// still reads the canonical rows the detail and export exits serve.
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(run.dataDir)), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open test-owned harvest store: %v", err)
 	}

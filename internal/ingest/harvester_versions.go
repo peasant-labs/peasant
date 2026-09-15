@@ -25,6 +25,45 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 }
 
+// NativeGenerationRepairTargets declares the adapter, indexer and format
+// targets that replace the retained baseline ONLY for a store that can persist
+// and read a managed generation: a registered format-2 writer, a configured
+// snapshot reader with its owned-artifact root and lock, a native generation
+// activator and a prior reader. A store that cannot is served by the retained
+// baseline, so the native path is never advertised before its writer and reader
+// exist. When a harness is absent from the baseline it is also absent here.
+var NativeGenerationRepairTargets = map[Harness]HarvesterVersions{
+	HarnessCodex:    {AdapterVersion: 2, IndexerVersion: 17, IndexVersion: 2},
+	HarnessOpenCode: {AdapterVersion: 2, IndexerVersion: 17, IndexVersion: 2},
+}
+
+// nativeGenerationSessionSupported reports whether this build can read one
+// stored session's native layout into a managed generation. The OpenCode
+// candidate snapshot reads the current session_message projection; a session
+// stored from the older message/part layout, or from a JSON tree, has no
+// snapshot this build can read, so the retained adapter refresh serves it
+// instead of failing the native lane. A harness without a declared native
+// target is always served by its retained path.
+func nativeGenerationSessionSupported(session DiscoveredSession) bool {
+	if session.Harness != HarnessOpenCode {
+		return true
+	}
+	return session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite
+}
+
+// NativeGenerationTargets overlays the managed-generation targets on a baseline
+// registry for a store that supports them, leaving every other harness and any
+// harness without a declared native target exactly as the baseline states.
+func NativeGenerationTargets(baseline map[Harness]HarvesterVersions) map[Harness]HarvesterVersions {
+	targets := maps.Clone(baseline)
+	for harness, target := range NativeGenerationRepairTargets {
+		if _, ok := targets[harness]; ok {
+			targets[harness] = target
+		}
+	}
+	return targets
+}
+
 // WithHarvesterVersions injects targets for a pipeline without changing global
 // registrations. The pipeline owns a copy, including when an option is reused.
 func WithHarvesterVersions(versions map[Harness]HarvesterVersions) PipelineOption {
@@ -90,11 +129,72 @@ func (p *Pipeline) indexerTargets() map[Harness]HarvesterVersions {
 	return targets
 }
 
-func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
+// resolveVersionTargets computes the effective harness targets once. An
+// explicit injection wins; otherwise a store that can persist and read a
+// managed generation activates the native repair targets, and every other store
+// keeps the retained baseline.
+func (p *Pipeline) resolveVersionTargets() map[Harness]HarvesterVersions {
 	if p.harvesterVersions != nil {
 		return p.harvesterVersions
 	}
+	if p.supportsNativeGeneration() {
+		return NativeGenerationTargets(HarvesterVersionRegistry)
+	}
+	return HarvesterVersionRegistry
+}
+
+func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
+	if p.resolvedVersions != nil {
+		return p.resolvedVersions
+	}
 	// Internal stage tests and callers can construct Pipeline directly. Reading
 	// the defaults here does not mutate the registry or initialize shared state.
-	return HarvesterVersionRegistry
+	return p.resolveVersionTargets()
+}
+
+// sessionVersionTarget returns the effective harvester target for one stored
+// session. When the resolved target is the native-generation override but the
+// session's layout has no native snapshot this build can read, the session
+// keeps the retained baseline target so the ordinary adapter refresh serves it
+// instead of the native lane. An explicitly injected non-native target is
+// returned unchanged.
+func (p *Pipeline) sessionVersionTarget(session DiscoveredSession) HarvesterVersions {
+	target := p.versionTargets()[session.Harness]
+	native, declared := NativeGenerationRepairTargets[session.Harness]
+	if declared && target == native && !nativeGenerationSessionSupported(session) {
+		if baseline, ok := HarvesterVersionRegistry[session.Harness]; ok {
+			return baseline
+		}
+	}
+	return target
+}
+
+// managedGenerationSupport is the store capability probe the native-generation
+// gate needs: a registered format-2 writer and a configured snapshot reader.
+type managedGenerationSupport interface {
+	SupportsIndexFormat(int) bool
+	GenerationSnapshotsSupported() bool
+}
+
+// supportsNativeGeneration reports whether the configured store can stage,
+// activate and read a managed generation. All four capabilities are required:
+// without the activator the candidate cannot be persisted, without the prior
+// reader a refresh would rekey unchanged source, and without the writer and
+// snapshot reader the format target would advertise a representation no caller
+// can persist or read.
+func (p *Pipeline) supportsNativeGeneration() bool {
+	if p.metricsStore == nil {
+		return false
+	}
+	if _, ok := p.metricsStore.(NativeGenerationActivator); !ok {
+		return false
+	}
+	if _, ok := p.metricsStore.(NativeGenerationPriorReader); !ok {
+		return false
+	}
+	support, ok := p.metricsStore.(managedGenerationSupport)
+	if !ok {
+		return false
+	}
+	return support.SupportsIndexFormat(2) && support.GenerationSnapshotsSupported()
 }

@@ -28,6 +28,10 @@ type GenerationActivation struct {
 	IndexedAtMs    int64
 	ExpectedState  *ingest.SessionIndexState
 	ContentCapture ingest.SessionContentCaptureWrite
+	// PriorEvidence is the opaque activation-owned document a reopen reloads to
+	// reuse the candidate's identities and retained prefixes. Nil leaves prior
+	// evidence absent; the committed generation rows still supply aliases.
+	PriorEvidence []byte
 	// CaptureRevision binds the index write to its publication metadata capture.
 	CaptureRevision int64
 	// IndexedInputHash is the proof of the input this parser consumed. It is
@@ -91,8 +95,12 @@ reconciled:
 	}
 	if active == activation.Generation.Generation.ID {
 		// A retry after a crash that already committed. Re-repair the exported
-		// metadata from the committed generation row, not caller data, and
-		// clear the intent; nothing else changes.
+		// metadata from the committed generation row, not caller data, re-persist
+		// the prior document when this activation carries it, and clear the
+		// intent; nothing else changes.
+		if err := s.persistPriorEvidence(ctx, sessionID, activation.Generation.Generation.ID, activation.PriorEvidence); err != nil {
+			return err
+		}
 		return s.finishCommittedActivationLocked(ctx, sessionID, activation.Generation.Generation.ID)
 	}
 
@@ -127,7 +135,7 @@ reconciled:
 		Result:             indexformat.V2{Generation: staged},
 		IndexVersion:       2,
 		Mode:               ingest.SessionEntryWriteReplaceAll,
-		RequireFullContent: false,
+		RequireFullContent: captureRequiresFullContent(capture),
 		ContentCapture:     capture,
 		IndexerVersion:     activation.IndexerVersion,
 		IndexedAtMs:        activation.IndexedAtMs,
@@ -183,6 +191,9 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		return err
 	}
 	if active == intent.GenerationID {
+		if err := s.persistPriorEvidence(ctx, sessionID, intent.GenerationID, intent.PriorEvidence); err != nil {
+			return err
+		}
 		metadata, err := s.exportedMetadataForGeneration(ctx, sessionID, intent.GenerationID)
 		if err != nil {
 			return err
@@ -247,7 +258,7 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		Result:             indexformat.V2{Generation: generation},
 		IndexVersion:       2,
 		Mode:               ingest.SessionEntryWriteReplaceAll,
-		RequireFullContent: false,
+		RequireFullContent: captureRequiresFullContent(capture),
 		ContentCapture:     capture,
 		IndexerVersion:     indexerVersion,
 		IndexedAtMs:        indexedAtMs,
@@ -271,6 +282,9 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 			return fmt.Errorf("store: recover pending activation for session %s generation %s: the managed generation transaction refused the staged candidate; the prior generation is preserved and the candidate is retained; retry a verified activation", sessionID, intent.GenerationID)
 		}
 	}
+	if err := s.persistPriorEvidence(ctx, sessionID, intent.GenerationID, intent.PriorEvidence); err != nil {
+		return err
+	}
 	metadataJSON, err := json.Marshal(generation.Metadata)
 	if err != nil {
 		return fmt.Errorf("store: recover pending activation for session %s: encode metadata: %w", sessionID, err)
@@ -279,6 +293,27 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		return err
 	}
 	return s.generationArtifacts.ClearIntent(ctx, sessionID)
+}
+
+// captureRequiresFullContent reports whether an activation's content capture
+// certifies the full stored content. A native managed generation carries every
+// content record it names, so its activation writes through the full-content
+// path; a caller that supplies no capture keeps the bounded preview default.
+func captureRequiresFullContent(capture ingest.SessionContentCaptureWrite) bool {
+	return capture.CaptureFormat == ingest.ContentCaptureFormatFull
+}
+
+// persistPriorEvidence writes the opaque harness prior document beside one
+// staged generation. An empty document leaves any existing prior evidence
+// untouched; the committed generation rows remain the alias authority.
+func (s *Store) persistPriorEvidence(ctx context.Context, sessionID schema.SessionID, generationID string, evidence []byte) error {
+	if len(evidence) == 0 {
+		return nil
+	}
+	if err := s.generationArtifacts.WritePriorEvidence(ctx, sessionID, generationID, evidence); err != nil {
+		return err
+	}
+	return nil
 }
 
 // finishCommittedActivationLocked re-repairs an already-committed generation
@@ -404,11 +439,19 @@ func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID,
 		ContentCapture:   capture,
 		IndexedInputHash: indexedInputHash,
 		ArtifactIdentity: activation.ArtifactIdentity,
+		PriorEvidence:    activation.PriorEvidence,
 		CandidateDigest:  candidateDigest,
 	}); err != nil {
 		return indexformat.Generation{}, err
 	}
-	return s.generationArtifacts.Stage(ctx, generation, blobs)
+	staged, err := s.generationArtifacts.Stage(ctx, generation, blobs)
+	if err != nil {
+		return indexformat.Generation{}, err
+	}
+	if err := s.persistPriorEvidence(ctx, sessionID, staged.ID, activation.PriorEvidence); err != nil {
+		return indexformat.Generation{}, err
+	}
+	return staged, nil
 }
 
 // verifyImmutableCandidateIdentity refuses an identifier collision before the

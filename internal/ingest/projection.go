@@ -1031,9 +1031,11 @@ func buildProjectionContent(partitions projectionPartitions, resolved []*resolve
 	records := make([]indexformat.ContentRecord, 0, len(resolved))
 	content := make(map[schema.SourceEntryRef][]byte, len(resolved))
 	add := func(ref schema.SourceEntryRef, value string) error {
-		if value == "" {
-			return nil
-		}
+		// Every emitted entry ref gets a record, including an empty one: the
+		// snapshot hydration requires each ref to resolve, so a content-less
+		// block (an empty tool carrier, an empty text block) must carry a
+		// zero-length blob rather than no blob at all. A pruned or corrupt
+		// generation then still refuses instead of reading as empty.
 		relative := projectionContentPath(ref)
 		sum := sha256.Sum256([]byte(value))
 		record := indexformat.ContentRecord{

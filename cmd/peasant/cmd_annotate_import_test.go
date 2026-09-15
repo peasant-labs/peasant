@@ -44,7 +44,7 @@ func executeAnnotateImportCmd(t *testing.T, dir string, args []string) (stdout, 
 func openTestDB(t *testing.T, dir string) *store.Store {
 	t.Helper()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	db, err := store.Open(dbPath)
+	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}
