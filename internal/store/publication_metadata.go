@@ -43,26 +43,12 @@ func validateCaptureMetadata(m *schema.UnifiedMetadata, kind ingest.CWDProvenanc
 	if _, err := ingest.NewCWDProvenanceKind(string(kind)); err != nil {
 		return err
 	}
-	if kind == ingest.CWDNotRecovered {
-		return publicationRepairError("source has not been inspected")
-	}
-	if (kind == ingest.CWDSourceExact) != (m.CWD != "") {
-		return publicationRepairError("CWD and its source provenance disagree")
-	}
-	if m.SchemaVersion != ingest.CurrentSchemaVersion {
-		return publicationRepairError("unsupported metadata schema")
-	}
-	if _, err := schema.NewSessionID(string(m.SessionID)); err != nil {
-		return publicationRepairError("invalid metadata session identity")
-	}
-	if _, err := schema.NewProjectHash(string(m.Project.Hash)); err != nil {
-		return publicationRepairError("invalid metadata project identity")
-	}
-	if _, err := schema.NewTranscriptContentHash(m.ContentHash); err != nil {
-		return publicationRepairError("invalid captured content digest")
-	}
-	if m.MetadataHash != schema.ComputeMetadataHash(m) {
-		return publicationRepairError("metadata integrity digest does not match snapshot")
+	// The capture rule is defined once, in the ingest pipeline, and enforced on
+	// this side by the same function: the pipeline only ever offers a snapshot
+	// the rule accepts, so a refusal here is a genuine disagreement rather than
+	// a snapshot the caller could not certify.
+	if err := ingest.ValidatePublicationCaptureSnapshot(m, kind); err != nil {
+		return publicationRepairError(err.Error())
 	}
 	return nil
 }

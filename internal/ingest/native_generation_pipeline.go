@@ -202,10 +202,16 @@ func (p *Pipeline) openCodeSnapshotLoader(input *CapturedIndexInput) func(contex
 //
 // The provenance kind comes from the one rule the retained write path uses, and
 // the pipeline is what certifies it: the store records exactly what is supplied
-// here and never derives a kind of its own. A missing or mismatched snapshot, a
-// schema this build does not currently certify, or a candidate that proved no
-// complete generation is not certified: the activation then records no capture
-// and leaves the stored provenance exactly as it was.
+// here and never derives a kind of its own. The whole agreement is then judged by
+// the ONE capture rule the store enforces (ValidatePublicationCaptureSnapshot)
+// before it is offered, so a recorded metadata snapshot that cannot be certified
+// -- a missing or mismatched identity, a schema this build does not currently
+// certify, or a missing integrity or content digest -- is not certified: the
+// activation records no capture and leaves the stored provenance exactly as it
+// was. Only a snapshot that passes the store's own-validity rule is ever
+// supplied, so the activation is never refused for an uncertifiable snapshot; a
+// capture that disagrees with the STORED session is still refused by the store,
+// because only the store can compare it against the stored row.
 func managedActivationCapture(input *CapturedIndexInput, session DiscoveredSession, completeness indexformat.GenerationCompleteness) *PublicationCaptureWrite {
 	if input == nil || input.metadata == nil {
 		return nil
@@ -217,10 +223,11 @@ func managedActivationCapture(input *CapturedIndexInput, session DiscoveredSessi
 	if meta.SessionID != session.SessionID || meta.ModelHarness != session.Harness {
 		return nil
 	}
-	if meta.SchemaVersion != CurrentSchemaVersion {
+	kind := publicationCWDProvenance(&meta, session)
+	if err := ValidatePublicationCaptureSnapshot(&meta, kind); err != nil {
 		return nil
 	}
-	return &PublicationCaptureWrite{Metadata: meta, CWDProvenance: publicationCWDProvenance(&meta, session)}
+	return &PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 }
 
 // activateNativeGenerationResult stages and activates one validated managed
