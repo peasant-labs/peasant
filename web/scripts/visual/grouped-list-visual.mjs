@@ -26,10 +26,20 @@ const CHROME = process.env.CHROME_PATH
 const THEMES = ['dark', 'light']
 // Feature bytes only this slice introduces. The app markers live in the app
 // chunk; the fairtrade primitive class lives in the design-system chunk, so
-// each signature is located in whichever served chunk carries it.
+// each signature group is located in whichever served chunk carries it, and
+// every group must also appear verbatim in the embedded binary. The retained
+// flat-disclosure group is the marker added by the cross-project filter/pager
+// fix: an export that predates that fix carries the older grouped markers but
+// not this one, so a stale build can no longer satisfy provenance.
 const APP_FEATURE_BYTES = ['data-grouped-sessions-section', 'data-helper-member-paging']
 const FT_FEATURE_BYTES = ['helper-group-trigger']
-const FEATURE_BYTES = [...APP_FEATURE_BYTES, ...FT_FEATURE_BYTES]
+const FLAT_FEATURE_BYTES = ['data-flat-sessions-disclosure']
+const FEATURE_GROUPS = [
+  { label: 'grouped-list app', signatures: APP_FEATURE_BYTES },
+  { label: 'fairtrade helper-group', signatures: FT_FEATURE_BYTES },
+  { label: 'retained flat disclosure', signatures: FLAT_FEATURE_BYTES },
+]
+const FEATURE_BYTES = FEATURE_GROUPS.flatMap((group) => group.signatures)
 const PROJECT_HASH = 'a'.repeat(64)
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const fail = (message) => { throw new Error(`Grouped local list visual harness failed: ${message}`) }
@@ -92,12 +102,16 @@ function assertProvenance() {
   const chunks = join(WEB, 'out/_next/static/chunks')
   if (!existsSync(BIN) || !existsSync(chunks)) fail(`missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
   const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
-  const locate = (signatures, label) => {
+  const binary = readFileSync(BIN)
+  const missingBinaryBytes = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
+  if (missingBinaryBytes.length) {
+    fail(`the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so bin/peasant matches web/out`)
+  }
+  return FEATURE_GROUPS.map(({ label, signatures }) => {
     const match = javascript.find(({ content }) => signatures.every((signature) => content.includes(signature)))
     if (!match) fail(`the built export contains no chunk with the ${label} feature bytes ${signatures.join(', ')}; rebuild this exact worktree`)
-    return match.path
-  }
-  return [locate(APP_FEATURE_BYTES, 'grouped-list app'), locate(FT_FEATURE_BYTES, 'fairtrade helper-group')]
+    return { label, signatures, path: match.path }
+  })
 }
 
 function response(body, status = 200) {
@@ -284,16 +298,16 @@ try {
   for (let i = 0; i < 40 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
   if (!healthy) fail(`real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`)
 
-  const servedPaths = chunks.map((chunk) => `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`)
+  const servedPaths = chunks.map((chunk) => `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk.path).split('\\').join('/')}`)
   for (const [index, servedPath] of servedPaths.entries()) {
     const served = await fetch(`${ORIGIN}${servedPath}`)
     const body = await served.text()
-    const expected = index === 0 ? APP_FEATURE_BYTES : FT_FEATURE_BYTES
-    if (served.status !== 200 || !expected.every((signature) => body.includes(signature))) {
-      fail(`served provenance: ${servedPath} returned HTTP ${served.status} without the grouped-list feature bytes; stop stale servers, rebuild this exact worktree, and rerun`)
+    const { label, signatures } = chunks[index]
+    if (served.status !== 200 || !signatures.every((signature) => body.includes(signature))) {
+      fail(`served provenance: ${servedPath} returned HTTP ${served.status} without the ${label} feature bytes; stop stale servers, rebuild this exact worktree, and rerun`)
     }
   }
-  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk)).join(',')} served=true bytes=${FEATURE_BYTES.join(',')}`)
+  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk.path)).join(',')} served=true bytes=${FEATURE_BYTES.join(',')}`)
 
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) {

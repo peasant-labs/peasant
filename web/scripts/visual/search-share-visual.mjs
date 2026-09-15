@@ -22,7 +22,10 @@ const CHROME = process.env.CHROME_PATH
 const FIXTURE = join(HERE, 'testdata/search-share.yaml')
 const FEATURE_BYTES = Object.freeze({
   search: ['data-search-annotation', 'repositoryLocationId'],
-  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash', 'session-groups/'],
+  // `share-helper-tree-scroll` is the marker the nested-helper-disclosure fix
+  // introduces; an export that predates that fix carries the other share bytes
+  // but not this one, so a stale build can no longer satisfy provenance.
+  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash', 'session-groups/', 'share-helper-tree-scroll'],
   discoveryRoute: '/api/v1/web/discovery',
 })
 const THEMES = ['dark', 'light']
@@ -184,17 +187,17 @@ function assertProvenance() {
   const chunks = join(WEB, 'out/_next/static/chunks')
   if (!existsSync(BIN) || !existsSync(chunks)) fail(`missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
   const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
-  const featureChunks = Object.fromEntries(Object.entries(FEATURE_BYTES).filter(([name]) => name !== 'discoveryRoute').map(([name, signatures]) => {
+  const featureChunks = Object.entries(FEATURE_BYTES).filter(([name]) => name !== 'discoveryRoute').map(([name, signatures]) => {
     const match = javascript.find(({ content }) => signatures.every((signature) => content.includes(signature)))
-    return [name, match]
-  }))
+    return { name, signatures, match }
+  })
   const binary = readFileSync(BIN)
   const missingBinaryBytes = Object.values(FEATURE_BYTES).flat().filter((signature) => !binary.includes(Buffer.from(signature)))
-  const missingChunks = Object.entries(featureChunks).filter(([, chunk]) => !chunk).map(([name]) => name)
+  const missingChunks = featureChunks.filter(({ match }) => !match).map(({ name }) => name)
   if (missingChunks.length || missingBinaryBytes.length || !binary.includes(Buffer.from(FEATURE_BYTES.discoveryRoute))) {
     fail(`stale provenance: missing shipped feature chunks=${missingChunks.join(',') || 'none'}, missing binary bytes=${missingBinaryBytes.join(',') || 'none'}, discoveryRoute=${binary.includes(Buffer.from(FEATURE_BYTES.discoveryRoute))}; rebuild this exact worktree`)
   }
-  return Object.values(featureChunks).map(({ path }) => path)
+  return featureChunks.map(({ name, signatures, match }) => ({ name, signatures, path: match.path }))
 }
 function response(body) { return { status: 200, contentType: 'application/json', body: JSON.stringify(body) } }
 const VISUAL_PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -626,13 +629,14 @@ try {
   for (let i = 0; i < 40 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
   if (!healthy) fail(`real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`)
   for (const chunk of chunks) {
-    const chunkPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`
+    const chunkPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk.path).split('\\').join('/')}`
     const served = await fetch(`${ORIGIN}${chunkPath}`)
     const body = await served.text()
-    const expected = Object.values(FEATURE_BYTES).flat().some((signature) => body.includes(signature))
-    if (served.status !== 200 || !expected) fail(`served provenance: ${chunkPath} returned HTTP ${served.status} without verified feature bytes; stop stale servers, rebuild this exact worktree, and rerun the visual harness`)
+    if (served.status !== 200 || !chunk.signatures.every((signature) => body.includes(signature))) {
+      fail(`served provenance: ${chunkPath} returned HTTP ${served.status} without the ${chunk.name} feature bytes; stop stale servers, rebuild this exact worktree, and rerun the visual harness`)
+    }
   }
-  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk)).join(',')} binaryBytes=search/share/discovery-route served=true`)
+  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk.path)).join(',')} binaryBytes=search/share/discovery-route served=true`)
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) for (const viewport of VIEWPORTS) for (const kind of ['search', 'share']) {
     const page = await browser.newPage()
