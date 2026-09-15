@@ -2458,7 +2458,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			freshness.PublicationReadiness = PublicationReady
 		}
 		status := ClassifyAgainstStore(session, freshness, p.config.StalenessThreshold)
-		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest {
+		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0 {
 			// Publication readiness is a repair hint, not change evidence.
 			// Before any capture it re-reads native input only for a session
 			// that has no retained artifact to hold its input: a legacy row
@@ -2467,6 +2467,15 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// its retained-first path: its clock, schema, cursor and captured
 			// evidence decide whether native input is read, and the ordinary
 			// index write binds publication once a capture exists.
+			//
+			// That binding needs a capture to bind. A row that never held a
+			// publication capture (a pre-capture legacy row, revision 0) cannot
+			// be settled from its retained pair: the retained metadata is not
+			// a source-proven capture and the index write records no lossy
+			// backfill from it, so the row would stay "needs ingest" on every
+			// harvest while the push error keeps promising that ingest repairs
+			// it. Only the native re-read can capture it, so the readiness
+			// trigger stands for such a row.
 			settled := loc
 			settled.PublicationReadiness = PublicationReady
 			if ClassifyAgainstStore(session, settled, p.config.StalenessThreshold) == DiffUnchanged {

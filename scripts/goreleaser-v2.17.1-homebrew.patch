@@ -2,9 +2,8 @@ diff --git a/internal/pipe/cask/cask.go b/internal/pipe/cask/cask.go
 index d49e42c..4c504d8 100644
 --- a/internal/pipe/cask/cask.go
 +++ b/internal/pipe/cask/cask.go
-@@ -465,2 +465,9 @@ func compareByArch(a, b releasePackage) int {
+@@ -465 +465,8 @@ func compareByArch(a, b releasePackage) int {
 -	return cmp.Compare(a.Arch, b.Arch)
--}
 +	return cmp.Compare(archOrder(a.Arch), archOrder(b.Arch))
 +}
 +
@@ -13,15 +12,31 @@ index d49e42c..4c504d8 100644
 +		return 0
 +	}
 +	return 1
-+}
 diff --git a/internal/pipe/cask/templates/cask.rb b/internal/pipe/cask/templates/cask.rb
-index e586be4..f0e7c4d 100644
+index e586be4..5b93230 100644
 --- a/internal/pipe/cask/templates/cask.rb
 +++ b/internal/pipe/cask/templates/cask.rb
 @@ -16,2 +16 @@ cask "{{ .Name }}" do
 -  {{ end }}
 -
 +  {{- end -}}
+@@ -63 +62 @@ cask "{{ .Name }}" do
+-  preflight do
++  preflight_steps do
+@@ -71 +70 @@ cask "{{ .Name }}" do
+-  postflight do
++  postflight_steps do
+@@ -79,2 +78,2 @@ cask "{{ .Name }}" do
+-    generate_completions_from_executable must come after postflight so that
+-    any setup done in postflight (e.g. removing the macOS quarantine attribute)
++    generate_completions_from_executable must come after postflight_steps so that
++    any setup done in postflight_steps (e.g. removing the macOS quarantine attribute)
+@@ -89 +88 @@ cask "{{ .Name }}" do
+-  uninstall_preflight do
++  uninstall_preflight_steps do
+@@ -97 +96 @@ cask "{{ .Name }}" do
+-  uninstall_postflight do
++  uninstall_postflight_steps do
 @@ -108 +107 @@ cask "{{ .Name }}" do
 -  {{ with .Caveats -}}
 +  {{- with .Caveats -}}
