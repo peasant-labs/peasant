@@ -12,7 +12,7 @@ name: E2E
 # so the check appears (as skipped) on feature PRs. On release PRs the standalone
 # run's job skips and the release-pr.yml-called copy is the single authority
 # (inside a called reusable workflow github.workflow is the caller's name), so
-# the suite executes exactly once per push.
+# the suite executes at most once per push.
 on:
   pull_request:
     branches: [develop]
@@ -37,9 +37,11 @@ on:
 
 # Cancel superseded runs on the same ref to save minutes. Scoped by the workflow
 # name because the release-pr.yml-called copy runs with the caller's github
-# context; a shared group would let the two copies cancel each other.
+# context; a shared group would let the two copies cancel each other. On a
+# release PR the group is also scoped to the head SHA, so a stale labeled run
+# cannot cancel the current head's gate.
 concurrency:
-  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
   cancel-in-progress: true
 
 env:

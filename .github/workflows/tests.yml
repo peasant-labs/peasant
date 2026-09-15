@@ -91,10 +91,12 @@ on:
 # the workflow name: in a called reusable workflow the github context belongs to
 # the caller, so the standalone copy (github.workflow == 'Tests') and the
 # release-pr.yml-called copy (github.workflow == 'Release PR') would otherwise
-# share a group and cancel each other instead of running their own copies. See
-# the per-job guards below.
+# share a group and cancel each other instead of running their own copies. On a
+# release PR the group is also scoped to the head SHA, so a stale labeled run
+# cannot cancel the current head's gate; ordinary runs keep ref-level
+# superseding. See the per-job guards below.
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
   cancel-in-progress: true
 
 permissions:
