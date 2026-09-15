@@ -31,4 +31,4 @@ jobs:
           podman run --rm docker.io/library/alpine:3.20 echo podman-ok
 
       - name: Docker-compatible shim
-        run: docker info --format '{{.ServerVersion}}'
+        run: docker version --format '{{.Server.Version}}'
