@@ -310,6 +310,10 @@ func Sessions() []ingest.Session {
 	// existing index or ID. See heroTitleFixtureSessions for what each one
 	// demonstrates.
 	sessions = append(sessions, heroTitleFixtureSessions()...)
+	// Additive mounted current-parent navigation fixture — appended last for the
+	// same reason. See context_navigation.yaml for the three stored sessions,
+	// their resolved context/source and parent links and retained history.
+	sessions = append(sessions, canonicalContextNavigationFixture.storedSessions()...)
 	return sessions
 }
 

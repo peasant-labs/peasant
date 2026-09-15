@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   annotateTranscript,
   computeAnalytics,
   computePersonalMedians,
+  type AdaptTranscriptOptions,
   type TranscriptInitialPosition,
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
@@ -32,6 +33,7 @@ import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
 import { sessionsHref, transcriptHref, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
+import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
 import {
   clearScopeQuery,
   collectFileTouches,
@@ -71,16 +73,6 @@ type SessionDetailWire = SessionDetailPayload &
   Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
 
 /**
- * The adapter options the host owns today. `AdaptTranscriptOptions` is the
- * published Fairtrade boundary; `relationshipNavigation` is the canonical
- * local-read field the adapter consumes once the canonical Fairtrade package
- * publishes that option, and is inert against the currently pinned package.
- */
-type HostAdapterOptions = NonNullable<Parameters<typeof adaptTranscript>[3]> & {
-  relationshipNavigation?: SessionDetailReadPayload['relationshipNavigation'];
-};
-
-/**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
  * wire-to-view adapter (`adaptTranscript`). Peasant owns the *data layer* (the
  * WebSocket `session_detail` + `quality` subscriptions, phase detection, the
@@ -117,6 +109,9 @@ export function SessionDetailV2(props: SessionDetailV2Props) {
 }
 
 function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery }: SessionDetailV2Props) {
+  // Host element for the mounted viewer; the per-session reading state replays
+  // the inner scroller offset against it on the way back.
+  const transcriptHostRef = useRef<HTMLDivElement | null>(null);
   const { data: detail, error } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
@@ -135,13 +130,22 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }, [router, pathname, searchParams]);
 
   // The host's exact-ID current-target route callback: an authorized navigation
-  // entry whose target resolves to a stored session routes to that session.
-  // known-unavailable / unknown / conflicting entries never navigate. The
-  // mounted click + Back restoration is pending the canonical Fairtrade package
-  // publishing the relationshipNavigation option and callback.
+  // entry whose target resolves to a stored session routes to that session. The
+  // authority is the stored exact target, never list selection, so a stored but
+  // unselected parent stays reachable. known-unavailable / unknown / conflicting
+  // entries have no identifier and never navigate. The reading state of this
+  // session is kept per session by the hook below, so Back restores it.
   const navigateToRelationship = useCallback(
     (entry: SessionRelationshipNavigation) => {
-      if (entry.status !== RelationshipNavigationStatus.Resolved || !entry.localId) return;
+      // A usable target is either an exactly resolved boundary or a general
+      // source/parent link; both carry the one stored identifier. A
+      // known-unavailable / unknown / conflicting status carries NO identifier
+      // and is inert here, so an unresolved link can never route to the wrong
+      // session.
+      const linkable =
+        entry.status === RelationshipNavigationStatus.Resolved ||
+        entry.status === RelationshipNavigationStatus.GeneralLinkOnly;
+      if (!linkable || !entry.localId) return;
       router.push(transcriptHref(projectHash, entry.localId));
     },
     [router, projectHash],
@@ -270,14 +274,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read's authorized navigation rides beside the durable
-    // detail. It is passed through the published adapter-options boundary; the
-    // pinned package ignores the field until the canonical release publishes it.
-    const adapterOptions: HostAdapterOptions = {
-      relationshipNavigation: detail.relationshipNavigation,
-    };
+    // The flat local read carries authorized navigation ALONGSIDE the durable
+    // detail. The durable payload boundary rejects that read-only field, so the
+    // host separates the two: only the durable detail reaches `adaptTranscript`
+    // as payload, and the navigation travels through the published
+    // adapter-options boundary, which cooks it into usable source/parent links.
+    const { relationshipNavigation, ...durableDetail } = detail;
+    const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     const adapted = adaptTranscript(
-      { ...detail, turns: visibleTurns },
+      { ...durableDetail, turns: visibleTurns },
       undefined,
       analytics,
       adapterOptions,
@@ -301,6 +306,16 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     () => new Map((vm?.turns ?? []).map((turn) => [turn.index, turn.toolCalls])),
     [vm],
   );
+
+  // Host-owned reading state for Back: the viewer is controlled from here so a
+  // reader who follows a stored context/parent link and returns finds the same
+  // disclosure and selection, and the inner scroll offset is replayed.
+  const {
+    earlierHistoryOpen,
+    setEarlierHistoryOpen,
+    activeTurn,
+    setActiveTurn,
+  } = useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm));
 
   const { theme } = useTheme();
 
@@ -349,9 +364,8 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
-  // carries the authorized navigation above; the pinned package does not invoke
-  // it until the canonical release publishes the matching callback, so the
-  // mounted link/Back behavior stays gated without faking it here.
+  // is invoked by the viewer's source/parent link with the authorized navigation
+  // above; the host owns the resulting route.
   const viewerCallbacks = {
     onCopyLink: () => {
       void navigator.clipboard?.writeText(
@@ -441,6 +455,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // The app shell publishes one responsive header height for both its main
     // offset and bounded viewers, including the mobile two-row header.
     <div
+      ref={transcriptHostRef}
       data-tour="transcript-view"
       className={[
         'flex h-[calc(100dvh-var(--app-header-height))] flex-col',
@@ -466,6 +481,14 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             canExport: false,
           }}
           callbacks={viewerCallbacks}
+          // Host-owned reading state: the earlier-history disclosure and the
+          // selected turn survive following a stored link and coming back.
+          // Plain rendering state is recomputed by the package; the host only
+          // restores what the reader explicitly opened or selected.
+          earlierHistoryOpen={earlierHistoryOpen}
+          onEarlierHistoryOpenChange={setEarlierHistoryOpen}
+          activeTurn={requestedTurn == null ? activeTurn : undefined}
+          onActiveTurnChange={setActiveTurn}
           // Origin-aware host trail through the app router.
           breadcrumb={breadcrumb}
           LinkComponent={Link}

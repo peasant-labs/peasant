@@ -8,11 +8,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// storedTargetLookup resolves owner-local session identifiers to stored
-// targets. ResolveStoredTargets is the production implementation; it applies
-// neither origin scope nor selection scope, because selection scopes discovery
-// and lists only and never gates access to an already-stored session.
-type storedTargetLookup func(ctx context.Context, ids []string) ([]StoredTarget, error)
+// StoredTargetLookup resolves owner-local session identifiers to stored
+// targets. ResolveStoredTargets is the store-backed implementation; every
+// implementation applies neither origin scope nor selection scope, because
+// selection scopes discovery and lists only and never gates access to an
+// already-stored session.
+type StoredTargetLookup func(ctx context.Context, ids []string) ([]StoredTarget, error)
 
 // knownRelationshipTarget reports whether a durable relationship target state
 // names a specific owner-local session that navigation may link to.
@@ -34,7 +35,7 @@ func knownRelationshipTarget(state schema.RelationshipTargetState) bool {
 //
 // Navigation pairs by relationship kind, so a context_from and a started_by
 // relationship that name different sessions produce two distinct entries.
-func resolveRelationshipNavigation(ctx context.Context, relationships []schema.SessionRelationship, lookup storedTargetLookup) ([]schema.SessionRelationshipNavigation, error) {
+func resolveRelationshipNavigation(ctx context.Context, relationships []schema.SessionRelationship, lookup StoredTargetLookup) ([]schema.SessionRelationshipNavigation, error) {
 	linkable := make([]schema.SessionRelationship, 0, len(relationships))
 	for _, relationship := range relationships {
 		if knownRelationshipTarget(relationship.TargetState) && relationship.TargetLocalID != nil {
@@ -109,10 +110,19 @@ func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*
 }
 
 // decorateDetailReadPayload augments a durable detail payload with resolved
-// navigation. It is the ONE navigation-decorating site, so every local read
-// construction (WebSocket session_detail and the HTTP detail route) shares it.
+// navigation through the shared decoration boundary.
 func (p *StoreDataProvider) decorateDetailReadPayload(ctx context.Context, detail *schema.SessionDetailPayload) (*schema.SessionDetailReadPayload, error) {
-	nav, err := resolveRelationshipNavigation(ctx, detail.Relationships, p.ResolveStoredTargets)
+	return DecorateDetailReadPayload(ctx, detail, p.ResolveStoredTargets)
+}
+
+// DecorateDetailReadPayload augments one validated durable detail payload with
+// authorized current-target navigation resolved against stored exact
+// identifiers. It is the ONE navigation-decorating construction, so every local
+// read projection (WebSocket session_detail and the HTTP detail route) and
+// every provider that can resolve its own stored targets builds the same read
+// payload from the same closed-set rules.
+func DecorateDetailReadPayload(ctx context.Context, detail *schema.SessionDetailPayload, lookup StoredTargetLookup) (*schema.SessionDetailReadPayload, error) {
+	nav, err := resolveRelationshipNavigation(ctx, detail.Relationships, lookup)
 	if err != nil {
 		return nil, err
 	}

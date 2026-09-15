@@ -1,0 +1,37 @@
+# Mounted current-parent navigation corpus.
+#
+# One case proves a child's authorized context/source and started_by links route
+# to their exact stored targets through the real adapter and viewer, and that a
+# non-resolved target renders no active link. The transition proves that after a
+# reader follows a stored link and comes back, the host replays the child's inner
+# scroll offset, earlier-history disclosure, and selected turn.
+cases:
+  - name: stored-context-source-and-parent-links-route-to-exact-targets
+    childSessionId: sess_contextchild
+    projectName: alpha-project
+    contextFromStatus: resolved
+    contextFromLocalId: sess_contextsource
+    startedByStatus: resolved
+    startedByLocalId: sess_contextparent
+    expectedLinkKind: started_by
+  - name: unavailable-parent-target-renders-no-active-link
+    childSessionId: sess_contextchild
+    projectName: alpha-project
+    contextFromStatus: resolved
+    contextFromLocalId: sess_contextsource
+    startedByStatus: known_unavailable
+    startedByLocalId: sess_contextmissing
+    expectedLinkKind: none
+transitions:
+  - name: back-restores-scroll-disclosure-and-selection
+    childSessionId: sess_contextchild
+    projectName: alpha-project
+    contextFromStatus: resolved
+    contextFromLocalId: sess_contextsource
+    startedByStatus: resolved
+    startedByLocalId: sess_contextparent
+    storedScrollTop: 480
+    storedActiveTurn: 3
+    storedEarlierOpen: true
+    expectedEarlierExpanded: true
+    expectedScrollTop: 480
