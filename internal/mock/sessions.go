@@ -282,7 +282,7 @@ func Sessions() []ingest.Session {
 		schema.OutcomeFailed,
 	}
 
-	sessions := make([]ingest.Session, len(data.Sessions)+1, len(data.Sessions)+1+len(heroTitleFixtureSessions()))
+	sessions := make([]ingest.Session, len(data.Sessions)+1, len(data.Sessions)+1+len(heroTitleFixtureSessions())+len(contextNavigationFixtureSessions()))
 	sessions[0] = canonicalStrikeMockFixture.session()
 	for i, s := range data.Sessions {
 		startTime, _ := time.Parse(time.RFC3339, s.StartTime)
@@ -310,6 +310,10 @@ func Sessions() []ingest.Session {
 	// existing index or ID. See heroTitleFixtureSessions for what each one
 	// demonstrates.
 	sessions = append(sessions, heroTitleFixtureSessions()...)
+	// Additive capture fixture for the mounted current-parent links and retained
+	// earlier history — appended after the hero-title fixtures so those keep
+	// their existing indices.
+	sessions = append(sessions, contextNavigationFixtureSessions()...)
 	return sessions
 }
 
@@ -396,6 +400,239 @@ func heroTitleFixtureQualitySession() api.QualitySession {
 		Outcome: "resolved",
 	}
 }
+
+// contextNavigationFixtureProject reuses the existing "fortuna" mock project so
+// no new project-summary/routing wiring is needed.
+const (
+	contextNavigationChildID      = "sess_contextnavigationchild"
+	contextNavigationUnresolvedID = "sess_contextnavigationunresolved"
+	contextNavigationSourceID     = "sess_contextnavigationsource"
+	contextNavigationStartedID    = "sess_contextnavigationstartedby"
+	contextNavigationProject      = "fortuna"
+)
+
+// contextNavigationMissingTargetID names no stored session: the unresolved child
+// below references it so the mounted header renders an honest unavailable
+// reference instead of a link.
+const contextNavigationMissingTargetID = "sess_contextnavigationabsenttarget"
+
+// contextNavigationFixtureSessions returns three additive mock sessions that
+// demonstrate the current-parent navigation header and retained earlier history
+// on a mounted child detail:
+//   - the child carries a context_from relationship to the source session and a
+//     started_by relationship to a DIFFERENT parent, so both links render and
+//     route to their own authorized target;
+//   - the child carries one retained earlier-history section, collapsed before
+//     its current turns and excluded from its own-turn and input counts;
+//   - the child's main turns carry provenance-bearing source refs, so the
+//     protected retention rules apply rather than the legacy text filters.
+//
+// The two target sessions are ordinary recorded sessions. Nothing here touches
+// an existing session, index, or the seeded-PRNG draw sequence used elsewhere
+// in this file.
+func contextNavigationFixtureSessions() []ingest.Session {
+	sourceStart := time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC)
+	startedStart := sourceStart.Add(30 * time.Minute)
+	childStart := startedStart.Add(2 * time.Hour)
+	sourceID := schema.SessionID(contextNavigationSourceID)
+	startedID := schema.SessionID(contextNavigationStartedID)
+
+	return []ingest.Session{
+		{
+			ID:        sourceID,
+			Project:   contextNavigationProject,
+			Harness:   schema.HarnessCodex,
+			StartTime: sourceStart,
+			EndTime:   sourceStart.Add(5 * time.Minute),
+			Turns:     MockTurns(3, sourceStart),
+			Metadata: ingest.SessionMetadata{
+				TotalTokens:   2400,
+				Duration:      5 * time.Minute,
+				TurnCount:     3,
+				ToolCallCount: 1,
+			},
+		},
+		{
+			ID:        startedID,
+			Project:   contextNavigationProject,
+			Harness:   schema.HarnessCodex,
+			StartTime: startedStart,
+			EndTime:   startedStart.Add(6 * time.Minute),
+			Turns:     MockTurns(4, startedStart),
+			Metadata: ingest.SessionMetadata{
+				TotalTokens:   3100,
+				Duration:      6 * time.Minute,
+				TurnCount:     4,
+				ToolCallCount: 2,
+			},
+		},
+		{
+			ID:        schema.SessionID(contextNavigationChildID),
+			Project:   contextNavigationProject,
+			Harness:   schema.HarnessCodex,
+			StartTime: childStart,
+			EndTime:   childStart.Add(7 * time.Minute),
+			Turns: []ingest.Turn{
+				{
+					Index:          0,
+					Role:           ingest.RoleUser,
+					EntryType:      schema.EntryTypeText,
+					SourceEntryRef: "e_cn_child_input",
+					Content:        "carry the inherited parser fix into this child session",
+					Timestamp:      childStart,
+					Provenance: contextNavProvenance(
+						schema.ContentOriginSubmittedInput, schema.ActorOriginUnknown,
+						schema.DeliveryOriginSessionAdmission, schema.ContentOwnershipLocal,
+						schema.InputModalityText, "s_cn_child_input",
+					),
+				},
+				{
+					Index:          1,
+					Role:           ingest.RoleAssistant,
+					EntryType:      schema.EntryTypeThinking,
+					SourceEntryRef: "e_cn_child_reason",
+					Content:        "inspect the inherited branch point first",
+					Timestamp:      childStart.Add(time.Minute),
+					Provenance: contextNavProvenance(
+						schema.ContentOriginAgentOutput, schema.ActorOriginAgentDelegate,
+						schema.DeliveryOriginSessionAdmission, schema.ContentOwnershipLocal,
+						schema.InputModalityNone, "",
+					),
+				},
+				{
+					Index:          2,
+					Role:           ingest.RoleAssistant,
+					EntryType:      schema.EntryTypeText,
+					SourceEntryRef: "e_cn_child_answer",
+					Content:        "the parser fix from the source session still applies here",
+					Timestamp:      childStart.Add(2 * time.Minute),
+					Provenance: contextNavProvenance(
+						schema.ContentOriginAgentOutput, schema.ActorOriginAgentDelegate,
+						schema.DeliveryOriginSessionAdmission, schema.ContentOwnershipLocal,
+						schema.InputModalityNone, "",
+					),
+				},
+			},
+			EarlierHistory: []ingest.EarlierHistorySection{
+				{
+					State: schema.EarlierHistoryUncertainMigrated,
+					Turns: []ingest.Turn{
+						{
+							Index:          0,
+							Role:           ingest.RoleUser,
+							EntryType:      schema.EntryTypeText,
+							SourceEntryRef: "e_cn_earlier_input",
+							Content:        "retained question from before the recorded ownership boundary",
+							Timestamp:      sourceStart,
+							Provenance: contextNavProvenance(
+								schema.ContentOriginSubmittedInput, schema.ActorOriginUnknown,
+								schema.DeliveryOriginInheritedContext, schema.ContentOwnershipUncertain,
+								schema.InputModalityText, "s_cn_earlier_input",
+							),
+						},
+						{
+							Index:          1,
+							Role:           ingest.RoleAssistant,
+							EntryType:      schema.EntryTypeText,
+							SourceEntryRef: "e_cn_earlier_answer",
+							Content:        "retained answer whose ownership cannot be proved",
+							Timestamp:      sourceStart.Add(time.Minute),
+							Provenance: contextNavProvenance(
+								schema.ContentOriginUnknown, schema.ActorOriginUnknown,
+								schema.DeliveryOriginUnknown, schema.ContentOwnershipUncertain,
+								schema.InputModalityUnknown, "",
+							),
+						},
+					},
+				},
+			},
+			Relationships: []schema.SessionRelationship{
+				{
+					Kind:          schema.SessionRelationshipContextFrom,
+					TargetState:   schema.RelationshipTargetKnown,
+					TargetLocalID: &sourceID,
+					Evidence:      schema.EvidenceNativeTyped,
+				},
+				{
+					Kind:          schema.SessionRelationshipStartedBy,
+					TargetState:   schema.RelationshipTargetKnown,
+					TargetLocalID: &startedID,
+					Evidence:      schema.EvidenceNativeTyped,
+				},
+			},
+			Purpose:              schema.SessionPurposeDelegatedWork,
+			RootSessionID:        &startedID,
+			ParentSessionID:      &startedID,
+			InputSubmissionCount: contextNavInt64(1),
+			Metadata: ingest.SessionMetadata{
+				TotalTokens:   1800,
+				Duration:      7 * time.Minute,
+				TurnCount:     3,
+				ToolCallCount: 0,
+			},
+		},
+		{
+			ID:        schema.SessionID(contextNavigationUnresolvedID),
+			Project:   contextNavigationProject,
+			Harness:   schema.HarnessCodex,
+			StartTime: childStart.Add(24 * time.Hour),
+			EndTime:   childStart.Add(24*time.Hour + 4*time.Minute),
+			Turns: []ingest.Turn{
+				{
+					Index:          0,
+					Role:           ingest.RoleAssistant,
+					EntryType:      schema.EntryTypeText,
+					SourceEntryRef: "e_cn_unresolved_answer",
+					Content:        "this child stays readable even though its started-by target is no longer stored",
+					Timestamp:      childStart.Add(24 * time.Hour),
+					Provenance: contextNavProvenance(
+						schema.ContentOriginAgentOutput, schema.ActorOriginAgentDelegate,
+						schema.DeliveryOriginSessionAdmission, schema.ContentOwnershipLocal,
+						schema.InputModalityNone, "",
+					),
+				},
+			},
+			Relationships: []schema.SessionRelationship{
+				{
+					Kind:          schema.SessionRelationshipStartedBy,
+					TargetState:   schema.RelationshipTargetKnown,
+					TargetLocalID: contextNavSessionIDPtr(contextNavigationMissingTargetID),
+					Evidence:      schema.EvidenceNativeTyped,
+				},
+			},
+			Purpose: schema.SessionPurposeDelegatedWork,
+			Metadata: ingest.SessionMetadata{
+				TotalTokens:   600,
+				Duration:      4 * time.Minute,
+				TurnCount:     1,
+				ToolCallCount: 0,
+			},
+		},
+	}
+}
+
+func contextNavSessionIDPtr(id string) *schema.SessionID {
+	value := schema.SessionID(id)
+	return &value
+}
+
+// contextNavProvenance builds one complete, valid provenance record for the
+// context-navigation fixture. A submission reference is carried only where the
+// evidence names one; an absent reference stays absent rather than inventing an
+// identity the source never recorded.
+func contextNavProvenance(origin schema.ContentOrigin, actor schema.ActorOrigin, delivery schema.DeliveryOrigin, ownership schema.ContentOwnership, modality schema.InputModality, submission schema.SubmissionRef) *schema.ContentProvenance {
+	return &schema.ContentProvenance{
+		Origin:        origin,
+		Actor:         actor,
+		Delivery:      delivery,
+		Ownership:     ownership,
+		Evidence:      schema.EvidenceNativeTyped,
+		InputModality: modality,
+		SubmissionRef: submission,
+	}
+}
+
+func contextNavInt64(value int64) *int64 { return &value }
 
 // mockScorecardMetrics builds deterministic per-session quality signals so the
 // Highlights self-assessment card renders in mock mode. Values cycle through

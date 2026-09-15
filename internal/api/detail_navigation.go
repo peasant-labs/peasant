@@ -129,11 +129,19 @@ type detailReadProvider interface {
 	DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error)
 }
 
+// storedTargetResolver is implemented by a provider that can resolve stored
+// session identifiers into link targets. A provider without it has no way to
+// authorize a link, so its read stays durable-only.
+type storedTargetResolver interface {
+	ResolveStoredTargets(ctx context.Context, ids []string) ([]StoredTarget, error)
+}
+
 // SessionDetailReadForProvider loads one flat local detail read payload. A
 // provider that can resolve navigation (the generation-backed store, and the
-// progressive provider that fronts it) serves the durable read projection;
-// every other provider keeps the preserved SessionByID conversion path with no
-// navigation, because it has no stored-target resolver to consult.
+// progressive provider that fronts it) serves the durable read projection; any
+// other provider keeps the preserved SessionByID conversion path, decorated
+// with resolved navigation when it can name stored targets and left
+// navigation-free when it cannot.
 func SessionDetailReadForProvider(ctx context.Context, provider DataProvider, id string) (*schema.SessionDetailReadPayload, error) {
 	if reader, ok := provider.(detailReadProvider); ok {
 		return reader.DetailReadPayload(ctx, id)
@@ -146,5 +154,15 @@ func SessionDetailReadForProvider(ctx context.Context, provider DataProvider, id
 	if err != nil {
 		return nil, err
 	}
-	return &schema.SessionDetailReadPayload{SessionDetailPayload: *detail}, nil
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: *detail}
+	resolver, ok := provider.(storedTargetResolver)
+	if !ok {
+		return read, nil
+	}
+	nav, err := resolveRelationshipNavigation(ctx, detail.Relationships, resolver.ResolveStoredTargets)
+	if err != nil {
+		return nil, err
+	}
+	read.RelationshipNavigation = nav
+	return read, nil
 }
