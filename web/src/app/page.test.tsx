@@ -115,6 +115,12 @@ function makeSummaries(
   return { projects, selection };
 }
 
+function replaceExactlyOnce(source: string, find: string, replace: string, label: string): string {
+  const count = source.split(find).length - 1;
+  if (count !== 1) throw new Error(`${label} mutation anchor must occur exactly once, received ${count}`);
+  return source.replace(find, replace);
+}
+
 const requiredSelectionRetryCaseNames = [
   'pending retry stays closed until selected replacement succeeds',
   'failed retry stays closed and actionable',
@@ -167,6 +173,105 @@ function loadSelectionRetryFixture(): SelectionRetryFixture {
   }
   return root as unknown as SelectionRetryFixture;
 }
+
+const requiredFlatSessionCaseNames = [
+  'cross-project-filter-and-top-level-paging',
+  'harness-filter-narrows-the-same-set',
+] as const;
+
+type FlatSessionCase = {
+  name: string;
+  sessionCount: number;
+  projects: string[];
+  harnesses: string[];
+  filterQuery: string;
+  expectedFilteredCount: number;
+  expectedTotalPages: number;
+  expectedFilteredPages: number;
+};
+
+const flatSessionsManifestSource = readFileSync(
+  resolve(process.cwd(), 'src/app/testdata/home_flat_sessions.manifest.yaml'),
+  'utf8',
+);
+const flatSessionsCasesSource = readFileSync(
+  resolve(process.cwd(), 'src/app/testdata/home_flat_sessions.yaml'),
+  'utf8',
+);
+
+function loadFlatSessionFixture(
+  manifestSource = flatSessionsManifestSource,
+  casesSource = flatSessionsCasesSource,
+): FlatSessionCase[] {
+  const manifest = requireRecord(
+    parseStrictYAML(manifestSource, 'home flat sessions manifest'),
+    'home flat sessions manifest',
+  );
+  requireExactRequiredFields(
+    manifest,
+    ['expectedCount', 'requiredNames', 'expectedLoaderMutationCount', 'loaderMutations'],
+    'home flat sessions manifest',
+  );
+  const requiredNames = manifest.requiredNames as unknown[];
+  if (
+    !Number.isSafeInteger(manifest.expectedCount)
+    || !Array.isArray(requiredNames)
+    || requiredNames.length !== manifest.expectedCount
+    || requiredNames.length !== requiredFlatSessionCaseNames.length
+  ) {
+    throw new Error('home flat sessions manifest must name every required case exactly once');
+  }
+  if (
+    !Number.isSafeInteger(manifest.expectedLoaderMutationCount)
+    || !Array.isArray(manifest.loaderMutations)
+    || manifest.loaderMutations.length !== manifest.expectedLoaderMutationCount
+  ) {
+    throw new Error('home flat sessions manifest must carry one loader mutation per expected mutation');
+  }
+  const root = requireRecord(parseStrictYAML(casesSource, 'home flat sessions cases'), 'home flat sessions cases');
+  requireExactRequiredFields(root, ['cases'], 'home flat sessions cases');
+  if (!Array.isArray(root.cases)) throw new Error('home flat sessions cases.cases must be an array');
+  const rows = root.cases.map((value, index) => requireRecord(value, `home flat sessions cases.cases[${index}]`));
+  requireUniqueNames(rows, 'home flat sessions cases.cases');
+  rows.forEach((row, index) => {
+    const label = `home flat sessions cases.cases[${index}]`;
+    requireExactRequiredFields(
+      row,
+      ['name', 'sessionCount', 'projects', 'harnesses', 'filterQuery', 'expectedFilteredCount', 'expectedTotalPages', 'expectedFilteredPages'],
+      label,
+    );
+    if (!Number.isSafeInteger(row.sessionCount) || (row.sessionCount as number) < 1) {
+      throw new Error(`${label}.sessionCount must be a positive integer`);
+    }
+    if (!Array.isArray(row.projects) || row.projects.length === 0) {
+      throw new Error(`${label}.projects must name at least one project`);
+    }
+    if (!Array.isArray(row.harnesses) || row.harnesses.length === 0) {
+      throw new Error(`${label}.harnesses must name at least one harness`);
+    }
+    if (typeof row.filterQuery !== 'string' || row.filterQuery === '') {
+      throw new Error(`${label}.filterQuery must be a non-empty string`);
+    }
+    for (const field of ['expectedFilteredCount', 'expectedTotalPages', 'expectedFilteredPages'] as const) {
+      if (!Number.isSafeInteger(row[field]) || (row[field] as number) < 1) {
+        throw new Error(`${label}.${field} must be a positive integer`);
+      }
+    }
+  });
+  const names = rows.map((row) => row.name);
+  if (
+    rows.length !== manifest.expectedCount
+    || requiredFlatSessionCaseNames.some((name) => !names.includes(name))
+  ) {
+    throw new Error('home flat sessions manifest must name exactly the required cases; a case is missing or renamed');
+  }
+  for (const name of requiredFlatSessionCaseNames) {
+    if (!names.includes(name)) throw new Error(`home flat sessions fixture is missing required case ${name}`);
+  }
+  return rows as unknown as FlatSessionCase[];
+}
+
+const flatSessionFixture = loadFlatSessionFixture();
 
 function deferred<T>() {
   let resolvePromise!: (value: T) => void;
@@ -365,6 +470,79 @@ describe('HomePage — the changes-first picker', () => {
     expect(screen.getByText('2 sessions · 2 helper threads')).toBeInTheDocument();
     expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalled();
   });
+
+  it('rejects every retained flat-session loader mutation', () => {
+    const manifest = requireRecord(
+      parseStrictYAML(flatSessionsManifestSource, 'home flat sessions manifest'),
+      'home flat sessions manifest',
+    );
+    for (const mutationValue of manifest.loaderMutations as unknown[]) {
+      const mutation = requireRecord(mutationValue, 'flat session loader mutation');
+      const target = mutation.target === 'manifest' ? flatSessionsManifestSource : flatSessionsCasesSource;
+      const mutated = replaceExactlyOnce(target, String(mutation.find), String(mutation.replace), String(mutation.name));
+      expect(
+        () =>
+          loadFlatSessionFixture(
+            mutation.target === 'manifest' ? mutated : flatSessionsManifestSource,
+            mutation.target === 'cases' ? mutated : flatSessionsCasesSource,
+          ),
+        String(mutation.name),
+      ).toThrow(new RegExp(String(mutation.expectedError)));
+    }
+  });
+
+  for (const testCase of flatSessionFixture) {
+    it(`retains the cross-project filter and top-level pager: ${testCase.name}`, async () => {
+      const sessions = Array.from({ length: testCase.sessionCount }, (_, index) =>
+        makeSession({
+          id: `sess-${String(index).padStart(4, '0')}`,
+          project: testCase.projects[index % testCase.projects.length],
+          projectHash: index % testCase.projects.length === 0 ? ALPHA_HASH : BETA_HASH,
+          harness: testCase.harnesses[index % testCase.harnesses.length] as 'codex',
+          startTime: new Date(Date.UTC(2026, 0, 1) - index * 3_600_000).toISOString(),
+        }),
+      );
+      channelData = { sessions };
+      api.fetchProjectSummaries.mockResolvedValue(
+        makeSummaries(
+          testCase.projects.map((project, index) =>
+            makeSummary({ project, projectHash: index === 0 ? ALPHA_HASH : BETA_HASH }),
+          ),
+        ),
+      );
+      groupedApi.fetchGroupedLocalSessions.mockResolvedValue(GROUPED_HOME_PAYLOAD);
+
+      render(<HomePage />);
+      // The grouped list stays mounted with its own helper counts ...
+      expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
+      expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
+
+      // ... and the flat filter + pager stay reachable beside it.
+      fireEvent.click(
+        screen.getByRole('button', { name: /filter and page through every session/i }),
+      );
+      expect(screen.getByText(`${testCase.sessionCount} sessions`)).toBeInTheDocument();
+      expect(screen.getByText(`page 1 of ${testCase.expectedTotalPages}`)).toBeInTheDocument();
+
+      // Filtering by the previous supported field narrows to the server-visible
+      // set without touching the grouped helper membership.
+      fireEvent.change(screen.getByRole('searchbox', { name: 'search sessions' }), {
+        target: { value: testCase.filterQuery },
+      });
+      expect(
+        screen.getByText(`${testCase.expectedFilteredCount} sessions of ${testCase.sessionCount}`),
+      ).toBeInTheDocument();
+      expect(screen.getByText(`page 1 of ${testCase.expectedFilteredPages}`)).toBeInTheDocument();
+      expect(screen.getByText('2 helper threads')).toBeInTheDocument();
+      expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
+
+      // The top-level pager navigates the filtered result.
+      fireEvent.click(screen.getByRole('button', { name: 'next' }));
+      expect(
+        screen.getByText(`page ${testCase.expectedFilteredPages} of ${testCase.expectedFilteredPages}`),
+      ).toBeInTheDocument();
+    });
+  }
 
   it('falls back to sessions-channel grouping with stats unavailable while the fetch loads', () => {
     api.fetchProjectSummaries.mockReturnValue(pending());

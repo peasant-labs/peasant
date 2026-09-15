@@ -1,0 +1,27 @@
+# Home flat-session filter and paging cases.
+#
+# The grouped list took over Home's session body, and with it the cross-project
+# filter over session identity fields (short id, harness, project) and the
+# 25-row top-level pager. Those flows are retained as a reachable production
+# option beside the grouped list. This fixture names a session set large enough
+# to page, the field value the previous filter supported, and the exact rendered
+# page counts, so the retained flow is asserted on the mounted Home rather than
+# on the table component alone.
+cases:
+  - name: cross-project-filter-and-top-level-paging
+    sessionCount: 60
+    projects: [alpha-project, beta-project]
+    harnesses: [codex]
+    filterQuery: alpha-project
+    expectedFilteredCount: 30
+    expectedTotalPages: 3
+    expectedFilteredPages: 2
+
+  - name: harness-filter-narrows-the-same-set
+    sessionCount: 80
+    projects: [gamma-project]
+    harnesses: [codex, claude-code]
+    filterQuery: codex
+    expectedFilteredCount: 40
+    expectedTotalPages: 4
+    expectedFilteredPages: 2

@@ -33,7 +33,8 @@ import {
   TeachingEmptyState,
   type TileSpec,
 } from "@/lib/ft-ui";
-import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
+import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp, List } from "lucide-react";
+import { AllSessions } from "@/components/sessions/AllSessions";
 import { GroupedSessionsSection } from "@/components/sessions/GroupedSessionsSection";
 import { useSessionTitles } from "@/hooks/useSessionTitles";
 
@@ -208,6 +209,51 @@ function SelectionNotice({
             Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Flat all-sessions disclosure.
+//
+// The grouped list replaced the old flat table on Home, and with it the filter
+// over session identity fields (short id, harness, project) and the 25-row
+// top-level pager. Those are real flows, so they stay REACHABLE: a collapsed
+// disclosure mounts the unchanged AllSessions table over the same session set,
+// beside the grouped list rather than instead of it. The grouped list keeps its
+// own per-group disclosure/paging state; this table keeps the flat filter and
+// pager exactly as they were, and it is never widened by a helper membership.
+// ---------------------------------------------------------------------------
+
+function AllSessionsDisclosure({
+  sessions,
+  titles,
+}: {
+  sessions: SessionSummary[];
+  titles?: ReadonlyMap<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  if (sessions.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2" data-flat-sessions-disclosure="true">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="inline-flex w-fit items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
+      >
+        <List size={13} aria-hidden />
+        <span className="tabular-nums">filter and page through every session</span>
+        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+      </button>
+      {open && (
+        <AllSessions
+          sessions={sessions}
+          titles={titles}
+          title="every session"
+          subtitle="every ingested session across projects, filterable and paged."
+        />
       )}
     </div>
   );
@@ -517,6 +563,12 @@ export default function HomePage() {
           titles={sessionTitles}
           heading="all sessions"
         />
+      )}
+
+      {/* The pre-existing cross-project filter and 25-row pager stay reachable
+          here, beside the grouped list. See AllSessionsDisclosure above. */}
+      {groupedSectionVisible && (
+        <AllSessionsDisclosure sessions={sessions} titles={sessionTitles} />
       )}
     </div>
   );
