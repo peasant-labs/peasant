@@ -193,14 +193,23 @@ success, so this incident record is not an executable redispatch procedure.
    `release(vX.Y.Z-rc1): <summary>` (bump `rcN` for subsequent candidates).
    - `release-pr.yml` (open/edit trigger) validates the title grammar and that **you**
      are an `admin`/`maintain` collaborator. Fix the title or authorship if it fails.
-   - `release-validate.yml` (path-filtered to packaging-relevant files — `**.go`,
-     `.goreleaser.yml`, flake/`go.mod`/`go.sum`/web manifests, `Makefile`; a real
-     release PR always matches) runs the per-distro install matrix against a goreleaser
+   - `release-validate.yml` runs the per-distro install matrix against a goreleaser
      **`--snapshot`** build (synthetic version): deb 2×2 (ubuntu 22.04/24.04 ×
       amd64/arm64), rpm (fedora `dnf` + leap `zypper modifyrepo --disable --all`
       followed by `zypper --no-refresh --allow-unsigned-rpm`), Arch
      `makepkg` (x86_64), `brew style`, the **rc-only** macOS cask install, and
      `nix build .#peasant`.
+   - On a push, the `e2e` and `release-validate` matrices re-run only when the push
+     touches their inputs or their previous run on this PR has not passed; `tests`
+     always runs. **Before merging, apply the `full-gate` label to the head and wait
+     for the complete matrix.** This step is mandatory but is not enforced by the
+     merge or tag workflow: a skipped gate on the final head does not satisfy the
+     release ceremony. Inspect the labeled `Release PR` run for the final SHA and
+     confirm every required child job passed (`macos cask install (rc only)` may be
+     skipped on a final). The label run can overlap a push's run, so after any later
+     push remove and re-add the label and repeat; on a failed or cancelled child,
+     fix, push, and repeat. §5 covers re-runs of the post-tag `release.yml`, not
+     this pre-merge pass.
 3. **Merge** (the approval assertion is deferred during the single-maintainer
    period - §2).
    - `release-pr.yml` (merge trigger) checks out the merge
@@ -235,7 +244,8 @@ success, so this incident record is not an executable redispatch procedure.
 This section describes finals after the exact initial `v0.1.0` bootstrap.
 
 1. Open a PR into `develop` titled `release(vX.Y.Z): <summary>`. Same validation as an
-   rc, plus `release-validate.yml` skips the macOS cask install (rc-only).
+   rc, plus `release-validate.yml` skips the macOS cask install (rc-only). The
+   delta-gated matrices and the mandatory `full-gate` pass from §3 apply here too.
 2. Merge (approval assertion deferred during the single-maintainer period - §2).
    `release-pr.yml` updates the Nix vendor hash if
    needed and mints the annotated final tag on the hash-current commit.

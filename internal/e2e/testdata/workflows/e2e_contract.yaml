@@ -125,20 +125,37 @@ reusable_callers:
     jobs:
       - job: tests
         uses: ./.github/workflows/tests.yml
+        needs: [validate]
+        if_contains:
+          - startsWith(github.event.pull_request.title, 'release(')
+          - contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+          - github.event.label.name == 'full-gate'
         permissions:
           - key: contents
             value: read
       - job: e2e
         uses: ./.github/workflows/e2e.yml
+        needs: [validate, changes]
+        if_contains:
+          - startsWith(github.event.pull_request.title, 'release(')
+          - contains(fromJSON('["opened","reopened"]'), github.event.action)
+          - needs.changes.outputs.e2e != 'false'
+          - needs.changes.result != 'success'
+          - needs.validate.result == 'success'
+          - github.event.label.name == 'full-gate'
         permissions:
           - key: contents
             value: read
       - job: release-validate
         uses: ./.github/workflows/release-validate.yml
-        needs: validate
+        needs: [validate, changes]
         if_contains:
           - startsWith(github.event.pull_request.title, 'release(')
-          - contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+          - contains(fromJSON('["opened","reopened"]'), github.event.action)
+          - needs.changes.outputs.release_validate != 'false'
+          - needs.changes.result != 'success'
+          - needs.validate.result == 'success'
+          - github.event.label.name == 'full-gate'
         permissions:
           - key: contents
             value: read
