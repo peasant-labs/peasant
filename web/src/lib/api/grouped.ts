@@ -22,6 +22,7 @@ import {
   type LocalSessionListItem,
   type LocalSessionListPayload,
   type LocalSessionRow,
+  type SearchResult,
 } from '@peasant-labs/schema';
 import { getApiBaseUrl } from './base';
 import { parseDiscoveryError } from './errors';
@@ -175,4 +176,42 @@ function errorCode(body: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The match rows a grouped search payload carries directly on its items. */
+export function groupedSearchMatches(payload: LocalSessionListPayload): SearchResult[] {
+  return payload.items.flatMap((item) => item.transcript?.matches ?? []);
+}
+
+/**
+ * Flatten a grouped search into the individual transcript-hit rows the command
+ * palette navigates. Ordinary items contribute their own matches; a helper-only
+ * result is an owner context container, so its saved helpers are fetched from
+ * the exact issued scope to surface their hits. An expired scope omits the
+ * helper hits rather than widening the query — the ordinary hits still render.
+ */
+export async function fetchGroupedSearchMatches(
+  query: string,
+  limit?: number,
+): Promise<SearchResult[]> {
+  const payload = await fetchGroupedLocalSearch(query, limit);
+  const rows = groupedSearchMatches(payload);
+  for (const item of payload.items) {
+    const group = item.helperGroups?.[0];
+    if (!item.context || !group) continue;
+    try {
+      const members = await fetchHelperGroupMembers({
+        groupId: group.groupId,
+        scope: group.memberScope,
+        page: 1,
+        limit: 20,
+      });
+      for (const member of members.members) {
+        if (member.transcript?.matches) rows.push(...member.transcript.matches);
+      }
+    } catch (cause) {
+      if (!isGroupScopeExpired(cause)) throw cause;
+    }
+  }
+  return rows;
 }

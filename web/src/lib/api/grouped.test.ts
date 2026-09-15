@@ -13,6 +13,7 @@ import {
   decodeGroupedMembers,
   fetchGroupedLocalSearch,
   fetchGroupedLocalSessions,
+  fetchGroupedSearchMatches,
   fetchHelperGroupMembers,
   isGroupScopeExpired,
 } from './grouped';
@@ -243,5 +244,95 @@ describe('grouped local REST client', () => {
     const failure = await fetchHelperGroupMembers({ groupId: 'hg_p1', scope: 'scope-p1' }).catch((error) => error);
     expect(isGroupScopeExpired(failure)).toBe(false);
     expect(String(failure)).toContain('500');
+  });
+});
+
+function match(sessionId: string, entryIndex: number) {
+  return {
+    sessionId,
+    project: '/work/alpha-project',
+    projectHash: 'a'.repeat(64),
+    entryIndex,
+    role: 'user' as const,
+    snippet: `${sessionId} hit`,
+    score: 1,
+  };
+}
+
+describe('grouped search navigation', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const helperOnlyPayload = {
+    items: [
+      {
+        kind: 'transcript',
+        transcript: { session: sessionSummaryFor('agent-a1'), matches: [match('agent-a1', 0)] },
+      },
+      {
+        kind: 'context_container',
+        context: { groupId: 'hg_h1', ownerStatus: 'known_unavailable' },
+        helperGroups: [{ groupId: 'hg_h1', purpose: 'helper_review', helperThreadCount: 1, memberScope: 'scope-h1' }],
+      },
+    ],
+    page: 1,
+    limit: 20,
+    totalItems: 2,
+    ordinarySessionTotal: 1,
+    helperThreadTotal: 1,
+  };
+
+  function sessionSummaryFor(id: string) {
+    return {
+      id,
+      harness: 'codex',
+      startTime: '2026-01-01T00:00:00Z',
+      durationMins: 1,
+      turnCount: 1,
+      totalTokens: 1,
+      toolCallCount: 0,
+    };
+  }
+
+  it('expands a helper-only search container from its issued scope, keeping ordinary hits', async () => {
+    fetchMock
+      .mockReturnValueOnce(okResponse(helperOnlyPayload))
+      .mockReturnValueOnce(
+        okResponse({
+          members: [{ kind: 'transcript', transcript: { session: sessionSummaryFor('agent-b1'), matches: [match('agent-b1', 3)] } }],
+          page: 1,
+          limit: 20,
+          total: 1,
+        }),
+      );
+
+    const rows = await fetchGroupedSearchMatches('needle', 20);
+    expect(rows.map((row) => row.sessionId)).toEqual(['agent-a1', 'agent-b1']);
+
+    const searchUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(searchUrl.searchParams.get('view')).toBe('grouped');
+    const memberUrl = new URL(String(fetchMock.mock.calls[1][0]));
+    expect(memberUrl.pathname).toBe('/api/v1/session-groups/hg_h1/members');
+    expect(memberUrl.searchParams.get('scope')).toBe('scope-h1');
+    expect([...memberUrl.searchParams.keys()].sort()).toEqual(['limit', 'page', 'scope']);
+  });
+
+  it('omits helper hits when the helper scope expired instead of widening the query', async () => {
+    fetchMock
+      .mockReturnValueOnce(okResponse(helperOnlyPayload))
+      .mockReturnValueOnce(errorResponse(409, { error: 'expired', code: 'group_scope_expired' }));
+
+    const rows = await fetchGroupedSearchMatches('needle', 20);
+    expect(rows.map((row) => row.sessionId)).toEqual(['agent-a1']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
