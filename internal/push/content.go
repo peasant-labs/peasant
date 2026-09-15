@@ -206,16 +206,19 @@ func applyPublishConsentOverlay(detail *schema.SessionDetailPayload, meta *inges
 	// totals, so they are copied from the same capture metadata the metadata
 	// part is built from. The detail's own counts are left alone.
 	//
-	// Pi is the exception: its validated detail already derives these mirrors
-	// from per-turn usage (and deliberately zeroes them when no usage exists),
-	// so copying the capture totals here would contradict the harness mirror
-	// that SessionToDetailValidated just enforced.
+	// Pi is the exception for the TOKEN mirrors only: its validated detail
+	// already derives them from per-turn usage (and deliberately zeroes them
+	// when no usage exists), so copying the capture totals here would contradict
+	// the harness mirror that SessionToDetailValidated just enforced. Duration
+	// has no usage-derived equivalent in that mirror, so it is copied for every
+	// harness; leaving it inside the exception silently published a zero
+	// duration for a capture that recorded one.
 	if detail.Harness != schema.HarnessPi {
 		detail.TokensIn = meta.Stats.TokensIn
 		detail.TokensOut = meta.Stats.TokensOut
 		detail.TotalTokens = meta.Stats.TokensIn + meta.Stats.TokensOut
-		detail.DurationMins = (time.Duration(meta.Stats.DurationMs) * time.Millisecond).Minutes()
 	}
+	detail.DurationMins = (time.Duration(meta.Stats.DurationMs) * time.Millisecond).Minutes()
 	detail.Source = "imported"
 	detail.Status = "local"
 }
