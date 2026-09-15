@@ -444,7 +444,7 @@ func seedMountedLegacyStore(
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create mounted legacy data directory: %v", err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open mounted legacy store: %v", err)
 	}

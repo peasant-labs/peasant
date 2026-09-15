@@ -271,7 +271,7 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("mounted canonical harvest: %v\n%s", err, output)
 			}
-			database, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1))
+			database, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatal(err)
 			}
