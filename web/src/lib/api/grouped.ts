@@ -18,6 +18,7 @@ import {
   isSessionListItemKind,
   zLocalHelperMembersPayload,
   zLocalSessionListPayload,
+  type HelperGroupSummary,
   type LocalHelperMembersPayload,
   type LocalSessionListItem,
   type LocalSessionListPayload,
@@ -107,15 +108,86 @@ export function decodeGroupedMembers(
   return parsed.data;
 }
 
-/** GET /api/v1/sessions?view=grouped */
-export async function fetchGroupedLocalSessions(): Promise<LocalSessionListPayload> {
-  const path = '/api/v1/sessions?view=grouped';
+/**
+ * The originating route scope for a grouped session list.
+ *
+ * A project scope is sent to the SERVER as the route's existing `project`
+ * filter, so the candidate set, the ordinary/helper counts and every issued
+ * member scope are all limited to that project before the response is built.
+ * The client never folds a global list into a project heading, because a
+ * client-side fold would still show the server's cross-project totals and
+ * could widen a member expansion past the project.
+ */
+export interface GroupedLocalSessionsScope {
+  /** Opaque project hash; omit for the cross-project list. */
+  projectHash?: string;
+}
+
+/** GET /api/v1/sessions?view=grouped[&project=<projectHash>] */
+export async function fetchGroupedLocalSessions(
+  scope: GroupedLocalSessionsScope = {},
+): Promise<LocalSessionListPayload> {
+  const params = new URLSearchParams({ view: 'grouped' });
+  if (scope.projectHash) params.set('project', scope.projectHash);
+  const path = `/api/v1/sessions?${params.toString()}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
     const body = await response.text().catch(() => '');
     throw parseDiscoveryError(path, response.status, body);
   }
   return decodeGroupedLocalList(await response.json(), path);
+}
+
+/**
+ * The grouped project filter was not applied by the server: the response to a
+ * project-scoped request still carries another project's rows. A host that
+ * understands the missing seam can fall back to its flat project list; a host
+ * that does not must fail closed, because showing a cross-project response
+ * under one project heading misstates the project and its counts.
+ */
+export class GroupedProjectScopeError extends Error {
+  readonly projectHash: string;
+  readonly offendingSessionId: string;
+  readonly offendingProjectHash: string;
+
+  constructor(projectHash: string, sessionId: string, offendingProjectHash: string) {
+    super(
+      `The grouped list at /api/v1/sessions?view=grouped&project=${projectHash} included session ${sessionId} from project ${offendingProjectHash} in assertGroupedProjectScope. No project-scoped list was rendered, because a response built without the grouped project filter carries other projects' sessions and their cross-project counts, and showing it under one project heading would misstate that project. Confirm the Peasant server applies the grouped project filter, then retry.`,
+    );
+    this.name = 'GroupedProjectScopeError';
+    this.projectHash = projectHash;
+    this.offendingSessionId = sessionId;
+    this.offendingProjectHash = offendingProjectHash;
+  }
+}
+
+export function isGroupedProjectScopeError(error: unknown): error is GroupedProjectScopeError {
+  return error instanceof GroupedProjectScopeError;
+}
+
+/**
+ * Refuse a grouped response that claims one project but carries another
+ * project's rows.
+ *
+ * The project filter is applied by the SERVER. A server that does not implement
+ * the grouped project filter answers with the cross-project list; rendering
+ * that under a project heading would show other projects' sessions and print
+ * the cross-project counts. This stops the surface instead, and never folds or
+ * re-sorts the rows on the client. A row without a recorded project hash is not
+ * a contradiction and is allowed through.
+ */
+export function assertGroupedProjectScope(
+  payload: LocalSessionListPayload,
+  projectHash: string,
+): void {
+  for (const item of payload.items) {
+    const row = item.transcript;
+    if (!row) continue;
+    const rowHash = row.session.projectHash;
+    if (rowHash !== undefined && rowHash !== projectHash) {
+      throw new GroupedProjectScopeError(projectHash, row.session.id, rowHash);
+    }
+  }
 }
 
 /** GET /api/v1/search?q=...&view=grouped */
@@ -184,12 +256,37 @@ export function groupedSearchMatches(payload: LocalSessionListPayload): SearchRe
 }
 
 /**
+ * Members requested per member page while flattening search hits. This mirrors
+ * the server's member page cap so one group needs as few round trips as
+ * possible; paging still follows the server-reported total, so a group larger
+ * than one page is never truncated.
+ */
+export const SEARCH_MEMBER_PAGE_LIMIT = 50;
+
+/**
+ * One navigable search hit's identity. A hit is unique per (session, entry), so
+ * the same saved helper reached through two owners, or through a nested group
+ * plus its own top-level item, becomes exactly one palette row.
+ */
+function searchMatchKey(match: SearchResult): string {
+  return `${match.sessionId}:${match.entryIndex}`;
+}
+
+/**
  * Flatten a grouped search into the individual transcript-hit rows the command
- * palette navigates. Each item's own matches are included, and every saved
- * helper group is expanded from its exact issued scope so a matching helper is
- * navigable whether its owner also matched or the result is a helper-only
- * context container. An expired scope omits that group's helper hits rather
- * than widening the query — the ordinary hits still render.
+ * palette navigates.
+ *
+ * Every item's own matches are included first, in the server's relevance
+ * order. Then every saved helper group is expanded from its exact issued scope,
+ * breadth-first through the NESTED groups the server returns under a member:
+ * the server suppresses a group from the top level when its owner is also a
+ * candidate, so a matching helper G2 owned by a matching helper G1 is reachable
+ * only through G1's member payload. All required member pages are followed, and
+ * an already-visited (group, scope) pair is never fetched twice, so a shared
+ * owner or a cycle cannot loop or duplicate hits.
+ *
+ * An expired scope omits THAT group's helper hits only: the ordinary hits and
+ * every other reachable group stay, and the query is never widened.
  */
 export async function fetchGroupedSearchMatches(
   query: string,
@@ -197,22 +294,55 @@ export async function fetchGroupedSearchMatches(
 ): Promise<SearchResult[]> {
   const payload = await fetchGroupedLocalSearch(query, limit);
   const rows = groupedSearchMatches(payload);
+  const seenMatches = new Set(rows.map(searchMatchKey));
+
+  const visitedGroups = new Set<string>();
+  const pending: HelperGroupSummary[] = [];
   for (const item of payload.items) {
-    for (const group of item.helperGroups ?? []) {
-      try {
+    pending.push(...(item.helperGroups ?? []));
+  }
+
+  while (pending.length > 0) {
+    const group = pending.shift();
+    if (group === undefined) break;
+    const groupKey = `${group.groupId}\u0000${group.memberScope}`;
+    if (visitedGroups.has(groupKey)) continue;
+    visitedGroups.add(groupKey);
+
+    try {
+      let requestedPage = 1;
+      let highestServedPage = 0;
+      for (;;) {
         const members = await fetchHelperGroupMembers({
           groupId: group.groupId,
           scope: group.memberScope,
-          page: 1,
-          limit: 20,
+          page: requestedPage,
+          limit: SEARCH_MEMBER_PAGE_LIMIT,
         });
         for (const member of members.members) {
-          if (member.transcript?.matches) rows.push(...member.transcript.matches);
+          for (const match of member.transcript?.matches ?? []) {
+            const key = searchMatchKey(match);
+            if (!seenMatches.has(key)) {
+              seenMatches.add(key);
+              rows.push(match);
+            }
+          }
+          pending.push(...(member.helperGroups ?? []));
         }
-      } catch (cause) {
-        if (!isGroupScopeExpired(cause)) throw cause;
+        // Stop on an empty page, a non-positive served limit, or a server page
+        // that did not advance (a shrunk set can return a lower page than
+        // requested), so a malformed or stale page cannot loop the traversal.
+        if (members.members.length === 0 || members.limit < 1 || members.page <= highestServedPage) {
+          break;
+        }
+        highestServedPage = members.page;
+        if (members.page * members.limit >= members.total) break;
+        requestedPage = members.page + 1;
       }
+    } catch (cause) {
+      if (!isGroupScopeExpired(cause)) throw cause;
     }
   }
+
   return rows;
 }

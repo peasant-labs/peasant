@@ -9,6 +9,7 @@ import {
 } from '@/test/strictYaml';
 import {
   GroupScopeExpiredError,
+  assertGroupedProjectScope,
   decodeGroupedLocalList,
   decodeGroupedMembers,
   fetchGroupedLocalSearch,
@@ -247,23 +248,219 @@ describe('grouped local REST client', () => {
   });
 });
 
-function match(sessionId: string, entryIndex: number) {
+const traversalManifestSource = readFileSync(
+  resolve(process.cwd(), 'src/lib/api/testdata/grouped_search_traversal.manifest.yaml'),
+  'utf8',
+);
+const traversalCasesSource = readFileSync(
+  resolve(process.cwd(), 'src/lib/api/testdata/grouped_search_traversal.yaml'),
+  'utf8',
+);
+
+type TraversalResponse = {
+  groupId: string;
+  scope: string;
+  page: number;
+  outcome: 'ok' | 'expired';
+  body: unknown;
+};
+
+type TraversalMemberRequest = {
+  groupId: string;
+  scope: string;
+  page: number;
+};
+
+type TraversalCase = {
+  name: string;
+  query: string;
+  searchLimit: number;
+  searchPayload: unknown;
+  responses: TraversalResponse[];
+  expectedMemberRequests: TraversalMemberRequest[];
+  expectedSessionIds: string[];
+};
+
+const TRAVERSAL_CASE_FIELDS = [
+  'name',
+  'query',
+  'searchLimit',
+  'searchPayload',
+  'responses',
+  'expectedMemberRequests',
+  'expectedSessionIds',
+] as const;
+const TRAVERSAL_RESPONSE_FIELDS = ['groupId', 'scope', 'page', 'outcome', 'body'] as const;
+const TRAVERSAL_REQUEST_FIELDS = ['groupId', 'scope', 'page'] as const;
+const TRAVERSAL_MANIFEST_FIELDS = [
+  'expectedCount',
+  'requiredNames',
+  'requiredOutcomes',
+  'expectedLoaderMutationCount',
+  'loaderMutations',
+] as const;
+
+function loadGroupedTraversalFixture(
+  manifestValue = traversalManifestSource,
+  casesValue = traversalCasesSource,
+): TraversalCase[] {
+  const manifest = requireRecord(
+    parseStrictYAML(manifestValue, 'grouped search traversal manifest'),
+    'grouped search traversal manifest',
+  );
+  requireExactRequiredFields(manifest, TRAVERSAL_MANIFEST_FIELDS, 'grouped search traversal manifest');
+  const requiredNames = manifest.requiredNames as unknown[];
+  if (
+    !Number.isSafeInteger(manifest.expectedCount)
+    || !Array.isArray(requiredNames)
+    || requiredNames.length !== manifest.expectedCount
+    || requiredNames.some((name) => typeof name !== 'string' || name.length === 0)
+    || new Set(requiredNames).size !== requiredNames.length
+  ) {
+    throw new Error('grouped search traversal manifest must carry one independent, unique required-name per expected case');
+  }
+  if (
+    !Array.isArray(manifest.requiredOutcomes)
+    || manifest.requiredOutcomes.length === 0
+    || manifest.requiredOutcomes.some((outcome) => typeof outcome !== 'string')
+  ) {
+    throw new Error('grouped search traversal manifest must name at least one required response outcome');
+  }
+  if (
+    !Number.isSafeInteger(manifest.expectedLoaderMutationCount)
+    || !Array.isArray(manifest.loaderMutations)
+    || manifest.loaderMutations.length !== manifest.expectedLoaderMutationCount
+  ) {
+    throw new Error('grouped search traversal manifest must carry one loader mutation per expected mutation');
+  }
+  const outcomes = manifest.requiredOutcomes as readonly string[];
+
+  const root = requireRecord(parseStrictYAML(casesValue, 'grouped search traversal cases'), 'grouped search traversal cases');
+  requireExactRequiredFields(root, ['cases'], 'grouped search traversal cases');
+  if (!Array.isArray(root.cases)) throw new Error('grouped search traversal cases.cases must be an array');
+  const rows = root.cases.map((value, index) => requireRecord(value, `grouped search traversal cases.cases[${index}]`));
+  requireUniqueNames(rows, 'grouped search traversal cases.cases');
+  rows.forEach((row, index) => {
+    const label = `grouped search traversal cases.cases[${index}]`;
+    requireExactRequiredFields(row, TRAVERSAL_CASE_FIELDS, label);
+    if (typeof row.query !== 'string' || row.query.length === 0) {
+      throw new Error(`${label}.query must be a non-empty string`);
+    }
+    if (!Number.isSafeInteger(row.searchLimit) || (row.searchLimit as number) < 1) {
+      throw new Error(`${label}.searchLimit must be a positive integer`);
+    }
+    if (!Array.isArray(row.responses)) throw new Error(`${label}.responses must be an array`);
+    (row.responses as unknown[]).forEach((value, responseIndex) => {
+      const response = requireRecord(value, `${label}.responses[${responseIndex}]`);
+      requireExactRequiredFields(response, TRAVERSAL_RESPONSE_FIELDS, `${label}.responses[${responseIndex}]`);
+      if (typeof response.outcome !== 'string' || !outcomes.includes(response.outcome)) {
+        throw new Error(`${label}.responses[${responseIndex}].outcome has an invalid outcome ${String(response.outcome)}`);
+      }
+      if (!Number.isSafeInteger(response.page) || (response.page as number) < 1) {
+        throw new Error(`${label}.responses[${responseIndex}].page must be a positive integer`);
+      }
+    });
+    if (!Array.isArray(row.expectedMemberRequests)) {
+      throw new Error(`${label}.expectedMemberRequests must be an array`);
+    }
+    (row.expectedMemberRequests as unknown[]).forEach((value, requestIndex) => {
+      const request = requireRecord(value, `${label}.expectedMemberRequests[${requestIndex}]`);
+      requireExactRequiredFields(request, TRAVERSAL_REQUEST_FIELDS, `${label}.expectedMemberRequests[${requestIndex}]`);
+      if (!Number.isSafeInteger(request.page) || (request.page as number) < 1) {
+        throw new Error(`${label}.expectedMemberRequests[${requestIndex}].page must be a positive integer`);
+      }
+    });
+    if (!Array.isArray(row.expectedSessionIds) || row.expectedSessionIds.some((id) => typeof id !== 'string')) {
+      throw new Error(`${label}.expectedSessionIds must be a string array`);
+    }
+  });
+  const names = rows.map((row) => row.name);
+  if (rows.length !== manifest.expectedCount || requiredNames.some((name) => !names.includes(name))) {
+    throw new Error('grouped search traversal manifest must name exactly the required cases; a case is missing or renamed');
+  }
+  return rows as unknown as TraversalCase[];
+}
+
+const traversalFixture = loadGroupedTraversalFixture();
+
+/** The (groupId, scope, page) a member URL names, or null for a non-member URL. */
+function memberRequestFromUrl(raw: string): TraversalMemberRequest | null {
+  const url = new URL(raw);
+  const match = url.pathname.match(/^\/api\/v1\/session-groups\/([^/]+)\/members$/);
+  if (!match) return null;
   return {
-    sessionId,
-    project: '/work/alpha-project',
-    projectHash: 'a'.repeat(64),
-    entryIndex,
-    role: 'user' as const,
-    snippet: `${sessionId} hit`,
-    score: 1,
+    groupId: decodeURIComponent(match[1]),
+    scope: url.searchParams.get('scope') ?? '',
+    page: Number(url.searchParams.get('page')),
   };
 }
 
+function requestKey(request: TraversalMemberRequest): string {
+  return `${request.groupId}\u0000${request.scope}\u0000${request.page}`;
+}
+
 describe('grouped search navigation', () => {
+  it('rejects every traversal loader mutation', () => {
+    const manifest = requireRecord(
+      parseStrictYAML(traversalManifestSource, 'grouped search traversal manifest'),
+      'grouped search traversal manifest',
+    );
+    for (const mutationValue of manifest.loaderMutations as unknown[]) {
+      const mutation = requireRecord(mutationValue, 'traversal loader mutation');
+      const target = mutation.target === 'manifest' ? traversalManifestSource : traversalCasesSource;
+      const mutated = replaceExactlyOnce(target, String(mutation.find), String(mutation.replace), String(mutation.name));
+      expect(
+        () => loadGroupedTraversalFixture(
+          mutation.target === 'manifest' ? mutated : traversalManifestSource,
+          mutation.target === 'cases' ? mutated : traversalCasesSource,
+        ),
+        String(mutation.name),
+      ).toThrow(new RegExp(String(mutation.expectedError)));
+    }
+  });
+
+  for (const testCase of traversalFixture) {
+    it(`navigates grouped search: ${testCase.name}`, async () => {
+      const responses = new Map(testCase.responses.map((response) => [requestKey(response), response]));
+      const memberRequests: TraversalMemberRequest[] = [];
+      const fetchMock = vi.fn((input: unknown) => {
+        const url = String(input);
+        if (url.includes('/api/v1/search')) return okResponse(testCase.searchPayload);
+        const request = memberRequestFromUrl(url);
+        if (!request) throw new Error(`unexpected request ${url}`);
+        memberRequests.push(request);
+        const response = responses.get(requestKey(request));
+        if (!response) throw new Error(`no fixture response for ${url}`);
+        if (response.outcome === 'expired') return errorResponse(409, response.body);
+        return okResponse(response.body);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const rows = await fetchGroupedSearchMatches(testCase.query, testCase.searchLimit);
+        expect(rows.map((row) => row.sessionId)).toEqual(testCase.expectedSessionIds);
+        expect(memberRequests).toEqual(testCase.expectedMemberRequests);
+
+        // Every member request replays the issued scope and paging only: the
+        // query is never widened with an all-helper or cross-project filter.
+        for (const call of fetchMock.mock.calls) {
+          const request = memberRequestFromUrl(String(call[0]));
+          if (!request) continue;
+          const keys = [...new URL(String(call[0])).searchParams.keys()].sort();
+          expect(keys).toEqual(['limit', 'page', 'scope']);
+        }
+      } finally {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      }
+    });
+  }
+});
+
+describe('grouped project scope', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    fetchMock = vi.fn();
+    fetchMock = vi.fn(() => okResponse(listPayload));
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -272,67 +469,60 @@ describe('grouped search navigation', () => {
     vi.restoreAllMocks();
   });
 
-  const helperOnlyPayload = {
-    items: [
-      {
-        kind: 'transcript',
-        transcript: { session: sessionSummaryFor('agent-a1'), matches: [match('agent-a1', 0)] },
-      },
-      {
-        kind: 'context_container',
-        context: { groupId: 'hg_h1', ownerStatus: 'known_unavailable' },
-        helperGroups: [{ groupId: 'hg_h1', purpose: 'helper_review', helperThreadCount: 1, memberScope: 'scope-h1' }],
-      },
-    ],
-    page: 1,
-    limit: 20,
-    totalItems: 2,
-    ordinarySessionTotal: 1,
-    helperThreadTotal: 1,
-  };
-
-  function sessionSummaryFor(id: string) {
-    return {
-      id,
-      harness: 'codex',
-      startTime: '2026-01-01T00:00:00Z',
-      durationMins: 1,
-      turnCount: 1,
-      totalTokens: 1,
-      toolCallCount: 0,
-    };
-  }
-
-  it('expands a helper-only search container from its issued scope, keeping ordinary hits', async () => {
-    fetchMock
-      .mockReturnValueOnce(okResponse(helperOnlyPayload))
-      .mockReturnValueOnce(
-        okResponse({
-          members: [{ kind: 'transcript', transcript: { session: sessionSummaryFor('agent-b1'), matches: [match('agent-b1', 3)] } }],
-          page: 1,
-          limit: 20,
-          total: 1,
-        }),
-      );
-
-    const rows = await fetchGroupedSearchMatches('needle', 20);
-    expect(rows.map((row) => row.sessionId)).toEqual(['agent-a1', 'agent-b1']);
-
-    const searchUrl = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(searchUrl.searchParams.get('view')).toBe('grouped');
-    const memberUrl = new URL(String(fetchMock.mock.calls[1][0]));
-    expect(memberUrl.pathname).toBe('/api/v1/session-groups/hg_h1/members');
-    expect(memberUrl.searchParams.get('scope')).toBe('scope-h1');
-    expect([...memberUrl.searchParams.keys()].sort()).toEqual(['limit', 'page', 'scope']);
+  it('sends the project filter and no other narrowing parameter', async () => {
+    await fetchGroupedLocalSessions({ projectHash: 'a'.repeat(64) });
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/sessions');
+    expect(url.searchParams.get('view')).toBe('grouped');
+    expect(url.searchParams.get('project')).toBe('a'.repeat(64));
+    expect([...url.searchParams.keys()].sort()).toEqual(['project', 'view']);
   });
 
-  it('omits helper hits when the helper scope expired instead of widening the query', async () => {
-    fetchMock
-      .mockReturnValueOnce(okResponse(helperOnlyPayload))
-      .mockReturnValueOnce(errorResponse(409, { error: 'expired', code: 'group_scope_expired' }));
+  it('accepts a response whose transcript rows all belong to the requested project', () => {
+    const payload = decodeGroupedLocalList({
+      ...listPayload,
+      totalItems: 1,
+      ordinarySessionTotal: 1,
+      items: [
+        {
+          kind: 'transcript',
+          transcript: {
+            session: { ...sessionSummary('agent-a1'), projectHash: 'a'.repeat(64) },
+          },
+        },
+      ],
+    });
+    expect(() => assertGroupedProjectScope(payload, 'a'.repeat(64))).not.toThrow();
+  });
 
-    const rows = await fetchGroupedSearchMatches('needle', 20);
-    expect(rows.map((row) => row.sessionId)).toEqual(['agent-a1']);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+  it('refuses a response that carries another project under a project-scoped request', () => {
+    const payload = decodeGroupedLocalList({
+      ...listPayload,
+      totalItems: 1,
+      ordinarySessionTotal: 1,
+      items: [
+        {
+          kind: 'transcript',
+          transcript: {
+            session: { ...sessionSummary('agent-a1'), projectHash: 'b'.repeat(64) },
+          },
+        },
+      ],
+    });
+    expect(() => assertGroupedProjectScope(payload, 'a'.repeat(64))).toThrow(
+      /carries other projects' sessions/i,
+    );
   });
 });
+
+function sessionSummary(id: string) {
+  return {
+    id,
+    harness: 'codex' as const,
+    startTime: '2026-01-01T00:00:00Z',
+    durationMins: 1,
+    turnCount: 1,
+    totalTokens: 1,
+    toolCallCount: 0,
+  };
+}
