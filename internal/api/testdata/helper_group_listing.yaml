@@ -4,6 +4,7 @@ requiredNames:
   - owner-excluded
   - selected-helper-search
   - search-limit-selected-backfill
+  - selected-search-beyond-first-window
   - unresolved-independent
   - identical-independent-helpers
   - trunk-append-vs-replacement
@@ -140,6 +141,81 @@ cases:
       helperThreadTotal: 1
       items:
         - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
+
+  - name: selected-search-beyond-first-window
+    classification: must-pass
+    provenance: {source: bug, ref: "grouped search applied the flat route's global page bound to the ranked stream before the persisted selection, so a selected match ranked past that bound vanished from every grouped exit"}
+    mutation: {description: "fifty-one unselected short matches outrank the one selected long match while the page limit is one"}
+    input:
+      route: search
+      searchQuery: needle
+      searchLimit: 1
+      selection: selected
+      selectedIds: [agent-b3]
+      sessions:
+        - {id: agent-probe0, startMs: 700, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe1, startMs: 701, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe2, startMs: 702, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe3, startMs: 703, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe4, startMs: 704, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe5, startMs: 705, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe6, startMs: 706, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe7, startMs: 707, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe8, startMs: 708, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe9, startMs: 709, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe10, startMs: 710, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe11, startMs: 711, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe12, startMs: 712, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe13, startMs: 713, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe14, startMs: 714, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe15, startMs: 715, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe16, startMs: 716, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe17, startMs: 717, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe18, startMs: 718, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe19, startMs: 719, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe20, startMs: 720, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe21, startMs: 721, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe22, startMs: 722, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe23, startMs: 723, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe24, startMs: 724, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe25, startMs: 725, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe26, startMs: 726, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe27, startMs: 727, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe28, startMs: 728, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe29, startMs: 729, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe30, startMs: 730, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe31, startMs: 731, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe32, startMs: 732, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe33, startMs: 733, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe34, startMs: 734, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe35, startMs: 735, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe36, startMs: 736, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe37, startMs: 737, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe38, startMs: 738, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe39, startMs: 739, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe40, startMs: 740, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe41, startMs: 741, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe42, startMs: 742, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe43, startMs: 743, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe44, startMs: 744, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe45, startMs: 745, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe46, startMs: 746, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe47, startMs: 747, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe48, startMs: 748, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe49, startMs: 749, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-probe50, startMs: 750, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle followed by a deliberately long stretch of extra prose so the stream ranks the shorter unselected matches first"}
+    expected:
+      statusCode: 200
+      totalItems: 1
+      ordinarySessionTotal: 0
+      helperThreadTotal: 1
+      items:
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, limit: 20, total: 1, memberIds: [agent-b3]}
 
   - name: owner-excluded
     classification: must-pass

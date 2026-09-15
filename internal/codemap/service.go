@@ -86,10 +86,12 @@ const (
 
 	// SearchDefaultLimit and SearchMaxLimit publish the flat search route's page
 	// bounds. A caller that must apply its own eligibility before paging — the
-	// grouped local search view applies the persisted selection matcher — reads
-	// the widest ranked window SearchMaxLimit allows, then applies
-	// SearchDefaultLimit when the request named no limit. Sharing the constants
-	// keeps the grouped page and the flat page in the same units.
+	// grouped local search view applies the persisted selection matcher — walks
+	// ranked windows of at most SearchMaxLimit entries with SearchRankedWindow and
+	// pages the entries that survive, then applies SearchDefaultLimit when the
+	// request named no limit. Sharing the constants keeps the grouped page and the
+	// flat page in the same units, and walking windows rather than reading one
+	// window is what keeps a selected match ranked past the bound reachable.
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
 )
@@ -255,6 +257,47 @@ func (s *Service) ChangeDiff(ctx context.Context, projectHash schema.ProjectHash
 // clamped to searchMaxLimit. Search is global (no projectHash), so it has no
 // ErrProjectNotFound path.
 func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.SearchPayload, error) {
+	switch {
+	case limit <= 0:
+		limit = searchDefaultLimit
+	case limit > searchMaxLimit:
+		limit = searchMaxLimit
+	}
+	return s.searchRankedWindow(ctx, query, limit, 0)
+}
+
+// SearchRankedWindow reads ONE page of the same ranked global full-text search
+// Search serves, addressed by a raw offset into the ranked stream rather than a
+// position inside an already-filtered set. A caller that must apply its own
+// eligibility to the ranked matches — the grouped local search view applies the
+// persisted selection matcher — walks successive windows and counts its page
+// limit only over the entries that survive, so an ineligible entry can never
+// displace an eligible one that ranks past the flat route's bound.
+//
+// window must be within (0, SearchMaxLimit]; offset must be non-negative. The
+// ordering is the same deterministic (rank, session, entry) order Search uses,
+// so successive windows neither skip nor repeat a row while the index is
+// unchanged. window is the raw ranked row cap, exactly like the flat route's
+// limit: a window shorter than requested means the ranked stream is exhausted.
+func (s *Service) SearchRankedWindow(ctx context.Context, query string, window, offset int) (*schema.SearchPayload, error) {
+	if window <= 0 || window > searchMaxLimit {
+		return nil, fmt.Errorf(
+			"codemap: ranked search window %d is outside the supported 1..%d range in codemap.Service.SearchRankedWindow; a caller iterating the ranked stream to apply its own eligibility cannot page a window the flat search contract does not allow, and no search results were read; clamp the window to the flat search bounds and retry",
+			window, searchMaxLimit,
+		)
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf(
+			"codemap: ranked search offset %d is negative in codemap.Service.SearchRankedWindow; a ranked offset addresses a position in the search stream and cannot be negative, and no search results were read; pass the count of ranked rows already consumed and retry",
+			offset,
+		)
+	}
+	return s.searchRankedWindow(ctx, query, window, offset)
+}
+
+// searchRankedWindow is the shared implementation behind Search and
+// SearchRankedWindow: sanitize, read one ranked page, and shape the payload.
+func (s *Service) searchRankedWindow(ctx context.Context, query string, limit, offset int) (*schema.SearchPayload, error) {
 	payload := schema.NewSearchPayload(query)
 
 	if len(strings.TrimSpace(query)) < searchMinQueryLen {
@@ -265,14 +308,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 		return payload, nil
 	}
 
-	switch {
-	case limit <= 0:
-		limit = searchDefaultLimit
-	case limit > searchMaxLimit:
-		limit = searchMaxLimit
-	}
-
-	rows, err := s.querySearch(ctx, match, limit, 0)
+	rows, err := s.querySearch(ctx, match, limit, offset)
 	if err != nil {
 		return nil, err
 	}
