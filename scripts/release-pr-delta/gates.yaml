@@ -1,0 +1,58 @@
+# Input closure and required child jobs for the release-PR gates.
+#
+# Keep this file in step with .github/workflows/e2e.yml and
+# .github/workflows/release-validate.yml. A workflow change is itself an input
+# of both gates, so a drift that adds or renames a child makes the gate run (the
+# unknown child is rejected). A child removed from this file would silently
+# weaken the proof, so TestManifestMatchesWorkflows pins the required names to
+# the jobs (with their matrix expansion) defined by those workflows.
+gates:
+  - key: e2e
+    prefix: "e2e (release PR) / "
+    patterns:
+      - '\.go$'                  # every package the CLI and the e2e suite compile
+      - '^go\.mod$'              # dependency graph
+      - '^go\.sum$'
+      - '^Makefile$'             # the e2e target and its wrapper invocation
+      - '^flake\.nix$'           # the dev shell the job runs in
+      - '^flake\.lock$'
+      - '^scripts/e2e-budget\.sh$'
+      - '^internal/e2e/'         # the suite, its fixtures, and its contract data
+      - '(^|/)testdata/'         # fixtures other packages read (Pi round-trip)
+      - '^web/out/'              # the //go:embed all:web/out tree the CLI builds with
+      - '^\.github/workflows/'   # the workflow-contract tests read these files
+    children:
+      - name: full-stack push e2e (podman)
+  - key: release_validate
+    prefix: "release-validate (release PR) / "
+    patterns:
+      - '\.go$'               # the binary the snapshot cross-compiles
+      - '(^|/)testdata/'      # fixtures the Nix build tests read, root or nested
+      - '^docs/'              # documentation tests run in the Nix build checkPhase
+      - '^go\.mod$'
+      - '^go\.sum$'
+      - '^web/'               # the embedded dashboard `make web` builds
+      - '^Makefile$'
+      - '^flake\.nix$'        # the nix build job
+      - '^flake\.lock$'
+      - '^\.goreleaser\.yml$' # the packaging configuration itself
+      - '^scripts/'           # install-goreleaser, the patch, notices and checks
+      - '^\.github/workflows/'
+      - '^LICENSE$'           # packaged into the archives and packages
+      - '^README\.md$'
+      - '^THIRD_PARTY_NOTICES$'
+      - '^\.gitignore$'       # the clean-tree assertion after `make web`
+    children:
+      - name: classify rc
+      - name: goreleaser snapshot
+      - name: nix build .#peasant
+      - name: deb (ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982 / amd64)
+      - name: deb (ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982 / arm64)
+      - name: deb (ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90 / amd64)
+      - name: deb (ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90 / arm64)
+      - name: rpm (fedora@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814)
+      - name: rpm (opensuse/leap@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421)
+      - name: makepkg (archlinux x86_64)
+      - name: brew style (linux)
+      - name: macos cask install (rc only)
+        optional: true        # runs on release candidates only
