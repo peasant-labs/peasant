@@ -92,8 +92,8 @@ check: fmt lint
 	# One pass over every package. The race detector (GORACE_FLAG) is on by
 	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
 	# The explicit timeout outlives Go's 10m default: the release-PR race run
-	# needs longer than 10m in cmd/peasant and internal/api on the 2-vCPU CI
-	# runner, where the default panics the test binary mid-suite.
+	# needs longer than 10m in cmd/peasant and internal/api on the CI runner,
+	# where the default panics the test binary mid-suite.
 	go test -timeout=30m $(GORACE_FLAG) ./...
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
