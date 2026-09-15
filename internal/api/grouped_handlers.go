@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/schema"
 )
 
 // groupedViewValue is the only accepted value of the existing view parameter.
@@ -71,6 +72,20 @@ func (s *Server) serveGroupedSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filters := GroupedFilters{Variant: GroupedRouteSessions}
+	// project is opt-in and scopes the WHOLE grouped response, not just the
+	// visible page: the candidate set, the ordinary/helper counts and every
+	// issued member scope replay one project. Omission keeps the legacy
+	// cross-project list, and a malformed value is refused rather than widened.
+	if raw := r.URL.Query().Get("project"); raw != "" {
+		project, projectErr := schema.NewProjectHash(raw)
+		if projectErr != nil {
+			writeAPIError(w, http.StatusBadRequest,
+				fmt.Sprintf("Grouped sessions could not be listed because query field \"project\" is not the opaque 64-character project hash in internal/api.serveGroupedSessions. No rows were returned, because a malformed project filter cannot be matched to a project and must not widen the grouped list to every project. Send the projectHash from the project route, or omit project for the cross-project list, then retry: %v", projectErr),
+				"grouped_project_invalid")
+			return
+		}
+		filters.ProjectHash = project
+	}
 	candidates, err := source.Gather(r.Context(), filters)
 	if err != nil {
 		writeDiscoveryError(w, "failed to fetch grouped sessions", err)
