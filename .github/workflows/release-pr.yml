@@ -2,10 +2,13 @@ name: Release PR
 
 # Two-trigger release-PR gate (the "release(vX.Y.Z): …" ceremony).
 #
-# Trigger A — while a release PR is OPEN (opened/edited/synchronize/reopened):
-#   validate the title grammar (via the release-guard CLI, the single source of
-#   the grammar) and assert the PR author is a maintainer (admin/maintain
-#   collaborator). Failures surface at PR time, before merge.
+# Trigger A — while a release PR is OPEN (opened/edited/synchronize/reopened/
+#   labeled): validate the title grammar (via the release-guard CLI, the single
+#   source of the grammar) and assert the PR author is a maintainer
+#   (admin/maintain collaborator). Failures surface at PR time, before merge.
+#   The e2e and release-validate matrices re-run on a push only when the delta
+#   since the previous head touches their inputs (see the `changes` job); add
+#   the `full-gate` label to force the complete matrix on demand.
 #
 # Trigger B — when a release PR MERGES (closed && merged):
 #   run make nix-vendor-hash on the merge commit, commit a flake.nix hash fix if
@@ -17,18 +20,18 @@ name: Release PR
 # The App token needs Contents:write on peasant (an App installation setting).
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened, closed]
+    types: [opened, edited, synchronize, reopened, labeled, closed]
     branches: [develop]
 
 # A new push (synchronize) supersedes the running gates for this PR. A body or
-# title edit does NOT: the edited event carries the same head SHA, so it queues
+# title edit and a label add do NOT: they carry the same head SHA, so they queue
 # behind the in-flight run instead of cancelling it. Without this guard, a bot
 # editing the PR body seconds after open cancelled the opened run, and the
 # surviving edited run skips the gate jobs, leaving the PR with no pre-merge
 # test / e2e / release-validate signal.
 concurrency:
   group: release-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: ${{ github.event.action != 'edited' }}
+  cancel-in-progress: ${{ github.event.action != 'edited' && github.event.action != 'labeled' }}
 
 permissions:
   contents: read
@@ -68,11 +71,62 @@ jobs:
       - name: Assert author is a maintainer (admin/maintain)
         run: go run github.com/peasant-labs/schema/cmd/release-guard check-maintainer --user "$PR_AUTHOR"
 
-  # Full validation matrices on an OPEN release PR — REGARDLESS of files touched.
-  # tests.yml and e2e.yml are path-filtered on their own pull_request triggers,
-  # while release-validate.yml is workflow_call-only. Call all of them here as
-  # reusable workflows, gated on the same release( title as `validate`, so every
-  # release PR proves the full gate before merge.
+  # Input probe for the expensive matrices. A fix push re-runs a gate only when
+  # the delta since the previous head touches that gate's inputs; a one-gate fix
+  # does not re-run the others. Fail open: an event other than synchronize, a
+  # missing/unknown previous head (force-push), or an empty delta runs every
+  # gate. The path sets mirror the pull_request paths in e2e.yml and the
+  # packaging inputs of release-validate.yml; keep them in step with those
+  # workflows. tests.yml is the general gate and always runs.
+  changes:
+    name: changed gates
+    if: >-
+      github.event.action != 'closed' &&
+      startsWith(github.event.pull_request.title, 'release(')
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      e2e: ${{ steps.delta.outputs.e2e }}
+      release_validate: ${{ steps.delta.outputs.release_validate }}
+    steps:
+      - name: Checkout repository (full history for the previous head)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Classify the delta since the previous head
+        id: delta
+        env:
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Fail open: run a gate unless the push proves its inputs are untouched.
+          e2e=true
+          release_validate=true
+          if [ "$ACTION" = "synchronize" ] && [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$BEFORE" "$HEAD_SHA")"
+            if [ -n "$changed" ]; then
+              if ! printf '%s\n' "$changed" | grep -qE '^(internal/(e2e|ingest|pull|push)/|cmd/|go\.mod$|go\.sum$|Makefile$|\.github/workflows/e2e\.yml$)'; then
+                e2e=false
+              fi
+              if ! printf '%s\n' "$changed" | grep -qE '^(\.goreleaser\.yml$|scripts/install-goreleaser$|scripts/goreleaser-v2\.17\.1-homebrew\.patch$|flake\.(nix|lock)$|Makefile$|web/|go\.mod$|go\.sum$|\.github/workflows/(release-validate|release)\.yml$)'; then
+                release_validate=false
+              fi
+            fi
+          fi
+          echo "e2e=$e2e" >> "$GITHUB_OUTPUT"
+          echo "release_validate=$release_validate" >> "$GITHUB_OUTPUT"
+
+  # Validation matrices on an OPEN release PR. tests.yml runs on every open
+  # event; e2e.yml and release-validate.yml re-run on a synchronize push only
+  # when the `changes` job finds their inputs touched, so a fix to one gate does
+  # not re-run the others. Add the `full-gate` label to run the complete matrix
+  # on demand before merge.
+  #
   # A push also fires the path-filtered standalone Tests/E2E runs. Their jobs
   # skip release(...) PRs through caller-aware guards, so the called copies here
   # are the single execution of each suite and of the harvester guard — exactly
@@ -83,27 +137,32 @@ jobs:
     needs: validate
     if: >-
       startsWith(github.event.pull_request.title, 'release(') &&
-      contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+      (contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) ||
+       (github.event.action == 'labeled' && github.event.label.name == 'full-gate'))
     permissions:
       contents: read
     uses: ./.github/workflows/tests.yml
 
   e2e:
     name: e2e (release PR)
-    needs: validate
+    needs: [validate, changes]
     if: >-
       startsWith(github.event.pull_request.title, 'release(') &&
-      contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+      (contains(fromJSON('["opened","reopened"]'), github.event.action) ||
+       (github.event.action == 'labeled' && github.event.label.name == 'full-gate') ||
+       (github.event.action == 'synchronize' && needs.changes.outputs.e2e == 'true'))
     permissions:
       contents: read
     uses: ./.github/workflows/e2e.yml
 
   release-validate:
     name: release-validate (release PR)
-    needs: validate
+    needs: [validate, changes]
     if: >-
       startsWith(github.event.pull_request.title, 'release(') &&
-      contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+      (contains(fromJSON('["opened","reopened"]'), github.event.action) ||
+       (github.event.action == 'labeled' && github.event.label.name == 'full-gate') ||
+       (github.event.action == 'synchronize' && needs.changes.outputs.release_validate == 'true'))
     permissions:
       contents: read
     uses: ./.github/workflows/release-validate.yml
