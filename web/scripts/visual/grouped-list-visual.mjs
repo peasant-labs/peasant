@@ -218,6 +218,56 @@ async function runTheme(page, theme, gate) {
   }
   await capture(page, gate, join(OUT, theme, 'grouped-scope-expired.png'), '[data-grouped-sessions-section]', `${theme}/grouped-scope-expired`)
 
+  // The retained flat flow: its own disclosure opens the unchanged cross-project
+  // table with the filter box and the top-level pager, beside the grouped list.
+  await page.evaluate(() => {
+    document.querySelector('[data-flat-sessions-disclosure] button')?.click()
+  })
+  await page.waitForSelector('[data-tour="all-sessions"]', { visible: true, timeout: 10000 }).catch(() => fail(`${theme}: the retained flat session table never mounted`))
+  const flat = await page.evaluate(() => {
+    const section = document.querySelector('[data-tour="all-sessions"]')
+    const input = section?.querySelector('input[type="search"]')
+    const count = section?.querySelector('[aria-live="polite"]')?.textContent?.trim() || ''
+    const pager = section?.querySelector('.font-mono.text-xs.text-ink-4')?.textContent?.trim() || ''
+    const grouped = document.querySelector('[data-grouped-sessions-section]')
+    return {
+      hasFilter: !!input,
+      filterLabel: input?.getAttribute('aria-label') || '',
+      count,
+      pager,
+      // The grouped list must remain mounted beside it.
+      groupedStillMounted: !!grouped,
+    }
+  })
+  if (!flat.hasFilter || flat.filterLabel !== 'search sessions' || !/\d+ sessions/.test(flat.count)) {
+    fail(`${theme}: retained flat filter probe ${JSON.stringify(flat)}`)
+  }
+  if (!flat.groupedStillMounted) fail(`${theme}: opening the flat table unmounted the grouped list`)
+  await capture(page, gate, join(OUT, theme, 'home-flat.png'), '[data-flat-sessions-disclosure]', `${theme}/home-flat`)
+
+  // The project route mounts the SAME grouped list scoped to one project: the
+  // request must carry the project filter, and the response rows must render.
+  const sessionsUrls = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === '/api/v1/sessions') sessionsUrls.push(url)
+  })
+  const projectPage = await page.goto(`${ORIGIN}/sessions/${PROJECT_HASH}`, { waitUntil: 'domcontentloaded' })
+  if (projectPage?.status() !== 200) fail(`${theme}: project route HTTP ${projectPage?.status()}`)
+  await page.waitForSelector('[data-grouped-sessions-section]', { visible: true, timeout: 15000 }).catch(() => fail(`${theme}: the project-scoped grouped section never mounted`))
+  if (!sessionsUrls.some((url) => url.searchParams.get('view') === 'grouped' && url.searchParams.get('project') === PROJECT_HASH)) {
+    fail(`${theme}: the project route never requested the project-scoped grouped view ${JSON.stringify(sessionsUrls.map((url) => url.search))}`)
+  }
+  const projectMounted = await page.evaluate(() => {
+    const section = document.querySelector('[data-grouped-sessions-section]')
+    const owners = [...(section?.querySelectorAll('.helper-thread-row') ?? [])].map((row) => row.getAttribute('data-thread-id'))
+    return { owners, heading: document.querySelector('h1')?.textContent?.trim() || '' }
+  })
+  if (!projectMounted.owners.includes('agent-a1') || !projectMounted.owners.includes('agent-a3')) {
+    fail(`${theme}: project-scoped grouped rows missing ${JSON.stringify(projectMounted)}`)
+  }
+  await capture(page, gate, join(OUT, theme, 'project-grouped.png'), '[data-grouped-sessions-section]', `${theme}/project-grouped`)
+
   if (diagnostics.length) fail(`${theme}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
 }
 
