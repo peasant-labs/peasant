@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
-import { AllSessions } from '@/components/sessions/AllSessions';
+import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
 import { useSessionTitles } from '@/hooks/useSessionTitles';
 import { SkeletonList } from '@/lib/skeleton';
 import { TeachingEmptyState } from '@/lib/ft-ui';
@@ -16,10 +16,13 @@ import type { SessionsPayload, SessionSummary } from '@/types/messages';
 /**
  * `/sessions/{projectHash}` — every ingested session for one project.
  *
- * This is where a project row on the Home picker leads. It restores the
- * pre-release archive's project-detail behaviour (its ProjectDetailClient
- * filtered the sessions channel by project and rendered the session table)
- * using the same table Home renders, scoped to one project.
+ * This is where a project row on the Home picker leads. It renders the SAME
+ * server-grouped list Home renders, scoped to this project: the project hash
+ * rides the grouped REST route so the server applies the project predicate to
+ * the ordinary rows, the counts and every issued helper-member scope. Sorting
+ * and grouping are therefore server-driven and cannot disagree with the counts,
+ * and a saved helper expands from an originating scope that already excludes
+ * other projects.
  *
  * Its own route rather than `/projects/{hash}`: that path deliberately redirects
  * to the code map, and the map is capability-gated, so on a default server it is
@@ -28,6 +31,11 @@ import type { SessionsPayload, SessionSummary } from '@/types/messages';
  * The project is read from the PATH, not a query string — `useSearchParams`
  * would force a Suspense boundary under `output: 'export'` (see the /review
  * page), and there is nothing to gain from a query here.
+ *
+ * The WebSocket sessions channel is NOT the list source: it supplies the
+ * project display name for the heading and an invalidation signal, so a live
+ * update refetches the grouped REST read instead of re-deriving the list on the
+ * client. The flat route stays untouched for its existing consumers.
  */
 
 const CHANNELS: ['sessions'] = ['sessions'];
@@ -127,20 +135,25 @@ export function SessionsRouter() {
           the three branches rendered and the page went blank under the heading. */}
       {!error && data === undefined && <SkeletonList rows={5} label="Loading sessions" />}
 
-      {!error && data !== undefined && scoped.length === 0 && (
-        <TeachingEmptyState
-          title="no sessions recorded for this project yet"
-          body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
-          command="peasant ingest"
-        />
-      )}
-
-      {scoped.length > 0 && (
-        <AllSessions
-          sessions={scoped}
+      {/* The project-scoped grouped list. It renders exactly the server's items
+          and counts for THIS project; when the project has no sessions the
+          section shows the ingest teaching state it owns. A project scope the
+          server did not apply fails closed (see assertGroupedProjectScope)
+          rather than showing another project's sessions. */}
+      {!error && data !== undefined && (
+        <GroupedSessionsSection
+          variant="sessions"
+          projectHash={projectHash}
+          invalidationKey={data}
           titles={sessionTitles}
-          title="sessions"
-          subtitle="ingested session transcripts for this project."
+          heading="sessions"
+          emptyState={
+            <TeachingEmptyState
+              title="no sessions recorded for this project yet"
+              body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
+              command="peasant ingest"
+            />
+          }
         />
       )}
     </div>

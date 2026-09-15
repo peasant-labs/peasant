@@ -77,6 +77,41 @@ describe('GroupedSessionsSection', () => {
     );
   });
 
+  it('scopes the grouped read to one project through the route filter', async () => {
+    render(<GroupedSessionsSection variant="sessions" projectHash={PROJECT_HASH} heading="sessions" />);
+    await screen.findByText('agent-a1');
+
+    const listCalls = fetchMock.mock.calls.filter(
+      (call) => new URL(String(call[0])).pathname === '/api/v1/sessions',
+    );
+    expect(listCalls).toHaveLength(1);
+    const url = new URL(String(listCalls[0][0]));
+    expect(url.searchParams.get('view')).toBe('grouped');
+    expect(url.searchParams.get('project')).toBe(PROJECT_HASH);
+  });
+
+  it('refuses a cross-project grouped response instead of rendering it under the project heading', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') {
+        return okResponse({
+          ...listResponse(),
+          items: [
+            {
+              kind: 'transcript',
+              transcript: { session: { ...session('other'), projectHash: 'b'.repeat(64) } },
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
+    });
+    render(<GroupedSessionsSection variant="sessions" projectHash={PROJECT_HASH} heading="sessions" />);
+
+    expect(await screen.findByText(/carries other projects' sessions/i)).toBeInTheDocument();
+    expect(screen.queryByText('other')).not.toBeInTheDocument();
+  });
+
   it('refreshes the originating list when an expanded group scope expires, never a broader set', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = new URL(String(input));

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { FeedbackPanel } from '@/lib/ft-ui';
 import { SkeletonList } from '@/lib/skeleton';
 import {
+  assertGroupedProjectScope,
   fetchGroupedLocalSearch,
   fetchGroupedLocalSessions,
   type LocalSessionListPayload,
@@ -15,6 +16,14 @@ export interface GroupedSessionsSectionProps {
   variant: 'sessions' | 'search';
   /** Search query; required for the search variant. */
   query?: string;
+  /**
+   * Scope the sessions variant to one project. The project hash is sent as the
+   * grouped route's `project` filter, so the server scopes the candidates,
+   * the counts and every issued member scope; the section refuses a response
+   * that still carries another project's rows rather than rendering a
+   * cross-project list under a project heading. Ignored by the search variant.
+   */
+  projectHash?: string;
   /**
    * Any value that changes when the WebSocket sessions channel delivers an
    * update. The grouped list is a REST read; an existing WS update invalidates
@@ -42,6 +51,7 @@ export interface GroupedSessionsSectionProps {
 export function GroupedSessionsSection({
   variant,
   query,
+  projectHash,
   invalidationKey,
   titles,
   selection,
@@ -62,13 +72,15 @@ export function GroupedSessionsSection({
     const request =
       variant === 'search'
         ? fetchGroupedLocalSearch(query ?? '', 20)
-        : fetchGroupedLocalSessions();
+        : fetchGroupedLocalSessions({ projectHash });
     request
       .then((next) => {
-        if (!cancelled) {
-          setPayload(next);
-          setLoading(false);
+        if (cancelled) return;
+        if (variant === 'sessions' && projectHash) {
+          assertGroupedProjectScope(next, projectHash);
         }
+        setPayload(next);
+        setLoading(false);
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -80,7 +92,7 @@ export function GroupedSessionsSection({
     return () => {
       cancelled = true;
     };
-  }, [variant, query, invalidationKey, reload]);
+  }, [variant, query, projectHash, invalidationKey, reload]);
 
   if (loading && payload === null) {
     return <SkeletonList rows={4} label="Loading grouped sessions" />;
