@@ -1,0 +1,16 @@
+# Exact case set for the published provenance envelope fixture.
+# Name-only: no bare count, so adding a case never edits this file, and removing
+# or renaming one fails until the name is dropped here.
+requiredNames:
+  - relationships_with_public_anchors_publish
+  - absent_input_count_stays_absent
+  - measured_zero_input_count_stays_zero
+  - positive_input_count_root_and_purpose_publish
+  - retained_earlier_history_publishes_with_state
+  - full_tool_body_publishes_past_preview_bound
+  - project_label_withholds_working_directory
+  - hidden_git_fields_are_emptied
+  - session_only_graph_payload_refused_without_token
+  - legacy_snapshot_keeps_legacy_envelope_shape
+  - pi_metadata_body_is_redacted_in_envelope
+  - receipt_binds_content_hash_to_published_bytes

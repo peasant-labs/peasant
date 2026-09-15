@@ -132,6 +132,60 @@ func SeedManagedInput(t *testing.T, db *store.Store, filesystem ingest.FileSyste
 	return entries
 }
 
+// SeedGenerationPublication establishes one publication-ready capture backed by
+// a real committed generation. It writes the session row, publication metadata
+// and capture revision through the production insert, then activates the
+// generation with the same revision and a complete full-content capture, so the
+// publication reader and the durable snapshot reader agree on ONE committed
+// capture. It returns the capture revision it bound.
+//
+// It is the generation-capable counterpart of SeedReadyPublication, which seeds
+// the preserved V1 index. A test that drives publication from a committed
+// generation uses this so the pipeline reads real capture evidence instead of a
+// store double.
+func SeedGenerationPublication(t *testing.T, db *store.Store, meta *schema.UnifiedMetadata, generation indexformat.V2, blobs map[schema.SourceEntryRef][]byte) int64 {
+	t.Helper()
+	ctx := t.Context()
+	meta.SchemaVersion = ingest.CurrentSchemaVersion
+	if meta.ContentHash == "" {
+		content, err := json.Marshal(generation.Generation.Main.Entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		meta.ContentHash = schema.ComputeTranscriptHash(content)
+	}
+	meta.MetadataHash = schema.ComputeMetadataHash(meta)
+	cwdKind := ingest.CWDSourceAbsent
+	if meta.CWD != "" {
+		cwdKind = ingest.CWDSourceExact
+	}
+	revisions, err := db.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{{
+		Metadata: meta, PublicationCapture: true, CWDProvenance: cwdKind,
+	}})
+	if err != nil {
+		t.Fatalf("seed generation publication session row: %v", err)
+	}
+	revision := revisions[meta.SessionID]
+	if err := db.ActivateGeneration(ctx, store.GenerationActivation{
+		Generation:      generation,
+		Blobs:           blobs,
+		IndexerVersion:  1,
+		IndexedAtMs:     1,
+		CaptureRevision: revision,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			PublicationCaptureRevision: revision,
+			Status:                     ingest.ContentCaptureComplete,
+			SourceAuthority:            ingest.ContentSourceNewIngest,
+			TranscriptOrigin:           ingest.TranscriptOriginFile,
+			CaptureFormat:              ingest.ContentCaptureFormatFull,
+			CapturedAtMs:               1,
+		},
+	}); err != nil {
+		t.Fatalf("activate seeded generation for session %s: %v", meta.SessionID, err)
+	}
+	return revision
+}
+
 // sameMeta re-derives the checksums the seeded metadata carries, so the
 // managed artifact the index step captures matches the row that was mirrored.
 func sameMeta(t *testing.T, meta ingest.UnifiedMetadata, data []byte) ingest.UnifiedMetadata {

@@ -2,12 +2,15 @@ package push
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
@@ -15,6 +18,17 @@ import (
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
+
+// snapshotPublicationStore is the OPTIONAL durable snapshot surface a local
+// store may offer. It is asserted at runtime rather than added to PipelineStore:
+// a store opened without generation support is a supported configuration, and
+// extending a required interface would force every caller and double to
+// implement methods it cannot honor.
+type snapshotPublicationStore interface {
+	indexformat.SnapshotReader
+	indexformat.ContentResolver
+	GenerationSnapshotsSupported() bool
+}
 
 // BuildTranscriptContent builds the versioned, structured push wire body (D2):
 // a TranscriptContent envelope wrapping the SessionDetailPayload produced by the
@@ -74,6 +88,139 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 		Kind:            schema.ContentKindSessionDetail,
 		SessionDetail:   payload,
 	}, nil
+}
+
+// BuildPublishTranscriptContent builds the transcript part of one publication.
+//
+// When the store offers the durable snapshot surface and reports generation
+// support, the envelope serializes the committed generation's validated detail,
+// hydrated through the ONE payload-construction boundary shared with detail
+// reads and export, with the publication consent overlay applied. That is what
+// carries session-level graph evidence (relationships with public anchors,
+// root identity, purpose and the input-submission count), retained earlier
+// history, per-block provenance and full hydrated tool bodies into the
+// published bytes.
+//
+// A legacy V1 read (transcript.ErrLegacySnapshot) uses the preserved entries
+// builder unchanged, including its TurnCount = len(Turns) stamp. Any OTHER
+// snapshot failure fails the session whole: a corrupt or missing managed
+// artifact is never silently published as truncated legacy content.
+//
+// store is deliberately untyped: the durable surface is an optional capability
+// of the concrete store, and a store that does not implement it takes the
+// preserved legacy path. Callers pass the same store they read capture
+// metadata from.
+func BuildPublishTranscriptContent(
+	ctx context.Context,
+	store any,
+	sessionID string,
+	meta *ingest.UnifiedMetadata,
+	entries []schema.SessionEntry,
+	emit schema.PushContractVersion,
+	fields config.PushFieldVisibility,
+	origin sessionorigin.Origin,
+) (schema.TranscriptContent, error) {
+	if reader, ok := store.(snapshotPublicationStore); ok && reader.GenerationSnapshotsSupported() {
+		content, err := buildSnapshotPublishContent(ctx, reader, sessionID, meta, fields, origin, emit)
+		if err == nil {
+			return content, nil
+		}
+		if !errors.Is(err, transcript.ErrLegacySnapshot) {
+			return schema.TranscriptContent{}, err
+		}
+	}
+	return BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
+}
+
+// buildSnapshotPublishContent hydrates one committed generation inside the
+// shared session lock, applies the consent overlay and wraps the validated
+// detail in the publish envelope. The callback performs no network access and
+// mutates no store; hydration, folding, validation and envelope construction
+// all happen under the shared lock the snapshot boundary already holds.
+func buildSnapshotPublishContent(
+	ctx context.Context,
+	store snapshotPublicationStore,
+	sessionID string,
+	meta *ingest.UnifiedMetadata,
+	fields config.PushFieldVisibility,
+	origin sessionorigin.Origin,
+	emit schema.PushContractVersion,
+) (schema.TranscriptContent, error) {
+	var content schema.TranscriptContent
+	err := store.WithSessionSnapshot(ctx, schema.SessionID(sessionID), func(snapshot indexformat.ReadSnapshot) error {
+		detail, err := transcript.SnapshotToDetailValidated(ctx, snapshot, store)
+		if err != nil {
+			return err
+		}
+		applyPublishConsentOverlay(detail, meta, fields)
+		content = BuildTranscriptContentFromDetail(detail, emit, origin)
+		return nil
+	})
+	if err != nil {
+		return schema.TranscriptContent{}, err
+	}
+	return content, nil
+}
+
+// applyPublishConsentOverlay applies the publication field-consent gates to a
+// hydrated durable detail.
+//
+// The snapshot boundary carries the session's stored identity — working
+// directory, branch, remote and project — without the consent gates the legacy
+// entries builder applies, so this overlay is the one place those gates are
+// applied. It uses the SAME post-safety-net capture metadata the metadata part
+// uses, so the two published parts cannot disagree about what the user chose to
+// send. The gates are the legacy builder's: the repository label wins over the
+// filesystem path, and the path is withheld whenever a label went out or the
+// project-path field is hidden.
+//
+// Counts and graph identity are NOT recomputed. turnCount and toolCallCount
+// stay the durable producer-folded mirrors (never len(Turns)), and the graph
+// members, turns, native metadata, earlier history and provenance are the
+// durable detail exactly as validated.
+func applyPublishConsentOverlay(detail *schema.SessionDetailPayload, meta *ingest.UnifiedMetadata, fields config.PushFieldVisibility) {
+	if detail == nil || meta == nil {
+		return
+	}
+	resolved := fields.Resolve()
+	project := privacySafeProjectLabel(string(meta.Project.Hash))
+	label, sentLabel := projectWireLabel(meta, resolved)
+	if sentLabel {
+		project = label
+	}
+	detail.Project = project
+	// The snapshot carries the recorded working directory; the overlay only
+	// decides whether it may go out, never what it is.
+	snapshotWorkingDirectory := detail.WorkingDirectory
+	detail.WorkingDirectory = ""
+	if !sentLabel && resolved.ProjectPath {
+		detail.WorkingDirectory = snapshotWorkingDirectory
+	}
+	if !resolved.GitBranch {
+		detail.GitBranch = ""
+	}
+	if !resolved.GitRemote {
+		detail.GitRemote = ""
+	}
+	// The snapshot boundary does not carry the capture's token and duration
+	// totals, so they are copied from the same capture metadata the metadata
+	// part is built from. The detail's own counts are left alone.
+	//
+	// Pi is the exception for the TOKEN mirrors only: its validated detail
+	// already derives them from per-turn usage (and deliberately zeroes them
+	// when no usage exists), so copying the capture totals here would contradict
+	// the harness mirror that SessionToDetailValidated just enforced. Duration
+	// has no usage-derived equivalent in that mirror, so it is copied for every
+	// harness; leaving it inside the exception silently published a zero
+	// duration for a capture that recorded one.
+	if detail.Harness != schema.HarnessPi {
+		detail.TokensIn = meta.Stats.TokensIn
+		detail.TokensOut = meta.Stats.TokensOut
+		detail.TotalTokens = meta.Stats.TokensIn + meta.Stats.TokensOut
+	}
+	detail.DurationMins = (time.Duration(meta.Stats.DurationMs) * time.Millisecond).Minutes()
+	detail.Source = "imported"
+	detail.Status = "local"
 }
 
 // BuildTranscriptContentFromDetail wraps an already-validated detail payload

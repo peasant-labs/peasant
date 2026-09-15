@@ -1008,7 +1008,13 @@ func (p *Pipeline) pushSession(
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
 	// Stored origin belongs to the same database snapshot as metadata and entries.
-	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
+	//
+	// The envelope is built from the session's committed generation when the
+	// store supports the durable snapshot surface, so session-level provenance
+	// evidence and hydrated full tool bodies are published exactly as the local
+	// detail read serves them. A legacy V1 session keeps the preserved entries
+	// builder; a corrupt managed artifact fails this session whole.
+	content, err := BuildPublishTranscriptContent(ctx, p.store, sess.SessionID, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
 	}
