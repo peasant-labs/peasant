@@ -101,6 +101,27 @@ permissions:
   contents: read
 
 jobs:
+  # Route the architecture-neutral jobs to the self-hosted x86_64 runner pool,
+  # with a Blacksmith amd64 fallback when the pool is offline. Every routed job
+  # reads the label array from this job's output. `check` and `cgo0` build and
+  # test Go on arm64 and stay on their arm64 runner.
+  determine-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick.outputs.use-runner }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        uses: mikehardy/runner-fallback-action@dc7732f9e532c451b2527b288ba8d58fd4b0a4ca # v1.1.0
+        with:
+          organization: peasant-labs
+          primary-runner: "self-hosted,nixos"
+          fallback-runner: "blacksmith-2vcpu-ubuntu-2404"
+          fallback-on-error: true
+          github-token: ${{ secrets.RUNNER_STATUS_TOKEN }}
+      - name: Report chosen runner
+        run: 'echo "chosen: ${{ steps.pick.outputs.use-runner }}"'
+
   # Exactly-once contract: every job below carries the same guard so the
   # path-filtered standalone run skips release(...) PRs, where release-pr.yml
   # calls this workflow as the single authority. Inside a called reusable
@@ -165,7 +186,8 @@ jobs:
       github.event_name == 'pull_request' &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -294,7 +316,8 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -332,7 +355,8 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -364,7 +388,8 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository

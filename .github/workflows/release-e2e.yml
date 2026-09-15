@@ -15,11 +15,32 @@ permissions:
   contents: read
 
 jobs:
+  # Route the single warm-stack driver to the self-hosted x86_64 runner pool,
+  # with a Blacksmith amd64 fallback when the pool is offline.
+  determine-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick.outputs.use-runner }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        uses: mikehardy/runner-fallback-action@dc7732f9e532c451b2527b288ba8d58fd4b0a4ca # v1.1.0
+        with:
+          organization: peasant-labs
+          primary-runner: "self-hosted,nixos"
+          fallback-runner: "blacksmith-4vcpu-ubuntu-2404"
+          fallback-on-error: true
+          github-token: ${{ secrets.RUNNER_STATUS_TOKEN }}
+      - name: Report chosen runner
+        run: 'echo "chosen: ${{ steps.pick.outputs.use-runner }}"'
+
   release-e2e:
     name: release e2e (installed packages)
     # Arch's official warm-stack image is amd64-only, so the single warm-stack
-    # driver runs on the amd64 Blacksmith runner.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # driver runs on the self-hosted amd64 pool, with the Blacksmith amd64
+    # runner as fallback.
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 90
     steps:
       - name: Checkout peasant

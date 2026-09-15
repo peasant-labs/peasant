@@ -86,6 +86,9 @@ jobs:
       contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/tests.yml
 
   e2e:
@@ -106,6 +109,9 @@ jobs:
       contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/release-validate.yml
 
   # Trigger B: a release PR MERGED — assert maintainer approval, then tag.
