@@ -16,6 +16,7 @@
 !peasant-shoot.mjs
 !inspect-feedback-shoot.mjs
 !context-navigation-shoot.mjs
+!context-navigation-fixture.mjs
 !boot-peasant.mjs
 !shell-nav-gate.mjs
 !shell-nav-default-gate.mjs
@@ -30,8 +31,6 @@
 !transcript-input-gate.mjs
 !validate-mock-coordinates.mjs
 !strike-smoke-fixture.mjs
-!current-parent-navigation.mjs
-!current-parent-navigation-fixture.mjs
 !search-share-visual.mjs
 !grouped-list-visual.mjs
 !testdata/

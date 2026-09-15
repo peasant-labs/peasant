@@ -28,11 +28,11 @@ import type {
   SessionRelationshipNavigation,
   QualityPayload,
 } from '@/types/messages';
-import { RelationshipNavigationStatus } from '@peasant-labs/schema';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
 import { sessionsHref, transcriptHref, EarlierHistoryParam, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
+import { relationshipLinkHref } from './lib/relationshipLink';
 import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
 import {
   clearScopeQuery,
@@ -135,22 +135,16 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
   }, [router, pathname, searchParams]);
 
-  // The host's exact-ID current-target route callback: an authorized navigation
-  // entry whose target resolves to a stored session routes to that session. The
-  // authority is the stored exact target, never list selection, so a stored but
-  // unselected parent stays reachable. A usable target is either an exactly
-  // resolved boundary or a general source/parent link; both carry the one stored
-  // identifier. known-unavailable / unknown / conflicting entries carry NO
-  // identifier and are inert here, so an unresolved link can never route to the
-  // wrong session. The reading state of this session is kept per session by the
-  // hook below, so Back restores it.
+  // The host's route decision for an authorized navigation entry: the exact
+  // stored target's own production transcript route, or nothing when the entry
+  // is not linkable. The authority is the stored exact target, never list
+  // selection, so a stored but unselected parent stays reachable. The child's
+  // reading state is kept per session by the hook below, so Back restores it.
   const navigateToRelationship = useCallback(
     (entry: SessionRelationshipNavigation) => {
-      const linkable =
-        entry.status === RelationshipNavigationStatus.Resolved ||
-        entry.status === RelationshipNavigationStatus.GeneralLinkOnly;
-      if (!linkable || !entry.localId) return;
-      router.push(transcriptHref(projectHash, entry.localId));
+      const href = relationshipLinkHref(projectHash, entry);
+      if (!href) return;
+      router.push(href);
     },
     [router, projectHash],
   );
@@ -400,7 +394,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
   // is invoked by the viewer's source/parent link with the authorized navigation
-  // above; the host owns the resulting route and the Back restoration that
+  // above; the host owns the route it opens and the Back restoration that
   // follows.
   const viewerCallbacks = {
     onCopyLink: () => {

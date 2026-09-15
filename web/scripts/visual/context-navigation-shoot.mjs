@@ -1,263 +1,376 @@
-/* Mounted current-parent links + retained earlier history, captured from the REAL production route of
-   the REAL built binary (never the dev fixture route, never a storybook/story-only surface).
-
-   The production path under test: `/projects/{project}/{session}/` -> the app shell chrome -> the
-   `SessionDetailV2` adapter -> the WebSocket `session_detail` subscription -> the packed
-   `@peasant-labs/fairtrade` `adaptTranscript` + `<TranscriptViewer>` composite. The backend is the
-   binary's mock data store, so the durable relationships, the authorized read navigation and the
-   retained earlier-history section all arrive over the wire.
-
-   What each surface proves, per theme:
-     context-links     the child renders a context-source link and a started-by link targeting two
-                       DIFFERENT stored sessions; the retained earlier history starts collapsed, expands,
-                       and the disclosure survives the click -> Back round trip back onto the child.
-     unresolved-parent the child whose started-by target is no longer stored renders an honest
-                       unavailable reference (no link) and stays readable.
-
-   The script verifies build provenance BEFORE trusting any capture: a marker only this change
-   introduces must be present both in the built artifact on disk AND in the chunk the server actually
-   serves.
-
-   env:
-     PEASANT_REAL_ORIGIN  origin of the running real binary   (default http://localhost:8790)
-     CONTEXT_NAV_OUT      capture directory                   (required; never a tracked path)
-     CHROME_PATH          Chrome/Chromium binary              (required)
-     PUPPETEER_CORE       explicit puppeteer-core module path (optional)
-   usage: PEASANT_REAL_ORIGIN=http://localhost:8790 CONTEXT_NAV_OUT=/tmp/ctx-nav CHROME_PATH=$(command -v google-chrome) node scripts/visual/context-navigation-shoot.mjs
-*/
-import { mkdirSync, readFileSync, readdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+/* MOUNTED CURRENT-PARENT / CONTEXT NAVIGATION — real-binary evidence capture.
+ *
+ * Boots the exact worktree's `bin/peasant` (assets embedded from this branch's
+ * `web/out`) with the mock data store, so the child transcript, its stored
+ * context_from source and started_by parent, and its retained earlier-history
+ * partition all arrive over the REAL WebSocket `session_detail` payload through
+ * the real store -> decoration boundary -> adapter -> composite path. Only the
+ * theme and the reading actions are driven from here.
+ *
+ * Surfaces, per theme:
+ *   context-links      the child renders a context-source link and a
+ *                      started-by (current-parent) link to two DIFFERENT stored
+ *                      sessions, the retained earlier history starts collapsed,
+ *                      the disclosure toggle does not re-position the stream,
+ *                      and expanding it writes the section to the route.
+ *   context-child-scrolled
+ *                      the child with a real reading position: the stream
+ *                      scrolled, a selected turn, and a typed search query.
+ *   parent-session     following the current-parent link opens the EXACT stored
+ *                      parent session with its own content.
+ *   context-back-restored
+ *                      Back returns to the child with its query, retained-history
+ *                      disclosure, selected turn, search, and inner stream
+ *                      offset restored.
+ *   context-reloaded   a reload of the disclosed route keeps the disclosure open.
+ *   context-copied-link
+ *                      a fresh document opened at the copied disclosed route
+ *                      keeps the disclosure open (no session storage to rely on).
+ *   unresolved-parent  a child whose current-parent target is no longer stored
+ *                      renders an honest unavailable reference (no link) and
+ *                      stays readable.
+ *
+ * Build provenance is asserted BEFORE any capture: the change marker must be
+ * present both in the built artifact on disk and in the chunk the server
+ * actually serves, so a stale export or the wrong worktree cannot silently
+ * invalidate the evidence.
+ *
+ * Run:  CHROME_PATH=$(command -v google-chrome) node web/scripts/visual/context-navigation-shoot.mjs
+ * Env:  PEASANT_CONTEXT_NAV_SKIP_BUILD=1   reuse the existing bin/peasant
+ *       PEASANT_CONTEXT_NAV_PORT            server port (default 8793)
+ *       PEASANT_CONTEXT_NAV_CAPTURE_DIR     output root (default /tmp/opencode/context-navigation-captures)
+ *       PUPPETEER_CORE                      explicit puppeteer-core module path
+ */
+import { execSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join, relative, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
+import { loadContextNavigationFixture } from './context-navigation-fixture.mjs'
+import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const REPO = resolve(HERE, '../../..')
+const WEB = join(REPO, 'web')
+const BIN = join(REPO, 'bin/peasant')
+const OUT = process.env.PEASANT_CONTEXT_NAV_CAPTURE_DIR || '/tmp/opencode/context-navigation-captures'
+const PORT = process.env.PEASANT_CONTEXT_NAV_PORT || '8793'
+const ORIGIN = `http://localhost:${PORT}`
+const CHROME = process.env.CHROME_PATH || 'google-chrome'
+const MOCKS = SMOKE_MOCKS
+const FIXTURE = loadContextNavigationFixture()
+
+/** Feature bytes only this change introduces, located in the binary + served chunk. */
+const FEATURE_BYTES = ['peasant:transcript-reading:']
+const LINK_ACTION = 'open current session'
+const SEARCH_TEXT = 'durable'
+const FONTS = [
+  '400 16px "Atkinson Hyperlegible"', '700 16px "Atkinson Hyperlegible"',
+  '400 16px "Atkinson Hyperlegible Mono"', '600 16px "Atkinson Hyperlegible Mono"',
+]
+const THEME_ATTRIBUTES = ['data-theme', 'data-tb-theme']
+const CHILD_PATH = `/projects/${FIXTURE.projectHash}/${encodeURIComponent(FIXTURE.childSessionId)}/`
+const UNRESOLVED_PATH = `/projects/${FIXTURE.projectHash}/${encodeURIComponent(FIXTURE.unresolvedChildId)}/`
+const pause = (ms) => new Promise((r) => setTimeout(r, ms))
+
+if (!existsSync(CHROME) && !process.env.CHROME_PATH) {
+  console.error('ERROR [context-navigation-shoot] CHROME_PATH is unset and google-chrome is not on PATH.')
+  process.exit(1)
+}
+
+const fail = (step, reason) => new Error(
+  `Mounted context navigation capture failed because ${reason} during ${step} in context-navigation-shoot.mjs; the link/Back exit is not proven on this build; inspect the served route and internal/mock/testdata/context_navigation.yaml, fix the production path, rebuild, and rerun.`,
+)
+
+function filesBelow(directory) {
+  if (!existsSync(directory)) return []
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    return entry.isDirectory() ? filesBelow(path) : [path]
+  })
+}
+
+/** Prove the served artifact carries this change and not a stale export. */
+function assertBuildProvenance() {
+  const chunks = join(WEB, 'out/_next/static/chunks')
+  if (!existsSync(BIN) || !existsSync(chunks)) throw fail('verifying build provenance', `missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
+  const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
+  const binary = readFileSync(BIN)
+  const missingBinaryBytes = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
+  if (missingBinaryBytes.length) throw fail('verifying build provenance', `the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so bin/peasant matches web/out`)
+  const match = javascript.find(({ content }) => FEATURE_BYTES.every((signature) => content.includes(signature)))
+  if (!match) throw fail('verifying build provenance', `the built export contains no chunk with the feature bytes ${FEATURE_BYTES.join(', ')}; rebuild this exact worktree`)
+  return match
+}
+
+async function assertServedChunkCarriesMarker(chunkPath) {
+  const servedPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunkPath).split('\\').join('/')}`
+  const response = await fetch(`${ORIGIN}${servedPath}`).catch(() => null)
+  if (!response || response.status !== 200) throw fail('verifying the served artifact', `GET ${servedPath} returned ${response?.status ?? 0}`)
+  const body = await response.text()
+  if (!FEATURE_BYTES.every((signature) => body.includes(signature))) {
+    throw fail('verifying the served artifact', `the served chunk ${servedPath} does not carry ${FEATURE_BYTES.join(', ')}; the server is not serving the built export under test`)
+  }
+  return servedPath
+}
+
+async function useTheme(page, theme) {
+  await page.evaluateOnNewDocument((value) => {
+    try { localStorage.setItem('peasant-theme', value) } catch { /* storage disabled */ }
+  }, theme)
+}
+
+async function assertTheme(page, theme, step) {
+  const attrs = await page.evaluate((names) => Object.fromEntries(names.map((name) => [name, document.documentElement.getAttribute(name)])), THEME_ATTRIBUTES)
+  if (!THEME_ATTRIBUTES.every((attribute) => attrs[attribute] === theme)) throw fail(step, `theme attributes were ${JSON.stringify(attrs)} instead of ${JSON.stringify(theme)}`)
+}
+
+async function assertAtkinson(page, step) {
+  await page.evaluate(async (faces) => { try { await Promise.all(faces.map((face) => document.fonts.load(face))) } catch { /* already loaded */ } ; await document.fonts.ready }, FONTS)
+  if (!await page.evaluate(() => document.fonts.check('16px "Atkinson Hyperlegible"'))) throw fail(step, 'Atkinson Hyperlegible was not loaded from the layout head')
+  const family = await page.evaluate(() => getComputedStyle(document.body).fontFamily)
+  if (!/Atkinson/i.test(family)) throw fail(step, `body font-family ${JSON.stringify(family)} does not lead with Atkinson Hyperlegible`)
+}
+
+async function waitForSelector(page, selector, step, timeout = 20000) {
+  const element = await page.waitForSelector(selector, { visible: true, timeout }).catch(() => null)
+  if (!element) throw fail(step, `selector ${JSON.stringify(selector)} never mounted; current URL is ${page.url()}`)
+  return element
+}
+
+async function waitForPath(page, expected, step) {
+  const reached = await page.waitForFunction((value) => window.location.pathname.includes(value), { timeout: 20000 }, expected).catch(() => null)
+  if (!reached) throw fail(step, `navigation never reached a path containing ${JSON.stringify(expected)}; current URL is ${page.url()}`)
+}
+
+async function capture(page, gate, theme, id, selector, evidence) {
+  const element = await waitForSelector(page, selector, `capturing ${id}`)
+  const directory = join(OUT, theme)
+  mkdirSync(directory, { recursive: true })
+  const file = join(directory, `${id}.png`)
+  await element.screenshot({ path: file, captureBeyondViewport: false })
+  await gate.assert(`${theme}/${id}`, file, { sel: selector, where: 'context-navigation-shoot.mjs' })
+  evidence.captures.push(file)
+  return file
+}
+
+/** The child's rendered context rows: label, whether a link is offered, its status text. */
+async function contextRows(page) {
+  return page.evaluate(() => [...document.querySelectorAll('.txn-context-source')].map((row) => ({
+    label: row.querySelector('.txn-context-row span:not(.txn-context-status)')?.textContent ?? null,
+    link: row.querySelector('.txn-context-link')?.textContent ?? null,
+    status: row.querySelector('.txn-context-status')?.textContent ?? null,
+  })))
+}
+
+async function readStreamPosition(page) {
+  return page.evaluate(() => {
+    const stream = document.querySelector('.txn-stream')
+    const active = document.querySelector(".txn-turnwrap:has(.txn-turn.txn-active)") ?? document.querySelector('.txn-turn.txn-active')?.closest('.txn-turnwrap')
+    return {
+      search: window.location.search,
+      scrollTop: stream ? stream.scrollTop : -1,
+      maxScroll: stream ? stream.scrollHeight - stream.clientHeight : 0,
+      turn: active?.getAttribute('data-turn') ?? null,
+    }
+  })
+}
+
+async function openSearch(page, step) {
+  await page.keyboard.down('Control')
+  await page.keyboard.press('f')
+  await page.keyboard.up('Control')
+  return waitForSelector(page, '.txn-search-input', step)
+}
+
+async function runTheme(browser, theme, chunkPath, gate, evidence) {
+  const page = await browser.newPage()
+  try {
+    await applyDeterminism(page)
+    await page.setViewport({ width: 1460, height: 1000, deviceScaleFactor: 1 })
+    await useTheme(page, theme)
+    const servedPath = await assertServedChunkCarriesMarker(chunkPath)
+    evidence.servedChunks.push(servedPath)
+
+    /* ── surface 1: the child's stored context and current-parent links ── */
+    const response = await page.goto(`${ORIGIN}${CHILD_PATH}`, { waitUntil: 'domcontentloaded' })
+    if (response?.status() !== 200) throw fail('opening the child transcript', `HTTP status was ${response?.status() ?? 0}`)
+    await waitForSelector(page, '.txn-app', 'mounting the child transcript')
+    await waitForSelector(page, '.txn-context-link', 'rendering the stored source and parent links')
+    await assertTheme(page, theme, 'capturing the child context links')
+    await assertAtkinson(page, 'capturing the child context links')
+
+    const rows = await contextRows(page)
+    if (rows.length !== 2) throw fail('rendering the child context rows', `rendered ${JSON.stringify(rows)}, expected the context-source and started-by rows`)
+    if (rows[0].label !== FIXTURE.contextLabel || rows[1].label !== FIXTURE.starterLabel) {
+      throw fail('rendering the child context rows', `labels ${JSON.stringify(rows.map((row) => row.label))} are not ${JSON.stringify([FIXTURE.contextLabel, FIXTURE.starterLabel])}`)
+    }
+    if (rows.some((row) => row.link !== LINK_ACTION)) throw fail('rendering the child context rows', `link controls ${JSON.stringify(rows.map((row) => row.link))} are not ${JSON.stringify(LINK_ACTION)}`)
+
+    const collapsed = await page.$eval('.txn-earlier-toggle', (node) => node.getAttribute('aria-expanded'))
+    if (collapsed !== 'false') throw fail('capturing the child context links', `retained history was disclosed without a reader action (aria-expanded=${collapsed})`)
+    evidence.child = { theme, rows, collapsed }
+
+    /* ── surface 2: the disclosure toggle does not re-position the stream ── */
+    const scrolled = await page.evaluate(() => {
+      const stream = document.querySelector('.txn-stream')
+      if (!stream) return null
+      const max = stream.scrollHeight - stream.clientHeight
+      stream.scrollTop = Math.floor(max / 2)
+      stream.dispatchEvent(new Event('scroll', { bubbles: true }))
+      return { target: stream.scrollTop, max }
+    })
+    if (!scrolled || scrolled.max < 200 || scrolled.target < 100) throw fail('scrolling the child transcript', `the inner stream does not overflow enough to prove restoration (${JSON.stringify(scrolled)})`)
+    await pause(150)
+    const beforeToggle = await readStreamPosition(page)
+    await page.click('.txn-earlier-toggle')
+    await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 10000 })
+      .catch(() => fail('expanding the retained earlier history', 'the disclosure did not expand'))
+    await pause(200)
+    const afterToggle = await readStreamPosition(page)
+    const toggleQuery = new URLSearchParams(afterToggle.search)
+    if (toggleQuery.get('earlier') !== 'earlier-0') throw fail('persisting the retained-history disclosure', `the route ${JSON.stringify(afterToggle.search)} does not name the disclosed section`)
+    if (toggleQuery.get('turn') !== null) throw fail('persisting the retained-history disclosure', `disclosing a section moved the stream position: the route gained turn=${toggleQuery.get('turn')}`)
+    if (!(afterToggle.scrollTop > 0)) throw fail('persisting the retained-history disclosure', `disclosing a section reset the stream to the top (scrollTop=${afterToggle.scrollTop})`)
+    await waitForSelector(page, '.txn-earlier', 'rendering the disclosed retained history')
+
+    /* ── a real reading position: scrolled stream, selected turn, typed query ── */
+    await page.evaluate(() => {
+      const stream = document.querySelector('.txn-stream')
+      if (stream) { stream.scrollTop = Math.min(600, stream.scrollHeight - stream.clientHeight); stream.dispatchEvent(new Event('scroll', { bubbles: true })) }
+    })
+    await page.waitForFunction(() => document.querySelector(".txn-turnwrap:has(.txn-turn.txn-active)") != null, { timeout: 10000 })
+      .catch(() => fail('selecting a turn', 'no turn became active after scrolling the stream'))
+    const searchInput = await openSearch(page, 'opening the transcript search')
+    await searchInput.type(SEARCH_TEXT)
+    await pause(250)
+    const before = await readStreamPosition(page)
+    if (!(before.scrollTop > 0) || before.turn === null) throw fail('setting the reading position', `the reading position was not established (${JSON.stringify(before)})`)
+    await capture(page, gate, theme, 'context-links', '.txn-app', evidence)
+    await capture(page, gate, theme, 'context-child-scrolled', '.txn-app', evidence)
+
+    /* ── surface 3: follow the current-parent link to the exact stored parent ── */
+    await page.evaluate((label) => {
+      const row = [...document.querySelectorAll('.txn-context-source')].find((candidate) => candidate.textContent?.includes(label))
+      row?.querySelector('button.txn-context-link')?.click()
+    }, FIXTURE.starterLabel)
+    await waitForPath(page, FIXTURE.parentId, 'following the current-parent link')
+    await waitForSelector(page, '.txn-app', 'mounting the exact stored parent session')
+    await page.waitForFunction((text) => (document.querySelector('.txn-app')?.textContent ?? '').includes(text), { timeout: 20000 }, FIXTURE.parentOpening)
+      .catch(() => fail('mounting the exact stored parent session', `the parent's own stored content ${JSON.stringify(FIXTURE.parentOpening)} never rendered`))
+    const parentProbe = await page.evaluate((id) => ({
+      pathname: window.location.pathname,
+      theme: document.documentElement.getAttribute('data-theme'),
+      contextLinks: document.querySelectorAll('.txn-context-link').length,
+    }), FIXTURE.parentId)
+    if (!parentProbe.pathname.includes(FIXTURE.parentId)) throw fail('following the current-parent link', `the route ${JSON.stringify(parentProbe.pathname)} is not the authorized target ${FIXTURE.parentId}`)
+    if (parentProbe.theme !== theme) throw fail('mounting the exact stored parent session', `the parent rendered theme ${parentProbe.theme}`)
+    if (parentProbe.contextLinks !== 0) throw fail('mounting the exact stored parent session', "the child's context controls leaked onto the parent session")
+    await capture(page, gate, theme, 'parent-session', '.txn-app', evidence)
+    evidence.follow = { theme, parentProbe, before }
+
+    /* ── surface 4: Back restores query, disclosure, selection, search, scroll ── */
+    await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => null)
+    await waitForPath(page, encodeURIComponent(FIXTURE.childSessionId), 'returning to the child with Back')
+    await waitForSelector(page, '.txn-context-link', 're-mounting the child context links after Back')
+    await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 })
+      .catch(() => fail('restoring the child disclosure on Back', `the retained-history disclosure did not reopen (route ${page.url()})`))
+    await pause(1400)
+    const restored = await readStreamPosition(page)
+    const restoredQuery = new URLSearchParams(restored.search)
+    if (restoredQuery.get('earlier') !== 'earlier-0') throw fail('restoring the child disclosure on Back', `the route ${JSON.stringify(restored.search)} lost the disclosed section`)
+    if (Math.abs(restored.scrollTop - before.scrollTop) > 2) throw fail('restoring the child scroll offset on Back', `scrollTop was ${restored.scrollTop}, expected ${before.scrollTop}`)
+    if (restored.turn !== before.turn) throw fail('restoring the child selection on Back', `selected turn was ${restored.turn}, expected ${before.turn}`)
+    const restoredSearchInput = await openSearch(page, 'reopening the transcript search after Back')
+    const restoredSearch = await restoredSearchInput.evaluate((node) => node.value)
+    if (restoredSearch !== SEARCH_TEXT) throw fail('restoring the child search on Back', `search was ${JSON.stringify(restoredSearch)}, expected ${JSON.stringify(SEARCH_TEXT)}`)
+    await capture(page, gate, theme, 'context-back-restored', '.txn-app', evidence)
+    evidence.back = { theme, restored, restoredSearch }
+
+    /* ── the disclosure is route state: reload and a copied link reopen it ── */
+    const disclosedUrl = page.url()
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await waitForSelector(page, '.txn-earlier-toggle', 'reloading the disclosed route')
+    const reloadedExpanded = await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 }).then(() => true).catch(() => false)
+    if (!reloadedExpanded) throw fail('reloading the disclosed route', `the retained-history disclosure collapsed on reload of ${disclosedUrl}`)
+    await capture(page, gate, theme, 'context-reloaded', '.txn-app', evidence)
+
+    const copied = await browser.newPage()
+    try {
+      await applyDeterminism(copied)
+      await copied.setViewport({ width: 1460, height: 1000, deviceScaleFactor: 1 })
+      await useTheme(copied, theme)
+      await copied.goto(disclosedUrl, { waitUntil: 'domcontentloaded' })
+      await waitForSelector(copied, '.txn-earlier-toggle', 'opening the copied disclosed link')
+      const copiedExpanded = await copied.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 }).then(() => true).catch(() => false)
+      if (!copiedExpanded) throw fail('opening the copied disclosed link', `the retained-history disclosure collapsed on a fresh document at ${disclosedUrl}`)
+      await capture(copied, gate, theme, 'context-copied-link', '.txn-app', evidence)
+    } finally {
+      await copied.close()
+    }
+
+    /* ── surface 5: an absent current-parent target stays honest and readable ── */
+    await page.goto(`${ORIGIN}${UNRESOLVED_PATH}`, { waitUntil: 'domcontentloaded' })
+    await waitForSelector(page, '.txn-context-source', 'rendering the unresolved current-parent reference')
+    await assertTheme(page, theme, 'capturing the unresolved reference')
+    const unresolvedRows = await contextRows(page)
+    if (unresolvedRows.length !== 1) throw fail('rendering the unresolved current-parent reference', `rendered ${JSON.stringify(unresolvedRows)}, expected the one started-by row`)
+    if (unresolvedRows[0].label !== FIXTURE.starterLabel || unresolvedRows[0].link !== null || unresolvedRows[0].status !== 'source unavailable') {
+      throw fail('rendering the unresolved current-parent reference', `the unavailable reference drifted: ${JSON.stringify(unresolvedRows[0])}`)
+    }
+    const readable = await page.evaluate((text) => (document.querySelector('.txn-app')?.textContent ?? '').includes(text), FIXTURE.childOpening.slice(0, 40))
+    if (!readable) throw fail('rendering the unresolved current-parent reference', 'the child did not stay readable while its current-parent target is unavailable')
+    await capture(page, gate, theme, 'unresolved-parent', '.txn-app', evidence)
+    evidence.unresolved = { theme, rows: unresolvedRows }
+
+    console.log(`OK [${theme}] child links → ${FIXTURE.parentId} → Back ${restored.search} · scroll=${restored.scrollTop}/${before.scrollTop} · turn=${restored.turn} · search=${JSON.stringify(restoredSearch)}`)
+  } finally {
+    await page.close()
+  }
+}
+
+if (!process.env.PEASANT_CONTEXT_NAV_SKIP_BUILD) {
+  console.log('[context-navigation-shoot] make build (user canonical path) …')
+  execSync('make build', { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+} else {
+  console.log('[context-navigation-shoot] PEASANT_CONTEXT_NAV_SKIP_BUILD=1 — reusing existing bin/peasant')
+}
+if (!existsSync(BIN)) { console.error(`ERROR [context-navigation-shoot] ${BIN} not found — run \`make build\` first.`); process.exit(1) }
+
+const chunkPath = assertBuildProvenance()
+console.log(`[context-navigation-shoot] provenance OK: ${relative(REPO, chunkPath)} carries ${FEATURE_BYTES.join(', ')}`)
+
+console.log(`[context-navigation-shoot] starting ${BIN} on :${PORT} (mock store: ${MOCKS}) …`)
+const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', `--mock-data-store=${MOCKS}`], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
+let serverError = ''
+server.stderr.on('data', (data) => { serverError += data.toString() })
+let serverDown = false
+server.on('exit', () => { serverDown = true })
 
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
-
-const CHROME = process.env.CHROME_PATH
-const ORIGIN = (process.env.PEASANT_REAL_ORIGIN || 'http://localhost:8790').replace(/\/$/, '')
-const OUT = process.env.CONTEXT_NAV_OUT
-if (!CHROME) {
-  console.error('ERROR [context-navigation-shoot.mjs] CHROME_PATH is unset — set it to your Chrome/Chromium binary.')
-  process.exit(1)
+let browser
+const teardown = async () => {
+  try { if (browser) await browser.close() } catch { /* already closing */ }
+  try { if (!serverDown) server.kill('SIGTERM') } catch { /* already gone */ }
 }
-if (!OUT) {
-  console.error('ERROR [context-navigation-shoot.mjs] CONTEXT_NAV_OUT is unset — point it at a review-capture directory (never a tracked path).')
-  process.exit(1)
-}
-mkdirSync(OUT, { recursive: true })
+const evidence = { fixture: relative(REPO, 'internal/mock/testdata/context_navigation.yaml'), chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunks: [], captures: [] }
 
-// String literal that only this change introduces; it survives the production minifier and is absent
-// from every earlier build, so finding it in the SERVED chunk proves the capture is this branch's build.
-const PROVENANCE_MARKER = 'is not a section identifier'
+let healthy = false
+for (let i = 0; i < 60 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
+if (!healthy) { console.error(`ERROR [context-navigation-shoot] the real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`); await teardown(); process.exit(2) }
 
-const CHILD_PATH = '/projects/fortuna/sess_contextnavigationchild/'
-const UNRESOLVED_PATH = '/projects/fortuna/sess_contextnavigationunresolved/'
-const STARTED_BY_ID = 'sess_contextnavigationstartedby'
-
-const pause = (ms) => new Promise((r) => setTimeout(r, ms))
-const results = []
-
-function chunkFiles(dir) {
-  const found = []
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name)
-    if (entry.isDirectory()) found.push(...chunkFiles(path))
-    else if (entry.name.endsWith('.js')) found.push(path)
-  }
-  return found
-}
-
-/* ── PROVENANCE: the built artifact on disk and the served chunk must both carry the marker ── */
-const builtDir = resolve('out/_next/static/chunks')
-let builtMatches = []
 try {
-  builtMatches = chunkFiles(builtDir).filter((file) => readFileSync(file, 'utf8').includes(PROVENANCE_MARKER))
+  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1460, height: 1000, deviceScaleFactor: 1 } })
+  const gate = new SurfaceGate(await browser.newPage())
+  for (const theme of SMOKE_THEMES) await runTheme(browser, theme, chunkPath, gate, evidence)
+  writeFileSync(join(OUT, 'evidence.json'), JSON.stringify(evidence, null, 2))
+  console.log(`\nOK [context-navigation-shoot] ${evidence.captures.length} mounted captures across ${SMOKE_THEMES.length} themes:`)
+  for (const file of evidence.captures) console.log(`  ${file}`)
 } catch (error) {
-  console.error(`ERROR [context-navigation-shoot.mjs] cannot read the built chunk directory ${builtDir}: ${error.message}. Build the web app first.`)
-  process.exit(2)
+  console.error(`FAIL [context-navigation-shoot] ${error.stack || error.message}`)
+  await teardown()
+  process.exit(1)
+} finally {
+  await teardown()
 }
-if (builtMatches.length === 0) {
-  console.error(`ERROR [context-navigation-shoot.mjs] the built artifact at ${builtDir} does not contain the change marker ${JSON.stringify(PROVENANCE_MARKER)}; the served build is not this branch. Rebuild before capturing.`)
-  process.exit(2)
-}
-
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1460, height: 1000, deviceScaleFactor: 1 } })
-const page = await browser.newPage()
-await applyDeterminism(page)
-const errors = []
-page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
-page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404|hydrat/.test(m.text())) errors.push(m.text()) })
-
-const die = async (code, what) => {
-  console.error(`\nSTRUCTURAL FAILURE [context-navigation-shoot.mjs] — ${what}\n  the captures would be invalid. Exiting ${code}.`)
-  try { await browser.close() } catch { /* already closing */ }
-  process.exit(code)
-}
-
-const waitFor = async (selector, timeoutMs = 15000) => {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    if (await page.$(selector)) return
-    await pause(120)
-  }
-  throw new Error(`selector "${selector}" never mounted within ${timeoutMs}ms`)
-}
-
-const shell = await page.goto(`${ORIGIN}/`, { waitUntil: 'networkidle0' })
-const shellHtml = await shell.text()
-const servedChunks = [...shellHtml.matchAll(/\/_next\/static\/chunks\/[^"']+\.js/g)].map((m) => m[0])
-const servedMatch = builtMatches
-  .map((file) => `/${file.slice(file.indexOf('_next')).replace(/\\/g, '/')}`)
-  .find((rel) => servedChunks.includes(rel))
-if (!servedMatch) {
-  await die(2, `provenance-mismatch: the built marker lives in ${builtMatches.map((f) => f.split('/').pop()).join(', ')} but the served page references none of them; the server is serving a different build than the one under test`)
-}
-const servedChunk = await page.evaluate(async (path) => (await fetch(path)).text(), servedMatch)
-if (!servedChunk.includes(PROVENANCE_MARKER)) {
-  await die(2, `provenance-mismatch: the served chunk ${servedMatch} does not contain the change marker; the server is serving a different build than the one under test`)
-}
-console.log(`[context-navigation-shoot] provenance OK: served chunk ${servedMatch} of ${builtMatches.length} built chunk(s) carries ${JSON.stringify(PROVENANCE_MARKER)}`)
-
-const gate = new SurfaceGate(page)
-
-/**
- * The app owns its theme and restores it from `peasant-theme`, so the capture
- * drives it exactly like the app does: seed the stored value before the
- * document loads, then require BOTH theme attributes the app stamps.
- */
-async function useTheme(theme) {
-  await page.evaluateOnNewDocument((value) => { try { localStorage.setItem('peasant-theme', value) } catch { /* storage disabled */ } }, theme)
-}
-
-async function assertTheme(theme) {
-  const attrs = await page.evaluate(() => ({
-    app: document.documentElement.getAttribute('data-theme'),
-    package: document.documentElement.getAttribute('data-tb-theme'),
-  }))
-  if (attrs.app !== theme || attrs.package !== theme) {
-    await die(3, `theme-didn't-flip: requested ${theme} but the document reports ${JSON.stringify(attrs)}`)
-  }
-}
-
-async function assertAtkinson() {
-  const family = await page.evaluate(() => getComputedStyle(document.body).fontFamily)
-  if (!/Atkinson/i.test(family)) await die(4, `font-drift: body font-family ${JSON.stringify(family)} does not lead with Atkinson Hyperlegible`)
-}
-
-async function capture(name, theme, path) {
-  await page.screenshot({ path })
-  await gate.assert(name, path)
-}
-
-for (const theme of ['dark', 'light']) {
-  await useTheme(theme)
-
-  /* ── surface 1: context links, disclosure, click + Back ── */
-  {
-    const name = 'context-links'
-    try {
-      await page.goto(`${ORIGIN}${CHILD_PATH}`, { waitUntil: 'networkidle0' })
-      await assertTheme(theme)
-      await assertAtkinson()
-      await waitFor('.txn-context-source .txn-context-link')
-      const header = await page.evaluate(() => [...document.querySelectorAll('.txn-context-source')].map((row) => ({
-        label: row.querySelector('.txn-context-row > span')?.textContent ?? '',
-        link: !!row.querySelector('.txn-context-link'),
-        status: row.querySelector('.txn-context-status')?.textContent ?? null,
-      })))
-      if (header.length !== 2 || !header.every((row) => row.link)) {
-        throw new Error(`expected two linkable context rows, rendered ${JSON.stringify(header)}`)
-      }
-      if (header[0].label !== 'context inherited from' || header[1].label !== 'started by') {
-        throw new Error(`context header labels drifted: ${JSON.stringify(header.map((row) => row.label))}`)
-      }
-
-      // Retained history starts collapsed, expands on the reader's action, and
-      // the disclosure has to survive leaving the child and coming back.
-      const toggle = await page.$('.txn-earlier-toggle')
-      if (!toggle) throw new Error('no retained earlier-history section rendered on the child')
-      const collapsed = await page.evaluate(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded'))
-      if (collapsed !== 'false') throw new Error(`retained history was disclosed without a reader action (aria-expanded=${collapsed})`)
-      await toggle.click()
-      await pause(400)
-      const expanded = await page.evaluate(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded'))
-      if (expanded !== 'true') throw new Error(`clicking the retained-history toggle left aria-expanded=${expanded}`)
-
-      const links = await page.$$('.txn-context-source .txn-context-link')
-      await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 }), links[1].click()])
-      const arrivedId = page.url().replace(ORIGIN, '').split('?')[0].replace(/\/$/, '').split('/').pop()
-      if (arrivedId !== STARTED_BY_ID) {
-        throw new Error(`started-by link opened session ${JSON.stringify(arrivedId)}, expected the authorized target ${STARTED_BY_ID}`)
-      }
-
-      await page.goBack({ waitUntil: 'networkidle0' })
-      await pause(500)
-      // The label route the capture opened resolves to the canonical project
-      // hash, so match the child identity rather than the literal pathname.
-      const restored = new URL(page.url())
-      const restoredSegments = restored.pathname.replace(/\/$/, '').split('/')
-      if (restoredSegments.pop() !== 'sess_contextnavigationchild') {
-        throw new Error(`Back returned to ${restored.pathname}, expected the child session route`)
-      }
-      if (restored.searchParams.get('earlier') !== 'earlier-0') {
-        throw new Error(`Back returned to ${restored.pathname}${restored.search}, which lost the retained-history disclosure`)
-      }
-      await assertTheme(theme)
-      const restoredExpanded = await page.evaluate(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded'))
-      if (restoredExpanded !== 'true') {
-        throw new Error(`Back returned to the child but the retained-history disclosure collapsed (aria-expanded=${restoredExpanded})`)
-      }
-      const path = join(OUT, `${theme}-${name}.png`)
-      await capture(name, theme, path)
-      results.push({ name, theme, status: 'ok', path, info: `rows="${header.map((row) => row.label).join(' | ')}"; disclosure collapsed->expanded->restored-after-back; started-by opened ${STARTED_BY_ID}` })
-    } catch (error) {
-      results.push({ name, theme, status: 'gap', info: error.message })
-      console.error(`GAP [${name}/${theme}] ${error.message}`)
-    }
-  }
-
-  /* ── surface 2: unavailable current-parent reference ── */
-  {
-    const name = 'unresolved-parent'
-    try {
-      await page.goto(`${ORIGIN}${UNRESOLVED_PATH}`, { waitUntil: 'networkidle0' })
-      await assertTheme(theme)
-      await assertAtkinson()
-      await waitFor('.txn-context-source')
-      const row = await page.evaluate(() => {
-        const first = document.querySelector('.txn-context-source')
-        return first
-          ? {
-              label: first.querySelector('.txn-context-row > span')?.textContent ?? '',
-              link: !!first.querySelector('.txn-context-link'),
-              status: first.querySelector('.txn-context-status')?.textContent ?? null,
-            }
-          : null
-      })
-      if (!row) throw new Error('no context header rendered for the child with a stored-absent target')
-      if (row.link || row.label !== 'started by' || row.status !== 'source unavailable') {
-        throw new Error(`unavailable reference drifted: ${JSON.stringify(row)}`)
-      }
-      const readable = await page.evaluate(() => (document.querySelector('.txn-app')?.textContent ?? '').includes('no longer stored'))
-      if (!readable) throw new Error('the child did not stay readable while its current-parent target is unavailable')
-
-      const path = join(OUT, `${theme}-${name}.png`)
-      await capture(name, theme, path)
-      results.push({ name, theme, status: 'ok', path, info: `label="${row.label}" status="${row.status}" link=false; child readable` })
-    } catch (error) {
-      results.push({ name, theme, status: 'gap', info: error.message })
-      console.error(`GAP [${name}/${theme}] ${error.message}`)
-    }
-  }
-
-  if (errors.length) console.error(`[context-navigation-shoot] console errors during ${theme}: ${errors.join(' | ')}`)
-}
-
-await browser.close()
-
-console.log('\n[context-navigation-shoot] results')
-for (const row of results) {
-  console.log(`  ${row.status === 'ok' ? 'OK ' : 'GAP'} ${row.theme}/${row.name}${row.path ? ` -> ${row.path}` : ''} (${row.info})`)
-}
-const ok = results.filter((row) => row.status === 'ok').length
-console.log(`\n[context-navigation-shoot] ${ok}/${results.length} captures passed the real-data mount + interaction check`)
-if (ok !== results.length) process.exit(1)

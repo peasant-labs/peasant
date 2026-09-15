@@ -31,11 +31,18 @@ function requiredString(value, field, path) {
   return value[field]
 }
 
+/** The stored content of a fixture session's opening turn, read off the same file the Go store serves. */
+function openingTurn(session, path) {
+  const turns = session.turns
+  if (!Array.isArray(turns) || turns.length === 0) throw new Error(`${path}.turns must carry at least the opening record`)
+  return requiredString(record(turns[0], `${path}.turns[0]`), 'content', `${path}.turns[0]`)
+}
+
 /**
- * Loads the ONE mounted current-parent navigation fixture shared with the Go
- * mock provider, so the capture and the server can never disagree about the
- * child route, its exact context/source and parent targets, or the labels the
- * real viewer renders.
+ * Loads the ONE mounted current-navigation fixture shared with the Go mock
+ * provider, so the capture and the server can never disagree about the child
+ * route, its exact context/source and parent targets, the unresolved reference,
+ * or the labels the real viewer renders.
  */
 export function loadContextNavigationFixture() {
   try {
@@ -43,7 +50,7 @@ export function loadContextNavigationFixture() {
     if (document.errors.length > 0) throw document.errors[0]
     if (document.contents === null) throw new Error('fixture document is empty')
     const root = record(document.toJS(), 'context navigation fixture')
-    exactFields(root, ['project', 'child', 'source', 'parent', 'expected'], 'context navigation fixture')
+    exactFields(root, ['project', 'child', 'source', 'parent', 'unresolved', 'expected'], 'context navigation fixture')
 
     const project = record(root.project, 'context navigation fixture.project')
     exactFields(project, ['hash', 'name'], 'context navigation fixture.project')
@@ -53,9 +60,11 @@ export function loadContextNavigationFixture() {
     const child = record(root.child, 'context navigation fixture.child')
     const source = record(root.source, 'context navigation fixture.source')
     const parent = record(root.parent, 'context navigation fixture.parent')
+    const unresolved = record(root.unresolved, 'context navigation fixture.unresolved')
     const childSessionId = requiredSessionId(child, 'id', 'context navigation fixture.child')
     const sourceId = requiredSessionId(source, 'id', 'context navigation fixture.source')
     const parentId = requiredSessionId(parent, 'id', 'context navigation fixture.parent')
+    const unresolvedChildId = requiredSessionId(unresolved, 'id', 'context navigation fixture.unresolved')
     const relationships = child.relationships
     if (!Array.isArray(relationships) || relationships.length !== 2) throw new Error('context navigation fixture.child.relationships must name the context_from source and the started_by parent')
     for (const relationship of relationships) {
@@ -66,6 +75,13 @@ export function loadContextNavigationFixture() {
     if (context?.targetLocalId !== sourceId || starter?.targetLocalId !== parentId) throw new Error('context navigation fixture relationships must target the declared source and parent sessions')
     if (context?.targetState !== 'target_known' || starter?.targetState !== 'target_known' || context?.evidence !== 'native_typed' || starter?.evidence !== 'native_typed') throw new Error('context navigation fixture relationships must be known native-typed targets')
 
+    // The unresolved child must name a target the store does NOT hold, so the
+    // honest-reference arm can never accidentally become a link.
+    const unresolvedRelationships = unresolved.relationships
+    if (!Array.isArray(unresolvedRelationships) || unresolvedRelationships.length !== 1) throw new Error('context navigation fixture.unresolved.relationships must carry the one started_by relationship')
+    const absentTargetId = requiredSessionId(record(unresolvedRelationships[0], 'context navigation fixture.unresolved.relationships[0]'), 'targetLocalId', 'context navigation fixture.unresolved.relationships[0]')
+    if ([childSessionId, sourceId, parentId, unresolvedChildId].includes(absentTargetId)) throw new Error(`context navigation fixture.unresolved relationship target ${absentTargetId} names a stored session; the unavailable reference case requires an absent target`)
+
     const expected = record(root.expected, 'context navigation fixture.expected')
     exactFields(expected, ['contextLabel', 'starterLabel', 'starterLinkAction', 'earlierSummary'], 'context navigation fixture.expected')
 
@@ -73,8 +89,13 @@ export function loadContextNavigationFixture() {
       projectHash,
       projectName,
       childSessionId,
+      childOpening: openingTurn(child, 'context navigation fixture.child'),
       sourceId,
+      sourceOpening: openingTurn(source, 'context navigation fixture.source'),
       parentId,
+      parentOpening: openingTurn(parent, 'context navigation fixture.parent'),
+      unresolvedChildId,
+      absentTargetId,
       contextLabel: requiredString(expected, 'contextLabel', 'context navigation fixture.expected'),
       starterLabel: requiredString(expected, 'starterLabel', 'context navigation fixture.expected'),
       starterLinkAction: requiredString(expected, 'starterLinkAction', 'context navigation fixture.expected'),
@@ -82,7 +103,7 @@ export function loadContextNavigationFixture() {
     })
   } catch (error) {
     throw new Error(
-      `Mounted current-parent navigation fixture could not be loaded because ${error.message} at ${FIXTURE_PATH} before the capture server started; the mounted link/Back evidence would not match the served data; fix the fixture structure or schema values, then rerun current-parent-navigation.mjs.`,
+      `Mounted context navigation fixture could not be loaded because ${error.message} at ${FIXTURE_PATH} before the capture server started; the mounted link/Back evidence would not match the served data; fix the fixture structure or schema values, then rerun context-navigation-shoot.mjs.`,
       { cause: error },
     )
   }

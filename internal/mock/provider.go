@@ -78,6 +78,7 @@ func (p *Provider) ResolveStoredTargets(_ context.Context, ids []string) ([]api.
 var _ interface {
 	ResolveStoredTargets(ctx context.Context, ids []string) ([]api.StoredTarget, error)
 } = (*Provider)(nil)
+
 func (p *Provider) DashboardMetrics(_ context.Context) (*api.DashboardPayload, error) {
 	total := len(p.sessions)
 	if total == 0 {

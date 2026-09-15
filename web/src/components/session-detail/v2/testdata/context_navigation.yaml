@@ -1,0 +1,148 @@
+# Context/starter navigation on the mounted transcript route.
+#
+# Each case is one durable relationship set (what the session stores) plus the
+# authorized read navigation the local metadata read serves for it, and the
+# rows the mounted production route must cook from them. The cases come from
+# the local read's closed status set: the read resolves a stored target
+# (`resolved`) or reports it as unavailable, unknown, or conflicting, and never
+# publishes a source anchor, so every linkable row is the general
+# current-target link.
+back_case: context-and-starter-distinct
+cases:
+  - name: context-and-starter-distinct
+    search: "?origin=Map"
+    earlier_turn_content: migrated earlier work
+    relationships:
+      - kind: context_from
+        targetState: target_known
+        targetLocalId: sess_contextsource
+        evidence: native_typed
+        anchor: {kind: general_source_session}
+      - kind: started_by
+        targetState: target_known
+        targetLocalId: sess_startersource
+        evidence: native_typed
+    navigation:
+      - {kind: context_from, status: resolved, localId: sess_contextsource}
+      - {kind: started_by, status: resolved, localId: sess_startersource}
+    expected:
+      rows:
+        - label: context inherited from
+          link: sess_contextsource
+          status: null
+          note: "opens the current source. the earlier source state is not verified; captured child history stays unchanged."
+        - label: started by
+          link: sess_startersource
+          status: null
+          note: null
+  - name: same-target-combines
+    relationships:
+      - kind: context_from
+        targetState: target_known
+        targetLocalId: sess_sharedsource
+        evidence: native_typed
+      - kind: started_by
+        targetState: target_known
+        targetLocalId: sess_sharedsource
+        evidence: native_typed
+    navigation:
+      - {kind: context_from, status: resolved, localId: sess_sharedsource}
+      - {kind: started_by, status: resolved, localId: sess_sharedsource}
+    expected:
+      rows:
+        - label: context inherited from and started by
+          link: sess_sharedsource
+          status: null
+          note: "opens the current source. the earlier source state is not verified; captured child history stays unchanged."
+  - name: known-unavailable-no-link
+    relationships:
+      - kind: context_from
+        targetState: target_known
+        targetLocalId: sess_absentsource
+        evidence: native_typed
+        anchor: {kind: general_source_session}
+    navigation:
+      - {kind: context_from, status: known_unavailable}
+    expected:
+      rows:
+        - label: context inherited from
+          link: null
+          status: source unavailable
+          note: null
+  - name: unknown-source-no-link
+    relationships:
+      - kind: context_from
+        targetState: unknown
+        evidence: unknown
+    navigation:
+      - {kind: context_from, status: unknown}
+    expected:
+      rows:
+        - label: context inherited from
+          link: null
+          status: unknown source
+          note: null
+  - name: conflicting-source-no-link
+    relationships:
+      - kind: context_from
+        targetState: conflicting_current_native_evidence
+        evidence: conflict
+    navigation:
+      - {kind: context_from, status: conflicting}
+    expected:
+      rows:
+        - label: context inherited from
+          link: null
+          status: conflicting source evidence
+          note: null
+  - name: navigation-for-another-session-never-links
+    relationships:
+      - kind: context_from
+        targetState: target_known
+        targetLocalId: sess_contextsource
+        evidence: native_typed
+        anchor: {kind: general_source_session}
+    navigation:
+      - {kind: context_from, status: resolved, localId: sess_othersession}
+    expected:
+      rows:
+        - label: context inherited from
+          link: null
+          status: source unavailable
+          note: null
+  - name: durable-target-without-navigation-no-link
+    relationships:
+      - kind: context_from
+        targetState: target_known
+        targetLocalId: sess_contextsource
+        evidence: native_typed
+        anchor: {kind: general_source_session}
+    navigation: []
+    expected:
+      rows:
+        - label: context inherited from
+          link: null
+          status: source unavailable
+          note: null
+  - name: explicit-none-omits-row
+    relationships:
+      - kind: started_by
+        targetState: explicit_none
+        evidence: native_typed
+    navigation: []
+    expected:
+      rows: []
+
+# The host's single route decision, over the whole closed status set. Every
+# status the adapter can hand the callback appears here, so a widened contract
+# fails the closed-set membership check instead of silently losing a case.
+link_cases:
+  - {name: resolved-opens-the-stored-target, kind: context_from, status: resolved, localId: sess_contextsource, expectedTarget: sess_contextsource}
+  - {name: general-link-opens-the-current-target, kind: context_from, status: general_link_only, localId: sess_contextsource, expectedTarget: sess_contextsource}
+  - {name: started-by-opens-the-stored-target, kind: started_by, status: resolved, localId: sess_startersource, expectedTarget: sess_startersource}
+  - {name: known-unavailable-has-no-route, kind: context_from, status: known_unavailable, localId: null, expectedTarget: null}
+  - {name: inaccessible-has-no-route, kind: context_from, status: inaccessible, localId: null, expectedTarget: null}
+  - {name: unknown-has-no-route, kind: context_from, status: unknown, localId: null, expectedTarget: null}
+  - {name: conflicting-has-no-route, kind: context_from, status: conflicting, localId: null, expectedTarget: null}
+  - {name: resolved-without-a-target-identifier-has-no-route, kind: context_from, status: resolved, localId: null, expectedTarget: null}
+  - {name: unknown-relationship-kind-has-no-route, kind: future_relationship, status: resolved, localId: sess_contextsource, expectedTarget: null}
