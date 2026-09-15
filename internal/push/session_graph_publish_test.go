@@ -54,6 +54,10 @@ type sessionGraphPublishCase struct {
 	WantNetworkCalls int                        `yaml:"wantNetworkCalls"`
 	WantSaved        int                        `yaml:"wantSavedPublications"`
 	WantAttempts     int                        `yaml:"wantAttempts"`
+	// WantLegacyEnvelope pins that a store without the durable snapshot surface
+	// publishes the preserved entries-built envelope: the graph token is derived
+	// from the entry provenance alone, with no snapshot-derived session members.
+	WantLegacyEnvelope bool `yaml:"wantLegacyEnvelope"`
 }
 
 type sessionGraphPublishFixture struct {
@@ -163,7 +167,37 @@ func TestSessionGraphPublishOfflineScanAndFreshNegotiation(t *testing.T) {
 			if got := len(store.PublicationAttempts); got != fixtureCase.WantAttempts {
 				t.Fatalf("publication attempts=%d, want %d", got, fixtureCase.WantAttempts)
 			}
+			if fixtureCase.WantLegacyEnvelope {
+				requireLegacyEnvelope(t, transport)
+			}
 		})
+	}
+}
+
+// requireLegacyEnvelope pins the preserved entries-built envelope shape: the
+// last upload carries no session-level snapshot members, and its turn count is
+// the folded turn count rather than a durable generation mirror.
+func requireLegacyEnvelope(t *testing.T, transport push.Transport) {
+	t.Helper()
+	pub, ok := transport.(*testutil.StubPublisher)
+	if !ok || len(pub.Calls) == 0 {
+		t.Fatalf("legacy envelope assertion needs a stub upload; transport=%T", transport)
+	}
+	var envelope schema.TranscriptContent
+	if err := json.Unmarshal(pub.Calls[len(pub.Calls)-1].TranscriptBody, &envelope); err != nil {
+		t.Fatalf("decode uploaded body: %v", err)
+	}
+	detail := envelope.SessionDetail
+	if detail == nil {
+		t.Fatal("legacy envelope has no sessionDetail")
+	}
+	if detail.RootSessionID != nil || detail.Purpose != "" || len(detail.Relationships) != 0 ||
+		detail.InputSubmissionCount != nil || len(detail.EarlierHistory) != 0 {
+		t.Fatalf("legacy envelope carries snapshot-derived members: root=%v purpose=%q relationships=%d count=%v earlier=%d",
+			detail.RootSessionID, detail.Purpose, len(detail.Relationships), detail.InputSubmissionCount, len(detail.EarlierHistory))
+	}
+	if detail.TurnCount != len(detail.Turns) {
+		t.Fatalf("legacy turnCount=%d, want the folded turn count %d", detail.TurnCount, len(detail.Turns))
 	}
 }
 

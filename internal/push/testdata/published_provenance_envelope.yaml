@@ -1,0 +1,325 @@
+# Session-level provenance carriage on the REAL publish path.
+#
+# Every case drives the REAL shared publish service (push.Pipeline.Run) against
+# a REAL store. `path: snapshot` seeds a committed managed generation through
+# storetest.SeedGenerationPublication; `path: legacy` seeds the preserved V1
+# index through testutil.SeedReadyPublication on the same generation-capable
+# store, so the durable-first builder falls through to the preserved entries
+# builder on transcript.ErrLegacySnapshot.
+#
+# The emitted bytes come from StubPublisher.Calls[].TranscriptBody and the typed
+# request from StubPublisher.AuthoritativeCalls. Nothing is derived from a test
+# double of the production builder.
+#
+# Closed-set axes (an unknown value fails the loader):
+#   path:          snapshot | legacy
+#   stats:         absent | zero | positive        (inputSubmissionCount)
+#   relationships: none | known | known-retained | unknown
+#   rootIdentity:  present | absent
+#   purpose:       interaction | absent
+#   earlier:       none | one | two
+#   visibility:    default | label-sent | path-hidden | git-hidden
+#   advertisement: graph | plain
+#   redaction:     none | tool-body | pi-metadata
+#   entries:       plain | provenance | tool-block
+#
+# `advertisement: graph` is a receiver advertising the FULL current capability
+# menu (the graph token plus every other known token); `plain` advertises none.
+# The required capability set is always derived from the emitted payload, so a
+# graph-bearing row still requires session_graph_provenance_v1.
+#
+# `blobBytes` sizes the managed tool body that hydration must carry past the
+# stored preview; it is input data, so the expected byte count is pinned beside
+# the fixture fact rather than in the Go test.
+cases:
+  - name: relationships_with_public_anchors_publish
+    path: snapshot
+    stats: positive
+    relationships: known
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: label-sent
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      savedPublications: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        turnCount: 1
+        inputSubmissionCount: 3
+        rootSessionId: target
+        purpose: interaction
+        project: "github.com:acme/repo"
+        workingDirectory: ""
+        relationships:
+          - kind: started_by
+            targetState: target_known
+            targetLocalId: target
+            evidence: native_typed
+          - kind: context_from
+            targetState: target_known
+            targetLocalId: previous
+            evidence: native_typed
+            anchor:
+              kind: before_redacted_entry
+              sourceEntryRef: e_ctx
+              sourceRevisionRef: rev_1
+
+  # A committed COMPLETE generation always carries a measured
+  # inputSubmissionCount (a zero is measured), so an ABSENT count is only
+  # reachable through the preserved legacy projection. This case pins that
+  # presence semantics survive the fallback: absent stays absent rather than
+  # being backfilled to a zero.
+  - name: absent_input_count_stays_absent
+    path: legacy
+    stats: absent
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: []
+      mirrors: true
+      detail:
+        inputSubmissionCountAbsent: true
+        rootSessionIdAbsent: true
+        purpose: ""
+        relationships: []
+
+  - name: measured_zero_input_count_stays_zero
+    path: snapshot
+    stats: zero
+    relationships: none
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        inputSubmissionCount: 0
+        rootSessionId: target
+
+  - name: positive_input_count_root_and_purpose_publish
+    path: snapshot
+    stats: positive
+    relationships: none
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    # The durable turn mirror differs from len(Turns) so this case proves the
+    # published turnCount is the captured generation mirror, not a recount.
+    generationTurnCount: 7
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        turnCount: 7
+        inputSubmissionCount: 3
+        rootSessionId: target
+        purpose: interaction
+
+  - name: retained_earlier_history_publishes_with_state
+    path: snapshot
+    stats: positive
+    relationships: known-retained
+    rootIdentity: present
+    purpose: interaction
+    earlier: two
+    visibility: default
+    advertisement: graph
+    redaction: none
+    harness: pi
+    entries: plain
+    expect:
+      uploads: 1
+      requiredCapabilities: [native_metadata_v1, session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        rootSessionId: target
+        purpose: interaction
+        relationships:
+          - kind: started_by
+            targetState: target_known_retained
+            targetLocalId: target
+            evidence: native_typed
+          - kind: context_from
+            targetState: target_known_retained
+            targetLocalId: previous
+            evidence: native_typed
+            anchor:
+              kind: before_redacted_entry
+              sourceEntryRef: e_ctx
+              sourceRevisionRef: rev_1
+        earlierHistory:
+          - state: uncertain_migrated
+            turnIndexes: [0]
+            nativeMetadataIds: [n_earlier_1]
+          - state: uncertain_unresolved
+            turnIndexes: [0, 1]
+            nativeMetadataIds: [n_earlier_2]
+
+  - name: full_tool_body_publishes_past_preview_bound
+    path: snapshot
+    stats: zero
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: tool-block
+    blobBytes: 4096
+    generationTurnCount: 2
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      detail:
+        turnCount: 2
+        toolArgumentEqualsManagedBlob: true
+        toolArgumentBytes: 4096
+        callProvenanceRef: s_call1
+        resultProvenanceRef: s_result1
+
+  - name: project_label_withholds_working_directory
+    path: snapshot
+    stats: zero
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: label-sent
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      detail:
+        project: "github.com:acme/repo"
+        workingDirectory: ""
+
+  - name: hidden_git_fields_are_emptied
+    path: snapshot
+    stats: zero
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: git-hidden
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      detail:
+        gitBranch: ""
+        gitRemote: ""
+        project: project-abcdef1234ab
+        workingDirectory: /home/test/myapp
+
+  - name: session_only_graph_payload_refused_without_token
+    path: snapshot
+    stats: zero
+    relationships: none
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: default
+    advertisement: plain
+    redaction: none
+    entries: plain
+    expect:
+      uploads: 0
+      errors: true
+      savedPublications: 0
+      attempts: 0
+      requiredCapabilities: [session_graph_provenance_v1]
+
+  - name: legacy_snapshot_keeps_legacy_envelope_shape
+    path: legacy
+    stats: absent
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      requiredCapabilities: []
+      detail:
+        turnCount: 1
+        inputSubmissionCountAbsent: true
+        rootSessionIdAbsent: true
+        purpose: ""
+        relationships: []
+        project: project-abcdef1234ab
+
+  - name: pi_metadata_body_is_redacted_in_envelope
+    path: snapshot
+    stats: zero
+    relationships: none
+    rootIdentity: absent
+    purpose: absent
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: pi-metadata
+    harness: pi
+    entries: plain
+    expect:
+      uploads: 1
+      requiredCapabilities: [detailed_usage_v1, native_metadata_v1, observed_model_v1, session_graph_provenance_v1]
+      # The metadata mirror survives the REAL whole-document redaction boundary
+      # and the read-back/re-marshal that restores observed models.
+      mirrors: true
+      secretAbsent: true
+      observedModel: pi-observed-model-1
+
+  - name: receipt_binds_content_hash_to_published_bytes
+    path: snapshot
+    stats: positive
+    relationships: known
+    rootIdentity: present
+    purpose: interaction
+    earlier: none
+    visibility: default
+    advertisement: graph
+    redaction: none
+    entries: provenance
+    expect:
+      uploads: 1
+      savedPublications: 1
+      requiredCapabilities: [session_graph_provenance_v1]
+      mirrors: true
+      contentHashMatchesBytes: true
+      fingerprintMatches: true
+      detail:
+        inputSubmissionCount: 3
+        rootSessionId: target
+        purpose: interaction

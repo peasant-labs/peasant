@@ -46,6 +46,24 @@ cases:
     wantSavedPublications: 1
     wantAttempts: 0
 
+  # The preserved fallback: a store without the durable snapshot surface (here a
+  # bundle double) still publishes the entries-built envelope. The graph token is
+  # derived from the turn provenance alone, and no snapshot-derived session
+  # member appears.
+  - name: store_without_generation_support_publishes_legacy_envelope
+    arm: pipeline
+    payload: graph
+    transport: stub
+    advertisement:
+      - session_graph_provenance_v1
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 1
+    wantError: false
+    wantNetworkCalls: 1
+    wantSavedPublications: 1
+    wantLegacyEnvelope: true
+
   - name: support_changed_after_scan_to_unsupported_refuses
     arm: pipeline
     payload: graph
