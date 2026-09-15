@@ -9,7 +9,6 @@ import type { SessionsPayload } from '@/types/messages';
 import {
   ALPHA_HASH,
   BETA_HASH,
-  REVIEW_LIST_PAYLOAD,
   makeSession,
 } from '@/app/review/[[...segments]]/test-fixtures';
 import { DiscoveryRequestError } from '@/lib/api/errors';
@@ -22,9 +21,9 @@ import {
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
 import { localReviewClarityFixture, makeClarityProjectSummaries } from '@/test/fixtures/localReviewClarity';
 
-// ChangeGraph (embedded in the home's single-project change list) now calls
-// useRouter for CommitGraph tip-row navigation; mock it here so tests never
-// hit the "invariant expected app router to be mounted" error.
+// Home's picker rows are the only route into a project; no embedded graph
+// mounts here any more, so no app router is required. Mock it anyway so a
+// transitive Link/router read can never hit "invariant expected app router".
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 // The Changes home reads ambient liveness from the sessions WS channel.
@@ -41,14 +40,11 @@ vi.mock('@/contexts/WebSocketContext', () => ({
   }),
 }));
 
-// REST stubs — the home fetches per-project summaries (picker rows) and, on
-// single-project installs, the project's review changes for the embedded
-// ChangeList (the ChangeList itself renders for real — not mocked).
+// REST stubs — the home fetches per-project summaries (picker rows) only.
 const api = vi.hoisted(() => ({
   fetchProjectSummaries: vi.fn<() => Promise<DecodedProjectSummariesPayload>>(),
   // The render-now seed: tests exercise the cold path (no cached payload).
   cachedProjectSummaries: () => null,
-  fetchReviewChanges: vi.fn(),
 }));
 vi.mock('@/lib/api/map', () => api);
 
@@ -288,7 +284,6 @@ const selectionRetryFixture = loadSelectionRetryFixture();
 describe('HomePage — the changes-first picker', () => {
   beforeEach(() => {
     api.fetchProjectSummaries.mockReturnValue(pending());
-    api.fetchReviewChanges.mockReturnValue(pending());
     // Keep the grouped route pending: these tests assert the picker/selection
     // policy, and a resolved grouped payload would commit an unrelated state
     // update after the synchronous assertions.
@@ -423,8 +418,8 @@ describe('HomePage — the changes-first picker', () => {
     expect(beta.textContent).toContain('—');
     expect(beta.textContent).toContain('3d ago');
 
-    // No map embedded on the home anymore.
-    expect(screen.queryByLabelText(/Map of/)).not.toBeInTheDocument();
+    // No change graph embedded on the home anymore.
+    expect(screen.queryByLabelText(/Change history for/)).not.toBeInTheDocument();
   });
 
   it('E1: shows aggregate summary cards above the multi-project picker', async () => {
@@ -668,28 +663,23 @@ describe('HomePage — the changes-first picker', () => {
     channelErrorCode = undefined;
     channelData = { sessions: [makeSession({ id: 'visible', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     view.rerender(<HomePage />);
-    expect(await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Open the sessions of alpha-project' })).toBeInTheDocument();
   });
 
-  it('skips the picker on single-project installs and embeds the Changes list', async () => {
+  it('renders the ordinary picker for a single-project install — never an embedded change graph', async () => {
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
-    // No picker — straight to the project's changes (real ChangeList rows).
-    const row = await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
-    expect(row).toHaveAttribute(
-      'href',
-      `/review/${ALPHA_HASH}?branch=feat%2Fgraph-cache`,
-    );
-    expect(screen.queryByRole('link', { name: /Open the sessions of/ })).not.toBeInTheDocument();
-    expect(api.fetchReviewChanges).toHaveBeenCalledWith(ALPHA_HASH);
-
-    // The embedded list is the tour's changes-list anchor.
-    expect(document.querySelector('[data-tour="changes-list"]')).not.toBeNull();
+    const row = await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
+    expect(row).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
+    // The change graph is not embedded anywhere on the home surface.
+    expect(screen.queryByLabelText(/Change history for/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open the line of work/ })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-tour="changes-list"]')).toBeNull();
+    // A single-project install still gets the aggregate KPI grid.
+    expect(screen.getByText('files built with ai')).toBeInTheDocument();
   });
 
   // A selected-mode project list without an explanation reads as broken rather
@@ -697,7 +687,7 @@ describe('HomePage — the changes-first picker', () => {
   // actually-hiding selection is called out plainly (with a
   // path to review/widen it, and WITHOUT naming the hidden projects), and an
   // active-but-not-hiding-anything selection stays silent.
-  it('shows a selection notice when an active selection hides projects and sessions, on the single-project view', async () => {
+  it('shows a selection notice when an active selection hides projects and sessions, on a single-project install', async () => {
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(
       makeSummaries([makeSummary({ project: 'alpha-project' })], {
@@ -706,7 +696,6 @@ describe('HomePage — the changes-first picker', () => {
         hiddenSessions: 5,
       }),
     );
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
     const notice = await screen.findByRole('status');
@@ -761,10 +750,9 @@ describe('HomePage — the changes-first picker', () => {
         hiddenSessions: 0,
       }),
     );
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
-    await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
+    await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
@@ -777,21 +765,20 @@ describe('HomePage — the changes-first picker', () => {
         hiddenSessions: 0,
       }),
     );
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
-    await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
+    await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('resolves the single project hash from the sessions channel when summaries fail', async () => {
+  it('renders a single-project row from the sessions channel when summaries fail', async () => {
     api.fetchProjectSummaries.mockRejectedValue(new Error('boom'));
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     render(<HomePage />);
 
-    await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
-    expect(api.fetchReviewChanges).toHaveBeenCalledWith(ALPHA_HASH);
+    const row = await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
+    expect(row).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
+    expect(screen.queryByLabelText(/Change history for/)).not.toBeInTheDocument();
   });
 
   it('shows the disconnected state when the local app is unreachable', async () => {

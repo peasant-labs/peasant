@@ -193,14 +193,23 @@ success, so this incident record is not an executable redispatch procedure.
    `release(vX.Y.Z-rc1): <summary>` (bump `rcN` for subsequent candidates).
    - `release-pr.yml` (open/edit trigger) validates the title grammar and that **you**
      are an `admin`/`maintain` collaborator. Fix the title or authorship if it fails.
-   - `release-validate.yml` (path-filtered to packaging-relevant files — `**.go`,
-     `.goreleaser.yml`, flake/`go.mod`/`go.sum`/web manifests, `Makefile`; a real
-     release PR always matches) runs the per-distro install matrix against a goreleaser
+   - `release-validate.yml` runs the per-distro install matrix against a goreleaser
      **`--snapshot`** build (synthetic version): deb 2×2 (ubuntu 22.04/24.04 ×
       amd64/arm64), rpm (fedora `dnf` + leap `zypper modifyrepo --disable --all`
       followed by `zypper --no-refresh --allow-unsigned-rpm`), Arch
      `makepkg` (x86_64), `brew style`, the **rc-only** macOS cask install, and
      `nix build .#peasant`.
+   - On a push, the `e2e` and `release-validate` matrices re-run only when the push
+     touches their inputs or their previous run on this PR has not passed; `tests`
+     always runs. **Before merging, apply the `full-gate` label to the head and wait
+     for the complete matrix.** This step is mandatory but is not enforced by the
+     merge or tag workflow: a skipped gate on the final head does not satisfy the
+     release ceremony. Inspect the labeled `Release PR` run for the final SHA and
+     confirm every required child job passed (`macos cask install (rc only)` may be
+     skipped on a final). The label run can overlap a push's run, so after any later
+     push remove and re-add the label and repeat; on a failed or cancelled child,
+     fix, push, and repeat. §5 covers re-runs of the post-tag `release.yml`, not
+     this pre-merge pass.
 3. **Merge** (the approval assertion is deferred during the single-maintainer
    period - §2).
    - `release-pr.yml` (merge trigger) checks out the merge
@@ -235,7 +244,8 @@ success, so this incident record is not an executable redispatch procedure.
 This section describes finals after the exact initial `v0.1.0` bootstrap.
 
 1. Open a PR into `develop` titled `release(vX.Y.Z): <summary>`. Same validation as an
-   rc, plus `release-validate.yml` skips the macOS cask install (rc-only).
+   rc, plus `release-validate.yml` skips the macOS cask install (rc-only). The
+   delta-gated matrices and the mandatory `full-gate` pass from §3 apply here too.
 2. Merge (approval assertion deferred during the single-maintainer period - §2).
    `release-pr.yml` updates the Nix vendor hash if
    needed and mints the annotated final tag on the hash-current commit.
@@ -254,7 +264,43 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
 
 ---
 
-## 5. Release guard rules
+## 5. Re-running a failed release
+
+`release.yml` runs once per tag. When a job fails, re-run **only the failed jobs**;
+do not re-run the whole workflow.
+
+- The GitHub UI action *Re-run failed jobs*, or `gh run rerun <run-id> --failed`,
+  re-runs the failed jobs and their downstream dependents. Successful upstream
+  and unrelated jobs are retained — a failed smoke re-runs only the smoke, and
+  `guard`, `nix-vendor-hash`, `full-stack e2e`, `release e2e` are not re-run.
+- A gate that failed re-runs together with its dependents, so `release` and the
+  smokes run once the gate passes. That is the normal case: publication had been
+  skipped, not executed, when the gate failed.
+- `release (goreleaser)` is safe to re-run for the **current** release: the
+  existing Release keeps its notes (`release.mode: keep-existing`) and
+  re-uploaded assets replace the old ones (`release.replace_existing_artifacts:
+  true`), so a partial publish completes instead of failing on duplicate
+  artifacts. On a final tag the Homebrew cask push is retried as well; do not
+  re-run an older final's release job after a newer final has published, because
+  it would write the older cask back to the live tap. rc reruns never push the
+  cask (`skip_upload: auto`).
+- `smoke` / `macos-cask-smoke` only download and install the published artifacts;
+  they are safe to re-run alone, in any order.
+- If `e2e` or `release-e2e` failed, its re-run also re-runs `release` and the
+  smokes, because publication depends on those gates. That dependency is
+  intentional: a gate failure must block publication.
+- A re-run consumes the workflow stored at the tag, not the current `develop`.
+  A fix to `release.yml` itself therefore does not reach an existing tag's
+  re-run. The `v0.1.0` startup record in §3 documents the only recovery exercise
+  of that shape; its one-time workflow was removed after it succeeded, so a
+  workflow-level failure at tag time needs a new, reviewed recovery path.
+
+After any re-run, repeat the §4 verification: the full artifact set,
+`checksums.txt`, and a fresh smoke on both architectures.
+
+---
+
+## 6. Release guard rules
 
 The `release.yml` **guard** job verifies that the tag push came from the release App
 and that the tag parses as a Peasant rc or final release. Final tags can publish full
@@ -276,7 +322,7 @@ pre-tag update because a tag must point at immutable, hash-current source.
 
 ---
 
-## 6. Publication checklist
+## 7. Publication checklist
 
 Run these, in order, when enabling external package publication.
 
@@ -354,7 +400,7 @@ Run these, in order, when enabling external package publication.
 
 ---
 
-## 7. Deferred ladder
+## 8. Deferred ladder
 
 The following are optional release-hardening improvements. RPM artifacts and WSL
 documentation are part of the current release contract rather than this list.

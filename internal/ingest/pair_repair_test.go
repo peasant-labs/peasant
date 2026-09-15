@@ -35,6 +35,11 @@ type pairRepairCase struct {
 	TranscriptReadFault bool   `yaml:"transcriptReadFault"`
 	WantRepaired        bool   `yaml:"wantRepaired"`
 	WantSourceReport    bool   `yaml:"wantSourceReport"`
+	// CapturedSeed stores the row with a source-proven publication capture,
+	// the state of every row an ordinary harvest has already captured. Without
+	// it the seed is a pre-capture row, which an ordinary harvest re-reads from
+	// native input once in order to capture it.
+	CapturedSeed bool `yaml:"capturedSeed"`
 }
 
 func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
@@ -104,6 +109,12 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				parentID = &parent
 				meta.ParentUUID = parentID
 			}
+			if fixture.CapturedSeed {
+				// The pair must carry the snapshot the capture records, so the
+				// integrity digest is sealed before the pair is written.
+				meta.SchemaVersion = ingest.CurrentSchemaVersion
+				meta.MetadataHash = schema.ComputeMetadataHash(meta)
+			}
 			encoded, err := json.Marshal(meta)
 			if err != nil {
 				t.Fatal(err)
@@ -137,7 +148,12 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				parentMeta.ModelHarness = ingest.HarnessClaudeCode
 				storeEntries = append(storeEntries, ingest.StoreEntry{Metadata: parentMeta})
 			}
-			storeEntries = append(storeEntries, ingest.StoreEntry{Metadata: meta})
+			entry := ingest.StoreEntry{Metadata: meta}
+			if fixture.CapturedSeed {
+				entry.PublicationCapture = true
+				entry.CWDProvenance = ingest.CWDSourceAbsent
+			}
+			storeEntries = append(storeEntries, entry)
 			if err := database.InsertSessions(ctx, storeEntries); err != nil {
 				t.Fatal(err)
 			}

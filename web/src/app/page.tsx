@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useChannel } from "@/contexts/WebSocketContext";
 import { discoveryErrorMessage } from "@/lib/selectionGuidance";
 import { DiscoveryErrorCode, discoveryErrorCode } from "@/lib/api/errors";
@@ -18,13 +18,10 @@ import {
   projectListState,
 } from "@/components/picker/SelectionRecoveryPanel";
 import { ExplainerToggle, useExplainer } from "@/components/Explainer";
-import { Skeleton, SkeletonList } from "@/lib/skeleton";
+import { Skeleton } from "@/lib/skeleton";
 import type { SessionsPayload, SessionSummary } from "@/types/messages";
-import type { ReviewListPayload } from "@peasant-labs/schema";
-import { cachedProjectSummaries, fetchProjectSummaries, fetchReviewChanges, type DecodedProjectSummariesPayload } from "@/lib/api/map";
+import { cachedProjectSummaries, fetchProjectSummaries, type DecodedProjectSummariesPayload } from "@/lib/api/map";
 import { displayProject } from "@/lib/quality/utils";
-import { parseProjectHash } from "@/lib/navigation/projectRoutes";
-import { ChangeGraph } from "@/app/review/[[...segments]]/ChangeGraph";
 import { formatRelative } from "@/app/review/[[...segments]]/format";
 import {
   StatGrid,
@@ -48,14 +45,12 @@ const CHANNELS: ["sessions"] = ["sessions"];
 // falling back to sessions-channel grouping (stats unavailable) while the
 // fetch loads or fails. A row click lands on /sessions/{projectHash} — that
 // project's session list (the shared ProjectPicker, destination="sessions").
-// Single-project installs skip the picker and embed that project's Changes
-// list directly. The Map lives at /map now.
+// Every install renders this one shape — including a single-project install.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Summary stats (E1) — aggregate across all projects, built from picker rows.
 // ---------------------------------------------------------------------------
-
 interface SummaryStats {
   projects: number;
   sessions: number;
@@ -89,71 +84,6 @@ function summaryStats(rows: PickerRow[], totalSessions: number): SummaryStats {
     }
   }
   return { projects: rows.length, sessions: totalSessions, recorded, total, hasCoverage, open, hasOpen, lastWorkMs };
-}
-
-// ---------------------------------------------------------------------------
-// Single-project installs — skip the picker, embed the Changes graph directly
-// (the same ChangeGraph the /review surface renders).
-// ---------------------------------------------------------------------------
-
-function SingleProjectChanges({ row }: { row: PickerRow }) {
-  const [payload, setPayload] = useState<ReviewListPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const projectHash = row.hash ? parseProjectHash(row.hash) : null;
-
-  useEffect(() => {
-    if (!projectHash) return;
-    let cancelled = false;
-    setPayload(null);
-    setError(null);
-    fetchReviewChanges(projectHash)
-      .then((p) => {
-        if (!cancelled) setPayload(p);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectHash]);
-
-  let body: ReactNode;
-  if (!row.hash) {
-    body = (
-      <div className="border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-danger">
-        No project hash is recorded for {displayProject(row.name)} — the server
-        may predate this surface, or the project has not been ingested yet.
-      </div>
-    );
-  } else if (!projectHash) {
-    body = <div role="alert">This project has a malformed identity. Refresh project discovery before opening its changes. No changes request was sent.</div>;
-  } else if (error) {
-    body = (
-      <div className="border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-danger">
-        Couldn&rsquo;t load the changes: {error}
-      </div>
-    );
-  } else if (!payload) {
-    // Same shimmer geometry as the /review list skeleton.
-    body = <SkeletonList rows={4} label="Loading changes" />;
-  } else {
-    body = <ChangeGraph projectHash={projectHash} projectName={row.name} payload={payload} />;
-  }
-
-  return (
-    // Same fairtrade bare-`section` neutralization as AllSessions: without it
-    // this single-project view is capped at --maxw and centred inside its
-    // flex-column parent instead of filling it. See the note in
-    // components/sessions/AllSessions.tsx for the mechanism.
-    <section
-      className="flex flex-col gap-3 w-full max-w-none mx-0 px-0"
-      data-tour="changes-list"
-    >
-      <h2 className="text-sm font-medium text-ink">{displayProject(row.name)}</h2>
-      {body}
-    </section>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +307,6 @@ export default function HomePage() {
       : sessions.length > 0
       ? sessions.length
       : rows.reduce((n, r) => n + r.sessions, 0);
-  const singleProject = rows.length === 1 ? rows[0] : null;
   const stats = useMemo(() => summaryStats(rows, totalSessions), [rows, totalSessions]);
 
   // Nothing has resolved yet: summary fetch still in flight AND no sessions
@@ -502,15 +431,15 @@ export default function HomePage() {
         </p>
       )}
 
-      {/* KPI grid — aggregate stats across all projects (picker view only).
+      {/* KPI grid — aggregate stats across all projects.
           StatGrid replaces the hand-rolled SummaryCard grid: responsive auto-fit
           columns, mono eyebrow labels, tabular display numbers, optional sub lines. */}
-      {!loading && rows.length > 0 && !singleProject && (
+      {!loading && rows.length > 0 && (
         <StatGrid tiles={kpiTiles} />
       )}
 
       {/* Explain a screen of "—": the per-project stats couldn't load. */}
-      {summariesFailed && !singleProject && rows.length > 0 && (
+      {summariesFailed && rows.length > 0 && (
         <p className="text-xs text-ink-3">
           Per-project stats couldn&rsquo;t load, so coverage and unmerged-branch
           counts show &ldquo;—&rdquo;. Session counts and last-work are still accurate.
@@ -521,7 +450,7 @@ export default function HomePage() {
           loading       → skeleton rows (DataState's built-in shimmer)
           disconnected  → calm lost-connection panel (not an empty state)
           empty         → TeachingEmptyState — what to run and why
-          data present  → picker or single-project changes view */}
+          data present  → the project picker */}
       <DataState
         loading={loading}
         status={wsStatus}
@@ -539,15 +468,9 @@ export default function HomePage() {
         }
         skeletonRows={4}
       >
-        {singleProject ? (
-          // Keyed by project so a change of the single project resets the
-          // embedded list's fetch state via a remount.
-          <SingleProjectChanges key={singleProject.name} row={singleProject} />
-        ) : (
-          // statsPending until the summary fetch settles → the coverage +
-          // unmerged cells shimmer instead of popping empty→value.
-          <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
-        )}
+        {/* statsPending until the summary fetch settles → the coverage +
+            unmerged cells shimmer instead of popping empty→value. */}
+        <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
       </DataState>
 
       {/* Every ingested session, grouped by its saved helper threads, beneath

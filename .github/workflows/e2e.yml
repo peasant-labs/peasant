@@ -9,7 +9,10 @@ name: E2E
 # refs/tags/v* push), and on-demand. It does NOT run on ordinary feature PRs or
 # on post-merge pushes to develop/main -- an integration run on every merge is
 # more than the CI budget allows. The pull_request trigger below still evaluates
-# so the check appears (as skipped) on feature PRs.
+# so the check appears (as skipped) on feature PRs. On release PRs the standalone
+# run's job skips and the release-pr.yml-called copy is the single authority
+# (inside a called reusable workflow github.workflow is the caller's name), so
+# the suite executes at most once per push.
 on:
   pull_request:
     branches: [develop]
@@ -32,12 +35,17 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# Cancel superseded runs on the same ref to save minutes. Scoped by the workflow
+# name because the release-pr.yml-called copy runs with the caller's github
+# context; a shared group would let the two copies cancel each other. On a
+# release PR the group is also scoped to the head SHA, so a stale labeled run
+# cannot cancel the current head's gate.
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
   cancel-in-progress: true
 
 env:
-  VILLAGE_REF: 830cbcbe3cd00613d04bd8f6a2ae9f1db955d503
+  VILLAGE_REF: 319be4358df9568164de774fceb715a92e2ab38f
 
 permissions:
   contents: read
@@ -45,12 +53,17 @@ permissions:
 jobs:
   e2e:
     name: full-stack push e2e (podman)
-    # Release only: a release PR (title starts with "release(", via release-pr.yml
-    # or the pull_request trigger), a release tag (release.yml calls this workflow
-    # on a refs/tags/v* push), or an on-demand dispatch. Ordinary feature PRs and
-    # post-merge pushes to develop/main evaluate this to false and skip. Skipped
-    # rather than absent, so a required-check config stays satisfied.
-    if: startsWith(github.event.pull_request.title, 'release(') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    # Release only: a release PR (title starts with "release(", reached through
+    # release-pr.yml's call — the standalone copy skips so the suite runs once),
+    # a release tag (release.yml calls this workflow on a refs/tags/v* push), or
+    # an on-demand dispatch. Ordinary feature PRs and post-merge pushes to
+    # develop/main evaluate this to false and skip. Skipped rather than absent,
+    # so a required-check config stays satisfied.
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.pull_request.title, 'release(') &&
+       github.workflow == 'Release PR')
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 45
     steps:

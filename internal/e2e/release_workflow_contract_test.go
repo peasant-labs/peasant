@@ -111,10 +111,75 @@ type workflowEnvExpectation struct {
 	Value string `yaml:"value"`
 }
 
+// workflowNeeds accepts either a scalar or a sequence; the caller compares the
+// values as an exact set.
+type workflowNeeds []string
+
+func (needs *workflowNeeds) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		var single string
+		if err := node.Decode(&single); err != nil {
+			return err
+		}
+		if strings.TrimSpace(single) == "" {
+			return fmt.Errorf("needs must be non-empty")
+		}
+		*needs = []string{single}
+		return nil
+	}
+	var decoded []string
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	for i, value := range decoded {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("needs item %d must be non-empty", i)
+		}
+	}
+	*needs = decoded
+	return nil
+}
+
+func workflowNeedsValues(node *yaml.Node) []string {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		return []string{node.Value}
+	}
+	values := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		values = append(values, item.Value)
+	}
+	return values
+}
+
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	counts := make(map[string]int, len(got))
+	for _, value := range got {
+		counts[value]++
+	}
+	for _, value := range want {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 type workflowJobPermissionsExpectation struct {
 	Job         string                   `yaml:"job"`
 	Uses        string                   `yaml:"uses"`
-	Needs       string                   `yaml:"needs"`
+	Needs       workflowNeeds            `yaml:"needs"`
 	IfContains  nonEmptyStrings          `yaml:"if_contains"`
 	Permissions []workflowEnvExpectation `yaml:"permissions"`
 }
@@ -305,14 +370,10 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 			if uses.Value != expectation.Uses {
 				t.Fatalf("%s: reusable job %q uses %q, want %q", caller.Workflow, expectation.Job, uses.Value, expectation.Uses)
 			}
-			if expectation.Needs != "" {
-				needs := yamlMappingValue(job, "needs")
-				gotNeeds := "<nil>"
-				if needs != nil {
-					gotNeeds = needs.Value
-				}
-				if needs == nil || needs.Value != expectation.Needs {
-					t.Fatalf("%s: reusable job %q needs %q, want %q", caller.Workflow, expectation.Job, gotNeeds, expectation.Needs)
+			if len(expectation.Needs) > 0 {
+				got := workflowNeedsValues(yamlMappingValue(job, "needs"))
+				if !sameStringSet(got, expectation.Needs) {
+					t.Fatalf("%s: reusable job %q needs %v, want exactly %v", caller.Workflow, expectation.Job, got, expectation.Needs)
 				}
 			}
 			if len(expectation.IfContains) > 0 {

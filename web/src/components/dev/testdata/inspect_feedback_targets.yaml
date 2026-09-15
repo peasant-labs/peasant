@@ -1,0 +1,193 @@
+# Element descriptions for the dev inspect + feedback tool.
+#
+# Each element case mounts `html` into the page, picks the element matched by
+# `pick`, and asserts the description the tool would post: the generated CSS
+# `selector`, the cheap hover `label`, the owning `section`, the `anchor` the
+# route stores (the section, or the label when nothing scopes the element), and
+# the DOM snippet length (`snippetChars`, capped by the tool).
+#
+# `padTo` substitutes the literal token PAD in `html` with that many `x`
+# characters, so the snippet cap is expressed as data instead of a long literal.
+#
+# Every inventory carries a `requiredNames` list; the loader fails when the case
+# names and the required names are not the exact same set, so a case cannot be
+# deleted without updating the inventory.
+
+elements:
+  requiredNames:
+    - an id short-circuits the selector chain
+    - a unique child keeps a plain tag step
+    - sibling tags get an nth-of-type disambiguator
+    - the ancestor walk is capped
+    - a labelled section names the anchor
+    - a section heading names the section without an aria-label
+    - a section id is the last resort
+    - an element outside any section has no anchor section
+    - the hover label keeps only the leading classes
+    - the dom snippet is capped
+  cases:
+    - name: an id short-circuits the selector chain
+      html: '<div id="panel-root"><button class="save primary danger extra">save</button></div>'
+      pick: '#panel-root'
+      selector: '#panel-root'
+      label: 'div#panel-root'
+      section: ''
+      anchor: 'div#panel-root'
+      snippetChars: 82
+    - name: a unique child keeps a plain tag step
+      html: '<div id="wrap"><button class="a b c d e">save</button></div>'
+      pick: button
+      selector: '#wrap > button.a.b.c'
+      label: 'button.a.b.c'
+      section: ''
+      anchor: 'button.a.b.c'
+      snippetChars: 39
+    - name: sibling tags get an nth-of-type disambiguator
+      html: '<div id="list"><span class="x">a</span><span class="x">b</span><span class="x">c</span></div>'
+      pick: '#list > span:nth-of-type(2)'
+      selector: '#list > span.x:nth-of-type(2)'
+      label: 'span.x'
+      section: ''
+      anchor: 'span.x'
+      snippetChars: 24
+    - name: the ancestor walk is capped
+      html: '<div class="l1"><div class="l2"><div class="l3"><div class="l4"><div class="l5"><div class="l6"><div class="l7"><button class="deep">x</button></div></div></div></div></div></div></div>'
+      pick: 'button.deep'
+      selector: 'div.l3 > div.l4 > div.l5 > div.l6 > div.l7 > button.deep'
+      label: 'button.deep'
+      section: ''
+      anchor: 'button.deep'
+      snippetChars: 31
+    - name: a labelled section names the anchor
+      html: '<main><section aria-label="Files changed"><ul><li class="row">x</li></ul></section></main>'
+      pick: '.row'
+      selector: 'main > section > ul > li.row'
+      label: 'li.row'
+      section: 'Files changed'
+      anchor: 'Files changed'
+      snippetChars: 22
+    - name: a section heading names the section without an aria-label
+      html: '<section><h2>Semantic tags</h2><div class="filters"><span class="chip">a</span></div></section>'
+      pick: '.chip'
+      selector: 'section > div.filters > span.chip'
+      label: 'span.chip'
+      section: 'Semantic tags'
+      anchor: 'Semantic tags'
+      snippetChars: 27
+    - name: a section id is the last resort
+      html: '<section id="review-files"><div class="row">x</div></section>'
+      pick: '.row'
+      selector: '#review-files > div.row'
+      label: 'div.row'
+      section: '#review-files'
+      anchor: '#review-files'
+      snippetChars: 24
+    - name: an element outside any section has no anchor section
+      html: '<div class="loose"><span class="t">x</span></div>'
+      pick: '.t'
+      selector: 'div.loose > span.t'
+      label: 'span.t'
+      section: ''
+      anchor: 'span.t'
+      snippetChars: 24
+    - name: the hover label keeps only the leading classes
+      html: '<button id="save-btn" class="a b c d">save</button>'
+      pick: '#save-btn'
+      selector: '#save-btn'
+      label: 'button#save-btn.a.b.c'
+      section: ''
+      anchor: 'button#save-btn.a.b.c'
+      snippetChars: 51
+    - name: the dom snippet is capped
+      html: '<div class="wide" data-pad="PAD">y</div>'
+      padTo: 600
+      pick: '.wide'
+      selector: 'div.wide'
+      label: 'div.wide'
+      section: ''
+      anchor: 'div.wide'
+      snippetChars: 400
+
+switches:
+  requiredNames:
+    - the switch is off by default
+    - the off value disables the tool
+    - the off value works beside other parameters
+    - the off value works before other parameters
+    - another value leaves the tool on
+    - a longer value is not the off switch
+  cases:
+    - name: the switch is off by default
+      query: ''
+      disabled: false
+    - name: the off value disables the tool
+      query: '?fb=off'
+      disabled: true
+    - name: the off value works beside other parameters
+      query: '?theme=light&fb=off'
+      disabled: true
+    - name: the off value works before other parameters
+      query: '?fb=off&theme=light'
+      disabled: true
+    - name: another value leaves the tool on
+      query: '?fb=on'
+      disabled: false
+    - name: a longer value is not the off switch
+      query: '?fb=offline'
+      disabled: false
+
+payloads:
+  requiredNames:
+    - the owning section becomes the anchor
+    - the cheap label is the anchor fallback
+    - a whitespace comment trims to empty
+  cases:
+    - name: the owning section becomes the anchor
+      html: '<section aria-label="Files changed"><button class="row">x</button></section>'
+      pick: 'button.row'
+      route: /projects/alpha-project/sess-feedback
+      comment: '  the heading wraps awkwardly  '
+      selector: 'section > button.row'
+      anchor: 'Files changed'
+      commentStored: 'the heading wraps awkwardly'
+      snippetChars: 30
+    - name: the cheap label is the anchor fallback
+      html: '<div class="loose"><button class="row">x</button></div>'
+      pick: 'button.row'
+      route: /
+      comment: 'spacing is tight'
+      selector: 'div.loose > button.row'
+      anchor: 'button.row'
+      commentStored: 'spacing is tight'
+      snippetChars: 30
+    - name: a whitespace comment trims to empty
+      html: '<div class="loose"><button class="row">x</button></div>'
+      pick: 'button.row'
+      route: /review/
+      comment: '   '
+      selector: 'div.loose > button.row'
+      anchor: 'button.row'
+      commentStored: ''
+      snippetChars: 30
+
+# The tool renders design-system chrome through the published fairtrade bundle
+# (components.css). This inventory guards that every class the tool depends on is
+# still shipped, so a design-system release that drops one fails here instead of
+# rendering an unstyled tool.
+designSystemClasses:
+  requiredNames:
+    - fbk-launch
+    - fbk-tag
+    - fbk-target
+    - fbk-arming
+    - fbk-pop
+    - fbk-pop-h
+    - fbk-pop-b
+    - fbk-pop-tgt
+    - fbk-pop-f
+    - fbk-kbd
+    - btn
+    - btn-sm
+    - btn-primary
+    - btn-ghost
+    - input

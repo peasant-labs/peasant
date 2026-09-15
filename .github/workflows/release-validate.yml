@@ -16,8 +16,11 @@ name: Release Validate
 on:
   workflow_call:
 
+# Cancel superseded runs on the same ref to save minutes. On a release PR the
+# group is scoped to the head SHA so a stale labeled run cannot cancel the
+# current head's gate.
 concurrency:
-  group: release-validate-${{ github.ref }}
+  group: release-validate-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
   cancel-in-progress: true
 
 permissions:

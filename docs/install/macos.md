@@ -202,7 +202,7 @@ remain as a faster-update channel or be retired.
   for users with a Go toolchain. The embedded dashboard is stubbed in source builds.
 - Code signing + notarization (so raw downloads "just work" with no `xattr` step)
   and a `.pkg` installer are
-  [deferred](../release-runbook.md#7-deferred-ladder).
+  [deferred](../release-runbook.md#8-deferred-ladder).
 
 ## References
 

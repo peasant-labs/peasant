@@ -417,9 +417,21 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				if _, err := pipeline.Run(ctx); err != nil {
 					t.Fatal(err)
 				}
-				if adapter.extracts.Load() != 0 {
-					t.Fatal("cache warmup unexpectedly extracted native data")
+				// A compatible warm-up is the first ordinary harvest of a row
+				// that has never held a publication capture, so it reads native
+				// input exactly once to capture the row; a future stored schema
+				// is refused without a read. Either way the run under test
+				// starts from zero native activity.
+				wantWarmExtracts := int64(0)
+				if *fixture.WarmStoredSchema <= ingest.CurrentSchemaVersion {
+					wantWarmExtracts = 1
 				}
+				if got := adapter.extracts.Load(); got != wantWarmExtracts {
+					t.Fatalf("cache warmup extracted native data %d times, want %d", got, wantWarmExtracts)
+				}
+				adapter.extracts.Store(0)
+				filesystem.nativeRead.Store(0)
+				filesystem.nativeStat.Store(0)
 				// Startup reconciliation may have refreshed DerivedAt during
 				// warmup. Compare both files and SQL against that same baseline.
 				beforeMetadata, err = filesystem.MemFS.ReadFile(metaPath)

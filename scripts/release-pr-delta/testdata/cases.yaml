@@ -1,0 +1,287 @@
+# Cases for the release-PR delta classifier.
+#
+# `cases` fixes the event action, the paths a synchronize push changed, the
+# evidence kind recorded on the previous head for each gate, and the gates the
+# decision must run. Evidence kinds:
+#   complete                    - every required child succeeded
+#   complete-optional-skipped   - required children succeeded, the optional one skipped
+#   incomplete                  - one required child is missing
+#   missing                     - no child check runs at all
+#   failed                      - a later failed attempt of a required child
+#   cancelled                   - a later cancelled attempt of a required child
+#   required-skipped            - a required child skipped
+#   optional-failed             - the optional child failed
+#   foreign-child               - an unknown child under the gate's prefix
+#   rerun-success               - an earlier failure then a later success
+#   in-progress                 - a later attempt is still running
+cases:
+  - name: source-change-runs-everything
+    action: synchronize
+    changed: [internal/ingest/pipeline.go]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: changelog-only-with-complete-evidence-skips-both-gates
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: false
+      release_validate: false
+
+  - name: docs-change-runs-release-validate-only
+    action: synchronize
+    changed: [docs/KICKSTART.md]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: cross-package-testdata-runs-e2e
+    action: synchronize
+    changed: [internal/ingest/testdata/pi_source_v3_structure.yaml]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: workflow-change-runs-everything
+    action: synchronize
+    changed: [.github/workflows/tests.yml]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: makefile-change-runs-everything
+    action: synchronize
+    changed: [Makefile]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: packaging-config-change-runs-release-validate-only
+    action: synchronize
+    changed: [.goreleaser.yml]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: web-change-runs-release-validate-only
+    action: synchronize
+    changed: [web/app/page.tsx]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: unusual-file-name-still-matches-its-gate
+    action: synchronize
+    changed: ["web/café.js"]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: root-testdata-change-runs-both-gates
+    action: synchronize
+    changed: [testdata/install_guidance.yaml]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: docs-only-without-evidence-runs-everything
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: missing
+    rv_evidence: missing
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: incomplete-evidence-runs-the-gate
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: complete
+    rv_evidence: incomplete
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: failed-gate-on-the-previous-head-runs-again
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: complete
+    rv_evidence: failed
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: cancelled-gate-on-the-previous-head-runs-again
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: cancelled
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: false
+
+  - name: required-child-skipped-runs-the-gate
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: required-skipped
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: false
+
+  - name: optional-child-skipped-keeps-the-gate-skipped
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: complete
+    rv_evidence: complete-optional-skipped
+    want:
+      e2e: false
+      release_validate: false
+
+  - name: optional-child-failed-runs-the-gate
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: complete
+    rv_evidence: optional-failed
+    want:
+      e2e: false
+      release_validate: true
+
+  - name: foreign-child-runs-the-gate
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: foreign-child
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: false
+
+  - name: rerun-success-clears-an-earlier-failure
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: rerun-success
+    rv_evidence: complete
+    want:
+      e2e: false
+      release_validate: false
+
+  - name: in-progress-attempt-runs-the-gate
+    action: synchronize
+    changed: [CHANGELOG.md]
+    e2e_evidence: in-progress
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: false
+
+  - name: non-synchronize-event-runs-every-gate
+    action: edited
+    changed: [CHANGELOG.md]
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+  - name: empty-delta-runs-every-gate
+    action: synchronize
+    changed: []
+    e2e_evidence: complete
+    rv_evidence: complete
+    want:
+      e2e: true
+      release_validate: true
+
+# Raw check-run sets for the evidence predicate. Names are child suffixes;
+# the test prefixes them with the gate's prefix.
+evidence_cases:
+  - name: complete-required-set-succeeds
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z" }
+    want: true
+
+  - name: missing-required-child-fails
+    gate: release_validate
+    runs:
+      - { name: classify rc, conclusion: success, started_at: "2026-09-15T00:00:00Z" }
+    want: false
+
+  - name: unknown-child-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z" }
+      - { name: mystery job, conclusion: success, started_at: "2026-09-15T00:00:01Z" }
+    want: false
+
+  - name: foreign-producer-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z", app_slug: some-other-app }
+    want: false
+
+  - name: later-failed-attempt-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z" }
+      - { name: "full-stack push e2e (podman)", conclusion: failure, started_at: "2026-09-15T01:00:00Z" }
+    want: false
+
+  - name: later-successful-attempt-passes
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: failure, started_at: "2026-09-15T00:00:00Z" }
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T01:00:00Z" }
+    want: true
+
+  - name: skipped-required-child-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: skipped, started_at: "2026-09-15T00:00:00Z" }
+    want: false
+
+  - name: missing-producer-identity-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z", app_slug: missing }
+    want: false
+
+  - name: conflicting-conclusions-at-one-timestamp-fail
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z" }
+      - { name: "full-stack push e2e (podman)", conclusion: failure, started_at: "2026-09-15T00:00:00Z" }
+    want: false
+
+  - name: missing-timestamp-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success }
+    want: false
+
+  - name: invalid-timestamp-fails
+    gate: e2e
+    runs:
+      - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "not-a-time" }
+    want: false
