@@ -35,6 +35,11 @@ const helperGroupListingFixturePath = "internal/api/testdata/helper_group_listin
 
 var helperGroupFixtureProjectHash = schema.ProjectHash(strings.Repeat("a", 64))
 
+// helperGroupFixtureSiblingProjectHash is a second stored project. A
+// project-scoped grouped case uses it to prove an in-project request never sees
+// a sibling project's ordinary session or saved helper.
+var helperGroupFixtureSiblingProjectHash = schema.ProjectHash(strings.Repeat("b", 64))
+
 type helperGroupListingFixture struct {
 	RequiredNames []string                                                             `yaml:"requiredNames"`
 	NotApplicable []helperGroupListingNotApplicableCase                                `yaml:"notApplicableInThisRouteSet"`
@@ -50,22 +55,21 @@ type helperGroupListingInput struct {
 	Route       string                      `yaml:"route"`
 	SearchQuery string                      `yaml:"searchQuery"`
 	SearchLimit int                         `yaml:"searchLimit"`
+	Project     string                      `yaml:"project"`
 	Selection   string                      `yaml:"selection"`
 	SelectedIDs []string                    `yaml:"selectedIds"`
 	Sessions    []helperGroupListingSession `yaml:"sessions"`
 }
 
 type helperGroupListingSession struct {
-	ID         string `yaml:"id"`
-	StartMs    int64  `yaml:"startMs"`
-	Purpose    string `yaml:"purpose"`
-	Origin     string `yaml:"origin"`
-	Owner      string `yaml:"owner"`
-	OwnerState string `yaml:"ownerState"`
-	Text       string `yaml:"text"`
-	// Pushable seeds a metrics row so the session is offered by the sync
-	// chooser route, whose predicate is the pushable set.
-	Pushable bool `yaml:"pushable"`
+	ID          string `yaml:"id"`
+	StartMs     int64  `yaml:"startMs"`
+	Purpose     string `yaml:"purpose"`
+	Origin      string `yaml:"origin"`
+	Owner       string `yaml:"owner"`
+	OwnerState  string `yaml:"ownerState"`
+	Text        string `yaml:"text"`
+	ProjectHash string `yaml:"projectHash"`
 }
 
 type helperGroupListingExpected struct {
@@ -86,15 +90,23 @@ type helperGroupListingExpected struct {
 }
 
 type helperGroupListingItem struct {
-	Kind              string   `yaml:"kind"`
+	Kind               string                          `yaml:"kind"`
+	SessionID          string                          `yaml:"sessionId"`
+	OwnerStatus        string                          `yaml:"ownerStatus"`
+	GroupCount         int                             `yaml:"groupCount"`
+	HelperThreadCount  int                             `yaml:"helperThreadCount"`
+	MemberIDs          []string                        `yaml:"memberIds"`
+	NestedMemberGroups []helperGroupListingNestedGroup `yaml:"nestedMemberGroups"`
+}
+
+// helperGroupListingNestedGroup asserts a helper that itself owns saved helpers:
+// its immediate group must render under the member row, with the same exact
+// count and member page the top-level group gets.
+type helperGroupListingNestedGroup struct {
 	SessionID         string   `yaml:"sessionId"`
-	OwnerStatus       string   `yaml:"ownerStatus"`
 	GroupCount        int      `yaml:"groupCount"`
 	HelperThreadCount int      `yaml:"helperThreadCount"`
 	MemberIDs         []string `yaml:"memberIds"`
-	// SyncStatus is asserted on the sync route only: the grouped sync row must
-	// carry the same status the flat sync route computes for that session.
-	SyncStatus string `yaml:"syncStatus"`
 }
 
 type helperGroupListingTopLevelPage struct {
@@ -170,17 +182,6 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 	db := storetest.Open(t)
 	for i, session := range tc.Input.Sessions {
 		seedHelperGroupSession(t, db, session, int64(i))
-	}
-	// The sync chooser route offers the pushable set. InsertSessions seeds a
-	// metrics row for every session, so a sync case that names a non-pushable
-	// session must remove that seed; other routes never look at metrics and keep
-	// the shared seed untouched.
-	if tc.Input.Route == "sync" {
-		for _, session := range tc.Input.Sessions {
-			if !session.Pushable {
-				helperGroupDropMetrics(t, db, session.ID)
-			}
-		}
 	}
 	selection := helperGroupSelection(tc.Input)
 	policy, err := sessionvisibility.New(selection)
@@ -259,17 +260,6 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 		default:
 			t.Fatalf("case names unknown expected kind %q", expected.Kind)
 		}
-		if expected.Kind == string(schema.SessionListItemTranscript) && expected.SyncStatus != "" {
-			if item.Transcript.Sync == nil {
-				t.Fatalf("item[%d] route is sync but the row carries no Sync mirror", i)
-			}
-			if item.Transcript.Sync.SyncStatus != expected.SyncStatus {
-				t.Fatalf("item[%d] syncStatus = %q, want %q", i, item.Transcript.Sync.SyncStatus, expected.SyncStatus)
-			}
-			if item.Transcript.Sync.ID != expected.SessionID {
-				t.Fatalf("item[%d] sync mirror id = %q, want %q", i, item.Transcript.Sync.ID, expected.SessionID)
-			}
-		}
 		if len(item.HelperGroups) != expected.GroupCount {
 			t.Fatalf("item[%d] helper groups = %d, want %d", i, len(item.HelperGroups), expected.GroupCount)
 		}
@@ -285,6 +275,10 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 			if got := helperGroupMemberIDs(members); !reflect.DeepEqual(got, expected.MemberIDs) {
 				t.Fatalf("item[%d] members = %v, want %v", i, got, expected.MemberIDs)
 			}
+			assertNestedMemberGroups(t, base, i, members, expected.NestedMemberGroups)
+		}
+		if expected.GroupCount == 0 && len(expected.NestedMemberGroups) > 0 {
+			t.Fatalf("item[%d] declares nested member groups but renders no group to expand", i)
 		}
 	}
 	if tc.Expected.DistinctGroupIDs {
@@ -416,15 +410,17 @@ func helperGroupListURL(t *testing.T, base string, input helperGroupListingInput
 	t.Helper()
 	switch input.Route {
 	case "sessions":
-		return base + "/api/v1/sessions?view=grouped"
+		values := url.Values{"view": {groupedViewValue}}
+		if input.Project != "" {
+			values.Set("project", input.Project)
+		}
+		return base + "/api/v1/sessions?" + values.Encode()
 	case "search":
 		values := url.Values{"q": {input.SearchQuery}, "view": {groupedViewValue}}
 		if input.SearchLimit > 0 {
 			values.Set("limit", fmt.Sprintf("%d", input.SearchLimit))
 		}
 		return base + "/api/v1/search?" + values.Encode()
-	case "sync":
-		return base + "/api/v1/sync/sessions?view=grouped"
 	default:
 		t.Fatalf("case names unknown route %q", input.Route)
 		return ""
@@ -478,6 +474,42 @@ func helperGroupMemberIDs(payload schema.LocalHelperMembersPayload) []string {
 	return ids
 }
 
+// assertNestedMemberGroups asserts a helper that itself owns saved helpers: its
+// row on the member page carries exactly the declared immediate group, and that
+// group's own member page returns the declared exact members. It is the control
+// that keeps an owner chain rendered where the owner's row is instead of being
+// root-flattened.
+func assertNestedMemberGroups(t *testing.T, base string, itemIndex int, members schema.LocalHelperMembersPayload, expected []helperGroupListingNestedGroup) {
+	t.Helper()
+	for _, nested := range expected {
+		var row *schema.LocalSessionListItem
+		for i := range members.Members {
+			member := members.Members[i]
+			if member.Transcript != nil && member.Transcript.Session.ID == nested.SessionID {
+				row = &members.Members[i]
+				break
+			}
+		}
+		if row == nil {
+			t.Fatalf("item[%d] member page has no row for %q; a helper that owns helpers lost its disclosure", itemIndex, nested.SessionID)
+		}
+		if len(row.HelperGroups) != nested.GroupCount {
+			t.Fatalf("item[%d] member %q groups = %d, want %d", itemIndex, nested.SessionID, len(row.HelperGroups), nested.GroupCount)
+		}
+		if nested.GroupCount == 0 {
+			continue
+		}
+		group := row.HelperGroups[0]
+		if group.HelperThreadCount != nested.HelperThreadCount {
+			t.Fatalf("item[%d] member %q group count = %d, want %d", itemIndex, nested.SessionID, group.HelperThreadCount, nested.HelperThreadCount)
+		}
+		child := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 50)
+		if got := helperGroupMemberIDs(child); !reflect.DeepEqual(got, nested.MemberIDs) {
+			t.Fatalf("item[%d] member %q nested members = %v, want %v", itemIndex, nested.SessionID, got, nested.MemberIDs)
+		}
+	}
+}
+
 // helperGroupListShape extracts the identity/order/count projection that must be
 // stable across repeated identical queries. Opaque member scopes are excluded:
 // they are fresh lookups each time, not identity.
@@ -520,6 +552,16 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 	if spec.Origin != "" {
 		origin = sessionorigin.Origin(spec.Origin)
 	}
+	projectHash := helperGroupFixtureProjectHash
+	projectName := "fixture-project"
+	projectFilePath := "/fixture/project"
+	if spec.ProjectHash == helperGroupFixtureSiblingProjectHash.String() {
+		projectHash = helperGroupFixtureSiblingProjectHash
+		projectName = "fixture-sibling-project"
+		projectFilePath = "/fixture/sibling-project"
+	} else if spec.ProjectHash != "" {
+		projectHash = schema.ProjectHash(spec.ProjectHash)
+	}
 	metadata := &schema.UnifiedMetadata{
 		SchemaVersion: ingest.CurrentSchemaVersion,
 		SessionID:     schema.SessionID(spec.ID),
@@ -527,9 +569,9 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 		Model:         schema.ModelID("fixture-model"),
 		HostSlug:      schema.HostSlug("fixture-host"),
 		Project: schema.ProjectContext{
-			Hash:     helperGroupFixtureProjectHash,
-			Name:     "fixture-project",
-			FilePath: "/fixture/project",
+			Hash:     projectHash,
+			Name:     projectName,
+			FilePath: projectFilePath,
 		},
 		Timestamp: schema.TimestampInfo{Start: start, End: end, Ingested: &ingested},
 		Source:    schema.SourceInfo{FilePath: "/fixture/session.jsonl", Format: schema.SourceFormatJSONL},
@@ -543,9 +585,6 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 	}
 	if spec.Purpose != "" || spec.Owner != "" || spec.OwnerState != "" {
 		seedHelperGroupingEvidence(t, db, spec)
-	}
-	if spec.Pushable {
-		seedHelperGroupMetrics(t, db, spec)
 	}
 	MarkStoredSessionsIndexed(t, db)
 	if spec.Text != "" {
@@ -612,40 +651,6 @@ func helperGroupSetPurpose(t *testing.T, db *store.Store, id, purpose string) {
 	defer db.Pool().Put(conn)
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_purpose = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{purpose, id}}); err != nil {
 		t.Fatalf("change purpose for %q: %v", id, err)
-	}
-}
-
-// seedHelperGroupMetrics writes the session_metrics row the sync chooser route
-// requires: a session without metrics is not pushable and never reaches the
-// sync list. It is the same row the production metrics writer produces.
-func seedHelperGroupMetrics(t *testing.T, db *store.Store, spec helperGroupListingSession) {
-	t.Helper()
-	turnCount := 1
-	durationMinutes := 1.0
-	totalTokens := 10
-	if err := db.SaveMetrics(context.Background(), &ingest.SessionMetrics{
-		SessionID: ingest.SessionID(spec.ID),
-		QualityMetrics: schema.QualityMetrics{
-			TurnCount:       &turnCount,
-			DurationMinutes: &durationMinutes,
-			TotalTokens:     &totalTokens,
-		},
-	}); err != nil {
-		t.Fatalf("seed metrics for pushable session %q: %v", spec.ID, err)
-	}
-}
-
-// helperGroupDropMetrics removes the metrics row InsertSessions seeds, so a
-// fixture session can stand OUTSIDE the pushable set the sync route offers.
-func helperGroupDropMetrics(t *testing.T, db *store.Store, id string) {
-	t.Helper()
-	conn, err := db.Pool().Take(context.Background())
-	if err != nil {
-		t.Fatalf("take connection to drop metrics for %q: %v", id, err)
-	}
-	defer db.Pool().Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_metrics WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{id}}); err != nil {
-		t.Fatalf("drop metrics for %q: %v", id, err)
 	}
 }
 

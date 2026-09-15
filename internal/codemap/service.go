@@ -83,6 +83,15 @@ const (
 	searchDefaultLimit = 20
 	searchMaxLimit     = 50
 	searchMinQueryLen  = 2
+
+	// SearchDefaultLimit and SearchMaxLimit publish the flat search route's page
+	// bounds. A caller that must apply its own eligibility before paging — the
+	// grouped local search view applies the persisted selection matcher — reads
+	// the widest ranked window SearchMaxLimit allows, then applies
+	// SearchDefaultLimit when the request named no limit. Sharing the constants
+	// keeps the grouped page and the flat page in the same units.
+	SearchDefaultLimit = searchDefaultLimit
+	SearchMaxLimit     = searchMaxLimit
 )
 
 // Service computes the Map/Review payloads for one peasant store.

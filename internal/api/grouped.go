@@ -52,6 +52,13 @@ type GroupedFilters struct {
 	// existing q and limit parameters. They are empty on every other variant.
 	SearchQuery string
 	SearchLimit int
+	// ProjectHash is the parsed value of the sessions route's project
+	// parameter: the opaque project identity a caller scoped the grouped list
+	// to. It is empty when the caller asked for every project, which keeps the
+	// legacy cross-project grouped list. The member scope records it, so a
+	// member fetch replays exactly the project predicate the list used and
+	// never widens to a sibling project.
+	ProjectHash schema.ProjectHash
 }
 
 // GroupedCandidate is one route-predicate-applied session plus the durable
@@ -192,6 +199,14 @@ type groupedView struct {
 	groups   []*helperGroup
 	// groupsByOwner indexes resolved groups by their owner's stable identity.
 	groupsByOwner map[string][]*helperGroup
+	// nested marks the groups that render under a candidate row instead of as
+	// their own top-level context container. A group nests under its owner when
+	// the owner is an ordinary candidate, or when the owner is a helper whose
+	// own group is reachable. A group whose owner is outside the candidate set
+	// is a top-level container; a group whose owner edge points back into a
+	// cycle is a top-level container too, so no saved helper and no owner
+	// context ever disappears.
+	nested map[string]bool
 }
 
 // buildGroupedView partitions candidates into ordinary items and owner groups.
@@ -231,7 +246,93 @@ func buildGroupedView(candidates []GroupedCandidate) *groupedView {
 		sort.SliceStable(groups, func(i, j int) bool { return groups[i].groupID < groups[j].groupID })
 		view.groupsByOwner[owner] = groups
 	}
+	view.nested = nestedGroups(view.groups, view.ordinary, candidates)
 	return view
+}
+
+// nestedGroups reports which helper groups render under a candidate row rather
+// than as their own top-level context container. A group nests under its owner
+// when the owner is an ordinary candidate, or when the owner is a helper member
+// of a group that is itself reachable. A group whose owner is absent is a
+// top-level container in its own right. Whatever stays unreachable is an owner
+// cycle: the owner edge points only at helpers that point back, so no ordinary
+// root exists. Those groups are emitted as top-level context containers with a
+// conflicting owner status, so a stored cycle yields honest, expandable
+// contexts instead of no visible items at all.
+func nestedGroups(groups []*helperGroup, ordinary []GroupedCandidate, candidates []GroupedCandidate) map[string]bool {
+	ordinaryIDs := make(map[string]bool, len(ordinary))
+	for _, candidate := range ordinary {
+		ordinaryIDs[candidate.StableID] = true
+	}
+	present := candidateIndex(candidates)
+	// memberGroup names the group a helper member belongs to, so an owner that
+	// is itself a helper can be resolved to the group that renders it.
+	memberGroup := make(map[string]*helperGroup, len(groups))
+	for _, group := range groups {
+		for _, member := range group.members {
+			memberGroup[member.StableID] = group
+		}
+	}
+
+	// reachable marks every group a caller can open, whether nested or emitted
+	// as its own top-level container.
+	reachable := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		if !group.resolved || !present[group.ownerID] {
+			reachable[group.groupID] = true
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, group := range groups {
+			if reachable[group.groupID] || !group.resolved || !present[group.ownerID] {
+				continue
+			}
+			if ordinaryIDs[group.ownerID] {
+				reachable[group.groupID] = true
+				changed = true
+				continue
+			}
+			// The owner is itself a helper. It is only open when the group that
+			// contains it is open; that propagates reachability down the owner
+			// chain and leaves a cycle unreachable.
+			if ownerGroup, ok := memberGroup[group.ownerID]; ok && reachable[ownerGroup.groupID] {
+				reachable[group.groupID] = true
+				changed = true
+			}
+		}
+	}
+
+	nested := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		if !reachable[group.groupID] {
+			continue
+		}
+		if !group.resolved || !present[group.ownerID] {
+			// A root group is reachable through its own top-level container.
+			continue
+		}
+		nested[group.groupID] = true
+	}
+	return nested
+}
+
+// groupsNestedUnder returns the groups owned by one candidate that render under
+// that candidate's row. A group emitted as its own top-level container is
+// excluded, so a cyclic owner edge never appears twice and the member projection
+// cannot recurse into itself.
+func (v *groupedView) groupsNestedUnder(ownerID string) []*helperGroup {
+	groups := v.groupsByOwner[ownerID]
+	if len(groups) == 0 {
+		return nil
+	}
+	nested := make([]*helperGroup, 0, len(groups))
+	for _, group := range groups {
+		if v.nested[group.groupID] {
+			nested = append(nested, group)
+		}
+	}
+	return nested
 }
 
 // candidateLess orders helper members ascending session start, then stable ID.
@@ -280,7 +381,7 @@ func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandida
 	}
 	items := make([]topLevelItem, 0, len(view.ordinary)+len(view.groups))
 	for _, candidate := range view.ordinary {
-		groups, err := view.helperGroupSummaries(view.groupsByOwner[candidate.StableID], filters, issuer)
+		groups, err := view.helperGroupSummaries(view.groupsNestedUnder(candidate.StableID), filters, issuer)
 		if err != nil {
 			return nil, err
 		}
@@ -295,11 +396,18 @@ func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandida
 		})
 	}
 	for _, group := range view.groups {
-		if group.resolved && present[group.ownerID] {
-			// The owner is a candidate, so the group renders under its owner's
+		if view.nested[group.groupID] {
+			// The owner is reachable, so the group renders under its owner's
 			// row (ordinary item or helper member expansion), never as a
 			// top-level container.
 			continue
+		}
+		ownerStatus := group.ownerStatus
+		if group.resolved && present[group.ownerID] {
+			// The owner is a candidate, yet the group is unreachable: its owner
+			// edge points back into a cycle. Report the contradiction honestly
+			// instead of claiming the owner is merely unavailable.
+			ownerStatus = schema.RelationshipNavigationConflicting
 		}
 		groups, err := view.helperGroupSummaries([]*helperGroup{group}, filters, issuer)
 		if err != nil {
@@ -312,7 +420,7 @@ func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandida
 				Kind: schema.SessionListItemContextContainer,
 				Context: &schema.HelperContextSummary{
 					GroupID:     group.groupID,
-					OwnerStatus: group.ownerStatus,
+					OwnerStatus: ownerStatus,
 				},
 				HelperGroups: groups,
 			},
@@ -439,7 +547,7 @@ func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidat
 
 	members := make([]schema.LocalSessionListItem, 0, end-start)
 	for _, member := range group.members[start:end] {
-		groups, err := view.helperGroupSummaries(view.groupsByOwner[member.StableID], filters, issuer)
+		groups, err := view.helperGroupSummaries(view.groupsNestedUnder(member.StableID), filters, issuer)
 		if err != nil {
 			return nil, err
 		}
