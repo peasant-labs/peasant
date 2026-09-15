@@ -22,7 +22,7 @@ const CHROME = process.env.CHROME_PATH
 const FIXTURE = join(HERE, 'testdata/search-share.yaml')
 const FEATURE_BYTES = Object.freeze({
   search: ['data-search-annotation', 'repositoryLocationId'],
-  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash'],
+  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash', 'session-groups/'],
   discoveryRoute: '/api/v1/web/discovery',
 })
 const THEMES = ['dark', 'light']
@@ -190,6 +190,39 @@ function assertProvenance() {
   return Object.values(featureChunks).map(({ path }) => path)
 }
 function response(body) { return { status: 200, contentType: 'application/json', body: JSON.stringify(body) } }
+// The share chooser reads the grouped sync route. Build the grouped envelope
+// from the same flat session rows so the harness stays a thin transport mock:
+// the route, shell, chooser, hierarchy and helper-group code remain real.
+function groupedSyncPayload(sessions) {
+  const items = sessions.map((session) => ({
+    kind: 'transcript',
+    transcript: {
+      session,
+      sync: {
+        id: session.id,
+        harness: session.harness,
+        projectName: session.project,
+        projectHash: session.projectHash,
+        hostSlug: 'visual-host',
+        startTime: session.startTime,
+        durationMs: Math.round(session.durationMins * 60000),
+        totalTokens: session.totalTokens,
+        turnCount: session.turnCount,
+        model: 'visual-model',
+        syncStatus: 'new',
+      },
+    },
+    helperGroups: session.helperGroups || [],
+  }))
+  return {
+    items,
+    page: 1,
+    limit: items.length,
+    totalItems: items.length,
+    ordinarySessionTotal: sessions.length,
+    helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups || []).reduce((count, group) => count + group.helperThreadCount, 0), 0),
+  }
+}
 function installMocks(page, fixture, diagnostics) {
   page.on('request', (request) => {
     const url = new URL(request.url())
@@ -197,7 +230,7 @@ function installMocks(page, fixture, diagnostics) {
     if (url.pathname === '/api/v1/config/mock') return void request.respond(response({ enabled: false })).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/projects/summary') return void request.respond(response({ projects: [{ project: 'peasant-labs/engine', projectHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sessions: 4 }] })).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/search') return void request.respond(response({ query: fixture.search.query, results: fixture.search.results })).catch((e) => diagnostics.push(e.message))
-    if (url.pathname === '/api/v1/sessions') return void request.respond(response({ sessions: fixture.sessions })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/sync/sessions') return void request.respond(response(groupedSyncPayload(fixture.sessions))).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/web/discovery') return void request.respond(response({ items: fixture.discovery })).catch((e) => diagnostics.push(e.message))
     return void request.continue().catch((e) => diagnostics.push(e.message))
   })

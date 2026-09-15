@@ -63,6 +63,9 @@ type helperGroupListingSession struct {
 	Owner      string `yaml:"owner"`
 	OwnerState string `yaml:"ownerState"`
 	Text       string `yaml:"text"`
+	// Pushable seeds a metrics row so the session is offered by the sync
+	// chooser route, whose predicate is the pushable set.
+	Pushable bool `yaml:"pushable"`
 }
 
 type helperGroupListingExpected struct {
@@ -89,6 +92,9 @@ type helperGroupListingItem struct {
 	GroupCount        int      `yaml:"groupCount"`
 	HelperThreadCount int      `yaml:"helperThreadCount"`
 	MemberIDs         []string `yaml:"memberIds"`
+	// SyncStatus is asserted on the sync route only: the grouped sync row must
+	// carry the same status the flat sync route computes for that session.
+	SyncStatus string `yaml:"syncStatus"`
 }
 
 type helperGroupListingTopLevelPage struct {
@@ -164,6 +170,17 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 	db := storetest.Open(t)
 	for i, session := range tc.Input.Sessions {
 		seedHelperGroupSession(t, db, session, int64(i))
+	}
+	// The sync chooser route offers the pushable set. InsertSessions seeds a
+	// metrics row for every session, so a sync case that names a non-pushable
+	// session must remove that seed; other routes never look at metrics and keep
+	// the shared seed untouched.
+	if tc.Input.Route == "sync" {
+		for _, session := range tc.Input.Sessions {
+			if !session.Pushable {
+				helperGroupDropMetrics(t, db, session.ID)
+			}
+		}
 	}
 	selection := helperGroupSelection(tc.Input)
 	policy, err := sessionvisibility.New(selection)
@@ -241,6 +258,17 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 			containerGroupIDs = append(containerGroupIDs, item.Context.GroupID)
 		default:
 			t.Fatalf("case names unknown expected kind %q", expected.Kind)
+		}
+		if expected.Kind == string(schema.SessionListItemTranscript) && expected.SyncStatus != "" {
+			if item.Transcript.Sync == nil {
+				t.Fatalf("item[%d] route is sync but the row carries no Sync mirror", i)
+			}
+			if item.Transcript.Sync.SyncStatus != expected.SyncStatus {
+				t.Fatalf("item[%d] syncStatus = %q, want %q", i, item.Transcript.Sync.SyncStatus, expected.SyncStatus)
+			}
+			if item.Transcript.Sync.ID != expected.SessionID {
+				t.Fatalf("item[%d] sync mirror id = %q, want %q", i, item.Transcript.Sync.ID, expected.SessionID)
+			}
 		}
 		if len(item.HelperGroups) != expected.GroupCount {
 			t.Fatalf("item[%d] helper groups = %d, want %d", i, len(item.HelperGroups), expected.GroupCount)
@@ -395,6 +423,8 @@ func helperGroupListURL(t *testing.T, base string, input helperGroupListingInput
 			values.Set("limit", fmt.Sprintf("%d", input.SearchLimit))
 		}
 		return base + "/api/v1/search?" + values.Encode()
+	case "sync":
+		return base + "/api/v1/sync/sessions?view=grouped"
 	default:
 		t.Fatalf("case names unknown route %q", input.Route)
 		return ""
@@ -514,6 +544,9 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 	if spec.Purpose != "" || spec.Owner != "" || spec.OwnerState != "" {
 		seedHelperGroupingEvidence(t, db, spec)
 	}
+	if spec.Pushable {
+		seedHelperGroupMetrics(t, db, spec)
+	}
 	MarkStoredSessionsIndexed(t, db)
 	if spec.Text != "" {
 		preview := spec.Text
@@ -579,6 +612,40 @@ func helperGroupSetPurpose(t *testing.T, db *store.Store, id, purpose string) {
 	defer db.Pool().Put(conn)
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_purpose = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{purpose, id}}); err != nil {
 		t.Fatalf("change purpose for %q: %v", id, err)
+	}
+}
+
+// seedHelperGroupMetrics writes the session_metrics row the sync chooser route
+// requires: a session without metrics is not pushable and never reaches the
+// sync list. It is the same row the production metrics writer produces.
+func seedHelperGroupMetrics(t *testing.T, db *store.Store, spec helperGroupListingSession) {
+	t.Helper()
+	turnCount := 1
+	durationMinutes := 1.0
+	totalTokens := 10
+	if err := db.SaveMetrics(context.Background(), &ingest.SessionMetrics{
+		SessionID: ingest.SessionID(spec.ID),
+		QualityMetrics: schema.QualityMetrics{
+			TurnCount:       &turnCount,
+			DurationMinutes: &durationMinutes,
+			TotalTokens:     &totalTokens,
+		},
+	}); err != nil {
+		t.Fatalf("seed metrics for pushable session %q: %v", spec.ID, err)
+	}
+}
+
+// helperGroupDropMetrics removes the metrics row InsertSessions seeds, so a
+// fixture session can stand OUTSIDE the pushable set the sync route offers.
+func helperGroupDropMetrics(t *testing.T, db *store.Store, id string) {
+	t.Helper()
+	conn, err := db.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatalf("take connection to drop metrics for %q: %v", id, err)
+	}
+	defer db.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_metrics WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{id}}); err != nil {
+		t.Fatalf("drop metrics for %q: %v", id, err)
 	}
 }
 

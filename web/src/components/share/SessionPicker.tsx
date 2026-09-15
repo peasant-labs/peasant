@@ -2,10 +2,11 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/lib/ft-ui';
-import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
+import type { ShareSession, ShareHierarchySession, ShareHelperContext, ShareHelperGroup } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
 import { summarizePrompt } from '@peasant-labs/fairtrade/ui';
+import { HelperGroupTree, type HelperMembersPage } from '@/components/share/HelperGroupTree';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,14 @@ interface SessionPickerProps {
   onSelectionChange: (ids: Set<string>) => void;
   onNext: () => void;
   onFooterActionsChange: SetShareFooterActions;
+  /** Helper-only grouped results with no ordinary owner row. */
+  helperContexts?: ShareHelperContext[];
+  /** Toggle exactly one helper member's transcript id. */
+  onMemberToggle?: (id: string, checked: boolean) => void;
+  /** Fetch one authorized helper member page for an exact scope. */
+  loadMembers?: (group: ShareHelperGroup, page: number, limit: number) => Promise<HelperMembersPage>;
+  /** Refresh the originating grouped list after a refused scope. */
+  onScopeExpired?: () => void;
 }
 
 interface DescendantSelectionState {
@@ -162,6 +171,10 @@ export function SessionPicker({
   onSelectionChange,
   onNext,
   onFooterActionsChange,
+  helperContexts,
+  onMemberToggle,
+  loadMembers,
+  onScopeExpired,
 }: SessionPickerProps) {
   const groups = useMemo(() => groupShareHierarchy(sessions), [sessions]);
 
@@ -335,6 +348,32 @@ export function SessionPicker({
     return () => onFooterActionsChange(null);
   }, [onFooterActionsChange, onNext, selectedCount]);
 
+  // An owner row with collapsed helper groups renders ONE fairtrade helper
+  // tree: the ordinary owner row stays the tree's owner (so the project
+  // hierarchy's rail and tri-state are unchanged), and the members disclose
+  // under it. A session without helper groups renders exactly as before.
+  const renderSessionRow = (session: ShareHierarchySession) => {
+    const ordinary = (
+      <SessionRow key={session.id} session={session} checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} setRowElement={setRowElement} onToggle={toggleSession} />
+    );
+    if (!session.helperGroups?.length || !onMemberToggle || !loadMembers || !onScopeExpired) {
+      return ordinary;
+    }
+    return (
+      <HelperGroupTree
+        key={session.id}
+        groups={session.helperGroups}
+        owner={
+          <SessionRow session={session} checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} setRowElement={setRowElement} onToggle={toggleSession} />
+        }
+        selectedIds={selectedIds}
+        onMemberToggle={onMemberToggle}
+        loadMembers={loadMembers}
+        onScopeExpired={onScopeExpired}
+      />
+    );
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
@@ -373,7 +412,7 @@ export function SessionPicker({
                 return <section key={branch.branch} className="share-node" aria-label={`branch ${branch.branch || 'unknown'}`}>
                  <h4 ref={setRowRef(branchKey)} className="px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...selectionState(branchKey)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
                 <div className="share-subtree">
-                  {branch.sessions.map((session) => <SessionRow key={session.id} session={session} checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} setRowElement={setRowElement} onToggle={toggleSession} />)}
+                  {branch.sessions.map((session) => renderSessionRow(session))}
                 </div>
               </section>;})}
               </div>
@@ -383,6 +422,22 @@ export function SessionPicker({
         })}
           </div>
         </div>
+        {helperContexts && helperContexts.length > 0 && onMemberToggle && loadMembers && onScopeExpired ? (
+          <div className="share-helper-contexts border-t border-rule" aria-label="helpers without a visible owner">
+            <div className="px-4 py-3 border-b border-rule font-mono text-sm">helpers without a visible owner</div>
+            {helperContexts.map((context) => (
+              <HelperGroupTree
+                key={context.groupId}
+                groups={context.helperGroups}
+                ownerStatus={context.ownerStatus}
+                selectedIds={selectedIds}
+                onMemberToggle={onMemberToggle}
+                loadMembers={loadMembers}
+                onScopeExpired={onScopeExpired}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

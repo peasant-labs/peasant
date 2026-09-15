@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import YAML from 'yaml';
 import fixtureSource from './testdata/mounted-share-linked-sessions.yaml?raw';
+import { buildGroupedSyncResponse } from './testdata/grouped-sync';
 import { ShareWizardClient } from './ShareWizardClient';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
@@ -101,8 +102,20 @@ function installFetch(): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const requested = new URL(String(input), 'http://mounted.test');
     switch (requested.pathname) {
-      case '/api/v1/sessions':
-        return response({ sessions: fixture.discoveryOnly });
+      case '/api/v1/sync/sessions':
+        return response(buildGroupedSyncResponse(fixture.discoveryOnly.map((row) => ({
+          id: row.id,
+          harness: row.harness,
+          startTime: row.startTime,
+          durationMins: row.durationMins,
+          totalTokens: row.totalTokens,
+          turnCount: row.turnCount,
+          toolCallCount: row.toolCallCount,
+          project: row.project,
+          projectHash: row.projectHash,
+          preview: row.preview,
+          syncStatus: 'new' as const,
+        }))));
       case '/api/v1/session-summaries': {
         const ids = new Set((requested.searchParams.get('ids') ?? '').split(',').filter(Boolean));
         const all = [...fixture.discoveryOnly, ...fixture.linkedOnly];

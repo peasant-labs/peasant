@@ -27,6 +27,13 @@ sessions:
     projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     preview: "Wire retry handling into the queue worker"
     outcome: resolved
+    # A collapsed owner-anchored helper group: the chooser renders the canonical
+    # fairtrade group chip under this owner, and its members stay folded until
+    # the viewer opens it.
+    helperGroups:
+      - groupId: hg_visual_owner1
+        helperThreadCount: 2
+        memberScope: scope_visual_owner1
   - id: sess-visual-search-002
     harness: opencode
     startTime: "2026-02-23T14:30:00Z"

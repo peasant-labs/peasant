@@ -9,7 +9,13 @@ function emptyRollup(): Record<ShareStatus, number> {
 
 /** A session can be contributed only if it's new or updated. */
 export function isSelectable(s: ShareSession): boolean {
-  return s.shareStatus === 'new' || s.shareStatus === 'updated';
+  return isSelectableStatus(s.shareStatus);
+}
+
+/** The contribute-eligibility of one share status, for callers that hold the
+ * status without a full session row (e.g. a fetched helper member). */
+export function isSelectableStatus(status: ShareStatus): boolean {
+  return status === 'new' || status === 'updated';
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ShareWizardClient } from '@/app/share/ShareWizardClient';
+import { buildGroupedSyncResponse } from '@/app/share/testdata/grouped-sync';
 import * as useMockConfig from '@/hooks/useMockConfig';
 import * as mockData from '@/lib/share/mock-data';
 
@@ -111,6 +112,8 @@ describe('ShareWizardClient', () => {
       {
         id: 'backend-1',
         harness: 'claude-code',
+        project: 'alpha',
+        projectHash: 'hash-alpha-a',
         startTime: '2026-02-24T09:00:00Z',
         durationMins: 30,
         totalTokens: 10000,
@@ -124,9 +127,15 @@ describe('ShareWizardClient', () => {
       error: null,
       refetch: vi.fn(),
     });
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => backendSessions,
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/sync/sessions')) {
+        return { ok: true, json: async () => buildGroupedSyncResponse(backendSessions) };
+      }
+      if (url.includes('/api/v1/web/discovery')) {
+        return { ok: true, json: async () => ({ items: [{ sessionId: 'backend-1', locationLabel: 'workspace', repositoryLocationId: 'rl_workspace', branch: 'main', selectionStatus: 'selected' }] }) };
+      }
+      throw new Error(`unexpected real-mode fetch: ${url}`);
     });
     fetchMockSessionsSpy.mockReturnValue({
       sessions: [],
@@ -137,7 +146,7 @@ describe('ShareWizardClient', () => {
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/v1/sessions'),
+        expect.stringContaining('/api/v1/sync/sessions?view=grouped'),
       );
     });
     expect(fetchMockSessionsSpy).not.toHaveBeenCalled();
@@ -184,6 +193,8 @@ describe('ShareWizardClient', () => {
       {
         id: 'retry-1',
         harness: 'claude-code',
+        project: 'alpha',
+        projectHash: 'hash-alpha-a',
         startTime: '2026-02-24T09:00:00Z',
         durationMins: 30,
         totalTokens: 10000,
@@ -191,13 +202,15 @@ describe('ShareWizardClient', () => {
         toolCallCount: 5,
       },
     ];
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => backendSessions,
-    });
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ items: [{ sessionId: 'retry-1', locationLabel: 'workspace', repositoryLocationId: 'rl_workspace', branch: 'main', selectionStatus: 'selected' }] }),
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/sync/sessions')) {
+        return { ok: true, json: async () => buildGroupedSyncResponse(backendSessions) };
+      }
+      if (url.includes('/api/v1/web/discovery')) {
+        return { ok: true, json: async () => ({ items: [{ sessionId: 'retry-1', locationLabel: 'workspace', repositoryLocationId: 'rl_workspace', branch: 'main', selectionStatus: 'selected' }] }) };
+      }
+      throw new Error(`unexpected retry fetch: ${url}`);
     });
 
     const user = userEvent.setup();
