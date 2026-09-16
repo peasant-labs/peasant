@@ -23,11 +23,6 @@ export type TranscriptReadingState = {
 
 const KEY_PREFIX = 'peasant:transcript-reading:';
 
-export const EMPTY_TRANSCRIPT_READING_STATE: TranscriptReadingState = Object.freeze({
-  scrollTop: 0,
-  search: '',
-});
-
 function storageKey(sessionId: string): string {
   return `${KEY_PREFIX}${sessionId}`;
 }

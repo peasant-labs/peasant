@@ -184,12 +184,14 @@ async function readStreamPosition(page) {
     return {
       search: window.location.search,
       scrollTop: stream ? stream.scrollTop : -1,
+      scrollHeight: stream ? stream.scrollHeight : -1,
       maxScroll: stream ? stream.scrollHeight - stream.clientHeight : 0,
       clientHeight: stream ? stream.clientHeight : -1,
       turn: active?.getAttribute('data-turn') ?? null,
       turns: [...document.querySelectorAll('.txn-turnwrap[data-turn]')].map((node) => ({
         index: node.getAttribute('data-turn'),
         offsetTop: node.offsetTop,
+        viewportTop: Math.round(node.getBoundingClientRect().top),
       })),
     }
   })
@@ -268,18 +270,65 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       return { target: stream.scrollTop, max }
     })
     if (!scrolled || scrolled.max < 200 || scrolled.target < 100) throw fail('scrolling the child transcript', `the inner stream does not overflow enough to prove restoration (${JSON.stringify(scrolled)})`)
-    await pause(150)
-    const beforeToggle = await readStreamPosition(page)
-    await page.click('.txn-earlier-toggle')
+    // Compare SETTLED offsets, and compare them in the frame the reader sees.
+    // The disclosed section is inserted ABOVE the scrolled content, so the
+    // browser's scroll anchoring moves the numeric offset by exactly that
+    // insertion to hold the reader's view: the assertion is that the view held
+    // (turn positions unchanged) and that the ONLY numeric movement is the
+    // inserted height — never a host-requested jump to another position.
+    const anchorOf = (position) => position.turns.map((turn) => turn.viewportTop)
+    const beforeToggle = await settledStreamPosition(page)
+    // A DOM click, deliberately: puppeteer's `page.click` scrolls the element
+    // into view first, which moves the reader before the app is even asked.
+    await page.evaluate(() => document.querySelector('.txn-earlier-toggle')?.click())
     await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 10000 })
-      .catch(() => fail('expanding the retained earlier history', 'the disclosure did not expand'))
-    await pause(200)
-    const afterToggle = await readStreamPosition(page)
-    const toggleQuery = new URLSearchParams(afterToggle.search)
-    if (toggleQuery.get('earlier') !== 'earlier-0') throw fail('persisting the retained-history disclosure', `the route ${JSON.stringify(afterToggle.search)} does not name the disclosed section`)
-    if (toggleQuery.get('turn') !== null) throw fail('persisting the retained-history disclosure', `disclosing a section moved the stream position: the route gained turn=${toggleQuery.get('turn')}`)
-    if (!(afterToggle.scrollTop > 0)) throw fail('persisting the retained-history disclosure', `disclosing a section reset the stream to the top (scrollTop=${afterToggle.scrollTop})`)
+      .catch(() => { throw fail('expanding the retained earlier history', 'the disclosure did not expand') })
     await waitForSelector(page, '.txn-earlier', 'rendering the disclosed retained history')
+    const afterToggle = await settledStreamPosition(page)
+    const toggleQuery = new URLSearchParams(afterToggle.search)
+    const beforeQuery = new URLSearchParams(beforeToggle.search)
+    if (toggleQuery.get('earlier') !== 'earlier-0') throw fail('persisting the retained-history disclosure', `the route ${JSON.stringify(afterToggle.search)} does not name the disclosed section`)
+    // The route may differ ONLY in the retained-history parameters: a `turn`
+    // target or any re-scoped/re-originated parameter would be the host asking
+    // the viewer to move the stream, which this disclosure must never do.
+    const routeKeys = new Set([...beforeQuery.keys(), ...toggleQuery.keys()])
+    for (const key of routeKeys) {
+      if (key === 'earlier') continue
+      const beforeValues = beforeQuery.getAll(key)
+      const afterValues = toggleQuery.getAll(key)
+      if (beforeValues.join(' ') !== afterValues.join(' ')) {
+        throw fail('persisting the retained-history disclosure', `disclosing a section changed the route parameter ${key}: ${JSON.stringify(beforeValues)} -> ${JSON.stringify(afterValues)}`)
+      }
+    }
+    const insertedHeight = afterToggle.scrollHeight - beforeToggle.scrollHeight
+    const offsetDelta = afterToggle.scrollTop - beforeToggle.scrollTop
+    if (!Number.isFinite(insertedHeight) || insertedHeight <= 0) {
+      throw fail('persisting the retained-history disclosure', `the disclosed section rendered no measurable height (scrollHeight ${beforeToggle.scrollHeight} -> ${afterToggle.scrollHeight})`)
+    }
+    // The disclosed section is inserted ABOVE the scrolled content, so the ONLY
+    // movement the reader may see is that insertion: either the browser holds
+    // the view by moving the numeric offset by the inserted height, or the DOM
+    // content shifts down by it (Chrome's scroll-anchoring heuristic decides
+    // which, per position). Either way `contentShift + offsetDelta` must equal
+    // the inserted height — anything more would be a host- or viewer-initiated
+    // jump beyond the disclosure's own content, which is what "without moving
+    // the stream position" forbids.
+    const beforeAnchor = anchorOf(beforeToggle)
+    const afterAnchor = anchorOf(afterToggle)
+    if (beforeAnchor.length !== afterAnchor.length) throw fail('persisting the retained-history disclosure', `the disclosed section changed the rendered turn count (${beforeAnchor.length} -> ${afterAnchor.length})`)
+    if (beforeAnchor.length === 0 || !beforeAnchor.every(Number.isFinite) || !afterAnchor.every(Number.isFinite)) {
+      throw fail('persisting the retained-history disclosure', `the disclosed section left no measurable turn geometry to compare: ${JSON.stringify({ beforeAnchor, afterAnchor })}`)
+    }
+    const contentShift = afterAnchor[0] - beforeAnchor[0]
+    for (let index = 0; index < beforeAnchor.length; index += 1) {
+      if (Math.abs((afterAnchor[index] - beforeAnchor[index]) - contentShift) > 2) {
+        throw fail('persisting the retained-history disclosure', `disclosing a section moved turn ${index} by ${afterAnchor[index] - beforeAnchor[index]}px while turn 0 moved ${contentShift}px; every turn must move by the same inserted height`)
+      }
+    }
+    if (Math.abs(contentShift + offsetDelta - insertedHeight) > 4) {
+      throw fail('persisting the retained-history disclosure', `disclosing a section moved the reader by ${contentShift}px of content and ${offsetDelta}px of offset, but it inserted only ${insertedHeight}px; the disclosure must not re-position the stream beyond its own content`)
+    }
+    evidence.disclosureToggle = { theme, beforeToggle, afterToggle, insertedHeight, offsetDelta, contentShift, beforeAnchor, afterAnchor, route: { before: beforeToggle.search, after: afterToggle.search } }
 
     /* ── a real reading position: scrolled stream, selected turn, typed query ── */
     await page.evaluate(() => {
@@ -287,7 +336,7 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       if (stream) { stream.scrollTop = Math.min(600, stream.scrollHeight - stream.clientHeight); stream.dispatchEvent(new Event('scroll', { bubbles: true })) }
     })
     await page.waitForFunction(() => document.querySelector(".txn-turnwrap:has(.txn-turn.txn-active)") != null, { timeout: 10000 })
-      .catch(() => fail('selecting a turn', 'no turn became active after scrolling the stream'))
+      .catch(() => { throw fail('selecting a turn', 'no turn became active after scrolling the stream') })
     const searchInput = await openSearch(page, 'opening the transcript search')
     await searchInput.type(SEARCH_TEXT)
     await pause(500)
@@ -320,7 +369,14 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     if (before.turn !== viewerDerivedTurn(before)) throw fail('settling the reading position', `the rendered highlight ${before.turn} is not the turn the viewer derives for offset ${before.scrollTop} (${viewerDerivedTurn(before)})`)
     if (Math.abs(record.scrollTop - before.scrollTop) > 2) throw fail('recording the reading position', `the stored offset ${record.scrollTop} does not track the mounted stream ${before.scrollTop}`)
     if (record.activeTurn !== Number(before.turn)) throw fail('recording the reading position', `the stored selection ${record.activeTurn} does not track the settled mounted active turn ${before.turn}`)
+    // PICTURE the asserted state: the settled reading position is the state the
+    // assertions above just checked, and re-sampling right after the capture
+    // proves the screenshot is that state.
     await capture(page, gate, theme, 'context-child-scrolled', '.txn-app', evidence)
+    const forwardAfterCapture = await readStreamPosition(page)
+    if (forwardAfterCapture.turn !== before.turn || forwardAfterCapture.scrollTop !== before.scrollTop) {
+      throw fail('capturing the child reading position', `the capture is not the asserted state: checked turn ${before.turn} at ${before.scrollTop}px, afterwards turn ${forwardAfterCapture.turn} at ${forwardAfterCapture.scrollTop}px`)
+    }
 
     /* ── surface 3: follow the current-parent link to the exact stored parent ── */
     await page.evaluate((label) => {
@@ -330,7 +386,7 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     await waitForPath(page, FIXTURE.parentId, 'following the current-parent link')
     await waitForSelector(page, '.txn-app', 'mounting the exact stored parent session')
     await page.waitForFunction((text) => (document.querySelector('.txn-app')?.textContent ?? '').includes(text), { timeout: 20000 }, FIXTURE.parentOpening)
-      .catch(() => fail('mounting the exact stored parent session', `the parent's own stored content ${JSON.stringify(FIXTURE.parentOpening)} never rendered`))
+      .catch(() => { throw fail('mounting the exact stored parent session', `the parent's own stored content ${JSON.stringify(FIXTURE.parentOpening)} never rendered`) })
     const parentProbe = await page.evaluate((id) => ({
       pathname: window.location.pathname,
       theme: document.documentElement.getAttribute('data-theme'),
@@ -347,7 +403,7 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     await waitForPath(page, encodeURIComponent(FIXTURE.childSessionId), 'returning to the child with Back')
     await waitForSelector(page, '.txn-context-link', 're-mounting the child context links after Back')
     await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 })
-      .catch(() => fail('restoring the child disclosure on Back', `the retained-history disclosure did not reopen (route ${page.url()})`))
+      .catch(() => { throw fail('restoring the child disclosure on Back', `the retained-history disclosure did not reopen (route ${page.url()})`) })
     const restored = await settledStreamPosition(page)
     const restoredQuery = new URLSearchParams(restored.search)
     if (restoredQuery.get('earlier') !== 'earlier-0') throw fail('restoring the child disclosure on Back', `the route ${JSON.stringify(restored.search)} lost the disclosed section`)
@@ -359,14 +415,38 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     if (restored.turn === null) throw fail('restoring the child selection on Back', 'the child came back with no selected turn at all')
     if (restored.turn !== before.turn) throw fail('restoring the child selection on Back', `the restored highlight ${restored.turn} is not the settled forward highlight ${before.turn}`)
     if (restored.turn !== viewerDerivedTurn(restored)) throw fail('restoring the child selection on Back', `the restored highlight ${restored.turn} is not the turn the viewer derives for offset ${restored.scrollTop} (${viewerDerivedTurn(restored)})`)
-    const restoredSearchInput = await openSearch(page, 'reopening the transcript search after Back')
-    const restoredSearch = await restoredSearchInput.evaluate((node) => node.value)
-    if (restoredSearch !== SEARCH_TEXT) throw fail('restoring the child search on Back', `search was ${JSON.stringify(restoredSearch)}, expected ${JSON.stringify(SEARCH_TEXT)}`)
+    const restoredRecord = await page.evaluate((key) => {
+      try { return JSON.parse(sessionStorage.getItem(key) ?? 'null') } catch { return null }
+    }, READING_STATE_KEY(FIXTURE.childSessionId))
+    if (!restoredRecord || restoredRecord.search !== SEARCH_TEXT) {
+      throw fail('restoring the child search on Back', `the per-session record holds ${JSON.stringify(restoredRecord?.search)}, expected ${JSON.stringify(SEARCH_TEXT)}`)
+    }
+
+    // PICTURE the asserted state: nothing may run between the assertion above
+    // and the capture, and the state is re-sampled right after the capture to
+    // prove the screenshot is the state that was checked.
     await capture(page, gate, theme, 'context-back-restored', '.txn-app', evidence)
+    const restoredAfterCapture = await readStreamPosition(page)
+    if (restoredAfterCapture.turn !== restored.turn || restoredAfterCapture.scrollTop !== restored.scrollTop) {
+      throw fail('capturing the restored child state', `the capture is not the asserted state: checked turn ${restored.turn} at ${restored.scrollTop}px, afterwards turn ${restoredAfterCapture.turn} at ${restoredAfterCapture.scrollTop}px`)
+    }
+
+    // SEPARATE, explicitly labelled action: reopening the search panel runs the
+    // viewer's own search effect, which scrolls to and selects the first match.
+    // The search panel's open/closed disclosure is viewer-local state that the
+    // host does not own, so the restored capture above shows the query restored
+    // with the panel closed; this step proves the query is really there and
+    // pictures the reopened state instead of conflating the two.
+    const restoredSearchInput = await openSearch(page, 'reopening the transcript search after Back')
+    const reopenedQuery = await restoredSearchInput.evaluate((node) => node.value)
+    if (reopenedQuery !== SEARCH_TEXT) throw fail('reopening the transcript search after Back', `the reopened query was ${JSON.stringify(reopenedQuery)}, expected ${JSON.stringify(SEARCH_TEXT)}`)
+    const searchReopened = await settledStreamPosition(page)
+    await capture(page, gate, theme, 'context-back-search-reopened', '.txn-app', evidence)
     evidence.back = {
       theme,
       restored,
-      restoredSearch,
+      restoredQuery: restoredRecord.search,
+      searchReopened,
       forwardRawTurn: forwardRaw.turn,
       forwardSettledTurn: before.turn,
       viewerDerived: { forward: viewerDerivedTurn(before), restored: viewerDerivedTurn(restored) },
@@ -377,9 +457,26 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     const disclosedUrl = page.url()
     await page.reload({ waitUntil: 'domcontentloaded' })
     await waitForSelector(page, '.txn-earlier-toggle', 'reloading the disclosed route')
-    const reloadedExpanded = await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 }).then(() => true).catch(() => false)
-    if (!reloadedExpanded) throw fail('reloading the disclosed route', `the retained-history disclosure collapsed on reload of ${disclosedUrl}`)
-    await capture(page, gate, theme, 'context-reloaded', '.txn-app', evidence)
+    await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 })
+      .catch(() => { throw fail('reloading the disclosed route', `the retained-history disclosure collapsed on reload of ${disclosedUrl}`) })
+    // The route reopens the disclosure AND the session record replays the
+    // reader's offset (sessionStorage survives a reload of the same tab). Both
+    // are asserted here; a capture is deliberately NOT written, because this
+    // state is the same route-plus-record state `context-back-restored` already
+    // pictures and would be byte-identical evidence.
+    const reloaded = await settledStreamPosition(page)
+    if (Math.abs(reloaded.scrollTop - record.scrollTop) > 2) {
+      throw fail('reloading the disclosed route', `the reloaded child sits at ${reloaded.scrollTop}px, expected the stored ${record.scrollTop}`)
+    }
+    if (reloaded.turn === null) throw fail('reloading the disclosed route', 'the reloaded child came back with no selected turn')
+    evidence.reload = {
+      disclosedUrl,
+      restoredOffset: reloaded.scrollTop,
+      restoredTurn: reloaded.turn,
+      viewerDerived: viewerDerivedTurn(reloaded),
+      expanded: true,
+      picturedBy: 'context-back-restored (same route + session record; no duplicate capture written)',
+    }
 
     const copied = await browser.newPage()
     try {
@@ -388,9 +485,24 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       await useTheme(copied, theme)
       await copied.goto(disclosedUrl, { waitUntil: 'domcontentloaded' })
       await waitForSelector(copied, '.txn-earlier-toggle', 'opening the copied disclosed link')
-      const copiedExpanded = await copied.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 }).then(() => true).catch(() => false)
-      if (!copiedExpanded) throw fail('opening the copied disclosed link', `the retained-history disclosure collapsed on a fresh document at ${disclosedUrl}`)
+      await copied.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 })
+        .catch(() => { throw fail('opening the copied disclosed link', `the retained-history disclosure collapsed on a fresh document at ${disclosedUrl}`) })
+      // A copied link carries what the URL carries and nothing else: the
+      // disclosure reopens from `?earlier=`, while the transient reading state
+      // is session-scoped. A fresh tab therefore replays no offset and no query
+      // (the hook writes an empty default record on mount), and asserting that
+      // boundary keeps the two restoration paths from being conflated.
+      const copiedState = await settledStreamPosition(copied)
+      const copiedRecord = await copied.evaluate((key) => {
+        try { return JSON.parse(sessionStorage.getItem(key) ?? 'null') } catch { return null }
+      }, READING_STATE_KEY(FIXTURE.childSessionId))
+      const copiedCarriesReaderState = copiedRecord !== null && (copiedRecord.scrollTop !== 0 || (copiedRecord.search ?? '') !== '')
+      if (copiedCarriesReaderState) {
+        throw fail('opening the copied disclosed link', `a fresh document replayed session reading state: ${JSON.stringify(copiedRecord)}`)
+      }
+      if (copiedState.scrollTop !== 0) throw fail('opening the copied disclosed link', `a fresh document replayed a stored offset (${copiedState.scrollTop}px) with no reader state to justify it`)
       await capture(copied, gate, theme, 'context-copied-link', '.txn-app', evidence)
+      evidence.copiedLink = { disclosedUrl, expanded: true, replayedReaderState: false, offset: copiedState.scrollTop, record: copiedRecord }
     } finally {
       await copied.close()
     }
@@ -414,7 +526,7 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     await capture(page, gate, theme, 'unresolved-parent', '.txn-app', evidence)
     evidence.unresolved = { theme, rows: unresolvedRows }
 
-    console.log(`OK [${theme}] child links → ${FIXTURE.parentId} → Back ${restored.search} · scroll=${restored.scrollTop}/${before.scrollTop} · turn=${restored.turn} · search=${JSON.stringify(restoredSearch)}`)
+    console.log(`OK [${theme}] child links → ${FIXTURE.parentId} → Back ${restored.search} · restored scroll=${restored.scrollTop}/${before.scrollTop} · restored turn=${restored.turn} (derived ${viewerDerivedTurn(restored)}) · query=${JSON.stringify(restoredRecord.search)} · search panel reopened → turn=${searchReopened.turn} at ${searchReopened.scrollTop}px`)
   } finally {
     await page.close()
   }

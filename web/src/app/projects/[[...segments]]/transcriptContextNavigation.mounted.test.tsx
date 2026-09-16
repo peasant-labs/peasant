@@ -180,12 +180,12 @@ afterEach(() => {
 });
 
 describe('mounted context and starter navigation on the production transcript route', () => {
-  it('covers every named fixture case exactly', () => {
-    expect(fixture.cases.map((entry) => entry.name).sort()).toEqual(
-      fixture.cases.map((entry) => entry.name).slice().sort(),
-    );
-    expect(fixture.cases.length).toBe(8);
-    expect(fixture.backCase.name).toBe('context-and-starter-distinct');
+  it('uses the required-name corpus validated by its strict loader', () => {
+    // `loadContextNavigationFixture` already enforces exact membership against
+    // the manifest's requiredNames (count AND set) and the backCase pointer
+    // before any test runs, so a drifted corpus fails this whole file. The
+    // mounted flows below only need their back case to exist in that corpus.
+    expect(fixture.cases.map((entry) => entry.name)).toContain(fixture.backCase.name);
   });
 
   for (const c of fixture.cases) {
