@@ -166,6 +166,17 @@ async function contextRows(page) {
   })))
 }
 
+/**
+ * The mounted reading position: the route, the stream offset, the rendered
+ * active turn, and the per-turn layout the viewer derives that highlight from.
+ *
+ * The fairtrade viewer derives the active turn inside its OWN scroll handler:
+ * the last visible turn whose `offsetTop - scrollTop` is within 40% of the
+ * scroller's height. Reading the highlight without that context is what made an
+ * earlier revision of this harness report a mismatch — a search-match jump
+ * re-positions the stream without firing the derivation, so the highlight is
+ * stale until the next scroll event (which the Back replay itself is).
+ */
 async function readStreamPosition(page) {
   return page.evaluate(() => {
     const stream = document.querySelector('.txn-stream')
@@ -174,9 +185,40 @@ async function readStreamPosition(page) {
       search: window.location.search,
       scrollTop: stream ? stream.scrollTop : -1,
       maxScroll: stream ? stream.scrollHeight - stream.clientHeight : 0,
+      clientHeight: stream ? stream.clientHeight : -1,
       turn: active?.getAttribute('data-turn') ?? null,
+      turns: [...document.querySelectorAll('.txn-turnwrap[data-turn]')].map((node) => ({
+        index: node.getAttribute('data-turn'),
+        offsetTop: node.offsetTop,
+      })),
     }
   })
+}
+
+/** The viewer's own active-turn derivation for one sampled position. */
+function viewerDerivedTurn(position) {
+  let derived = position.turns[0]?.index ?? '0'
+  for (const turn of position.turns) {
+    if (turn.offsetTop - position.scrollTop <= position.clientHeight * 0.4) derived = turn.index
+  }
+  return derived
+}
+
+/**
+ * Read the mounted position until the highlight and the offset hold steady
+ * across two reads, so a comparison is always settled-to-settled: the Back
+ * replay re-applies the offset over several frames, and the viewer re-derives
+ * the highlight from the offset on each of them.
+ */
+async function settledStreamPosition(page) {
+  let previous = await readStreamPosition(page)
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await pause(200)
+    const current = await readStreamPosition(page)
+    if (current.turn === previous.turn && current.scrollTop === previous.scrollTop) return current
+    previous = current
+  }
+  return previous
 }
 
 async function openSearch(page, step) {
@@ -249,18 +291,35 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     const searchInput = await openSearch(page, 'opening the transcript search')
     await searchInput.type(SEARCH_TEXT)
     await pause(500)
+
+    // The query jump re-positions the stream to its first match WITHOUT running
+    // the viewer's active-turn derivation, so the raw highlight here is stale
+    // (it holds the search-match turn while the offset already sits past it).
+    // One reader-equivalent scroll gesture settles it against the final layout,
+    // which is exactly what the Back replay does when it re-applies the offset.
+    const forwardRaw = await readStreamPosition(page)
+    await page.evaluate(() => {
+      const stream = document.querySelector('.txn-stream')
+      if (!stream) return
+      stream.scrollTop += 1
+      stream.dispatchEvent(new Event('scroll', { bubbles: true }))
+      stream.scrollTop -= 1
+      stream.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    const before = await settledStreamPosition(page)
+
     // The host owns where the reader was, so the per-session record is the
     // expectation Back must reproduce; the DOM is the reader-visible proof that
-    // the record tracks them.
+    // the record tracks them (settled, not stale).
     const record = await page.evaluate((key) => {
       try { return JSON.parse(sessionStorage.getItem(key) ?? 'null') } catch { return null }
     }, READING_STATE_KEY(FIXTURE.childSessionId))
-    const before = await readStreamPosition(page)
     if (!record) throw fail('setting the reading position', 'the host wrote no per-session reading record before the follow')
     if (!Number.isSafeInteger(record.activeTurn)) throw fail('setting the reading position', `the reading record carries no selected turn: ${JSON.stringify(record)}`)
     if (!(before.scrollTop > 0) || before.turn === null) throw fail('setting the reading position', `the reading position was not established in the mounted viewer (${JSON.stringify(before)})`)
+    if (before.turn !== viewerDerivedTurn(before)) throw fail('settling the reading position', `the rendered highlight ${before.turn} is not the turn the viewer derives for offset ${before.scrollTop} (${viewerDerivedTurn(before)})`)
     if (Math.abs(record.scrollTop - before.scrollTop) > 2) throw fail('recording the reading position', `the stored offset ${record.scrollTop} does not track the mounted stream ${before.scrollTop}`)
-    if (before.turn !== String(record.activeTurn)) throw fail('recording the reading position', `the stored selection ${record.activeTurn} does not track the mounted active turn ${before.turn}`)
+    if (record.activeTurn !== Number(before.turn)) throw fail('recording the reading position', `the stored selection ${record.activeTurn} does not track the settled mounted active turn ${before.turn}`)
     await capture(page, gate, theme, 'context-child-scrolled', '.txn-app', evidence)
 
     /* ── surface 3: follow the current-parent link to the exact stored parent ── */
@@ -289,23 +348,30 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     await waitForSelector(page, '.txn-context-link', 're-mounting the child context links after Back')
     await page.waitForFunction(() => document.querySelector('.txn-earlier-toggle')?.getAttribute('aria-expanded') === 'true', { timeout: 15000 })
       .catch(() => fail('restoring the child disclosure on Back', `the retained-history disclosure did not reopen (route ${page.url()})`))
-    await pause(1400)
-    const restored = await readStreamPosition(page)
+    const restored = await settledStreamPosition(page)
     const restoredQuery = new URLSearchParams(restored.search)
     if (restoredQuery.get('earlier') !== 'earlier-0') throw fail('restoring the child disclosure on Back', `the route ${JSON.stringify(restored.search)} lost the disclosed section`)
     if (Math.abs(restored.scrollTop - record.scrollTop) > 2) throw fail('restoring the child scroll offset on Back', `scrollTop was ${restored.scrollTop}, expected the stored ${record.scrollTop}`)
+    // Settled-to-settled: the Back replay re-applies the offset and the viewer
+    // re-derives the highlight from it, so the comparison is between the two
+    // settled rendered states (the raw forward read is stale until that
+    // derivation runs — see `forwardRaw` in the evidence).
     if (restored.turn === null) throw fail('restoring the child selection on Back', 'the child came back with no selected turn at all')
-    // The viewer re-derives the active turn from the replayed offset, so the
-    // restored turn is the turn AT the restored position. The stored selection
-    // and the mounted active turn are recorded rather than force-compared: the
-    // search filter is applied after the forward scroll but before the replay,
-    // which can land the highlight one turn off the forward-pass highlight.
-    const selectionDrift = { stored: record.activeTurn, before: before.turn, restored: restored.turn }
+    if (restored.turn !== before.turn) throw fail('restoring the child selection on Back', `the restored highlight ${restored.turn} is not the settled forward highlight ${before.turn}`)
+    if (restored.turn !== viewerDerivedTurn(restored)) throw fail('restoring the child selection on Back', `the restored highlight ${restored.turn} is not the turn the viewer derives for offset ${restored.scrollTop} (${viewerDerivedTurn(restored)})`)
     const restoredSearchInput = await openSearch(page, 'reopening the transcript search after Back')
     const restoredSearch = await restoredSearchInput.evaluate((node) => node.value)
     if (restoredSearch !== SEARCH_TEXT) throw fail('restoring the child search on Back', `search was ${JSON.stringify(restoredSearch)}, expected ${JSON.stringify(SEARCH_TEXT)}`)
     await capture(page, gate, theme, 'context-back-restored', '.txn-app', evidence)
-    evidence.back = { theme, restored, restoredSearch, selectionDrift }
+    evidence.back = {
+      theme,
+      restored,
+      restoredSearch,
+      forwardRawTurn: forwardRaw.turn,
+      forwardSettledTurn: before.turn,
+      viewerDerived: { forward: viewerDerivedTurn(before), restored: viewerDerivedTurn(restored) },
+      recordedTurn: record.activeTurn,
+    }
 
     /* ── the disclosure is route state: reload and a copied link reopen it ── */
     const disclosedUrl = page.url()
