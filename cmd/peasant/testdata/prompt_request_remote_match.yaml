@@ -1,0 +1,73 @@
+# Remote-matching cases for the waiting-prompt-request hint.
+#
+# The village serves a request's remote as GitHub's repository full_name:
+# "owner/name", with no host and no scheme, because that is what the App reads
+# out of the webhook. The remote on this machine is whatever the user cloned
+# from, in any form git accepts, so each case exercises the whole path — the
+# shared normalization, the reduction to "owner/name", and the match that
+# follows — rather than the reduction alone.
+#
+# The cases that do not match are the point of the fixture as much as the ones
+# that do: a hint about a pull request that is not this repository's would send
+# an author looking for a request that does not exist.
+cases:
+  - name: scp-remote-matches
+    pushedRemote: "git@github.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: scp-remote-without-git-suffix-matches
+    pushedRemote: "git@github.com:peasant-labs/village"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: https-remote-matches
+    pushedRemote: "https://github.com/peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: https-remote-with-credentials-matches
+    pushedRemote: "https://token@github.com/peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: ssh-url-with-port-matches
+    pushedRemote: "ssh://git@github.com:22/peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: host-case-difference-matches
+    pushedRemote: "git@GitHub.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: owner-and-repository-case-difference-matches
+    pushedRemote: "git@github.com:Peasant-Labs/Village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: same-repository-name-under-another-owner-does-not-match
+    pushedRemote: "git@github.com:someone-else/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: different-repository-in-the-same-owner-does-not-match
+    pushedRemote: "git@github.com:peasant-labs/schema.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: another-host-does-not-match
+    pushedRemote: "git@gitlab.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: subgroup-on-another-host-does-not-match
+    pushedRemote: "https://gitlab.com/group/peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: remote-without-a-host-does-not-match
+    pushedRemote: "peasant-labs/village"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: local-path-remote-does-not-match
+    pushedRemote: "/Users/developer/code/village"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: empty-remote-does-not-match
+    pushedRemote: ""
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: empty-request-remote-does-not-match
+    pushedRemote: "git@github.com:peasant-labs/village.git"
+    requestRemote: ""
+    wantMatch: false

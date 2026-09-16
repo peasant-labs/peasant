@@ -161,7 +161,8 @@ func BuildPushCommand() *cobra.Command {
 			}
 			runErr := func(ctx context.Context) error {
 
-				// --quiet promises errors and one final result line. Structured
+				// --quiet promises errors, a waiting prompt request, and one final
+				// result line. Structured
 				// diagnostics below error level are fail-safe notes about degraded
 				// service - a manifest that could not be fetched, quality metrics that
 				// could not be read - not failures, and a hook fires on every commit.
@@ -181,6 +182,25 @@ func BuildPushCommand() *cobra.Command {
 				}
 				if creds.VillageURL == "" {
 					return fmt.Errorf("village URL is not set — run 'peasant village login' to re-link your account")
+				}
+
+				// A reviewer asking for the prompts behind a pull request has no
+				// way to reach the author except here: the author is pushing, and
+				// when a hook is what runs the push there is no wizard and no
+				// other terminal surface in the run. So the lookup happens as
+				// soon as login is confirmed, before the publish step, and it
+				// prints even under --quiet — a hint stored away for a quieter
+				// run than the hook's would never be read.
+				//
+				// It is a read on both sides: it publishes nothing, it widens
+				// access to nothing, and every way it can fail prints nothing and
+				// leaves the push untouched. --json is the one exception, because
+				// its stdout is a document rather than a console.
+				//
+				// Everything outside this paragraph's control is inside
+				// reportWaitingPromptRequests, which is silent on every failure.
+				if !jsonOutput {
+					reportWaitingPromptRequests(ctx, cmd, creds, repository, cmd.Flags().Changed("repository"))
 				}
 
 				cfg, err := loadRunConfig(cfgPath, dryRun)
@@ -382,7 +402,8 @@ func BuildPushCommand() *cobra.Command {
 				// retain, so it is printed for the pushes that actually happen. It
 				// used to sit inside the public-visibility branch below, which no
 				// input reaches any more, so no push printed it at all. --quiet
-				// suppresses it (errors + final result line only), and a dry run
+				// suppresses it (errors, a waiting prompt request, and the final
+				// result line), and a dry run
 				// publishes nothing to keep a record of.
 				if !dryRun && !jsonOutput && level != outputQuiet {
 					reportSessions, queryErr := pushCandidates(ctx, db, force, sourceHarness)
@@ -724,7 +745,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s)", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
-	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors and a final result line")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
@@ -1488,7 +1509,10 @@ type outputLevel int
 
 const (
 	// outputQuiet suppresses the summary and redaction report, leaving only
-	// errors (stderr) and a single final result line (stdout).
+	// errors (stderr), a waiting prompt request, and a single final result line
+	// (stdout). The waiting request is why it is not simply "errors and a
+	// result": a hook runs with --quiet, and a hook run is the one surface that
+	// reaches an author whose prompts a reviewer asked for.
 	outputQuiet outputLevel = iota
 	// outputNormal prints a concise summary (the default).
 	outputNormal

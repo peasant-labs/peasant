@@ -619,6 +619,12 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 			preflightReached.Store(true)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/annotations/manifest":
 			// The annotation stage can check its empty manifest after preflight.
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/users/me/prompt-requests":
+			// A logged-in push asks once whether a reviewer is waiting on the
+			// prompts behind a pull request. It is a read that publishes nothing,
+			// which is the property this corpus is about, so it stays alongside
+			// the other reads rather than among the requests that would be
+			// unexpected here.
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/transcripts/publish":
 			// The seeded session is publishable, which is what carries the run past
 			// the preflight this test needs reached. The village REFUSES the upload,
