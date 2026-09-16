@@ -1,0 +1,130 @@
+{
+  "fixture": "internal/mock/testdata/context_navigation.yaml",
+  "chunk": "web/out/_next/static/chunks/app/projects/[[...segments]]/page-5b741d8ba5fae9b2.js",
+  "featureBytes": [
+    "peasant:transcript-reading:"
+  ],
+  "servedChunks": [
+    "/_next/static/chunks/app/projects/[[...segments]]/page-5b741d8ba5fae9b2.js",
+    "/_next/static/chunks/app/projects/[[...segments]]/page-5b741d8ba5fae9b2.js"
+  ],
+  "captures": [
+    "/tmp/opencode/context-navigation-captures/dark/context-links.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-child-scrolled.png",
+    "/tmp/opencode/context-navigation-captures/dark/parent-session.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-back-restored.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-reloaded.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-copied-link.png",
+    "/tmp/opencode/context-navigation-captures/dark/unresolved-parent.png",
+    "/tmp/opencode/context-navigation-captures/light/context-links.png",
+    "/tmp/opencode/context-navigation-captures/light/context-child-scrolled.png",
+    "/tmp/opencode/context-navigation-captures/light/parent-session.png",
+    "/tmp/opencode/context-navigation-captures/light/context-back-restored.png",
+    "/tmp/opencode/context-navigation-captures/light/context-reloaded.png",
+    "/tmp/opencode/context-navigation-captures/light/context-copied-link.png",
+    "/tmp/opencode/context-navigation-captures/light/unresolved-parent.png"
+  ],
+  "child": {
+    "theme": "light",
+    "rows": [
+      {
+        "label": "context inherited from",
+        "link": "open current session",
+        "status": null
+      },
+      {
+        "label": "started by",
+        "link": "open current session",
+        "status": null
+      }
+    ],
+    "collapsed": "false"
+  },
+  "follow": {
+    "theme": "light",
+    "parentProbe": {
+      "pathname": "/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess_contextparent/",
+      "theme": "light",
+      "contextLinks": 0
+    },
+    "before": {
+      "search": "?earlier=earlier-0",
+      "scrollTop": 665,
+      "maxScroll": 711,
+      "clientHeight": 750,
+      "turn": "1",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 677
+        },
+        {
+          "index": "1",
+          "offsetTop": 808
+        },
+        {
+          "index": "2",
+          "offsetTop": 1001
+        },
+        {
+          "index": "3",
+          "offsetTop": 1132
+        },
+        {
+          "index": "4",
+          "offsetTop": 1302
+        }
+      ]
+    }
+  },
+  "back": {
+    "theme": "light",
+    "restored": {
+      "search": "?earlier=earlier-0",
+      "scrollTop": 665,
+      "maxScroll": 711,
+      "clientHeight": 750,
+      "turn": "1",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 677
+        },
+        {
+          "index": "1",
+          "offsetTop": 808
+        },
+        {
+          "index": "2",
+          "offsetTop": 1001
+        },
+        {
+          "index": "3",
+          "offsetTop": 1132
+        },
+        {
+          "index": "4",
+          "offsetTop": 1302
+        }
+      ]
+    },
+    "restoredSearch": "durable",
+    "forwardRawTurn": "0",
+    "forwardSettledTurn": "1",
+    "viewerDerived": {
+      "forward": "1",
+      "restored": "1"
+    },
+    "recordedTurn": 1
+  },
+  "unresolved": {
+    "theme": "light",
+    "rows": [
+      {
+        "label": "started by",
+        "link": null,
+        "status": "source unavailable"
+      }
+    ]
+  }
+}
