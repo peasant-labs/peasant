@@ -95,6 +95,7 @@ export function loadContextNavigationFixture() {
       parentId,
       parentOpening: openingTurn(parent, 'context navigation fixture.parent'),
       unresolvedChildId,
+      unresolvedOpening: openingTurn(unresolved, 'context navigation fixture.unresolved'),
       absentTargetId,
       contextLabel: requiredString(expected, 'contextLabel', 'context navigation fixture.expected'),
       starterLabel: requiredString(expected, 'starterLabel', 'context navigation fixture.expected'),

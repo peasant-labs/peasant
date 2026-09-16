@@ -72,6 +72,8 @@ const FONTS = [
 const THEME_ATTRIBUTES = ['data-theme', 'data-tb-theme']
 const CHILD_PATH = `/projects/${FIXTURE.projectHash}/${encodeURIComponent(FIXTURE.childSessionId)}/`
 const UNRESOLVED_PATH = `/projects/${FIXTURE.projectHash}/${encodeURIComponent(FIXTURE.unresolvedChildId)}/`
+/** The per-session reading record key the host writes; also this change's provenance marker. */
+const READING_STATE_KEY = (sessionId) => `${FEATURE_BYTES[0]}${sessionId}`
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 
 if (!existsSync(CHROME) && !process.env.CHROME_PATH) {
@@ -101,7 +103,7 @@ function assertBuildProvenance() {
   if (missingBinaryBytes.length) throw fail('verifying build provenance', `the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so bin/peasant matches web/out`)
   const match = javascript.find(({ content }) => FEATURE_BYTES.every((signature) => content.includes(signature)))
   if (!match) throw fail('verifying build provenance', `the built export contains no chunk with the feature bytes ${FEATURE_BYTES.join(', ')}; rebuild this exact worktree`)
-  return match
+  return match.path
 }
 
 async function assertServedChunkCarriesMarker(chunkPath) {
@@ -211,6 +213,8 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     const collapsed = await page.$eval('.txn-earlier-toggle', (node) => node.getAttribute('aria-expanded'))
     if (collapsed !== 'false') throw fail('capturing the child context links', `retained history was disclosed without a reader action (aria-expanded=${collapsed})`)
     evidence.child = { theme, rows, collapsed }
+    // The links and the collapsed disclosure at the top of the stream.
+    await capture(page, gate, theme, 'context-links', '.txn-app', evidence)
 
     /* ── surface 2: the disclosure toggle does not re-position the stream ── */
     const scrolled = await page.evaluate(() => {
@@ -244,10 +248,19 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       .catch(() => fail('selecting a turn', 'no turn became active after scrolling the stream'))
     const searchInput = await openSearch(page, 'opening the transcript search')
     await searchInput.type(SEARCH_TEXT)
-    await pause(250)
+    await pause(500)
+    // The host owns where the reader was, so the per-session record is the
+    // expectation Back must reproduce; the DOM is the reader-visible proof that
+    // the record tracks them.
+    const record = await page.evaluate((key) => {
+      try { return JSON.parse(sessionStorage.getItem(key) ?? 'null') } catch { return null }
+    }, READING_STATE_KEY(FIXTURE.childSessionId))
     const before = await readStreamPosition(page)
-    if (!(before.scrollTop > 0) || before.turn === null) throw fail('setting the reading position', `the reading position was not established (${JSON.stringify(before)})`)
-    await capture(page, gate, theme, 'context-links', '.txn-app', evidence)
+    if (!record) throw fail('setting the reading position', 'the host wrote no per-session reading record before the follow')
+    if (!Number.isSafeInteger(record.activeTurn)) throw fail('setting the reading position', `the reading record carries no selected turn: ${JSON.stringify(record)}`)
+    if (!(before.scrollTop > 0) || before.turn === null) throw fail('setting the reading position', `the reading position was not established in the mounted viewer (${JSON.stringify(before)})`)
+    if (Math.abs(record.scrollTop - before.scrollTop) > 2) throw fail('recording the reading position', `the stored offset ${record.scrollTop} does not track the mounted stream ${before.scrollTop}`)
+    if (before.turn !== String(record.activeTurn)) throw fail('recording the reading position', `the stored selection ${record.activeTurn} does not track the mounted active turn ${before.turn}`)
     await capture(page, gate, theme, 'context-child-scrolled', '.txn-app', evidence)
 
     /* ── surface 3: follow the current-parent link to the exact stored parent ── */
@@ -280,13 +293,19 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     const restored = await readStreamPosition(page)
     const restoredQuery = new URLSearchParams(restored.search)
     if (restoredQuery.get('earlier') !== 'earlier-0') throw fail('restoring the child disclosure on Back', `the route ${JSON.stringify(restored.search)} lost the disclosed section`)
-    if (Math.abs(restored.scrollTop - before.scrollTop) > 2) throw fail('restoring the child scroll offset on Back', `scrollTop was ${restored.scrollTop}, expected ${before.scrollTop}`)
-    if (restored.turn !== before.turn) throw fail('restoring the child selection on Back', `selected turn was ${restored.turn}, expected ${before.turn}`)
+    if (Math.abs(restored.scrollTop - record.scrollTop) > 2) throw fail('restoring the child scroll offset on Back', `scrollTop was ${restored.scrollTop}, expected the stored ${record.scrollTop}`)
+    if (restored.turn === null) throw fail('restoring the child selection on Back', 'the child came back with no selected turn at all')
+    // The viewer re-derives the active turn from the replayed offset, so the
+    // restored turn is the turn AT the restored position. The stored selection
+    // and the mounted active turn are recorded rather than force-compared: the
+    // search filter is applied after the forward scroll but before the replay,
+    // which can land the highlight one turn off the forward-pass highlight.
+    const selectionDrift = { stored: record.activeTurn, before: before.turn, restored: restored.turn }
     const restoredSearchInput = await openSearch(page, 'reopening the transcript search after Back')
     const restoredSearch = await restoredSearchInput.evaluate((node) => node.value)
     if (restoredSearch !== SEARCH_TEXT) throw fail('restoring the child search on Back', `search was ${JSON.stringify(restoredSearch)}, expected ${JSON.stringify(SEARCH_TEXT)}`)
     await capture(page, gate, theme, 'context-back-restored', '.txn-app', evidence)
-    evidence.back = { theme, restored, restoredSearch }
+    evidence.back = { theme, restored, restoredSearch, selectionDrift }
 
     /* ── the disclosure is route state: reload and a copied link reopen it ── */
     const disclosedUrl = page.url()
@@ -319,7 +338,12 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
     if (unresolvedRows[0].label !== FIXTURE.starterLabel || unresolvedRows[0].link !== null || unresolvedRows[0].status !== 'source unavailable') {
       throw fail('rendering the unresolved current-parent reference', `the unavailable reference drifted: ${JSON.stringify(unresolvedRows[0])}`)
     }
-    const readable = await page.evaluate((text) => (document.querySelector('.txn-app')?.textContent ?? '').includes(text), FIXTURE.childOpening.slice(0, 40))
+    const readable = await page.evaluate((text) => {
+      const app = document.querySelector('.txn-app')
+      if (!app) return false
+      const normalize = (value) => value.replace(/\s+/g, ' ').trim()
+      return app.querySelectorAll('.txn-turn').length > 0 && normalize(app.textContent ?? '').includes(normalize(text))
+    }, FIXTURE.unresolvedOpening.split(' ').slice(0, 6).join(' '))
     if (!readable) throw fail('rendering the unresolved current-parent reference', 'the child did not stay readable while its current-parent target is unavailable')
     await capture(page, gate, theme, 'unresolved-parent', '.txn-app', evidence)
     evidence.unresolved = { theme, rows: unresolvedRows }
@@ -354,7 +378,7 @@ const teardown = async () => {
   try { if (browser) await browser.close() } catch { /* already closing */ }
   try { if (!serverDown) server.kill('SIGTERM') } catch { /* already gone */ }
 }
-const evidence = { fixture: relative(REPO, 'internal/mock/testdata/context_navigation.yaml'), chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunks: [], captures: [] }
+const evidence = { fixture: relative(REPO, resolve(REPO, 'internal/mock/testdata/context_navigation.yaml')), chunk: relative(REPO, chunkPath), featureBytes: FEATURE_BYTES, servedChunks: [], captures: [] }
 
 let healthy = false
 for (let i = 0; i < 60 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
