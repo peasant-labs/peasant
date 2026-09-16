@@ -8,7 +8,7 @@
 # package globs ambiguous.
 smoke:
   staging_step: Stage a clean download directory
-  staging_dir_expression: env.SMOKE_DIR
+  staging_dir_expression: ${{ env.SMOKE_DIR }}
   staging_run_contains:
     - mktemp -d
     - RUNNER_TEMP

@@ -83,8 +83,8 @@ func TestReleaseSmokeStagesCleanWorkspace(t *testing.T) {
 	for _, stepName := range fixture.Smoke.StepsInsideStaging {
 		step := workflowStepNode(t, steps, stepName)
 		workingDirectory := yamlMappingValue(step, "working-directory")
-		if workingDirectory == nil || !strings.Contains(workingDirectory.Value, fixture.Smoke.StagingDirExpression) {
-			t.Fatalf("release.yml: smoke step %q must run inside the staging directory, got %v", stepName, workingDirectory)
+		if workingDirectory == nil || strings.TrimSpace(workingDirectory.Value) != fixture.Smoke.StagingDirExpression {
+			t.Fatalf("release.yml: smoke step %q must run inside the staging directory expression %q, got %v", stepName, fixture.Smoke.StagingDirExpression, workingDirectory)
 		}
 	}
 
