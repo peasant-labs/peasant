@@ -71,7 +71,15 @@ export type TranscriptRoute =
 
 const MAP_FIELDS = new Set(['node', 'mode', 'grain', 'expand', 'filter', 'focus', 'scale', 'panX', 'panY']);
 const REVIEW_FIELDS = new Set(['branch']);
-const TRANSCRIPT_FIELDS = new Set(['turn', 'scope', 'scopeVal', 'origin', 'originNode', 'originBranch', 'returnTo']);
+/** Transcript route parameter naming each disclosed retained-history section. */
+export const EarlierHistoryParam = 'earlier';
+const TRANSCRIPT_FIELDS = new Set(['turn', 'scope', 'scopeVal', 'origin', 'originNode', 'originBranch', 'returnTo', EarlierHistoryParam]);
+// Repeatable transcript field: one entry per disclosed earlier-history section.
+const TRANSCRIPT_REPEATABLE_FIELDS = new Set([EarlierHistoryParam]);
+// The retained-history section identifier the transcript viewer publishes for a
+// section at zero-based position N. The host persists exactly these identifiers
+// in the route, so returning to the page restores what the reader had open.
+const EARLIER_SECTION_ID = /^earlier-(?:0|[1-9]\d*)$/;
 
 export const TranscriptScope = {
   Task: 'task',
@@ -228,6 +236,8 @@ export type TranscriptHrefOptions = {
   originNode?: string;
   originBranch?: string;
   returnLocation?: ReturnLocation;
+  /** Retained-history section identifiers the reader has disclosed. */
+  earlierHistoryOpen?: readonly string[];
 };
 
 export function transcriptHref(projectHash: ProjectHash, sessionId: string, options: TranscriptHrefOptions = {}): string {
@@ -238,9 +248,25 @@ export function transcriptHref(projectHash: ProjectHash, sessionId: string, opti
   appendValue(params, 'origin', options.origin);
   appendValue(params, 'originNode', options.originNode);
   appendValue(params, 'originBranch', options.originBranch);
+  for (const section of normalizeEarlierSections(options.earlierHistoryOpen ?? [])) params.append(EarlierHistoryParam, section);
   if (options.returnLocation) params.set('returnTo', formatReturnLocation(options.returnLocation));
   const query = params.toString();
   return `/projects/${projectHash}/${safeBuilderSegment(sessionId, 'transcript')}${query ? `?${query}` : ''}`;
+}
+
+/**
+ * The canonical retained-history selection: one copy of each disclosed section
+ * identifier, ordered, so link shape and comparison are deterministic.
+ * A malformed identifier is caller error (the host only ever echoes identifiers
+ * the viewer published) and throws rather than silently dropping disclosure.
+ */
+function normalizeEarlierSections(sections: readonly string[]): string[] {
+  for (const section of sections) {
+    if (!EARLIER_SECTION_ID.test(section)) {
+      throw new Error(`Cannot create transcript link: retained-history identifier ${JSON.stringify(section)} is not a section identifier. Use the identifier the transcript viewer publishes for the section.`);
+    }
+  }
+  return [...new Set(sections)].sort();
 }
 
 function singleton(params: URLSearchParams, key: string): string | null | undefined {
@@ -323,12 +349,16 @@ export type TranscriptRouteQuery = {
   originNode: string | null;
   originBranch: string | null;
   returnLocation: ReturnLocation | null;
+  /** Retained-history sections the reader had disclosed, canonicalized. */
+  earlierHistoryOpen: readonly string[];
 };
 
 export function parseTranscriptRouteQuery(search: string | URLSearchParams): TranscriptRouteQuery | null {
   const params = typeof search === 'string' ? new URLSearchParams(search) : new URLSearchParams(search);
   for (const key of params.keys()) if (!TRANSCRIPT_FIELDS.has(key)) return null;
-  for (const key of TRANSCRIPT_FIELDS) if (params.getAll(key).length > 1) return null;
+  for (const key of TRANSCRIPT_FIELDS) {
+    if (!TRANSCRIPT_REPEATABLE_FIELDS.has(key) && params.getAll(key).length > 1) return null;
+  }
   const rawTurn = params.get('turn');
   const turn = rawTurn == null ? null : Number(rawTurn);
   if (rawTurn != null && (!/^\d+$/.test(rawTurn) || !Number.isSafeInteger(turn))) return null;
@@ -341,6 +371,8 @@ export function parseTranscriptRouteQuery(search: string | URLSearchParams): Tra
   const originNode = params.get('originNode');
   const originBranch = params.get('originBranch');
   if ([originNode, originBranch].some((value) => value != null && !safeQueryString(value))) return null;
+  const earlier = params.getAll(EarlierHistoryParam);
+  if (earlier.some((section) => !EARLIER_SECTION_ID.test(section))) return null;
   const rawReturn = params.get('returnTo');
   const parsedReturn = parseReturnLocation(rawReturn);
   if (rawReturn && !parsedReturn) return null;
@@ -352,6 +384,7 @@ export function parseTranscriptRouteQuery(search: string | URLSearchParams): Tra
     originNode,
     originBranch,
     returnLocation: parsedReturn,
+    earlierHistoryOpen: normalizeEarlierSections(earlier),
   };
 }
 

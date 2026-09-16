@@ -282,7 +282,7 @@ func Sessions() []ingest.Session {
 		schema.OutcomeFailed,
 	}
 
-	sessions := make([]ingest.Session, len(data.Sessions)+1, len(data.Sessions)+1+len(heroTitleFixtureSessions()))
+	sessions := make([]ingest.Session, len(data.Sessions)+1, len(data.Sessions)+1+len(heroTitleFixtureSessions())+len(canonicalContextNavigationFixture.storedSessions()))
 	sessions[0] = canonicalStrikeMockFixture.session()
 	for i, s := range data.Sessions {
 		startTime, _ := time.Parse(time.RFC3339, s.StartTime)
@@ -310,6 +310,10 @@ func Sessions() []ingest.Session {
 	// existing index or ID. See heroTitleFixtureSessions for what each one
 	// demonstrates.
 	sessions = append(sessions, heroTitleFixtureSessions()...)
+	// Additive mounted current-parent navigation fixture — appended last for the
+	// same reason. See context_navigation.yaml for the stored sessions, their
+	// resolved context/source and parent links and retained history.
+	sessions = append(sessions, canonicalContextNavigationFixture.storedSessions()...)
 	return sessions
 }
 
