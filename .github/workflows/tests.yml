@@ -103,6 +103,45 @@ permissions:
   contents: read
 
 jobs:
+  # Route the architecture-neutral jobs to the self-hosted container pool
+  # (rootless podman on the desktop; labels self-hosted/container), with a
+  # Blacksmith amd64 fallback when no pool runner is online. Every routed job
+  # reads the label array from this job's output. `check` and `cgo0` build and
+  # test Go on arm64 and stay on their arm64 runner; the harvester guard needs
+  # the repository's Nix shell and stays too.
+  determine-runner:
+    name: determine-runner
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+    steps:
+      - name: Pick a runner
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "container")) | .name' 2>/dev/null | wc -l); then
+            echo "::warning::runner availability query failed; using the fallback"
+            online=0
+          fi
+          echo "online runners: ${online}"
+          if [ "${online}" -gt 0 ]; then
+            echo 'runner=["self-hosted","container"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runner=["blacksmith-2vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Report chosen runner
+        env:
+          CHOSEN: ${{ steps.pick.outputs.runner }}
+        run: 'echo "chosen: $CHOSEN"'
+
   # Exactly-once contract: every job below carries the same guard so the
   # path-filtered standalone run skips release(...) PRs, where release-pr.yml
   # calls this workflow as the single authority. Inside a called reusable
@@ -167,6 +206,10 @@ jobs:
       github.event_name == 'pull_request' &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
+    # Not routed to the container pool: the guard compiles two revisions inside
+    # the repository's `nix develop` shell, and the pool image deliberately has
+    # no Nix. Revisit when the pool gains Nix or the guard gets a
+    # container-native toolchain.
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 30
     steps:
@@ -296,7 +339,8 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -334,7 +378,8 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -366,7 +411,8 @@ jobs:
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
       github.workflow == 'Release PR'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository

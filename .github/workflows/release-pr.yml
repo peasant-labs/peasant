@@ -136,6 +136,9 @@ jobs:
        (github.event.action == 'labeled' && github.event.label.name == 'full-gate'))
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/tests.yml
 
   e2e:
@@ -169,6 +172,9 @@ jobs:
         (needs.changes.result != 'success' || needs.changes.outputs.release_validate != 'false')))
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/release-validate.yml
 
   # Trigger B: a release PR MERGED — assert maintainer approval, then tag.

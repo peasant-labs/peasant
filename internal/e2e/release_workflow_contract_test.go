@@ -27,6 +27,17 @@ var e2eAssertedTestsManifest []byte
 //go:embed testdata/workflows/release_validate_rpm.yaml
 var releaseValidateRPMFixtureBytes []byte
 
+const (
+	// routedRunnerExpression is the runs-on a routed reusable workflow uses to
+	// place an x86_64 job on the runner that its determine-runner job selects.
+	routedRunnerExpression = "${{ fromJson(needs.determine-runner.outputs.runner) }}"
+	// runnerRoutingSecret is read by the inline determine-runner job in every
+	// reusable workflow that routes runners; the job exports it as GH_TOKEN for
+	// its paginated runner-status query. Secrets do not cross a reusable-workflow
+	// call unless the caller passes them explicitly.
+	runnerRoutingSecret = "${{ secrets.RUNNER_STATUS_TOKEN }}"
+)
+
 type releaseValidateRPMFixture struct {
 	PrepareExit   int                              `yaml:"prepare_exit"`
 	MutationCases []releaseValidateRPMMutationCase `yaml:"mutation_cases"`
@@ -282,7 +293,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 
 func TestReleaseE2EWorkflowContract(t *testing.T) {
 	assertReleaseE2EWorkflowContract(t)
-	assertProductionWorkflowReusableJobsHaveNoSecrets(t)
+	assertReusableWorkflowCallerSecrets(t)
 }
 
 func TestReleaseArtifactWorkflowsRequireRealDashboard(t *testing.T) {
@@ -800,12 +811,12 @@ func assertReleaseE2EWorkflowContract(t *testing.T) {
 		t.Fatalf("release-e2e: jobs.%s must not have an if condition; it must run whenever release.yml calls it", defaults.ReleaseE2EWorkflowJob)
 	}
 	runsOn := yamlMappingValue(job, "runs-on")
-	if runsOn == nil || runsOn.Value != "blacksmith-4vcpu-ubuntu-2404" {
+	if runsOn == nil || runsOn.Value != routedRunnerExpression {
 		got := "<missing>"
 		if runsOn != nil {
 			got = runsOn.Value
 		}
-		t.Fatalf("release-e2e: jobs.%s runs-on = %s, want blacksmith-4vcpu-ubuntu-2404 for Arch amd64 coverage", defaults.ReleaseE2EWorkflowJob, got)
+		t.Fatalf("release-e2e: jobs.%s runs-on = %s, want %s so the amd64-only warm-stack driver runs on the routed runner", defaults.ReleaseE2EWorkflowJob, got, routedRunnerExpression)
 	}
 	steps := yamlMappingValue(job, "steps")
 	if steps == nil || steps.Kind != yaml.SequenceNode {
@@ -954,19 +965,53 @@ func yamlSequenceContains(node *yaml.Node, want string) bool {
 	return false
 }
 
-func assertProductionWorkflowReusableJobsHaveNoSecrets(t *testing.T) {
+func assertReusableWorkflowCallerSecrets(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "release.yml")
-	doc := readWorkflowDoc(t, path)
-	jobs := yamlMappingValue(doc, "jobs")
-	e2eJob := yamlMappingValue(jobs, "e2e")
-	releaseE2EJob := yamlMappingValue(jobs, defaults.ReleaseE2EWorkflowJob)
-	if e2eJob == nil || releaseE2EJob == nil {
-		t.Fatal("release: workflow must define reusable jobs e2e and release-e2e")
+	fixture := loadE2EWorkflowContractFixture(t)
+	for _, caller := range fixture.ReusableCallers {
+		jobs := yamlMappingValue(readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), caller.Workflow)), "jobs")
+		for _, expectation := range caller.Jobs {
+			job := yamlMappingValue(jobs, expectation.Job)
+			if job == nil {
+				t.Fatalf("%s: workflow must define reusable job %q", caller.Workflow, expectation.Job)
+			}
+			secrets := yamlMappingValue(job, "secrets")
+			if calledWorkflowRoutesRunners(t, expectation) {
+				if secrets == nil || secrets.Kind != yaml.ScalarNode || secrets.Value != "inherit" {
+					t.Fatalf("%s: reusable job %q must pass `secrets: inherit`; %s routes runners through determine-runner, which reads %s", caller.Workflow, expectation.Job, expectation.Uses, runnerRoutingSecret)
+				}
+				continue
+			}
+			if secrets != nil {
+				t.Fatalf("%s: reusable job %q must not declare a secrets mapping or scalar; %s does not route runners through determine-runner", caller.Workflow, expectation.Job, expectation.Uses)
+			}
+		}
 	}
-	if yamlMappingValue(e2eJob, "secrets") != nil || yamlMappingValue(releaseE2EJob, "secrets") != nil {
-		t.Fatal("release: reusable jobs e2e and release-e2e must not declare a secrets mapping or scalar; they run without inherited credentials")
+}
+
+// calledWorkflowRoutesRunners reports whether the reusable workflow that a
+// caller job invokes defines a determine-runner job that runs the inline router
+// and exports the routing secret as GH_TOKEN. Only those callers may pass
+// `secrets: inherit`.
+func calledWorkflowRoutesRunners(t *testing.T, expectation workflowJobPermissionsExpectation) bool {
+	t.Helper()
+	const localWorkflowPrefix = "./.github/workflows/"
+	if !strings.HasPrefix(expectation.Uses, localWorkflowPrefix) {
+		t.Fatalf("reusable job %q uses %q, which is not a local reusable workflow", expectation.Job, expectation.Uses)
 	}
+	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", strings.TrimPrefix(expectation.Uses, localWorkflowPrefix))
+	determineRunner := yamlMappingValue(yamlMappingValue(readWorkflowDoc(t, path), "jobs"), "determine-runner")
+	steps := yamlMappingValue(determineRunner, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, step := range steps.Content {
+		token := yamlMappingValue(yamlMappingValue(step, "env"), "GH_TOKEN")
+		if token != nil && token.Value == runnerRoutingSecret {
+			return true
+		}
+	}
+	return false
 }
 
 func e2eWorkflowSteps(t *testing.T, doc *yaml.Node) []*yaml.Node {
