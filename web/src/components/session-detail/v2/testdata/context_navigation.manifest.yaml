@@ -1,0 +1,114 @@
+expectedCaseCount: 8
+requiredNames:
+  - context-and-starter-distinct
+  - same-target-combines
+  - known-unavailable-no-link
+  - unknown-source-no-link
+  - conflicting-source-no-link
+  - navigation-for-another-session-never-links
+  - durable-target-without-navigation-no-link
+  - explicit-none-omits-row
+expectedLinkCaseCount: 9
+requiredLinkNames:
+  - resolved-opens-the-stored-target
+  - general-link-opens-the-current-target
+  - started-by-opens-the-stored-target
+  - known-unavailable-has-no-route
+  - inaccessible-has-no-route
+  - unknown-has-no-route
+  - conflicting-has-no-route
+  - resolved-without-a-target-identifier-has-no-route
+  - unknown-relationship-kind-has-no-route
+requiredStatuses:
+  - resolved
+  - general_link_only
+  - known_unavailable
+  - inaccessible
+  - unknown
+  - conflicting
+backCase: context-and-starter-distinct
+expectedLoaderMutationCount: 8
+loaderMutations:
+  - name: unknown case field
+    target: cases
+    find: "  - name: context-and-starter-distinct\n"
+    replace: "  - name: context-and-starter-distinct\n    unexpected_field: true\n"
+    expectedError: "unknown fields"
+  - name: unknown root field
+    target: cases
+    find: "back_case: context-and-starter-distinct\n"
+    replace: "back_case: context-and-starter-distinct\nunexpected_root: true\n"
+    expectedError: "unknown fields"
+  - name: duplicate case name
+    target: cases
+    find: "  - name: same-target-combines\n"
+    replace: "  - name: context-and-starter-distinct\n"
+    expectedError: "duplicates name"
+  - name: row that is both a link and a status
+    target: cases
+    find: "        - label: context inherited from\n          link: null\n          status: source unavailable\n          note: null\n  - name: unknown-source-no-link\n"
+    replace: "        - label: context inherited from\n          link: sess_contextsource\n          status: source unavailable\n          note: null\n  - name: unknown-source-no-link\n"
+    expectedError: "either a link or a status"
+  - name: row status outside the closed set
+    target: cases
+    find: "          status: unknown source\n"
+    replace: "          status: unknown provenance\n"
+    expectedError: "closed set"
+  - name: linkable status without a target identifier
+    target: cases
+    find: "{kind: context_from, status: known_unavailable}"
+    replace: "{kind: context_from, status: known_unavailable, localId: sess_contextsource}"
+    expectedError: "exactly one identifier"
+  - name: back case that names no case
+    target: manifest
+    find: "backCase: context-and-starter-distinct\n"
+    replace: "backCase: no-such-case\n"
+    expectedError: "names no fixture case"
+  - name: required name dropped from the inventory
+    target: manifest
+    find: "  - explicit-none-omits-row\nexpectedLinkCaseCount: 9\n"
+    replace: "expectedLinkCaseCount: 9\n"
+    expectedError: "exact set"
+expectedMutationCount: 4
+mutations:
+  - name: durable payload keeps the read navigation mixed in
+    find: "const { relationshipNavigation, ...durableDetail } = detail;"
+    replace: "const durableDetail = detail;"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.relationshipNavigation.test.tsx
+    expectedFailedTestNames:
+      - context-and-starter-distinct separates read metadata from durable content
+      - same-target-combines separates read metadata from durable content
+      - known-unavailable-no-link separates read metadata from durable content
+      - unknown-source-no-link separates read metadata from durable content
+      - conflicting-source-no-link separates read metadata from durable content
+      - navigation-for-another-session-never-links separates read metadata from durable content
+      - durable-target-without-navigation-no-link separates read metadata from durable content
+      - explicit-none-omits-row separates read metadata from durable content
+    expectedFailurePattern: relationshipNavigation
+  - name: host routes a current-parent link to the current session instead of the authorized target
+    find: "const href = relationshipLinkHref(projectHash, entry);"
+    replace: "const href = transcriptHref(projectHash, sessionId);"
+    expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
+    expectedFailedTestNames:
+      - context-and-starter-distinct
+      - same-target-combines
+      - opens the exact stored target session when a reader follows the context link
+      - restores the child query, disclosure, scroll, and selection after Back from the target
+    expectedFailurePattern: did not route to the exact stored target
+  - name: host stops restoring the retained-history disclosure from the route
+    find: "earlierHistoryOpen={earlierHistoryOpen}"
+    replace: "earlierHistoryOpen={undefined}"
+    expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
+    expectedFailedTestNames:
+      - context-and-starter-distinct
+      - same-target-combines
+      - restores the child query, disclosure, scroll, and selection after Back from the target
+      - reopens the retained-history disclosure from a copied route in a fresh document
+    expectedFailurePattern: was not restored from the
+  - name: host stops replaying the per-session reading state
+    find: "useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm), requestedTurn == null)"
+    replace: "{ activeTurn: undefined, setActiveTurn: () => {}, search: '', setSearch: () => {} }"
+    expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
+    expectedFailedTestNames:
+      - restores the child query, disclosure, scroll, and selection after Back from the target
+    expectedFailurePattern: was not applied through the host reading record
