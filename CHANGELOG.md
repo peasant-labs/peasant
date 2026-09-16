@@ -7,6 +7,52 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.7.0-rc1] - 2026-09-16
+
+### Added
+- Native repair activation through the harvester registry: a harness whose
+  effective target is a managed generation is built, staged, and activated
+  through the store instead of replacing bare entries, so repaired sessions keep
+  their captured content and prior evidence; a store that cannot persist a
+  managed generation keeps the retained baseline (#426).
+- The generation activation records the publication-capture agreement in the
+  same transaction as the managed-generation install, so a session repaired from
+  a stale index is publishable immediately. An uncertifiable provenance kind
+  records nothing and leaves stored provenance unchanged; an unchanged capture
+  never moves; a changed capture advances its revision once; a disagreement
+  refuses the activation (#429).
+- Published payloads carry durable session provenance — relationships and their
+  public anchors, the root session, the purpose, the input-submission count
+  (including a measured zero), and retained earlier history — through the
+  snapshot-first publish path, with the consent overlay and the metadata mirrors
+  the receiver requires (#428).
+- Mounted session navigation on the new detail surface: a stored context link
+  opens the exact stored target, current-parent links navigate, and the retained
+  earlier-history disclosure restores on Back, reload, and copied links without
+  moving the stream position (#432).
+- Grouped local browse and share: grouped local session lists on the home
+  picker, grouped search and share flows, and a share chooser that selects
+  explicit helper members (#426).
+- `peasant push` scans payloads offline and negotiates receiver capabilities
+  freshly before publishing (#426).
+- The web app includes an inspect and feedback tool, development-gated and
+  app-local (#422).
+
+### Changed
+- The durable session detail no longer carries the read-only navigation field;
+  the viewer receives it as an adapter option, so sessions with relationships
+  cook correctly (#432).
+- The projects home no longer embeds the change graph (#425).
+- Release tooling: the release-PR gate re-runs only with a clear delta and
+  passing evidence (#419); partial re-runs of a failed release are documented
+  (#416); the release gate no longer runs the race detector (#414); x86_64 and
+  architecture-neutral CI jobs run on the self-hosted runner pool (#424).
+- The `changes` visual regression baselines were re-blessed (#427).
+
+### Fixed
+- Pi publications keep their recorded duration when publishing through the
+  snapshot path; previously the duration was emitted as zero (#428).
+
 ## [0.6.0] - 2026-09-14
 
 ### Added
@@ -361,6 +407,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
 [0.6.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0
 [0.5.0-rc3]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc3
