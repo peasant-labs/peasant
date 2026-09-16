@@ -29,9 +29,12 @@ type PipelineConfig struct {
 	JSONOutput bool
 	// Verbose requests per-session detail rows.
 	Verbose bool
-	// Quiet suppresses everything except errors and the final result line. A
-	// git hook runs with it, so a degraded-but-recoverable notice must not print
-	// into an ordinary commit or push.
+	// Quiet suppresses everything except errors, a waiting prompt request, and
+	// the final result line. A git hook runs with it, so a degraded-but-
+	// recoverable notice must not print into an ordinary commit or push; a
+	// waiting prompt request is not a notice about the run, it is the reason the
+	// author is being reached at all, and the command prints it rather than the
+	// pipeline.
 	Quiet bool
 	// FilterSessionIDs, when non-nil, restricts the push to only these session IDs.
 	// Set by the push wizard after user confirmation.

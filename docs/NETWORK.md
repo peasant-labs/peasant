@@ -13,6 +13,7 @@ Peasant is a local-first tool. All ingestion, indexing, and analysis happens on 
 | [Push transcripts](#1-push-transcripts) | `peasant push` | Village API | Session metadata + transcript | No — wizard confirmation |
 | [Push annotations](#2-push-annotations) | `peasant push` | Village API | Annotation labels + scores | No — wizard confirmation |
 | [Hook-triggered push](#6-hook-triggered-push) | `git commit` or `git push` | Village API | Same as the two rows above | **Yes — after an explicit per-repository install** |
+| [Waiting prompt request lookup](#7-waiting-prompt-request-lookup) | `peasant village push` (by hand or from a hook) | Village API | Nothing (GET only) | Yes — whenever a logged-in push runs |
 | [Login](#3-login) | `peasant login` | Village API | OAuth code exchange | No — explicit command |
 | [Logout](#4-logout) | `peasant logout` | Village API | API key revocation | No — explicit command |
 | [Model registry fetch](#5-model-registry-fetch) | `peasant ingest` | models.dev | Nothing (GET only) | Yes — during ingest |
@@ -259,6 +260,32 @@ This is the only path on this page that sends data without you running a command
 
 ---
 
+## 7. Waiting prompt request lookup
+
+A reviewer can ask the author to attach the prompts behind a pull request. When that happens, the author is the only person who can act on it, and the only place Peasant can reach them is a push. So a logged-in `peasant village push` asks the village once whether anything is waiting for the repository it is pushing, and prints one line for each match.
+
+**Trigger:** `peasant village push`, by hand or from an [installed hook](#6-hook-triggered-push), when login is already confirmed.
+
+**Endpoint:** `GET {village}/api/v1/users/me/prompt-requests`
+
+**Authentication:** Bearer token (obtained via `peasant village login`)
+
+**Data sent:** nothing. It is a GET with no body: the request carries your credentials and the identity they already imply, exactly as the other Village reads do. The response names the pull requests waiting on you, so Peasant can print the repository, the pull request number, and the command to run.
+
+**Failure behaviour:** a lookup that fails — no network, a non-2xx status, or a response this version cannot read — prints nothing and changes nothing about the push. It cannot publish, and it cannot delay a commit beyond its own five-second bound.
+
+**What attaching does, and does not do:** attaching a pull request's prompts **never uploads anything.** It does not publish a transcript into the commons, and it does not share one with GitHub. It only widens who may read transcripts that are **already published**, by granting a pull request's readers access to the transcripts attached to it. If you have nothing published, attaching publishes nothing.
+
+**What it prints:** one line per waiting request for the repository being pushed, for example:
+
+```
+waiting: example-org/sample-app#216 — run 'peasant village push' to attach the prompts behind it
+```
+
+A request for any other repository prints nothing. This is the one line a `--quiet` push still prints besides errors and its final result line: a hook run is the surface where the author is reachable, so a hint held back for a quieter run would never be read.
+
+---
+
 ## Village URL
 
 | Environment | URL |
@@ -274,5 +301,5 @@ This is the only path on this page that sends data without you running a command
 - **No telemetry or analytics** — no usage data, feature flags, or behavioral tracking
 - **No crash reporting** — errors are logged locally only
 - **No update checker** — no version polling or auto-update
-- **No background network calls** — nothing runs on a timer, in a daemon, or between commands. The only automatic fetch is `models.dev` during an explicit `peasant ingest`. A [Git upload hook](#6-hook-triggered-push), if you installed one, uploads inside your own `git commit` or `git push` — it is automatic in the sense that it needs no separate command, and it still runs only when you run Git in that repository
+- **No background network calls** — nothing runs on a timer, in a daemon, or between commands. The only automatic fetch is `models.dev` during an explicit `peasant ingest`. A [Git upload hook](#6-hook-triggered-push), if you installed one, uploads inside your own `git commit` or `git push` — it is automatic in the sense that it needs no separate command, and it still runs only when you run Git in that repository. A logged-in push also makes one read, the [waiting prompt request lookup](#7-waiting-prompt-request-lookup), which sends nothing and publishes nothing; it runs inside the push you already started, never on its own
 - **No data sharing without an explicit user action that enables it** — publishing requires a login, and either a wizard confirmation (`peasant push`) or a per-repository hook you installed yourself. Peasant never publishes a repository you did not either push by hand or install a hook for

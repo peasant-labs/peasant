@@ -249,8 +249,9 @@ func CommandPrefix(binding Binding) string {
 //
 // --quiet is always included: a hook fires on every commit or push, and the
 // default summary would print several lines into an otherwise ordinary git
-// command. --quiet still prints errors and one final result line, so a failure
-// is never hidden.
+// command. --quiet still prints errors, a waiting prompt request, and one final
+// result line, so neither a failure nor a reviewer's request for the prompts
+// behind a pull request is hidden.
 //
 // --timeout is always included for the same reason: git must not be held up by a
 // village that stopped answering. See DefaultUploadBudget.

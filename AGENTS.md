@@ -175,6 +175,11 @@ the server serves the newly built assets before you trust a screenshot or a comp
   automatically or in the background. It draws only from the sessions the user recorded. Pulled
   transcripts are not re-pushable. Governance for re-sharing pulled sessions is a tracked
   follow-up.
+- The consented publication paths are the `/share` wizard, the upload hook installed by
+  `peasant village hooks install`, and attaching the prompts behind a pull request. Attaching is
+  a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+  transcripts already published. Do not add a path that publishes without one of these, and do
+  not make any of them automatic.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
   user-facing lists show only the configured selection. An explicit session selection must not
   widen visibility to the sibling sessions of its project. Apply the boundary server-side.

@@ -66,9 +66,10 @@ func (p *Pipeline) negotiate(ctx context.Context) (emit schema.PushContractVersi
 	if err != nil {
 		span.End(perf.OutcomeSkipped, nil) // Existing fail-open fallback, not a successful handshake.
 		// Fail-open, so this is a note about a degraded preflight and not a
-		// failure. --quiet promises errors and one final result line, and a hook
-		// runs with it: an unreachable village would otherwise print this into
-		// every commit on top of the warning the hook already emits.
+		// failure. --quiet promises errors, a waiting prompt request, and one
+		// final result line, and a hook runs with it: an unreachable village
+		// would otherwise print this into every commit on top of the warning the
+		// hook already emits.
 		if !p.runCfg.Quiet {
 			fmt.Fprintf(p.stderr,
 				"notice: schema-version preflight unavailable (%v); emitting CLI contract v%s\n", err, cli)
