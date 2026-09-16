@@ -1,0 +1,28 @@
+# Persistent-workspace contract for the release workflows that run on the
+# self-hosted pool, whose runners keep their workspace between jobs.
+#
+# Smoke: the archive download, extraction, and assertions run in a fresh
+# job-scoped directory; every listed step must declare the staging directory.
+# Packaging: each listed job clears its owned dist/ directory before the
+# artifact download so stale same- or older-version files cannot make the
+# package globs ambiguous.
+smoke:
+  staging_step: Stage a clean download directory
+  staging_dir_expression: env.SMOKE_DIR
+  staging_run_contains:
+    - mktemp -d
+    - RUNNER_TEMP
+    - SMOKE_DIR=$staging
+    - GITHUB_ENV
+  steps_inside_staging:
+    - Download the released archive
+    - Assert the binary is statically linked
+    - Assert version matches the tag
+packaging:
+  reset_step: Reset dist/
+  reset_run: rm -rf dist
+  download_step: Download dist/
+  jobs:
+    - deb
+    - rpm
+    - makepkg
