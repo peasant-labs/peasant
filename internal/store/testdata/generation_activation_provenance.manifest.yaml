@@ -1,0 +1,12 @@
+# Required case names for the generation-activation publication-capture oracle.
+# The test asserts this set equals the fixture's case names exactly, so a deleted
+# or renamed case fails instead of silently shrinking the oracle.
+requiredNames:
+  - bound_capture_stays_bound
+  - absent_capture_stays_not_recovered
+  - mismatched_capture_stays_needs_ingest
+  - activation_records_capture_when_absent
+  - activation_repeats_unchanged_capture
+  - activation_advances_changed_capture_once
+  - activation_unproven_capture_leaves_provenance
+  - activation_refuses_conflicting_capture

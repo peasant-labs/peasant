@@ -1,0 +1,72 @@
+# The managed-generation activation must preserve a recorded publication-capture
+# agreement AND record a certified one that is missing. Pointing a session at a
+# generation updates session facts the row-version trigger watches, so the
+# activation transaction re-states the provenance it read instead of letting the
+# trigger clear it. The activation may also carry a certified capture, which the
+# store records in the same transaction so a repaired session is publishable
+# without a further run. Each case seeds one pre-activation capture state,
+# activates a real managed generation whose derived title repairs the stored
+# one, and asserts the stored agreement a discovery run compares.
+session:
+  id: 'cccccccc-0001-4000-8000-000000000001'
+  host_slug: host-gen
+  project_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  cwd: /tmp/prov/cwd
+  content_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+generation:
+  id: gen-provenance-1
+cases:
+  - name: bound_capture_stays_bound
+    provenance: source_exact
+    want_readiness: ready
+    want_bound: true
+    want_capture_revision: 7
+  - name: absent_capture_stays_not_recovered
+    provenance: not_recovered
+    want_readiness: needs_ingest
+    want_bound: false
+    want_capture_revision: 0
+  - name: mismatched_capture_stays_needs_ingest
+    provenance: source_exact
+    corrupt_capture_hash: true
+    want_readiness: needs_ingest
+    want_bound: true
+    want_capture_revision: 7
+  # The activation lane records the capture it certifies in the same
+  # transaction as the generation install.
+  - name: activation_records_capture_when_absent
+    provenance: not_recovered
+    activation_capture: source_exact
+    want_readiness: ready
+    want_bound: true
+    want_capture_revision: 1
+  - name: activation_repeats_unchanged_capture
+    provenance: source_exact
+    activation_capture: source_exact
+    want_readiness: ready
+    want_bound: true
+    want_capture_revision: 7
+  - name: activation_advances_changed_capture_once
+    provenance: source_exact
+    activation_capture: source_absent
+    want_readiness: ready
+    want_bound: true
+    want_capture_revision: 8
+  # A kind the pipeline cannot certify is not a capture: the activation still
+  # installs the generation, and the stored provenance stays exactly as it was.
+  - name: activation_unproven_capture_leaves_provenance
+    provenance: not_recovered
+    activation_capture: not_recovered
+    want_readiness: needs_ingest
+    want_bound: false
+    want_capture_revision: 0
+  # A capture that disagrees with the stored session refuses the activation
+  # instead of committing a half-bound state.
+  - name: activation_refuses_conflicting_capture
+    provenance: not_recovered
+    activation_capture: source_exact
+    activation_foreign_project: true
+    want_refused: true
+    want_readiness: needs_ingest
+    want_bound: false
+    want_capture_revision: 0

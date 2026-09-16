@@ -35,7 +35,10 @@ type fileSessionLocker struct {
 }
 
 // NewFileSessionLocker opens the per-session lock namespace rooted at root.
-// root is the same owned-artifact root the generation files live under.
+// root is the same owned-artifact root the generation files live under. The
+// lock directory itself is created on the first lock, so a run that takes no
+// session lock leaves no extra directory in the owned-artifact tree a reader or
+// publisher walks.
 func NewFileSessionLocker(root string) (SessionLocker, error) {
 	if root == "" {
 		return nil, fmt.Errorf("store: session lock root is empty in NewFileSessionLocker; readers and activation cannot serialize; configure the owned-artifact root")
@@ -52,9 +55,6 @@ func NewFileSessionLocker(root string) (SessionLocker, error) {
 		}
 	}
 	defer osRoot.Close()
-	if err := osRoot.MkdirAll("locks", 0o700); err != nil {
-		return nil, fmt.Errorf("store: create session lock directory in NewFileSessionLocker: %s; no lock was taken; fix filesystem access and retry", sanitizeFSError(err))
-	}
 	return &fileSessionLocker{root: root}, nil
 }
 
@@ -82,14 +82,20 @@ func (l *fileSessionLocker) lock(ctx context.Context, id schema.SessionID, mode 
 	rel := filepath.Join("locks", string(id)+".lock")
 	file, err := osRoot.OpenFile(rel, os.O_CREATE|os.O_RDWR, 0o600)
 	_ = osRoot.Close()
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			// The locks directory vanished; recreate it under confinement.
-			if mkRoot, mkErr := os.OpenRoot(l.root); mkErr == nil {
-				_ = mkRoot.MkdirAll("locks", 0o700)
-				_ = mkRoot.Close()
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		// The lock namespace is created on first use, so no run pays for a
+		// directory it never locks. Create it under confinement and retry the
+		// same confined open once; any other error stays a refusal.
+		if mkRoot, mkErr := os.OpenRoot(l.root); mkErr == nil {
+			_ = mkRoot.MkdirAll("locks", 0o700)
+			_ = mkRoot.Close()
+			if retryRoot, retryErr := os.OpenRoot(l.root); retryErr == nil {
+				file, err = retryRoot.OpenFile(rel, os.O_CREATE|os.O_RDWR, 0o600)
+				_ = retryRoot.Close()
 			}
 		}
+	}
+	if err != nil {
 		return nil, fmt.Errorf("store: open %s session lock in fileSessionLocker: %s; no lock was taken; fix filesystem access and retry", label, sanitizeFSError(err))
 	}
 	if err := acquireFlock(ctx, file.Fd(), mode); err != nil {

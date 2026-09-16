@@ -1,8 +1,14 @@
 'use client';
 
-import { useCallback, useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import type {
+  HelperGroupSummary,
+  LocalSessionListItem,
+  LocalSessionListPayload,
+  LocalSessionRow,
+} from '@peasant-labs/schema';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import {
   Button,
@@ -16,16 +22,19 @@ import {
   type RedactionCache,
 } from '@/components/share/RedactionStep';
 import { PushStep } from '@/components/share/PushStep';
-import type { ShareDiscoveryResult, ShareSession, ShareHierarchySession, LabelSelection } from '@/lib/share/types';
+import type { ShareDiscoveryResult, ShareSession, ShareHierarchySession, ShareHelperContext, ShareHelperGroup, LabelSelection } from '@/lib/share/types';
 import { emptyLabelSelection } from '@/lib/share/types';
+import { HelperScopeExpiredError, type HelperMembersPage } from '@/components/share/HelperGroupTree';
+import { summarizePrompt } from '@peasant-labs/fairtrade/ui';
 import {
   DEFAULT_REDACTION_LEVEL,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
-import { groupByProject, isSelectable } from '@/lib/share/group';
+import { isSelectable, isSelectableStatus } from '@/lib/share/group';
 import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
+import { decodeGroupedSyncList, decodeHelperMembers } from '@/lib/api/grouped-sync';
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 import type { ShareFooterActions } from '@/components/share/footer-actions';
 
@@ -40,6 +49,8 @@ interface BackendSessionSummary {
   totalTokens: number;
   turnCount: number;
   toolCallCount: number;
+  /** Optional measured input submissions (present includes a measured zero). */
+  inputSubmissionCount?: number;
   project?: string;
   /** Canonical project identity from the schema-owned SessionSummary wire. */
   projectHash?: string;
@@ -48,6 +59,31 @@ interface BackendSessionSummary {
   /** Heuristic outcome — see SessionSummary.outcome (Go). */
   outcome?: string;
   shareStatus?: ShareSession['shareStatus'];
+}
+
+/**
+ * Map the sync route's status menu onto the chooser's contribution status.
+ * Only new/updated are contributable; every other value, including an
+ * unrecognized one, is held so the chooser never offers a row it cannot
+ * honestly call contributable.
+ */
+function shareStatusFromSync(status: string | undefined): ShareSession['shareStatus'] {
+  switch (status) {
+    case 'new': return 'new';
+    case 'updated': return 'updated';
+    case 'synced': return 'shared';
+    case 'held': return 'held';
+    default: return 'held';
+  }
+}
+
+function mapHelperGroups(groups: HelperGroupSummary[] | null | undefined): ShareHelperGroup[] | undefined {
+  if (!groups || groups.length === 0) return undefined;
+  return groups.map((group) => ({
+    groupId: group.groupId,
+    helperThreadCount: group.helperThreadCount,
+    memberScope: group.memberScope,
+  }));
 }
 
 function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession {
@@ -67,6 +103,30 @@ function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession 
     turnCount: backend.turnCount,
     model: '',
     shareStatus: backend.shareStatus ?? 'new',
+    preview: backend.preview ?? '',
+    outcome: backend.outcome,
+  };
+}
+
+/** Map one grouped sync transcript row onto the chooser's session shape. */
+function mapGroupedToShareSession(row: LocalSessionRow): ShareSession {
+  const backend = row.session;
+  const projectHash = (row.sync?.projectHash ?? backend.projectHash)?.trim();
+  if (!projectHash) {
+    throw new Error(`Share chooser cannot safely group sync session ${JSON.stringify(backend.id)} because the grouped sync response omitted projectHash. Refresh the page; if this repeats, update or restart Peasant.`);
+  }
+  return {
+    id: backend.id,
+    provider: backend.harness as ShareSession['provider'],
+    projectName: row.sync?.projectName ?? backend.project ?? 'Unknown Project',
+    projectHash,
+    hostSlug: row.sync?.hostSlug ?? '',
+    startTime: backend.startTime,
+    durationMins: Math.round(backend.durationMins),
+    totalTokens: backend.totalTokens,
+    turnCount: backend.turnCount,
+    model: row.sync?.model ?? '',
+    shareStatus: shareStatusFromSync(row.sync?.syncStatus),
     preview: backend.preview ?? '',
     outcome: backend.outcome,
   };
@@ -95,23 +155,41 @@ async function fetchSessionSummaries(requestUrl: string, failure: string): Promi
   return payload.sessions ?? [];
 }
 
+async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
+  const path = '/api/v1/sync/sessions?view=grouped';
+  const response = await fetch(`${getApiBaseUrl()}${path}`);
+  if (!response.ok) {
+    let detail = `the server returned HTTP ${response.status} without an actionable response body`;
+    try {
+      const payload = await response.json() as { error?: string };
+      if (payload.error) detail = payload.error;
+    } catch {
+      const body = await response.text().catch(() => '');
+      if (body.trim()) detail = body.trim();
+    }
+    throw new Error(`Session discovery failed while loading the Share chooser: ${detail}`);
+  }
+  return decodeGroupedSyncList(await response.json(), path);
+}
+
 /**
- * Load the chooser's sessions.
+ * Load the chooser's sessions from the grouped sync route.
  *
- * `GET /api/v1/sessions` is the DISCOVERY list: it is scoped by the saved
- * kickstart selection and by session origin, so an agent-driven session is not
- * offered there. When the URL carried linked identifiers, they are resolved
- * separately through `GET /api/v1/session-summaries?ids=`, which applies
- * NEITHER scope, and the two results are unioned by id.
+ * The sync route is the pushable-session set with its contribution status, and
+ * its opt-in grouped view carries each owner's collapsed helper groups plus the
+ * opaque member scope that expansion replays. The project/location/branch
+ * hierarchy metadata still comes from GET /api/v1/web/discovery, which lists
+ * every stored session.
  *
- * That split is the mechanism behind a rule this project already settled:
- * hiding a session from a list is discovery scope and never access control, so
- * a link to a hidden session still opens it. Filtering the discovery endpoint
- * without it would break every such link.
+ * When the URL carried linked identifiers, they are resolved separately through
+ * GET /api/v1/session-summaries?ids=, which applies no discovery scope, and the
+ * two results are unioned by id. That split is the mechanism behind a rule this
+ * project already settled: hiding a session from a list is discovery scope and
+ * never access control, so a link to a hidden session still opens it.
  */
 async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
-  const [browsable, linked, metadata] = await Promise.all([
-    fetchSessionSummaries(`${getApiBaseUrl()}/api/v1/sessions`, 'Session discovery failed while loading the Share chooser'),
+  const [grouped, linked, metadata] = await Promise.all([
+    fetchGroupedSyncSessions(),
     linkedIds.length > 0
       ? fetchSessionSummaries(
           `${getApiBaseUrl()}/api/v1/session-summaries?ids=${encodeURIComponent(linkedIds.join(','))}`,
@@ -120,22 +198,104 @@ async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDis
       : Promise.resolve([] as BackendSessionSummary[]),
     fetchDiscovery(),
   ]);
+  const byId = new Map<string, ShareHierarchySession>();
+  const helperContexts: ShareHelperContext[] = [];
+  const groupedItems: LocalSessionListItem[] = grouped.items;
+  for (const item of groupedItems) {
+    if (item.kind === 'context_container') {
+      if (!item.context) continue;
+      helperContexts.push({
+        groupId: item.context.groupId,
+        ownerStatus: item.context.ownerStatus,
+        helperGroups: mapHelperGroups(item.helperGroups) ?? [],
+      });
+      continue;
+    }
+    if (!item.transcript) continue;
+    const session = mapGroupedToShareSession(item.transcript);
+    if (byId.has(session.id)) continue;
+    const meta = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
+    byId.set(session.id, {
+      ...session,
+      helperGroups: mapHelperGroups(item.helperGroups),
+      locationLabel: meta.locationLabel,
+      repositoryLocationId: meta.repositoryLocationId,
+      branch: meta.branch,
+    });
+  }
   // The browsable list comes first, so its ordering survives and a linked
   // session already offered there is not duplicated.
-  const byId = new Map<string, BackendSessionSummary>();
-  for (const summary of [...browsable, ...linked]) {
-    if (!byId.has(summary.id)) byId.set(summary.id, summary);
-  }
-  const sessions: ShareHierarchySession[] = [...byId.values()].map((summary) => {
+  for (const summary of linked) {
+    if (byId.has(summary.id)) continue;
     const session = mapBackendToShareSession(summary);
-    const item = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
-    return { ...session, locationLabel: item.locationLabel, repositoryLocationId: item.repositoryLocationId, branch: item.branch };
-  });
+    const meta = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
+    byId.set(session.id, { ...session, locationLabel: meta.locationLabel, repositoryLocationId: meta.repositoryLocationId, branch: meta.branch });
+  }
+  const sessions = [...byId.values()];
   return {
     sessions,
     counts: countByStatus(sessions),
+    helperContexts,
   };
 }
+
+/**
+ * Fetch one authorized helper member page for an exact scope. A refused scope
+ * (409 group_scope_expired) is surfaced as a typed error so the tree can hide
+ * its members and offer ONLY an originating-list refresh, never a broader load.
+ * Any other 409 is a plain failure: it never masquerades as a refresheable
+ * scope. Paging and totals come from the decoded contract, never a fabricated
+ * fallback.
+ */
+async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> {
+  const path = `/api/v1/session-groups/${encodeURIComponent(group.groupId)}/members`;
+  const url = `${getApiBaseUrl()}${path}?scope=${encodeURIComponent(group.memberScope)}&page=${page}&limit=${limit}`;
+  const response = await fetch(url);
+  if (response.status === 409) {
+    let code: string | undefined;
+    try {
+      const payload = await response.json() as { code?: unknown };
+      if (typeof payload.code === 'string') code = payload.code;
+    } catch {
+      // A 409 without a decodable body is still a refusal, never a refreshable
+      // scope; the fall-through below reports it as an actionable failure.
+    }
+    if (code === 'group_scope_expired') {
+      throw new HelperScopeExpiredError();
+    }
+    throw new Error(`Helper members for group ${group.groupId} could not be listed because the server refused the saved helper scope with HTTP 409 (${code ?? 'no error code'}). No members were returned and nothing broader was requested. Refresh the share chooser and retry.`);
+  }
+  if (!response.ok) {
+    let detail = `the server returned HTTP ${response.status} without an actionable response body`;
+    try {
+      const payload = await response.json() as { error?: string };
+      if (payload.error) detail = payload.error;
+    } catch {
+      // Keep the status-only detail; the member request is still refused.
+    }
+    throw new Error(`Helper members for group ${group.groupId} could not be listed because ${detail}. No members were returned. Refresh the share chooser and retry.`);
+  }
+  const payload = decodeHelperMembers(await response.json(), path);
+  const members = payload.members.map((item) => {
+    const row = item.transcript;
+    const session = mapGroupedToShareSession(row);
+    return {
+      id: session.id,
+      title: summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`,
+      provider: session.provider,
+      inputSubmissionCount: row.session.inputSubmissionCount,
+      turnCount: session.turnCount,
+      selectable: isSelectableStatus(session.shareStatus),
+      session,
+      // A member may itself anchor saved helper groups. They are carried through
+      // verbatim so the tree can mount each nested scope independently; the
+      // scope is an opaque replay token, never an access grant.
+      helperGroups: mapHelperGroups(item.helperGroups),
+    };
+  });
+  return { members, total: payload.total, page: payload.page, limit: payload.limit };
+}
+
 
 // Local step-id union — the four visible wizard steps.
 type WizardStep = 'select' | 'labels' | 'redact' | 'submit';
@@ -268,35 +428,99 @@ export function ShareWizardClient() {
   // is the only thing that preselects, and only that one session.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Helper members are fetched lazily by the tree. The chooser keeps the ones
+  // it has seen so the downstream steps can resolve a selected member by its
+  // explicit transcript id instead of dropping it.
+  const [memberSessions, setMemberSessions] = useState<Map<string, ShareSession>>(() => new Map());
+
+  const allSessions = useMemo<ShareSession[]>(() => {
+    if (!discovery) return [];
+    if (memberSessions.size === 0) return discovery.sessions;
+    const merged: ShareSession[] = [...discovery.sessions];
+    const seen = new Set(merged.map((session) => session.id));
+    for (const session of memberSessions.values()) {
+      if (seen.has(session.id)) continue;
+      seen.add(session.id);
+      merged.push(session);
+    }
+    return merged;
+  }, [discovery, memberSessions]);
+
   const selectableIds = useMemo(
-    () => new Set(discovery?.sessions.filter(isSelectable).map((session) => session.id) ?? []),
-    [discovery],
+    () => new Set(allSessions.filter(isSelectable).map((session) => session.id)),
+    [allSessions],
   );
 
+  // The deep-link preselect is applied ONCE per linked identifier. It must not
+  // be re-applied when the chooser later accumulates lazily loaded helper
+  // members, or opening any helper page would silently reset the selection to
+  // the linked session.
+  const appliedDeepLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!discovery || !deepLinkSessionId) return;
+    if (appliedDeepLinkRef.current === deepLinkSessionId) return;
+    const linked = discovery.sessions.find((s) => s.id === deepLinkSessionId);
+    if (!linked || !isSelectable(linked)) return;
+    appliedDeepLinkRef.current = deepLinkSessionId;
+    // The deep-link is a drill-in: select exactly that one session, not its
+    // whole project.
+    setSelectedIds(new Set([linked.id]));
+  }, [discovery, deepLinkSessionId]);
+
+  // Reconciliation runs ONLY when a new originating-list revision arrives
+  // (initial load or an explicit refresh). Accumulating member pages is not a
+  // list revision, so it never prunes; a refreshed list prunes ids it can no
+  // longer confirm rather than pushing them blindly.
+  const reconciledListRef = useRef<ShareDiscoveryResult<ShareHierarchySession> | null>(null);
   useEffect(() => {
     if (!discovery) return;
+    if (reconciledListRef.current === discovery) return;
+    reconciledListRef.current = discovery;
+    setSelectedIds((previous) => {
+      if (previous.size === 0) return previous;
+      const confirmed = new Set(discovery.sessions.map((s) => s.id));
+      const next = new Set([...previous].filter((id) => confirmed.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [discovery]);
 
-    const linked =
-      deepLinkSessionId &&
-      discovery.sessions.find((s) => s.id === deepLinkSessionId);
+  useEffect(() => {
+    if (deepLinkStep) setStep(deepLinkStep);
+  }, [deepLinkStep]);
 
-    if (linked && selectableIds.has(linked.id)) {
-      // The deep-link is a drill-in: select exactly that one session, not its
-      // whole project.
-      const project = groupByProject(discovery.sessions).find((p) =>
-        p.sessions.some((s) => s.id === linked.id),
-      );
-      void project; // grouping confirms the project exists; selection is the single session
-      setSelectedIds(new Set([linked.id]));
-    } else {
-      // No deep-link → nothing selected. The user picks on the Choose step.
-      setSelectedIds(new Set());
-    }
+  // Explicit per-helper selection: a member toggle adds or removes exactly that
+  // transcript id. It never widens to the owner, a sibling, or another group,
+  // and the chooser has no group or owner aggregate control.
+  const toggleMember = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
-    if (deepLinkStep) {
-      setStep(deepLinkStep);
-    }
-  }, [discovery, deepLinkSessionId, deepLinkStep, selectableIds]);
+  // A refused member scope refreshes the ORIGINATING grouped list. The refresh
+  // re-runs the loader and deliberately invalidates every member page fetched
+  // for the old scopes; the reconciliation effect above then prunes the
+  // selection to ids the fresh list confirms, so a stale or ineligible id is
+  // never pushed.
+  const refreshSessions = useCallback(() => {
+    setMemberSessions(new Map());
+    setRetryCount((count) => count + 1);
+  }, []);
+
+  // Fetch one member page and remember the member sessions it returned, so the
+  // downstream steps can resolve a selected member by its transcript id.
+  const loadMembersForWizard = useCallback(async (group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> => {
+    const result = await loadHelperMembers(group, page, limit);
+    setMemberSessions((previous) => {
+      const next = new Map(previous);
+      for (const member of result.members) next.set(member.id, member.session);
+      return next;
+    });
+    return result;
+  }, []);
 
   // Redaction level. It starts - and stays - at the single level this version
   // offers.
@@ -486,13 +710,17 @@ export function ShareWizardClient() {
               onSelectionChange={setSelectedIds}
               onNext={goNext}
               onFooterActionsChange={setFooterActions}
+              helperContexts={disc.helperContexts}
+              onMemberToggle={toggleMember}
+              loadMembers={loadMembersForWizard}
+              onScopeExpired={refreshSessions}
             />
           )}
 
           {/* Step 2 — Labels (optional, skippable). */}
           {step === 'labels' && (
             <LabelsStep
-              sessions={disc.sessions}
+              sessions={allSessions}
               selectedIds={selectedIds}
               onLabelsChange={setLabels}
               onNext={goNext}
@@ -505,7 +733,7 @@ export function ShareWizardClient() {
               unless the user opts an item out. No gate — onNext just advances. */}
           {step === 'redact' && (
             <RedactionStep
-              sessions={disc.sessions}
+              sessions={allSessions}
               selectedIds={selectedIds}
               redactionLevel={redactionLevel}
               onLevelChange={setRedactionLevel}
@@ -521,7 +749,7 @@ export function ShareWizardClient() {
               safe-by-default so there is no approval gate. */}
           {step === 'submit' && selectedIds.size > 0 && (
             <PushStep
-              sessions={disc.sessions}
+              sessions={allSessions}
               selectedIds={selectedIds}
               labels={labels}
               redactionLevel={redactionLevel}

@@ -189,6 +189,17 @@ type SessionContentCaptureWrite struct {
 	FailureCode                ContentCaptureFailureCode
 	FailureMessage             string
 }
+
+// PublicationCaptureWrite is a caller-certified publication-capture agreement:
+// the captured metadata snapshot and the working-directory provenance kind the
+// caller proved by inspecting the source. It is supplied only by a caller that
+// can certify both. The store records exactly what it is given and never
+// derives a provenance kind of its own.
+type PublicationCaptureWrite struct {
+	Metadata      UnifiedMetadata
+	CWDProvenance CWDProvenanceKind
+}
+
 type SessionContentCapture struct {
 	PublicationCaptureRevision int64
 	SessionID                  SessionID

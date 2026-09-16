@@ -76,6 +76,16 @@ type Server struct {
 	hub    *Hub
 	ln     net.Listener
 
+	// groupedMu guards groupedVariants. Registration happens during Listen and,
+	// for a route owner that registers later, before Serve; handlers read it.
+	groupedMu       sync.RWMutex
+	groupedVariants map[GroupedRouteVariant]GroupedVariantSource
+	// groupedRevision is the selection revision captured at startup. A member
+	// scope issued under a different revision is refused rather than replayed.
+	groupedRevision string
+	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
+	memberScopes *memberScopeCache
+
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
 	// the store after the owner closes it.
@@ -104,10 +114,16 @@ func (s *Server) Addr() net.Addr {
 
 // NewServer creates a Server with the given configuration.
 func NewServer(cfg ServerConfig) *Server {
-	return &Server{
-		cfg: cfg,
-		hub: cfg.Hub,
+	s := &Server{
+		cfg:             cfg,
+		hub:             cfg.Hub,
+		groupedVariants: make(map[GroupedRouteVariant]GroupedVariantSource),
+		memberScopes:    newMemberScopeCache(memberScopeTTL, memberScopeMaxEntries),
 	}
+	if provider, ok := cfg.Provider.(groupedCandidateProvider); ok {
+		s.groupedRevision = provider.GroupedScopeRevision()
+	}
+	return s
 }
 
 // Listen binds the server to the configured port and sets up routes.
@@ -115,6 +131,11 @@ func NewServer(cfg ServerConfig) *Server {
 // Call Serve to start accepting connections.
 func (s *Server) Listen(ctx context.Context) error {
 	mux := http.NewServeMux()
+
+	// Grouped list views are opt-in over the existing flat list and search
+	// routes. The provider's predicates are registered once here so the member
+	// operation can replay whichever route produced a rendered group.
+	s.registerProviderGroupedVariants()
 
 	// API routes
 	mux.HandleFunc("GET "+defaults.RouteHealth.String(), s.handleHealth)
@@ -140,6 +161,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteReviewChange.String(), s.handleReviewChange)
 	mux.HandleFunc("GET "+defaults.RouteReviewDiff.String(), s.handleReviewDiff)
 	mux.HandleFunc("GET "+defaults.RouteSearch.String(), s.handleSearch)
+	mux.HandleFunc("GET "+groupedMembersRoute, s.handleHelperGroupMembers)
 
 	// Annotation REST routes
 	ah := &annotationHandler{
@@ -157,8 +179,20 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// Sync/push routes
 	sh := &syncHandler{
-		store:  s.cfg.Store,
-		config: s.cfg.Config,
+		store:       s.cfg.Store,
+		config:      s.cfg.Config,
+		scopeIssuer: s,
+	}
+	// The grouped sync chooser view registers the exact sync predicate on the
+	// same member seam the sessions and search routes use, so expanding a sync
+	// helper group replays the sync route rather than another route's set.
+	if s.cfg.Store != nil {
+		if err := s.RegisterGroupedRouteVariant(GroupedVariantSource{
+			Variant: GroupedRouteSync,
+			Gather:  sh.gatherGroupedSyncCandidates,
+		}); err != nil {
+			return fmt.Errorf("register grouped sync route variant: %w", err)
+		}
 	}
 	mux.HandleFunc("GET "+defaults.RouteSyncSessions.String(), sh.handleSyncSessions)
 	mux.HandleFunc("GET "+defaults.RouteSyncAuth.String(), sh.handleSyncAuth)
@@ -366,6 +400,21 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 	if s.cfg.Provider == nil {
 		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// view is opt-in. Omission preserves the exact legacy flat envelope; only
+	// the published grouped value selects the grouped payload, and any other
+	// value is refused rather than silently served as flat.
+	view := r.URL.Query().Get("view")
+	if view != "" && view != groupedViewValue {
+		writeAPIError(w, http.StatusBadRequest,
+			fmt.Sprintf("Sessions could not be listed because query field \"view\" is %q in internal/api.handleSessions. No sessions were returned, because an unpublished view value cannot be served safely. Omit view for the flat list or use view=%s, then retry.", view, groupedViewValue),
+			"grouped_view_unknown")
+		return
+	}
+	if view == groupedViewValue {
+		s.serveGroupedSessions(w, r)
 		return
 	}
 

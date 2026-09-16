@@ -22,7 +22,10 @@ const CHROME = process.env.CHROME_PATH
 const FIXTURE = join(HERE, 'testdata/search-share.yaml')
 const FEATURE_BYTES = Object.freeze({
   search: ['data-search-annotation', 'repositoryLocationId'],
-  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash'],
+  // `share-helper-tree-scroll` is the marker the nested-helper-disclosure fix
+  // introduces; an export that predates that fix carries the other share bytes
+  // but not this one, so a stale build can no longer satisfy provenance.
+  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash', 'session-groups/', 'share-helper-tree-scroll'],
   discoveryRoute: '/api/v1/web/discovery',
 })
 const THEMES = ['dark', 'light']
@@ -171,34 +174,151 @@ function readFixture() {
   if (fixture.marker !== undefined || fixture.search.results.length < 2 || fixture.sessions.length < 4 || fixture.discovery.length !== fixture.sessions.length || !projectHashesValid) {
     fail('fixture must omit feature markers, contain two search rows, four sessions with canonical projectHash values, and one discovery row per session')
   }
+  // Every session helper group must have a scoped member page to expand, and the
+  // corpus may not reuse a transcript id across pages.
+  const helperMembers = fixture.helperMembers ?? {}
+  const helperScopes = fixture.sessions.flatMap((session) => (session.helperGroups ?? []).map((group) => group.memberScope))
+  if (helperScopes.some((scope) => !Array.isArray(helperMembers[scope]))) fail('every session helper group needs a helperMembers page keyed by its memberScope')
+  const helperIds = Object.values(helperMembers).flat().map((member) => member.id)
+  if (new Set(helperIds).size !== helperIds.length) fail('helperMembers may not reuse a transcript id across scopes')
   return fixture
 }
 function assertProvenance() {
   const chunks = join(WEB, 'out/_next/static/chunks')
   if (!existsSync(BIN) || !existsSync(chunks)) fail(`missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
   const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
-  const featureChunks = Object.fromEntries(Object.entries(FEATURE_BYTES).filter(([name]) => name !== 'discoveryRoute').map(([name, signatures]) => {
+  const featureChunks = Object.entries(FEATURE_BYTES).filter(([name]) => name !== 'discoveryRoute').map(([name, signatures]) => {
     const match = javascript.find(({ content }) => signatures.every((signature) => content.includes(signature)))
-    return [name, match]
-  }))
+    return { name, signatures, match }
+  })
   const binary = readFileSync(BIN)
   const missingBinaryBytes = Object.values(FEATURE_BYTES).flat().filter((signature) => !binary.includes(Buffer.from(signature)))
-  const missingChunks = Object.entries(featureChunks).filter(([, chunk]) => !chunk).map(([name]) => name)
+  const missingChunks = featureChunks.filter(({ match }) => !match).map(({ name }) => name)
   if (missingChunks.length || missingBinaryBytes.length || !binary.includes(Buffer.from(FEATURE_BYTES.discoveryRoute))) {
     fail(`stale provenance: missing shipped feature chunks=${missingChunks.join(',') || 'none'}, missing binary bytes=${missingBinaryBytes.join(',') || 'none'}, discoveryRoute=${binary.includes(Buffer.from(FEATURE_BYTES.discoveryRoute))}; rebuild this exact worktree`)
   }
-  return Object.values(featureChunks).map(({ path }) => path)
+  return featureChunks.map(({ name, signatures, match }) => ({ name, signatures, path: match.path }))
 }
 function response(body) { return { status: 200, contentType: 'application/json', body: JSON.stringify(body) } }
+const VISUAL_PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+// The share chooser reads the grouped sync route. Build the grouped envelope
+// from the same flat session rows so the harness stays a thin transport mock:
+// the route, shell, chooser, hierarchy and helper-group code remain real.
+function groupedSyncPayload(sessions) {
+  const items = sessions.map((session) => ({
+    kind: 'transcript',
+    transcript: {
+      session,
+      sync: {
+        id: session.id,
+        harness: session.harness,
+        projectName: session.project,
+        projectHash: session.projectHash,
+        hostSlug: 'visual-host',
+        startTime: session.startTime,
+        durationMs: Math.round(session.durationMins * 60000),
+        totalTokens: session.totalTokens,
+        turnCount: session.turnCount,
+        model: 'visual-model',
+        syncStatus: 'new',
+      },
+    },
+    helperGroups: (session.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
+  }))
+  return {
+    items,
+    page: 1,
+    limit: items.length,
+    totalItems: items.length,
+    ordinarySessionTotal: sessions.length,
+    helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups || []).reduce((count, group) => count + group.helperThreadCount, 0), 0),
+  }
+}
+
+// The palette reads the opt-in grouped search view. Each flat fixture hit
+// becomes the owner transcript's own match, exactly how the grouped route
+// carries an ordinary result; the palette flattens it back for annotations.
+function groupedSearchEnvelope(search) {
+  const results = Array.isArray(search?.results) ? search.results : []
+  return {
+    items: results.map((result) => ({
+      kind: 'transcript',
+      transcript: {
+        session: {
+          id: result.sessionId,
+          harness: 'codex',
+          startTime: '2026-06-01T09:00:00Z',
+          durationMins: 1,
+          turnCount: 1,
+          totalTokens: 1,
+          toolCallCount: 0,
+          project: result.project,
+          projectHash: result.projectHash,
+        },
+        matches: [result],
+      },
+      helperGroups: [],
+    })),
+    page: 1,
+    limit: 20,
+    totalItems: results.length,
+    ordinarySessionTotal: results.length,
+    helperThreadTotal: 0,
+  }
+}
+
+// One scoped helper-member page, replayed from the fixture's exact scope. A
+// member may itself anchor a nested group, which the mounted chooser mounts
+// recursively with its own independent paging state.
+function helperMembersPayload(fixture, scope) {
+  const rows = (fixture.helperMembers || {})[scope] || []
+  const members = rows.map((row) => ({
+    kind: 'transcript',
+    transcript: {
+      session: {
+        id: row.id,
+        harness: 'codex',
+        startTime: '2026-02-24T09:15:00Z',
+        durationMins: 5,
+        totalTokens: 1000,
+        turnCount: row.turnCount,
+        toolCallCount: 1,
+        project: 'peasant-labs/engine',
+        projectHash: VISUAL_PROJECT_HASH,
+        preview: row.preview,
+      },
+      sync: {
+        id: row.id,
+        harness: 'codex',
+        projectName: 'peasant-labs/engine',
+        projectHash: VISUAL_PROJECT_HASH,
+        hostSlug: 'visual-host',
+        startTime: '2026-02-24T09:15:00Z',
+        durationMs: 300000,
+        totalTokens: 1000,
+        turnCount: row.turnCount,
+        model: 'visual-model',
+        syncStatus: row.syncStatus,
+      },
+    },
+    helperGroups: (row.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
+  }))
+  return { members, page: 1, limit: 20, total: members.length }
+}
 function installMocks(page, fixture, diagnostics) {
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (url.origin !== ORIGIN) return void request.continue().catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/config/mock') return void request.respond(response({ enabled: false })).catch((e) => diagnostics.push(e.message))
-    if (url.pathname === '/api/v1/projects/summary') return void request.respond(response({ projects: [{ project: 'peasant-labs/engine', projectHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sessions: 4 }] })).catch((e) => diagnostics.push(e.message))
-    if (url.pathname === '/api/v1/search') return void request.respond(response({ query: fixture.search.query, results: fixture.search.results })).catch((e) => diagnostics.push(e.message))
-    if (url.pathname === '/api/v1/sessions') return void request.respond(response({ sessions: fixture.sessions })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/projects/summary') return void request.respond(response({ projects: [{ project: 'peasant-labs/engine', projectHash: VISUAL_PROJECT_HASH, sessions: 4 }] })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/search') return void request.respond(response(groupedSearchEnvelope(fixture.search))).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/sync/sessions') return void request.respond(response(groupedSyncPayload(fixture.sessions))).catch((e) => diagnostics.push(e.message))
+    if (url.pathname === '/api/v1/sessions') {
+      if (url.searchParams.get('view') === 'grouped') return void request.respond(response({ items: [], page: 1, limit: 20, totalItems: 0, ordinarySessionTotal: 0, helperThreadTotal: 0 })).catch((e) => diagnostics.push(e.message))
+      return void request.respond(response({ sessions: fixture.sessions })).catch((e) => diagnostics.push(e.message))
+    }
     if (url.pathname === '/api/v1/web/discovery') return void request.respond(response({ items: fixture.discovery })).catch((e) => diagnostics.push(e.message))
+    if (url.pathname.startsWith('/api/v1/session-groups/')) return void request.respond(response(helperMembersPayload(fixture, url.searchParams.get('scope') || ''))).catch((e) => diagnostics.push(e.message))
     return void request.continue().catch((e) => diagnostics.push(e.message))
   })
 }
@@ -443,6 +563,49 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     await pause(150)
     mkdirSync(join(OUT, theme, viewport.id), { recursive: true })
     await page.screenshot({ path: join(OUT, theme, viewport.id, 'share-list.png') })
+
+    // Nested helper disclosure evidence: expand the owner's saved-helper group,
+    // then the nested group its member anchors, and select the nested member.
+    // The two groups are independent scopes, and the nested selection must stay
+    // an explicit transcript id with no owner or parent widening.
+    await page.evaluate(() => { const b = document.querySelector('.swz-body'); if (b) b.scrollTop = 0 })
+    const ownerTrigger = '[data-group-id="hg_visual_owner1"] .helper-group-trigger'
+    await wait(page, ownerTrigger, 'share helper group trigger', false)
+    await page.$eval(ownerTrigger, (el) => el.click())
+    await wait(page, '[data-thread-id="sess-visual-helper-001"]', 'share helper member', false)
+    const nestedTrigger = '[data-thread-id="sess-visual-helper-001"] .helper-group-trigger'
+    await wait(page, nestedTrigger, 'share nested helper trigger', false)
+    await page.$eval(nestedTrigger, (el) => el.click())
+    await wait(page, '[data-thread-id="sess-visual-helper-003"]', 'share nested helper member', false)
+    await page.$eval('[data-thread-id="sess-visual-helper-003"] input[type="checkbox"]', (el) => el.click())
+    await page.waitForFunction(() => document.querySelector('[data-thread-id="sess-visual-helper-003"] input[type="checkbox"]')?.checked === true, { timeout: 10000 }).catch(() => fail('share: nested helper selection never registered'))
+    // The nested disclosure must stay reachable inside the bounded chooser: the
+    // tree may scroll horizontally in its own column, but it must never widen
+    // the chooser or push the member control out of the left edge.
+    const nestedFit = await page.evaluate(() => {
+      const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
+      const row = document.querySelector('[data-thread-id="sess-visual-helper-003"]')
+      const control = row?.querySelector('input[type="checkbox"]')
+      const scroller = row?.closest('.share-helper-tree-scroll')
+      if (!chooser || !row || !control) return { ok: false, why: 'nested row or chooser missing' }
+      const chooserRect = chooser.getBoundingClientRect()
+      const controlRect = control.getBoundingClientRect()
+      return {
+        ok: true,
+        chooserOverflow: chooser.scrollWidth - chooser.clientWidth,
+        controlLeftOverflow: chooserRect.left - controlRect.left,
+        controlWidth: controlRect.width,
+        inScroller: scroller !== null,
+      }
+    })
+    if (!nestedFit.ok || !nestedFit.inScroller || nestedFit.chooserOverflow > 1 || nestedFit.controlLeftOverflow > 1 || nestedFit.controlWidth <= 0) {
+      fail(`${theme}/${viewport.id}/share: nested helper disclosure fit ${JSON.stringify(nestedFit)}`)
+    }
+    // Bring the nested disclosure into the bounded chooser viewport so the
+    // evidence shows it on the narrow viewport too.
+    await page.$eval('[data-thread-id="sess-visual-helper-003"]', (el) => el.scrollIntoView({ block: 'center', inline: 'nearest' }))
+    await pause(200)
+    await capture(page, gate, join(OUT, theme, viewport.id, 'share-helper-nested.png'), 'main', `${theme}/${viewport.id}/share-helper-nested`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
 }
@@ -466,13 +629,14 @@ try {
   for (let i = 0; i < 40 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
   if (!healthy) fail(`real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`)
   for (const chunk of chunks) {
-    const chunkPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`
+    const chunkPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk.path).split('\\').join('/')}`
     const served = await fetch(`${ORIGIN}${chunkPath}`)
     const body = await served.text()
-    const expected = Object.values(FEATURE_BYTES).flat().some((signature) => body.includes(signature))
-    if (served.status !== 200 || !expected) fail(`served provenance: ${chunkPath} returned HTTP ${served.status} without verified feature bytes; stop stale servers, rebuild this exact worktree, and rerun the visual harness`)
+    if (served.status !== 200 || !chunk.signatures.every((signature) => body.includes(signature))) {
+      fail(`served provenance: ${chunkPath} returned HTTP ${served.status} without the ${chunk.name} feature bytes; stop stale servers, rebuild this exact worktree, and rerun the visual harness`)
+    }
   }
-  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk)).join(',')} binaryBytes=search/share/discovery-route served=true`)
+  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk.path)).join(',')} binaryBytes=search/share/discovery-route served=true`)
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) for (const viewport of VIEWPORTS) for (const kind of ['search', 'share']) {
     const page = await browser.newPage()

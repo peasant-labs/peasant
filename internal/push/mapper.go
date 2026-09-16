@@ -12,6 +12,33 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// publishMirrorIdentity is the metadata part's identity object with the
+// session-graph mirror members the receiver validates whenever the transcript
+// envelope carries graph evidence. The legacy schema.SessionIdentity cannot
+// carry rootSessionId, purpose or relationships, so the document is assembled
+// and read back through this shape: a re-marshal through the legacy identity
+// would silently drop the mirrors between redaction and upload.
+//
+// parentUuid keeps its legacy wire name until promoteAuthoritativePublishFields
+// renames it on the authoritative request, exactly as it does today.
+type publishMirrorIdentity struct {
+	SessionID       schema.SessionID             `json:"sessionId"`
+	ParentSessionID *schema.SessionID            `json:"parentUuid,omitempty"`
+	RootSessionID   *schema.SessionID            `json:"rootSessionId,omitempty"`
+	Purpose         schema.SessionPurpose        `json:"purpose,omitempty"`
+	Relationships   []schema.SessionRelationship `json:"relationships,omitempty"`
+	SchemaVersion   int                          `json:"schemaVersion"`
+}
+
+// publishMirrorDocument is the assembled metadata part: every PublishRequest
+// field plus the mirror-carrying identity above. It is used both to marshal the
+// document and to read it back after whole-document redaction, so the mirrors
+// pass through the same redaction boundary as every other assembled field.
+type publishMirrorDocument struct {
+	schema.PublishRequest
+	Identity publishMirrorIdentity `json:"identity"`
+}
+
 // MapOptions bundles all parameters for MapMetadata.
 // Replaces positional parameters for clarity and extensibility.
 type MapOptions struct {
@@ -110,6 +137,12 @@ func MapMetadata(opts MapOptions) (_ []byte, err error) {
 			DurationMs:    meta.Stats.DurationMs,
 			TokensIn:      meta.Stats.TokensIn,
 			TokensOut:     meta.Stats.TokensOut,
+			// Presence is preserved exactly: an absent capture stays absent
+			// (nil) and a measured zero stays a present zero. The receiver
+			// compares this mirror against the durable detail's value, so
+			// backfilling either direction would turn a valid publish into a
+			// mirror refusal.
+			InputSubmissionCount: meta.Stats.InputSubmissionCount,
 		},
 		Diagnostics: schema.DiagnosticsInfo{
 			Warnings: make([]schema.DiagnosticEntry, len(meta.Diagnostics.Warnings)),
@@ -195,7 +228,22 @@ func MapMetadata(opts MapOptions) (_ []byte, err error) {
 	// declaration, not an identity leak). Empty ⇒ omitempty drops it ⇒ village stores NULL.
 	req.License = opts.License
 
-	result, err := json.Marshal(req)
+	// The identity object carries the session-graph mirrors the receiver
+	// validates against the durable detail. They are assembled from the same
+	// capture metadata the rest of the document is built from and travel through
+	// the whole-document redaction below like every other assembled field.
+	document := publishMirrorDocument{
+		PublishRequest: req,
+		Identity: publishMirrorIdentity{
+			SessionID:       req.Identity.SessionID,
+			ParentSessionID: req.Identity.ParentSessionID,
+			RootSessionID:   meta.RootSessionID,
+			Purpose:         meta.Purpose,
+			Relationships:   append([]schema.SessionRelationship(nil), meta.Relationships...),
+			SchemaVersion:   req.Identity.SchemaVersion,
+		},
+	}
+	result, err := json.Marshal(document)
 	if err != nil {
 		return nil, fmt.Errorf("marshal publish request: %w", err)
 	}
@@ -210,27 +258,27 @@ func MapMetadata(opts MapOptions) (_ []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	var redactedRequest schema.PublishRequest
-	if err := json.Unmarshal(redacted, &redactedRequest); err != nil {
+	var redactedDocument publishMirrorDocument
+	if err := json.Unmarshal(redacted, &redactedDocument); err != nil {
 		return nil, fmt.Errorf("restore schema-owned evidence after publish-request redaction: decode failed: %w; no request was created; fix the redaction rule and retry", err)
 	}
-	if len(redactedRequest.Entries) != len(req.Entries) {
-		return nil, fmt.Errorf("restore schema-owned evidence after publish-request redaction: entry count changed from %d to %d; no request was created because model evidence cannot be matched safely; fix the redaction rule and retry", len(req.Entries), len(redactedRequest.Entries))
+	if len(redactedDocument.Entries) != len(document.Entries) {
+		return nil, fmt.Errorf("restore schema-owned evidence after publish-request redaction: entry count changed from %d to %d; no request was created because model evidence cannot be matched safely; fix the redaction rule and retry", len(document.Entries), len(redactedDocument.Entries))
 	}
-	for index := range req.Entries {
-		modelID, present, evidenceErr := observedModelFromExtra(req.Entries[index].Extra)
+	for index := range document.Entries {
+		modelID, present, evidenceErr := observedModelFromExtra(document.Entries[index].Extra)
 		if evidenceErr != nil {
 			return nil, evidenceErr
 		}
 		if present {
-			restored, restoreErr := restoreObservedModelExtra(redactedRequest.Entries[index].Extra, modelID)
+			restored, restoreErr := restoreObservedModelExtra(redactedDocument.Entries[index].Extra, modelID)
 			if restoreErr != nil {
 				return nil, restoreErr
 			}
-			redactedRequest.Entries[index].Extra = restored
+			redactedDocument.Entries[index].Extra = restored
 		}
 	}
-	final, err := json.Marshal(redactedRequest)
+	final, err := json.Marshal(redactedDocument)
 	if err != nil {
 		return nil, err
 	}

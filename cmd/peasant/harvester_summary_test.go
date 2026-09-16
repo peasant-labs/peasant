@@ -35,10 +35,11 @@ func TestHarvestHarvesterSummary(t *testing.T) {
 		SessionID  string `yaml:"sessionID"`
 		Transcript string `yaml:"transcript"`
 		Cases      []struct {
-			Name    string `yaml:"name"`
-			Command string `yaml:"command"`
-			DryRun  bool   `yaml:"dryRun"`
-			Indexed int    `yaml:"indexed"`
+			Name            string `yaml:"name"`
+			Command         string `yaml:"command"`
+			DryRun          bool   `yaml:"dryRun"`
+			Indexed         int    `yaml:"indexed"`
+			ExpectedTargets string `yaml:"expectedTargets"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(harvesterSummaryYAML, &fixtures); err != nil {
@@ -60,6 +61,9 @@ func TestHarvestHarvesterSummary(t *testing.T) {
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
 			t.Fatalf("invalid fixture name %q", fixture.Name)
+		}
+		if fixture.ExpectedTargets != "retained" && fixture.ExpectedTargets != "activated" {
+			t.Fatalf("fixture %q declares unknown expectedTargets %q; use retained or activated", fixture.Name, fixture.ExpectedTargets)
 		}
 		names[fixture.Name] = true
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -93,8 +97,12 @@ func TestHarvestHarvesterSummary(t *testing.T) {
 			if err := json.Unmarshal([]byte(out), &decoded); err != nil {
 				t.Fatalf("decode harvest: %v\n%s", err, out)
 			}
-			if !maps.Equal(decoded.Summary.HarvesterVersions, ingest.HarvesterVersionRegistry) {
-				t.Fatalf("target map = %+v", decoded.Summary.HarvesterVersions)
+			expectedTargets := ingest.HarvesterVersionRegistry
+			if fixture.ExpectedTargets == "activated" {
+				expectedTargets = ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
+			}
+			if !maps.Equal(decoded.Summary.HarvesterVersions, expectedTargets) {
+				t.Fatalf("target map = %+v, want %+v", decoded.Summary.HarvesterVersions, expectedTargets)
 			}
 			if len(decoded.Sessions) != 1 || string(decoded.Sessions[0].SessionID) != fixtures.SessionID || decoded.Summary.Indexed != fixture.Indexed {
 				t.Fatalf("populated command result = %+v", decoded)

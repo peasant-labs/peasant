@@ -1,4 +1,4 @@
-expectedCaseCount: 28
+expectedCaseCount: 30
 requiredNames:
   - canonical map trailing slash
   - canonical transcript trailing slash
@@ -6,6 +6,8 @@ requiredNames:
   - review branch slash round trip
   - transcript session round trip
   - scoped transcript round trip
+  - retained history round trip
+  - malformed retained history section
   - ascii legacy label
   - reserved legacy label
   - unicode legacy label
@@ -33,6 +35,8 @@ cases:
   - {name: review branch slash round trip, operation: review, pathname: '', search: '', projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, sessionId: '', branch: 'feat/identity-route', rawReturn: '', expected: '/review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?branch=feat%2Fidentity-route'}
   - {name: transcript session round trip, operation: transcript, pathname: '', search: '', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: 'session with space', branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/session%20with%20space?turn=12&origin=Review'}
   - {name: scoped transcript round trip, operation: transcript-scoped, pathname: '', search: '?turn=42&scope=file&scopeVal=src%2Fapi.ts&origin=Map&originNode=src%2Fapi.ts', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: sparse-session, branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/sparse-session?turn=42&scope=file&scopeVal=src%2Fapi.ts&origin=Map&originNode=src%2Fapi.ts'}
+  - {name: retained history round trip, operation: transcript-history, pathname: '', search: '?turn=3&earlier=earlier-1&earlier=earlier-0&earlier=earlier-1', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: history-session, branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/history-session?turn=3&earlier=earlier-0&earlier=earlier-1'}
+  - {name: malformed retained history section, operation: transcript-query-reject, pathname: '', search: '?earlier=history-0', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: rejected}
   - {name: ascii legacy label, operation: legacy, pathname: '/map/alpha-project', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: alpha-project}
   - {name: reserved legacy label, operation: legacy, pathname: '/review/team%20alpha%3Fcopy', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 'team alpha?copy'}
   - {name: unicode legacy label, operation: legacy, pathname: '/projects/%E9%9B%AA%E5%B1%B1/session', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 雪山}

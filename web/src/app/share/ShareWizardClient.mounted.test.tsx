@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import YAML from 'yaml';
 import fixtureSource from './testdata/mounted-share.yaml?raw';
+import { buildGroupedSyncResponse } from './testdata/grouped-sync';
 import { ShareWizardClient } from './ShareWizardClient';
 import * as useMockConfig from '@/hooks/useMockConfig';
 
@@ -25,6 +26,29 @@ function loadFixture(): Fixture {
 const fixture = loadFixture();
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 
+function syncStatusFor(shareStatus: string): 'new' | 'updated' | 'synced' | 'held' {
+  if (shareStatus === 'updated') return 'updated';
+  if (shareStatus === 'shared') return 'synced';
+  if (shareStatus === 'new') return 'new';
+  return 'held';
+}
+
+function groupedSyncPayload() {
+  return buildGroupedSyncResponse(fixture.sessions.map((session) => ({
+    id: session.id,
+    harness: session.harness,
+    startTime: session.startTime,
+    durationMins: session.durationMins,
+    totalTokens: session.totalTokens,
+    turnCount: session.turnCount,
+    toolCallCount: session.toolCallCount,
+    project: session.project,
+    projectHash: session.projectHash,
+    preview: session.preview,
+    syncStatus: syncStatusFor(session.shareStatus),
+  })));
+}
+
 function installFetch(items: unknown = fixture.items, annotationsGate: Promise<void> = Promise.resolve(), redactionsGate: Promise<void> = Promise.resolve()) {
   // Routed by EXACT path, never by containment. Containment dispatch is first
   // match wins, so a sessions-adjacent route would be swallowed by the sessions
@@ -34,8 +58,8 @@ function installFetch(items: unknown = fixture.items, annotationsGate: Promise<v
     const url = String(input);
     const { pathname } = new URL(url, 'http://mounted.test');
     switch (pathname) {
-      case '/api/v1/sessions':
-        return response({ sessions: fixture.sessions });
+      case '/api/v1/sync/sessions':
+        return response(groupedSyncPayload());
       case '/api/v1/web/discovery':
         return response({ items });
       case '/api/v1/annotations':

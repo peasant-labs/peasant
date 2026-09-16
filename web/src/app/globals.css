@@ -738,6 +738,29 @@ textarea::placeholder {
   min-width: 0;
 }
 
+/* The helper tree is a fairtrade tree placed inside this host surface, which is
+   bounded and narrow on mobile. The tree keeps its canonical natural width (the
+   fairtrade indentation, disclosure and title ellipsis are untouched) and scrolls
+   inside its own column instead of widening the chooser; the title still
+   ellipsizes against the row it actually renders in. */
+.share-helper-tree-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.share-page .helper-thread-provider {
+  flex-wrap: wrap;
+}
+/* On the narrowest viewport, render the tree at its natural width and let the
+   wrapper above scroll, so a twice-nested disclosure keeps readable rows
+   instead of collapsing long facts into character columns. */
+@media (max-width: 40rem) {
+  .share-helper-tree-scroll > .helper-tree {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+
 /* Share owns the viewport below the responsive app header. The page and wizard
    form one unbroken flex chain, so the body receives the actual remaining space
    after breadcrumbs, title, rail, and footer without guessed offsets. */

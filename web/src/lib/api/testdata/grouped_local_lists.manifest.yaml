@@ -1,0 +1,18 @@
+expectedCount: 8
+requiredNames:
+  - owner-retained-pages
+  - helper-only-search
+  - unresolved-independent
+  - member-page
+  - invalid-item-kind
+  - unknown-owner-status
+  - unknown-purpose
+  - missing-session-id
+requiredKinds:
+  - list
+  - members
+expectedLoaderMutationCount: 3
+loaderMutations:
+  - {name: grouped count drift is rejected, target: manifest, find: "expectedCount: 8\nrequiredNames:", replace: "expectedCount: 7\nrequiredNames:", expectedError: independent}
+  - {name: grouped duplicate case names are rejected, target: cases, find: "  - name: helper-only-search\n    kind: list", replace: "  - name: owner-retained-pages\n    kind: list", expectedError: duplicates}
+  - {name: grouped missing required case is rejected, target: manifest, find: "  - unresolved-independent\n", replace: "  - unresolved-renamed\n", expectedError: required case}

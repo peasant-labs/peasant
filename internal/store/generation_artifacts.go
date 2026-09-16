@@ -42,6 +42,12 @@ type GenerationIntent struct {
 	ContentCapture   ingest.SessionContentCaptureWrite `json:"contentCapture"`
 	IndexedInputHash *string                           `json:"indexedInputHash,omitempty"`
 	ArtifactIdentity *string                           `json:"artifactIdentity,omitempty"`
+	// PublicationCapture is the pipeline-certified capture agreement the replay
+	// records with the same guarded transaction. Nil records none.
+	PublicationCapture *ingest.PublicationCaptureWrite `json:"publicationCapture,omitempty"`
+	// PriorEvidence preserves the activation-owned harness document across a
+	// crash so recovery persists the same prior the successful path would have.
+	PriorEvidence []byte `json:"priorEvidence,omitempty"`
 
 	// CandidateDigest binds this envelope to the complete staged candidate: the
 	// normalized whole-generation manifest plus every captured blob digest.
@@ -78,7 +84,19 @@ type GenerationArtifactStore interface {
 	// ReadBlob reads one immutable content blob addressed by its captured
 	// relative path and verifies its length and integrity digest.
 	ReadBlob(context.Context, schema.SessionID, string, indexformat.ContentRecord) ([]byte, error)
+	// WritePriorEvidence writes the opaque activation-owned prior document for
+	// one staged generation. It is written after the generation directory is
+	// renamed into place and is fsynced, so a reopen reads the same identities.
+	WritePriorEvidence(context.Context, schema.SessionID, string, []byte) error
+	// ReadPriorEvidence returns the persisted prior document for one
+	// generation, or (nil, nil) when none was written.
+	ReadPriorEvidence(context.Context, schema.SessionID, string) ([]byte, error)
 }
+
+// priorEvidenceName is the fixed file name of the activation-owned prior
+// document inside one generation directory. It is not a content blob and does
+// not participate in the manifest binding.
+const priorEvidenceName = "prior.json"
 
 // osGenerationArtifactStore is the production, root-confined implementation.
 // Every filesystem operation runs through os.Root relative paths so a symlink
@@ -732,6 +750,69 @@ func (a *osGenerationArtifactStore) ReadBlob(ctx context.Context, id schema.Sess
 	digest := sha256.Sum256(data)
 	if hex.EncodeToString(digest[:]) != record.Digest {
 		return nil, fmt.Errorf("store: managed content %s of generation %s for session %s in ReadBlob fails its integrity digest; the artifact is corrupt; run managed recovery rather than serving altered content", record.Ref, generationID, id)
+	}
+	return data, nil
+}
+
+// WritePriorEvidence writes the activation-owned prior document inside one
+// already-staged generation directory. The write is atomic and fsynced, so a
+// reopen reads the exact document the activation committed. An empty document
+// is refused rather than silently deleted: absence is expressed by not calling
+// this method.
+func (a *osGenerationArtifactStore) WritePriorEvidence(ctx context.Context, id schema.SessionID, generationID string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("store: prior evidence for session %s generation %s is empty; nothing was written; omit the document to leave prior evidence absent", id, generationID)
+	}
+	if err := validateGenerationID(generationID); err != nil {
+		return err
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := writeRootSyncedAtomic(root, path.Join(genRel, priorEvidenceName), data, id, generationID, "prior evidence"); err != nil {
+		return fmt.Errorf("store: persist prior evidence for generation %s of session %s: %w; the committed generation is unchanged and the prior is reloaded from its committed rows", generationID, id, err)
+	}
+	return nil
+}
+
+// ReadPriorEvidence returns the persisted prior document for one generation.
+// A generation that never carried a prior document returns (nil, nil); a
+// missing or unreadable directory for another reason is an error, never an
+// empty document that would silently rekey unchanged source.
+func (a *osGenerationArtifactStore) ReadPriorEvidence(ctx context.Context, id schema.SessionID, generationID string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateGenerationID(generationID); err != nil {
+		return nil, err
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return nil, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	data, err := root.ReadFile(path.Join(genRel, priorEvidenceName))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: read prior evidence for generation %s of session %s: %s; the prior cannot be loaded; restore the owned generation directory and retry", generationID, id, sanitizeFSError(err))
+	}
+	if len(data) == 0 {
+		return nil, nil
 	}
 	return data, nil
 }

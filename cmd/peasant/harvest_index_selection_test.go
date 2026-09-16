@@ -94,6 +94,10 @@ func LoadHarvestIndexSelectionFixtures(t testing.TB) ([]harvestIndexSessionFixtu
 
 func TestHarvestIndexSelectionMounted(t *testing.T) {
 	sessions, cases := LoadHarvestIndexSelectionFixtures(t)
+	// The mounted command opens its store with the managed-generation writer and
+	// snapshot reader, so the run advertises the activated native targets for the
+	// harnesses they cover; a refreshed session settles at those revisions.
+	effectiveTargets := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
 	for _, fixture := range cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
@@ -103,7 +107,7 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(dbPath)
+			db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -182,7 +186,7 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 			for _, session := range sessions {
 				after := readHarvestIndexSnapshot(t, db, session.ID)
 				if slices.Contains(fixture.Indexed, session.Name) {
-					if after.IndexerVersion != ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion || after.IndexedAt == before[session.ID].IndexedAt {
+					if after.IndexerVersion != effectiveTargets[session.Harness].IndexerVersion || after.IndexedAt == before[session.ID].IndexedAt {
 						t.Errorf("selected session %s not refreshed: %+v", session.Name, after)
 					}
 					if session.VersionDelta < 0 && reflect.DeepEqual(after.Entries, before[session.ID].Entries) {

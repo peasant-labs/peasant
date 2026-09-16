@@ -209,11 +209,20 @@ func (run nativeCLIRun) harvest(t *testing.T, source testfixture.MaterializedSou
 type nativeCLIStored struct {
 	Entries  []schema.SessionEntry
 	Metadata ingest.UnifiedMetadata
+	// CaptureRevision and PublicationBound are the stored publication-capture
+	// agreement. The production harvest records it, so a native session is
+	// publishable right after the run, and the agreement must not move on an
+	// unchanged repeat harvest.
+	CaptureRevision  int64
+	PublicationBound bool
 }
 
 func (run nativeCLIRun) assertStored(t *testing.T, c nativeCLICase, project, userText string) nativeCLIStored {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(run.dataDir)))
+	// The production harvest activates the managed-generation representation for
+	// a native OpenCode session, so the reader registers that representation and
+	// still reads the canonical rows the detail and export exits serve.
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(run.dataDir)), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open test-owned harvest store: %v", err)
 	}
@@ -265,5 +274,15 @@ func (run nativeCLIRun) assertStored(t *testing.T, c nativeCLICase, project, use
 	if metadata.CWD != project || metadata.Version != c.Version || metadata.Stats.TokensIn != c.InputTokens || metadata.Stats.TokensOut != c.OutputTokens {
 		t.Fatalf("native session metadata did not survive production harvest: %+v", metadata)
 	}
-	return nativeCLIStored{Entries: entries, Metadata: metadata}
+	state, err := db.ReadIndexState(ctx, ingest.SessionID(c.SessionID))
+	if err != nil {
+		t.Fatalf("read persisted index state: %v", err)
+	}
+	if state == nil {
+		t.Fatal("persisted session has no readable index state")
+	}
+	if state.PublicationCaptureRevision == 0 || !state.PublicationBound {
+		t.Fatalf("native session is not publishable after harvest: capture revision=%d bound=%v", state.PublicationCaptureRevision, state.PublicationBound)
+	}
+	return nativeCLIStored{Entries: entries, Metadata: metadata, CaptureRevision: state.PublicationCaptureRevision, PublicationBound: state.PublicationBound}
 }

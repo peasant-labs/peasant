@@ -9,7 +9,6 @@ import type { SessionsPayload } from '@/types/messages';
 import {
   ALPHA_HASH,
   BETA_HASH,
-  REVIEW_LIST_PAYLOAD,
   makeSession,
 } from '@/app/review/[[...segments]]/test-fixtures';
 import { DiscoveryRequestError } from '@/lib/api/errors';
@@ -22,9 +21,9 @@ import {
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
 import { localReviewClarityFixture, makeClarityProjectSummaries } from '@/test/fixtures/localReviewClarity';
 
-// ChangeGraph (embedded in the home's single-project change list) now calls
-// useRouter for CommitGraph tip-row navigation; mock it here so tests never
-// hit the "invariant expected app router to be mounted" error.
+// Home's picker rows are the only route into a project; no embedded graph
+// mounts here any more, so no app router is required. Mock it anyway so a
+// transitive Link/router read can never hit "invariant expected app router".
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 // The Changes home reads ambient liveness from the sessions WS channel.
@@ -41,16 +40,48 @@ vi.mock('@/contexts/WebSocketContext', () => ({
   }),
 }));
 
-// REST stubs — the home fetches per-project summaries (picker rows) and, on
-// single-project installs, the project's review changes for the embedded
-// ChangeList (the ChangeList itself renders for real — not mocked).
+// REST stubs — the home fetches per-project summaries (picker rows) only.
 const api = vi.hoisted(() => ({
   fetchProjectSummaries: vi.fn<() => Promise<DecodedProjectSummariesPayload>>(),
   // The render-now seed: tests exercise the cold path (no cached payload).
   cachedProjectSummaries: () => null,
-  fetchReviewChanges: vi.fn(),
 }));
 vi.mock('@/lib/api/map', () => api);
+
+// The grouped local list is a REST read driven by the live sessions channel.
+// These tests assert the picker/selection policy, so the grouped route stubs an
+// explicit empty payload; the grouped decode, grouping and member paging have
+// their own real-route tests.
+const groupedApi = vi.hoisted(() => ({
+  fetchGroupedLocalSessions: vi.fn(),
+  fetchGroupedLocalSearch: vi.fn(),
+}));
+vi.mock('@/lib/api/grouped', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api/grouped')>();
+  return { ...actual, ...groupedApi };
+});
+
+const GROUPED_HOME_PAYLOAD = {
+  items: [
+    {
+      kind: 'transcript',
+      transcript: { session: makeSession({ id: 'sg-owner' }) },
+      helperGroups: [
+        { groupId: 'hg_home', purpose: 'helper_review', helperThreadCount: 2, memberScope: 'scope-home' },
+      ],
+    },
+    {
+      kind: 'transcript',
+      transcript: { session: makeSession({ id: 'sg-ordinary' }) },
+      helperGroups: [],
+    },
+  ],
+  page: 1,
+  limit: 20,
+  totalItems: 2,
+  ordinarySessionTotal: 2,
+  helperThreadTotal: 2,
+};
 
 /** A pending promise — keeps the summaries fetch "loading" for a test. */
 function pending<T>(): Promise<T> {
@@ -78,6 +109,12 @@ function makeSummaries(
   selection: DecodedProjectSummariesPayload['selection'] = { active: false, hiddenProjects: 0, hiddenSessions: 0 },
 ): DecodedProjectSummariesPayload {
   return { projects, selection };
+}
+
+function replaceExactlyOnce(source: string, find: string, replace: string, label: string): string {
+  const count = source.split(find).length - 1;
+  if (count !== 1) throw new Error(`${label} mutation anchor must occur exactly once, received ${count}`);
+  return source.replace(find, replace);
 }
 
 const requiredSelectionRetryCaseNames = [
@@ -133,6 +170,105 @@ function loadSelectionRetryFixture(): SelectionRetryFixture {
   return root as unknown as SelectionRetryFixture;
 }
 
+const requiredFlatSessionCaseNames = [
+  'cross-project-filter-and-top-level-paging',
+  'harness-filter-narrows-the-same-set',
+] as const;
+
+type FlatSessionCase = {
+  name: string;
+  sessionCount: number;
+  projects: string[];
+  harnesses: string[];
+  filterQuery: string;
+  expectedFilteredCount: number;
+  expectedTotalPages: number;
+  expectedFilteredPages: number;
+};
+
+const flatSessionsManifestSource = readFileSync(
+  resolve(process.cwd(), 'src/app/testdata/home_flat_sessions.manifest.yaml'),
+  'utf8',
+);
+const flatSessionsCasesSource = readFileSync(
+  resolve(process.cwd(), 'src/app/testdata/home_flat_sessions.yaml'),
+  'utf8',
+);
+
+function loadFlatSessionFixture(
+  manifestSource = flatSessionsManifestSource,
+  casesSource = flatSessionsCasesSource,
+): FlatSessionCase[] {
+  const manifest = requireRecord(
+    parseStrictYAML(manifestSource, 'home flat sessions manifest'),
+    'home flat sessions manifest',
+  );
+  requireExactRequiredFields(
+    manifest,
+    ['expectedCount', 'requiredNames', 'expectedLoaderMutationCount', 'loaderMutations'],
+    'home flat sessions manifest',
+  );
+  const requiredNames = manifest.requiredNames as unknown[];
+  if (
+    !Number.isSafeInteger(manifest.expectedCount)
+    || !Array.isArray(requiredNames)
+    || requiredNames.length !== manifest.expectedCount
+    || requiredNames.length !== requiredFlatSessionCaseNames.length
+  ) {
+    throw new Error('home flat sessions manifest must name every required case exactly once');
+  }
+  if (
+    !Number.isSafeInteger(manifest.expectedLoaderMutationCount)
+    || !Array.isArray(manifest.loaderMutations)
+    || manifest.loaderMutations.length !== manifest.expectedLoaderMutationCount
+  ) {
+    throw new Error('home flat sessions manifest must carry one loader mutation per expected mutation');
+  }
+  const root = requireRecord(parseStrictYAML(casesSource, 'home flat sessions cases'), 'home flat sessions cases');
+  requireExactRequiredFields(root, ['cases'], 'home flat sessions cases');
+  if (!Array.isArray(root.cases)) throw new Error('home flat sessions cases.cases must be an array');
+  const rows = root.cases.map((value, index) => requireRecord(value, `home flat sessions cases.cases[${index}]`));
+  requireUniqueNames(rows, 'home flat sessions cases.cases');
+  rows.forEach((row, index) => {
+    const label = `home flat sessions cases.cases[${index}]`;
+    requireExactRequiredFields(
+      row,
+      ['name', 'sessionCount', 'projects', 'harnesses', 'filterQuery', 'expectedFilteredCount', 'expectedTotalPages', 'expectedFilteredPages'],
+      label,
+    );
+    if (!Number.isSafeInteger(row.sessionCount) || (row.sessionCount as number) < 1) {
+      throw new Error(`${label}.sessionCount must be a positive integer`);
+    }
+    if (!Array.isArray(row.projects) || row.projects.length === 0) {
+      throw new Error(`${label}.projects must name at least one project`);
+    }
+    if (!Array.isArray(row.harnesses) || row.harnesses.length === 0) {
+      throw new Error(`${label}.harnesses must name at least one harness`);
+    }
+    if (typeof row.filterQuery !== 'string' || row.filterQuery === '') {
+      throw new Error(`${label}.filterQuery must be a non-empty string`);
+    }
+    for (const field of ['expectedFilteredCount', 'expectedTotalPages', 'expectedFilteredPages'] as const) {
+      if (!Number.isSafeInteger(row[field]) || (row[field] as number) < 1) {
+        throw new Error(`${label}.${field} must be a positive integer`);
+      }
+    }
+  });
+  const names = rows.map((row) => row.name);
+  if (
+    rows.length !== manifest.expectedCount
+    || requiredFlatSessionCaseNames.some((name) => !names.includes(name))
+  ) {
+    throw new Error('home flat sessions manifest must name exactly the required cases; a case is missing or renamed');
+  }
+  for (const name of requiredFlatSessionCaseNames) {
+    if (!names.includes(name)) throw new Error(`home flat sessions fixture is missing required case ${name}`);
+  }
+  return rows as unknown as FlatSessionCase[];
+}
+
+const flatSessionFixture = loadFlatSessionFixture();
+
 function deferred<T>() {
   let resolvePromise!: (value: T) => void;
   let rejectPromise!: (reason: unknown) => void;
@@ -148,7 +284,11 @@ const selectionRetryFixture = loadSelectionRetryFixture();
 describe('HomePage — the changes-first picker', () => {
   beforeEach(() => {
     api.fetchProjectSummaries.mockReturnValue(pending());
-    api.fetchReviewChanges.mockReturnValue(pending());
+    // Keep the grouped route pending: these tests assert the picker/selection
+    // policy, and a resolved grouped payload would commit an unrelated state
+    // update after the synchronous assertions.
+    groupedApi.fetchGroupedLocalSessions.mockReturnValue(pending());
+    groupedApi.fetchGroupedLocalSearch.mockReturnValue(pending());
   });
 
   afterEach(() => {
@@ -278,8 +418,8 @@ describe('HomePage — the changes-first picker', () => {
     expect(beta.textContent).toContain('—');
     expect(beta.textContent).toContain('3d ago');
 
-    // No map embedded on the home anymore.
-    expect(screen.queryByLabelText(/Map of/)).not.toBeInTheDocument();
+    // No change graph embedded on the home anymore.
+    expect(screen.queryByLabelText(/Change history for/)).not.toBeInTheDocument();
   });
 
   it('E1: shows aggregate summary cards above the multi-project picker', async () => {
@@ -312,6 +452,92 @@ describe('HomePage — the changes-first picker', () => {
     // "unmerged branches" labels BOTH the stat tile and the picker column.
     expect(screen.getAllByText('unmerged branches').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('mounts the grouped local session list from the grouped REST route', async () => {
+    channelData = { sessions: [makeSession({ id: 'sg-owner', project: 'alpha-project' })] };
+    api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
+    groupedApi.fetchGroupedLocalSessions.mockResolvedValue(GROUPED_HOME_PAYLOAD);
+    render(<HomePage />);
+
+    expect(await screen.findByText('all sessions')).toBeInTheDocument();
+    expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
+    expect(screen.getByText('sg-owner')).toBeInTheDocument();
+    expect(screen.getByText('2 sessions · 2 helper threads')).toBeInTheDocument();
+    expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalled();
+  });
+
+  it('rejects every retained flat-session loader mutation', () => {
+    const manifest = requireRecord(
+      parseStrictYAML(flatSessionsManifestSource, 'home flat sessions manifest'),
+      'home flat sessions manifest',
+    );
+    for (const mutationValue of manifest.loaderMutations as unknown[]) {
+      const mutation = requireRecord(mutationValue, 'flat session loader mutation');
+      const target = mutation.target === 'manifest' ? flatSessionsManifestSource : flatSessionsCasesSource;
+      const mutated = replaceExactlyOnce(target, String(mutation.find), String(mutation.replace), String(mutation.name));
+      expect(
+        () =>
+          loadFlatSessionFixture(
+            mutation.target === 'manifest' ? mutated : flatSessionsManifestSource,
+            mutation.target === 'cases' ? mutated : flatSessionsCasesSource,
+          ),
+        String(mutation.name),
+      ).toThrow(new RegExp(String(mutation.expectedError)));
+    }
+  });
+
+  for (const testCase of flatSessionFixture) {
+    it(`retains the cross-project filter and top-level pager: ${testCase.name}`, async () => {
+      const sessions = Array.from({ length: testCase.sessionCount }, (_, index) =>
+        makeSession({
+          id: `sess-${String(index).padStart(4, '0')}`,
+          project: testCase.projects[index % testCase.projects.length],
+          projectHash: index % testCase.projects.length === 0 ? ALPHA_HASH : BETA_HASH,
+          harness: testCase.harnesses[index % testCase.harnesses.length] as 'codex',
+          startTime: new Date(Date.UTC(2026, 0, 1) - index * 3_600_000).toISOString(),
+        }),
+      );
+      channelData = { sessions };
+      api.fetchProjectSummaries.mockResolvedValue(
+        makeSummaries(
+          testCase.projects.map((project, index) =>
+            makeSummary({ project, projectHash: index === 0 ? ALPHA_HASH : BETA_HASH }),
+          ),
+        ),
+      );
+      groupedApi.fetchGroupedLocalSessions.mockResolvedValue(GROUPED_HOME_PAYLOAD);
+
+      render(<HomePage />);
+      // The grouped list stays mounted with its own helper counts ...
+      expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
+      expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
+
+      // ... and the flat filter + pager stay reachable beside it.
+      fireEvent.click(
+        screen.getByRole('button', { name: /filter and page through every session/i }),
+      );
+      expect(screen.getByText(`${testCase.sessionCount} sessions`)).toBeInTheDocument();
+      expect(screen.getByText(`page 1 of ${testCase.expectedTotalPages}`)).toBeInTheDocument();
+
+      // Filtering by the previous supported field narrows to the server-visible
+      // set without touching the grouped helper membership.
+      fireEvent.change(screen.getByRole('searchbox', { name: 'search sessions' }), {
+        target: { value: testCase.filterQuery },
+      });
+      expect(
+        screen.getByText(`${testCase.expectedFilteredCount} sessions of ${testCase.sessionCount}`),
+      ).toBeInTheDocument();
+      expect(screen.getByText(`page 1 of ${testCase.expectedFilteredPages}`)).toBeInTheDocument();
+      expect(screen.getByText('2 helper threads')).toBeInTheDocument();
+      expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
+
+      // The top-level pager navigates the filtered result.
+      fireEvent.click(screen.getByRole('button', { name: 'next' }));
+      expect(
+        screen.getByText(`page ${testCase.expectedFilteredPages} of ${testCase.expectedFilteredPages}`),
+      ).toBeInTheDocument();
+    });
+  }
 
   it('falls back to sessions-channel grouping with stats unavailable while the fetch loads', () => {
     api.fetchProjectSummaries.mockReturnValue(pending());
@@ -437,28 +663,23 @@ describe('HomePage — the changes-first picker', () => {
     channelErrorCode = undefined;
     channelData = { sessions: [makeSession({ id: 'visible', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     view.rerender(<HomePage />);
-    expect(await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Open the sessions of alpha-project' })).toBeInTheDocument();
   });
 
-  it('skips the picker on single-project installs and embeds the Changes list', async () => {
+  it('renders the ordinary picker for a single-project install — never an embedded change graph', async () => {
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
-    // No picker — straight to the project's changes (real ChangeList rows).
-    const row = await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
-    expect(row).toHaveAttribute(
-      'href',
-      `/review/${ALPHA_HASH}?branch=feat%2Fgraph-cache`,
-    );
-    expect(screen.queryByRole('link', { name: /Open the sessions of/ })).not.toBeInTheDocument();
-    expect(api.fetchReviewChanges).toHaveBeenCalledWith(ALPHA_HASH);
-
-    // The embedded list is the tour's changes-list anchor.
-    expect(document.querySelector('[data-tour="changes-list"]')).not.toBeNull();
+    const row = await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
+    expect(row).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
+    // The change graph is not embedded anywhere on the home surface.
+    expect(screen.queryByLabelText(/Change history for/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open the line of work/ })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-tour="changes-list"]')).toBeNull();
+    // A single-project install still gets the aggregate KPI grid.
+    expect(screen.getByText('files built with ai')).toBeInTheDocument();
   });
 
   // A selected-mode project list without an explanation reads as broken rather
@@ -466,7 +687,7 @@ describe('HomePage — the changes-first picker', () => {
   // actually-hiding selection is called out plainly (with a
   // path to review/widen it, and WITHOUT naming the hidden projects), and an
   // active-but-not-hiding-anything selection stays silent.
-  it('shows a selection notice when an active selection hides projects and sessions, on the single-project view', async () => {
+  it('shows a selection notice when an active selection hides projects and sessions, on a single-project install', async () => {
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(
       makeSummaries([makeSummary({ project: 'alpha-project' })], {
@@ -475,7 +696,6 @@ describe('HomePage — the changes-first picker', () => {
         hiddenSessions: 5,
       }),
     );
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
     const notice = await screen.findByRole('status');
@@ -530,10 +750,9 @@ describe('HomePage — the changes-first picker', () => {
         hiddenSessions: 0,
       }),
     );
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
-    await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
+    await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
@@ -546,21 +765,20 @@ describe('HomePage — the changes-first picker', () => {
         hiddenSessions: 0,
       }),
     );
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     render(<HomePage />);
 
-    await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
+    await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('resolves the single project hash from the sessions channel when summaries fail', async () => {
+  it('renders a single-project row from the sessions channel when summaries fail', async () => {
     api.fetchProjectSummaries.mockRejectedValue(new Error('boom'));
-    api.fetchReviewChanges.mockResolvedValue(REVIEW_LIST_PAYLOAD);
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     render(<HomePage />);
 
-    await screen.findByRole('link', { name: 'Open the line of work "feat/graph-cache"' });
-    expect(api.fetchReviewChanges).toHaveBeenCalledWith(ALPHA_HASH);
+    const row = await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
+    expect(row).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
+    expect(screen.queryByLabelText(/Change history for/)).not.toBeInTheDocument();
   });
 
   it('shows the disconnected state when the local app is unreachable', async () => {

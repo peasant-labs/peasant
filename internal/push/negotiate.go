@@ -34,14 +34,21 @@ type Transport interface {
 }
 
 // negotiate preflights the village schema-version endpoint and returns the
-// push-contract version the pipeline should EMIT, or an actionable error that
-// aborts the push.
+// push-contract version the pipeline should EMIT plus the receiver's freshly
+// advertised capability support, or an actionable error that aborts the push.
 //
-// Fail-open: if the required preflight is unavailable (transport error / nil
-// body), the push proceeds at the CLI version — the village's server-side
-// validation still rejects bad harness/model. A village that advertises
-// [Min,Current] drives the within/older/ahead matrix.
-func (p *Pipeline) negotiate(ctx context.Context) (emit schema.PushContractVersion, capabilities []schema.ContentCapability, negotiateErr error) {
+// The advertisement is fetched ONCE per real upload run, immediately before the
+// upload phase, and is never cached: a scan performed earlier is a local
+// requirement statement, not a receiver answer, so support changed since the
+// scan is detected here.
+//
+// Fail-open applies to the CONTRACT VERSION only: if the preflight is
+// unavailable (transport error / nil body), the push proceeds at the CLI
+// version — the village's server-side validation still rejects bad
+// harness/model. Capability support is NOT failed open: the returned support
+// carries Known=false, so any payload that requires an optional capability is
+// refused before upload rather than assumed compatible.
+func (p *Pipeline) negotiate(ctx context.Context) (emit schema.PushContractVersion, support RemoteCapabilitySupport, negotiateErr error) {
 	rec := perf.RecorderFromContext(ctx)
 	span := rec.StartChildSpan(perf.StagePushNegotiate, perf.ParentSpanFromContext(ctx), nil)
 	ctx = perf.ContextWithParentSpan(ctx, span.ID())
@@ -66,26 +73,27 @@ func (p *Pipeline) negotiate(ctx context.Context) (emit schema.PushContractVersi
 			fmt.Fprintf(p.stderr,
 				"notice: schema-version preflight unavailable (%v); emitting CLI contract v%s\n", err, cli)
 		}
-		return cli, nil, nil
+		return cli, RemoteCapabilitySupport{Known: false, Unavailable: err}, nil
 	}
 	if resp == nil {
 		span.End(perf.OutcomeSkipped, nil)
-		return cli, nil, nil
+		return cli, RemoteCapabilitySupport{Known: false}, nil
 	}
 
 	min := resp.MinPushContractVersion
 	current := resp.PushContractVersion
+	support = RemoteCapabilitySupport{Known: true, Capabilities: resp.ContentCapabilities}
 
 	switch village.ClassifyContract(cli, min, current) {
 	case village.NegotiationOlderThanMin:
-		return "", nil, village.UpgradeCLIError(cli, min)
+		return "", RemoteCapabilitySupport{}, village.UpgradeCLIError(cli, min)
 	case village.NegotiationAheadOfCurrent:
 		if !village.CanDowngrade(cli, current) {
-			return "", nil, village.CannotDowngradeError(cli, current)
+			return "", RemoteCapabilitySupport{}, village.CannotDowngradeError(cli, current)
 		}
 		fmt.Fprint(p.stderr, village.DowngradeEmitWarning(cli, current))
-		return current, resp.ContentCapabilities, nil
+		return current, support, nil
 	default: // within or unadvertised
-		return cli, resp.ContentCapabilities, nil
+		return cli, support, nil
 	}
 }
