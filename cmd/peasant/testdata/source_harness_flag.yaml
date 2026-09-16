@@ -13,6 +13,7 @@ required_names:
   - logs-all-preserves-source-isolation
   - harvest-allows-harness-only
   - logs-allows-harness-only
+  - logs-defaults-enabled-empty-selected-harness
 cases:
   - name: harvest-rejects-old-flag
     args: [harvest, --source-provider=strike]
@@ -71,3 +72,17 @@ cases:
   - name: logs-allows-harness-only
     args: [harvest, logs, --source-harness=strike, "--output={output}"]
     output_excludes: ["--source-harness requires --source-path"]
+  - name: logs-defaults-enabled-empty-selected-harness
+    private_home: true
+    default_strike_source: true
+    config_yaml: |
+      version: 1
+      sources:
+        strike:
+          enabled: true
+          paths: []
+      output:
+        basePath: "{output}"
+    args: [harvest, logs, --source-harness=strike, --dry-run, --json]
+    output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA]
+    database_absent: true

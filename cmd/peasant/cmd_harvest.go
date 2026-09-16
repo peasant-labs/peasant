@@ -231,8 +231,22 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	fs := &ingest.OSFileSystem{}
 	git := &ingest.ExecGitResolver{}
 
+	// Resolve a harness-only selector before loading so its documented default
+	// can satisfy enabled-source path validation. Explicit path overrides still
+	// apply after loading and index mode never discovers native source paths.
+	var nativeHarness *defaults.Harness
+	var nativeFallback defaults.SourcePath
+	if mode != harvestIndexOnly && flags.sourceHarness != "" && flags.sourcePath == "" {
+		provider, err := resolveHarnessFlag(flags.sourceHarness)
+		if err != nil {
+			return err
+		}
+		nativeHarness = &provider
+		nativeFallback = defaultSourcePath(provider)
+	}
+
 	// 2. Load config.
-	cfg, err := loadRunConfig(configPath, flags.dryRun)
+	cfg, err := loadRunConfigWithSourcePathFallback(configPath, flags.dryRun, nativeHarness, nativeFallback)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -1155,22 +1169,26 @@ func applyDefaultSourcePath(cfg *config.Config, provider defaults.Harness) {
 		return
 	}
 
-	var fallback defaults.SourcePath
+	fallback := defaultSourcePath(provider)
+	configured.Paths = []string{fallback.String()}
+}
+
+func defaultSourcePath(provider defaults.Harness) defaults.SourcePath {
 	switch provider {
 	case defaults.HarnessClaudeCode:
-		fallback = defaults.DefaultClaudePath
+		return defaults.DefaultClaudePath
 	case defaults.HarnessOpenCode:
-		fallback = defaults.DefaultOpenCodePath
+		return defaults.DefaultOpenCodePath
 	case defaults.HarnessCodex:
-		fallback = defaults.DefaultCodexPath
+		return defaults.DefaultCodexPath
 	case defaults.HarnessCursor:
-		fallback = defaults.DefaultCursorPath
+		return defaults.DefaultCursorPath
 	case defaults.HarnessStrike:
-		fallback = defaults.DefaultStrikePath
+		return defaults.DefaultStrikePath
 	case defaults.HarnessPi:
-		fallback = defaults.DefaultPiPath
+		return defaults.DefaultPiPath
 	}
-	configured.Paths = []string{fallback.String()}
+	return ""
 }
 
 type sourcePathIssue struct {

@@ -16,12 +16,22 @@ import (
 )
 
 func loadRunConfig(path string, dryRun bool) (*config.Config, error) {
+	return loadRunConfigWithSourcePathFallback(path, dryRun, nil, "")
+}
+
+func loadRunConfigWithSourcePathFallback(path string, dryRun bool, harness *defaults.Harness, fallback defaults.SourcePath) (*config.Config, error) {
 	if !dryRun {
+		if harness != nil {
+			return config.LoadWithSourcePathFallback(path, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, *harness, fallback)
+		}
 		return loadConfig(path)
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err == nil {
+			if harness != nil {
+				return config.ParseWithSourcePathFallback(data, *harness, fallback)
+			}
 			return config.Parse(data)
 		}
 		if !errors.Is(err, os.ErrNotExist) {
