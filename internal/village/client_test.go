@@ -329,3 +329,93 @@ func TestVillageClient_GetSchemaVersion_DecodesPushWindow(t *testing.T) {
 		t.Errorf("minPushContractVersion: got %q, want 0.1.0", resp.MinPushContractVersion)
 	}
 }
+
+// TestVillageClient_GetPromptRequests_DecodesWaitingRequests verifies the read
+// behind the push hint: it queries the prompt-requests route, carries the
+// caller's credentials, and decodes every field the printed line needs.
+func TestVillageClient_GetPromptRequests_DecodesWaitingRequests(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"requests": [
+				{
+					"owner": "peasant-labs",
+					"name": "village",
+					"number": 216,
+					"state": "waiting",
+					"remote": "peasant-labs/village",
+					"requested_at": "2026-09-16T00:00:00Z"
+				}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := village.NewVillageClient(srv.URL, testAPIKey, nil)
+	response, status, err := client.GetPromptRequests(context.Background())
+	if err != nil {
+		t.Fatalf("GetPromptRequests returned error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status: got %d, want 200", status)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method: got %q, want GET", gotMethod)
+	}
+	if gotPath != "/api/v1/users/me/prompt-requests" {
+		t.Errorf("path: got %q, want /api/v1/users/me/prompt-requests", gotPath)
+	}
+	if gotAuth != "Bearer "+testAPIKey {
+		t.Errorf("auth header: got %q", gotAuth)
+	}
+	if len(response.Requests) != 1 {
+		t.Fatalf("requests: got %d, want 1", len(response.Requests))
+	}
+	request := response.Requests[0]
+	if request.Owner != "peasant-labs" || request.Name != "village" || request.Number != 216 {
+		t.Errorf("request: got %s/%s#%d", request.Owner, request.Name, request.Number)
+	}
+	if request.Remote != "peasant-labs/village" {
+		t.Errorf("remote: got %q, want peasant-labs/village", request.Remote)
+	}
+}
+
+// TestVillageClient_GetPromptRequests_ReportsAFailedRead keeps a failed read a
+// failure the caller must decide about. A non-2xx status and a body this version
+// cannot decode are both errors rather than an empty request list, so the
+// caller's silence stays a deliberate choice instead of an accident.
+func TestVillageClient_GetPromptRequests_ReportsAFailedRead(t *testing.T) {
+	t.Run("non-2xx status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		_, status, err := village.NewVillageClient(srv.URL, testAPIKey, nil).GetPromptRequests(context.Background())
+		if err == nil {
+			t.Fatal("a non-2xx response must be an error")
+		}
+		if status != http.StatusServiceUnavailable {
+			t.Errorf("status: got %d, want 503", status)
+		}
+	})
+
+	t.Run("undecodable body", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"requests": [`))
+		}))
+		defer srv.Close()
+
+		_, _, err := village.NewVillageClient(srv.URL, testAPIKey, nil).GetPromptRequests(context.Background())
+		if err == nil {
+			t.Fatal("a body this version cannot decode must be an error, not an empty request list")
+		}
+	})
+}
