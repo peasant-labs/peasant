@@ -1,0 +1,289 @@
+{
+  "fixture": "internal/mock/testdata/context_navigation.yaml",
+  "chunk": "web/out/_next/static/chunks/app/projects/[[...segments]]/page-5b741d8ba5fae9b2.js",
+  "featureBytes": [
+    "peasant:transcript-reading:"
+  ],
+  "servedChunks": [
+    "/_next/static/chunks/app/projects/[[...segments]]/page-5b741d8ba5fae9b2.js",
+    "/_next/static/chunks/app/projects/[[...segments]]/page-5b741d8ba5fae9b2.js"
+  ],
+  "captures": [
+    "/tmp/opencode/context-navigation-captures/dark/context-links.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-child-scrolled.png",
+    "/tmp/opencode/context-navigation-captures/dark/parent-session.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-back-restored.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-back-search-reopened.png",
+    "/tmp/opencode/context-navigation-captures/dark/context-copied-link.png",
+    "/tmp/opencode/context-navigation-captures/dark/unresolved-parent.png",
+    "/tmp/opencode/context-navigation-captures/light/context-links.png",
+    "/tmp/opencode/context-navigation-captures/light/context-child-scrolled.png",
+    "/tmp/opencode/context-navigation-captures/light/parent-session.png",
+    "/tmp/opencode/context-navigation-captures/light/context-back-restored.png",
+    "/tmp/opencode/context-navigation-captures/light/context-back-search-reopened.png",
+    "/tmp/opencode/context-navigation-captures/light/context-copied-link.png",
+    "/tmp/opencode/context-navigation-captures/light/unresolved-parent.png"
+  ],
+  "child": {
+    "theme": "light",
+    "rows": [
+      {
+        "label": "context inherited from",
+        "link": "open current session",
+        "status": null
+      },
+      {
+        "label": "started by",
+        "link": "open current session",
+        "status": null
+      }
+    ],
+    "collapsed": "false"
+  },
+  "disclosureToggle": {
+    "theme": "light",
+    "beforeToggle": {
+      "search": "",
+      "scrollTop": 221,
+      "scrollHeight": 1147,
+      "maxScroll": 397,
+      "clientHeight": 750,
+      "turn": "1",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 363,
+          "viewportTop": 392
+        },
+        {
+          "index": "1",
+          "offsetTop": 494,
+          "viewportTop": 523
+        },
+        {
+          "index": "2",
+          "offsetTop": 687,
+          "viewportTop": 716
+        },
+        {
+          "index": "3",
+          "offsetTop": 818,
+          "viewportTop": 847
+        },
+        {
+          "index": "4",
+          "offsetTop": 988,
+          "viewportTop": 1017
+        }
+      ]
+    },
+    "afterToggle": {
+      "search": "?earlier=earlier-0",
+      "scrollTop": 221,
+      "scrollHeight": 1461,
+      "maxScroll": 711,
+      "clientHeight": 750,
+      "turn": "1",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 677,
+          "viewportTop": 706
+        },
+        {
+          "index": "1",
+          "offsetTop": 808,
+          "viewportTop": 837
+        },
+        {
+          "index": "2",
+          "offsetTop": 1001,
+          "viewportTop": 1030
+        },
+        {
+          "index": "3",
+          "offsetTop": 1132,
+          "viewportTop": 1161
+        },
+        {
+          "index": "4",
+          "offsetTop": 1302,
+          "viewportTop": 1331
+        }
+      ]
+    },
+    "insertedHeight": 314,
+    "offsetDelta": 0,
+    "contentShift": 314,
+    "beforeAnchor": [
+      392,
+      523,
+      716,
+      847,
+      1017
+    ],
+    "afterAnchor": [
+      706,
+      837,
+      1030,
+      1161,
+      1331
+    ],
+    "route": {
+      "before": "",
+      "after": "?earlier=earlier-0"
+    }
+  },
+  "follow": {
+    "theme": "light",
+    "parentProbe": {
+      "pathname": "/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess_contextparent/",
+      "theme": "light",
+      "contextLinks": 0
+    },
+    "before": {
+      "search": "?earlier=earlier-0",
+      "scrollTop": 665,
+      "scrollHeight": 1461,
+      "maxScroll": 711,
+      "clientHeight": 750,
+      "turn": "1",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 677,
+          "viewportTop": 262
+        },
+        {
+          "index": "1",
+          "offsetTop": 808,
+          "viewportTop": 393
+        },
+        {
+          "index": "2",
+          "offsetTop": 1001,
+          "viewportTop": 586
+        },
+        {
+          "index": "3",
+          "offsetTop": 1132,
+          "viewportTop": 717
+        },
+        {
+          "index": "4",
+          "offsetTop": 1302,
+          "viewportTop": 887
+        }
+      ]
+    }
+  },
+  "back": {
+    "theme": "light",
+    "restored": {
+      "search": "?earlier=earlier-0",
+      "scrollTop": 665,
+      "scrollHeight": 1461,
+      "maxScroll": 711,
+      "clientHeight": 750,
+      "turn": "1",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 677,
+          "viewportTop": 262
+        },
+        {
+          "index": "1",
+          "offsetTop": 808,
+          "viewportTop": 393
+        },
+        {
+          "index": "2",
+          "offsetTop": 1001,
+          "viewportTop": 586
+        },
+        {
+          "index": "3",
+          "offsetTop": 1132,
+          "viewportTop": 717
+        },
+        {
+          "index": "4",
+          "offsetTop": 1302,
+          "viewportTop": 887
+        }
+      ]
+    },
+    "restoredQuery": "durable",
+    "searchReopened": {
+      "search": "?earlier=earlier-0",
+      "scrollTop": 665,
+      "scrollHeight": 1461,
+      "maxScroll": 711,
+      "clientHeight": 750,
+      "turn": "0",
+      "turns": [
+        {
+          "index": "0",
+          "offsetTop": 677,
+          "viewportTop": 262
+        },
+        {
+          "index": "1",
+          "offsetTop": 808,
+          "viewportTop": 393
+        },
+        {
+          "index": "2",
+          "offsetTop": 1001,
+          "viewportTop": 586
+        },
+        {
+          "index": "3",
+          "offsetTop": 1132,
+          "viewportTop": 717
+        },
+        {
+          "index": "4",
+          "offsetTop": 1302,
+          "viewportTop": 887
+        }
+      ]
+    },
+    "forwardRawTurn": "0",
+    "forwardSettledTurn": "1",
+    "viewerDerived": {
+      "forward": "1",
+      "restored": "1"
+    },
+    "recordedTurn": 1
+  },
+  "reload": {
+    "disclosedUrl": "http://localhost:8793/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess_contextchild/?earlier=earlier-0",
+    "restoredOffset": 665,
+    "restoredTurn": "1",
+    "viewerDerived": "1",
+    "expanded": true,
+    "picturedBy": "context-back-restored (same route + session record; no duplicate capture written)"
+  },
+  "copiedLink": {
+    "disclosedUrl": "http://localhost:8793/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess_contextchild/?earlier=earlier-0",
+    "expanded": true,
+    "replayedReaderState": false,
+    "offset": 0,
+    "record": {
+      "scrollTop": 0,
+      "search": ""
+    }
+  },
+  "unresolved": {
+    "theme": "light",
+    "rows": [
+      {
+        "label": "started by",
+        "link": null,
+        "status": "source unavailable"
+      }
+    ]
+  }
+}
