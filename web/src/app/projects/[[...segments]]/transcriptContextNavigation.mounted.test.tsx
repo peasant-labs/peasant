@@ -145,6 +145,18 @@ async function waitForViewer(): Promise<void> {
   await waitFor(() => expect(document.querySelector('.txn-app')).not.toBeNull());
 }
 
+/**
+ * Wait until `read()` satisfies `check`. Every restoration failure carries one
+ * searchable diagnostic naming the invariant, so a mutation of the production
+ * restoration path fails with the state it actually produced.
+ */
+async function restoredState<T>(read: () => T, check: (value: T) => boolean, detail: string): Promise<void> {
+  await waitFor(() => {
+    const value = read();
+    if (!check(value)) throw new Error(`mounted context navigation invariant failed: ${detail} (read ${JSON.stringify(value)})`);
+  });
+}
+
 /** Mount the child session through the production route. */
 function mountChild(c: ContextNavigationCase) {
   pathname = `/projects/${PROJECT_HASH}/${CHILD_ID}`;
@@ -199,9 +211,12 @@ describe('mounted context and starter navigation on the production transcript ro
       // Every link the mounted viewer offers opens its own exact stored target
       // with a push, so the browser keeps the child route for Back.
       for (let index = 0; index < links.length; index += 1) {
+        const expectedTarget = linkedRows[index].link as string;
         pushed.length = 0;
         fireEvent.click(links[index]);
-        expect(pushed).toEqual([transcriptHref(PROJECT_HASH, linkedRows[index].link as string)]);
+        if (pushed.length !== 1 || pushed[0] !== transcriptHref(PROJECT_HASH, expectedTarget)) {
+          throw new Error(`the current-parent link did not route to the exact stored target ${expectedTarget}: ${JSON.stringify(pushed)}`);
+        }
         expect(replaced).toEqual([]);
       }
       if (links.length === 0) expect(pushed).toEqual([]);
@@ -218,7 +233,9 @@ describe('mounted context and starter navigation on the production transcript ro
     fireEvent.click(contextLinks()[0]);
     expect(pushed).toHaveLength(1);
     const url = new URL(pushed[0], 'http://peasant.invalid');
-    expect(decodeURIComponent(url.pathname)).toBe(`/projects/${PROJECT_HASH}/sess_contextsource`);
+    if (decodeURIComponent(url.pathname) !== `/projects/${PROJECT_HASH}/sess_contextsource`) {
+      throw new Error(`the current-parent link did not route to the exact stored target sess_contextsource: ${pushed[0]}`);
+    }
     expect(url.search).toBe('');
 
     // Follow the pushed route for real: the target mounts through the same
@@ -266,7 +283,11 @@ describe('mounted context and starter navigation on the production transcript ro
       return input;
     });
     fireEvent.change(searchInput, { target: { value: 'needle' } });
-    expect(searchInput.value).toBe('needle');
+    if (searchInput.value !== 'needle') {
+      throw new Error(
+        `mounted context navigation invariant failed: the transcript search query was not applied through the host reading record (read ${JSON.stringify(searchInput.value)})`,
+      );
+    }
 
     const stream = document.querySelector<HTMLElement>('.txn-stream');
     if (!stream) throw new Error('transcript stream did not mount');
@@ -281,7 +302,9 @@ describe('mounted context and starter navigation on the production transcript ro
     // the retained history, so the disclosure comes back with the route.
     const childSearch = new URL(disclosed, 'http://peasant.invalid').search;
     fireEvent.click(contextLinks()[0]);
-    expect(pushed).toEqual([transcriptHref(PROJECT_HASH, 'sess_contextsource')]);
+    if (pushed.length !== 1 || pushed[0] !== transcriptHref(PROJECT_HASH, 'sess_contextsource')) {
+      throw new Error(`the current-parent link did not route to the exact stored target sess_contextsource: ${JSON.stringify(pushed)}`);
+    }
 
     // Forward: the target's own route and content.
     const url = new URL(pushed[0], 'http://peasant.invalid');
@@ -298,12 +321,20 @@ describe('mounted context and starter navigation on the production transcript ro
     await waitForViewer();
     await waitFor(() => expect(document.body.textContent).toContain('child request'));
 
-    await waitFor(() =>
-      expect(document.querySelector<HTMLButtonElement>('.txn-earlier-toggle')?.getAttribute('aria-expanded')).toBe('true'),
+    await restoredState(
+      () => document.querySelector<HTMLButtonElement>('.txn-earlier-toggle')?.getAttribute('aria-expanded') ?? null,
+      (value) => value === 'true',
+      'the retained-history disclosure was not restored from the route on Back',
     );
-    await waitFor(() => expect(document.querySelector<HTMLElement>('.txn-stream')?.scrollTop).toBe(120));
-    await waitFor(() =>
-      expect(document.querySelector(".txn-turnwrap[data-turn='1'] .txn-turn.txn-active")).not.toBeNull(),
+    await restoredState(
+      () => document.querySelector<HTMLElement>('.txn-stream')?.scrollTop ?? -1,
+      (value) => value === 120,
+      'the inner stream scroll offset was not restored from the child reading record on Back',
+    );
+    await restoredState(
+      () => document.querySelector(".txn-turnwrap[data-turn='1'] .txn-turn.txn-active") !== null,
+      (value) => value === true,
+      'the selected turn was not restored from the child reading record on Back',
     );
 
     fireEvent.keyDown(window, { key: 'f', metaKey: true });
@@ -312,7 +343,11 @@ describe('mounted context and starter navigation on the production transcript ro
       if (!input) throw new Error('search input did not reopen');
       return input;
     });
-    expect(restoredInput.value).toBe('needle');
+    if (restoredInput.value !== 'needle') {
+      throw new Error(
+        `mounted context navigation invariant failed: the search query was not restored from the child reading record on Back (read ${JSON.stringify(restoredInput.value)})`,
+      );
+    }
 
     // The child's own route query survives the round trip: the origin crumb the
     // host derives from it is still mounted.
@@ -329,8 +364,10 @@ describe('mounted context and starter navigation on the production transcript ro
     render(<ProjectsRouter />);
     await waitForViewer();
 
-    await waitFor(() =>
-      expect(document.querySelector<HTMLButtonElement>('.txn-earlier-toggle')?.getAttribute('aria-expanded')).toBe('true'),
+    await restoredState(
+      () => document.querySelector<HTMLButtonElement>('.txn-earlier-toggle')?.getAttribute('aria-expanded') ?? null,
+      (value) => value === 'true',
+      'the retained-history disclosure was not restored from the copied route',
     );
     expect(document.body.textContent).toContain(c.earlierTurnContent as string);
   });

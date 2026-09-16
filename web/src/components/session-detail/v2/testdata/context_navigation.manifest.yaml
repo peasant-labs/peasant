@@ -76,34 +76,39 @@ mutations:
     replace: "const durableDetail = detail;"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.relationshipNavigation.test.tsx
     expectedFailedTestNames:
-      - context-and-starter-distinct
-      - same-target-combines
-      - known-unavailable-no-link
-      - unknown-source-no-link
-      - conflicting-source-no-link
-      - navigation-for-another-session-never-links
-      - durable-target-without-navigation-no-link
-      - explicit-none-omits-row
+      - context-and-starter-distinct separates read metadata from durable content
+      - same-target-combines separates read metadata from durable content
+      - known-unavailable-no-link separates read metadata from durable content
+      - unknown-source-no-link separates read metadata from durable content
+      - conflicting-source-no-link separates read metadata from durable content
+      - navigation-for-another-session-never-links separates read metadata from durable content
+      - durable-target-without-navigation-no-link separates read metadata from durable content
+      - explicit-none-omits-row separates read metadata from durable content
     expectedFailurePattern: relationshipNavigation
   - name: host routes a current-parent link to the current session instead of the authorized target
     find: "const href = relationshipLinkHref(projectHash, entry);"
     replace: "const href = transcriptHref(projectHash, sessionId);"
     expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
     expectedFailedTestNames:
+      - context-and-starter-distinct
+      - same-target-combines
       - opens the exact stored target session when a reader follows the context link
       - restores the child query, disclosure, scroll, and selection after Back from the target
-    expectedFailurePattern: expected the current-parent link to route
+    expectedFailurePattern: did not route to the exact stored target
   - name: host stops restoring the retained-history disclosure from the route
     find: "earlierHistoryOpen={earlierHistoryOpen}"
     replace: "earlierHistoryOpen={undefined}"
     expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
     expectedFailedTestNames:
+      - context-and-starter-distinct
+      - same-target-combines
       - restores the child query, disclosure, scroll, and selection after Back from the target
-    expectedFailurePattern: retained-history disclosure
+      - reopens the retained-history disclosure from a copied route in a fresh document
+    expectedFailurePattern: was not restored from the
   - name: host stops replaying the per-session reading state
     find: "useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm), requestedTurn == null)"
     replace: "{ activeTurn: undefined, setActiveTurn: () => {}, search: '', setSearch: () => {} }"
     expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
     expectedFailedTestNames:
       - restores the child query, disclosure, scroll, and selection after Back from the target
-    expectedFailurePattern: "did not reopen|restored search"
+    expectedFailurePattern: was not applied through the host reading record

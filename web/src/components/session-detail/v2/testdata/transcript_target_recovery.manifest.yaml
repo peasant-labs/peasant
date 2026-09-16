@@ -25,7 +25,7 @@ mutations:
       - absent target opens top and offers stale-link removal
     expectedFailurePattern: absent initial position invariant failed
   - name: hidden target positions before reveal
-    find: "if (!requestedTurnVisible) return undefined;"
+    find: "if (!requestedTurnVisible) return null;"
     replace: "if (!requestedTurnVisible) return { kind: 'turn', turnIndex: requestedTurn };"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.test.tsx
     expectedFailedTestNames:
