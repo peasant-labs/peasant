@@ -206,7 +206,6 @@ jobs:
       github.event_name == 'pull_request' &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    needs: determine-runner
     # Not routed to the container pool: the guard compiles two revisions inside
     # the repository's `nix develop` shell, and the pool image deliberately has
     # no Nix. Revisit when the pool gains Nix or the guard gets a

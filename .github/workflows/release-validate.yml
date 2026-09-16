@@ -196,6 +196,12 @@ jobs:
     runs-on: ${{ matrix.target.debarch == 'amd64' && fromJson(needs.determine-runner.outputs.runner) || matrix.target.runs-on }}
     timeout-minutes: 15
     steps:
+      # The pool's runners keep their workspace between jobs; reset the owned
+      # dist/ directory so a rerun or an older-version artifact left by another
+      # job cannot make the package globs ambiguous.
+      - name: Reset dist/
+        run: rm -rf dist
+
       - name: Download dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -240,6 +246,12 @@ jobs:
             prepare: "zypper --non-interactive modifyrepo --disable --all"
             install: "zypper --non-interactive --no-refresh install --allow-unsigned-rpm"
     steps:
+      # The pool's runners keep their workspace between jobs; reset the owned
+      # dist/ directory so a rerun or an older-version artifact left by another
+      # job cannot make the package globs ambiguous.
+      - name: Reset dist/
+        run: rm -rf dist
+
       - name: Download dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -268,6 +280,12 @@ jobs:
       # archlinux:base-devel is amd64-only, matching this explicit amd64 job.
       image: archlinux@sha256:40d14ac9db5af04f695eacd82a53181ad685fecc2534a66e05a51182a077cbd5 # archlinux:base-devel
     steps:
+      # The pool's runners keep their workspace between jobs; reset the owned
+      # dist/ directory so a rerun or an older-version artifact left by another
+      # job cannot make the package globs ambiguous.
+      - name: Reset dist/
+        run: rm -rf dist
+
       - name: Download dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -312,6 +330,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The pool's runners keep their workspace between jobs; reset the owned
+      # dist/ directory so a rerun or an older-version artifact left by another
+      # job cannot make the package globs ambiguous.
+      - name: Reset dist/
+        run: rm -rf dist
+
       - name: Download dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -350,6 +374,12 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
+      # The pool's runners keep their workspace between jobs; reset the owned
+      # dist/ directory so a rerun or an older-version artifact left by another
+      # job cannot make the package globs ambiguous.
+      - name: Reset dist/
+        run: rm -rf dist
+
       - name: Download dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

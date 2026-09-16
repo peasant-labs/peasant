@@ -240,7 +240,18 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       ARCH: ${{ matrix.arch }}
     steps:
+      # The pool's runners keep their workspace between jobs, so this job never
+      # downloads into the (reused) repository workspace: a fresh directory per
+      # run keeps a same-version rerun and an older-version archive from making
+      # `gh release download` or the archive glob ambiguous.
+      - name: Stage a clean download directory
+        run: |
+          set -euo pipefail
+          staging="$(mktemp -d "$RUNNER_TEMP/release-smoke.XXXXXX")"
+          echo "SMOKE_DIR=$staging" >> "$GITHUB_ENV"
+
       - name: Download the released archive
+        working-directory: ${{ env.SMOKE_DIR }}
         run: |
           set -euxo pipefail
           gh release download "$TAG" \
@@ -250,6 +261,7 @@ jobs:
           tar xzf peasant_*_linux_"${ARCH}".tar.gz
 
       - name: Assert the binary is statically linked
+        working-directory: ${{ env.SMOKE_DIR }}
         run: |
           set -uo pipefail
           if ldd ./peasant 2>&1 | grep -q "not a dynamic executable"; then
@@ -264,6 +276,7 @@ jobs:
           fi
 
       - name: Assert version matches the tag
+        working-directory: ${{ env.SMOKE_DIR }}
         run: |
           set -euo pipefail
           expected="${TAG#v}"
