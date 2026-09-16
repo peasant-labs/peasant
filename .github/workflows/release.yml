@@ -34,6 +34,7 @@ jobs:
   # `nix-vendor-hash`, the arm64 `smoke` entry, and `macos-cask-smoke` keep
   # their current runners.
   determine-runner:
+    name: determine-runner
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

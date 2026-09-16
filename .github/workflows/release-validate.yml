@@ -33,6 +33,7 @@ jobs:
   # offline. `classify`, `nix-build`, the arm64 `deb` entries, and `macos-cask`
   # keep their current runners.
   determine-runner:
+    name: determine-runner
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

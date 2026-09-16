@@ -19,6 +19,7 @@ jobs:
   # (rootless podman on the desktop; labels self-hosted/container), with a
   # Blacksmith amd64 fallback when no pool runner is online.
   determine-runner:
+    name: determine-runner
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

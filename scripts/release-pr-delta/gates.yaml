@@ -43,6 +43,9 @@ gates:
       - '^THIRD_PARTY_NOTICES$'
       - '^\.gitignore$'       # the clean-tree assertion after `make web`
     children:
+      # The router job selects the runner for every other child; it runs on
+      # every invocation, so it is required like the rest.
+      - name: determine-runner
       - name: classify rc
       - name: goreleaser snapshot
       - name: nix build .#peasant

@@ -110,6 +110,7 @@ jobs:
   # test Go on arm64 and stay on their arm64 runner; the harvester guard needs
   # the repository's Nix shell and stays too.
   determine-runner:
+    name: determine-runner
     if: >-
       github.event_name != 'pull_request' ||
       !startsWith(github.event.pull_request.title, 'release(') ||
