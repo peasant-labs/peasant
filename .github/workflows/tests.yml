@@ -103,10 +103,12 @@ permissions:
   contents: read
 
 jobs:
-  # Route the architecture-neutral jobs to the self-hosted x86_64 runner pool,
-  # with a Blacksmith amd64 fallback when the pool is offline. Every routed job
+  # Route the architecture-neutral jobs to the self-hosted container pool
+  # (rootless podman on the desktop; labels self-hosted/container), with a
+  # Blacksmith amd64 fallback when no pool runner is online. Every routed job
   # reads the label array from this job's output. `check` and `cgo0` build and
-  # test Go on arm64 and stay on their arm64 runner.
+  # test Go on arm64 and stay on their arm64 runner; the harvester guard needs
+  # the repository's Nix shell and stays too.
   determine-runner:
     if: >-
       github.event_name != 'pull_request' ||
@@ -124,13 +126,13 @@ jobs:
         run: |
           set -euo pipefail
           if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
-              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "container")) | .name' 2>/dev/null | wc -l); then
             echo "::warning::runner availability query failed; using the fallback"
             online=0
           fi
           echo "online runners: ${online}"
           if [ "${online}" -gt 0 ]; then
-            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+            echo 'runner=["self-hosted","container"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runner=["blacksmith-2vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
           fi
@@ -204,7 +206,11 @@ jobs:
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     needs: determine-runner
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    # Not routed to the container pool: the guard compiles two revisions inside
+    # the repository's `nix develop` shell, and the pool image deliberately has
+    # no Nix. Revisit when the pool gains Nix or the guard gets a
+    # container-native toolchain.
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 30
     steps:
       - name: Checkout repository

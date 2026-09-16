@@ -15,8 +15,9 @@ permissions:
   contents: read
 
 jobs:
-  # Route the single warm-stack driver to the self-hosted x86_64 runner pool,
-  # with a Blacksmith amd64 fallback when the pool is offline.
+  # Route the single warm-stack driver to the self-hosted container pool
+  # (rootless podman on the desktop; labels self-hosted/container), with a
+  # Blacksmith amd64 fallback when no pool runner is online.
   determine-runner:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -30,13 +31,13 @@ jobs:
         run: |
           set -euo pipefail
           if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
-              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "container")) | .name' 2>/dev/null | wc -l); then
             echo "::warning::runner availability query failed; using the fallback"
             online=0
           fi
           echo "online runners: ${online}"
           if [ "${online}" -gt 0 ]; then
-            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+            echo 'runner=["self-hosted","container"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
           fi
@@ -48,8 +49,9 @@ jobs:
   release-e2e:
     name: release e2e (installed packages)
     # Arch's official warm-stack image is amd64-only, so the single warm-stack
-    # driver runs on the self-hosted amd64 pool, with the Blacksmith amd64
-    # runner as fallback.
+    # driver runs on the self-hosted amd64 container pool, with the Blacksmith
+    # amd64 runner as fallback. The pool image ships podman, which the driver
+    # drives against the host socket.
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 90

@@ -28,6 +28,7 @@ permissions:
 
 jobs:
   # Route the x86_64 and architecture-neutral packaging jobs to the self-hosted
+  # container pool (rootless podman on the desktop; labels self-hosted/container),
   # x86_64 runner pool, with a Blacksmith amd64 fallback when the pool is
   # offline. `classify`, `nix-build`, the arm64 `deb` entries, and `macos-cask`
   # keep their current runners.
@@ -44,13 +45,13 @@ jobs:
         run: |
           set -euo pipefail
           if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
-              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "nixos")) | .name' 2>/dev/null | wc -l); then
+              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "container")) | .name' 2>/dev/null | wc -l); then
             echo "::warning::runner availability query failed; using the fallback"
             online=0
           fi
           echo "online runners: ${online}"
           if [ "${online}" -gt 0 ]; then
-            echo 'runner=["self-hosted","nixos"]' >> "$GITHUB_OUTPUT"
+            echo 'runner=["self-hosted","container"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
           fi
