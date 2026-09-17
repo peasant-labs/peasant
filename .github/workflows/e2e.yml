@@ -45,7 +45,19 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VILLAGE_REF: 319be4358df9568164de774fceb715a92e2ab38f
+  # The disposable Village checkout the harness provisions. Two invariants ride
+  # on this pin, both fail-closed:
+  #   1. Its backend/go.mod must require the same github.com/peasant-labs/schema
+  #      module as this repo's go.mod — `make e2e-schema-parity` enforces it
+  #      before any container starts, and the harness re-asserts it.
+  #   2. Its server must advertise every content capability the release emits
+  #      (today including session_graph_provenance_v1, gated behind the
+  #      provenance preservation proof). A Village ref that predates an
+  #      advertised capability leaves the enriched fixture sessions refused and
+  #      the fail-closed assertion in this workflow turns that into a red gate.
+  # Bump this ref and the schema module pin together; keep release-e2e.yml and
+  # internal/e2e/testdata/workflows/e2e_contract.yaml in lockstep.
+  VILLAGE_REF: 4d48936be9be8e8c52ef2c04eaa5fcc6369ff82a
 
 permissions:
   contents: read

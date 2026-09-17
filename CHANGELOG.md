@@ -48,6 +48,10 @@ Release, which holds the signed artifacts and checksums.
   (#416); the release gate no longer runs the race detector (#414); x86_64 and
   architecture-neutral CI jobs run on the self-hosted runner pool (#424).
 - The `changes` visual regression baselines were re-blessed (#427).
+- The schema contract module is re-pinned to v0.22.0 and the full-stack e2e gate
+  provisions the matching Village revision, so the release gate exercises
+  provenance publication against a receiver that advertises the session-graph
+  capability.
 
 ### Fixed
 - Pi publications keep their recorded duration when publishing through the
