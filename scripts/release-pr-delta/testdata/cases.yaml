@@ -219,6 +219,7 @@ evidence_cases:
   - name: complete-required-set-succeeds
     gate: e2e
     runs:
+      - { name: determine-runner, conclusion: success, started_at: "2026-09-15T00:00:00Z" }
       - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T00:00:00Z" }
     want: true
 
@@ -251,6 +252,7 @@ evidence_cases:
   - name: later-successful-attempt-passes
     gate: e2e
     runs:
+      - { name: determine-runner, conclusion: success, started_at: "2026-09-15T00:00:00Z" }
       - { name: "full-stack push e2e (podman)", conclusion: failure, started_at: "2026-09-15T00:00:00Z" }
       - { name: "full-stack push e2e (podman)", conclusion: success, started_at: "2026-09-15T01:00:00Z" }
     want: true

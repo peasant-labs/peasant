@@ -238,10 +238,16 @@ garbage, but they do not risk deleting an active sibling run.
 
 ### Podman version parity (local ↔ CI)
 
-The CI runner (`blacksmith-4vcpu-ubuntu-2404-arm`, Ubuntu 24.04) runs **podman
-4.9.x**. The e2e workflow **pins** this with a `Verify and pin podman version` step
-that hard-fails if the runner's podman major.minor drifts from `4.9` — forcing a
-lockstep update of this doc when the runner image changes.
+The CI driver runs through the `determine-runner` router: on the self-hosted
+container pool (`self-hosted` / `container`, rootless podman on the amd64
+desktop) when a pool runner is online, otherwise on the amd64 Blacksmith
+fallback (`blacksmith-4vcpu-ubuntu-2404`, Ubuntu 24.04), which runs **podman
+4.9.x**. The e2e workflow **pins** podman with a `Verify and pin podman version`
+step that hard-fails if the selected runner's podman major.minor drifts from
+`4.9` — forcing a lockstep update of this doc when the pool or fallback image
+changes. The warm stack is amd64-only, so the router never selects an arm64
+label: there the harness would `t.Skip()` and the fail-closed assertion step
+would block publication with no coverage.
 
 Parity matters because the counter bug was **only**
 reproducible under podman 4.9.x: that build emits ~8 cgroup-manager **stderr**

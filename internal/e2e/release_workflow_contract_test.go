@@ -63,6 +63,10 @@ type e2eWorkflowContractFixture struct {
 		AssertedTests            nonEmptyStrings          `yaml:"asserted_tests"`
 		CleanupRequiredStatuses  nonEmptyStrings          `yaml:"cleanup_required_statuses"`
 		CleanupForbiddenStatuses []workflowForbiddenValue `yaml:"cleanup_forbidden_statuses"`
+		RoutedRunnerJob          string                   `yaml:"routed_runner_job"`
+		RoutedPoolRunner         string                   `yaml:"routed_pool_runner"`
+		RoutedFallbackRunner     string                   `yaml:"routed_fallback_runner"`
+		RoutedForbiddenRunner    string                   `yaml:"routed_forbidden_runner_substring"`
 	} `yaml:"e2e"`
 	Release struct {
 		ParityStep        string                 `yaml:"parity_step"`
@@ -249,6 +253,8 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.E2E.DriverStep == "" || fixture.E2E.DriverEnv.Key == "" || fixture.E2E.DriverEnv.Value == "" ||
 		len(fixture.E2E.DriverContains) != 3 ||
 		len(fixture.E2E.CleanupRequiredStatuses) != 2 || len(fixture.E2E.CleanupForbiddenStatuses) != 3 ||
+		fixture.E2E.RoutedRunnerJob == "" || fixture.E2E.RoutedPoolRunner == "" ||
+		fixture.E2E.RoutedFallbackRunner == "" || fixture.E2E.RoutedForbiddenRunner == "" ||
 		fixture.Release.ParityStep == "" || fixture.Release.ParityRunContains == "" ||
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
@@ -775,8 +781,54 @@ func TestE2EWorkflowContract(t *testing.T) {
 	if !strings.Contains(asserted, "no tests to run") {
 		t.Fatal("e2e: assertion step must fail on no-tests output")
 	}
+	assertE2EWorkflowRoutesThePodmanDriver(t, doc, fixture)
 	assertWorkflowVillageRefsMatch(t, doc, fixture.ExpectedVillageRef)
 	assertTestsWorkflowTracksE2EChanges(t, fixture)
+}
+
+// assertE2EWorkflowRoutesThePodmanDriver pins the warm-stack driver's runner
+// routing. The harness provisions an amd64-only Village stack, so the driver
+// must read its runner from the determine-runner router (the self-hosted
+// container pool when a pool runner is online, otherwise an amd64 Blacksmith
+// fallback). An arm64 label leaves the harness t.Skip()ing and the assertion
+// step failing; pinning the route keeps a future edit from silently landing the
+// driver there again. Expectations live in
+// testdata/workflows/e2e_contract.yaml.
+func assertE2EWorkflowRoutesThePodmanDriver(t *testing.T, doc *yaml.Node, fixture e2eWorkflowContractFixture) {
+	t.Helper()
+	jobs := yamlMappingValue(doc, "jobs")
+	job := yamlMappingValue(jobs, "e2e")
+	if job == nil {
+		t.Fatal("e2e: workflow must define jobs.e2e")
+	}
+	if got := workflowNeedsValues(yamlMappingValue(job, "needs")); !sameStringSet(got, []string{fixture.E2E.RoutedRunnerJob}) {
+		t.Fatalf("e2e: jobs.e2e needs %v, want exactly [%s] so it reads the routed runner", got, fixture.E2E.RoutedRunnerJob)
+	}
+	runsOn := yamlMappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Value != routedRunnerExpression {
+		got := "<missing>"
+		if runsOn != nil {
+			got = runsOn.Value
+		}
+		t.Fatalf("e2e: jobs.e2e runs-on = %s, want %s so the amd64-only warm-stack driver runs on the routed runner", got, routedRunnerExpression)
+	}
+	router := yamlMappingValue(jobs, fixture.E2E.RoutedRunnerJob)
+	if router == nil {
+		t.Fatalf("e2e: workflow must define the %s router job", fixture.E2E.RoutedRunnerJob)
+	}
+	steps := yamlMappingValue(router, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatalf("e2e: jobs.%s must define a steps sequence", fixture.E2E.RoutedRunnerJob)
+	}
+	pick := workflowStepRun(t, steps.Content, "Pick a runner")
+	for _, want := range []string{fixture.E2E.RoutedPoolRunner, fixture.E2E.RoutedFallbackRunner} {
+		if !strings.Contains(pick, want) {
+			t.Fatalf("e2e: router %q must select %q", fixture.E2E.RoutedRunnerJob, want)
+		}
+	}
+	if strings.Contains(pick, fixture.E2E.RoutedForbiddenRunner) {
+		t.Fatalf("e2e: router %q must never select a runner matching %q; the warm-stack harness skips there", fixture.E2E.RoutedRunnerJob, fixture.E2E.RoutedForbiddenRunner)
+	}
 }
 
 func assertReleaseE2EWorkflowContract(t *testing.T) {

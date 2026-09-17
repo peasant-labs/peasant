@@ -45,6 +45,15 @@ e2e:
       reason: a newly created sibling stack may still be starting
     - value: status=running
       reason: a running sibling stack must never be removed
+  # The warm-stack driver reads its runner from the router job instead of a
+  # fixed label. The pool expression prefers the self-hosted container pool; the
+  # fallback must be an amd64 Blacksmith label (the harness provisions an
+  # amd64-only Village stack). The forbidden substring keeps an arm64 label out:
+  # there the harness t.Skip()s and the gate fails with no coverage.
+  routed_runner_job: determine-runner
+  routed_pool_runner: 'runner=["self-hosted","container"]'
+  routed_fallback_runner: 'runner=["blacksmith-4vcpu-ubuntu-2404"]'
+  routed_forbidden_runner_substring: "-arm"
 release:
   parity_step: Verify schema module pin parity
   parity_run_contains: make e2e-schema-parity

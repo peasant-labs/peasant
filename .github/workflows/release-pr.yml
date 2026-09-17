@@ -157,6 +157,9 @@ jobs:
         (needs.changes.result != 'success' || needs.changes.outputs.e2e != 'false')))
     permissions:
       contents: read
+    # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
+    # secrets do not cross a reusable-workflow call unless passed explicitly.
+    secrets: inherit
     uses: ./.github/workflows/e2e.yml
 
   release-validate:
