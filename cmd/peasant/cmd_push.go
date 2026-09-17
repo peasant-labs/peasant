@@ -133,6 +133,27 @@ func BuildPushCommand() *cobra.Command {
 					"village push: --timeout must not be negative (got %s); it is the overall budget for the whole upload, and a negative budget has no meaning; nothing was uploaded; pass a positive duration such as --timeout 5s, or omit the flag to run without a budget",
 					timeout)
 			}
+			// The waiting-request lookup runs HERE, before the upload's clock
+			// starts, and that placement is the whole reason it can be trusted in
+			// front of a hook.
+			//
+			// A reviewer asking for the prompts behind a pull request can only
+			// reach the author at a push, and a hook run is the only surface that
+			// gets there. But the readiness of a commit must not depend on a
+			// convenience: inside the budget below, a village that accepted the
+			// connection and stalled would spend the author's commit time on the
+			// lookup and could leave a push that used to fit to fail with a
+			// deadline the lookup caused. Ahead of the clock, the lookup can
+			// spend only its own bound, and it can consume none of the upload's.
+			//
+			// Credentials are read for it, and read again inside the run exactly
+			// as before: the run owns its own login diagnosis, and a login that
+			// fails here is reported there with the same message as always.
+			if creds, credsErr := auth.LoadCredentialsFrom(configDirOverride(cmd)); credsErr == nil &&
+				creds != nil && creds.IsValid() && creds.VillageURL != "" && !jsonOutput {
+				reportWaitingPromptRequests(ctx, cmd, creds, repository, cmd.Flags().Changed("repository"))
+			}
+
 			if timeout > 0 {
 				var cancelBudget context.CancelFunc
 				ctx, cancelBudget = context.WithTimeout(ctx, timeout)
@@ -182,30 +203,6 @@ func BuildPushCommand() *cobra.Command {
 				}
 				if creds.VillageURL == "" {
 					return fmt.Errorf("village URL is not set — run 'peasant village login' to re-link your account")
-				}
-
-				// A reviewer asking for the prompts behind a pull request has no
-				// way to reach the author except here: the author is pushing, and
-				// when a hook is what runs the push there is no wizard and no
-				// other terminal surface in the run. So the lookup happens as
-				// soon as login is confirmed, before the publish step, and it
-				// prints even under --quiet — a hint stored away for a quieter
-				// run than the hook's would never be read.
-				//
-				// It is a read on both sides: it publishes nothing, it widens
-				// access to nothing, and every way it can fail prints nothing and
-				// leaves the push untouched. --json is the one exception, because
-				// its stdout is a document rather than a console.
-				//
-				// It runs inside the run's budget, under its own tighter bound,
-				// and only when the budget has room for it: a run whose budget is
-				// too small to afford the convenience skips it, so the lookup can
-				// never be why a short run ran out of time.
-				//
-				// Everything beyond this paragraph's control is inside
-				// reportWaitingPromptRequests, which is silent on every failure.
-				if !jsonOutput {
-					reportWaitingPromptRequests(ctx, cmd, creds, repository, cmd.Flags().Changed("repository"))
 				}
 
 				cfg, err := loadRunConfig(cfgPath, dryRun)

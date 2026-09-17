@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -147,18 +146,16 @@ func promptRequestLine(remote string, number int) string {
 	return "waiting: " + remote + "#" + strconv.Itoa(number) + " — run 'peasant village push' to attach the prompts behind it\n"
 }
 
-// TestPromptRequestLookupBoundStaysUnderTheHookBudget keeps the convenience from
-// spending the thing it must not spend.
+// TestPromptRequestLookupBoundIsUnderTheHookBudget keeps the convenience from
+// costing more than a hook can spare.
 //
-// A hook gives the whole push githooks.DefaultUploadBudget, and the lookup runs
-// first on that same clock, so the time it can take belongs to the upload's
-// budget. A bound anywhere near the budget would let one stalled read leave the
-// upload too little room. The two values are separate constants in separate
-// packages, so they are held apart here rather than by a comment.
-func TestPromptRequestLookupBoundStaysUnderTheHookBudget(t *testing.T) {
+// The lookup is synchronous and in front of every upload, so its own bound is
+// what a stalled village costs a commit. It must stay well inside the budget a
+// hook gives the whole push, even though it no longer draws on it.
+func TestPromptRequestLookupBoundIsUnderTheHookBudget(t *testing.T) {
 	t.Parallel()
 	if promptRequestLookupTimeout*githooks.LookupBudgetShare > githooks.DefaultUploadBudget {
-		t.Fatalf("the lookup bound (%s) must stay well under the hook's whole-push budget (%s), or a stalled lookup leaves the upload too little room",
+		t.Fatalf("the lookup bound (%s) must stay well inside the hook's whole-push budget (%s)",
 			promptRequestLookupTimeout, githooks.DefaultUploadBudget)
 	}
 }
@@ -370,39 +367,38 @@ func TestPushCmd_AStalledLookupDoesNotFailThePush(t *testing.T) {
 	}
 }
 
-// TestPushCmd_ATightBudgetSkipsTheLookup keeps the convenience out of a budget
-// that cannot spare it.
+// TestPushCmd_AStalledLookupCannotSpendTheUploadBudget is the property that
+// makes the lookup safe in front of a hook, and it distinguishes placement
+// rather than bounding.
 //
-// The upload has work of its own to finish under the same cap, so a run whose
-// budget is too small to afford the lookup behaves exactly as it did before the
-// lookup existed: the read is not made at all, and the run fails — or succeeds —
-// for its own reasons.
-func TestPushCmd_ATightBudgetSkipsTheLookup(t *testing.T) {
+// The budget here is the same size as the lookup's own bound, so a lookup
+// running on the upload's clock — the shape this had first, and then narrowed —
+// would spend the whole of it on the stall and leave the upload to fail with a
+// deadline the lookup caused. Ahead of that clock, the stall costs its own
+// second and the upload still gets its full budget.
+func TestPushCmd_AStalledLookupCannotSpendTheUploadBudget(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	var lookups atomic.Int64
-	server := waitingPromptRequestsServer(t, []map[string]any{
-		promptRequest("peasant-labs/village", 216),
-	})
-	t.Cleanup(server.Close)
-	// The lookup would print if it ran; counting requests proves it did not.
-	counter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lookups.Add(1)
-		http.Redirect(w, r, server.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	stalled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-stalled
 	}))
-	t.Cleanup(counter.Close)
-	writeTestCredentialsFor(t, dir, counter.URL)
+	t.Cleanup(func() {
+		close(stalled)
+		server.Close()
+	})
+	writeTestCredentialsFor(t, dir, server.URL)
 	repo := gitRepositoryWithRemote(t, dir, "git@github.com:peasant-labs/village.git")
 
-	_, _, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--timeout", "100ms", "--repository", repo})
-	if err == nil {
-		t.Fatalf("a 100ms budget cannot cover this run, so it must report its own budget failure")
+	stdout, _, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--timeout", "1s", "--repository", repo})
+	if err != nil {
+		t.Fatalf("the stall belongs to the lookup, so the upload must keep its whole budget: %v\nstdout=%s", err, stdout)
 	}
-	if got := lookups.Load(); got != 0 {
-		t.Errorf("the lookup must not run under a budget this tight; it was requested %d time(s)", got)
+	if !strings.Contains(stdout, "Dry run — no uploads will be made") {
+		t.Errorf("the push must still reach its own dry run; stdout:\n%s", stdout)
 	}
-	if !strings.Contains(err.Error(), "the upload ran out of its") {
-		t.Errorf("the failure must stay the budget's own, unrelated to the lookup; got: %v", err)
+	if strings.Contains(stdout, "waiting: ") {
+		t.Errorf("a stalled lookup must print nothing; stdout:\n%s", stdout)
 	}
 }
 

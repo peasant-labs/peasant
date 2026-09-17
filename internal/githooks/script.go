@@ -66,15 +66,14 @@ const (
 	// is a one-time manual run, which the generated hook's header says.
 	DefaultUploadBudget = 5 * time.Second
 
-	// LookupBudgetShare is how many waiting-prompt-request lookups the whole
-	// upload budget must be able to cover.
+	// LookupBudgetShare is the fraction of the whole upload budget a stalled
+	// waiting-prompt-request lookup may cost.
 	//
-	// The hook command also runs that lookup, inside the same budget and before
-	// the upload, so the lookup's own bound is a share of this budget rather than
-	// a separate allowance: a stalled lookup must not leave the upload with too
-	// little room to start. This is the number that keeps the two apart, and it
-	// lives beside the budget it divides rather than in the command that applies
-	// the bound.
+	// The lookup runs in front of every upload — see the push command — and the
+	// hook runs the same command, so its own bound is felt on every commit. It
+	// does not draw on the budget, but it must not cost the commit anything like
+	// it either, and that relationship belongs beside the budget rather than in
+	// the command that spends it.
 	LookupBudgetShare = 4
 )
 

@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/peasant-labs/peasant/internal/auth"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
@@ -23,25 +22,11 @@ import (
 // pull request. It is worth a moment of a push, and not more: a village that
 // accepts a connection and never answers must not hold up a commit.
 //
-// The lookup runs inside the run's budget — the same --timeout a hook passes for
-// the whole upload — and this bound is applied on top, so the time it can take
-// from that budget is capped by whichever is smaller. It is kept well under
-// githooks.DefaultUploadBudget because the lookup is synchronous and comes
-// first: a bound anywhere near the budget would let one stalled read leave the
-// upload too little room, and the failure would look like the push's own
-// deadline. TestPromptRequestLookupBoundStaysUnderTheHookBudget holds the two
-// apart.
+// The lookup runs before the upload's --timeout clock starts, so this bound is
+// the whole of what the convenience can cost the commit: it is not shared with,
+// and cannot draw on, the budget the upload runs under. A village that accepts
+// the connection and never answers costs one second and nothing else.
 const promptRequestLookupTimeout = time.Second
-
-// promptRequestLookupBudgetFloor is the least budget the lookup will run under.
-//
-// The hint is a convenience ahead of an upload that has its own work to finish
-// in the same budget, so it is only worth anything when the budget has room to
-// spare. Below this floor the lookup is skipped entirely rather than risked
-// against the upload's time, which makes "too small a budget" a run that behaves
-// exactly as it did before this lookup existed. It is expressed in the lookup's
-// own units so lowering one moves the other.
-const promptRequestLookupBudgetFloor = githooks.LookupBudgetShare * promptRequestLookupTimeout
 
 // githubRemoteHost is the only host a prompt request can belong to.
 //
@@ -60,9 +45,9 @@ const githubRemoteHost = "github.com"
 // the lookup. Nothing here may change what the push publishes, and nothing here
 // may fail it.
 //
-// ctx is the run's budget context, so the lookup can never outlast the run; its
-// own bound is applied on top of it, and it does not run at all when the budget
-// left is below promptRequestLookupBudgetFloor.
+// ctx is the command's context. It must NOT be the run's budget-wrapped one: the
+// caller places this call ahead of that clock so that nothing here can spend the
+// upload's --timeout.
 //
 // The repository being pushed is named by --repository when the caller supplied
 // one (a hook does), and by the working directory otherwise, which is the
@@ -76,13 +61,6 @@ func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, creds 
 	}
 	pushedFullName := githubRepositoryFullName(remote)
 	if pushedFullName == "" {
-		return
-	}
-
-	if deadline, bounded := ctx.Deadline(); bounded && time.Until(deadline) < promptRequestLookupBudgetFloor {
-		// The upload needs this budget more than the author needs a hint this
-		// run: below the floor the lookup does not happen, so it cannot be the
-		// reason a short run ran out of time.
 		return
 	}
 
@@ -138,10 +116,10 @@ func pushedRepositoryRemote(ctx context.Context, repository string, scoped bool)
 //
 // A request for any other repository prints nothing: the caller is pushing this
 // repository, and a request raised against a different one is not theirs to act
-// on here. A request that is not waiting prints nothing either: the endpoint
-// serves the states a request passes through, and telling an author that
-// something is waiting when it has already been attached, or is a preview they
-// have not confirmed, would be wrong in exactly the way the line exists to avoid.
+// on here. A request that is not waiting prints nothing either. The village's own
+// query already filters to waiting, so that check is defensive — a later server
+// that serves every state must not turn this line into a claim that something is
+// waiting when it has been attached, or is a preview nobody confirmed.
 func printWaitingPromptRequests(w io.Writer, requests []schema.VillagePromptRequest, pushedFullName string) int {
 	printed := 0
 	for _, request := range requests {
