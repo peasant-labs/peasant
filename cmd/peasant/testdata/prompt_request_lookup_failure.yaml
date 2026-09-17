@@ -1,0 +1,20 @@
+# The lookup's failure shapes. Each name is one way the read can fail, and the
+# status and body are what the village answers with. Every one of them must
+# print nothing and leave the push where it would have been, so no case carries
+# a matching request: silence here can only come from the failure.
+cases:
+  - name: server-error
+    status: 500
+    body: ""
+  - name: unauthorized
+    status: 401
+    body: ""
+  - name: village-predating-the-endpoint
+    status: 404
+    body: ""
+  - name: truncated-json
+    status: 200
+    body: '{"requests": ['
+  - name: envelope-of-the-wrong-type
+    status: 200
+    body: '{"requests": "waiting"}'

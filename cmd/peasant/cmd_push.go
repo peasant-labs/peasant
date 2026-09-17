@@ -133,6 +133,27 @@ func BuildPushCommand() *cobra.Command {
 					"village push: --timeout must not be negative (got %s); it is the overall budget for the whole upload, and a negative budget has no meaning; nothing was uploaded; pass a positive duration such as --timeout 5s, or omit the flag to run without a budget",
 					timeout)
 			}
+			// The waiting-request lookup runs HERE, before the upload's clock
+			// starts, and that placement is the whole reason it can be trusted in
+			// front of a hook.
+			//
+			// A reviewer asking for the prompts behind a pull request can only
+			// reach the author at a push, and a hook run is the only surface that
+			// gets there. But the readiness of a commit must not depend on a
+			// convenience: inside the budget below, a village that accepted the
+			// connection and stalled would spend the author's commit time on the
+			// lookup and could leave a push that used to fit to fail with a
+			// deadline the lookup caused. Ahead of the clock, the lookup can
+			// spend only its own bound, and it can consume none of the upload's.
+			//
+			// Credentials are read for it, and read again inside the run exactly
+			// as before: the run owns its own login diagnosis, and a login that
+			// fails here is reported there with the same message as always.
+			if creds, credsErr := auth.LoadCredentialsFrom(configDirOverride(cmd)); credsErr == nil &&
+				creds != nil && creds.IsValid() && creds.VillageURL != "" && !jsonOutput {
+				reportWaitingPromptRequests(ctx, cmd, creds, repository, cmd.Flags().Changed("repository"))
+			}
+
 			if timeout > 0 {
 				var cancelBudget context.CancelFunc
 				ctx, cancelBudget = context.WithTimeout(ctx, timeout)
@@ -161,7 +182,8 @@ func BuildPushCommand() *cobra.Command {
 			}
 			runErr := func(ctx context.Context) error {
 
-				// --quiet promises errors and one final result line. Structured
+				// --quiet promises errors, a waiting prompt request, and one final
+				// result line. Structured
 				// diagnostics below error level are fail-safe notes about degraded
 				// service - a manifest that could not be fetched, quality metrics that
 				// could not be read - not failures, and a hook fires on every commit.
@@ -382,7 +404,8 @@ func BuildPushCommand() *cobra.Command {
 				// retain, so it is printed for the pushes that actually happen. It
 				// used to sit inside the public-visibility branch below, which no
 				// input reaches any more, so no push printed it at all. --quiet
-				// suppresses it (errors + final result line only), and a dry run
+				// suppresses it (errors, a waiting prompt request, and the final
+				// result line), and a dry run
 				// publishes nothing to keep a record of.
 				if !dryRun && !jsonOutput && level != outputQuiet {
 					reportSessions, queryErr := pushCandidates(ctx, db, force, sourceHarness)
@@ -724,7 +747,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s)", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
-	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors and a final result line")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
@@ -1488,7 +1511,10 @@ type outputLevel int
 
 const (
 	// outputQuiet suppresses the summary and redaction report, leaving only
-	// errors (stderr) and a single final result line (stdout).
+	// errors (stderr), a waiting prompt request, and a single final result line
+	// (stdout). The waiting request is why it is not simply "errors and a
+	// result": a hook runs with --quiet, and a hook run is the one surface that
+	// reaches an author whose prompts a reviewer asked for.
 	outputQuiet outputLevel = iota
 	// outputNormal prints a concise summary (the default).
 	outputNormal

@@ -1,0 +1,6 @@
+requiredNames:
+  - server-error
+  - unauthorized
+  - village-predating-the-endpoint
+  - truncated-json
+  - envelope-of-the-wrong-type

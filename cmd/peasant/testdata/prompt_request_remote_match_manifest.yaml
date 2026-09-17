@@ -1,0 +1,22 @@
+requiredNames:
+  - scp-remote-matches
+  - scp-remote-without-git-suffix-matches
+  - https-remote-matches
+  - https-remote-with-a-trailing-slash-matches
+  - https-remote-with-credentials-matches
+  - ssh-url-with-port-matches
+  - host-case-difference-matches
+  - owner-and-repository-case-difference-matches
+  - waiting-request-matches
+  - already-attached-request-does-not-match
+  - unconfirmed-preview-does-not-match
+  - detached-request-does-not-match
+  - same-repository-name-under-another-owner-does-not-match
+  - different-repository-in-the-same-owner-does-not-match
+  - another-host-does-not-match
+  - subgroup-on-another-host-does-not-match
+  - nested-path-on-github-does-not-match
+  - remote-without-a-host-does-not-match
+  - local-path-remote-does-not-match
+  - empty-remote-does-not-match
+  - empty-request-remote-does-not-match
