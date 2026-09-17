@@ -460,10 +460,12 @@ func (c *VillageClient) GetAnnotationManifest(ctx context.Context) (*schema.Anno
 // happened, on every outcome.
 //
 // It deliberately does NOT go through c.do. This lookup is not a stage of the
-// push pipeline, so profiling it as one would misattribute it, and marking the
-// run as having reached the village on a lookup that cannot affect the push
-// would corrupt the retry advice a later failure reports. It goes through the
-// shared client the way the pull side's reads do.
+// push pipeline: profiling it as one would put a convenience read inside the
+// upload's timing, and counting it as a push-side HTTP attempt would tell the
+// run's request observer that a push reached the village when the lookup — which
+// cannot affect the push — was all that did. It goes through the shared client
+// the way the pull side's reads do. The cost is that this one request is absent
+// from --timing and --profile-output.
 func (c *VillageClient) GetPromptRequests(ctx context.Context) (*schema.VillagePromptRequestsResponse, int, error) {
 	endpoint := c.baseURL + promptRequestsEndpoint
 	httpReq, err := c.newAuthedGet(ctx, endpoint)

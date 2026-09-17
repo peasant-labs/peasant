@@ -197,7 +197,12 @@ func BuildPushCommand() *cobra.Command {
 				// leaves the push untouched. --json is the one exception, because
 				// its stdout is a document rather than a console.
 				//
-				// Everything outside this paragraph's control is inside
+				// It runs inside the run's budget, under its own tighter bound,
+				// and only when the budget has room for it: a run whose budget is
+				// too small to afford the convenience skips it, so the lookup can
+				// never be why a short run ran out of time.
+				//
+				// Everything beyond this paragraph's control is inside
 				// reportWaitingPromptRequests, which is silent on every failure.
 				if !jsonOutput {
 					reportWaitingPromptRequests(ctx, cmd, creds, repository, cmd.Flags().Changed("repository"))

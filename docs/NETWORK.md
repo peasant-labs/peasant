@@ -272,7 +272,7 @@ A reviewer can ask the author to attach the prompts behind a pull request. When 
 
 **Data sent:** nothing. It is a GET with no body: the request carries your credentials and the identity they already imply, exactly as the other Village reads do. The response names the pull requests waiting on you, so Peasant can print the repository, the pull request number, and the command to run.
 
-**Failure behaviour:** a lookup that fails — no network, a non-2xx status, or a response this version cannot read — prints nothing and changes nothing about the push. It cannot publish, and it cannot delay a commit beyond its own five-second bound.
+**Failure behaviour:** a lookup that fails — no network, a non-2xx status, or a response this version cannot read — prints nothing and changes nothing about the push. It cannot publish, and it cannot outlast the push: the read is bounded to one second and runs inside the same `--timeout` the upload runs under. A budget below four seconds skips the lookup entirely, so a run that cannot afford the convenience behaves exactly as it did before it existed.
 
 **What attaching does, and does not do:** attaching a pull request's prompts **never uploads anything.** It does not publish a transcript into the commons, and it does not share one with GitHub. It only widens who may read transcripts that are **already published**, by granting a pull request's readers access to the transcripts attached to it. If you have nothing published, attaching publishes nothing.
 

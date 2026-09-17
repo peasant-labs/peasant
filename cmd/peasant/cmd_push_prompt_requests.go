@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
@@ -20,10 +21,27 @@ import (
 //
 // The lookup exists to tell an author that a reviewer wants the prompts behind a
 // pull request. It is worth a moment of a push, and not more: a village that
-// accepts a connection and never answers must not hold up a commit, which is
-// what a waiting village would otherwise do through the client's per-request
-// timeout. The push proceeds on its own budget either way.
-const promptRequestLookupTimeout = 5 * time.Second
+// accepts a connection and never answers must not hold up a commit.
+//
+// The lookup runs inside the run's budget — the same --timeout a hook passes for
+// the whole upload — and this bound is applied on top, so the time it can take
+// from that budget is capped by whichever is smaller. It is kept well under
+// githooks.DefaultUploadBudget because the lookup is synchronous and comes
+// first: a bound anywhere near the budget would let one stalled read leave the
+// upload too little room, and the failure would look like the push's own
+// deadline. TestPromptRequestLookupBoundStaysUnderTheHookBudget holds the two
+// apart.
+const promptRequestLookupTimeout = time.Second
+
+// promptRequestLookupBudgetFloor is the least budget the lookup will run under.
+//
+// The hint is a convenience ahead of an upload that has its own work to finish
+// in the same budget, so it is only worth anything when the budget has room to
+// spare. Below this floor the lookup is skipped entirely rather than risked
+// against the upload's time, which makes "too small a budget" a run that behaves
+// exactly as it did before this lookup existed. It is expressed in the lookup's
+// own units so lowering one moves the other.
+const promptRequestLookupBudgetFloor = githooks.LookupBudgetShare * promptRequestLookupTimeout
 
 // githubRemoteHost is the only host a prompt request can belong to.
 //
@@ -33,8 +51,8 @@ const promptRequestLookupTimeout = 5 * time.Second
 // segments — from being told a GitHub request is waiting for it.
 const githubRemoteHost = "github.com"
 
-// reportWaitingPromptRequests asks the village which prompt requests are
-// waiting for the repository being pushed and prints one line per match.
+// reportWaitingPromptRequests asks the village which prompt requests are waiting
+// for the repository being pushed and prints one line per match.
 //
 // It is a convenience, and every way it can fail is silent by design: a missing
 // git remote, a transport error, a non-2xx status, and a malformed response all
@@ -42,8 +60,13 @@ const githubRemoteHost = "github.com"
 // the lookup. Nothing here may change what the push publishes, and nothing here
 // may fail it.
 //
+// ctx is the run's budget context, so the lookup can never outlast the run; its
+// own bound is applied on top of it, and it does not run at all when the budget
+// left is below promptRequestLookupBudgetFloor.
+//
 // The repository being pushed is named by --repository when the caller supplied
-// one (a hook does), and by the working directory otherwise.
+// one (a hook does), and by the working directory otherwise, which is the
+// manual push's shape.
 func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, creds *auth.Credentials, repository string, scoped bool) {
 	out := cmd.OutOrStdout()
 
@@ -53,6 +76,13 @@ func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, creds 
 	}
 	pushedFullName := githubRepositoryFullName(remote)
 	if pushedFullName == "" {
+		return
+	}
+
+	if deadline, bounded := ctx.Deadline(); bounded && time.Until(deadline) < promptRequestLookupBudgetFloor {
+		// The upload needs this budget more than the author needs a hint this
+		// run: below the floor the lookup does not happen, so it cannot be the
+		// reason a short run ran out of time.
 		return
 	}
 
@@ -103,12 +133,21 @@ func pushedRepositoryRemote(ctx context.Context, repository string, scoped bool)
 }
 
 // printWaitingPromptRequests prints one line per request that names the
-// repository being pushed, and returns how many lines it printed. A request for
-// any other repository prints nothing: the caller is pushing this repository,
-// and a request raised against a different one is not theirs to act on here.
+// repository being pushed and is still waiting on its author, and returns how
+// many lines it printed.
+//
+// A request for any other repository prints nothing: the caller is pushing this
+// repository, and a request raised against a different one is not theirs to act
+// on here. A request that is not waiting prints nothing either: the endpoint
+// serves the states a request passes through, and telling an author that
+// something is waiting when it has already been attached, or is a preview they
+// have not confirmed, would be wrong in exactly the way the line exists to avoid.
 func printWaitingPromptRequests(w io.Writer, requests []schema.VillagePromptRequest, pushedFullName string) int {
 	printed := 0
 	for _, request := range requests {
+		if request.State != schema.VillagePullRequestAttachmentWaiting {
+			continue
+		}
 		if !sameRepositoryFullName(request.Remote, pushedFullName) {
 			continue
 		}
@@ -137,19 +176,25 @@ func sameRepositoryFullName(left, right string) bool {
 // normalization every other remote comparison in Peasant uses) and then reduced
 // to the same shape.
 //
-// The host must be GitHub. Two paths ending in the same two segments on
-// different hosts are different repositories, and a waiting request can only
-// ever name a GitHub one, so a mirror clone is never told a request is waiting
-// for it. A remote that does not name a host at all is refused for the same
-// reason: there is nothing to prove it is GitHub.
+// The host must be github.com and a GitHub repository is exactly
+// "github.com/owner/name": three segments. Two repositories whose paths end in
+// the same two segments are different repositories, so anything longer is not
+// reduced — a GitLab subgroup is not a GitHub owner. A remote that names no host
+// at all is refused for the same reason: there is nothing to prove it is GitHub.
+// The cost is a false negative for a GitHub Enterprise host and for a remote
+// configured as a bare "owner/name" with no host; both stay silent rather than
+// name a request that may not exist.
 func githubRepositoryFullName(remote string) string {
+	// A trailing slash survives the shared normalizer's .git stripping, and
+	// "owner/repo.git/" would otherwise reduce to a repository named "repo.git".
+	remote = strings.TrimRight(strings.TrimSpace(remote), "/")
 	normalized := ingest.NormalizeRemoteForMatch(remote)
 	if normalized == "" {
 		return ""
 	}
 	segments := strings.Split(normalized, "/")
-	if len(segments) < 3 || !strings.EqualFold(segments[0], githubRemoteHost) {
+	if len(segments) != 3 || !strings.EqualFold(segments[0], githubRemoteHost) {
 		return ""
 	}
-	return strings.Join(segments[len(segments)-2:], "/")
+	return segments[1] + "/" + segments[2]
 }

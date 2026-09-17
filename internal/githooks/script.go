@@ -65,6 +65,17 @@ const (
 	// tries again. An upload that genuinely needs longer — a large first push —
 	// is a one-time manual run, which the generated hook's header says.
 	DefaultUploadBudget = 5 * time.Second
+
+	// LookupBudgetShare is how many waiting-prompt-request lookups the whole
+	// upload budget must be able to cover.
+	//
+	// The hook command also runs that lookup, inside the same budget and before
+	// the upload, so the lookup's own bound is a share of this budget rather than
+	// a separate allowance: a stalled lookup must not leave the upload with too
+	// little room to start. This is the number that keeps the two apart, and it
+	// lives beside the budget it divides rather than in the command that applies
+	// the bound.
+	LookupBudgetShare = 4
 )
 
 // ManualMarkerPrefix opens the by-hand snippet. It is deliberately different

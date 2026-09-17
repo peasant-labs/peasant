@@ -1,15 +1,17 @@
-# Remote-matching cases for the waiting-prompt-request hint.
+# Cases for the line the push prints about a waiting prompt request.
 #
 # The village serves a request's remote as GitHub's repository full_name:
 # "owner/name", with no host and no scheme, because that is what the App reads
 # out of the webhook. The remote on this machine is whatever the user cloned
 # from, in any form git accepts, so each case exercises the whole path — the
-# shared normalization, the reduction to "owner/name", and the match that
-# follows — rather than the reduction alone.
+# shared normalization, the reduction to "owner/name", the state the request is
+# in, and the match that follows — and asserts the printed line, not the
+# comparison behind it.
 #
-# The cases that do not match are the point of the fixture as much as the ones
-# that do: a hint about a pull request that is not this repository's would send
-# an author looking for a request that does not exist.
+# The cases that print nothing are the point of the fixture as much as the ones
+# that do: a hint about a pull request that is not this repository's, or one that
+# is no longer waiting, sends an author looking for a request that is not open.
+# A case with no state is a request still waiting.
 cases:
   - name: scp-remote-matches
     pushedRemote: "git@github.com:peasant-labs/village.git"
@@ -21,6 +23,10 @@ cases:
     wantMatch: true
   - name: https-remote-matches
     pushedRemote: "https://github.com/peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: true
+  - name: https-remote-with-a-trailing-slash-matches
+    pushedRemote: "https://github.com/peasant-labs/village.git/"
     requestRemote: "peasant-labs/village"
     wantMatch: true
   - name: https-remote-with-credentials-matches
@@ -39,6 +45,26 @@ cases:
     pushedRemote: "git@github.com:Peasant-Labs/Village.git"
     requestRemote: "peasant-labs/village"
     wantMatch: true
+  - name: waiting-request-matches
+    pushedRemote: "git@github.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    state: waiting
+    wantMatch: true
+  - name: already-attached-request-does-not-match
+    pushedRemote: "git@github.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    state: attached
+    wantMatch: false
+  - name: unconfirmed-preview-does-not-match
+    pushedRemote: "git@github.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    state: preview
+    wantMatch: false
+  - name: detached-request-does-not-match
+    pushedRemote: "git@github.com:peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    state: detached
+    wantMatch: false
   - name: same-repository-name-under-another-owner-does-not-match
     pushedRemote: "git@github.com:someone-else/village.git"
     requestRemote: "peasant-labs/village"
@@ -53,6 +79,10 @@ cases:
     wantMatch: false
   - name: subgroup-on-another-host-does-not-match
     pushedRemote: "https://gitlab.com/group/peasant-labs/village.git"
+    requestRemote: "peasant-labs/village"
+    wantMatch: false
+  - name: nested-path-on-github-does-not-match
+    pushedRemote: "https://github.com/peasant-labs/village/extra.git"
     requestRemote: "peasant-labs/village"
     wantMatch: false
   - name: remote-without-a-host-does-not-match
