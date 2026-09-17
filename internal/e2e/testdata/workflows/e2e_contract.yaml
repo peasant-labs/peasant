@@ -45,15 +45,15 @@ e2e:
       reason: a newly created sibling stack may still be starting
     - value: status=running
       reason: a running sibling stack must never be removed
-  # The warm-stack driver reads its runner from the router job instead of a
-  # fixed label. The pool expression prefers the self-hosted container pool; the
-  # fallback must be an amd64 Blacksmith label (the harness provisions an
-  # amd64-only Village stack). The forbidden substring keeps an arm64 label out:
-  # there the harness t.Skip()s and the gate fails with no coverage.
-  routed_runner_job: determine-runner
-  routed_pool_runner: 'runner=["self-hosted","container"]'
-  routed_fallback_runner: 'runner=["blacksmith-4vcpu-ubuntu-2404"]'
-  routed_forbidden_runner_substring: "-arm"
+  # The warm-stack driver is pinned directly to the amd64 Blacksmith runner, not
+  # routed through determine-runner: rootless podman and the disposable Village
+  # stack do not come up inside the self-hosted pool containers, so a pool
+  # landing leaves the harness t.Skip()ing and the gate failing with no coverage.
+  # The harness provisions an amd64-only Village stack, so the label must never
+  # be an arm64 one.
+  driver_runner: blacksmith-4vcpu-ubuntu-2404
+  driver_forbidden_runner_substring: "-arm"
+  driver_forbidden_router: determine-runner
 release:
   parity_step: Verify schema module pin parity
   parity_run_contains: make e2e-schema-parity
@@ -174,6 +174,13 @@ release_validate:
     - workflow_call
   forbidden_triggers:
     - pull_request
+  # The snapshot producer is pinned directly to the amd64 Blacksmith runner, not
+  # routed through determine-runner: the pool keeps a runner's workspace between
+  # jobs and an earlier container run leaves root-owned dist/ that goreleaser's
+  # --clean cannot unlink. The install jobs still route through the router.
+  snapshot_job: snapshot
+  snapshot_runner: blacksmith-4vcpu-ubuntu-2404
+  snapshot_forbidden_router: determine-runner
 tests_workflow:
   triggers:
     - pull_request

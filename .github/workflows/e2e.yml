@@ -51,48 +51,6 @@ permissions:
   contents: read
 
 jobs:
-  # Route the full-stack podman driver to the self-hosted container pool
-  # (rootless podman on the desktop; labels self-hosted/container), with a
-  # Blacksmith amd64 fallback when no pool runner is online. The disposable
-  # Village stack the harness provisions is amd64-only, so the driver must never
-  # land on an arm64 runner: there the harness t.Skip()s, the assertion step
-  # below fails the job, and no e2e coverage runs. Same predicate and fallback
-  # as release-e2e.yml. The exactly-once guard keeps the standalone copy of this
-  # workflow from running the router on a release PR, where release-pr.yml's
-  # call is the single authority; keep it in step with the e2e job's guard.
-  determine-runner:
-    name: determine-runner
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      runner: ${{ steps.pick.outputs.runner }}
-    steps:
-      - name: Pick a runner
-        id: pick
-        env:
-          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-        run: |
-          set -euo pipefail
-          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
-              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "container")) | .name' 2>/dev/null | wc -l); then
-            echo "::warning::runner availability query failed; using the fallback"
-            online=0
-          fi
-          echo "online runners: ${online}"
-          if [ "${online}" -gt 0 ]; then
-            echo 'runner=["self-hosted","container"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Report chosen runner
-        env:
-          CHOSEN: ${{ steps.pick.outputs.runner }}
-        run: 'echo "chosen: $CHOSEN"'
-
   e2e:
     name: full-stack push e2e (podman)
     # Release only: a release PR (title starts with "release(", reached through
@@ -106,8 +64,15 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (startsWith(github.event.pull_request.title, 'release(') &&
        github.workflow == 'Release PR')
-    needs: determine-runner
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    # This job is deliberately NOT routed through the determine-runner pool
+    # selector the other x86_64 jobs use. The self-hosted container pool cannot
+    # host it: rootless podman and the disposable Village stack do not come up
+    # inside those pool containers, so a pool landing leaves the harness
+    # t.Skip()ing and the assertion step below failing with no coverage
+    # (release PR run 35268401677, runner desktop-container-1). The warm stack
+    # is amd64-only, so the label is the amd64 Blacksmith runner and must never
+    # be an arm64 one.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - name: Checkout peasant
@@ -131,14 +96,12 @@ jobs:
           VILLAGE_REPO: ${{ github.workspace }}/_village
         run: make e2e-schema-parity
 
-      # Pin/assert the CI podman version for local<->CI parity. ubuntu-24.04 ships
-      # podman 4.9.x (apt). The stderr object-count regression and the
-      # status=dead filter break are both 4.9.x-shaped, and local podman 5.x does
-      # NOT reproduce them — so a runner-image bump that changes podman must fail
-      # loudly here and force a lockstep update of docs/e2e.md's local repro. The
-      # pin stays authoritative whichever runner determine-runner picked (the
-      # self-hosted container pool or the amd64 Blacksmith fallback), so a pool
-      # image that drifts off the 4.9.x floor fails loudly here too.
+      # Pin/assert the CI podman version for local<->CI parity. The pinned amd64
+      # Blacksmith runner ships podman 4.9.x (apt on ubuntu-24.04). The stderr
+      # object-count regression and the status=dead filter break are both
+      # 4.9.x-shaped, and local podman 5.x does NOT reproduce them — so a
+      # runner-image bump that changes podman must fail loudly here and force a
+      # lockstep update of docs/e2e.md's local repro.
       - name: Verify and pin podman version (local<->CI parity)
         env:
           EXPECTED_PODMAN_MAJOR_MINOR: "4.9"

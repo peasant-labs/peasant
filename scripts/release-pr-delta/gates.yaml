@@ -22,12 +22,6 @@ gates:
       - '^web/out/'              # the //go:embed all:web/out tree the CLI builds with
       - '^\.github/workflows/'   # the workflow-contract tests read these files
     children:
-      # The router job selects the podman driver's runner and is required like
-      # the rest: the driver reads its output, so a missing router leaves the
-      # gate without a runner and the suite without coverage. Its exactly-once
-      # guard skips it only on the standalone copy of a release PR, where the
-      # release-pr.yml-called copy is the single authority.
-      - name: determine-runner
       - name: full-stack push e2e (podman)
   - key: release_validate
     prefix: "release-validate (release PR) / "
