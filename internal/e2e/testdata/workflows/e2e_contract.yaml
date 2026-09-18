@@ -1,4 +1,4 @@
-expected_village_ref: 319be4358df9568164de774fceb715a92e2ab38f
+expected_village_ref: 4d48936be9be8e8c52ef2c04eaa5fcc6369ff82a
 e2e:
   required_triggers:
     - push
@@ -45,6 +45,15 @@ e2e:
       reason: a newly created sibling stack may still be starting
     - value: status=running
       reason: a running sibling stack must never be removed
+  # The warm-stack driver is pinned directly to the amd64 Blacksmith runner, not
+  # routed through determine-runner: rootless podman and the disposable Village
+  # stack do not come up inside the self-hosted pool containers, so a pool
+  # landing leaves the harness t.Skip()ing and the gate failing with no coverage.
+  # The harness provisions an amd64-only Village stack, so the label must never
+  # be an arm64 one.
+  driver_runner: blacksmith-4vcpu-ubuntu-2404
+  driver_forbidden_runner_substring: "-arm"
+  driver_forbidden_router: determine-runner
 release:
   parity_step: Verify schema module pin parity
   parity_run_contains: make e2e-schema-parity
@@ -165,6 +174,13 @@ release_validate:
     - workflow_call
   forbidden_triggers:
     - pull_request
+  # The snapshot producer is pinned directly to the amd64 Blacksmith runner, not
+  # routed through determine-runner: the pool keeps a runner's workspace between
+  # jobs and an earlier container run leaves root-owned dist/ that goreleaser's
+  # --clean cannot unlink. The install jobs still route through the router.
+  snapshot_job: snapshot
+  snapshot_runner: blacksmith-4vcpu-ubuntu-2404
+  snapshot_forbidden_router: determine-runner
 tests_workflow:
   triggers:
     - pull_request

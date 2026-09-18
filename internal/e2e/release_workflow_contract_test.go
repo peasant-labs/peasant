@@ -63,6 +63,9 @@ type e2eWorkflowContractFixture struct {
 		AssertedTests            nonEmptyStrings          `yaml:"asserted_tests"`
 		CleanupRequiredStatuses  nonEmptyStrings          `yaml:"cleanup_required_statuses"`
 		CleanupForbiddenStatuses []workflowForbiddenValue `yaml:"cleanup_forbidden_statuses"`
+		DriverRunner             string                   `yaml:"driver_runner"`
+		DriverForbiddenRunner    string                   `yaml:"driver_forbidden_runner_substring"`
+		DriverForbiddenRouter    string                   `yaml:"driver_forbidden_router"`
 	} `yaml:"e2e"`
 	Release struct {
 		ParityStep        string                 `yaml:"parity_step"`
@@ -91,9 +94,12 @@ type e2eWorkflowContractFixture struct {
 	} `yaml:"release_guard"`
 	ReusableCallers []reusableWorkflowCallerExpectation `yaml:"reusable_callers"`
 	ReleaseValidate struct {
-		Workflow          string          `yaml:"workflow"`
-		RequiredTriggers  nonEmptyStrings `yaml:"required_triggers"`
-		ForbiddenTriggers nonEmptyStrings `yaml:"forbidden_triggers"`
+		Workflow                string          `yaml:"workflow"`
+		RequiredTriggers        nonEmptyStrings `yaml:"required_triggers"`
+		ForbiddenTriggers       nonEmptyStrings `yaml:"forbidden_triggers"`
+		SnapshotJob             string          `yaml:"snapshot_job"`
+		SnapshotRunner          string          `yaml:"snapshot_runner"`
+		SnapshotForbiddenRouter string          `yaml:"snapshot_forbidden_router"`
 	} `yaml:"release_validate"`
 	TestsWorkflow struct {
 		Triggers      nonEmptyStrings `yaml:"triggers"`
@@ -249,6 +255,8 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.E2E.DriverStep == "" || fixture.E2E.DriverEnv.Key == "" || fixture.E2E.DriverEnv.Value == "" ||
 		len(fixture.E2E.DriverContains) != 3 ||
 		len(fixture.E2E.CleanupRequiredStatuses) != 2 || len(fixture.E2E.CleanupForbiddenStatuses) != 3 ||
+		fixture.E2E.DriverRunner == "" || fixture.E2E.DriverForbiddenRunner == "" ||
+		fixture.E2E.DriverForbiddenRouter == "" ||
 		fixture.Release.ParityStep == "" || fixture.Release.ParityRunContains == "" ||
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
@@ -258,6 +266,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
 		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
+		fixture.ReleaseValidate.SnapshotJob == "" || fixture.ReleaseValidate.SnapshotRunner == "" || fixture.ReleaseValidate.SnapshotForbiddenRouter == "" ||
 		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
 	}
@@ -420,6 +429,39 @@ func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
 		if yamlMappingValue(on, trigger) != nil {
 			t.Fatalf("release-validate: forbidden direct trigger %q is present", trigger)
 		}
+	}
+}
+
+// TestReleaseValidateSnapshotPinsTheAmd64Runner pins the snapshot producer's
+// runner. The self-hosted container pool keeps a runner's workspace between
+// jobs, and an earlier container run leaves root-owned dist/ that goreleaser's
+// --clean cannot unlink (release PR run 35268401677), so the producer is pinned
+// directly to the amd64 Blacksmith runner and must not route through
+// determine-runner. The install jobs keep the router; that job must stay
+// defined. Expectations live in testdata/workflows/e2e_contract.yaml.
+func TestReleaseValidateSnapshotPinsTheAmd64Runner(t *testing.T) {
+	fixture := loadE2EWorkflowContractFixture(t)
+	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseValidate.Workflow))
+	jobs := yamlMappingValue(doc, "jobs")
+	job := yamlMappingValue(jobs, fixture.ReleaseValidate.SnapshotJob)
+	if job == nil {
+		t.Fatalf("release-validate: workflow must define the %q job", fixture.ReleaseValidate.SnapshotJob)
+	}
+	runsOn := yamlMappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Value != fixture.ReleaseValidate.SnapshotRunner {
+		got := "<missing>"
+		if runsOn != nil {
+			got = runsOn.Value
+		}
+		t.Fatalf("release-validate: jobs.%s runs-on = %s, want the pinned amd64 runner %q", fixture.ReleaseValidate.SnapshotJob, got, fixture.ReleaseValidate.SnapshotRunner)
+	}
+	for _, need := range workflowNeedsValues(yamlMappingValue(job, "needs")) {
+		if need == fixture.ReleaseValidate.SnapshotForbiddenRouter {
+			t.Fatalf("release-validate: jobs.%s must not depend on %q; the pool workspace holds root-owned dist/", fixture.ReleaseValidate.SnapshotJob, need)
+		}
+	}
+	if yamlMappingValue(jobs, fixture.ReleaseValidate.SnapshotForbiddenRouter) == nil {
+		t.Fatalf("release-validate: the %q router must stay defined for the install jobs that run on the pool", fixture.ReleaseValidate.SnapshotForbiddenRouter)
 	}
 }
 
@@ -763,7 +805,10 @@ func TestE2EWorkflowContract(t *testing.T) {
 	}
 	assertStepBefore(t, steps, fixture.E2E.ParityStep, fixture.E2E.DriverStep)
 	assertStepBefore(t, steps, "Clean up stale e2e podman containers", fixture.E2E.DriverStep)
-	asserted := workflowStepRun(t, steps, "Assert asserted e2e tests ran and passed")
+	// The coverage assertions run in the SAME step as the driver: the runner
+	// does not share files written by one step with a later step, so a separate
+	// assert step could not read the captured log.
+	asserted := driver
 	for _, testName := range fixture.E2E.AssertedTests {
 		if !strings.Contains(asserted, "--- SKIP: "+testName) {
 			t.Fatalf("e2e: assertion step must fail when %s skips", testName)
@@ -775,8 +820,44 @@ func TestE2EWorkflowContract(t *testing.T) {
 	if !strings.Contains(asserted, "no tests to run") {
 		t.Fatal("e2e: assertion step must fail on no-tests output")
 	}
+	assertE2EWorkflowPinsThePodmanDriverRunner(t, doc, fixture)
 	assertWorkflowVillageRefsMatch(t, doc, fixture.ExpectedVillageRef)
 	assertTestsWorkflowTracksE2EChanges(t, fixture)
+}
+
+// assertE2EWorkflowPinsThePodmanDriverRunner pins the warm-stack driver's runner.
+// The harness provisions an amd64-only Village stack and needs rootless podman,
+// which the self-hosted container pool cannot provide: a pool landing leaves the
+// harness t.Skip()ing and the fail-closed assertion failing with no coverage
+// (release PR run 35268401677). The driver therefore runs directly on the amd64
+// Blacksmith runner, has no route through determine-runner, and is never pinned
+// to an arm64 label. Expectations live in testdata/workflows/e2e_contract.yaml.
+func assertE2EWorkflowPinsThePodmanDriverRunner(t *testing.T, doc *yaml.Node, fixture e2eWorkflowContractFixture) {
+	t.Helper()
+	jobs := yamlMappingValue(doc, "jobs")
+	job := yamlMappingValue(jobs, "e2e")
+	if job == nil {
+		t.Fatal("e2e: workflow must define jobs.e2e")
+	}
+	runsOn := yamlMappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Value != fixture.E2E.DriverRunner {
+		got := "<missing>"
+		if runsOn != nil {
+			got = runsOn.Value
+		}
+		t.Fatalf("e2e: jobs.e2e runs-on = %s, want the pinned amd64 runner %q", got, fixture.E2E.DriverRunner)
+	}
+	if strings.Contains(runsOn.Value, fixture.E2E.DriverForbiddenRunner) {
+		t.Fatalf("e2e: jobs.e2e runs-on = %q must not match %q; the warm-stack harness skips on an arm64 runner", runsOn.Value, fixture.E2E.DriverForbiddenRunner)
+	}
+	for _, need := range workflowNeedsValues(yamlMappingValue(job, "needs")) {
+		if need == fixture.E2E.DriverForbiddenRouter {
+			t.Fatalf("e2e: jobs.e2e must not depend on %q; the podman driver cannot run on the self-hosted container pool", need)
+		}
+	}
+	if yamlMappingValue(jobs, fixture.E2E.DriverForbiddenRouter) != nil {
+		t.Fatalf("e2e: workflow must not define a %q router; the podman driver runs directly on %q", fixture.E2E.DriverForbiddenRouter, fixture.E2E.DriverRunner)
+	}
 }
 
 func assertReleaseE2EWorkflowContract(t *testing.T) {

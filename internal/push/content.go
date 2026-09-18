@@ -137,6 +137,44 @@ func BuildPublishTranscriptContent(
 // detail in the publish envelope. The callback performs no network access and
 // mutates no store; hydration, folding, validation and envelope construction
 // all happen under the shared lock the snapshot boundary already holds.
+// mirrorDurablePublicationIdentity copies the active generation's durable
+// publication identity — the input-submission count and the graph mirrors (root
+// session, purpose, relationships) — onto the capture metadata before the
+// publish metadata part is assembled. The receiver compares those mirrors
+// against the durable detail and refuses any disagreement, so the metadata part
+// must carry exactly the same measured facts, including a measured zero that is
+// distinct from an absent count. A legacy session, or a store without the
+// managed snapshot surface, keeps the capture metadata unchanged.
+func mirrorDurablePublicationIdentity(ctx context.Context, candidateStore any, sessionID string, meta *ingest.UnifiedMetadata) {
+	if meta == nil {
+		return
+	}
+	reader, ok := candidateStore.(snapshotPublicationStore)
+	if !ok || !reader.GenerationSnapshotsSupported() {
+		return
+	}
+	// The snapshot read mirrors the exact values the durable detail will carry;
+	// a legacy snapshot (or a read error) leaves the capture metadata untouched
+	// and lets the content build decide the session's fate.
+	_ = reader.WithSessionSnapshot(ctx, schema.SessionID(sessionID), func(snapshot indexformat.ReadSnapshot) error {
+		if snapshot.Session.InputSubmissionCount == nil {
+			meta.Stats.InputSubmissionCount = nil
+		} else {
+			count := *snapshot.Session.InputSubmissionCount
+			meta.Stats.InputSubmissionCount = &count
+		}
+		if snapshot.Session.RootSessionID == nil {
+			meta.RootSessionID = nil
+		} else {
+			root := *snapshot.Session.RootSessionID
+			meta.RootSessionID = &root
+		}
+		meta.Purpose = snapshot.Session.Purpose
+		meta.Relationships = append([]schema.SessionRelationship(nil), snapshot.Session.Relationships...)
+		return nil
+	})
+}
+
 func buildSnapshotPublishContent(
 	ctx context.Context,
 	store snapshotPublicationStore,

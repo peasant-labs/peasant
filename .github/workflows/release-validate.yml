@@ -29,9 +29,9 @@ permissions:
 jobs:
   # Route the x86_64 and architecture-neutral packaging jobs to the self-hosted
   # container pool (rootless podman on the desktop; labels self-hosted/container),
-  # x86_64 runner pool, with a Blacksmith amd64 fallback when the pool is
-  # offline. `classify`, `nix-build`, the arm64 `deb` entries, and `macos-cask`
-  # keep their current runners.
+  # with a Blacksmith amd64 fallback when the pool is offline. `classify`,
+  # `snapshot`, `nix-build`, the arm64 `deb` entries, and `macos-cask` keep
+  # their current runners.
   determine-runner:
     name: determine-runner
     runs-on: ubuntu-latest
@@ -107,8 +107,13 @@ jobs:
   # Build the snapshot artifacts once; every install job consumes them.
   snapshot:
     name: goreleaser snapshot
-    needs: determine-runner
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    # Deliberately NOT routed through determine-runner. The self-hosted
+    # container pool keeps a runner's workspace between jobs, and an earlier
+    # container run leaves root-owned dist/ that goreleaser's --clean cannot
+    # unlink (EACCES: permission denied, unlink '.../dist/artifacts.json';
+    # release PR run 35268401677, runner desktop-container-4). The install jobs
+    # below keep the router: they download into a clean directory of their own.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: Checkout repository
