@@ -264,16 +264,27 @@ jobs:
         working-directory: ${{ env.SMOKE_DIR }}
         run: |
           set -uo pipefail
-          if ldd ./peasant 2>&1 | grep -q "not a dynamic executable"; then
-            echo "static OK (ldd: not a dynamic executable)"
-          elif file ./peasant | grep -q "statically linked"; then
-            echo "static OK (file: statically linked)"
-          else
-            echo "::error::peasant is not statically linked (CGO_ENABLED=0 expected)"
-            ldd ./peasant || true
-            file ./peasant
-            exit 1
-          fi
+          # Capture both probes before judging: `ldd` exits non-zero for a
+          # static binary (which `pipefail` would turn into a false failure),
+          # and some pool runners have no `file` (which must not fail the
+          # assertion while `ldd` already proved the binary static).
+          ldd_output="$(ldd ./peasant 2>&1 || true)"
+          file_output="$(file ./peasant 2>/dev/null || true)"
+          case "$ldd_output" in
+            *"not a dynamic executable"*)
+              echo "static OK (ldd: not a dynamic executable)"
+              exit 0
+              ;;
+          esac
+          case "$file_output" in
+            *"statically linked"*)
+              echo "static OK (file: statically linked)"
+              exit 0
+              ;;
+          esac
+          echo "::error::peasant is not statically linked (CGO_ENABLED=0 expected)"
+          printf 'ldd: %s\nfile: %s\n' "${ldd_output:-<no output>}" "${file_output:-<no output>}"
+          exit 1
 
       - name: Assert version matches the tag
         working-directory: ${{ env.SMOKE_DIR }}
