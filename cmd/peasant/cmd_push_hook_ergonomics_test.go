@@ -49,7 +49,7 @@ func TestPushCmd_RuntimeFailureIsActionableFromAHook(t *testing.T) {
 }
 
 // TestPushCmd_QuietDoesNotAnnounceAnUnconfiguredInstall holds --quiet to what it
-// promises: errors, and one final result line.
+// promises: errors, a waiting prompt request, and one final result line.
 //
 // Not having run kickstart is the DEFAULT state, not an error and not a result.
 // The notice printed on every commit and every push for every user in it, and
