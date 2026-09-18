@@ -280,9 +280,10 @@ func piReadVillageDetail(t *testing.T, base, key, id string) *schema.SessionDeta
 	t.Helper()
 	status, raw := villageAPIRequest(t, http.MethodGet, base, "/api/v1/transcripts/"+id+"/content", key, nil)
 	piEqual(t, http.StatusOK, status, "Village content read: "+string(raw))
-	detail, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	envelope, err := schema.DecodeTranscriptContentRaw(raw)
 	piNoError(t, err)
-	return &detail
+	piCheck(t, envelope.SessionDetail != nil, "Village content read must serve the TranscriptContent envelope")
+	return envelope.SessionDetail
 }
 
 func assertPiCiphertext(t *testing.T, stack harnessStack, stored legacyStorageSnapshot, plaintext []byte) {
