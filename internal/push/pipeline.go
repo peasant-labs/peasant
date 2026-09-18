@@ -910,6 +910,16 @@ func (p *Pipeline) pushSession(
 	redacted := p.redactor.RedactMetadata(&meta)
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
+
+	// Keep the metadata publication mirrors exact. The receiver compares the
+	// input-submission count and the graph mirrors (root session, purpose,
+	// relationships) against the durable detail's values and refuses a
+	// disagreement, and a measured zero is distinct from an absent count. The
+	// durable detail is hydrated from the active generation snapshot, so mirror
+	// that same snapshot identity here, before the metadata part is assembled. A
+	// legacy session, or a store without the managed snapshot surface, keeps
+	// the capture metadata unchanged.
+	mirrorDurablePublicationIdentity(ctx, p.store, sess.SessionID, &meta)
 	stage.next(perf.StagePushSessionLoad)
 
 	metrics := input.Quality

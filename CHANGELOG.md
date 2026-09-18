@@ -54,6 +54,12 @@ Release, which holds the signed artifacts and checksums.
   capability.
 
 ### Fixed
+- Published payloads derive the metadata publication mirrors — the
+  input-submission count and the graph identity (root session, purpose,
+  relationships) — from the same active generation snapshot as the durable
+  detail; previously the metadata part could omit or diverge from those values,
+  so a receiver could refuse an otherwise valid publish with a mirror
+  disagreement (#433).
 - Pi publications keep their recorded duration when publishing through the
   snapshot path; previously the duration was emitted as zero (#428).
 
