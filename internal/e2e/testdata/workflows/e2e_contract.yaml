@@ -142,6 +142,10 @@ reusable_callers:
         permissions:
           - key: contents
             value: read
+          - key: checks
+            value: read
+          - key: pull-requests
+            value: read
       - job: e2e
         uses: ./.github/workflows/e2e.yml
         needs: [validate, changes]
@@ -188,3 +192,16 @@ tests_workflow:
   required_paths:
     - .github/workflows/**
     - .github/release-guard.policy.yml
+  post_merge_evidence:
+    job: post-merge-evidence
+    job_if_condition: github.event_name == 'push'
+    required_permissions:
+      - key: checks
+        value: read
+      - key: pull-requests
+        value: read
+    output: skip
+    step: Prove the merged tree already passed the checks
+    step_id: evidence
+    command: scripts/post-merge-evidence
+    check_needs: post-merge-evidence

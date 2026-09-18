@@ -212,7 +212,11 @@ success, so this incident record is not an executable redispatch procedure.
      `nix build .#peasant`.
    - On a push, the `e2e` and `release-validate` matrices re-run only when the push
      touches their inputs or their previous run on this PR has not passed; `tests`
-     always runs. **Before merging, apply the `full-gate` label to the head and wait
+     always runs. A post-merge push to `develop`/`main` skips `Tests / make check`
+     only when the `post-merge-evidence` probe proves the merged squash tree is the
+     pull request head's tree and that head's latest `make check` attempt succeeded;
+     any ambiguity or API failure runs the job.
+   - **Before merging, apply the `full-gate` label to the head and wait
      for the complete matrix.** This step is mandatory but is not enforced by the
      merge or tag workflow: a skipped gate on the final head does not satisfy the
      release ceremony. Inspect the labeled `Release PR` run for the final SHA and

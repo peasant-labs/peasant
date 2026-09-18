@@ -102,8 +102,18 @@ type e2eWorkflowContractFixture struct {
 		SnapshotForbiddenRouter string          `yaml:"snapshot_forbidden_router"`
 	} `yaml:"release_validate"`
 	TestsWorkflow struct {
-		Triggers      nonEmptyStrings `yaml:"triggers"`
-		RequiredPaths nonEmptyStrings `yaml:"required_paths"`
+		Triggers          nonEmptyStrings `yaml:"triggers"`
+		RequiredPaths     nonEmptyStrings `yaml:"required_paths"`
+		PostMergeEvidence struct {
+			Job                 string                   `yaml:"job"`
+			JobIfCondition      string                   `yaml:"job_if_condition"`
+			RequiredPermissions []workflowEnvExpectation `yaml:"required_permissions"`
+			Output              string                   `yaml:"output"`
+			Step                string                   `yaml:"step"`
+			StepID              string                   `yaml:"step_id"`
+			Command             string                   `yaml:"command"`
+			CheckNeeds          string                   `yaml:"check_needs"`
+		} `yaml:"post_merge_evidence"`
 	} `yaml:"tests_workflow"`
 }
 
@@ -267,7 +277,15 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
 		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
 		fixture.ReleaseValidate.SnapshotJob == "" || fixture.ReleaseValidate.SnapshotRunner == "" || fixture.ReleaseValidate.SnapshotForbiddenRouter == "" ||
-		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
+		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 ||
+		fixture.TestsWorkflow.PostMergeEvidence.Job == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.JobIfCondition == "" ||
+		len(fixture.TestsWorkflow.PostMergeEvidence.RequiredPermissions) != 2 ||
+		fixture.TestsWorkflow.PostMergeEvidence.Output == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.Step == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.StepID == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.Command == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.CheckNeeds == "" {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(e2eAssertedTestsManifest, "asserted E2E tests")
@@ -288,7 +306,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		seenCallers[caller.Workflow] = struct{}{}
 		seenJobs := make(map[string]struct{}, len(caller.Jobs))
 		for jobIndex, job := range caller.Jobs {
-			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) != 1 {
+			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) == 0 {
 				t.Fatalf("e2e: reusable caller fixture %d job %d is incomplete: %+v", callerIndex, jobIndex, job)
 			}
 			if _, exists := seenJobs[job.Job]; exists {
@@ -823,6 +841,7 @@ func TestE2EWorkflowContract(t *testing.T) {
 	assertE2EWorkflowPinsThePodmanDriverRunner(t, doc, fixture)
 	assertWorkflowVillageRefsMatch(t, doc, fixture.ExpectedVillageRef)
 	assertTestsWorkflowTracksE2EChanges(t, fixture)
+	assertTestsWorkflowPostMergeEvidence(t, fixture)
 }
 
 // assertE2EWorkflowPinsThePodmanDriverRunner pins the warm-stack driver's runner.
@@ -957,6 +976,57 @@ func assertTestsWorkflowTracksE2EChanges(t *testing.T, fixture e2eWorkflowContra
 				t.Fatalf("e2e: tests workflow on.%s.paths missing %q", trigger, want)
 			}
 		}
+	}
+}
+
+// assertTestsWorkflowPostMergeEvidence pins the post-merge probe: the job runs
+// only on pushes, reads the checks and pull request APIs, publishes the `skip`
+// output from the tool step, and the `check` job gates on that output while
+// still depending on the probe job.
+func assertTestsWorkflowPostMergeEvidence(t *testing.T, fixture e2eWorkflowContractFixture) {
+	t.Helper()
+	expect := fixture.TestsWorkflow.PostMergeEvidence
+	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "tests.yml")
+	doc := readWorkflowDoc(t, path)
+	jobs := yamlMappingValue(doc, "jobs")
+	probe := yamlMappingValue(jobs, expect.Job)
+	if probe == nil {
+		t.Fatalf("e2e: tests workflow has no %q job", expect.Job)
+	}
+	if got := yamlMappingValue(probe, "if"); got == nil || !strings.Contains(got.Value, expect.JobIfCondition) {
+		t.Fatalf("e2e: tests workflow job %s if = %v, want it to contain %q", expect.Job, got, expect.JobIfCondition)
+	}
+	permissions := yamlMappingValue(probe, "permissions")
+	for _, want := range expect.RequiredPermissions {
+		if got := yamlMappingValue(permissions, want.Key); got == nil || got.Value != want.Value {
+			t.Fatalf("e2e: tests workflow job %s permissions.%s = %v, want %q", expect.Job, want.Key, got, want.Value)
+		}
+	}
+	if got := yamlMappingValue(yamlMappingValue(probe, "outputs"), expect.Output); got == nil || !strings.Contains(got.Value, "steps."+expect.StepID+".outputs") {
+		t.Fatalf("e2e: tests workflow job %s outputs.%s = %v, want it to reference steps.%s.outputs", expect.Job, expect.Output, got, expect.StepID)
+	}
+	steps := yamlMappingValue(probe, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatalf("e2e: tests workflow job %s must define a steps sequence", expect.Job)
+	}
+	if run := workflowStepRun(t, steps.Content, expect.Step); !strings.Contains(run, expect.Command) {
+		t.Fatalf("e2e: tests workflow step %q run does not invoke %q", expect.Step, expect.Command)
+	}
+	check := yamlMappingValue(jobs, "check")
+	if check == nil {
+		t.Fatal("e2e: tests workflow has no check job")
+	}
+	needFound := false
+	for _, need := range workflowNeedsValues(yamlMappingValue(check, "needs")) {
+		if need == expect.CheckNeeds {
+			needFound = true
+		}
+	}
+	if !needFound {
+		t.Fatalf("e2e: tests workflow check job must need %q", expect.CheckNeeds)
+	}
+	if got := yamlMappingValue(check, "if"); got == nil || !strings.Contains(got.Value, "needs."+expect.Job+".outputs."+expect.Output) {
+		t.Fatalf("e2e: tests workflow check job if = %v, want it to gate on needs.%s.outputs.%s", got, expect.Job, expect.Output)
 	}
 }
 
