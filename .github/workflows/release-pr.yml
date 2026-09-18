@@ -136,6 +136,11 @@ jobs:
        (github.event.action == 'labeled' && github.event.label.name == 'full-gate'))
     permissions:
       contents: read
+      # The post-merge evidence job in the called workflow reads check runs
+      # and pull request associations; a called job's permissions cannot
+      # exceed the caller's grant, so the read scopes must pass through here.
+      checks: read
+      pull-requests: read
     # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
     # secrets do not cross a reusable-workflow call unless passed explicitly.
     secrets: inherit

@@ -142,6 +142,10 @@ reusable_callers:
         permissions:
           - key: contents
             value: read
+          - key: checks
+            value: read
+          - key: pull-requests
+            value: read
       - job: e2e
         uses: ./.github/workflows/e2e.yml
         needs: [validate, changes]
