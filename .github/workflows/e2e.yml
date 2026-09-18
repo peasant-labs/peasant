@@ -163,58 +163,48 @@ jobs:
         env:
           VILLAGE_REPO: ${{ github.workspace }}/_village
         run: |
+          set +e
           set -o pipefail
-          E2E_MEMORY_MODE=external make e2e E2E_TEST_FLAGS=-v 2>&1 | tee "$GITHUB_WORKSPACE/e2e.log"
-
-      # The harness t.Skip()s (podman/village/image-pull issues) rather than
-      # failing — which would pass the job with NO real coverage. Fail loudly
-      # unless the asserted e2e produced a positive PASS line, so a misconfigured
-      # runner or empty test match is visible.
-      - name: Assert asserted e2e tests ran and passed
-        if: always()
-        run: |
-          echo "captured e2e log tail:"; tail -5 "$GITHUB_WORKSPACE/e2e.log" || true
-          if grep -qi 'no tests to run' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::go test reported no tests to run; asserted e2e tests did not execute."
-            exit 1
+          log="$GITHUB_WORKSPACE/e2e.log"
+          E2E_MEMORY_MODE=external make e2e E2E_TEST_FLAGS=-v 2>&1 | tee "$log"
+          test_status=${PIPESTATUS[0]}
+          echo "captured e2e log tail:"; tail -5 "$log" || true
+          assert_status=0
+          fail() { echo "::error::$1"; assert_status=1; }
+          if grep -qi 'no tests to run' "$log"; then
+            fail "go test reported no tests to run; asserted e2e tests did not execute."
           fi
-          if grep -qE '^--- SKIP: TestSkipGateE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestSkipGateE2E was SKIPPED — podman/village/network setup is incomplete; no e2e coverage ran."
-            exit 1
+          if grep -qE '^--- SKIP: TestSkipGateE2E' "$log"; then
+            fail "TestSkipGateE2E was SKIPPED — podman/village/network setup is incomplete; no e2e coverage ran."
           fi
-          if ! grep -qE '^--- PASS: TestSkipGateE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestSkipGateE2E did not produce a positive PASS line; no asserted e2e coverage was proven."
-            exit 1
+          if ! grep -qE '^--- PASS: TestSkipGateE2E' "$log"; then
+            fail "TestSkipGateE2E did not produce a positive PASS line; no asserted e2e coverage was proven."
           fi
-          if grep -qE '^--- SKIP: TestPullRoundTripE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestPullRoundTripE2E was SKIPPED — pull regression coverage did not run."
-            exit 1
+          if grep -qE '^--- SKIP: TestPullRoundTripE2E' "$log"; then
+            fail "TestPullRoundTripE2E was SKIPPED — pull regression coverage did not run."
           fi
-          if ! grep -qE '^--- PASS: TestPullRoundTripE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestPullRoundTripE2E did not produce a positive PASS line; pull regression coverage was not proven."
-            exit 1
+          if ! grep -qE '^--- PASS: TestPullRoundTripE2E' "$log"; then
+            fail "TestPullRoundTripE2E did not produce a positive PASS line; pull regression coverage was not proven."
           fi
-          if grep -qE '^--- SKIP: TestHarnessRefreshE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestHarnessRefreshE2E was SKIPPED — warm-stack refresh coverage did not run."
-            exit 1
+          if grep -qE '^--- SKIP: TestHarnessRefreshE2E' "$log"; then
+            fail "TestHarnessRefreshE2E was SKIPPED — warm-stack refresh coverage did not run."
           fi
-          if ! grep -qE '^--- PASS: TestHarnessRefreshE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestHarnessRefreshE2E did not produce a positive PASS line; refresh regression coverage was not proven."
-            exit 1
+          if ! grep -qE '^--- PASS: TestHarnessRefreshE2E' "$log"; then
+            fail "TestHarnessRefreshE2E did not produce a positive PASS line; refresh regression coverage was not proven."
           fi
-          if grep -qE '^--- SKIP: TestPublicationConvergenceE2E' "$GITHUB_WORKSPACE/e2e.log" || ! grep -qE '^--- PASS: TestPublicationConvergenceE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestPublicationConvergenceE2E did not run and pass."
-            exit 1
+          if grep -qE '^--- SKIP: TestPublicationConvergenceE2E' "$log" || ! grep -qE '^--- PASS: TestPublicationConvergenceE2E' "$log"; then
+            fail "TestPublicationConvergenceE2E did not run and pass."
           fi
-          if grep -qE '^--- SKIP: TestPiRoundTripE2E' "$GITHUB_WORKSPACE/e2e.log" || ! grep -qE '^--- PASS: TestPiRoundTripE2E' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::TestPiRoundTripE2E did not run and pass; check the disposable Village stack and matching schema pins, then rerun native Pi preservation."
-            exit 1
+          if grep -qE '^--- SKIP: TestPiRoundTripE2E' "$log" || ! grep -qE '^--- PASS: TestPiRoundTripE2E' "$log"; then
+            fail "TestPiRoundTripE2E did not run and pass; check the disposable Village stack and matching schema pins, then rerun native Pi preservation."
           fi
-          if grep -qE '^--- SKIP: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' "$GITHUB_WORKSPACE/e2e.log" || ! grep -qE '^--- PASS: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::joined post-commit publication evidence did not run and pass."
-            exit 1
+          if grep -qE '^--- SKIP: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' "$log" || ! grep -qE '^--- PASS: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' "$log"; then
+            fail "joined post-commit publication evidence did not run and pass."
           fi
-          if grep -qE '^--- SKIP: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' "$GITHUB_WORKSPACE/e2e.log" || ! grep -qE '^--- PASS: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' "$GITHUB_WORKSPACE/e2e.log"; then
-            echo "::error::joined pre-push refusal evidence did not run and pass."
-            exit 1
+          if grep -qE '^--- SKIP: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' "$log" || ! grep -qE '^--- PASS: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' "$log"; then
+            fail "joined pre-push refusal evidence did not run and pass."
           fi
+          if [ "$test_status" -ne 0 ]; then
+            exit "$test_status"
+          fi
+          exit "$assert_status"
