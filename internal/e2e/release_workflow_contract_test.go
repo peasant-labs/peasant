@@ -805,7 +805,10 @@ func TestE2EWorkflowContract(t *testing.T) {
 	}
 	assertStepBefore(t, steps, fixture.E2E.ParityStep, fixture.E2E.DriverStep)
 	assertStepBefore(t, steps, "Clean up stale e2e podman containers", fixture.E2E.DriverStep)
-	asserted := workflowStepRun(t, steps, "Assert asserted e2e tests ran and passed")
+	// The coverage assertions run in the SAME step as the driver: the runner
+	// does not share files written by one step with a later step, so a separate
+	// assert step could not read the captured log.
+	asserted := driver
 	for _, testName := range fixture.E2E.AssertedTests {
 		if !strings.Contains(asserted, "--- SKIP: "+testName) {
 			t.Fatalf("e2e: assertion step must fail when %s skips", testName)
