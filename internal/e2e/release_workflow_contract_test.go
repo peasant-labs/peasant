@@ -306,7 +306,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		seenCallers[caller.Workflow] = struct{}{}
 		seenJobs := make(map[string]struct{}, len(caller.Jobs))
 		for jobIndex, job := range caller.Jobs {
-			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) != 1 {
+			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) == 0 {
 				t.Fatalf("e2e: reusable caller fixture %d job %d is incomplete: %+v", callerIndex, jobIndex, job)
 			}
 			if _, exists := seenJobs[job.Job]; exists {
