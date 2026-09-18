@@ -2,7 +2,10 @@ name: Tests
 
 # Runs the peasant quality gate (`make check`: gofmt + go vet + ast-grep +
 # `go test`, incl. the versioned back-compat golden corpus consumed from the
-# schema module) on PRs and pushes to the long-lived branches. The race detector
+# schema module) on PRs and pushes to the long-lived branches. A post-merge push
+# skips `make check` when the post-merge-evidence probe proves the merged tree
+# already passed it on the pull request; everything the probe cannot prove runs
+# it. The race detector
 # is currently disabled on this gate; see the check job for the re-enable note.
 # Uses the project's own nix dev shell so the toolchain (Go, ast-grep, …) matches
 # local exactly.
@@ -142,6 +145,43 @@ jobs:
           CHOSEN: ${{ steps.pick.outputs.runner }}
         run: 'echo "chosen: $CHOSEN"'
 
+  # A push that squashes a pull request already validated by `make check` does
+  # not repeat the job. The probe proves the pushed tree is the tested pull
+  # request head and that the head carries a successful GitHub Actions
+  # `make check`; everything it cannot prove runs the gate. See
+  # scripts/post-merge-evidence.
+  post-merge-evidence:
+    name: post-merge evidence
+    if: github.event_name == 'push'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+    outputs:
+      skip: ${{ steps.evidence.outputs.skip }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Prove the merged tree already passed the checks
+        id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          go run ./scripts/post-merge-evidence
+          -head "${{ github.sha }}"
+          -repo "${{ github.repository }}"
+
   # Exactly-once contract: every job below carries the same guard so the
   # path-filtered standalone run skips release(...) PRs, where release-pr.yml
   # calls this workflow as the single authority. Inside a called reusable
@@ -150,10 +190,16 @@ jobs:
   # guard on EVERY job: one unguarded job re-creates the cancellation race.
   check:
     name: make check
+    # The probe governs only the push runs; a skipped or failed probe runs the
+    # gate, and the release-PR guard stays intact for every event.
+    needs: post-merge-evidence
     if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
+      !cancelled() &&
+      (needs.post-merge-evidence.result != 'success' ||
+       needs.post-merge-evidence.outputs.skip != 'true') &&
+      (github.event_name != 'pull_request' ||
+       !startsWith(github.event.pull_request.title, 'release(') ||
+       github.workflow == 'Release PR')
     # The race detector is disabled on this gate for now: the release race suite
     # does not fit the 30-minute budget even on 4 vCPU. cmd/peasant alone is an
     # 18-minute race run and the full suite needs ~40 minutes, so the gate runs
