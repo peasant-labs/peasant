@@ -26,6 +26,9 @@ var manifestFixtureBytes []byte
 //go:embed testdata/manifest_policy.yaml
 var manifestPolicyBytes []byte
 
+//go:embed testdata/reusable_calls.yaml
+var reusableCallsBytes []byte
+
 const githubActionsSlug = "github-actions"
 
 type deltaFixture struct {
@@ -318,6 +321,7 @@ func TestManifestOptionalPartitionPolicy(t *testing.T) {
 
 type workflowJob struct {
 	Name     string `yaml:"name"`
+	Uses     string `yaml:"uses"`
 	Strategy struct {
 		Matrix map[string]any `yaml:"matrix"`
 	} `yaml:"strategy"`
@@ -328,6 +332,38 @@ type workflowDoc struct {
 }
 
 var matrixReference = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_.-]+)\s*\}\}`)
+
+// reusableCalls maps a reusable-workflow `uses` value to the job names the
+// called workflow defines. GitHub names the resulting check runs
+// "<caller> / <called job>", so the called names cannot be read from this
+// repository; the fixture declares them.
+type reusableCalls map[string][]string
+
+// loadReusableCalls parses the called-job manifest and rejects an entry that
+// names no job, so a malformed fixture fails loudly.
+func loadReusableCalls(t *testing.T) reusableCalls {
+	t.Helper()
+	var manifest struct {
+		Calls reusableCalls `yaml:"calls"`
+	}
+	if err := yaml.Unmarshal(reusableCallsBytes, &manifest); err != nil {
+		t.Fatalf("parse testdata/reusable_calls.yaml: %v", err)
+	}
+	if len(manifest.Calls) == 0 {
+		t.Fatal("testdata/reusable_calls.yaml must define calls")
+	}
+	for uses, jobs := range manifest.Calls {
+		if strings.TrimSpace(uses) == "" || len(jobs) == 0 {
+			t.Fatalf("testdata/reusable_calls.yaml entry %q must name at least one called job", uses)
+		}
+		for _, job := range jobs {
+			if strings.TrimSpace(job) == "" {
+				t.Fatalf("testdata/reusable_calls.yaml entry %q has an empty called job", uses)
+			}
+		}
+	}
+	return manifest.Calls
+}
 
 func workflowJobs(t *testing.T, path string) map[string]workflowJob {
 	t.Helper()
@@ -345,22 +381,49 @@ func workflowJobs(t *testing.T, path string) map[string]workflowJob {
 	return doc.Jobs
 }
 
-// expandJobNames renders a job's display name, expanding the matrix variables
-// of its strategy into every concrete value combination.
-func expandJobNames(job workflowJob) []string {
-	if !strings.Contains(job.Name, "${{ matrix.") {
-		return []string{job.Name}
+// expandJobNames renders every check-run name a job produces. A job is named by
+// its display name, or by its id when it declares none. A job that calls a
+// reusable workflow produces one check run per called job, named
+// "<caller> / <called job>". Matrix variables expand into every concrete value
+// combination. An undeclared reusable call fails: the name cannot be guessed.
+func expandJobNames(t *testing.T, jobID string, job workflowJob, calls reusableCalls) []string {
+	t.Helper()
+	base := job.Name
+	if strings.TrimSpace(base) == "" {
+		base = jobID
+	}
+	names := expandMatrixNames(base, job.Strategy.Matrix)
+	if job.Uses == "" {
+		return names
+	}
+	called, ok := calls[job.Uses]
+	if !ok {
+		t.Fatalf("job %q calls %q with no entry in testdata/reusable_calls.yaml", jobID, job.Uses)
+	}
+	var expanded []string
+	for _, callerName := range names {
+		for _, calledJob := range called {
+			expanded = append(expanded, callerName+" / "+calledJob)
+		}
+	}
+	return expanded
+}
+
+// expandMatrixNames expands the matrix variables of a single job name.
+func expandMatrixNames(name string, matrix map[string]any) []string {
+	if !strings.Contains(name, "${{ matrix.") {
+		return []string{name}
 	}
 	var names []string
 	seen := make(map[string]bool)
-	for _, variables := range matrixCombinations(job.Strategy.Matrix) {
-		name := matrixReference.ReplaceAllStringFunc(job.Name, func(match string) string {
+	for _, variables := range matrixCombinations(matrix) {
+		expanded := matrixReference.ReplaceAllStringFunc(name, func(match string) string {
 			parts := matrixReference.FindStringSubmatch(match)
 			return variables[parts[1]]
 		})
-		if !seen[name] {
-			seen[name] = true
-			names = append(names, name)
+		if !seen[expanded] {
+			seen[expanded] = true
+			names = append(names, expanded)
 		}
 	}
 	return names
@@ -443,11 +506,12 @@ func flattenVariables(prefix string, values map[string]any, into map[string]stri
 }
 
 // TestManifestMatchesWorkflows pins the required child names (and the caller
-// prefixes) to the jobs the workflows actually define, with matrix expansion.
-// This is the required-NAME guard: a child removed from gates.yaml fails here
-// instead of silently weakening the evidence.
+// prefixes) to the jobs the workflows actually define, with matrix expansion
+// and reusable-call nesting. This is the required-NAME guard: a child removed
+// from gates.yaml fails here instead of silently weakening the evidence.
 func TestManifestMatchesWorkflows(t *testing.T) {
 	gates := loadTestGates(t)
+	calls := loadReusableCalls(t)
 	root := filepath.Join("..", "..")
 	caller := workflowJobs(t, filepath.Join(root, ".github", "workflows", "release-pr.yml"))
 	plans := []struct {
@@ -468,9 +532,15 @@ func TestManifestMatchesWorkflows(t *testing.T) {
 			if want := callerJob.Name + " / "; g.Prefix != want {
 				t.Errorf("gate %s prefix = %q, want %q (caller job name)", g.Key, g.Prefix, want)
 			}
+			jobs := workflowJobs(t, filepath.Join(root, plan.calledFile))
+			jobIDs := make([]string, 0, len(jobs))
+			for jobID := range jobs {
+				jobIDs = append(jobIDs, jobID)
+			}
+			sort.Strings(jobIDs)
 			var want []string
-			for _, job := range workflowJobs(t, filepath.Join(root, plan.calledFile)) {
-				want = append(want, expandJobNames(job)...)
+			for _, jobID := range jobIDs {
+				want = append(want, expandJobNames(t, jobID, jobs[jobID], calls)...)
 			}
 			got := make([]string, 0, len(g.Children))
 			for _, child := range g.Children {
