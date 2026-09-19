@@ -740,6 +740,23 @@ func BaseConfig() *Config {
 //
 // Users who want a config file should run `peasant kickstart`.
 func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, error) {
+	return load(path, fs, git, nil)
+}
+
+// LoadWithSourcePathFallback loads and validates configuration after filling an
+// empty path list for one selected source. It is used by harness-scoped native
+// discovery, where the selected harness's documented default must satisfy the
+// normal enabled-source validation rule.
+func LoadWithSourcePathFallback(path string, fs ingest.FileSystem, git ingest.GitResolver, harness defaults.Harness, fallback defaults.SourcePath) (*Config, error) {
+	return load(path, fs, git, &sourcePathFallback{harness: harness, path: fallback})
+}
+
+type sourcePathFallback struct {
+	harness defaults.Harness
+	path    defaults.SourcePath
+}
+
+func load(path string, fs ingest.FileSystem, git ingest.GitResolver, fallback *sourcePathFallback) (*Config, error) {
 	if path == "" {
 		return LoadDefaults(context.Background(), git), nil
 	}
@@ -760,14 +777,14 @@ func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, e
 				if err != nil {
 					return nil, fmt.Errorf("config: read migrated %q: %w", path, err)
 				}
-				return Parse(data)
+				return parse(data, fallback)
 			}
 			return LoadDefaults(context.Background(), git), nil
 		}
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 
-	return Parse(data)
+	return parse(data, fallback)
 }
 
 // LoadDefaults returns a Config populated with sensible production defaults.
@@ -790,10 +807,25 @@ func LoadDefaults(ctx context.Context, git ingest.GitResolver) *Config {
 // Parse decodes raw YAML bytes into a Config, applies missing-field defaults, and
 // validates the result. Returns an error if any field fails validation.
 func Parse(data []byte) (*Config, error) {
+	return parse(data, nil)
+}
+
+// ParseWithSourcePathFallback parses and validates configuration after filling
+// an empty path list for one selected source.
+func ParseWithSourcePathFallback(data []byte, harness defaults.Harness, fallback defaults.SourcePath) (*Config, error) {
+	return parse(data, &sourcePathFallback{harness: harness, path: fallback})
+}
+
+func parse(data []byte, fallback *sourcePathFallback) (*Config, error) {
 	cfg := BaseConfig()
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
+	}
+	if fallback != nil {
+		if provider, ok := cfg.Sources.Provider(fallback.harness); ok && len(provider.Paths) == 0 {
+			provider.Paths = []string{fallback.path.String()}
+		}
 	}
 
 	if err := validate(cfg); err != nil {

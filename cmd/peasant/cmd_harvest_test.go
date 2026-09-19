@@ -312,21 +312,21 @@ func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 	}
 }
 
-// TestHarvestCmd_SourceHarnessWithoutPath verifies that passing --source-harness
-// without --source-path returns a clear error.
-func TestHarvestCmd_SourceHarnessWithoutPath(t *testing.T) {
+// TestApplyDefaultSourcePath verifies harness-only discovery preserves a
+// configured path and fills an empty path list from the documented default.
+func TestApplyDefaultSourcePath(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	_, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-harness=claude-code",
-		"--output=" + tmpDir,
-		"--dry-run",
-	})
-	if err == nil {
-		t.Fatal("expected error when --source-harness given without --source-path, got nil")
+	cfg := &config.Config{}
+	cfg.Sources.Codex.Paths = []string{"/configured/codex"}
+	applyDefaultSourcePath(cfg, defaults.HarnessCodex)
+	if got := cfg.Sources.Codex.Paths; len(got) != 1 || got[0] != "/configured/codex" {
+		t.Fatalf("configured paths changed: %v", got)
 	}
-	if !strings.Contains(err.Error(), "--source-harness requires --source-path") {
-		t.Errorf("error should mention '--source-harness requires --source-path', got: %v", err)
+
+	cfg.Sources.Codex.Paths = nil
+	applyDefaultSourcePath(cfg, defaults.HarnessCodex)
+	if got := cfg.Sources.Codex.Paths; len(got) != 1 || got[0] != defaults.DefaultCodexPath.String() {
+		t.Fatalf("default paths = %v, want %q", got, defaults.DefaultCodexPath)
 	}
 }
 

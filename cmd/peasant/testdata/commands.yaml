@@ -67,7 +67,7 @@ commands:
         output_contains: ["harvest"]
       - args: ["--source-harness=nosuchprovider"]
         expect_error: true
-        error_contains: ["--source-harness requires --source-path"]
+        error_contains: ["unknown harness"]
 
   - name: Web
     use: web
