@@ -31,11 +31,13 @@ const (
 	// routedRunnerExpression is the runs-on a routed reusable workflow uses to
 	// place an x86_64 job on the runner that its determine-runner job selects.
 	routedRunnerExpression = "${{ fromJson(needs.determine-runner.outputs.runner) }}"
-	// runnerRoutingSecret is read by the inline determine-runner job in every
-	// reusable workflow that routes runners; the job exports it as GH_TOKEN for
-	// its paginated runner-status query. Secrets do not cross a reusable-workflow
-	// call unless the caller passes them explicitly.
+	// runnerRoutingSecret is read by the shared runner-router reusable workflow
+	// that every routed workflow calls from its determine-runner job. Secrets do
+	// not cross a reusable-workflow call unless the caller passes them
+	// explicitly, so each call maps this secret to the router's input.
 	runnerRoutingSecret = "${{ secrets.RUNNER_STATUS_TOKEN }}"
+	// localWorkflowPrefix marks a call to a reusable workflow in this repository.
+	localWorkflowPrefix = "./.github/workflows/"
 )
 
 type releaseValidateRPMFixture struct {
@@ -93,6 +95,12 @@ type e2eWorkflowContractFixture struct {
 		CheckoutFetchTags      string                   `yaml:"checkout_fetch_tags"`
 	} `yaml:"release_guard"`
 	ReusableCallers []reusableWorkflowCallerExpectation `yaml:"reusable_callers"`
+	Router          struct {
+		Workflow        string          `yaml:"workflow"`
+		Ref             string          `yaml:"ref"`
+		SecretKey       string          `yaml:"secret_key"`
+		RoutedWorkflows nonEmptyStrings `yaml:"routed_workflows"`
+	} `yaml:"router"`
 	ReleaseValidate struct {
 		Workflow                string          `yaml:"workflow"`
 		RequiredTriggers        nonEmptyStrings `yaml:"required_triggers"`
@@ -275,7 +283,9 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		len(fixture.ReleaseGuard.RequiredJobPermissions) != 1 || len(fixture.ReleaseGuard.RequiredJobEnv) != 1 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
-		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
+		len(fixture.ReusableCallers) != 2 ||
+		fixture.Router.Workflow == "" || fixture.Router.Ref == "" || fixture.Router.SecretKey == "" || len(fixture.Router.RoutedWorkflows) == 0 ||
+		fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
 		fixture.ReleaseValidate.SnapshotJob == "" || fixture.ReleaseValidate.SnapshotRunner == "" || fixture.ReleaseValidate.SnapshotForbiddenRouter == "" ||
 		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 ||
 		fixture.TestsWorkflow.PostMergeEvidence.Job == "" ||
@@ -392,7 +402,8 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 		}
 		actualReusableJobs := 0
 		for i := 0; i+1 < len(jobs.Content); i += 2 {
-			if yamlMappingValue(jobs.Content[i+1], "uses") != nil {
+			uses := yamlMappingValue(jobs.Content[i+1], "uses")
+			if uses != nil && strings.HasPrefix(uses.Value, localWorkflowPrefix) {
 				actualReusableJobs++
 			}
 		}
@@ -426,6 +437,34 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 				}
 			}
 			assertYAMLMappingExact(t, yamlMappingValue(job, "permissions"), expectation.Permissions, caller.Workflow+" reusable job "+expectation.Job+" permissions")
+		}
+	}
+}
+
+// TestRoutedWorkflowsCallTheSharedRouter pins every routed workflow to the
+// published reusable router: the inline gh-api router must be deleted, the call
+// must pin the tag, and the routing secret must be mapped explicitly.
+func TestRoutedWorkflowsCallTheSharedRouter(t *testing.T) {
+	fixture := loadE2EWorkflowContractFixture(t)
+	wantUses := fixture.Router.Workflow + "@" + fixture.Router.Ref
+	for _, relativePath := range fixture.Router.RoutedWorkflows {
+		doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), relativePath))
+		job := yamlMappingValue(yamlMappingValue(doc, "jobs"), "determine-runner")
+		if job == nil {
+			t.Fatalf("%s: must define jobs.determine-runner", relativePath)
+		}
+		uses := yamlMappingValue(job, "uses")
+		if uses == nil || uses.Value != wantUses {
+			t.Fatalf("%s: jobs.determine-runner.uses = %v, want %q", relativePath, uses, wantUses)
+		}
+		token := yamlMappingValue(yamlMappingValue(job, "secrets"), fixture.Router.SecretKey)
+		if token == nil || token.Value != runnerRoutingSecret {
+			t.Fatalf("%s: jobs.determine-runner must map %s: %s", relativePath, fixture.Router.SecretKey, runnerRoutingSecret)
+		}
+		for _, forbidden := range []string{"steps", "outputs", "runs-on"} {
+			if yamlMappingValue(job, forbidden) != nil {
+				t.Fatalf("%s: jobs.determine-runner must not define %s; the inline router must be deleted", relativePath, forbidden)
+			}
 		}
 	}
 }
@@ -1127,42 +1166,40 @@ func assertReusableWorkflowCallerSecrets(t *testing.T) {
 				t.Fatalf("%s: workflow must define reusable job %q", caller.Workflow, expectation.Job)
 			}
 			secrets := yamlMappingValue(job, "secrets")
-			if calledWorkflowRoutesRunners(t, expectation) {
+			if calledWorkflowRoutesRunners(t, fixture, expectation) {
 				if secrets == nil || secrets.Kind != yaml.ScalarNode || secrets.Value != "inherit" {
-					t.Fatalf("%s: reusable job %q must pass `secrets: inherit`; %s routes runners through determine-runner, which reads %s", caller.Workflow, expectation.Job, expectation.Uses, runnerRoutingSecret)
+					t.Fatalf("%s: reusable job %q must pass `secrets: inherit`; %s routes runners through the shared router, which reads %s", caller.Workflow, expectation.Job, expectation.Uses, runnerRoutingSecret)
 				}
 				continue
 			}
 			if secrets != nil {
-				t.Fatalf("%s: reusable job %q must not declare a secrets mapping or scalar; %s does not route runners through determine-runner", caller.Workflow, expectation.Job, expectation.Uses)
+				t.Fatalf("%s: reusable job %q must not declare a secrets mapping or scalar; %s does not route runners through the shared router", caller.Workflow, expectation.Job, expectation.Uses)
 			}
 		}
 	}
 }
 
 // calledWorkflowRoutesRunners reports whether the reusable workflow that a
-// caller job invokes defines a determine-runner job that runs the inline router
-// and exports the routing secret as GH_TOKEN. Only those callers may pass
-// `secrets: inherit`.
-func calledWorkflowRoutesRunners(t *testing.T, expectation workflowJobPermissionsExpectation) bool {
+// caller job invokes defines a determine-runner job that calls the shared
+// runner-router reusable workflow and maps the routing secret explicitly. Only
+// those callers may pass `secrets: inherit`.
+func calledWorkflowRoutesRunners(t *testing.T, fixture e2eWorkflowContractFixture, expectation workflowJobPermissionsExpectation) bool {
 	t.Helper()
-	const localWorkflowPrefix = "./.github/workflows/"
 	if !strings.HasPrefix(expectation.Uses, localWorkflowPrefix) {
 		t.Fatalf("reusable job %q uses %q, which is not a local reusable workflow", expectation.Job, expectation.Uses)
 	}
 	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", strings.TrimPrefix(expectation.Uses, localWorkflowPrefix))
 	determineRunner := yamlMappingValue(yamlMappingValue(readWorkflowDoc(t, path), "jobs"), "determine-runner")
-	steps := yamlMappingValue(determineRunner, "steps")
-	if steps == nil || steps.Kind != yaml.SequenceNode {
+	if determineRunner == nil {
 		return false
 	}
-	for _, step := range steps.Content {
-		token := yamlMappingValue(yamlMappingValue(step, "env"), "GH_TOKEN")
-		if token != nil && token.Value == runnerRoutingSecret {
-			return true
-		}
+	wantUses := fixture.Router.Workflow + "@" + fixture.Router.Ref
+	uses := yamlMappingValue(determineRunner, "uses")
+	if uses == nil || uses.Value != wantUses {
+		t.Fatalf("%s: jobs.determine-runner.uses = %v, want the shared router %q; the inline router must be deleted", path, uses, wantUses)
 	}
-	return false
+	token := yamlMappingValue(yamlMappingValue(determineRunner, "secrets"), fixture.Router.SecretKey)
+	return token != nil && token.Value == runnerRoutingSecret
 }
 
 func e2eWorkflowSteps(t *testing.T, doc *yaml.Node) []*yaml.Node {

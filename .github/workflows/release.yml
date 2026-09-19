@@ -30,37 +30,15 @@ permissions: {}
 jobs:
   # Route the x86_64 release and smoke jobs to the self-hosted container pool
   # (rootless podman on the desktop; labels self-hosted/container), with a
-  # Blacksmith amd64 fallback when no pool runner is online. `guard`,
-  # `nix-vendor-hash`, the arm64 `smoke` entry, and `macos-cask-smoke` keep
-  # their current runners.
+  # Blacksmith amd64 fallback when no pool runner is online. Routing comes from
+  # the shared runner-router reusable workflow. `guard`, `nix-vendor-hash`, the
+  # arm64 `smoke` entry, and `macos-cask-smoke` keep their current runners.
   determine-runner:
-    name: determine-runner
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      runner: ${{ steps.pick.outputs.runner }}
-    steps:
-      - name: Pick a runner
-        id: pick
-        env:
-          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-        run: |
-          set -euo pipefail
-          if ! online=$(gh api /orgs/peasant-labs/actions/runners --paginate \
-              --jq '.runners[] | select(.status == "online") | select(any(.labels[]; .name == "container")) | .name' 2>/dev/null | wc -l); then
-            echo "::warning::runner availability query failed; using the fallback"
-            online=0
-          fi
-          echo "online runners: ${online}"
-          if [ "${online}" -gt 0 ]; then
-            echo 'runner=["self-hosted","container"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runner=["blacksmith-4vcpu-ubuntu-2404"]' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Report chosen runner
-        env:
-          CHOSEN: ${{ steps.pick.outputs.runner }}
-        run: 'echo "chosen: $CHOSEN"'
+    uses: peasant-labs/infra/.github/workflows/runner-router.yml@runner-router-v1
+    with:
+      fallback: '["blacksmith-4vcpu-ubuntu-2404"]'
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
 
   # Gate the build: reject tags not created by the release App and tags outside
   # the Peasant release grammar. Final releases no longer require a prior rc.

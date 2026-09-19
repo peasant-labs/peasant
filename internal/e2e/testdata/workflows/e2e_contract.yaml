@@ -172,6 +172,15 @@ reusable_callers:
         permissions:
           - key: contents
             value: read
+router:
+  workflow: peasant-labs/infra/.github/workflows/runner-router.yml
+  ref: runner-router-v1
+  secret_key: RUNNER_STATUS_TOKEN
+  routed_workflows:
+    - .github/workflows/tests.yml
+    - .github/workflows/release.yml
+    - .github/workflows/release-validate.yml
+    - .github/workflows/release-e2e.yml
 release_validate:
   workflow: .github/workflows/release-validate.yml
   required_triggers:
