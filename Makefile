@@ -187,15 +187,21 @@ build: web
 nix-vendor-hash:
 	./scripts/update-nix-vendor-hash.sh
 
-# Regenerate the dependency license notices shipped with the binary. web-stub
-# satisfies the //go:embed all:web/out requirement so `go list` can load
-# ./cmd/peasant; the embedded web content does not affect the Go module set.
+# Regenerate the dependency license notices shipped with the binary: Go modules
+# plus the embedded web dashboard's npm packages. web-stub satisfies the
+# //go:embed all:web/out requirement so `go list` can load ./cmd/peasant; the
+# web section needs web/node_modules (the embedded web content does not affect
+# the Go module set).
 third-party-notices: web-stub
+	cd web && pnpm install --frozen-lockfile
 	./scripts/gen-third-party-notices.sh
 
-# CI gate: fail if the committed notices drift from the deps, and fail on any
-# copyleft (forbidden/restricted) license entering the binary's module set.
+# CI gate: fail if the committed notices drift from the deps; fail on any
+# copyleft/unclassifiable license (Go guard + the web generator fails closed on
+# regen); and unit-test the web license classifier.
 third-party-notices-check: web-stub
+	cd web && pnpm install --frozen-lockfile
+	cd web && node scripts/gen-web-notices.test.mjs
 	./scripts/gen-third-party-notices.sh
 	git diff --exit-code -- THIRD_PARTY_NOTICES
 	./scripts/check-dep-licenses.sh
