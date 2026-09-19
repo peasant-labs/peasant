@@ -34,6 +34,11 @@ jobs:
   # the shared runner-router reusable workflow. `guard`, `nix-vendor-hash`, the
   # arm64 `smoke` entry, and `macos-cask-smoke` keep their current runners.
   determine-runner:
+    # The caller must grant at least what the called router workflow declares
+    # (contents: read); this workflow's top-level permissions are empty, so the
+    # grant is explicit here.
+    permissions:
+      contents: read
     uses: peasant-labs/infra/.github/workflows/runner-router.yml@runner-router-v1
     with:
       fallback: '["blacksmith-4vcpu-ubuntu-2404"]'

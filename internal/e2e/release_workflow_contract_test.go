@@ -443,7 +443,12 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 
 // TestRoutedWorkflowsCallTheSharedRouter pins every routed workflow to the
 // published reusable router: the inline gh-api router must be deleted, the call
-// must pin the tag, and the routing secret must be mapped explicitly.
+// must pin the tag, the routing secret must be mapped explicitly, and the job
+// must grant the permissions the router workflow declares. A reusable-workflow
+// call can only maintain or reduce the caller's permissions, so a workflow with
+// empty top-level permissions must grant `contents: read` on the calling job or
+// GitHub rejects the whole workflow graph at startup (release.yml did exactly
+// that before this assertion existed).
 func TestRoutedWorkflowsCallTheSharedRouter(t *testing.T) {
 	fixture := loadE2EWorkflowContractFixture(t)
 	wantUses := fixture.Router.Workflow + "@" + fixture.Router.Ref
@@ -466,7 +471,34 @@ func TestRoutedWorkflowsCallTheSharedRouter(t *testing.T) {
 				t.Fatalf("%s: jobs.determine-runner must not define %s; the inline router must be deleted", relativePath, forbidden)
 			}
 		}
+		assertJobCanCallTheRouter(t, relativePath, doc, job)
 	}
+}
+
+// assertJobCanCallTheRouter checks the permission grant a reusable-workflow call
+// needs. The router declares `contents: read`; a call may not elevate, so when
+// the workflow's top-level permissions do not already include it, the calling
+// job must grant it explicitly. `permissions: {}` means the workflow grants
+// nothing by default and every job opts in on its own.
+func assertJobCanCallTheRouter(t *testing.T, relativePath string, doc *yaml.Node, job *yaml.Node) {
+	t.Helper()
+	if mappingGrantsContentsRead(yamlMappingValue(job, "permissions")) {
+		return
+	}
+	if mappingGrantsContentsRead(yamlMappingValue(doc, "permissions")) {
+		return
+	}
+	t.Fatalf("%s: jobs.determine-runner must grant `contents: read`; the called router workflow declares it and a call may not elevate permissions (the workflow's top-level permissions do not grant it)", relativePath)
+}
+
+// mappingGrantsContentsRead reports whether a permissions mapping grants the
+// read scope on contents.
+func mappingGrantsContentsRead(permissions *yaml.Node) bool {
+	if permissions == nil || permissions.Kind != yaml.MappingNode {
+		return false
+	}
+	value := yamlMappingValue(permissions, "contents")
+	return value != nil && value.Value == "read"
 }
 
 func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
