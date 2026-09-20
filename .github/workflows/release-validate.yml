@@ -167,11 +167,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Docker Hub multi-platform indexes, pinned 2026-08-03. These indexes
-        # include both linux/amd64 and linux/arm64 for the native runner matrix.
+        # Project mirrors of the Ubuntu multi-platform indexes; byte-identical
+        # copies (skopeo copy --all), so linux/amd64 and linux/arm64 both
+        # resolve for the native runner matrix.
         image:
-          - "ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982" # ubuntu:22.04
-          - "ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90" # ubuntu:24.04
+          - "quay.io/peasant-labs/ubuntu@sha256:8041f5d446321c3f50ff21bc57e939a6710302123929f779f7fc5ed6959efa34" # ubuntu:22.04
+          - "quay.io/peasant-labs/ubuntu@sha256:c1be016f6ec91527a392928d11ea3083d86171e64c72571670357fb3c4d581c9" # ubuntu:24.04
         target:
           - { runs-on: blacksmith-2vcpu-ubuntu-2404, debarch: amd64 }
           - { runs-on: blacksmith-2vcpu-ubuntu-2404-arm, debarch: arm64 }
@@ -221,10 +222,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: "fedora@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814" # fedora:42
+          - image: "quay.io/fedora/fedora@sha256:e78cd1a688cd079c23864f289a89a49a3f4ad66d817864e325e1d058310ee95c" # fedora:42
             prepare: "true"
             install: "dnf install -y"
-          - image: "opensuse/leap@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421" # opensuse/leap:15.6
+          - image: "registry.opensuse.org/opensuse/leap@sha256:e4d84bbc5e0fa0df64381e95ad7ea8e3867cc34f3b1d174e9948d0f559d223e2" # opensuse/leap:15.6
             # Disable configured repositories before installing the local RPM:
             # --no-refresh still builds missing caches, which requires network access.
             prepare: "zypper --non-interactive modifyrepo --disable --all"
@@ -262,7 +263,7 @@ jobs:
     timeout-minutes: 20
     container:
       # archlinux:base-devel is amd64-only, matching this explicit amd64 job.
-      image: archlinux@sha256:40d14ac9db5af04f695eacd82a53181ad685fecc2534a66e05a51182a077cbd5 # archlinux:base-devel
+      image: quay.io/archlinux/archlinux@sha256:5eec215aabd3912afe2649fe6e7fe2912d12692d6b5d4cae6c950a2b065793cd # archlinux:base-devel
     steps:
       # The pool's runners keep their workspace between jobs; reset the owned
       # dist/ directory so a rerun or an older-version artifact left by another
