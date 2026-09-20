@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	postgresImage = "docker.io/library/postgres:16-alpine"
+	postgresImage = "quay.io/peasant-labs/postgres:16-alpine"
 	// docker.io/minio/minio no longer serves a pullable image (manifest
 	// requests are denied), so pull from Quay by digest. The digest is the
 	// multi-arch (arm64/amd64) manifest list that `quay.io/minio/minio:latest`
