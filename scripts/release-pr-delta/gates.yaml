@@ -51,12 +51,12 @@ gates:
       - name: classify rc
       - name: goreleaser snapshot
       - name: nix build .#peasant
-      - name: deb (ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982 / amd64)
-      - name: deb (ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982 / arm64)
-      - name: deb (ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90 / amd64)
-      - name: deb (ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90 / arm64)
-      - name: rpm (fedora@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814)
-      - name: rpm (opensuse/leap@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421)
+      - name: deb (quay.io/peasant-labs/ubuntu@sha256:8041f5d446321c3f50ff21bc57e939a6710302123929f779f7fc5ed6959efa34 / amd64)
+      - name: deb (quay.io/peasant-labs/ubuntu@sha256:8041f5d446321c3f50ff21bc57e939a6710302123929f779f7fc5ed6959efa34 / arm64)
+      - name: deb (quay.io/peasant-labs/ubuntu@sha256:c1be016f6ec91527a392928d11ea3083d86171e64c72571670357fb3c4d581c9 / amd64)
+      - name: deb (quay.io/peasant-labs/ubuntu@sha256:c1be016f6ec91527a392928d11ea3083d86171e64c72571670357fb3c4d581c9 / arm64)
+      - name: rpm (quay.io/fedora/fedora@sha256:e78cd1a688cd079c23864f289a89a49a3f4ad66d817864e325e1d058310ee95c)
+      - name: rpm (registry.opensuse.org/opensuse/leap@sha256:e4d84bbc5e0fa0df64381e95ad7ea8e3867cc34f3b1d174e9948d0f559d223e2)
       - name: makepkg (archlinux x86_64)
       - name: brew style (linux)
       - name: macos cask install (rc only)

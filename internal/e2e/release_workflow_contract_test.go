@@ -572,9 +572,9 @@ func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
 	for _, entry := range matrix.Content {
 		image := yamlMappingValue(entry, "image")
 		switch {
-		case image != nil && strings.HasPrefix(image.Value, "fedora@"):
+		case image != nil && strings.HasPrefix(image.Value, "quay.io/fedora/fedora@"):
 			fedora = entry
-		case image != nil && strings.HasPrefix(image.Value, "opensuse/leap@"):
+		case image != nil && strings.HasPrefix(image.Value, "registry.opensuse.org/opensuse/leap@"):
 			openSUSE = entry
 		}
 	}
