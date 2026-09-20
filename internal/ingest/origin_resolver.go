@@ -17,6 +17,10 @@ import (
 // backfill is a version watermark rather than a one-shot flag.
 const OriginRuleVersion = 1
 
+// The audit baseline has a leading run of one record; eight leaves headroom
+// while bounding each session's stored evidence. Exhaustion refuses to guess.
+const storedOriginLeadingUserRecordCap = 8
+
 // StoredOriginRow is one already-persisted session the resolver has to judge,
 // carrying the facts a verdict can be built from without reading anything else.
 //
@@ -65,7 +69,7 @@ type ResolveReport struct {
 
 // OriginResolverStore is the persistence the resolve pass needs: the rows a
 // newer rule has not judged, the update that records a verdict, and the stored
-// first user message that is the last surviving content evidence when a
+// leading user messages that are the last surviving content evidence when a
 // transcript is gone.
 type OriginResolverStore interface {
 	// ListStaleOriginSessions returns every session whose origin_version is
@@ -74,9 +78,9 @@ type OriginResolverStore interface {
 	// UpdateOriginState records a verdict and the version it was decided at, in
 	// one statement, so the two can never disagree.
 	UpdateOriginState(ctx context.Context, sessionID SessionID, origin string, version int) error
-	// FirstUserMessageBulk returns the stored preview of each session's first
-	// user message. Sessions with no user entry are omitted.
-	FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error)
+	// LeadingUserMessagesBulk returns ordered stored user previews, capped per
+	// session. Sessions with no user entry are omitted; textless entries remain.
+	LeadingUserMessagesBulk(ctx context.Context, sessionIDs []string, perSession int) (map[string][]string, error)
 }
 
 // OriginEvidenceMiner re-reads one transcript that is still on disk and reports
@@ -137,15 +141,16 @@ func NewOriginResolver(store OriginResolverStore, cache ClaudeEvidenceCache, min
 //     discovery this pass rides on has just refreshed it. FULL.
 //  3. The transcript is still on disk and its harness has a miner that reads it.
 //     The structured markers are all present. FULL.
-//  4. The transcript is gone. The verdict is built from the stored first user
-//     message and the row's parent, so a person's slash-command session is still
-//     recognisable, but the agent markers are unrecoverable. DEGRADED: the
+//  4. The transcript is gone. The verdict is built from the leading stored user
+//     records, reading past Claude's injected-only scaffolding. A person's slash
+//     command remains recognisable, but structured markers are unrecoverable. DEGRADED: the
 //     verdict is written, the version line is NOT advanced, and a later run
 //     retries the row the moment its transcript is readable again.
 //
-// Source four can therefore only ever reach a person's session or unknown, never
-// agent on marker evidence. That is the fail-safe direction: a row wrongly left
-// visible is a nuisance, a row wrongly hidden is a person's own work disappearing.
+// Source four can reach agent only through agent-authored bootstrap text that
+// survives in the stored records, never reconstructed structured identity. The
+// rule's fail-safe ordering is unchanged: commands outrank bootstrap text, plain
+// prose stays unknown, and only a leading scaffolding run is skipped.
 //
 // Ordering matters and is the caller's to keep. The pass must run BEFORE this
 // run writes its own sessions, so that it sees only rows an EARLIER run
@@ -197,11 +202,11 @@ func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion i
 		}
 	}
 
-	firstUserText := map[string]string{}
+	leadingUserText := map[string][]string{}
 	if len(needContent) > 0 {
-		firstUserText, err = r.store.FirstUserMessageBulk(ctx, needContent)
+		leadingUserText, err = r.store.LeadingUserMessagesBulk(ctx, needContent, storedOriginLeadingUserRecordCap)
 		if err != nil {
-			return report, fmt.Errorf("ingest: load stored first user messages for %d unresolved sessions: %w", len(needContent), err)
+			return report, fmt.Errorf("ingest: load stored leading user messages for %d unresolved sessions: %w", len(needContent), err)
 		}
 	}
 
@@ -217,10 +222,12 @@ func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion i
 			}
 		}
 		// Either the transcript is unreachable, or this build reads no origin
-		// evidence from that harness at all. Both fall back to the stored first
-		// user message; only the first is retryable, because only the first can
+		// evidence from that harness at all. Both fall back to stored user
+		// records; only the first is retryable, because only the first can
 		// ever answer differently later.
-		origin, _ := sessionorigin.Classify(sessionorigin.Evidence{FirstUserText: firstUserText[string(row.SessionID)]})
+		origin, _ := sessionorigin.Classify(sessionorigin.Evidence{
+			FirstUserText: storedOriginFirstUserText(row.Harness, leadingUserText[string(row.SessionID)]),
+		})
 		verdicts[i] = verdict{origin: origin, degraded: mineable, decided: true}
 	}
 
@@ -251,6 +258,20 @@ func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion i
 		report.Written++
 	}
 	return report, nil
+}
+
+// storedOriginFirstUserText applies Claude's shared skip test only to a leading
+// run. A textless record stops the walk too. Other harnesses keep their first
+// record. All-scaffolding or cap-exhausted runs yield no content evidence.
+// Stored rows are a reclassified projection, not the raw transcript record stream.
+func storedOriginFirstUserText(harness Harness, records []string) string {
+	for _, text := range records {
+		if harness == HarnessClaudeCode && skipClaudeInjectedOnlyUserRecord(text) {
+			continue
+		}
+		return text
+	}
+	return ""
 }
 
 // loadCache returns the evidence records discovery has just refreshed. A missing
