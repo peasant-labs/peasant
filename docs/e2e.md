@@ -169,7 +169,7 @@ the [Peasant ↔ Village Auth Model](auth.md) (§3, §4).
 - **podman** on `PATH` (`t.Skip`s with guidance if absent).
 - A **village checkout** providing `./cmd/server` + `./cmd/village-setup-demo`
   (a separate Go module — run as subprocess binaries). `t.Skip`s if absent/unbuilt.
-- Network access to pull the `postgres` and `quay.io/minio/minio` images. (S3 operations
+- Network access to pull the `quay.io/peasant-labs/postgres` and `quay.io/minio/minio` images. (S3 operations
   run in-process via the **minio-go** client — no `minio/mc` container is pulled.)
 
 ## Running
