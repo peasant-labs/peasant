@@ -837,6 +837,34 @@ sources:
 	}
 }
 
+func TestParseWithSourcePathFallback_DefaultsOnlySelectedSourceBeforeValidation(t *testing.T) {
+	t.Parallel()
+	data := []byte(`version: 1
+sources:
+  codex:
+    enabled: true
+    paths: []
+  strike:
+    enabled: false
+    paths: []
+`)
+
+	if _, err := Parse(data); err == nil || !strings.Contains(err.Error(), `enabled source "codex" must have at least one path`) {
+		t.Fatalf("Parse error = %v, want enabled Codex path validation error", err)
+	}
+
+	cfg, err := ParseWithSourcePathFallback(data, defaults.HarnessCodex, defaults.DefaultCodexPath)
+	if err != nil {
+		t.Fatalf("ParseWithSourcePathFallback: %v", err)
+	}
+	if got := cfg.Sources.Codex.Paths; len(got) != 1 || got[0] != defaults.DefaultCodexPath.String() {
+		t.Fatalf("Codex paths = %v, want [%q]", got, defaults.DefaultCodexPath)
+	}
+	if got := cfg.Sources.Strike.Paths; len(got) != 0 {
+		t.Fatalf("unselected Strike paths changed: %v", got)
+	}
+}
+
 // --- TestParse_CustomPatterns_EmptyID ---
 
 func TestParse_CustomPatterns_EmptyID(t *testing.T) {
