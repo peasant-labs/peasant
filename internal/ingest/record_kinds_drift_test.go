@@ -4,22 +4,27 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"os"
+	"reflect"
 	"testing"
 )
 
-//go:embed testdata/record_kinds_refusal.yaml
-var recordKindsRefusalYAML []byte
+//go:embed testdata/record_kinds_capture.yaml
+var recordKindsCaptureYAML []byte
 
 type recordKindsCaptureFixture struct {
 	RequiredNames []string `yaml:"required_names"`
 	Cases         []struct {
-		Name         string  `yaml:"name"`
-		Harness      Harness `yaml:"harness"`
-		Transcript   string  `yaml:"transcript"`
-		WantKind     string  `yaml:"want_kind"`
-		WantRetained bool    `yaml:"want_retained"`
+		Name            string  `yaml:"name"`
+		Harness         Harness `yaml:"harness"`
+		Transcript      string  `yaml:"transcript"`
+		WantKind        string  `yaml:"want_kind"`
+		WantNamespace   string  `yaml:"want_namespace"`
+		WantPayload     string  `yaml:"want_payload"`
+		WantPointer     string  `yaml:"want_pointer"`
+		WantRecordIndex int64   `yaml:"want_record_index"`
+		WantPosition    int64   `yaml:"want_position"`
+		WantError       bool    `yaml:"want_error"`
 	} `yaml:"cases"`
 }
 
@@ -65,20 +70,32 @@ func TestRecordKindsClaudePreviewParity(t *testing.T) {
 	}
 }
 
-// This transitional capture fixture keeps previous failure-vs-retention
-// assertions intact until the native producers are integrated. It is not a
-// claim that a refusal satisfies the open fallback policy.
+// Exercise the real authoritative capture boundary for every registered
+// harness. Storage/publication proofs live in their respective integration suites.
 func TestRecordKindsCaptureContract(t *testing.T) {
 	var fixtures recordKindsCaptureFixture
-	decodeRegistryFixture(t, recordKindsRefusalYAML, &fixtures)
+	decodeRegistryFixture(t, recordKindsCaptureYAML, &fixtures)
 	names := map[string]bool{}
+	harnesses := map[Harness]bool{}
 	for _, row := range fixtures.Cases {
 		if names[row.Name] {
 			t.Fatal("duplicate fixture", row.Name)
 		}
 		names[row.Name] = true
+		if !row.WantError {
+			harnesses[row.Harness] = true
+		}
 	}
 	checkRegistryFixtureNames(t, names, fixtures.RequiredNames)
+	for harness := range DefaultAdapterRegistry {
+		if !harnesses[harness] {
+			t.Errorf("missing capture fixture for supported harness %s", harness)
+		}
+		delete(harnesses, harness)
+	}
+	for harness := range harnesses {
+		t.Errorf("capture fixture for unsupported harness %s", harness)
+	}
 	sid, err := NewSessionID("11111111-1111-4111-8111-111111111111")
 	if err != nil {
 		t.Fatal(err)
@@ -102,19 +119,32 @@ func TestRecordKindsCaptureContract(t *testing.T) {
 				indexer = NewStrikeIndexer(fs)
 			case HarnessOpenCode:
 				indexer = NewOpenCodeIndexer(fs)
+			case HarnessPi:
+				indexer = NewPiIndexer(fs)
 			default:
 				t.Fatalf("unsupported fixture harness %s", row.Harness)
 			}
 			capture, err := indexer.IndexTranscriptBytesForCapture(context.Background(), session, []byte(row.Transcript))
-			if row.WantRetained {
-				if err != nil || len(capture.RetainedUnknown) != 1 || capture.RetainedUnknown[0].Kind != row.WantKind || capture.RetainedUnknown[0].Harness != row.Harness {
-					t.Fatalf("capture evidence %+v: %v", capture.RetainedUnknown, err)
+			if row.WantError {
+				if err == nil {
+					t.Fatal("malformed known content certified after unknown")
 				}
 				return
 			}
-			var refused *UnrepresentedRecordError
-			if !errors.As(err, &refused) || refused.Kind != row.WantKind || refused.Harness != row.Harness {
-				t.Fatalf("capture refusal: %v", err)
+			if err != nil || len(capture.RetainedUnknown) != 1 {
+				t.Fatalf("capture evidence %+v: %v", capture.RetainedUnknown, err)
+			}
+			got := capture.RetainedUnknown[0]
+			if got.Kind != row.WantKind || got.Harness != row.Harness || got.Namespace != row.WantNamespace || string(got.Payload) != row.WantPayload || got.Position.JSONPointer != row.WantPointer {
+				t.Fatalf("capture evidence differs: %+v payload=%s", got, got.Payload)
+			}
+			public := got.Position.Public
+			if public == nil || public.SourceRef == "" || public.RecordIndex != row.WantRecordIndex || public.Position != row.WantPosition {
+				t.Fatalf("source coordinates %+v, want record %d position %d", public, row.WantRecordIndex, row.WantPosition)
+			}
+			stored, err := retainedUnknownEntries(capture.Entries)
+			if err != nil || !reflect.DeepEqual(stored, capture.RetainedUnknown) {
+				t.Fatalf("entry evidence differs from capture: %+v %v", stored, err)
 			}
 		})
 	}

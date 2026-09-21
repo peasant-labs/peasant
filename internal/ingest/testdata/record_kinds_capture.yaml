@@ -1,0 +1,73 @@
+# Real authoritative capture: unlisted native names retain full payload and
+# public source coordinates. No registry allowlist entry is needed.
+required_names:
+  - claude-code retains unmapped record kind
+  - codex retains unmapped envelope kind
+  - strike retains unmapped event kind
+  - opencode retains unmapped part kind
+  - cursor retains unmapped block kind
+  - pi retains unmapped entry kind
+  - malformed known content after unknown still fails
+cases:
+  - name: claude-code retains unmapped record kind
+    harness: claude-code
+    transcript: |
+      {"type":"unmapped-record-xyz","message":{"role":"user","content":"hello"}}
+    want_kind: unmapped-record-xyz
+    want_namespace: record
+    want_payload: '{"type":"unmapped-record-xyz","message":{"role":"user","content":"hello"}}'
+    want_record_index: 0
+    want_position: 0
+  - name: codex retains unmapped envelope kind
+    harness: codex
+    transcript: |
+      {"type":"unmapped-envelope-xyz","payload":{}}
+    want_kind: unmapped-envelope-xyz
+    want_namespace: envelope
+    want_payload: '{"type":"unmapped-envelope-xyz","payload":{}}'
+    want_record_index: 0
+    want_position: 0
+  - name: strike retains unmapped event kind
+    harness: strike
+    transcript: |
+      {"type":"unmapped-event-xyz","time":1,"data":{}}
+    want_kind: unmapped-event-xyz
+    want_namespace: record
+    want_payload: '{"type":"unmapped-event-xyz","time":1,"data":{}}'
+    want_record_index: 0
+    want_position: 0
+  - name: opencode retains unmapped part kind
+    harness: opencode
+    transcript: |
+      {"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"11111111-1111-4111-8111-111111111111","messages":[{"id":"msg_1","session_id":"11111111-1111-4111-8111-111111111111","time_created":1,"time_updated":2,"data":{"role":"user"},"parts":[{"id":"prt_1","message_id":"msg_1","session_id":"11111111-1111-4111-8111-111111111111","time_created":1,"time_updated":2,"data":{"id":"prt_1","type":"unmapped-part-xyz"}}]}]}
+    want_kind: unmapped-part-xyz
+    want_namespace: part
+    want_payload: '{"id":"prt_1","type":"unmapped-part-xyz"}'
+    want_record_index: 0
+    want_position: 0
+  - name: cursor retains unmapped block kind
+    harness: cursor
+    transcript: |
+      {"role":"user","content":[{"type":"unmapped-block-xyz","text":"hi"}]}
+    want_kind: unmapped-block-xyz
+    want_namespace: content_block
+    want_payload: '{"type":"unmapped-block-xyz","text":"hi"}'
+    want_pointer: /content/0
+    want_record_index: 0
+    want_position: 1
+  - name: pi retains unmapped entry kind
+    harness: pi
+    transcript: |
+      {"type":"session","version":3,"id":"11111111-1111-4111-8111-111111111111","cwd":"/synthetic/project"}
+      {"type":"unmapped-entry-xyz","id":"x","parentId":null,"payload":{"number":9007199254740993}}
+    want_kind: unmapped-entry-xyz
+    want_namespace: entry
+    want_payload: '{"type":"unmapped-entry-xyz","id":"x","parentId":null,"payload":{"number":9007199254740993}}'
+    want_record_index: 1
+    want_position: 1
+  - name: malformed known content after unknown still fails
+    harness: claude-code
+    transcript: |
+      {"type":"unmapped-record-xyz","payload":{}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":7}]}}
+    want_error: true

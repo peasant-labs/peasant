@@ -34,7 +34,7 @@ required_names:
   - claude-null-identity-certifies
   - claude-null-identity-strict-refused
   - claude-stored-identity-strict-refused
-  - codex-null-identity-strict-refused
+  - codex-null-identity-retains-unknown
   - cursor-null-identity-strict-refused
   - claude-control-record-content-settles
   - codex-unknown-record-settles
@@ -113,13 +113,14 @@ cases:
     wantFailureCode: unknown_data_retained
     wantRetainedKind: future-record
     wantEntries: 4
-  - name: codex-null-identity-strict-refused
+  - name: codex-null-identity-retains-unknown
     harness: codex
     transcript: codex-unrepresented
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
-    wantEntries: 1
+    wantCaptureFormat: full
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: patch_apply_end
+    wantEntries: 2
   - name: cursor-null-identity-strict-refused
     harness: cursor
     transcript: cursor-unrepresented
@@ -143,22 +144,25 @@ cases:
     harness: codex
     transcript: codex-unknown-record
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
-    wantEntries: 1
+    wantCaptureFormat: full
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: future_record
+    wantEntries: 2
   - name: codex-unknown-response-item-settles
     harness: codex
     transcript: codex-unknown-response-item
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
-    wantEntries: 1
+    wantCaptureFormat: full
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: future_item
+    wantEntries: 2
   - name: codex-message-block-settles
     harness: codex
     transcript: codex-message-block
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
+    wantCaptureFormat: full
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: image
     wantEntries: 1
   # The refusals that must NOT settle. A pair the database never identified
   # and whose metadata records no transcript checksum cannot be established:

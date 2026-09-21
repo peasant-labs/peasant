@@ -189,9 +189,9 @@ harnesses:
           - {<<: *tool, kind: toolCall}
   codex:
     adapter_version: 1
-    indexer_version: 16
+    indexer_version: 17
     index_version: 1
-    native_versions: {adapter_version: 2, indexer_version: 17, index_version: 2}
+    native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
     fallback: *fallback
     inventories:
       - context: retained-format-1
@@ -263,8 +263,14 @@ harnesses:
       - context: native-generation
         namespace: event
         sources:
-          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage, switch: payload.Type}
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage, switch: payload.Type, complete: true}
+          - {file: codex_unknown.go, symbol: prepareCodexRecord, switch: variant}
+          - {file: content_capture.go, symbol: codexStrictEventMsgKinds}
         kinds:
+          - {<<: *ignored, kind: token_count, reason: Metadata event; no conversation row.}
+          - {<<: *ignored, kind: user_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_reasoning, reason: Mirrored content is represented by response items.}
           - {<<: *structural, kind: item_started}
           - {<<: *structural, kind: item_completed}
           - {<<: *structural, kind: turn_started}
@@ -322,6 +328,7 @@ harnesses:
         sources:
           - {file: codex_provenance.go, symbol: codexMediaContentTypes}
           - {file: codex_provenance.go, symbol: codexBlockModality, switch: contentType}
+          - {file: content_capture.go, symbol: codexStrictMessageBlockKinds}
         kinds:
           - {<<: *text, kind: input_text}
           - {<<: *text, kind: output_text}
@@ -330,6 +337,19 @@ harnesses:
           - {<<: *media, kind: image_url}
           - {<<: *media, kind: input_audio}
           - {<<: *media, kind: audio}
+      - context: native-generation
+        namespace: reasoning_summary
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningSummaryKinds}
+        kinds:
+          - {<<: *text, kind: summary_text}
+      - context: native-generation
+        namespace: reasoning_content
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningContentKinds}
+        kinds:
+          - {<<: *text, kind: reasoning_text}
+          - {<<: *text, kind: text}
       - context: native-generation
         namespace: content_kind
         sources:
@@ -392,10 +412,10 @@ harnesses:
           - {<<: *text, kind: network_proxy.rule_saved}
           - {<<: *text, kind: user_verification.notice}
   opencode:
-    adapter_version: 1
-    indexer_version: 16
+    adapter_version: 2
+    indexer_version: 17
     index_version: 1
-    native_versions: {adapter_version: 2, indexer_version: 17, index_version: 2}
+    native_versions: {adapter_version: 3, indexer_version: 18, index_version: 2}
     fallback: *fallback
     inventories:
       - context: retained-format-1
@@ -417,9 +437,10 @@ harnesses:
           - {<<: *text, kind: subtask}
           - {<<: *text, kind: agent}
       - context: retained-format-1
-        namespace: current_record
+        namespace: row
         sources:
-          - {file: opencode_current_projection.go, symbol: normalizeOpenCodeCurrentRow, switch: row.Type.String()}
+          - {file: opencode_current_projection.go, symbol: normalizeOpenCodeCurrentRowAt, switch: row.Type.String(), complete: true}
+          - {file: opencode_unknown.go, symbol: knownOpenCodeCurrentRow, switch: kind, complete: true}
         kinds:
           - {<<: *text, kind: user}
           - {<<: *text, kind: assistant}
@@ -431,17 +452,19 @@ harnesses:
           - {<<: *text, kind: agent-switched}
           - {<<: *text, kind: model-switched}
       - context: retained-format-1
-        namespace: current_content
+        namespace: assistant_content
         sources:
           - {file: opencode_current_projection.go, symbol: appendOpenCodeCurrentAssistantContent, switch: discriminator.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeCurrent, equal_operand: header.Type, complete: true}
         kinds:
           - {<<: *text, kind: text}
           - {<<: *text, kind: reasoning}
           - {<<: *tool, kind: tool}
       - context: native-generation
-        namespace: record
+        namespace: row
         sources:
-          - {file: opencode_provenance_decode.go, symbol: DecodeOpenCodeProvenanceRow, switch: row.Type}
+          - {file: opencode_provenance_decode.go, symbol: DecodeOpenCodeProvenanceRow, switch: row.Type, complete: true}
+          - {file: opencode_unknown.go, symbol: knownOpenCodeCurrentRow, switch: kind, complete: true}
         kinds:
           - {<<: *text, kind: user}
           - {<<: *text, kind: assistant}
@@ -453,17 +476,25 @@ harnesses:
           - {<<: *text, kind: agent-switched}
           - {<<: *text, kind: model-switched}
       - context: native-generation
-        namespace: content_block
+        namespace: assistant_content
         sources:
           - {file: opencode_current_projection.go, symbol: appendOpenCodeCurrentAssistantContent, switch: discriminator.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeCurrent, equal_operand: header.Type, complete: true}
         kinds:
           - {<<: *text, kind: text}
           - {<<: *text, kind: reasoning}
           - {<<: *tool, kind: tool}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: opencode_unknown.go, symbol: retainOpenCodeSemantic, equal_operand: discriminator.Type}
+        kinds:
+          - {<<: *text, kind: text}
       - context: retained-format-1
         namespace: tool_content
         sources:
           - {file: opencode_v2_projection.go, symbol: decodeOpenCodeV2ToolState, switch: value.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeToolContent, equal_operand: header.Type, complete: true}
         kinds:
           - {<<: *result, kind: text}
           - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME; no general media renderer, visualized: planned}
@@ -471,6 +502,7 @@ harnesses:
         namespace: tool_content
         sources:
           - {file: opencode_v2_projection.go, symbol: decodeOpenCodeV2ToolState, switch: value.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeToolContent, equal_operand: header.Type, complete: true}
         kinds:
           - {<<: *result, kind: text}
           - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME; no general media renderer, visualized: planned}

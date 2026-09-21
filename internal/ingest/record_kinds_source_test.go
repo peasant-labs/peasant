@@ -131,11 +131,22 @@ func (tree *recordKindSourceTree) inventory(source RecordKindSource) (map[string
 	}
 	result := map[string]RecordKindMatch{}
 	add := func(expr ast.Expr, match RecordKindMatch) {
-		if value, ok := tree.stringValue(expr, 0); ok {
+		if value, ok := tree.stringValue(expr, 0); ok && value != "" {
 			result[value] = match
 		}
 	}
 	ast.Inspect(root, func(node ast.Node) bool {
+		if source.EqualOperand != "" {
+			if comparison, ok := node.(*ast.BinaryExpr); ok && comparison.Op == token.EQL {
+				if sourceExpression(comparison.X) == source.EqualOperand {
+					add(comparison.Y, RecordKindLiteral)
+				}
+				if sourceExpression(comparison.Y) == source.EqualOperand {
+					add(comparison.X, RecordKindLiteral)
+				}
+			}
+			return true
+		}
 		if source.Switch != "" {
 			if stmt, ok := node.(*ast.SwitchStmt); ok && sourceExpression(stmt.Tag) == source.Switch {
 				for _, raw := range stmt.Body.List {
@@ -190,6 +201,17 @@ func verifyRecordKindSources(registry RecordKindRegistry, tree *recordKindSource
 				kinds, err := tree.inventory(source)
 				if err != nil {
 					return err
+				}
+				if source.Complete {
+					for _, row := range inventory.Kinds {
+						match := row.Match
+						if match == "" {
+							match = RecordKindLiteral
+						}
+						if actual, ok := kinds[row.Kind]; !ok || actual != match {
+							return fmt.Errorf("complete production selector %s/%s lacks registry kind %q", source.File, source.Symbol, row.Kind)
+						}
+					}
 				}
 				for kind, match := range kinds {
 					found[kind] = match
