@@ -6,6 +6,7 @@ required_names:
   - unknown visualized rejected
   - unknown context rejected
   - unknown match rejected
+  - conflicting source selection rejected
   - duplicate kind rejected
   - same name different namespace accepted
   - overlapping prefix rejected
@@ -17,6 +18,14 @@ required_names:
   - wrong native revision rejected
   - handler addition fails without row
   - handler removal fails while referenced
+  - native Codex event handler addition fails without row
+  - native OpenCode admission removal fails despite surviving dispatcher
+  - OpenCode inline handler addition fails without row
+  - native reasoning namespace stays separate from media
+  - native token count is ignored metadata
+  - native user mirror is ignored
+  - native agent mirror is ignored
+  - native reasoning mirror is ignored
   - row removal fails while handled
   - status mutation fails production witness
   - preview mutation fails production witness
@@ -36,6 +45,7 @@ cases:
   - {name: unknown visualized rejected, operation: yaml, find: 'visualized: hidden', replace: 'visualized: hiddden', error: unknown visualization}
   - {name: unknown context rejected, operation: yaml, find: 'context: retained-format-1', replace: 'context: imaginary', error: unknown context}
   - {name: unknown match rejected, operation: yaml, find: 'match: prefix', replace: 'match: regexp', error: unknown match}
+  - {name: conflicting source selection rejected, operation: yaml, find: 'switch: line.Type}', replace: 'switch: line.Type, equal_operand: line.Type}', error: conflicting selection modes}
   - {name: duplicate kind rejected, operation: yaml, find: '{<<: *text, kind: assistant}', replace: '{<<: *text, kind: user}', error: duplicate kind}
   - {name: same name different namespace accepted, operation: yaml, find: '{<<: *text, kind: api_error}', replace: '{<<: *text, kind: user}'}
   - {name: overlapping prefix rejected, operation: yaml, find: '{<<: *control, kind: artifact-, match: prefix}', replace: '{<<: *control, kind: agent-, match: prefix}', error: ambiguous overlapping match}
@@ -44,7 +54,7 @@ cases:
   - {name: missing supported harness rejected, operation: yaml, find: '  pi:', replace: '  gemini-cli:', error: 'has no section'}
   - {name: unsupported adapter rejected, operation: yaml, find: 'harnesses:', replace: "harnesses:\n  gemini-cli: {}", error: no supported adapter}
   - {name: wrong baseline revision rejected, operation: yaml, find: 'indexer_version: 17', replace: 'indexer_version: 999', error: baseline versions differ}
-  - {name: wrong native revision rejected, operation: yaml, find: 'native_versions: {adapter_version: 2, indexer_version: 17', replace: 'native_versions: {adapter_version: 2, indexer_version: 999', error: native versions differ}
+  - {name: wrong native revision rejected, operation: yaml, find: 'native_versions: {adapter_version: 2, indexer_version: 18', replace: 'native_versions: {adapter_version: 2, indexer_version: 999', error: native versions differ}
   - name: handler addition fails without row
     operation: source
     file: content_capture.go
@@ -57,6 +67,29 @@ cases:
     find: 'case string(piLabel):'
     replace: 'case "retired_label":'
     error: is not matched by production syntax
+  - name: native Codex event handler addition fails without row
+    operation: source
+    file: codex_history_replay.go
+    find: 'case "turn_started", "task_started":'
+    replace: 'case "turn_started", "task_started", "future_native_start":'
+    error: has no registry row
+  - name: native OpenCode admission removal fails despite surviving dispatcher
+    operation: source
+    file: opencode_unknown.go
+    find: "case \"model-switched\":\n\t\treturn true\n"
+    replace: ''
+    error: complete production selector
+  - name: OpenCode inline handler addition fails without row
+    operation: source
+    file: opencode_unknown.go
+    find: 'if discriminator.Type == "text" {'
+    replace: 'if discriminator.Type == "text" || discriminator.Type == "future_inline" {'
+    error: has no registry row
+  - {name: native reasoning namespace stays separate from media, operation: lookup, harness: codex, context: native-generation, namespace: reasoning_content, kind: input_image, status: retained-unknown, preview: no}
+  - {name: native token count is ignored metadata, operation: native-event-behavior, kind: token_count}
+  - {name: native user mirror is ignored, operation: native-event-behavior, kind: user_message}
+  - {name: native agent mirror is ignored, operation: native-event-behavior, kind: agent_message}
+  - {name: native reasoning mirror is ignored, operation: native-event-behavior, kind: agent_reasoning}
   - {name: row removal fails while handled, operation: delete-row, harness: pi, context: retained-format-1, namespace: entry, kind: label, error: has no registry row}
   - {name: status mutation fails production witness, operation: mutate-status, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment, status: represented, error: control behavior differs}
   - {name: preview mutation fails production witness, operation: mutate-preview, harness: claude-code, context: retained-format-1, namespace: record, kind: mode, preview: no, error: control behavior differs}

@@ -25,25 +25,44 @@ type IgnoredSourceRecord struct {
 	Reason IgnoredRecordReason
 }
 
-// Strict vocabularies for the record-kind drift test. Each slice is the
-// single source of truth its strict path gates on: the dispatch below refuses
-// an unlisted discriminator before reaching any case body, so adding an
-// accepted kind means extending the slice, and the drift test fails until the
-// registry follows. Case labels may repeat slice literals; the slice governs
-// reachability, never the label.
+// Specialized vocabularies consumed by production capture and unknown-data
+// preparation. A kind outside these lists uses the retained-evidence fallback;
+// a known kind still receives strict field validation. Source-derived registry
+// checks require declarations when a specialized handler is added or removed.
 func claudeStrictRecordKinds() []string {
-	return []string{"user", "assistant", "human", "system", "summary", "result", "progress", "queue-operation", "file-history-snapshot", "last-prompt"}
+	return []string{
+		"user",
+		"assistant",
+		"human",
+		"system",
+		"summary",
+		"result",
+		"progress",
+		"queue-operation",
+		"file-history-snapshot",
+		"last-prompt",
+	}
 }
 
 func claudeStrictSystemSubtypes() []string {
-	return []string{"turn_duration", "compact_boundary", "stop_hook_summary", "api_error"}
+	return []string{
+		"turn_duration",
+		"compact_boundary",
+		"stop_hook_summary",
+		"api_error",
+	}
 }
 
 // captureContentBlockKinds names the content blocks the strict capture path
 // validates for one harness. Claude alone admits tool_reference control
-// blocks; every other harness refuses anything outside the shared four.
+// blocks; other unrecognized blocks are retained before known-field validation.
 func captureContentBlockKinds(harness Harness) []string {
-	kinds := []string{"text", "thinking", "tool_use", "tool_result"}
+	kinds := []string{
+		"text",
+		"thinking",
+		"tool_use",
+		"tool_result",
+	}
 	if harness == HarnessClaudeCode {
 		kinds = append(kinds, "tool_reference")
 	}
@@ -54,7 +73,12 @@ func captureContentBlockKinds(harness Harness) []string {
 // accepts across harnesses. Cursor additionally accepts human-role lines,
 // which read as user turns.
 func captureRoleKinds() []string {
-	return []string{"user", "assistant", "system", "tool"}
+	return []string{
+		"user",
+		"assistant",
+		"system",
+		"tool",
+	}
 }
 
 func codexStrictEnvelopeKinds() []string {

@@ -183,6 +183,13 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 				if !ok || !attribution.mediaDiagnostic || kind.Status != RecordKindRepresented || kind.Preview != RecordKindPreviewYes || !strings.Contains(kind.Payload, "no standalone submitted-input count") {
 					result = fmt.Errorf("diagnostic-only attribution differs from production")
 				}
+			case "native-event-behavior":
+				kind := registry.Harnesses[HarnessCodex].Lookup(RecordKindNative, "event", row.Kind)
+				state := &codexReplayState{}
+				result = state.replayEventMessage("fixture", codexDecodedSegment{}, codexHistoryRecord{}, codexHistoryReplayPayload{Type: row.Kind}, CodexOwnershipOwn, CodexHistoryModeLegacy)
+				if result == nil && (len(state.nodes) != 0 || kind.Status != RecordKindIgnoredControl || kind.Preview != RecordKindPreviewNo || kind.Visualized != RecordKindNotApplicable) {
+					result = fmt.Errorf("native metadata/mirror behavior differs from registry")
+				}
 			default:
 				t.Fatal("unknown fixture operation", row.Operation)
 			}

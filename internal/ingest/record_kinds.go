@@ -114,12 +114,17 @@ const (
 )
 
 // RecordKindSource selects production syntax, not a duplicate test vocabulary.
-// Switch is an exact Go expression; empty selects a returned list or map.
+// Switch and EqualOperand are exact Go expressions; neither set selects a
+// returned list or map unless PrefixArgument selects a prefix test. Complete
+// requires one selector to cover the entire namespace, so a surviving duplicate
+// dispatcher cannot hide a removed admission branch.
 type RecordKindSource struct {
 	File           string `yaml:"file"`
 	Symbol         string `yaml:"symbol"`
 	Switch         string `yaml:"switch,omitempty"`
 	PrefixArgument string `yaml:"prefix_argument,omitempty"`
+	EqualOperand   string `yaml:"equal_operand,omitempty"`
+	Complete       bool   `yaml:"complete,omitempty"`
 	ListsOnly      bool   `yaml:"lists_only,omitempty"`
 }
 
@@ -254,6 +259,19 @@ func (r RecordKindRegistry) validate() error {
 			for _, source := range inventory.Sources {
 				if source.File == "" || source.Symbol == "" || strings.Contains(source.File, "..") || strings.HasSuffix(source.File, "_test.go") {
 					return fmt.Errorf("record-kind registry: harness %q requires a production source selector", harness)
+				}
+				modes := 0
+				if source.Switch != "" {
+					modes++
+				}
+				if source.EqualOperand != "" {
+					modes++
+				}
+				if source.PrefixArgument != "" {
+					modes++
+				}
+				if modes > 1 || (modes > 0 && source.ListsOnly) {
+					return fmt.Errorf("record-kind registry: harness %q source %s/%s has conflicting selection modes", harness, source.File, source.Symbol)
 				}
 			}
 		}
