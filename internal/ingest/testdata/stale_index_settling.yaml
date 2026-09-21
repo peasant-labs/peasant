@@ -101,7 +101,8 @@ cases:
     transcript: claude-unrepresented
     wantCaptureStatus: incomplete
     wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: future-record
     wantEntries: 4
   - name: claude-stored-identity-strict-refused
     harness: claude-code
@@ -109,7 +110,8 @@ cases:
     storedIdentity: true
     wantCaptureStatus: incomplete
     wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: future-record
     wantEntries: 4
   - name: codex-null-identity-strict-refused
     harness: codex
@@ -123,8 +125,9 @@ cases:
     transcript: cursor-unrepresented
     wantCaptureStatus: incomplete
     wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
-    wantEntries: 3
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: image
+    wantEntries: 2
   # The same steady state for the refusal branches beyond the first observed
   # one: a Claude control record carrying content, and Codex unknown top-level
   # records, unknown response items and unrepresented message blocks.
@@ -133,7 +136,8 @@ cases:
     transcript: claude-control-record-content
     wantCaptureStatus: incomplete
     wantCaptureFormat: preview_only
-    wantFailureCode: strict_capture_refused
+    wantFailureCode: unknown_data_retained
+    wantRetainedKind: progress
     wantEntries: 4
   - name: codex-unknown-record-settles
     harness: codex
