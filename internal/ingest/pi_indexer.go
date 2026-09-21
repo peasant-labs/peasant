@@ -72,7 +72,11 @@ func (i *PiIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session 
 	if err != nil {
 		return TranscriptCaptureResult{}, err
 	}
-	return TranscriptCaptureResult{Entries: entries, Diagnostics: doc.warnings}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	return TranscriptCaptureResult{Entries: entries, Diagnostics: doc.warnings, RetainedUnknown: unknown}, nil
 }
 
 func (i *PiIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
@@ -279,7 +283,20 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		return nil
 	}
 	for _, entry := range doc.active {
+		entry, unknown, carrierOnly, err := preparePiUnknown(entry, sessionID)
+		if err != nil {
+			return nil, piSourceError("unknown evidence", entry.line, err)
+		}
 		extra := PiExtra{Kind: PiExtraState, Harness: schema.HarnessPi, SourceRef: PiPublicRef(sessionID.String(), "entry", entry.ID)}
+		extra.RetainedUnknown = unknown
+		if carrierOnly {
+			carrier, err := NewPiCarrier(sessionID, len(rows), extra)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, carrier)
+			continue
+		}
 		row := schema.SessionEntry{Role: RoleSystem, EntryType: EntryTypeSystem, TimestampMs: parseIndexTimestamp(entry.Timestamp)}
 		var scope schema.UsageScope
 		var rawUsage json.RawMessage
@@ -292,7 +309,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		case piMessage:
 			var message piMessagePayload
 			if err := json.Unmarshal(entry.Message, &message); err != nil {
-				return nil, piSourceError("message", 0, err)
+				return nil, piSourceError("message", entry.line, err)
 			}
 			if message.Role == piRoleBash {
 				// A user shell execution has a real execute-style result, but is not
@@ -304,6 +321,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				if err := appendRow(row, extra); err != nil {
 					return nil, err
 				}
+				extra.RetainedUnknown = nil // evidence belongs to the source owner only
 				toolID := PiPublicRef(sessionID.String(), "tool", entry.ID)
 				name := "bash"
 				kind := classifyToolKind(name)
@@ -328,7 +346,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			var err error
 			content, tools, err = piContent(message.Content, message.Role == piRoleAssistant)
 			if err != nil {
-				return nil, piSourceError("message content", 0, err)
+				return nil, piSourceError("message content", entry.line, err)
 			}
 			switch message.Role {
 			case piRoleUser:

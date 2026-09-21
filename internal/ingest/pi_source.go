@@ -61,6 +61,11 @@ func (t *piEntryType) UnmarshalJSON(raw []byte) error {
 }
 
 type piEntry struct {
+	// Native coordinates and bytes survive active-path selection unchanged.
+	raw           json.RawMessage
+	line          int
+	sequence      int
+	unknownKind   string
 	Type          piEntryType     `json:"type"`
 	ID            string          `json:"id"`
 	ParentID      *string         `json:"parentId"`
@@ -163,6 +168,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	}
 	entries := make(map[string]piEntry)
 	var order []string
+	sequence := 0
 
 	// takeOmissions records the records this read left out, at the position
 	// they held, before the next accepted record is processed. It keeps no byte
@@ -171,6 +177,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	// on a filtered artifact is a one-line stand-in.
 	takeOmissions := func() error {
 		for _, at := range scanner.TakeOmissions() {
+			sequence++
 			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
 			doc.warnings = append(doc.warnings, OversizedRecordDiagnostic("Pi recording", at.Record))
 		}
@@ -204,11 +211,13 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 			}
 			return doc, piSourceError("raw validation", line+1, err)
 		}
-		var entry piEntry
-		if err := json.Unmarshal(raw, &entry); err != nil {
+		entry, err := decodePiEntry(raw, line+1)
+		if err != nil {
 			return doc, piSourceError("decode", line+1, err)
 		}
-		if entry.Type == "" || strings.TrimSpace(entry.ID) == "" {
+		sequence++
+		entry.sequence = sequence
+		if (entry.Type == "" && entry.unknownKind == "") || strings.TrimSpace(entry.ID) == "" {
 			return doc, piSourceError("decode", line+1, fmt.Errorf("entry type and id are required"))
 		}
 		if doc.header.ID == "" {
