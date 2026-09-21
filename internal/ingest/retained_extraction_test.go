@@ -50,7 +50,7 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	if err := filesystem.WriteFile(path, artifact.MetadataJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := pipeline.processRetainedSession(t.Context(), session, path)
+	result := pipeline.processRetainedSession(t.Context(), session, path, nil)
 	if result.result.Error != nil {
 		t.Fatal(result.result.Error)
 	}

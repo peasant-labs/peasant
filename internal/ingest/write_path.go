@@ -34,7 +34,7 @@ type installedPair struct {
 // durability point, and a torn install is detected on the next pair read by
 // its hash. It refuses to replace a pair a newer adapter than this build
 // produced.
-func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID string, pair installedPair, session DiscoveredSession) error {
+func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID string, pair installedPair, session DiscoveredSession, writeLane *storeWriteLane) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID
 	if err := p.fs.WriteFile(filepath.Join(tmpDir, pair.metadataName), pair.metadata, defaults.PrivateFilePerm); err != nil {
 		return fail(fmt.Errorf("write metadata for %s: %w", sessionID, err))
 	}
-	if err := p.replaceSessionDir(tmpDir, sessionDir, sessionID, pair.metadataName); err != nil {
+	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, sessionID, pair.metadataName, writeLane); err != nil {
 		return fail(err)
 	}
 	return p.fs.RemoveAll(tmpDir)
@@ -90,7 +90,7 @@ func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID
 // subtree. Rename is atomic on the same filesystem; there is no sync, no lock
 // and no rollback, because the database transaction is the durability point
 // and a mixed pair is refused on the next read by its hash.
-func (p *Pipeline) replaceSessionDir(src, dst, sessionID, metadataName string) error {
+func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, metadataName string, writeLane *storeWriteLane) error {
 	var ordered, metadata []string
 	wanted := make(map[string]bool)
 	err := p.fs.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
@@ -117,6 +117,17 @@ func (p *Pipeline) replaceSessionDir(src, dst, sessionID, metadataName string) e
 	})
 	if err != nil {
 		return fmt.Errorf("install parent files at %s: %w; existing child output remains in place; fix filesystem access or free disk space and rerun ingest", dst, err)
+	}
+	mirror, err := p.mirrorArtifactStore()
+	if err == nil && mirror != nil {
+		var sid SessionID
+		sid, err = NewSessionID(sessionID)
+		if err == nil {
+			p.runStoreWrite(writeLane, func() { err = mirror.PrepareArtifactInstall(ctx, sid) })
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("prepare artifact install for session %s at %s before replacing files: %w; existing installed pair and database entries were preserved; restore database access and retry harvest", sessionID, dst, err)
 	}
 	for _, rel := range append(ordered, metadata...) {
 		if err := p.fs.Rename(filepath.Join(src, rel), filepath.Join(dst, rel)); err != nil {
