@@ -1936,8 +1936,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		}
 		input.transcript, input.tree = nil, nil
 	}
-	// Private evidence survives local indexing, but Extra is not an outbound
-	// payload channel. Do not certify publication until that projection exists.
+	// Private evidence is exportable only when the schema projection validates
+	// the complete retained payload and capture-assigned source coordinates.
 	if err == nil && parsed {
 		if v1, ok := output.(indexformat.V1); ok {
 			if outputRecordsItsOmissions(output) {

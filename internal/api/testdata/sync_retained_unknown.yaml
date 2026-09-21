@@ -1,0 +1,8 @@
+requiredNames:
+  - escaped_json_string
+  - embedded_json_string
+cases:
+  - name: escaped_json_string
+    payload: '{"secret":"custom\u002dsecret","n":9007199254740993}'
+  - name: embedded_json_string
+    payload: '{"data":"{\"secret\":\"custom\\u002dsecret\"}"}'

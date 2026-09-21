@@ -57,8 +57,8 @@ type ContentCaptureFailureCode string
 const (
 	// ContentCaptureNoFailure is the absent code: nothing refused this capture.
 	ContentCaptureNoFailure ContentCaptureFailureCode = ""
-	// ContentCaptureUnknownDataRetained holds complete private evidence whose
-	// outbound projection is not yet supported. It is not a source omission.
+	// ContentCaptureUnknownDataRetained marks uninterpreted evidence. A full
+	// certificate additionally requires validated payloads and source coordinates.
 	ContentCaptureUnknownDataRetained ContentCaptureFailureCode = "unknown_data_retained"
 	// ContentCaptureStrictRefused means the strict parser refused this exact
 	// input under the recorded producer, and the tolerant projection was stored
