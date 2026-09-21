@@ -71,12 +71,23 @@ index profile output, but they are not normal progress-renderer stages.
 
 `processSession` installs the metadata/transcript pair by writing both files to
 a temporary directory and renaming them into place, transcript first and
-metadata last, with no file sync and no lock. The drain loop mirrors metadata,
+metadata last, with no file sync and no lock. Before the first final rename,
+the existing serial store-write lane commits a clear of the settled row's
+`indexed_input_hash`. The ordinary repair selector therefore sees an interrupted
+replacement without additional inventory or unchanged-pair reads. The drain loop mirrors metadata,
 retained statistics, associations and acquired source evidence to the database
 in one batched transaction per page, and the index writer commits entries per
 byte budget; the database is the durability point. Nothing at ingest reads a
 saved pair except a session the database itself selected as work. `harvest
 index` is the only reader that walks the saved tree.
+
+This recovery guarantee covers process termination while the OS survives, not
+physical power loss, pre-existing unmarked damage, or independent overlapping
+writers for the same session. Preparation preserves the artifact identity and
+entries; only successful indexing restores the proof. An unavailable native
+source leaves saved files and stored entries intact and reports the repair that
+could not proceed. Plain `harvest index` retains its existing metadata inventory
+and missing-row reconciliation; recovery adds no new inventory pass.
 
 Native OpenCode materialization can carry an acquired event sequence from the
 same private read-only SQLite snapshot as its transcript. Targeted session and

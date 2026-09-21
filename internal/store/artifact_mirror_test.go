@@ -72,6 +72,15 @@ func TestPrepareArtifactInstall(t *testing.T) {
 		if row.Name == "" || names[row.Name] {
 			t.Fatalf("invalid preparation case %q", row.Name)
 		}
+		declared := false
+		for _, required := range fixture.PrepareRequiredNames {
+			if required == row.Name {
+				declared = true
+			}
+		}
+		if !declared {
+			t.Fatalf("preparation case %q absent from manifest", row.Name)
+		}
 		names[row.Name] = true
 	}
 	if err := testutil.RequireFixtureNames("artifact_mirror.yaml", "preparation", fixture.PrepareRequiredNames, names); err != nil {
@@ -100,11 +109,11 @@ func TestPrepareArtifactInstall(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			before := mirrorDatabaseState(t, db.Pool(), fixture.SessionID)
+			before := preparationSessionState(t, db.Pool(), fixture.SessionID)
 			if err := db.PrepareArtifactInstall(t.Context(), entry.Metadata.SessionID); err != nil {
 				t.Fatal(err)
 			}
-			if after := mirrorDatabaseState(t, db.Pool(), fixture.SessionID); !reflect.DeepEqual(before, after) {
+			if after := preparationSessionState(t, db.Pool(), fixture.SessionID); !reflect.DeepEqual(before, after) {
 				t.Fatalf("preparation changed retained state: before=%+v after=%+v", before, after)
 			}
 			state, err := db.ReadIndexState(t.Context(), entry.Metadata.SessionID)
@@ -122,6 +131,28 @@ func TestPrepareArtifactInstall(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Include every session column except the one preparation owns, so widening a
+// later UPDATE cannot silently change publication, source or producer evidence.
+func preparationSessionState(t *testing.T, pool *sqlitex.Pool, sid string) map[string]string {
+	t.Helper()
+	conn := takeConn(t, pool)
+	defer pool.Put(conn)
+	state := make(map[string]string)
+	if err := sqlitex.Execute(conn, `SELECT * FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{sid}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			for i := 0; i < stmt.ColumnCount(); i++ {
+				if name := stmt.ColumnName(i); name != "indexed_input_hash" {
+					state[name] = stmt.ColumnType(i).String() + ":" + stmt.ColumnText(i)
+				}
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return state
 }
 
 func loadArtifactMirrorFixtures(t *testing.T) artifactMirrorFixtures {

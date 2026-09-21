@@ -432,7 +432,7 @@ func (f *countingInstallFS) WalkDir(root string, fn fs.WalkDirFunc) error {
 }
 func (f *countingInstallFS) Rename(src, dst string) error {
 	f.mu.Lock()
-	if dst == f.w.transcript || dst == f.w.metadata {
+	if strings.HasPrefix(dst, filepath.Dir(f.w.transcript)+string(filepath.Separator)) {
 		f.counts.TargetRenames++
 	}
 	f.mu.Unlock()
@@ -456,6 +456,7 @@ func requireNoExtraPeerIO(t *testing.T, baseline, actual installCounts, w instal
 }
 
 func TestInterruptedPairInstallMounted(t *testing.T) {
+	t.Parallel()
 	f := loadInterruptedPairFixtures(t)
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -466,7 +467,15 @@ func TestInterruptedPairInstallMounted(t *testing.T) {
 				t0, m0 := readInstallFile(t, w.transcript), readInstallFile(t, w.metadata)
 				pt, pm := readInstallFile(t, w.peerTranscript), readInstallFile(t, w.peerMetadata)
 				baselineFS := newCountingInstallFS(w)
-				runInstallCommand(t, w, command, baselineFS)
+				baseline, _ := runInstallCommand(t, w, command, baselineFS)
+				for _, session := range baseline.Sessions {
+					if session.Error != "" {
+						t.Fatal("baseline session error", session.Error)
+					}
+				}
+				if baselineFS.counts.TargetRenames != 0 {
+					t.Fatal("ordinary baseline rewrote settled target")
+				}
 				changed := bytes.ReplaceAll(w.nativeBytes, []byte(f.OriginalText), []byte(f.ReplacementText))
 				if bytes.Equal(changed, w.nativeBytes) {
 					t.Fatal("native mutation was vacuous")
