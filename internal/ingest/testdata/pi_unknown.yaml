@@ -1,0 +1,94 @@
+sessionID: 11111111-2222-4333-8444-555555555555
+header: '{"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/synthetic/project"}'
+requiredNames:
+  - unknown-only-large
+  - mixed-namespaces
+  - active-branch-ownership
+  - known-additive-fields
+  - known-additive-usage-fields
+  - custom-block
+  - invalid-known-after-unknown
+  - unknown-dangling-parent
+  - unknown-cycle
+  - invalid-discriminator
+  - invalid-known-message-field
+  - incomplete-tail
+  - physical-and-record-coordinates
+cases:
+  - name: unknown-only-large
+    paddingBytes: 12000
+    source: |
+      {"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","number":9007199254740993,"nullable":null,"padding":"PADDING"}}
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 2, pointer: '', contains: ['9007199254740993', '"nullable":null']}
+  - name: mixed-namespaces
+    source: |
+      {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"before"}}
+      {"type":"future","id":"x","parentId":"u","payload":{"value":1}}
+      {"type":"message","id":"m","parentId":"x","message":{"role":"future","content":{"new":"shape"}}}
+      {"type":"message","id":"a","parentId":"m","message":{"role":"assistant","content":[{"type":"text","text":"after"},{"type":"future","text":{"new":true}},{"type":"text","text":"last"},{"type":"future","payload":2}]}}
+      {"type":"session_info","id":"n","parentId":"a","name":"fixture title"}
+    content: [before, "after\nlast"]
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 3, pointer: '', contains: ['"value":1']}
+      - {namespace: message_role, kind: future, id: m, line: 4, pointer: /message, contains: ['"new":"shape"']}
+      - {namespace: content_block, kind: future, id: a, line: 5, pointer: /message/content/1, contains: ['"new":true']}
+      - {namespace: content_block, kind: future, id: a, line: 5, pointer: /message/content/3, contains: ['"payload":2']}
+  - name: active-branch-ownership
+    source: |
+      {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"root"}}
+      {"type":"future","id":"inactive","parentId":"u","payload":"not selected"}
+      {"type":"future","id":"active","parentId":"u","payload":"selected"}
+      {"type":"message","id":"a","parentId":"active","message":{"role":"assistant","content":"leaf"}}
+    content: [root, leaf]
+    expected:
+      - {namespace: entry, kind: future, id: active, line: 4, pointer: '', contains: ['"payload":"selected"']}
+  - name: known-additive-fields
+    source: |
+      {"type":"message","id":"u","parentId":null,"extra":null,"message":{"role":"user","future":null,"content":[{"type":"text","text":"known","extra":null}]}}
+    content: [known]
+  - name: known-additive-usage-fields
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","usage":{"input":1,"future":null,"cost":{"total":0.1,"future":{"new":"shape"}}},"content":"known usage"}}
+    content: [known usage]
+  - name: custom-block
+    source: |
+      {"type":"custom_message","id":"u","parentId":null,"content":[{"type":"text","text":"context"},{"type":"future","payload":true}]}
+    content: [context]
+    expected:
+      - {namespace: content_block, kind: future, id: u, line: 2, pointer: /content/1, contains: ['"payload":true']}
+  - name: invalid-known-after-unknown
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"future","payload":true},{"type":"text","text":5}]}}
+    reject: true
+  - name: unknown-dangling-parent
+    source: |
+      {"type":"future","id":"x","parentId":"missing"}
+    reject: true
+  - name: unknown-cycle
+    source: |
+      {"type":"future","id":"x","parentId":"x"}
+    reject: true
+  - name: invalid-discriminator
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":null}]}}
+    reject: true
+  - name: invalid-known-message-field
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":5,"content":[{"type":"future"}]}}
+    reject: true
+  - name: incomplete-tail
+    source: |
+      {"type":"future","id":"x","parentId":null,"payload":true}
+      {"type":
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 2, pointer: '', contains: ['"payload":true']}
+  - name: physical-and-record-coordinates
+    source: |
+
+      {"type":"future","id":"x","parentId":null,"payload":1}
+
+      {"type":"future","id":"y","parentId":"x","payload":2}
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 3, sequence: 2, pointer: '', contains: ['"payload":1']}
+      - {namespace: entry, kind: future, id: y, line: 5, sequence: 3, pointer: '', contains: ['"payload":2']}
