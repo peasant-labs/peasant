@@ -10,6 +10,8 @@ required_names:
   - cursor-additive-fields
   - strike-records
   - strike-blocks
+  - strike-object-block
+  - strike-object-corruption
   - strike-corruption-wins
   - strike-additive-fields
 cases:
@@ -111,6 +113,18 @@ cases:
     source: |
       {"type":"future_record","payload":"PAYLOAD"}
       {"type":"assistant.text","data":{"text":42}}
+    error: true
+  - name: strike-object-block
+    harness: strike
+    source: |
+      {"type":"assistant.reasoning","data":{"content":{"type":"future_block","payload":"PAYLOAD"}}}
+    positions: [1]
+    pointers: [/data/content]
+    kinds: [future_block]
+  - name: strike-object-corruption
+    harness: strike
+    source: |
+      {"type":"assistant.reasoning","data":{"content":{"type":"tool_result","content":[{"type":"future_block","payload":"PAYLOAD"}]}}}
     error: true
   - name: strike-additive-fields
     harness: strike

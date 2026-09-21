@@ -95,7 +95,8 @@ func prepareUnknownJSONL(harness Harness, raw []byte, line int) ([]byte, []Retai
 			kind, namespace, unknown = role, "role", true
 		}
 	case HarnessStrike:
-		unknown = kind != "" && !isKnownStrikeEvent(strikeEventType(kind))
+		_, known := knownStrikeEventKind(kind)
+		unknown = kind != "" && !known
 	}
 	if unknown {
 		record, err := NewRetainedUnknownFromSource(harness, namespace, kind, UnknownSourcePosition{Line: line}, raw)
@@ -163,17 +164,42 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 		if err := json.Unmarshal(raw, &message); err != nil {
 			return nil, nil, err
 		}
+		var kind string
+		if value := message["type"]; value != nil {
+			if err := json.Unmarshal(value, &kind); err != nil || kind == "" {
+				return nil, nil, fmt.Errorf("content block lacks a string type")
+			}
+			if !slices.Contains(captureContentBlockKinds(harness), kind) {
+				record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: pointer}, raw)
+				if err != nil {
+					return nil, nil, err
+				}
+				return json.RawMessage("[]"), []RetainedUnknown{record}, nil
+			}
+		}
+		var records []RetainedUnknown
 		if value := message["content"]; value != nil {
-			content, records, err := filterUnknownBlocks(harness, value, line, pointer+"/content")
+			content, found, err := filterUnknownBlocks(harness, value, line, pointer+"/content")
 			if err != nil {
 				return nil, nil, err
 			}
-			if len(records) > 0 {
+			if len(found) > 0 {
+				records = found
 				message["content"] = content
-				encoded, err := json.Marshal(message)
-				return encoded, records, err
+				raw, err = json.Marshal(message)
+				if err != nil {
+					return nil, nil, err
+				}
 			}
 		}
+		if kind != "" {
+			one := append([]byte{'['}, raw...)
+			one = append(one, ']')
+			if err := validateCaptureContent(harness, one, false); err != nil {
+				return nil, nil, err
+			}
+		}
+		return raw, records, nil
 	}
 	if len(trimmed) == 0 || trimmed[0] != '[' {
 		return raw, nil, nil

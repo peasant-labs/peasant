@@ -34,7 +34,7 @@ cases:
       {"sessionId":"SESSION_ID","type":"future-record","payload":"a record kind no shipped build represents","uuid":"entry-third","timestamp":"2026-01-01T00:00:02Z"}
     capture_status: incomplete
     capture_format: preview_only
-    failure_code: strict_capture_refused
+    failure_code: unknown_data_retained
     export_accepted: false
     publication_ready: false
     preflight_accepts: false

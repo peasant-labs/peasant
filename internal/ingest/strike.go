@@ -141,12 +141,17 @@ var knownStrikeEventKinds = []strikeEventType{
 }
 
 func isKnownStrikeEvent(eventType strikeEventType) bool {
+	_, ok := knownStrikeEventKind(string(eventType))
+	return ok
+}
+
+func knownStrikeEventKind(raw string) (strikeEventType, bool) {
 	for _, known := range knownStrikeEventKinds {
-		if eventType == known {
-			return true
+		if raw == string(known) {
+			return known, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // strikeMetadataEventKinds names the known Strike events that carry session

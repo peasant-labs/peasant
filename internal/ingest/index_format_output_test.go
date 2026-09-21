@@ -70,6 +70,7 @@ type indexFormatOutputCase struct {
 	LogsOnly             bool                `yaml:"logsOnly"`
 	Payload              indexOutputPayload  `yaml:"payload"`
 	WantIndexed          bool                `yaml:"wantIndexed"`
+	WantRetainedKind     string              `yaml:"wantRetainedKind"`
 	WantLogError         string              `yaml:"wantLogError"`
 	WantConstructorError string              `yaml:"wantConstructorError"`
 	WantDiagnostic       bool                `yaml:"wantDiagnostic"`
@@ -387,6 +388,23 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				t.Fatal(err)
 			}
 			if row.WantIndexed {
+				if row.WantRetainedKind != "" {
+					var retained []ingest.RetainedUnknown
+					for _, entry := range after {
+						records, err := ingest.RetainedUnknownOf(entry)
+						if err != nil {
+							t.Fatal(err)
+						}
+						retained = append(retained, records...)
+					}
+					if len(retained) != 1 || retained[0].Kind != row.WantRetainedKind || retained[0].Position.Line != 2 {
+						t.Fatalf("unknown source evidence missing: %+v", retained)
+					}
+					capture, found, err := db.GetSessionContentCapture(ctx, sid)
+					if err != nil || !found || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || store.PublishableWithOmissions(capture) {
+						t.Fatalf("unprojected evidence certified: %+v %v", capture, err)
+					}
+				}
 				if row.Payload == indexOutputEmpty && len(after) != 0 {
 					t.Fatalf("empty success retained stale entries: %+v", after)
 				}
