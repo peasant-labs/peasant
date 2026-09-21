@@ -69,15 +69,15 @@ func loadProjectionFormatDocument(t *testing.T) projectionFormatDocument {
 
 // TestOpenCodeManagedProjectionFormatVersionDiscipline documents and enforces
 // the version discipline for the managed projections. Tolerating current
-// control rows added the typed control field, so the current write version is 2
+// control rows added the typed control field; opaque evidence now requires version 3
 // while the shared minimum readable version stays 1: a version 1 projection
 // that predates the control field still decodes, a version 2 projection that
 // carries a control field decodes, and a version above the write version is
 // refused. The legacy projection shape is unchanged, so its write version stays
 // 2 and it shares the same minimum readable floor.
 func TestOpenCodeManagedProjectionFormatVersionDiscipline(t *testing.T) {
-	if openCodeCurrentProjectionVersion != 2 {
-		t.Fatalf("current projection write version = %d, want 2 after the control field was added", openCodeCurrentProjectionVersion)
+	if openCodeCurrentProjectionVersion != 3 {
+		t.Fatalf("current projection write version = %d, want 3 after retained evidence was added", openCodeCurrentProjectionVersion)
 	}
 	if openCodeLegacyProjectionVersion != 2 {
 		t.Fatalf("legacy projection write version = %d, want 2; the legacy persisted shape is unchanged", openCodeLegacyProjectionVersion)

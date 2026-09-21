@@ -15,6 +15,7 @@ import (
 // native session table carries a parent column and the row value is null or
 // empty; a missing column leaves it false.
 type OpenCodeProvenanceScope struct {
+	UnknownPosition  *UnknownPublicPosition
 	SessionID        string
 	Shape            OpenCodeProvenanceShape
 	ParentNullProven bool
@@ -40,9 +41,9 @@ type OpenCodeProvenanceRow struct {
 // classifier message plus its settled flag. It reuses the pinned row
 // validators and payload decoders, so the new path admits exactly what the
 // retained normalizer admits: redundant payload identities must agree with
-// the SQLite columns, required fields must be present, and newer control rows
-// without an upstream id surface the shared skip sentinel for the caller to
-// count. A setled row is complete: no running shell, no running or pending
+// the SQLite columns, required fields must be present, and unknown native kinds
+// retain redacted opaque evidence before normalization. A settled row has no
+// running shell, no running or pending
 // tool part, no running compaction.
 func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProvenanceScope) (OpenCodeProvenanceMessage, bool, error) {
 	msg := OpenCodeProvenanceMessage{
@@ -85,6 +86,19 @@ func DecodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: the payload message type disagrees with its row type; the row cannot be trusted; verify the source row and retry")
 		}
 	}
+	position := UnknownSourcePosition{SourceID: row.ID, Public: scope.UnknownPosition}
+	if row.HasSeq && row.Seq > 0 {
+		position.Sequence = int(row.Seq)
+	}
+	prepared, unknown, err := prepareOpenCodeCurrent(row.Type, data, position)
+	if err != nil {
+		return OpenCodeProvenanceMessage{}, false, err
+	}
+	msg.RetainedUnknown = unknown
+	if prepared == nil {
+		return msg, true, nil
+	}
+	data = prepared
 	normalized, err := normalizeOpenCodeV2StructuralRow(OpenCodeCurrentMessageRowForDecode(row), data, envelope)
 	if err != nil {
 		return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q failed structural normalization: %w; no partial row is eligible; verify the source row and retry", row.ID, err)
@@ -372,6 +386,7 @@ func decodeOpenCodeProvenanceControl(row OpenCodeProvenanceRow, msg OpenCodeProv
 func decodeOpenCodeSemanticProvenance(semantic openCodeSemanticMessage, scope OpenCodeProvenanceScope) (OpenCodeProvenanceMessage, bool, error) {
 	msg := OpenCodeProvenanceMessage{
 		MessageID:        semantic.EntryID,
+		RetainedUnknown:  semantic.RetainedUnknown,
 		SessionID:        scope.SessionID,
 		Shape:            scope.Shape,
 		TimeCreated:      semantic.TimeCreated,

@@ -185,7 +185,9 @@ type codexHistoryReplayPayload struct {
 // advance the byte checkpoint only and are never assigned a native ordinal
 // by line number.
 type codexHistoryRecord struct {
-	LineIndex int64
+	RawJSON           json.RawMessage
+	TraversalPosition int64
+	LineIndex         int64
 	// Ordinal is the valid decoded native ordinal. HasOrdinal is false for
 	// partial, malformed, blank and unknown records.
 	Ordinal          int64
@@ -228,6 +230,7 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 	var maxAssigned int64 = -1
 	offset := int64(0)
 	line := int64(0)
+	var traversalPosition int64
 	for offset < int64(len(data)) {
 		relative := bytes.IndexByte(data[offset:], '\n')
 		end := int64(len(data))
@@ -246,6 +249,9 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 		}
 		line++
 		trimmed := bytes.TrimSpace(recordLine)
+		record.RawJSON = append(json.RawMessage(nil), trimmed...)
+		record.TraversalPosition = traversalPosition
+		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
 		switch {
 		case partial:
 			// Deferred: no ordinal, no interpretation.
@@ -256,7 +262,7 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 			if err := json.Unmarshal(trimmed, &env); err != nil {
 				record.Malformed = true
 			} else if env.Type == "" && len(bytes.TrimSpace(env.Payload)) == 0 && len(bytes.TrimSpace(env.Metadata)) == 0 {
-				record.Blank = true
+				record.Malformed = true
 			} else if !recognizedCodexEnvelopeType(env.Type) {
 				record.EnvelopeType = env.Type
 				record.Payload = env.Payload
@@ -875,12 +881,16 @@ func (state *codexReplayState) replaySegment(threadID string, segment codexDecod
 			continue
 		}
 		if !record.HasOrdinal {
-			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-				ErrorType:   "codex_record_unknown",
-				Location:    codexRecordLocation(threadID, record),
-				Message:     "a complete native record has an unrecognized envelope type; its byte checkpoint advanced and no native ordinal was assigned",
-				Remediation: "Upgrade Peasant to a build that recognizes this Codex record type; later valid records are still captured once.",
-			})
+			if !codexUnknownInBounds(segment, record) {
+				continue
+			}
+			_, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
+			if err != nil {
+				return err
+			}
+			if err := state.emitUnknown(threadID, segment, record, codexUnknownOwnership(segment, record), unknown); err != nil {
+				return err
+			}
 			continue
 		}
 		if !codexRecordInBounds(segment, record, clampEnd) {
@@ -971,10 +981,42 @@ func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwne
 }
 
 // replayRecord dispatches one valid decoded record.
-func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) error {
+func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) (resultErr error) {
+	prepared, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
+	if err != nil {
+		return err
+	}
+	if prepared == nil {
+		return state.emitUnknown(threadID, segment, record, ownership, unknown)
+	}
+	defer func() {
+		if resultErr == nil {
+			resultErr = state.emitUnknown(threadID, segment, record, ownership, unknown)
+		}
+	}()
+	var envelope codexHistoryEnvelope
+	if err := json.Unmarshal(prepared, &envelope); err != nil {
+		return err
+	}
+	record.Payload = envelope.Payload
 	var payload codexHistoryReplayPayload
 	if len(record.Payload) > 0 {
-		if err := json.Unmarshal(record.Payload, &payload); err != nil {
+		replayPayload := record.Payload
+		if record.EnvelopeType == codexTypeResponse {
+			// A reasoning response's summary is an array, whereas the compacted
+			// envelope owns a scalar summary. Decode only replay-owned fields.
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(replayPayload, &fields); err != nil {
+				return err
+			}
+			delete(fields, "summary")
+			var err error
+			replayPayload, err = json.Marshal(fields)
+			if err != nil {
+				return err
+			}
+		}
+		if err := json.Unmarshal(replayPayload, &payload); err != nil {
 			// A malformed complete line advances the byte checkpoint only.
 			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
 				ErrorType:   "codex_record_malformed",
@@ -1076,6 +1118,13 @@ func (state *codexReplayState) replayResponseItem(threadID string, segment codex
 // boundaries and legacy instruction rollback.
 func (state *codexReplayState) replayEventMessage(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
 	switch payload.Type {
+	case "token_count",
+		"user_message",
+		"agent_message",
+		"agent_reasoning":
+		// Usage belongs to metadata; these conversation events mirror response
+		// items and must not duplicate the native item stream.
+		return nil
 	case "item_started":
 		if payload.ID != "" {
 			state.boundary.pendUnopened(payload.ID)

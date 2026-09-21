@@ -58,19 +58,42 @@ func captureRoleKinds() []string {
 }
 
 func codexStrictEnvelopeKinds() []string {
-	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeEventMsg, codexTypeResponse}
+	return []string{
+		codexTypeSessionMeta,
+		codexTypeTurnContext,
+		codexTypeEventMsg,
+		codexTypeResponse,
+	}
 }
 
 func codexStrictEventMsgKinds() []string {
-	return []string{"token_count", "task_started", "task_complete", "turn_aborted", "user_message", "agent_message", "agent_reasoning"}
+	return []string{
+		"token_count",
+		"task_started",
+		"task_complete",
+		"turn_aborted",
+		"user_message",
+		"agent_message",
+		"agent_reasoning",
+	}
 }
 
 func codexStrictResponsePayloadKinds() []string {
-	return []string{codexResponseMessage, codexResponseReasoning, codexResponseFunctionCall, codexResponseCustomCall, codexResponseFunctionOut, codexResponseCustomCallOut}
+	return []string{
+		codexResponseMessage,
+		codexResponseReasoning,
+		codexResponseFunctionCall,
+		codexResponseCustomCall,
+		codexResponseFunctionOut,
+		codexResponseCustomCallOut,
+	}
 }
 
 func codexStrictMessageBlockKinds() []string {
-	return []string{"input_text", "output_text"}
+	return []string{
+		"input_text",
+		"output_text",
+	}
 }
 
 func codexStrictReasoningSummaryKinds() []string {
@@ -78,7 +101,10 @@ func codexStrictReasoningSummaryKinds() []string {
 }
 
 func codexStrictReasoningContentKinds() []string {
-	return []string{"reasoning_text", "text"}
+	return []string{
+		"reasoning_text",
+		"text",
+	}
 }
 
 // cursorStrictRecordKinds names the Cursor record types with dedicated
@@ -431,7 +457,15 @@ func (idx *CodexIndexer) IndexTranscriptForCapture(ctx context.Context, s Discov
 }
 func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
 	var mirrors []string
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+		prepared, _, err := prepareCodexRecord(raw, UnknownSourcePosition{Line: 1}, false)
+		if err != nil {
+			return nil, err
+		}
+		if prepared == nil {
+			return nil, nil
+		}
+		raw = prepared
 		var env codexRolloutLine
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return nil, err
@@ -585,7 +619,8 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("conversation event has no equivalent response item"))
 		}
 	}
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
 func (idx *StrikeIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {

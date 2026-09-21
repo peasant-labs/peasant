@@ -144,6 +144,7 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 		return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "read message rows", Reason: fmt.Sprintf("the fixed page size is invalid: %v", err), Recovery: "retry the snapshot"}
 	}
 	var rows []OpenCodeHistoryRow
+	var traversalPosition int64
 	request := OpenCodeCurrentPageRequest{SessionID: currentID, PageSize: pageSize, Before: before}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -154,6 +155,9 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 			return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "read message rows", Reason: "the message page read failed against the native store", Recovery: "verify the source remains a supported session_message store and retry"}
 		}
 		for _, row := range page.Messages {
+			position := openCodeUnknownPosition(scope.SessionID, "current", row.ID.String(), int64(len(rows)), traversalPosition, "")
+			scope.UnknownPosition = position.Public
+			traversalPosition += openCodeCurrentTraversalSize([]byte(row.Data))
 			decoded, settled, err := DecodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
 				ID:          row.ID.String(),
 				SessionID:   row.SessionID.String(),
@@ -353,7 +357,7 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 		}
 		for _, block := range blocks {
 			block.Section = section
-			if msg.Attribution.Inherited && msg.Emit && msg.RetainedSegment != nil {
+			if msg.Attribution.Inherited && msg.Emit && msg.RetainedSegment != nil && len(block.RetainedUnknown) == 0 {
 				block.Retained = true
 				block.SegmentOrdinal = *msg.RetainedSegment
 				block.Section = ProjectionSection{}
@@ -389,6 +393,10 @@ func (e *OpenCodeIncompleteProvenanceError) Error() string {
 // semantic shape.
 func (idx *OpenCodeIndexer) OpenCodeHistoricalProvenanceBlocks(_ context.Context, session DiscoveredSession) ([]ClassifiedBlock, error) {
 	messages, err := idx.loadOpenCodeHistoricalSemanticMessages(session)
+	if err != nil {
+		return nil, err
+	}
+	messages, err = retainOpenCodeSemantic(session.SessionID, messages)
 	if err != nil {
 		return nil, err
 	}

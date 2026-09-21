@@ -663,7 +663,33 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		c.retaining = false
 		c.retainedSegment = 0
 	}()
+	if len(node.RetainedUnknown) > 0 {
+		ownership := ownershipOf(node, metadata)
+		if ownership == schema.ContentOwnershipUncertain {
+			c.uncertain = true
+		}
+		// Evidence-only carriers use the common entry metadata channel even
+		// for inherited sources. They carry no conversational content, count,
+		// title, or display; provenance and the source segment retain ownership.
+		c.retaining = false
+		block := ClassifiedBlock{NativeKey: node.NativeKey + "/retained-unknown", Section: sectionOf(ownership), Uncertain: ownership == schema.ContentOwnershipUncertain, Role: RoleSystem, EntryType: EntryTypeSystem, RetainedUnknown: node.RetainedUnknown,
+			Provenance: &schema.ContentProvenance{Origin: schema.ContentOriginUnknown, Actor: schema.ActorOriginUnknown, Delivery: schema.DeliveryOriginUnknown, Ownership: ownership, Evidence: schema.EvidenceNativeTyped, InputModality: schema.InputModalityNone}}
+		c.emit(block)
+		return nil
+	}
 	payload := decodeCodexItemPayload(node.Payload)
+	if node.NativeType == "message" && len(payload.Content) > 0 {
+		opaqueOnly := true
+		for _, block := range payload.Content {
+			if block.ContentType != codexOpaqueBlock {
+				opaqueOnly = false
+				break
+			}
+		}
+		if opaqueOnly {
+			return nil
+		}
+	}
 	switch node.NativeType {
 	case "message":
 		if payload.Type == codexResponseAgentMessage {
@@ -739,6 +765,9 @@ func (c *codexBlockClassifier) classifyMessage(node CodexCapturedNode, payload c
 	ownership := ownershipOf(node, metadata)
 	if ownership == schema.ContentOwnershipUncertain {
 		for i := range payload.Content {
+			if payload.Content[i].ContentType == codexOpaqueBlock {
+				continue
+			}
 			c.emitUncertainBlock(node, payload.Content[i], i)
 		}
 		if len(payload.Content) == 0 {
@@ -747,6 +776,9 @@ func (c *codexBlockClassifier) classifyMessage(node CodexCapturedNode, payload c
 		return
 	}
 	for i := range payload.Content {
+		if payload.Content[i].ContentType == codexOpaqueBlock {
+			continue
+		}
 		c.classifyContentBlock(node, payload, metadata, ownership, i)
 	}
 	if len(payload.Content) == 0 {
@@ -1206,6 +1238,9 @@ func (c *codexBlockClassifier) classifyReasoning(node CodexCapturedNode, payload
 		elements = append(elements, codexMessageBlock{})
 	}
 	for i, element := range elements {
+		if element.ContentType == codexOpaqueBlock {
+			continue
+		}
 		nativeKey := fmt.Sprintf("%s/b%d", node.NativeKey, i)
 		if ownership == schema.ContentOwnershipUncertain {
 			c.emitUncertainBlock(node, element, i)

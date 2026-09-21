@@ -80,7 +80,7 @@ normalization_cases:
     forbidden_managed: [aGk=]
   - name: v2_running_tool_rejects_completed_fields
     rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_run","name":"read","state":{"status":"running","input":{},"metadata":{},"content":[{"type":"text","text":"output"}]},"time":{"created":1000}}],"time":{"created":1000}}'}]
-    error_contains: unknown field "content"
+    error_contains: completed-only content
   - name: v2_completed_tool_rejects_empty_content
     rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{},"content":[]},"time":{"created":1000}}],"time":{"created":1000}}'}]
     error_contains: nonempty content
@@ -95,7 +95,7 @@ normalization_cases:
     error_contains: requires object input and metadata
   - name: v2_shell_rejects_mixed_identity
     rows: [{id: msg_v2, row_type: shell, data: '{"shellID":"sh_native","callID":"call_other","command":"pwd","status":"running","time":{"created":1000}}'}]
-    error_contains: unknown field "callID"
+    error_contains: mixes shellID and callID
   - name: v2_compaction_failed_rejects_summary
     rows: [{id: msg_v2, row_type: compaction, data: '{"status":"failed","reason":"auto","summary":"false summary","error":{"type":"error","message":"failure"},"time":{"created":1000}}'}]
     error_contains: cannot carry summary

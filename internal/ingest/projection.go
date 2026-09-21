@@ -54,6 +54,9 @@ type ClassifiedNativeAttachment struct {
 // positive attribution of each block; the shared projection owns reference
 // allocation, layout, tool folding, content records and counting.
 type ClassifiedBlock struct {
+	// RetainedUnknown is redacted opaque source evidence carried in entry Extra,
+	// never in conversational content or a display-only warning.
+	RetainedUnknown []RetainedUnknown
 	// NativeKey is the bounded opaque local native identity or coordinate for
 	// this block. It is persisted as an alias so a later capture reuses the
 	// same reference.
@@ -357,7 +360,15 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 	}
 	for i := range capture.Blocks {
 		block := capture.Blocks[i]
+		for _, record := range block.RetainedUnknown {
+			if record.Harness != capture.Harness {
+				return fmt.Errorf("ingest.BuildGeneration: block[%d] opaque evidence belongs to another harness; no candidate was produced; retain evidence only on its source owner", i)
+			}
+		}
 		if block.Retained {
+			if len(block.RetainedUnknown) > 0 {
+				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] carries opaque evidence without an entry; export could lose it; use an evidence-only entry carrier with explicit ownership", i)
+			}
 			// Retained inherited evidence never enters a conversational
 			// partition, so its section is ignored. Uncertainty belongs to the
 			// earlier-history path instead, and a partition-bound native
@@ -825,6 +836,9 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 		value := string(encoded)
 		entry.Extra = &value
 	}
+	if err := AttachRetainedUnknown(&entry, block.RetainedUnknown); err != nil {
+		return schema.SessionEntry{}, err
+	}
 	switch block.EntryType {
 	case schema.EntryTypeToolUse:
 		entry.HasToolUse = true
@@ -1190,6 +1204,9 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 	var titleRefs []schema.SourceEntryRef
 	for i := range main {
 		entry := main[i]
+		if IsRetainedUnknownCarrier(entry) {
+			continue
+		}
 		if entry.Depth == 0 {
 			turnCount++
 		}

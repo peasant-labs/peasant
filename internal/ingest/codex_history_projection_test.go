@@ -200,7 +200,7 @@ func (s *fixtureCodexSource) ReadCodexSource(_ context.Context, pointer string) 
 	if s.unstable {
 		// Every read returns a different bounded prefix so the stability
 		// recheck always observes a change.
-		return []byte(fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{}}\n{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"id\":\"m%d\"}}\n", s.calls)), nil
+		return []byte(fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{}}\n{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[],\"id\":\"m%d\"}}\n", s.calls)), nil
 	}
 	if s.fail[pointer] {
 		return nil, fmt.Errorf("synthetic missing native source %q", pointer)
@@ -500,7 +500,7 @@ func codexAssertCapturedSegments(t *testing.T, history ingest.CodexCapturedHisto
 		}
 	}
 	for _, node := range history.Nodes {
-		if len(node.Payload) == 0 {
+		if len(node.Payload) == 0 && len(node.RetainedUnknown) == 0 {
 			t.Errorf("node %s carries no captured payload; the classifier would have to reopen the source", node.Ref)
 		}
 	}
