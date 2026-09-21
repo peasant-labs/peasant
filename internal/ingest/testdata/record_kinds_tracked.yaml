@@ -1,0 +1,34 @@
+# Tracked-not-visualized membership: kinds that must appear in the report
+# list and kinds that must never appear there.
+required_names:
+  - tracked-only hidden kind is listed
+  - represented planned kind is listed
+  - rendered kind is absent
+  - ignored kind is absent
+  - refused kind is absent
+  - container kind is absent
+cases:
+  - name: tracked-only hidden kind is listed
+    harness: claude-code
+    kind: attachment
+    want_listed: true
+  - name: represented planned kind is listed
+    harness: claude-code
+    kind: compact_boundary
+    want_listed: true
+  - name: rendered kind is absent
+    harness: claude-code
+    kind: user
+    want_listed: false
+  - name: ignored kind is absent
+    harness: claude-code
+    kind: last-prompt
+    want_listed: false
+  - name: refused kind is absent
+    harness: claude-code
+    kind: image
+    want_listed: false
+  - name: container kind is absent
+    harness: codex
+    kind: event_msg
+    want_listed: false

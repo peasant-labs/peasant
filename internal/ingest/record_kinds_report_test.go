@@ -10,6 +10,9 @@ import (
 //go:embed testdata/record_kinds_aggregate.yaml
 var recordKindsAggregateYAML []byte
 
+//go:embed testdata/record_kinds_tracked.yaml
+var recordKindsTrackedYAML []byte
+
 type recordKindsAggregateFixture struct {
 	RequiredNames []string `yaml:"required_names"`
 	Cases         []struct {
@@ -23,6 +26,16 @@ type recordKindsAggregateFixture struct {
 			Kind    string `yaml:"kind"`
 			Count   int    `yaml:"count"`
 		} `yaml:"want"`
+	} `yaml:"cases"`
+}
+
+type recordKindsTrackedFixture struct {
+	RequiredNames []string `yaml:"required_names"`
+	Cases         []struct {
+		Name       string `yaml:"name"`
+		Harness    string `yaml:"harness"`
+		Kind       string `yaml:"kind"`
+		WantListed bool   `yaml:"want_listed"`
 	} `yaml:"cases"`
 }
 
@@ -45,6 +58,30 @@ func loadRecordKindsAggregateFixtures(t *testing.T) recordKindsAggregateFixture 
 	for _, name := range fixture.RequiredNames {
 		if !seen[name] {
 			t.Fatalf("missing record-kind aggregate fixture %q", name)
+		}
+	}
+	return fixture
+}
+
+func loadRecordKindsTrackedFixtures(t *testing.T) recordKindsTrackedFixture {
+	t.Helper()
+	var fixture recordKindsTrackedFixture
+	if err := yaml.Unmarshal(recordKindsTrackedYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool, len(fixture.Cases))
+	for _, row := range fixture.Cases {
+		if row.Name == "" || seen[row.Name] {
+			t.Fatalf("invalid record-kind tracked fixture %q", row.Name)
+		}
+		seen[row.Name] = true
+		if row.Harness == "" || row.Kind == "" {
+			t.Fatalf("record-kind tracked fixture %q is incomplete", row.Name)
+		}
+	}
+	for _, name := range fixture.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("missing record-kind tracked fixture %q", name)
 		}
 	}
 	return fixture
@@ -109,26 +146,17 @@ func TestRecordKindsTrackedNotVisualized(t *testing.T) {
 				string(row.Harness), row.Kind, string(entry.Status), string(entry.Visualized))
 		}
 	}
-	// The list must span both treatments: a tracked-only hidden kind and a
-	// represented planned kind. Either half missing means the predicate
-	// silently narrowed.
-	if !seen[RecordKindTracked{Harness: HarnessClaudeCode, Kind: "attachment"}] {
-		t.Error("tracked-not-visualized list omits claude-code/attachment")
-	}
-	if !seen[RecordKindTracked{Harness: HarnessClaudeCode, Kind: "compact_boundary"}] {
-		t.Error("tracked-not-visualized list omits claude-code/compact_boundary")
-	}
-	// Rendered, ignored, and refused kinds must never appear: they are shown,
-	// accounted without an entry, or refused.
-	for _, absent := range []RecordKindTracked{
-		{Harness: HarnessClaudeCode, Kind: "user"},
-		{Harness: HarnessClaudeCode, Kind: "last-prompt"},
-		{Harness: HarnessClaudeCode, Kind: "image"},
-		{Harness: HarnessCodex, Kind: "event_msg"},
-	} {
-		if seen[absent] {
-			t.Errorf("tracked-not-visualized lists %s/%s, which is shown or entryless",
-				string(absent.Harness), absent.Kind)
-		}
+	for _, row := range loadRecordKindsTrackedFixtures(t).Cases {
+		t.Run(row.Name, func(t *testing.T) {
+			harness := Harness(row.Harness)
+			if !harness.IsKnown() {
+				t.Fatalf("unknown harness %q", row.Harness)
+			}
+			member := seen[RecordKindTracked{Harness: harness, Kind: row.Kind}]
+			if member != row.WantListed {
+				t.Errorf("tracked-not-visualized lists %s/%s = %v, want listed = %v",
+					row.Harness, row.Kind, member, row.WantListed)
+			}
+		})
 	}
 }
