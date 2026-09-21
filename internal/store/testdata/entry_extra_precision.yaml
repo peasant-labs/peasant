@@ -1,0 +1,18 @@
+required_names:
+  - legacy-retained-payload-with-extension
+  - text-retained-payload-with-extension
+cases:
+  - name: legacy-retained-payload-with-extension
+    extra: '{"model_id":"fixture-model","counter":9007199254740993,"decimal":1.2300e+07,"retainedUnknown":[{"harness":"opencode","namespace":"part","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payload":{"n":9007199254740993,"decimal":1.2300e+07}}]}'
+    payload: '{"n":9007199254740993,"decimal":1.2300e+07}'
+    expected_fields:
+      counter: '9007199254740993'
+      decimal: '1.2300e+07'
+      model_id: '"fixture-model"'
+  - name: text-retained-payload-with-extension
+    extra: '{"model_id":"fixture-model","counter":9007199254740993,"decimal":1.2300e+07,"retainedUnknown":[{"harness":"opencode","namespace":"part","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{ \"n\":9007199254740993, \"decimal\":1.2300e+07 }"}]}'
+    payload: '{ "n":9007199254740993, "decimal":1.2300e+07 }'
+    expected_fields:
+      counter: '9007199254740993'
+      decimal: '1.2300e+07'
+      model_id: '"fixture-model"'

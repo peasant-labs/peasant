@@ -354,15 +354,24 @@ func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) error {
 		}
 		return nil
 	}
-	var existing map[string]any
+	// Keep untouched fields as raw JSON. Decoding through interface{} would
+	// round large native integers and normalize number spellings in retained
+	// evidence when an unrelated extension (such as model_id) is restored.
+	var existing map[string]json.RawMessage
 	if e.Extra != nil {
-		_ = json.Unmarshal([]byte(*e.Extra), &existing)
+		if err := json.Unmarshal([]byte(*e.Extra), &existing); err != nil {
+			return fmt.Errorf("store: cannot merge entry extensions into invalid extra JSON; no entry was emitted; re-index the source to restore its evidence")
+		}
 	}
 	if existing == nil {
-		existing = make(map[string]any)
+		existing = make(map[string]json.RawMessage)
 	}
 	for k, v := range extKVs {
-		existing[k] = v
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("store: cannot encode an entry extension; no entry was emitted; repair the extension producer")
+		}
+		existing[k] = encoded
 	}
 	b, err := json.Marshal(existing)
 	if err != nil {
