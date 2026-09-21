@@ -12,6 +12,7 @@ required_names:
   - strike-blocks
   - strike-object-block
   - strike-object-corruption
+  - strike-unknown-with-legacy-omission
   - strike-corruption-wins
   - strike-additive-fields
 cases:
@@ -131,3 +132,15 @@ cases:
     source: |
       {"type":"user.message","future_field":true,"data":{"text":"before","new_metadata":[1,2]}}
     texts: [before]
+  - name: strike-unknown-with-legacy-omission
+    harness: strike
+    source: |
+      {"type":"user.message","data":{"text":"before"}}
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"assistant.text","data":{"text":"after"}}
+    positions: [2]
+    pointers: [""]
+    kinds: [future_record]
+    texts: [before, after]
+    pipeline: true
+    legacy_omission: true

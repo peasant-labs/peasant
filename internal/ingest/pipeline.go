@@ -1949,9 +1949,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			if err == nil && len(unknown) > 0 {
 				result.retainedUnknown = retainedUnknownCounts(unknown)
 				result.partial = true
+				if result.refusalCode == ContentCaptureSourceRecordsOmitted && !result.omissionsRecorded {
+					result.strictRefusal += "; surviving unknown source data was retained privately, but the earlier source omission remains unaccounted"
+				} else {
+					result.refusalCode = ContentCaptureUnknownDataRetained
+					result.strictRefusal = "uninterpreted source data was retained locally; export and publication require an outbound evidence projection"
+				}
 				result.omissionsRecorded = false
-				result.refusalCode = ContentCaptureUnknownDataRetained
-				result.strictRefusal = "uninterpreted source data was retained locally; export and publication require an outbound evidence projection"
 			}
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,15 +42,16 @@ var _ ingest.SessionEntryBatchStore = (*unknownFailingStore)(nil)
 var retainedUnknownYAML []byte
 
 type retainedUnknownCase struct {
-	Name      string         `yaml:"name"`
-	Harness   ingest.Harness `yaml:"harness"`
-	Source    string         `yaml:"source"`
-	Positions []int          `yaml:"positions"`
-	Pointers  []string       `yaml:"pointers"`
-	Kinds     []string       `yaml:"kinds"`
-	Texts     []string       `yaml:"texts"`
-	Error     bool           `yaml:"error"`
-	Pipeline  bool           `yaml:"pipeline"`
+	Name           string         `yaml:"name"`
+	Harness        ingest.Harness `yaml:"harness"`
+	Source         string         `yaml:"source"`
+	Positions      []int          `yaml:"positions"`
+	Pointers       []string       `yaml:"pointers"`
+	Kinds          []string       `yaml:"kinds"`
+	Texts          []string       `yaml:"texts"`
+	Error          bool           `yaml:"error"`
+	Pipeline       bool           `yaml:"pipeline"`
+	LegacyOmission bool           `yaml:"legacy_omission"`
 }
 
 func loadRetainedUnknownFixtures(t *testing.T) []retainedUnknownCase {
@@ -171,6 +173,9 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 			session.Harness, session.ModTime = c.Harness, time.Now().Add(-time.Hour)
 			meta := makeMinimalMeta(t, session.SessionID.String())
 			meta.Project.Hash, meta.ModelHarness, meta.Source.FilePath = testutil.TestProjectHash, c.Harness, session.SourcePath.String()
+			if c.LegacyOmission {
+				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, schema.DiagnosticEntry{ErrorType: "record_too_large", Location: "synthetic prior source", Message: "an older capture omitted a source record without a positional placeholder"})
+			}
 			database, err := store.Open(t.TempDir() + "/unknown.db")
 			if err != nil {
 				t.Fatal(err)
@@ -203,7 +208,11 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 					t.Fatal("unknown data was incorrectly reported as refusal")
 				}
 				capture, found, err := database.GetSessionContentCapture(ctx, session.SessionID)
-				if err != nil || !found || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || capture.Status != ingest.ContentCaptureIncomplete {
+				wantCode := ingest.ContentCaptureUnknownDataRetained
+				if c.LegacyOmission {
+					wantCode = ingest.ContentCaptureSourceRecordsOmitted
+				}
+				if err != nil || !found || capture.FailureCode != wantCode || capture.Status != ingest.ContentCaptureIncomplete {
 					t.Fatalf("capture: %+v %v", capture, err)
 				}
 				if store.PublishableWithOmissions(capture) {
