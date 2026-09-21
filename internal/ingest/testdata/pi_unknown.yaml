@@ -14,26 +14,29 @@ requiredNames:
   - invalid-known-message-field
   - incomplete-tail
   - physical-and-record-coordinates
+  - forward-parent-source-order
 cases:
   - name: unknown-only-large
     paddingBytes: 12000
     source: |
-      {"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","number":9007199254740993,"nullable":null,"padding":"PADDING"}}
+      {"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","embedded":"{\"secret\":\"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\"}","number":9007199254740993,"nullable":null,"padding":"PADDING"}}
     expected:
-      - {namespace: entry, kind: future, id: x, line: 2, pointer: '', contains: ['9007199254740993', '"nullable":null']}
+      - {namespace: entry, kind: future, id: x, line: 2, position: 1, pointer: '', contains: ['9007199254740993', '"nullable":null']}
   - name: mixed-namespaces
+    publish: true
+    paddingBytes: 12000
     source: |
       {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"before"}}
-      {"type":"future","id":"x","parentId":"u","payload":{"value":1}}
-      {"type":"message","id":"m","parentId":"x","message":{"role":"future","content":{"new":"shape"}}}
-      {"type":"message","id":"a","parentId":"m","message":{"role":"assistant","content":[{"type":"text","text":"after"},{"type":"future","text":{"new":true}},{"type":"text","text":"last"},{"type":"future","payload":2}]}}
+      {"type":"future","id":"x","parentId":"u","payload":{"value":1,"number":9007199254740993,"exponent":1.2300e+07,"secret":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","padding":"PADDING"}}
+      {"type":"message","id":"m","parentId":"x","message":{"role":"future","content":{"new":"shape","padding":"PADDING"}}}
+      {"type":"message","id":"a","parentId":"m","message":{"role":"assistant","model":"observed-model","content":[{"type":"text","text":"after"},{"type":"future","text":{"new":true},"padding":"PADDING"},{"type":"text","text":"last"},{"type":"future","payload":2,"padding":"PADDING"}]}}
       {"type":"session_info","id":"n","parentId":"a","name":"fixture title"}
     content: [before, "after\nlast"]
     expected:
-      - {namespace: entry, kind: future, id: x, line: 3, pointer: '', contains: ['"value":1']}
-      - {namespace: message_role, kind: future, id: m, line: 4, pointer: /message, contains: ['"new":"shape"']}
-      - {namespace: content_block, kind: future, id: a, line: 5, pointer: /message/content/1, contains: ['"new":true']}
-      - {namespace: content_block, kind: future, id: a, line: 5, pointer: /message/content/3, contains: ['"payload":2']}
+      - {namespace: entry, kind: future, id: x, line: 3, position: 3, pointer: '', contains: ['"value":1', '9007199254740993', '1.2300e+07']}
+      - {namespace: message_role, kind: future, id: m, line: 4, position: 5, pointer: /message, contains: ['"new":"shape"']}
+      - {namespace: content_block, kind: future, id: a, line: 5, position: 9, pointer: /message/content/1, contains: ['"new":true']}
+      - {namespace: content_block, kind: future, id: a, line: 5, position: 11, pointer: /message/content/3, contains: ['"payload":2']}
   - name: active-branch-ownership
     source: |
       {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"root"}}
@@ -42,7 +45,7 @@ cases:
       {"type":"message","id":"a","parentId":"active","message":{"role":"assistant","content":"leaf"}}
     content: [root, leaf]
     expected:
-      - {namespace: entry, kind: future, id: active, line: 4, pointer: '', contains: ['"payload":"selected"']}
+      - {namespace: entry, kind: future, id: active, line: 4, position: 4, pointer: '', contains: ['"payload":"selected"']}
   - name: known-additive-fields
     source: |
       {"type":"message","id":"u","parentId":null,"extra":null,"message":{"role":"user","future":null,"content":[{"type":"text","text":"known","extra":null}]}}
@@ -56,7 +59,7 @@ cases:
       {"type":"custom_message","id":"u","parentId":null,"content":[{"type":"text","text":"context"},{"type":"future","payload":true}]}
     content: [context]
     expected:
-      - {namespace: content_block, kind: future, id: u, line: 2, pointer: /content/1, contains: ['"payload":true']}
+      - {namespace: content_block, kind: future, id: u, line: 2, position: 3, pointer: /content/1, contains: ['"payload":true']}
   - name: invalid-known-after-unknown
     source: |
       {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"future","payload":true},{"type":"text","text":5}]}}
@@ -82,7 +85,7 @@ cases:
       {"type":"future","id":"x","parentId":null,"payload":true}
       {"type":
     expected:
-      - {namespace: entry, kind: future, id: x, line: 2, pointer: '', contains: ['"payload":true']}
+      - {namespace: entry, kind: future, id: x, line: 2, position: 1, pointer: '', contains: ['"payload":true']}
   - name: physical-and-record-coordinates
     source: |
 
@@ -90,5 +93,14 @@ cases:
 
       {"type":"future","id":"y","parentId":"x","payload":2}
     expected:
-      - {namespace: entry, kind: future, id: x, line: 3, sequence: 2, pointer: '', contains: ['"payload":1']}
-      - {namespace: entry, kind: future, id: y, line: 5, sequence: 3, pointer: '', contains: ['"payload":2']}
+      - {namespace: entry, kind: future, id: x, line: 3, sequence: 2, position: 1, pointer: '', contains: ['"payload":1']}
+      - {namespace: entry, kind: future, id: y, line: 5, sequence: 3, position: 2, pointer: '', contains: ['"payload":2']}
+  - name: forward-parent-source-order
+    source: |
+      {"type":"future","id":"x","parentId":"y","payload":1}
+      {"type":"future","id":"y","parentId":null,"payload":2}
+      {"type":"message","id":"a","parentId":"x","message":{"role":"assistant","content":"leaf"}}
+    content: [leaf]
+    expected:
+      - {namespace: entry, kind: future, id: y, line: 3, position: 2, pointer: '', contains: ['"payload":2']}
+      - {namespace: entry, kind: future, id: x, line: 2, position: 1, pointer: '', contains: ['"payload":1']}

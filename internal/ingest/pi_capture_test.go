@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -195,6 +196,17 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 		t.Fatal(err)
 	}
 	beforeFiles := artifacts()
+	var beforeExport []byte
+	if seed {
+		detail, err := export.ExportSession(t.Context(), db, filesystem, sid.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		beforeExport, err = json.Marshal(detail)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if seed && (len(before.SourceFingerprint) == 0 || len(beforeFiles) == 0 || len(beforeEntries) != 1) {
 		t.Fatal("vacuous seed")
 	}
@@ -239,6 +251,16 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 		}
 		if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeEntries, entries) || !reflect.DeepEqual(beforeFiles, artifacts()) {
 			t.Fatal("rejected capture changed persisted state or managed artifacts")
+		}
+		if seed {
+			detail, err := export.ExportSession(t.Context(), db, filesystem, sid.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(detail)
+			if err != nil || !bytes.Equal(beforeExport, encoded) {
+				t.Fatal("rejected source changed prior export")
+			}
 		}
 		return
 	}

@@ -65,6 +65,7 @@ type piEntry struct {
 	raw           json.RawMessage
 	line          int
 	sequence      int
+	positions     map[string]int64
 	unknownKind   string
 	Type          piEntryType     `json:"type"`
 	ID            string          `json:"id"`
@@ -169,6 +170,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	entries := make(map[string]piEntry)
 	var order []string
 	sequence := 0
+	position := int64(0)
 
 	// takeOmissions records the records this read left out, at the position
 	// they held, before the next accepted record is processed. It keeps no byte
@@ -178,6 +180,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 	takeOmissions := func() error {
 		for _, at := range scanner.TakeOmissions() {
 			sequence++
+			position++ // an omitted record still occupies its source-record position
 			doc.omissions = append(doc.omissions, piOmission{At: at, AfterEntries: len(order)})
 			doc.warnings = append(doc.warnings, OversizedRecordDiagnostic("Pi recording", at.Record))
 		}
@@ -217,6 +220,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 		}
 		sequence++
 		entry.sequence = sequence
+		entry.assignPiPositions(&position)
 		if (entry.Type == "" && entry.unknownKind == "") || strings.TrimSpace(entry.ID) == "" {
 			return doc, piSourceError("decode", line+1, fmt.Errorf("entry type and id are required"))
 		}
