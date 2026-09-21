@@ -159,9 +159,11 @@ func sameRepositoryFullName(left, right string) bool {
 // the same two segments are different repositories, so anything longer is not
 // reduced — a GitLab subgroup is not a GitHub owner. A remote that names no host
 // at all is refused for the same reason: there is nothing to prove it is GitHub.
-// The cost is a false negative for a GitHub Enterprise host and for a remote
-// configured as a bare "owner/name" with no host; both stay silent rather than
-// name a request that may not exist.
+// The cost is a false negative for a GitHub Enterprise host, for a remote
+// configured as a bare "owner/name" with no host, and for an SSH-config alias
+// such as "git@github-work:owner/repo" — the commonest local setup of the three,
+// and the one most likely to surprise. All stay silent rather than name a
+// request that may not exist.
 func githubRepositoryFullName(remote string) string {
 	// A trailing slash survives the shared normalizer's .git stripping, and
 	// "owner/repo.git/" would otherwise reduce to a repository named "repo.git".

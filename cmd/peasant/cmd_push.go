@@ -1181,9 +1181,15 @@ func uploadBudgetExceededError(budget time.Duration, run pushRun) error {
 //
 // The message asserted "the village did not answer in time" in every case. With
 // the village not running and a short budget, the whole budget was spent on
-// LOCAL work — resolving the repository scope — and zero HTTP requests were
-// made, so the sentence named the wrong culprit and sent the user to check a
-// network that was never used.
+// LOCAL work — resolving the repository scope — and no upload request was made,
+// so the sentence named the wrong culprit and sent the user to check a network
+// the upload never used.
+//
+// "The village was never contacted" is a separate falsehood: the
+// waiting-request lookup IS a village request, and it may well have been
+// answered. It runs ahead of this budget and cannot draw on it, which is the
+// causal claim worth making — so the sentence says what the budget went on and
+// leaves the village out of it.
 func budgetPhaseNarrative(run pushRun, uploaded, failed, annotationChanges, annotationErrors int) (why, when, impact string) {
 	if run.reachedVillage() {
 		return "the village did not answer in time. A village that accepts a connection and then stalls is the usual cause; a refused connection fails immediately instead",
@@ -1192,11 +1198,11 @@ func budgetPhaseNarrative(run pushRun, uploaded, failed, annotationChanges, anno
 	}
 	switch run.phase {
 	case pushPhaseScope:
-		return "the budget expired during local work, before any village request was made: resolving which recorded sessions belong to this repository. The village was never contacted, so it is not the cause",
+		return "the budget expired during local work, before the upload sent anything: resolving which recorded sessions belong to this repository. The waiting-request lookup runs ahead of this budget and cannot draw on it, so the village is not where this budget went",
 			"while resolving the repository scope",
 			"nothing was sent and nothing was published; nothing local was changed or lost."
 	default:
-		return "the budget expired during local work, before any village request was made: loading credentials and config, opening the analytics store, and preparing the run. The village was never contacted, so it is not the cause",
+		return "the budget expired during local work, before the upload sent anything: loading credentials and config, opening the analytics store, and preparing the run. The waiting-request lookup runs ahead of this budget and cannot draw on it, so the village is not where this budget went",
 			"before the upload started",
 			"nothing was sent and nothing was published; nothing local was changed or lost."
 	}
