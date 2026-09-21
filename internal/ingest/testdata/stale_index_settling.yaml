@@ -100,7 +100,7 @@ cases:
     harness: claude-code
     transcript: claude-unrepresented
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
+    wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: future-record
     wantEntries: 4
@@ -109,7 +109,7 @@ cases:
     transcript: claude-unrepresented
     storedIdentity: true
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
+    wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: future-record
     wantEntries: 4
@@ -124,7 +124,7 @@ cases:
     harness: cursor
     transcript: cursor-unrepresented
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
+    wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: image
     wantEntries: 2
@@ -135,7 +135,7 @@ cases:
     harness: claude-code
     transcript: claude-control-record-content
     wantCaptureStatus: incomplete
-    wantCaptureFormat: preview_only
+    wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: progress
     wantEntries: 4

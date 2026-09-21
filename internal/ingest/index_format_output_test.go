@@ -401,8 +401,8 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 						t.Fatalf("unknown source evidence missing: %+v", retained)
 					}
 					capture, found, err := db.GetSessionContentCapture(ctx, sid)
-					if err != nil || !found || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || store.PublishableWithOmissions(capture) {
-						t.Fatalf("unprojected evidence certified: %+v %v", capture, err)
+					if err != nil || !found || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || !store.PublishableWithOmissions(capture) {
+						t.Fatalf("projected evidence not certified: %+v %v", capture, err)
 					}
 				}
 				if row.Payload == indexOutputEmpty && len(after) != 0 {

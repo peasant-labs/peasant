@@ -7,7 +7,11 @@
 # on every harvest, re-read its native source, and write the same refusal back.
 #
 # Each case states what the SECOND harvest owes: how many times it read the
-# native source, and how many sessions it reported updated and unchanged. The
+# native source, and how many sessions it reported updated, unchanged and indexed.
+# These are one-session fixtures; the exact write count is the contract. A
+# capture with projected unknown evidence is publishable as partial, so a new
+# indexer or missing index proof can cause retained index maintenance without a
+# native metadata update. Do not infer the index count from the updated count. The
 # first harvest establishes the stored state (a strict refusal, or a complete
 # capture converted to the migrated preview-only shape). The measured run is
 # the harvest after it. The exact read counts ARE the contract: a run that
@@ -37,6 +41,7 @@ cases:
     second_source_reads: 0
     second_updated: 0
     second_unchanged: 1
+    second_indexed: 0
   # A migrated preview-only capture recorded NO refusal: nothing has tried to
   # certify it, so it is pending work and this build owes the native read that
   # upgrades it. Treating it as settled would leave the user a preview forever.
@@ -46,6 +51,7 @@ cases:
     second_source_reads: 1
     second_updated: 1
     second_unchanged: 0
+    second_indexed: 1
   # New bytes are new evidence whatever the previous refusal said. A real
   # append moves the source clock, so the clock trigger fires and the worker
   # re-reads the source before the fingerprint comparison inside it decides.
@@ -55,22 +61,25 @@ cases:
     second_source_reads: 1
     second_updated: 1
     second_unchanged: 0
+    second_indexed: 1
   # A newer indexer might represent the record, so the steady state lifts and
   # the session is retried.
   - name: newer-indexer-still-retries
     stored: refusal
     mutate: bump_indexer
     second_source_reads: 1
-    second_updated: 1
-    second_unchanged: 0
+    second_updated: 0
+    second_unchanged: 1
+    second_indexed: 1
   # A refusal with no input proof anchors nothing to the bytes it claims to
   # describe, so it is not a steady state and must be retried.
   - name: no-input-proof-still-retries
     stored: refusal
     mutate: clear_input_proof
     second_source_reads: 1
-    second_updated: 1
-    second_unchanged: 0
+    second_updated: 0
+    second_unchanged: 1
+    second_indexed: 1
 
 # THE PREDICATE ITSELF, over the DIFF location's stored refusal fields.
 #

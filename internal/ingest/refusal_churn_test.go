@@ -27,6 +27,7 @@ type refusalChurnCase struct {
 	SecondSourceReads int    `yaml:"second_source_reads"`
 	SecondUpdated     int    `yaml:"second_updated"`
 	SecondUnchanged   int    `yaml:"second_unchanged"`
+	SecondIndexed     int    `yaml:"second_indexed"`
 }
 
 // refusalChurnFixture is the whole-harvest view of the shared fixture document.
@@ -86,12 +87,12 @@ func TestSettledRefusalDoesNotChurn(t *testing.T) {
 	for _, testCase := range fixture.Cases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
-			runSettledRefusalChurnCase(t, fixture, testCase.Name, testCase.Stored, testCase.Mutate, testCase.SecondSourceReads, testCase.SecondUpdated, testCase.SecondUnchanged)
+			runSettledRefusalChurnCase(t, fixture, testCase.Name, testCase.Stored, testCase.Mutate, testCase.SecondSourceReads, testCase.SecondUpdated, testCase.SecondUnchanged, testCase.SecondIndexed)
 		})
 	}
 }
 
-func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name, stored, mutate string, wantReads, wantUpdated, wantUnchanged int) {
+func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name, stored, mutate string, wantReads, wantUpdated, wantUnchanged, wantIndexed int) {
 	t.Helper()
 	ctx := context.Background()
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
@@ -193,8 +194,8 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 		t.Fatalf("%s: the second harvest reported updated=%d unchanged=%d, want updated=%d unchanged=%d; summary=%+v", name, second.Summary.Updated, second.Summary.Unchanged, wantUpdated, wantUnchanged, second.Summary)
 	}
 	indexed := indexStore.indexedSessions.Load()
-	if (indexed > 0) != (wantUpdated > 0) {
-		t.Fatalf("%s: the second harvest indexed %d session(s), want %s; a settled state must write no index and every other state must re-index", name, indexed, map[bool]string{true: "at least one", false: "none"}[wantUpdated > 0])
+	if indexed != int64(wantIndexed) || second.Summary.Indexed != wantIndexed {
+		t.Fatalf("%s: the second harvest indexed %d session(s), summary %d, want %d; index maintenance is independent of native metadata updates", name, indexed, second.Summary.Indexed, wantIndexed)
 	}
 }
 

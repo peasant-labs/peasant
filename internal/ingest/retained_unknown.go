@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -42,6 +43,48 @@ type RetainedUnknown struct {
 	Kind      string                `json:"kind"`
 	Position  UnknownSourcePosition `json:"position"`
 	Payload   json.RawMessage       `json:"payload"`
+}
+
+// MarshalJSON stores the payload as JSON text rather than as an embedded value.
+// encoding/json compacts RawMessage values; that would silently normalize the
+// original whitespace and string escaping every time Extra is written. This is
+// a private storage encoding, not the public retained-evidence contract.
+func (r RetainedUnknown) MarshalJSON() ([]byte, error) {
+	type envelope RetainedUnknown
+	fields := envelope(r)
+	fields.Payload = nil
+	return json.Marshal(struct {
+		*envelope
+		Payload     json.RawMessage `json:"payload,omitempty"`
+		PayloadText string          `json:"payloadText"`
+	}{envelope: &fields, PayloadText: string(r.Payload)})
+}
+
+// UnmarshalJSON keeps older private captures readable without inventing their
+// absent public coordinates. A legacy payload value and a new payloadText may
+// not coexist: choosing one would discard potentially different evidence.
+func (r *RetainedUnknown) UnmarshalJSON(data []byte) error {
+	type envelope RetainedUnknown
+	var fields envelope
+	encoded := struct {
+		*envelope
+		PayloadText json.RawMessage `json:"payloadText"`
+	}{envelope: &fields}
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		return err
+	}
+	if encoded.PayloadText != nil {
+		if len(fields.Payload) != 0 {
+			return fmt.Errorf("read retained evidence: conflicting private payload encodings; no evidence was certified; restore an unambiguous capture or re-index the source")
+		}
+		var text string
+		if err := json.Unmarshal(encoded.PayloadText, &text); err != nil || bytes.Equal(bytes.TrimSpace(encoded.PayloadText), []byte("null")) {
+			return fmt.Errorf("read retained evidence: payloadText must contain JSON text as a string; no evidence was certified; restore an intact capture or re-index the source")
+		}
+		fields.Payload = json.RawMessage(text)
+	}
+	*r = RetainedUnknown(fields)
+	return nil
 }
 
 const retainedUnknownKey = "retainedUnknown"
