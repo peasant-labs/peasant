@@ -70,8 +70,10 @@ func (r *RetainedUnknown) UnmarshalJSON(data []byte) error {
 		*envelope
 		PayloadText json.RawMessage `json:"payloadText"`
 	}{envelope: &fields}
-	if err := json.Unmarshal(data, &encoded); err != nil {
-		return err
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&encoded); err != nil {
+		return fmt.Errorf("read retained evidence: invalid private envelope; no evidence was certified; restore a supported capture or re-index the source")
 	}
 	if encoded.PayloadText != nil {
 		if len(fields.Payload) != 0 {

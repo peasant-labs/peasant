@@ -4,6 +4,9 @@ required_names:
   - modern-zero-position-preserves-lexical-json
   - ambiguous-encoding-refused
   - null-text-refused
+  - unknown-private-envelope-field-refused
+  - unknown-private-position-field-refused
+  - unknown-public-position-field-refused
 cases:
   - name: legacy-object-without-public-position
     extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payload":{ "n":9007199254740993 }}]}'
@@ -20,4 +23,13 @@ cases:
     error: true
   - name: null-text-refused
     extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payloadText":null}]}'
+    error: true
+  - name: unknown-private-envelope-field-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","unexpected":true,"position":{"line":1},"payloadText":"{}"}]}'
+    error: true
+  - name: unknown-private-position-field-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"unexpected":true},"payloadText":"{}"}]}'
+    error: true
+  - name: unknown-public-position-field-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0,"unexpected":true}},"payloadText":"{}"}]}'
     error: true
