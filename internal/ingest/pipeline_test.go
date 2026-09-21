@@ -322,7 +322,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 }
 
-func TestPipeline_RefusedRecordKindsReachSummary(t *testing.T) {
+func TestPipeline_RetainedUnknownKindsReachSummary(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -358,15 +358,15 @@ func TestPipeline_RefusedRecordKindsReachSummary(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// A refusal is best-effort: the run succeeds and stores an incomplete
-	// capture, and the summary aggregates the refused kind with its count.
-	refused := result.Summary.RefusedRecordKinds
-	if len(refused) != 1 {
-		t.Fatalf("RefusedRecordKinds has %d rows, want 1: %+v", len(refused), refused)
+	// Unknown data is retained, not refused. Occurrences and affected sessions
+	// are separate counts, and only a committed capture may report them.
+	retained := result.Summary.RetainedUnknownKinds
+	if len(retained) != 1 {
+		t.Fatalf("RetainedUnknownKinds has %d rows, want 1: %+v", len(retained), retained)
 	}
-	row := refused[0]
-	if row.Harness != ingest.HarnessClaudeCode || row.Kind != "unmapped-e2e-xyz" || row.Count != 1 {
-		t.Errorf("RefusedRecordKinds row is %+v, want claude-code/unmapped-e2e-xyz x1", row)
+	row := retained[0]
+	if row.Harness != ingest.HarnessClaudeCode || row.Kind != "unmapped-e2e-xyz" || row.Occurrences != 1 || row.Sessions != 1 {
+		t.Errorf("RetainedUnknownKinds row is %+v, want claude-code/unmapped-e2e-xyz x1 occurrence in one session", row)
 	}
 }
 

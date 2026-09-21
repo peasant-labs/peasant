@@ -88,10 +88,17 @@ func cursorStrictRecordKinds() []string {
 	return []string{"turn_ended"}
 }
 
+func isCursorSpecialRecordKind(kind string) bool {
+	return slices.Contains(cursorStrictRecordKinds(), kind)
+}
+
 type TranscriptCaptureResult struct {
 	Entries        []schema.SessionEntry
 	IgnoredRecords []IgnoredSourceRecord
 	Diagnostics    []DiagnosticEntry
+	// RetainedUnknown records uninterpreted occurrences, not affected sessions.
+	// They are also embedded in Entries for transactional local persistence.
+	RetainedUnknown []RetainedUnknown
 }
 
 // AuthoritativeTranscriptIndexer never certifies the surviving subset of a
@@ -290,7 +297,7 @@ func (idx *ClaudeIndexer) IndexTranscriptForCapture(ctx context.Context, s Disco
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		var line claudeIndexLine
 		if err := json.Unmarshal(raw, &line); err != nil {
 			return nil, err
@@ -371,23 +378,25 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	copy := *idx
 	copy.fullContent = true
 	copy.fullDepth = true
+	copy.retainUnknown = true
 	entries, err := copy.parseJSONL(s.SessionID, data)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
 func (idx *CursorIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	_, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	_, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		var line cursorJSONLLine
 		if err := json.Unmarshal(raw, &line); err != nil {
 			return nil, err
 		}
-		if line.Type == "turn_ended" && line.Status == "aborted" {
+		if isCursorSpecialRecordKind(line.Type) && line.Status == "aborted" {
 			if len(line.content()) != 0 {
 				return nil, fmt.Errorf("aborted turn carries unrepresented conversation content")
 			}
@@ -397,10 +406,8 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			return nil, nil
 		}
 		role := firstNonEmpty(line.Role, line.Message.Role)
-		if role != "human" {
-			if err := validateCaptureRole(role); err != nil {
-				return nil, err
-			}
+		if !slices.Contains(cursorCaptureRoleKinds(), role) {
+			return nil, fmt.Errorf("unsupported conversation role %q", role)
 		}
 		return nil, validateCaptureContent(HarnessCursor, line.content(), false)
 	})
@@ -410,11 +417,13 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	copy := *idx
 	copy.fullContent = true
 	copy.fullDepth = true
+	copy.retainUnknown = true
 	entries, err := copy.parseJSONL(s.SessionID, data)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
-	return TranscriptCaptureResult{Entries: entries}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, RetainedUnknown: unknown}, err
 }
 
 func (idx *CodexIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
@@ -586,7 +595,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	calls := make(map[string]bool)
 	processes := make(map[string]string)
 	pending := make(map[string]bool)
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		if strikeRecordTooLarge(raw, 0) {
 			return nil, fmt.Errorf("record exceeds Strike format limit")
 		}
@@ -595,7 +604,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			return nil, err
 		}
 		if !isKnownStrikeEvent(env.Type) {
-			return nil, &UnrepresentedRecordError{Harness: HarnessStrike, Kind: string(env.Type)}
+			return nil, fmt.Errorf("event lacks its type")
 		}
 		if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
 			return nil, fmt.Errorf("event requires data object")
@@ -639,7 +648,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 				return nil, fmt.Errorf("conversation event requires text payload")
 			}
 		case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
-			if strikeReasoningText(event) == "" {
+			if strikeReasoningText(event) == "" && !bytes.Equal(bytes.TrimSpace(event.Content), []byte("[]")) && !bytes.Equal(bytes.TrimSpace(event.Message), []byte("[]")) {
 				return nil, fmt.Errorf("reasoning event requires text payload")
 			}
 		}
@@ -653,5 +662,11 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	}
 	copy := *idx
 	copy.fullContent = true
-	return TranscriptCaptureResult{Entries: copy.parse(s.SessionID, data), IgnoredRecords: ignored}, nil
+	copy.retainUnknown = true
+	entries, err := copy.parseWithCompletion(s.SessionID, data, nil)
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }

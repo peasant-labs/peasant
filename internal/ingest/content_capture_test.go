@@ -43,6 +43,7 @@ func (a *captureFixtureAdapter) MaterializeTranscript(ctx context.Context, s ing
 }
 
 type captureFixture struct {
+	Unknown        bool           `yaml:"unknown"`
 	Text           string         `yaml:"text"`
 	Contains       bool           `yaml:"contains"`
 	ToolOutput     bool           `yaml:"tool_output"`
@@ -152,6 +153,12 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if fixture.Unknown {
+					if len(result.RetainedUnknown) == 0 {
+						t.Fatal("unknown payload was not retained")
+					}
+					return
+				}
 				if fixture.Control {
 					// Control records carry no conversation text; their entry
 					// shape is asserted by TestClaudeControlRecordEntryShape.
@@ -188,7 +195,7 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 
 func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 	for _, fixture := range loadCaptureFixtures(t) {
-		if fixture.Reject || fixture.Control {
+		if fixture.Reject || fixture.Control || fixture.Unknown {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {

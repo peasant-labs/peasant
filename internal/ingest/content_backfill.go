@@ -430,6 +430,13 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 		if err != nil {
 			return ContentCaptureResult{}, err
 		}
+		unknown, err := retainedUnknownEntries(capture.Entries)
+		if err != nil {
+			return ContentCaptureResult{}, err
+		}
+		if len(unknown) > 0 {
+			capture.Complete = false
+		}
 		capture.Authority = authority
 		return capture, nil
 	}
@@ -444,7 +451,11 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: true, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
+	unknown, err := retainedUnknownEntries(capture.Entries)
+	if err != nil {
+		return ContentCaptureResult{}, err
+	}
+	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: len(unknown) == 0, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
 }
 
 func captureHarness(raw string) (Harness, error) {
