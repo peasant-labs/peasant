@@ -2,15 +2,12 @@ package push
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
@@ -18,17 +15,6 @@ import (
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
-
-// snapshotPublicationStore is the OPTIONAL durable snapshot surface a local
-// store may offer. It is asserted at runtime rather than added to PipelineStore:
-// a store opened without generation support is a supported configuration, and
-// extending a required interface would force every caller and double to
-// implement methods it cannot honor.
-type snapshotPublicationStore interface {
-	indexformat.SnapshotReader
-	indexformat.ContentResolver
-	GenerationSnapshotsSupported() bool
-}
 
 // BuildTranscriptContent builds the versioned, structured push wire body (D2):
 // a TranscriptContent envelope wrapping the SessionDetailPayload produced by the
@@ -90,102 +76,24 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 	}, nil
 }
 
-// BuildPublishTranscriptContent builds the transcript part of one publication.
-//
-// When the store offers the durable snapshot surface and reports generation
-// support, the envelope serializes the committed generation's validated detail,
-// hydrated through the ONE payload-construction boundary shared with detail
-// reads and export, with the publication consent overlay applied. That is what
-// carries session-level graph evidence (relationships with public anchors,
-// root identity, purpose and the input-submission count), retained earlier
-// history, per-block provenance and full hydrated tool bodies into the
-// published bytes.
-//
-// A legacy V1 read (transcript.ErrLegacySnapshot) uses the preserved entries
-// builder unchanged, including its TurnCount = len(Turns) stamp. Any OTHER
-// snapshot failure fails the session whole: a corrupt or missing managed
-// artifact is never silently published as truncated legacy content.
-//
-// store is deliberately untyped: the durable surface is an optional capability
-// of the concrete store, and a store that does not implement it takes the
-// preserved legacy path. Callers pass the same store they read capture
-// metadata from.
+// BuildPublishTranscriptContent applies consent to the already-hydrated
+// committed detail. Metadata and detail were selected together by the store;
+// this function does no I/O and never selects a newer generation. Legacy inputs
+// have no managed detail and use the preserved entries builder instead.
 func BuildPublishTranscriptContent(
-	ctx context.Context,
-	store any,
-	sessionID string,
+	committedDetail *schema.SessionDetailPayload,
 	meta *ingest.UnifiedMetadata,
 	entries []schema.SessionEntry,
 	emit schema.PushContractVersion,
 	fields config.PushFieldVisibility,
 	origin sessionorigin.Origin,
 ) (schema.TranscriptContent, error) {
-	if reader, ok := store.(snapshotPublicationStore); ok && reader.GenerationSnapshotsSupported() {
-		content, err := buildSnapshotPublishContent(ctx, reader, sessionID, meta, fields, origin, emit)
-		if err == nil {
-			return content, nil
-		}
-		if !errors.Is(err, transcript.ErrLegacySnapshot) {
-			return schema.TranscriptContent{}, err
-		}
+	if committedDetail == nil {
+		return BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
 	}
-	return BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
-}
-
-// MirrorPublicationIdentity copies the count and graph mirrors from the built
-// transcript into capture metadata before MapMetadata assembles the other part.
-// Review and upload use the same envelope as their authority: a second snapshot
-// read could observe a different generation. Absence stays absent, including a
-// legacy detail's unknown input count; a measured zero stays a measured zero.
-func MirrorPublicationIdentity(meta *ingest.UnifiedMetadata, content schema.TranscriptContent) {
-	if meta == nil || content.SessionDetail == nil {
-		return
-	}
-	detail := content.SessionDetail
-	if detail.InputSubmissionCount == nil {
-		meta.Stats.InputSubmissionCount = nil
-	} else {
-		count := *detail.InputSubmissionCount
-		meta.Stats.InputSubmissionCount = &count
-	}
-	if detail.RootSessionID == nil {
-		meta.RootSessionID = nil
-	} else {
-		root := *detail.RootSessionID
-		meta.RootSessionID = &root
-	}
-	meta.Purpose = detail.Purpose
-	meta.Relationships = append([]schema.SessionRelationship(nil), detail.Relationships...)
-}
-
-// buildSnapshotPublishContent hydrates one committed generation inside the
-// shared session lock, applies the consent overlay and wraps the validated
-// detail in the publish envelope. The callback performs no network access and
-// mutates no store; hydration, folding, validation and envelope construction
-// all happen under the shared lock the snapshot boundary already holds.
-func buildSnapshotPublishContent(
-	ctx context.Context,
-	store snapshotPublicationStore,
-	sessionID string,
-	meta *ingest.UnifiedMetadata,
-	fields config.PushFieldVisibility,
-	origin sessionorigin.Origin,
-	emit schema.PushContractVersion,
-) (schema.TranscriptContent, error) {
-	var content schema.TranscriptContent
-	err := store.WithSessionSnapshot(ctx, schema.SessionID(sessionID), func(snapshot indexformat.ReadSnapshot) error {
-		detail, err := transcript.SnapshotToDetailValidated(ctx, snapshot, store)
-		if err != nil {
-			return err
-		}
-		applyPublishConsentOverlay(detail, meta, fields)
-		content = BuildTranscriptContentFromDetail(detail, emit, origin)
-		return nil
-	})
-	if err != nil {
-		return schema.TranscriptContent{}, err
-	}
-	return content, nil
+	detail := *committedDetail
+	applyPublishConsentOverlay(&detail, meta, fields)
+	return BuildTranscriptContentFromDetail(&detail, emit, origin), nil
 }
 
 // applyPublishConsentOverlay applies the publication field-consent gates to a

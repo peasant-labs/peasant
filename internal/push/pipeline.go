@@ -883,7 +883,7 @@ func (p *Pipeline) pushSession(
 
 	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
 	defer func() { stage.finish(sr.Error) }()
-	input, err := p.readPublicationInput(ctx, sess)
+	input, detail, err := p.readPublicationInput(ctx, sess)
 	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if err == nil {
 		err = ValidatePublicationInput(input)
@@ -966,14 +966,12 @@ func (p *Pipeline) pushSession(
 
 	stage.next(perf.StagePushPayloadBuild)
 
-	// Build the transcript first so both parts take their count and graph mirrors
-	// from this one envelope. A corrupt managed artifact fails the session before
-	// metadata assembly; the builder preserves the legacy entries fallback.
-	content, err := BuildPublishTranscriptContent(ctx, p.store, sess.SessionID, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
+	// The committed input already pairs current metadata with its hydrated
+	// detail. Apply publication consent without re-reading the active generation.
+	content, err := BuildPublishTranscriptContent(detail, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
 	}
-	MirrorPublicationIdentity(&meta, content)
 
 	// 5. Map metadata to publishRequest JSON.
 	publishJSON, err := MapMetadata(MapOptions{
@@ -1262,7 +1260,7 @@ func (p *Pipeline) preflight(ctx context.Context, sessions []ingest.PushSessionR
 			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 		}
 		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
-		input, readErr := p.readPublicationInput(ctx, sess)
+		input, _, readErr := p.readPublicationInput(ctx, sess)
 		if readErr == nil {
 			readErr = ValidatePublicationInput(input)
 		}

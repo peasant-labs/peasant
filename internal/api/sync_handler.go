@@ -459,7 +459,7 @@ func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr st
 }
 
 func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
-	input, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
+	input, detail, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
 		return "", err
 	}
@@ -482,12 +482,10 @@ func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string
 	// The review scan must see the exact bytes the publish will carry, so it
 	// builds the same envelope through the shared durable-first builder and
 	// derives the same capability requirements the upload gate will enforce.
-	content, err := push.BuildPublishTranscriptContent(ctx, h.store, sessionIDStr, &input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
+	content, err := push.BuildPublishTranscriptContent(detail, &input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
 	if err != nil {
 		return "", err
 	}
-	// Match upload: the built detail owns both parts' count and graph mirrors.
-	push.MirrorPublicationIdentity(&input.Metadata, content)
 	metadata, err := push.MapMetadata(push.MapOptions{Meta: &input.Metadata, Metrics: input.Quality, Entries: input.Entries, Associations: input.Associations, Fields: fields.Resolve()})
 	if err != nil {
 		return "", err
