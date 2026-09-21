@@ -149,9 +149,32 @@ func BuildPushCommand() *cobra.Command {
 			// Credentials are read for it, and read again inside the run exactly
 			// as before: the run owns its own login diagnosis, and a login that
 			// fails here is reported there with the same message as always.
+			var run pushRun
+
+			// The repository being pushed is resolved ONCE, here, ahead of the
+			// clock: the lookup below needs its remote, and the upload's scope
+			// resolution needs its root, so resolving them separately ran git
+			// twice on every hook-triggered push. A resolution that fails leaves
+			// both empty, and the scope resolves them itself exactly as it always
+			// did.
+			run.pushedRoot, run.pushedRemote, _ = pushedRepositoryGit(ctx, repository, cmd.Flags().Changed("repository"))
+
 			if creds, credsErr := auth.LoadCredentialsFrom(configDirOverride(cmd)); credsErr == nil &&
 				creds != nil && creds.IsValid() && creds.VillageURL != "" && !jsonOutput {
-				reportWaitingPromptRequests(ctx, cmd, creds, repository, cmd.Flags().Changed("repository"))
+				// One pooled client, built here and reused by the upload below, so
+				// a hook-triggered push opens one set of connections instead of
+				// two. It is built only when credentials are already in hand; a run
+				// that has to load them itself builds its own client as before. The
+				// pool is the default size because the upload's concurrency is
+				// resolved inside the budget, after this point — so the upload
+				// reuses this client when its concurrency fits the default pool and
+				// builds a wider one when it does not.
+				run.sharedClient = village.NewVillageClient(creds.VillageURL, creds.APIKey,
+					village.NewPooledHTTPClient(creds.VillageURL, village.DefaultPoolSize))
+				run.sharedClientBaseURL = creds.VillageURL
+				if run.pushedRemote != "" {
+					reportWaitingPromptRequests(ctx, cmd, run.sharedClient, run.pushedRemote)
+				}
 			}
 
 			if timeout > 0 {
@@ -167,7 +190,6 @@ func BuildPushCommand() *cobra.Command {
 			// query came back "sqlite: prepare: interrupted", and repository
 			// resolution reported that a perfectly valid repository was not one —
 			// which, inside a hook, is the entire diagnosis the user gets.
-			var run pushRun
 			run.villageRequested = &atomic.Bool{}
 			run.binding = hookBinding(cmd)
 			// Preserve the requested containment before any budgeted local work.
@@ -451,7 +473,14 @@ func BuildPushCommand() *cobra.Command {
 					}
 				}
 
-				client := village.NewVillageClientWithConcurrency(creds.VillageURL, creds.APIKey, resolvedConcurrency)
+				client := run.sharedClient
+				if client == nil || run.sharedClientBaseURL != creds.VillageURL || resolvedConcurrency > village.DefaultPoolSize {
+					// No client was built ahead of the clock, or the credentials or
+					// the requested parallelism differ from what it was built for:
+					// build one sized to the concurrency, exactly as before.
+					client = village.NewVillageClient(creds.VillageURL, creds.APIKey,
+						village.NewPooledHTTPClient(creds.VillageURL, resolvedConcurrency))
+				}
 				client.SetRequestObserver(run.markVillageRequest)
 				pipeline, err := push.NewPipeline(db, client, creds, cfg, fs, runCfg, pushRedactor, cmd.ErrOrStderr())
 				if err != nil {
@@ -776,26 +805,37 @@ func applyUploadBudgetError(timeout time.Duration, contextErr, runErr error, run
 // stores on sessions, and the identities of any directories inside the same
 // worktree that carry their own. The resulting scope is applied as an additional
 // AND filter and therefore cannot widen configured selection.
-func resolveRepositoryScope(ctx context.Context, db *store.Store, root string) (*push.RepositoryScope, error) {
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"scope village push to repository: path %q could not be resolved during --repository processing: %w; nothing was uploaded; pass the path to an existing Git repository",
-			root, err)
-	}
+func resolveRepositoryScope(ctx context.Context, db *store.Store, root, preResolvedRoot, preResolvedRemote string) (*push.RepositoryScope, error) {
+	// The caller resolves the repository ahead of the budget clock, for the
+	// waiting-request lookup, and hands the answer here so this does not run git
+	// for it again. When it has none — that resolution failed, or the push never
+	// ran it — this resolves it exactly as it always did.
+	canonicalRoot, remote := preResolvedRoot, preResolvedRemote
 	resolver := &ingest.ExecGitResolver{}
-	canonicalRoot, err := resolver.ResolveRepositoryRoot(ctx, abs)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"scope village push to repository: Git could not resolve a repository root from %q during --repository processing: %w; nothing was uploaded; pass a path inside an existing Git repository",
-			abs, err)
+	// The path the messages below name: the root the caller resolved, or the one
+	// resolved here when it had none.
+	abs := canonicalRoot
+	if canonicalRoot == "" || remote == "" {
+		resolvedAbs, err := filepath.Abs(root)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"scope village push to repository: path %q could not be resolved during --repository processing: %w; nothing was uploaded; pass the path to an existing Git repository",
+				root, err)
+		}
+		abs = resolvedAbs
+		canonicalRoot, err = resolver.ResolveRepositoryRoot(ctx, abs)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"scope village push to repository: Git could not resolve a repository root from %q during --repository processing: %w; nothing was uploaded; pass a path inside an existing Git repository",
+				abs, err)
+		}
+		// Ask for the remote the same way ingestion does, so the identity below is
+		// byte-identical to the one stamped on sessions. The walk stops at this
+		// repository's own boundary, so a repository nested inside another one is
+		// never given its parent's remote — and therefore never its parent's
+		// sessions.
+		remote, _, _ = resolver.WalkUpRemoteURL(ctx, canonicalRoot)
 	}
-	// Ask for the remote the same way ingestion does, so the identity below is
-	// byte-identical to the one stamped on sessions. The walk stops at this
-	// repository's own boundary, so a repository nested inside another one is
-	// never given its parent's remote — and therefore never its parent's
-	// sessions.
-	remote, _, _ := resolver.WalkUpRemoteURL(ctx, canonicalRoot)
 	installationSalt := db.InstallationSalt()
 	identity, _, err := ingest.DeriveProjectIdentifiers(installationSalt, remote, canonicalRoot)
 	if err != nil {
@@ -1049,6 +1089,18 @@ type pushRun struct {
 	// user to push EVERY project on the machine. The flag value is known the
 	// moment the flag is read, so it is kept from then on.
 	requestedRepository string
+	// pushedRoot and pushedRemote are the repository being pushed, resolved once
+	// ahead of the budget clock for the waiting-request lookup and reused by the
+	// scope resolution below instead of running git for the same answer again.
+	// Empty when that resolution failed, in which case the scope resolves them.
+	pushedRoot   string
+	pushedRemote string
+	// sharedClient is the pooled client the lookup used, when credentials were
+	// already in hand ahead of the clock: the upload reuses it so one push opens
+	// one set of connections. sharedClientBaseURL records what it was built for,
+	// so a run whose credentials resolve differently does not reuse it.
+	sharedClient        *village.VillageClient
+	sharedClientBaseURL string
 	scope               *push.RepositoryScope
 	result              *push.PushResult
 	annotationSummary   *push.AnnotationPushSummary
@@ -1090,7 +1142,7 @@ func (r *pushRun) resolveScope(ctx context.Context, db *store.Store, repository 
 		r.requestedRepository = repository
 	}
 	r.phase = pushPhaseScope
-	scope, err := resolveRepositoryScope(ctx, db, repository)
+	scope, err := resolveRepositoryScope(ctx, db, repository, r.pushedRoot, r.pushedRemote)
 	if err != nil {
 		return nil, err
 	}

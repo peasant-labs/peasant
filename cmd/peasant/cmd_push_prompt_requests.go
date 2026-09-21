@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
@@ -49,16 +48,14 @@ const githubRemoteHost = "github.com"
 // caller places this call ahead of that clock so that nothing here can spend the
 // upload's --timeout.
 //
-// The repository being pushed is named by --repository when the caller supplied
-// one (a hook does), and by the working directory otherwise, which is the
-// manual push's shape.
-func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, creds *auth.Credentials, repository string, scoped bool) {
+// The repository being pushed is named by the caller, which resolved it once for
+// both this lookup and the upload's scope: the remote here, the root there.
+//
+// client is the caller's, built once and shared with the upload, so this lookup
+// and the upload that follows it open one set of pooled connections.
+func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, client *village.VillageClient, remote string) {
 	out := cmd.OutOrStdout()
 
-	remote, err := pushedRepositoryRemote(ctx, repository, scoped)
-	if err != nil {
-		return
-	}
 	pushedFullName := githubRepositoryFullName(remote)
 	if pushedFullName == "" {
 		return
@@ -67,7 +64,6 @@ func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, creds 
 	lookupCtx, cancel := context.WithTimeout(ctx, promptRequestLookupTimeout)
 	defer cancel()
 
-	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 	response, _, err := client.GetPromptRequests(lookupCtx)
 	if err != nil || response == nil {
 		return
@@ -79,7 +75,7 @@ func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, creds 
 // pushedRepositoryRemote returns the raw git remote of the repository being
 // pushed. An empty remote (a repository with no origin) is reported as an error
 // so the caller prints nothing rather than matching an empty name.
-func pushedRepositoryRemote(ctx context.Context, repository string, scoped bool) (string, error) {
+func pushedRepositoryGit(ctx context.Context, repository string, scoped bool) (root string, remote string, err error) {
 	path := "."
 	if scoped {
 		if strings.TrimSpace(repository) == "" {
@@ -87,27 +83,27 @@ func pushedRepositoryRemote(ctx context.Context, repository string, scoped bool)
 			// empty value names no repository, and resolving the working
 			// directory in its place would answer a question the caller did not
 			// ask.
-			return "", fmt.Errorf("--repository names no path")
+			return "", "", fmt.Errorf("--repository names no path")
 		}
 		path = repository
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	resolver := &ingest.ExecGitResolver{}
-	root, err := resolver.ResolveRepositoryRoot(ctx, absolute)
+	root, err = resolver.ResolveRepositoryRoot(ctx, absolute)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	remote, _, err := resolver.WalkUpRemoteURL(ctx, root)
+	remote, _, err = resolver.WalkUpRemoteURL(ctx, root)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if strings.TrimSpace(remote) == "" {
-		return "", fmt.Errorf("the repository being pushed has no git remote")
+		return "", "", fmt.Errorf("the repository being pushed has no git remote")
 	}
-	return remote, nil
+	return root, remote, nil
 }
 
 // printWaitingPromptRequests prints one line per request that names the
