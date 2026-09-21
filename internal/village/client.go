@@ -96,9 +96,10 @@ type VillageClient struct {
 
 // NewVillageClient creates a VillageClient targeting the given base URL with the
 // provided API key. If httpClient is nil, a client backed by a shared pooled
-// transport sized to DefaultPoolSize is built (see newPooledHTTPClient); pass
-// a non-nil httpClient to inject one (tests). To size the pool to a specific
-// upload concurrency, use NewVillageClientWithConcurrency.
+// transport sized to DefaultPoolSize is built (see NewPooledHTTPClient); pass
+// a non-nil httpClient to inject one (tests) or to SHARE one, which is what the
+// CLI does: the waiting-request lookup and the upload are handed the same
+// pooled client, so a hook-triggered push opens one set of connections.
 func NewVillageClient(baseURL, apiKey string, httpClient *http.Client) *VillageClient {
 	if httpClient == nil {
 		httpClient = newPooledHTTPClient(baseURL, DefaultPoolSize)
@@ -110,18 +111,15 @@ func NewVillageClient(baseURL, apiKey string, httpClient *http.Client) *VillageC
 	}
 }
 
-// NewVillageClientWithConcurrency creates a VillageClient whose shared transport
-// is sized to `concurrency`: MaxIdleConnsPerHost and
-// MaxConnsPerHost both equal concurrency, so reruns reuse pooled connections
-// (no fresh TLS handshake per upload) and in-flight uploads are not throttled
-// below the requested parallelism. This is the constructor the CLI uses with the
-// resolved --concurrency value.
-func NewVillageClientWithConcurrency(baseURL, apiKey string, concurrency int) *VillageClient {
-	return &VillageClient{
-		baseURL:    baseURL,
-		apiKey:     apiKey,
-		httpClient: newPooledHTTPClient(baseURL, concurrency),
-	}
+// NewPooledHTTPClient builds the pooled HTTP client the CLI shares between the
+// waiting-request lookup and the upload: MaxIdleConnsPerHost and
+// MaxConnsPerHost both equal poolSize, so reruns reuse pooled connections (no
+// fresh TLS handshake per upload) and in-flight uploads are not throttled below
+// the requested parallelism. The caller chooses poolSize — the CLI passes the
+// concurrency a push resolves to when nothing overrides it — and passes the
+// result to NewVillageClient.
+func NewPooledHTTPClient(baseURL string, poolSize int) *http.Client {
+	return newPooledHTTPClient(baseURL, poolSize)
 }
 
 // SetRequestObserver registers a callback invoked immediately before each
