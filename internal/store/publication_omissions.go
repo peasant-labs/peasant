@@ -72,7 +72,7 @@ func publishableCaptureState(status ingest.ContentCaptureStatus, code ingest.Con
 		// The exception, and it is where the format matters: the allowed code
 		// over a BOUNDED PREVIEW is still a preview, and a preview may never be
 		// published. Only a capture that stores the full text qualifies.
-		return code == ingest.ContentCaptureSourceRecordsOmitted &&
+		return (code == ingest.ContentCaptureSourceRecordsOmitted || code == ingest.ContentCaptureUnknownDataRetained) &&
 			format == ingest.ContentCaptureFormatFull
 	}
 	return false

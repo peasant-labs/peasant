@@ -223,11 +223,15 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 		return err
 	}
 	entries, rows := 0, 0
+	var evidenceEntries []schema.SessionEntry
 	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		e := scanSessionEntry(st)
+		if e.Extra != nil {
+			evidenceEntries = append(evidenceEntries, e)
+		}
 		m, err := readManifest(conn, e)
 		if err != nil {
 			return err
@@ -254,7 +258,20 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 	if entries != c.EntryCount || rows != c.ContentRowCount || hex.EncodeToString(h.Sum(nil)) != c.FullCaptureSHA256 {
 		return contentIntegrityError()
 	}
-	return nil
+	active, err := readActiveGenerationOnConn(conn, id)
+	if err != nil {
+		return err
+	}
+	if active != nil {
+		snapshot, err := buildReadSnapshotOnConn(conn, id)
+		if err != nil {
+			return err
+		}
+		for _, section := range snapshot.Earlier {
+			evidenceEntries = append(evidenceEntries, section.Content.Entries...)
+		}
+	}
+	return validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode)
 }
 func verifyStoredContent(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCapture) error {
 	return verifyCaptureProjection(ctx, conn, id, c, true)

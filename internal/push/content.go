@@ -89,11 +89,26 @@ func BuildPublishTranscriptContent(
 	origin sessionorigin.Origin,
 ) (schema.TranscriptContent, error) {
 	if committedDetail == nil {
-		return BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
+		content, err := BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
+		if err == nil {
+			mirrorInterpretationDiagnostics(meta, content.SessionDetail)
+		}
+		return content, err
 	}
 	detail := *committedDetail
 	applyPublishConsentOverlay(&detail, meta, fields)
+	mirrorInterpretationDiagnostics(meta, &detail)
 	return BuildTranscriptContentFromDetail(&detail, emit, origin), nil
+}
+
+// Only the built, selected content may supply interpretation partial state.
+// Capture metadata may also describe older omission placeholders, so absence
+// of detail diagnostics must not clear an existing omission indication.
+func mirrorInterpretationDiagnostics(meta *ingest.UnifiedMetadata, detail *schema.SessionDetailPayload) {
+	if meta != nil && detail != nil && detail.Diagnostics != nil {
+		partial := detail.Diagnostics.Partial
+		meta.Diagnostics.Partial = &partial
+	}
 }
 
 // applyPublishConsentOverlay applies the publication field-consent gates to a
@@ -211,6 +226,35 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 	}
 	defer observeRedactionDocument(redactor, &err, redactionEntriesValidation)
 	entries = append([]schema.SessionEntry(nil), entries...)
+	unknown := make(map[int][]ingest.RetainedUnknown)
+	for i := range entries {
+		records, err := ingest.RetainedUnknownOf(entries[i])
+		if err != nil {
+			return nil, err
+		}
+		if len(records) == 0 {
+			continue
+		}
+		for j := range records {
+			payload, err := redactRetainedJSON(string(records[j].Payload), redactor, 0)
+			if err != nil {
+				return nil, err
+			}
+			records[j].Payload = json.RawMessage(payload)
+		}
+		unknown[i] = records
+		var extra map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(*entries[i].Extra), &extra); err != nil {
+			return nil, err
+		}
+		delete(extra, "retainedUnknown")
+		encoded, err := json.Marshal(extra)
+		if err != nil {
+			return nil, err
+		}
+		text := string(encoded)
+		entries[i].Extra = &text
+	}
 	protected := make(map[int]*string)
 	for i := range entries {
 		extra, pi, err := ingest.DecodePiEntryExtra(entries[i])
@@ -263,6 +307,11 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 		for i, extra := range protected {
 			entries[i].Extra = extra
 		}
+		for i, records := range unknown {
+			if err := ingest.AttachRetainedUnknown(&entries[i], records); err != nil {
+				return nil, err
+			}
+		}
 		return entries, nil
 	}
 	raw, err := json.Marshal(entries)
@@ -308,6 +357,11 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 				return nil, err
 			}
 			redactedEntries[index].Extra = restored
+		}
+	}
+	for i, records := range unknown {
+		if err := ingest.AttachRetainedUnknown(&redactedEntries[i], records); err != nil {
+			return nil, err
 		}
 	}
 	return redactedEntries, nil
@@ -432,6 +486,15 @@ func marshalTranscriptContent(
 }
 
 func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) (_ []byte, err error) {
+	// Embedded JSON is text on the public wire. Redact its decoded string
+	// tokens separately, preserving number literals and the capture's coordinates.
+	var retained []schema.RetainedUnknownRecord
+	if content.SessionDetail != nil {
+		retained, err = redactRetainedRecords(content.SessionDetail.RetainedUnknown, redactor)
+		if err != nil {
+			return nil, err
+		}
+	}
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)
@@ -443,6 +506,16 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 		return b, nil
 	}
 	defer observeRedactionDocument(redactor, &err, redactionTranscriptValidation)
+	if len(retained) > 0 {
+		copy := *content.SessionDetail
+		copy.RetainedUnknown = nil
+		redactionInput := content
+		redactionInput.SessionDetail = &copy
+		b, err = json.Marshal(redactionInput)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Through the SAME fail-closed round trip as the other two seams. This one
 	// called redact.RedactJSONDocBytes directly and returned its value, so a
 	// re-marshal failure published the assembled document exactly as built, with
@@ -491,6 +564,12 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	if content.SessionDetail != nil {
 		if err := restoreObservedModels(content.SessionDetail.Turns, check.SessionDetail.Turns); err != nil {
 			return nil, err
+		}
+		if len(retained) > 0 {
+			check.SessionDetail.RetainedUnknown = retained
+			if check.SessionDetail.Diagnostics == nil || !check.SessionDetail.Diagnostics.Partial {
+				return nil, transcriptShapeRedactionError("retained evidence lost its partial diagnostic")
+			}
 		}
 	}
 	final, err := json.Marshal(check)

@@ -16,10 +16,11 @@ type ProjectedTarget struct {
 
 // Projection is the one fold result for local viewing and all outbound content.
 type Projection struct {
-	Turns          []ingest.Turn
-	NativeMetadata []schema.NativeMetadataRecord
-	UsageOwners    []schema.UsageDetail
-	SourceMap      map[string]ProjectedTarget
+	RetainedUnknown []schema.RetainedUnknownRecord
+	Turns           []ingest.Turn
+	NativeMetadata  []schema.NativeMetadataRecord
+	UsageOwners     []schema.UsageDetail
+	SourceMap       map[string]ProjectedTarget
 }
 
 // ProjectionOptions can require carrier agreement with the session harness.
@@ -32,6 +33,11 @@ func EntriesToProjectionValidated(entries []schema.SessionEntry, opts Projection
 
 func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, validate bool) (Projection, error) {
 	p := Projection{SourceMap: make(map[string]ProjectedTarget)}
+	var err error
+	p.RetainedUnknown, err = ingest.ProjectRetainedUnknown(entries, opts.Harness)
+	if err != nil && validate {
+		return p, err
+	}
 	evidence := make(map[int]ingest.PiExtra)
 	indexes := make(map[int]bool)
 	for _, entry := range entries {
@@ -43,6 +49,9 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 			return p, projectionError("invalid carrier row")
 		}
 		if !pi {
+			if ingest.IsRetainedUnknownCarrier(entry) {
+				continue
+			}
 			if opts.Harness == schema.HarnessPi {
 				return p, projectionError("Pi session contains a row without typed source/usage evidence")
 			}
@@ -256,7 +265,15 @@ func SessionToDetailValidatedWithProjection(session *ingest.Session, p Projectio
 	copy := *session
 	copy.Turns = p.Turns
 	copy.NativeMetadata = p.NativeMetadata
-	return SessionToDetailValidated(&copy)
+	detail, err := SessionToDetailValidated(&copy)
+	if err != nil {
+		return nil, err
+	}
+	detail.RetainedUnknown = p.RetainedUnknown
+	if len(p.RetainedUnknown) > 0 {
+		detail.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
+	}
+	return detail, schema.ValidateRetainedUnknown(*detail)
 }
 
 func projectionError(reason string) error {

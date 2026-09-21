@@ -1,0 +1,42 @@
+cases:
+  - name: managed_partition_preserves_unknown
+    payload: '{"type":"future","number":9007199254740993}'
+    expected: '{"type":"future","number":9007199254740993}'
+    advertised: true
+    managed: true
+  - name: earlier_history_restores_source_order
+    payload: '{"type":"future","number":9007199254740993}'
+    expected: '{"type":"future","number":9007199254740993}'
+    advertised: true
+    managed: true
+    earlier: true
+  - name: full_record_between_known_records
+    payload: '{"type":"future","number":9007199254740993}'
+    expected: '{"type":"future","number":9007199254740993}'
+    advertised: true
+  - name: nested_large_payload_keeps_precision
+    payload: '{"type":"future","number":9007199254740993123456789,"body":"BODY"}'
+    expected: '{"type":"future","number":9007199254740993123456789,"body":"BODY"}'
+    pointer: /message/content/1
+    repeat: 12000
+    advertised: true
+  - name: escaped_secret_is_redacted
+    payload: '{"type":"future","secret":"custom\u002dsecret"}'
+    expected: '{"type":"future","secret":"[CUSTOM]"}'
+    advertised: true
+  - name: embedded_json_secret_is_redacted
+    payload: '{"type":"future","data":"{\"secret\":\"custom\\u002dsecret\"}"}'
+    expected: '{"type":"future","data":"{\"secret\":\"[CUSTOM]\"}"}'
+    advertised: true
+  - name: receiver_without_preservation_refuses
+    payload: '{"type":"future","number":9007199254740993}'
+    expected: '{"type":"future","number":9007199254740993}'
+    advertised: false
+  - name: missing_traversal_coordinate_refuses_write
+    payload: '{"type":"future"}'
+    missingCoordinates: true
+    writeError: true
+  - name: duplicate_location_refuses_write
+    payload: '{"type":"future"}'
+    duplicate: true
+    writeError: true

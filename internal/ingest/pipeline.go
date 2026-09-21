@@ -1569,6 +1569,7 @@ type indexParseResult struct {
 	// readable, exportable and publishable; a partial capture without that
 	// proof is written as the bounded preview it is.
 	omissionsRecorded bool
+	unknownRecorded   bool
 	im                indexedMeta
 	input             *CapturedIndexInput
 	output            indexformat.Result
@@ -1954,6 +1955,10 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				} else {
 					result.refusalCode = ContentCaptureUnknownDataRetained
 					result.strictRefusal = "uninterpreted source data was retained locally; export and publication require an outbound evidence projection"
+					if projected, projectErr := ProjectRetainedUnknown(v1.Entries, im.session.Harness); projectErr == nil && len(projected) == len(unknown) {
+						result.unknownRecorded = true
+						result.strictRefusal = "uninterpreted source data was retained with complete payload and source coordinates; export and publication carry partial interpretation diagnostics"
+					}
 				}
 				result.omissionsRecorded = false
 			}
@@ -2074,7 +2079,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
 			format := ContentCaptureFormatPreviewOnly
-			if result.omissionsRecorded {
+			if result.omissionsRecorded || result.unknownRecorded {
 				format = ContentCaptureFormatFull
 				requireFullContent = true
 			}
@@ -2188,7 +2193,11 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		logEntry := p.makeIndexLogEntry(result.im, outcome, result.entryCount, result.startedAt, nil, nil)
 		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true, retainedUnknown: result.retainedUnknown}
 		if len(result.retainedUnknown) > 0 {
-			p.reportDiagnostic(DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: "Keep the source capture; upgrade to a build with the matching outbound evidence contract before exporting or publishing this session."})
+			remediation := "Keep the source capture; re-index with a position-aware adapter before exporting or publishing this session."
+			if result.unknownRecorded {
+				remediation = "Export the retained evidence as recorded, or publish to a receiver supporting retained_unknown_v1; interpretation remains partial."
+			}
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: remediation})
 		} else if result.omissionsRecorded {
 			p.reportDiagnostic(permanentRefusalDiagnostic(result.im.session.SessionID, result.refusalCode, true, errors.New(result.strictRefusal)))
 		}

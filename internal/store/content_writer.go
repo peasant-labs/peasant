@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
@@ -143,6 +144,16 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	// the bounded preview it is.
 	if !FullCaptureWritable(c) || c.SourceAuthority == ingest.ContentSourceNone {
 		return out, fmt.Errorf("store full content write: capture %q with failure code %q is not a state this writer may certify as full content; prior data unchanged; resolve strict parser failures, or store the tolerant projection as a preview capture, before retrying", c.Status, c.FailureCode)
+	}
+	evidenceEntries := entries
+	if managed, ok := w.Result.(indexformat.V2); ok && len(managed.Generation.Earlier) > 0 {
+		evidenceEntries = append([]schema.SessionEntry(nil), entries...)
+		for _, section := range managed.Generation.Earlier {
+			evidenceEntries = append(evidenceEntries, section.Content.Entries...)
+		}
+	}
+	if err := validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode); err != nil {
+		return out, err
 	}
 	if c.Status == ingest.ContentCaptureComplete && c.FailureMessage != "" {
 		return out, fmt.Errorf("store full content write: a complete capture carries a failure message (%q); prior data unchanged; a complete capture records no failure, so clear the message or store the capture with the code that explains it", c.FailureMessage)

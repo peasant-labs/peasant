@@ -1,9 +1,11 @@
 package transcript
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -54,6 +56,10 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 	if err != nil {
 		return fail(err)
 	}
+	unknown, err := ingest.ProjectRetainedUnknown(mainEntries, snapshot.Metadata.ModelHarness)
+	if err != nil {
+		return fail(err)
+	}
 	session := snapshotToSession(snapshot)
 	session.Turns = mainTurns
 	session.NativeMetadata = append([]schema.NativeMetadataRecord(nil), snapshot.Main.NativeMetadata...)
@@ -67,6 +73,11 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 		if err != nil {
 			return fail(err)
 		}
+		retained, err := ingest.ProjectRetainedUnknown(entries, snapshot.Metadata.ModelHarness)
+		if err != nil {
+			return fail(err)
+		}
+		unknown = append(unknown, retained...)
 		session.EarlierHistory = append(session.EarlierHistory, ingest.EarlierHistorySection{
 			State:          section.State,
 			Turns:          turns,
@@ -75,6 +86,21 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 	}
 	detail, err := SessionToDetailValidated(session)
 	if err != nil {
+		return fail(err)
+	}
+	// Main and earlier partitions are display order, not source order. Restore
+	// the capture-assigned traversal order without merging distinct occurrences.
+	slices.SortStableFunc(unknown, func(a, b schema.RetainedUnknownRecord) int {
+		if source := cmp.Compare(a.SourceRef, b.SourceRef); source != 0 {
+			return source
+		}
+		return cmp.Compare(a.Position, b.Position)
+	})
+	detail.RetainedUnknown = unknown
+	if len(unknown) > 0 {
+		detail.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
+	}
+	if err := schema.ValidateRetainedUnknown(*detail); err != nil {
 		return fail(err)
 	}
 	return detail, nil
@@ -111,6 +137,12 @@ func hydratePartitionEntries(ctx context.Context, snapshot indexformat.ReadSnaps
 		if !utf8.Valid(full) {
 			return nil, fmt.Errorf("entry %d: managed content for source ref %q in generation %q is not valid UTF-8; the artifact is corrupt; no partial transcript was emitted",
 				entry.EntryIndex, entry.SourceEntryRef, snapshot.GenerationID)
+		}
+		if ingest.IsRetainedUnknownCarrier(entry) {
+			// Integrity-check any named blob under the same snapshot lock, but
+			// never turn evidence into fabricated display prose.
+			out[i] = entry
+			continue
 		}
 		text := string(full)
 		switch entry.EntryType {
