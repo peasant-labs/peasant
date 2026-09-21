@@ -93,6 +93,10 @@ type harvestFlags struct {
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
 // "ingest" is registered as a silent alias for backward compatibility.
 func BuildHarvestCommand() *cobra.Command {
+	return buildHarvestCommand(&ingest.OSFileSystem{})
+}
+
+func buildHarvestCommand(filesystem ingest.FileSystem) *cobra.Command {
 	var flags harvestFlags
 
 	cmd := &cobra.Command{
@@ -101,7 +105,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Short:   "Harvest AI coding agent transcripts",
 		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, Strike, and Pi.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHarvest(cmd, harvestAll, &flags)
+			return runHarvest(cmd, harvestAll, &flags, filesystem)
 		},
 	}
 
@@ -113,7 +117,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Short: "Extract transcripts to peasant-sync/ (no database)",
 		Long:  "Discover and copy AI agent transcripts to the local peasant-sync/ directory without populating the analytics database.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHarvest(cmd, harvestLogsOnly, &flags)
+			return runHarvest(cmd, harvestLogsOnly, &flags, filesystem)
 		},
 	}
 	registerHarvestFlags(logsCmd, &flags, harvestLogsOnly)
@@ -127,7 +131,7 @@ func BuildHarvestCommand() *cobra.Command {
 			"By default, select sessions with stale indexer revisions. Use --source-harness, --session, and --since to narrow the selection, or --force to re-process matching current sessions.\n" +
 			"Use --all to rebuild a lost or damaged database from the files in peasant-sync/. --all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHarvest(cmd, harvestIndexOnly, &flags)
+			return runHarvest(cmd, harvestIndexOnly, &flags, filesystem)
 		},
 	}
 	registerHarvestFlags(indexCmd, &flags, harvestIndexOnly)
@@ -212,7 +216,7 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 	return len(ingest.FailedIndexSessions(log))
 }
 
-func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
+func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem) error {
 	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
 	ctx, cancelOperation := context.WithCancel(signalCtx)
@@ -228,7 +232,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	configPath := resolveConfigPath(cmd)
 
 	// 1. Construct real dependencies.
-	fs := &ingest.OSFileSystem{}
+	fs := filesystem
 	git := &ingest.ExecGitResolver{}
 
 	// 2. Load config.
