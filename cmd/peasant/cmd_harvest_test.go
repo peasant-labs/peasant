@@ -1977,7 +1977,7 @@ func TestPrintSummary_RecordKindsRefusedAndTracked(t *testing.T) {
 	if !strings.Contains(output, "refused: codex/world_state x2") {
 		t.Errorf("summary should name the refused kind with its count; got:\n%s", output)
 	}
-	if !strings.Contains(output, "tracked, not visualized: claude-code/attachment") {
+	if !strings.Contains(output, "tracked, not visualized: claude-code/retained-format-1/record/attachment") {
 		t.Errorf("summary should name the tracked-not-visualized kind; got:\n%s", output)
 	}
 }

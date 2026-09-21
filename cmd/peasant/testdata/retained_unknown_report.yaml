@@ -1,3 +1,8 @@
+coverage_expected:
+  - 'tracked, not visualized: claude-code/retained-format-1/record/attachment'
+  - 'tracked, not visualized: claude-code/retained-format-1/record/artifact- (prefix)'
+  - 'tracked, not visualized: codex/retained-format-1/response_item/function_call'
+  - 'tracked, not visualized: codex/native-generation/response_item/function_call'
 cases:
   - name: occurrences_are_not_sessions
     harness: claude-code

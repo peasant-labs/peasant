@@ -1288,7 +1288,11 @@ func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount
 		fmt.Fprintln(w, "  These captures stay incomplete; export and publication refuse them until a build represents the kinds.")
 	}
 	for _, row := range tracked {
-		fmt.Fprintf(w, "  registry coverage (not run observations), tracked, not visualized: %s/%s\n", string(row.Harness), row.Kind)
+		match := ""
+		if row.Match == ingest.RecordKindPrefix {
+			match = " (prefix)"
+		}
+		fmt.Fprintf(w, "  registry coverage (not run observations), tracked, not visualized: %s/%s/%s/%s%s\n", row.Harness, row.Context, row.Namespace, row.Kind, match)
 	}
 }
 
