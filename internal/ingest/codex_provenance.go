@@ -672,12 +672,24 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		// for inherited sources. They carry no conversational content, count,
 		// title, or display; provenance and the source segment retain ownership.
 		c.retaining = false
-		block := ClassifiedBlock{NativeKey: node.NativeKey + "/retained-unknown", Section: sectionOf(ownership), Uncertain: ownership == schema.ContentOwnershipUncertain, Role: RoleSystem, EntryType: EntryTypeSystem,
+		block := ClassifiedBlock{NativeKey: node.NativeKey + "/retained-unknown", Section: sectionOf(ownership), Uncertain: ownership == schema.ContentOwnershipUncertain, Role: RoleSystem, EntryType: EntryTypeSystem, RetainedUnknown: node.RetainedUnknown,
 			Provenance: &schema.ContentProvenance{Origin: schema.ContentOriginUnknown, Actor: schema.ActorOriginUnknown, Delivery: schema.DeliveryOriginUnknown, Ownership: ownership, Evidence: schema.EvidenceNativeTyped, InputModality: schema.InputModalityNone}}
 		c.emit(block)
 		return nil
 	}
 	payload := decodeCodexItemPayload(node.Payload)
+	if node.NativeType == "message" && len(payload.Content) > 0 {
+		opaqueOnly := true
+		for _, block := range payload.Content {
+			if block.ContentType != codexOpaqueBlock {
+				opaqueOnly = false
+				break
+			}
+		}
+		if opaqueOnly {
+			return nil
+		}
+	}
 	switch node.NativeType {
 	case "message":
 		if payload.Type == codexResponseAgentMessage {

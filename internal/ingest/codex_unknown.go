@@ -1,13 +1,14 @@
 package ingest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
-	"github.com/peasant-labs/schema"
 )
 
 const codexOpaqueBlock = "__peasant_retained_unknown__"
@@ -28,9 +29,19 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		return nil, nil, fmt.Errorf("Codex record requires a string type")
 	}
 	var unknown []RetainedUnknown
+	traversal := codexTraversalPointers(raw)
 	retain := func(namespace, kind, pointer string, value json.RawMessage) error {
 		at := position
 		at.JSONPointer = pointer
+		if position.Public != nil {
+			public := *position.Public
+			if index, ok := traversal[pointer]; ok {
+				public.Position += index
+			} else {
+				return fmt.Errorf("retain Codex evidence: source pointer is outside the captured traversal; no evidence was stored; repair the capture traversal")
+			}
+			at.Public = &public
+		}
 		evidence, err := NewRetainedUnknownFromSource(HarnessCodex, namespace, kind, at, value)
 		if err == nil {
 			unknown = append(unknown, evidence)
@@ -111,6 +122,11 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			}
 			for i := range nested {
 				nested[i].Position.JSONPointer = "/payload/item" + strings.TrimPrefix(nested[i].Position.JSONPointer, "/payload")
+				if position.Public != nil {
+					public := *position.Public
+					public.Position += traversal[nested[i].Position.JSONPointer]
+					nested[i].Position.Public = &public
+				}
 			}
 			unknown = append(unknown, nested...)
 			if len(nested) > 0 {
@@ -217,6 +233,58 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 	return encoded, unknown, err
 }
 
+// codexTraversalPointers assigns preorder coordinates to the source envelope,
+// discriminated payload, canonical item, and every content/summary block. It
+// visits known and unknown values alike, before interpretation or folding.
+func codexTraversalPointers(raw []byte) map[string]int64 {
+	positions := map[string]int64{"": 0}
+	var envelope struct {
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return positions
+	}
+	var visit func(json.RawMessage, string)
+	visit = func(value json.RawMessage, pointer string) {
+		positions[pointer] = int64(len(positions))
+		var object map[string]json.RawMessage
+		if json.Unmarshal(value, &object) != nil {
+			return
+		}
+		for _, field := range []string{"content", "summary"} {
+			var blocks []json.RawMessage
+			if json.Unmarshal(object[field], &blocks) != nil {
+				continue
+			}
+			for i, block := range blocks {
+				visit(block, fmt.Sprintf("%s/%s/%d", pointer, field, i))
+			}
+		}
+		if item := object["item"]; len(item) > 0 && string(item) != "null" {
+			visit(item, pointer+"/item")
+		}
+	}
+	if envelope.Type == codexTypeResponse || envelope.Type == codexTypeEventMsg {
+		visit(envelope.Payload, "/payload")
+	}
+	return positions
+}
+
+func codexPublicPosition(stream string, line int, position int64) *UnknownPublicPosition {
+	digest := sha256.Sum256([]byte("codex\x00" + stream))
+	return &UnknownPublicPosition{SourceRef: "src_" + hex.EncodeToString(digest[:]), RecordIndex: int64(line - 1), Position: position}
+}
+
+func codexNativeUnknownPosition(threadID string, segment codexDecodedSegment, record codexHistoryRecord) UnknownSourcePosition {
+	stream := segment.descriptor.PhysicalSourceID
+	if stream == "" {
+		stream = segment.descriptor.Pointer
+	}
+	line := int(record.LineIndex + 1)
+	return UnknownSourcePosition{SourceID: segment.descriptor.PhysicalSourceID, Line: line, Public: codexPublicPosition(threadID+"\x00"+stream, line, record.TraversalPosition)}
+}
+
 // Unknown envelopes have physical coordinates only. Membership is determined
 // by the captured byte interval, never by assigning the physical line an ordinal.
 func codexUnknownInBounds(segment codexDecodedSegment, record codexHistoryRecord) bool {
@@ -303,10 +371,8 @@ func attachCodexUnknown(result *indexformat.V2, nodes []CodexCapturedNode) error
 		byAlias[key] = node.RetainedUnknown
 		segments[key] = node.SegmentOrdinal
 	}
-	byRef := map[schema.SourceEntryRef][]RetainedUnknown{}
 	for _, alias := range result.Generation.Aliases {
 		if evidence := byAlias[alias.NativeKey]; len(evidence) > 0 {
-			byRef[alias.Ref] = evidence
 			for i := range result.Generation.Segments {
 				segment := &result.Generation.Segments[i]
 				if segment.Ordinal == segments[alias.NativeKey] && !slices.Contains(segment.CapturedRefs, alias.Ref) {
@@ -315,22 +381,5 @@ func attachCodexUnknown(result *indexformat.V2, nodes []CodexCapturedNode) error
 			}
 		}
 	}
-	attach := func(entries []schema.SessionEntry) error {
-		for i := range entries {
-			if err := AttachRetainedUnknown(&entries[i], byRef[entries[i].SourceEntryRef]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := attach(result.Generation.Main.Entries); err != nil {
-		return err
-	}
-	for i := range result.Generation.Earlier {
-		if err := attach(result.Generation.Earlier[i].Content.Entries); err != nil {
-			return err
-		}
-	}
-	applyStrictCounts(&result.Generation, result.Generation.Completeness)
 	return result.Generation.Validate()
 }

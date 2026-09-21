@@ -10,8 +10,30 @@ required_names:
   - inherited_envelope
   - reverted_envelope
   - broken_json
+  - canonical_opaque_only
+  - physical_blank_line
+  - missing_discriminator
 cases:
+  - name: physical_blank_line
+    prefix_blank: true
+    position: 4
+    native_position: 5
+    record: '{"type":"future","payload":{"new":true}}'
+    namespace: envelope
+    kind: future
+    pointer: ''
+  - name: missing_discriminator
+    record: '{}'
+    error: true
+  - name: canonical_opaque_only
+    native_only: true
+    native_position: 7
+    record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"new-item","content":[{"type":"future","text":{"new":true}}]}}}'
+    namespace: content_block
+    kind: future
+    pointer: /payload/item/content/0
   - name: inherited_envelope
+    native_position: 4
     native_only: true
     copy_boundary: 2
     record: '{"type":"future","payload":{"new":true}}'
@@ -19,6 +41,7 @@ cases:
     kind: future
     pointer: ''
   - name: reverted_envelope
+    native_position: 4
     native_only: true
     reverted: true
     record: '{"type":"future","payload":{"new":true}}'
@@ -29,38 +52,50 @@ cases:
     record: '{"type":"future"'
     error: true
   - name: reasoning_block
+    position: 6
+    native_position: 7
     record: '{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"before"},{"type":"future","text":{"new":true}},{"type":"summary_text","text":"after"}]}}'
     namespace: content_block
     kind: future
     pointer: /payload/summary/1
   - name: canonical_item
+    native_position: 6
     native_only: true
     record: '{"type":"event_msg","payload":{"type":"item_completed","id":"new-item","item":{"type":"FutureItem","content":{"new":true}}}}'
     namespace: item
     kind: FutureItem
     pointer: /payload/item
   - name: canonical_block
+    native_position: 8
     native_only: true
     record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"new-item","content":[{"type":"input_text","text":"before"},{"type":"future","text":{"new":true}},{"type":"input_text","text":"after"}]}}}'
     namespace: content_block
     kind: future
     pointer: /payload/item/content/1
   - name: envelope
+    position: 3
+    native_position: 4
     record: '{"type":"future","payload":{"large":9007199254740993,"token":"ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"}}'
     namespace: envelope
     kind: future
     pointer: ''
   - name: event
+    position: 4
+    native_position: 5
     record: '{"type":"event_msg","payload":{"type":"future","message":{"new":true}}}'
     namespace: event_msg
     kind: future
     pointer: /payload
   - name: response
+    position: 4
+    native_position: 5
     record: '{"type":"response_item","payload":{"type":"future","content":{"new":true}}}'
     namespace: response_item
     kind: future
     pointer: /payload
   - name: nested
+    position: 6
+    native_position: 7
     record: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"},{"type":"future","text":{"new":true}},{"type":"input_text","text":"after"}]}}'
     namespace: content_block
     kind: future

@@ -58,19 +58,42 @@ func captureRoleKinds() []string {
 }
 
 func codexStrictEnvelopeKinds() []string {
-	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeEventMsg, codexTypeResponse}
+	return []string{
+		codexTypeSessionMeta,
+		codexTypeTurnContext,
+		codexTypeEventMsg,
+		codexTypeResponse,
+	}
 }
 
 func codexStrictEventMsgKinds() []string {
-	return []string{"token_count", "task_started", "task_complete", "turn_aborted", "user_message", "agent_message", "agent_reasoning"}
+	return []string{
+		"token_count",
+		"task_started",
+		"task_complete",
+		"turn_aborted",
+		"user_message",
+		"agent_message",
+		"agent_reasoning",
+	}
 }
 
 func codexStrictResponsePayloadKinds() []string {
-	return []string{codexResponseMessage, codexResponseReasoning, codexResponseFunctionCall, codexResponseCustomCall, codexResponseFunctionOut, codexResponseCustomCallOut}
+	return []string{
+		codexResponseMessage,
+		codexResponseReasoning,
+		codexResponseFunctionCall,
+		codexResponseCustomCall,
+		codexResponseFunctionOut,
+		codexResponseCustomCallOut,
+	}
 }
 
 func codexStrictMessageBlockKinds() []string {
-	return []string{"input_text", "output_text"}
+	return []string{
+		"input_text",
+		"output_text",
+	}
 }
 
 func codexStrictReasoningSummaryKinds() []string {
@@ -78,7 +101,10 @@ func codexStrictReasoningSummaryKinds() []string {
 }
 
 func codexStrictReasoningContentKinds() []string {
-	return []string{"reasoning_text", "text"}
+	return []string{
+		"reasoning_text",
+		"text",
+	}
 }
 
 // cursorStrictRecordKinds names the Cursor record types with dedicated

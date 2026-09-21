@@ -185,8 +185,9 @@ type codexHistoryReplayPayload struct {
 // advance the byte checkpoint only and are never assigned a native ordinal
 // by line number.
 type codexHistoryRecord struct {
-	RawJSON   json.RawMessage
-	LineIndex int64
+	RawJSON           json.RawMessage
+	TraversalPosition int64
+	LineIndex         int64
 	// Ordinal is the valid decoded native ordinal. HasOrdinal is false for
 	// partial, malformed, blank and unknown records.
 	Ordinal          int64
@@ -229,6 +230,7 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 	var maxAssigned int64 = -1
 	offset := int64(0)
 	line := int64(0)
+	var traversalPosition int64
 	for offset < int64(len(data)) {
 		relative := bytes.IndexByte(data[offset:], '\n')
 		end := int64(len(data))
@@ -248,6 +250,8 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 		line++
 		trimmed := bytes.TrimSpace(recordLine)
 		record.RawJSON = append(json.RawMessage(nil), trimmed...)
+		record.TraversalPosition = traversalPosition
+		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
 		switch {
 		case partial:
 			// Deferred: no ordinal, no interpretation.
@@ -258,7 +262,7 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 			if err := json.Unmarshal(trimmed, &env); err != nil {
 				record.Malformed = true
 			} else if env.Type == "" && len(bytes.TrimSpace(env.Payload)) == 0 && len(bytes.TrimSpace(env.Metadata)) == 0 {
-				record.Blank = true
+				record.Malformed = true
 			} else if !recognizedCodexEnvelopeType(env.Type) {
 				record.EnvelopeType = env.Type
 				record.Payload = env.Payload
@@ -880,7 +884,7 @@ func (state *codexReplayState) replaySegment(threadID string, segment codexDecod
 			if !codexUnknownInBounds(segment, record) {
 				continue
 			}
-			_, unknown, err := prepareCodexRecord(record.RawJSON, UnknownSourcePosition{SourceID: segment.descriptor.PhysicalSourceID, Line: int(record.LineIndex + 1)}, true)
+			_, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
 			if err != nil {
 				return err
 			}
@@ -978,7 +982,7 @@ func codexSegmentOwnership(segment codexDecodedSegment, ordinal int64) CodexOwne
 
 // replayRecord dispatches one valid decoded record.
 func (state *codexReplayState) replayRecord(threadID string, segment codexDecodedSegment, record codexHistoryRecord, ownership CodexOwnership, mode CodexHistoryMode) (resultErr error) {
-	prepared, unknown, err := prepareCodexRecord(record.RawJSON, UnknownSourcePosition{SourceID: segment.descriptor.PhysicalSourceID, Line: int(record.LineIndex + 1)}, true)
+	prepared, unknown, err := prepareCodexRecord(record.RawJSON, codexNativeUnknownPosition(threadID, segment, record), true)
 	if err != nil {
 		return err
 	}

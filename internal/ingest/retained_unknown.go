@@ -17,11 +17,22 @@ import (
 // Line and Sequence are one-based when present; native sources may instead use
 // their stable ID or opaque source reference. JSONPointer addresses a nested value.
 type UnknownSourcePosition struct {
-	SourceEntryRef schema.SourceEntryRef `json:"sourceEntryRef,omitempty"`
-	SourceID       string                `json:"sourceId,omitempty"`
-	Line           int                   `json:"line,omitempty"`
-	Sequence       int                   `json:"sequence,omitempty"`
-	JSONPointer    string                `json:"jsonPointer,omitempty"`
+	Public         *UnknownPublicPosition `json:"public,omitempty"`
+	SourceEntryRef schema.SourceEntryRef  `json:"sourceEntryRef,omitempty"`
+	SourceID       string                 `json:"sourceId,omitempty"`
+	Line           int                    `json:"line,omitempty"`
+	Sequence       int                    `json:"sequence,omitempty"`
+	JSONPointer    string                 `json:"jsonPointer,omitempty"`
+}
+
+// UnknownPublicPosition is assigned while traversing the complete source, before
+// known records or blocks are folded away. SourceRef identifies the opaque source
+// stream, not a filesystem path or an individual native entry. Both coordinates
+// are zero-based; absence must never be confused with the first source record.
+type UnknownPublicPosition struct {
+	SourceRef   string `json:"sourceRef"`
+	RecordIndex int64  `json:"recordIndex"`
+	Position    int64  `json:"position"`
 }
 
 // RetainedUnknown is private, already-redacted source evidence. It is not a

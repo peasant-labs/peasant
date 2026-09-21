@@ -27,15 +27,18 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 	var fixture struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
-			Name         string `yaml:"name"`
-			Record       string `yaml:"record"`
-			Namespace    string `yaml:"namespace"`
-			Kind         string `yaml:"kind"`
-			Pointer      string `yaml:"pointer"`
-			Error        bool   `yaml:"error"`
-			NativeOnly   bool   `yaml:"native_only"`
-			CopyBoundary *int64 `yaml:"copy_boundary"`
-			Reverted     bool   `yaml:"reverted"`
+			Name           string `yaml:"name"`
+			Record         string `yaml:"record"`
+			Namespace      string `yaml:"namespace"`
+			Kind           string `yaml:"kind"`
+			Pointer        string `yaml:"pointer"`
+			Error          bool   `yaml:"error"`
+			NativeOnly     bool   `yaml:"native_only"`
+			CopyBoundary   *int64 `yaml:"copy_boundary"`
+			Reverted       bool   `yaml:"reverted"`
+			Position       int64  `yaml:"position"`
+			NativePosition int64  `yaml:"native_position"`
+			PrefixBlank    bool   `yaml:"prefix_blank"`
 		} `yaml:"cases"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(codexUnknownNativeYAML))
@@ -48,7 +51,15 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 		t.Fatal("trailing YAML", err)
 	}
 	names := []string{}
+	if len(fixture.Required) == 0 {
+		t.Fatal("missing required-name manifest")
+	}
+	seen := map[string]bool{}
 	for _, row := range fixture.Cases {
+		if row.Name == "" || seen[row.Name] {
+			t.Fatal("duplicate or empty fixture name")
+		}
+		seen[row.Name] = true
 		names = append(names, row.Name)
 	}
 	slices.Sort(names)
@@ -76,6 +87,11 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 				record = string(encoded)
 			}
 			middle := record + "\n"
+			line := 3
+			if row.PrefixBlank {
+				middle = "\n" + middle
+				line++
+			}
 			if row.Reverted {
 				middle += `{"type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}` + "\n"
 			}
@@ -146,7 +162,10 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 					t.Fatalf("persisted evidence: %+v", evidence)
 				}
 				got := evidence[0]
-				if got.Namespace != row.Namespace || got.Kind != row.Kind || got.Position.Line != 3 || got.Position.JSONPointer != row.Pointer {
+				if public := got.Position.Public; public == nil || public.RecordIndex != int64(line-1) || public.Position != row.NativePosition || !strings.HasPrefix(public.SourceRef, "src_") {
+					t.Fatalf("wrong source traversal: %+v", public)
+				}
+				if got.Namespace != row.Namespace || got.Kind != row.Kind || got.Position.Line != line || got.Position.JSONPointer != row.Pointer {
 					t.Fatalf("coordinates: %+v", got)
 				}
 				if bytes.Contains(got.Payload, []byte("ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD")) {

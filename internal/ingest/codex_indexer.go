@@ -295,6 +295,8 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 
 	var entries []schema.SessionEntry
 	entryIndex := 0
+	var traversalPosition int64
+	previousLine := 0
 
 	for scanner.Scan() {
 		var placeholderErr error
@@ -307,10 +309,15 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		}
 		raw := scanner.Bytes()
 		trimmed := bytes.TrimSpace(raw)
+		traversalPosition += int64(max(0, scanner.Line()-previousLine-1))
+		previousLine = scanner.Line()
 		if len(trimmed) == 0 {
+			traversalPosition++
 			continue
 		}
-		prepared, unknown, prepareErr := prepareCodexRecord(trimmed, UnknownSourcePosition{Line: scanner.Line()}, false)
+		position := UnknownSourcePosition{Line: scanner.Line(), Public: codexPublicPosition(sessionID.String(), scanner.Line(), traversalPosition)}
+		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
+		prepared, unknown, prepareErr := prepareCodexRecord(trimmed, position, false)
 		if prepareErr != nil {
 			if completion == nil && !json.Valid(trimmed) {
 				continue
