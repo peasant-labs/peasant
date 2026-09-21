@@ -13,7 +13,15 @@ required_names:
   - canonical_opaque_only
   - physical_blank_line
   - missing_discriminator
+  - namespace_collision_message_text
 cases:
+  - name: namespace_collision_message_text
+    position: 5
+    native_position: 6
+    record: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"text","text":{"new":true}}]}}'
+    namespace: message_block
+    kind: text
+    pointer: /payload/content/0
   - name: physical_blank_line
     prefix_blank: true
     position: 4
@@ -29,7 +37,7 @@ cases:
     native_only: true
     native_position: 7
     record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"new-item","content":[{"type":"future","text":{"new":true}}]}}}'
-    namespace: content_block
+    namespace: message_block
     kind: future
     pointer: /payload/item/content/0
   - name: inherited_envelope
@@ -55,21 +63,21 @@ cases:
     position: 6
     native_position: 7
     record: '{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"before"},{"type":"future","text":{"new":true}},{"type":"summary_text","text":"after"}]}}'
-    namespace: content_block
+    namespace: reasoning_summary
     kind: future
     pointer: /payload/summary/1
   - name: canonical_item
     native_position: 6
     native_only: true
     record: '{"type":"event_msg","payload":{"type":"item_completed","id":"new-item","item":{"type":"FutureItem","content":{"new":true}}}}'
-    namespace: item
+    namespace: item_body
     kind: FutureItem
     pointer: /payload/item
   - name: canonical_block
     native_position: 8
     native_only: true
     record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"new-item","content":[{"type":"input_text","text":"before"},{"type":"future","text":{"new":true}},{"type":"input_text","text":"after"}]}}}'
-    namespace: content_block
+    namespace: message_block
     kind: future
     pointer: /payload/item/content/1
   - name: envelope
@@ -83,7 +91,7 @@ cases:
     position: 4
     native_position: 5
     record: '{"type":"event_msg","payload":{"type":"future","message":{"new":true}}}'
-    namespace: event_msg
+    namespace: event
     kind: future
     pointer: /payload
   - name: response
@@ -97,7 +105,7 @@ cases:
     position: 6
     native_position: 7
     record: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"},{"type":"future","text":{"new":true}},{"type":"input_text","text":"after"}]}}'
-    namespace: content_block
+    namespace: message_block
     kind: future
     pointer: /payload/content/1
   - name: corrupt_known_after_unknown

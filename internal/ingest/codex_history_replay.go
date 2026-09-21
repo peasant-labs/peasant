@@ -1118,6 +1118,13 @@ func (state *codexReplayState) replayResponseItem(threadID string, segment codex
 // boundaries and legacy instruction rollback.
 func (state *codexReplayState) replayEventMessage(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
 	switch payload.Type {
+	case "token_count",
+		"user_message",
+		"agent_message",
+		"agent_reasoning":
+		// Usage belongs to metadata; these conversation events mirror response
+		// items and must not duplicate the native item stream.
+		return nil
 	case "item_started":
 		if payload.ID != "" {
 			state.boundary.pendUnopened(payload.ID)

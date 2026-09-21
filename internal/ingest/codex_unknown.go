@@ -81,7 +81,11 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		}
 	}
 	if !known {
-		err := retain(kind, variant, "/payload", envelope["payload"])
+		namespace := kind
+		if kind == codexTypeEventMsg {
+			namespace = "event"
+		}
+		err := retain(namespace, variant, "/payload", envelope["payload"])
 		return nil, unknown, err
 	}
 	if native && kind == codexTypeEventMsg && variant == "item_completed" && len(payload["item"]) > 0 && string(payload["item"]) != "null" {
@@ -94,7 +98,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			return raw, nil, nil
 		}
 		if _, _, ok := codexItemNativeType(codexItemBody{Type: header.Type}); !ok {
-			if err := retain("item", header.Type, "/payload/item", payload["item"]); err != nil {
+			if err := retain("item_body", header.Type, "/payload/item", payload["item"]); err != nil {
 				return nil, nil, err
 			}
 			delete(payload, "item")
@@ -189,7 +193,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 					}
 				}
 				supported := slices.Contains(kinds, header.Type)
-				if native && codexMediaContentTypes()[header.Type] {
+				if native && variant == codexResponseMessage && codexMediaContentTypes()[header.Type] {
 					supported = true
 				}
 				if supported {
@@ -203,7 +207,11 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 					}
 					continue
 				}
-				if err := retain("content_block", header.Type, fmt.Sprintf("/payload/%s/%d", field, i), block); err != nil {
+				namespace := "message_block"
+				if variant == codexResponseReasoning {
+					namespace = "reasoning_" + field
+				}
+				if err := retain(namespace, header.Type, fmt.Sprintf("/payload/%s/%d", field, i), block); err != nil {
 					return nil, nil, err
 				}
 				// Preserve vector alignment for native provenance. The empty placeholder

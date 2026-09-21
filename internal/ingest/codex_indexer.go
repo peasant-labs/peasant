@@ -405,6 +405,9 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
 			return nil, err
 		}
+		if len(unknown) > 0 && entry.ContentPreview == nil && entry.ToolInput == nil && entry.ToolOutput == nil {
+			entry.Role, entry.EntryType, entry.HasThinking = RoleSystem, EntryTypeSystem, false
+		}
 		entries = append(entries, entry)
 		if completion != nil {
 			completion.recognized++

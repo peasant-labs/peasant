@@ -92,6 +92,11 @@ func TestCodexRetainedUnknown(t *testing.T) {
 				t.Fatalf("evidence = %+v", evidence)
 			}
 			record := evidence[0]
+			for _, entry := range result.Entries {
+				if entry.Extra != nil && entry.ContentPreview == nil && !IsRetainedUnknownCarrier(entry) {
+					t.Fatal("opaque-only message fabricated a visible empty turn")
+				}
+			}
 			if public := record.Position.Public; public == nil || public.RecordIndex != int64(line-1) || public.Position != row.Position || !strings.HasPrefix(public.SourceRef, "src_") {
 				t.Fatalf("wrong source traversal: %+v", public)
 			}
