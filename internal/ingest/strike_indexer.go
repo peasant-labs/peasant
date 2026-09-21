@@ -157,6 +157,7 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 }
 
 func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	var traversal unknownJSONLTraversal
 	a := &strikeAssembly{
 		sessionID:      sessionID,
 		fullContent:    i.fullContent,
@@ -202,7 +203,7 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 			return
 		}
 		if i.retainUnknown {
-			filtered, records, whole, err := prepareUnknownJSONL(HarnessStrike, trimmed, line)
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessStrike, raw, line, &traversal)
 			if err != nil {
 				parseErr = err
 				return

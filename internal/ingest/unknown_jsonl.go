@@ -19,7 +19,8 @@ func (e *captureCorruptionError) Unwrap() error { return e.err }
 // prepareUnknownJSONL separates uninterpreted evidence from known content before
 // typed decoding. Unknown shapes must not be decoded into a known block struct:
 // their fields may legitimately have entirely different types.
-func prepareUnknownJSONL(harness Harness, raw []byte, line int) ([]byte, []RetainedUnknown, bool, error) {
+func prepareUnknownJSONL(harness Harness, raw []byte, line int, traversal *unknownJSONLTraversal) ([]byte, []RetainedUnknown, bool, error) {
+	public := traversal.record(line)
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return nil, nil, false, fmt.Errorf("source record must be a JSON object")
@@ -99,7 +100,7 @@ func prepareUnknownJSONL(harness Harness, raw []byte, line int) ([]byte, []Retai
 		unknown = kind != "" && !known
 	}
 	if unknown {
-		record, err := NewRetainedUnknownFromSource(harness, namespace, kind, UnknownSourcePosition{Line: line}, raw)
+		record, err := NewRetainedUnknownFromSource(harness, namespace, kind, UnknownSourcePosition{Line: line, Public: public}, raw)
 		return nil, []RetainedUnknown{record}, true, err
 	}
 	var records []RetainedUnknown
@@ -108,7 +109,7 @@ func prepareUnknownJSONL(harness Harness, raw []byte, line int) ([]byte, []Retai
 		if !exists {
 			return nil
 		}
-		filtered, found, err := filterUnknownBlocks(harness, value, line, pointer)
+		filtered, found, err := filterUnknownBlocks(harness, value, line, pointer, traversal, public)
 		if err != nil {
 			return err
 		}
@@ -157,7 +158,7 @@ func prepareUnknownJSONL(harness Harness, raw []byte, line int) ([]byte, []Retai
 	return filtered, records, false, err
 }
 
-func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer string) (json.RawMessage, []RetainedUnknown, error) {
+func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer string, traversal *unknownJSONLTraversal, root *UnknownPublicPosition) (json.RawMessage, []RetainedUnknown, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if harness == HarnessStrike && len(trimmed) > 0 && trimmed[0] == '{' {
 		var message map[string]json.RawMessage
@@ -166,11 +167,12 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 		}
 		var kind string
 		if value := message["type"]; value != nil {
+			public := traversal.block(root)
 			if err := json.Unmarshal(value, &kind); err != nil || kind == "" {
 				return nil, nil, fmt.Errorf("content block lacks a string type")
 			}
 			if !slices.Contains(captureContentBlockKinds(harness), kind) {
-				record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: pointer}, raw)
+				record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: pointer, Public: public}, raw)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -179,7 +181,7 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 		}
 		var records []RetainedUnknown
 		if value := message["content"]; value != nil {
-			content, found, err := filterUnknownBlocks(harness, value, line, pointer+"/content")
+			content, found, err := filterUnknownBlocks(harness, value, line, pointer+"/content", traversal, root)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -211,6 +213,7 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 	kept := make([]json.RawMessage, 0, len(blocks))
 	var records []RetainedUnknown
 	for i, block := range blocks {
+		public := traversal.block(root)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(block, &fields); err != nil || fields == nil {
 			return nil, nil, fmt.Errorf("content block must be an object")
@@ -221,7 +224,7 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 		}
 		at := pointer + "/" + strconv.Itoa(i)
 		if !slices.Contains(captureContentBlockKinds(harness), kind) {
-			record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: at}, block)
+			record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: at, Public: public}, block)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -229,7 +232,7 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 			continue
 		}
 		if kind == "tool_result" && fields["content"] != nil {
-			content, nested, err := filterUnknownBlocks(harness, fields["content"], line, at+"/content")
+			content, nested, err := filterUnknownBlocks(harness, fields["content"], line, at+"/content", traversal, root)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -266,7 +269,7 @@ func validateRetainingJSONL(ctx context.Context, session DiscoveredSession, data
 			sawOmission = true
 			return nil, nil
 		}
-		filtered, _, whole, err := prepareUnknownJSONL(session.Harness, raw, 1)
+		filtered, _, whole, err := prepareUnknownJSONL(session.Harness, raw, 1, nil)
 		if err != nil || whole {
 			return nil, err
 		}

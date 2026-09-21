@@ -604,6 +604,7 @@ func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	var traversal unknownJSONLTraversal
 	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
@@ -623,7 +624,7 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		}
 		var unknown []RetainedUnknown
 		if idx.retainUnknown {
-			filtered, records, whole, err := prepareUnknownJSONL(HarnessCursor, raw, scanner.Line())
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessCursor, scanner.Bytes(), scanner.Line(), &traversal)
 			if err != nil {
 				return nil, err
 			}

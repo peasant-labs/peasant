@@ -1,0 +1,23 @@
+required_names:
+  - legacy-object-without-public-position
+  - legacy-json-string-is-not-new-text-encoding
+  - modern-zero-position-preserves-lexical-json
+  - ambiguous-encoding-refused
+  - null-text-refused
+cases:
+  - name: legacy-object-without-public-position
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payload":{ "n":9007199254740993 }}]}'
+    payload: '{ "n":9007199254740993 }'
+    missing_public: true
+  - name: legacy-json-string-is-not-new-text-encoding
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payload":"native value"}]}'
+    payload: '"native value"'
+  - name: modern-zero-position-preserves-lexical-json
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{ \"n\":9007199254740993, \"decimal\":1.2300e+06, \"zero\":-0 }"}]}'
+    payload: '{ "n":9007199254740993, "decimal":1.2300e+06, "zero":-0 }'
+  - name: ambiguous-encoding-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payload":{},"payloadText":"{}"}]}'
+    error: true
+  - name: null-text-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payloadText":null}]}'
+    error: true

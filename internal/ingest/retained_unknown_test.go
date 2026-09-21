@@ -215,11 +215,12 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 				if err != nil || !found || capture.FailureCode != wantCode || capture.Status != ingest.ContentCaptureIncomplete {
 					t.Fatalf("capture: %+v %v", capture, err)
 				}
-				if store.PublishableWithOmissions(capture) {
-					t.Fatal("local Extra must not certify outbound projection")
+				if store.PublishableWithOmissions(capture) == c.LegacyOmission {
+					t.Fatal("capture eligibility does not match its projected evidence and omission state")
 				}
-				if _, err := database.ReadSessionEntries(ctx, session.SessionID, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); !errors.Is(err, store.ErrContentCaptureIncomplete) {
-					t.Fatalf("full-content reader failed to hold unprojected evidence: %v", err)
+				_, readErr := database.ReadSessionEntries(ctx, session.SessionID, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent})
+				if c.LegacyOmission && !errors.Is(readErr, store.ErrContentCaptureIncomplete) || !c.LegacyOmission && readErr != nil {
+					t.Fatalf("full-content reader disagrees with accounted evidence: %v", readErr)
 				}
 				entries, err := database.ListEntries(ctx, session.SessionID)
 				if err != nil {

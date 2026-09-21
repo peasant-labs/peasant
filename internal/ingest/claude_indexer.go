@@ -156,6 +156,7 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	var traversal unknownJSONLTraversal
 	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
@@ -181,7 +182,7 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		}
 		var unknown []RetainedUnknown
 		if idx.retainUnknown {
-			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, trimmed, scanner.Line())
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, raw, scanner.Line(), &traversal)
 			if err != nil {
 				return nil, err
 			}
