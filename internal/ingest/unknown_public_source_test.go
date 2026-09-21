@@ -31,6 +31,8 @@ import (
 var unknownPublicSourceYAML []byte
 
 type unknownPublicSourceCase struct {
+	PayloadPrefix string         `yaml:"payload_prefix"`
+	PayloadSuffix string         `yaml:"payload_suffix"`
 	Complete      bool           `yaml:"complete"`
 	Namespace     string         `yaml:"namespace"`
 	Name          string         `yaml:"name"`
@@ -101,6 +103,8 @@ func TestUnknownSourceToPublication(t *testing.T) {
 			secretBody := strings.Repeat("A", 36)
 			payload := strings.ReplaceAll(strings.ReplaceAll(doc.Payload, "SECRET_BODY", secretBody), "BODY", body)
 			expected := strings.ReplaceAll(doc.Expected, "BODY", body)
+			payload = c.PayloadPrefix + payload + c.PayloadSuffix
+			expected = c.PayloadPrefix + expected + c.PayloadSuffix
 			data := strings.ReplaceAll(c.Source, "UNKNOWN", payload)
 			sid, err := ingest.NewSessionID(testutil.TestSessionUUID)
 			if err != nil {

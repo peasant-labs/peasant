@@ -624,7 +624,7 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		}
 		var unknown []RetainedUnknown
 		if idx.retainUnknown {
-			filtered, records, whole, err := prepareUnknownJSONL(HarnessCursor, raw, scanner.Line(), &traversal)
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessCursor, scanner.Bytes(), scanner.Line(), &traversal)
 			if err != nil {
 				return nil, err
 			}

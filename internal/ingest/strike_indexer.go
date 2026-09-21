@@ -203,7 +203,7 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 			return
 		}
 		if i.retainUnknown {
-			filtered, records, whole, err := prepareUnknownJSONL(HarnessStrike, trimmed, line, &traversal)
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessStrike, raw, line, &traversal)
 			if err != nil {
 				parseErr = err
 				return

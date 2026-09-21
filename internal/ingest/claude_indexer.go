@@ -182,7 +182,7 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		}
 		var unknown []RetainedUnknown
 		if idx.retainUnknown {
-			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, trimmed, scanner.Line(), &traversal)
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, raw, scanner.Line(), &traversal)
 			if err != nil {
 				return nil, err
 			}

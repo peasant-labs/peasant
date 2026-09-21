@@ -35,6 +35,8 @@ cases:
       {"type":"user.message","time":"2026-01-01T00:00:00Z","data":{"text":"opening","future_field":{"present":true}}}
       {"type":"assistant.text","time":"2026-01-01T00:00:01Z","data":{"text":"closing","future_field":[1,2]}}
   - name: claude-record-traversal
+    payload_prefix: " \t"
+    payload_suffix: "\t "
     namespace: record
     harness: claude-code
     source: |
@@ -47,6 +49,8 @@ cases:
     positions: [0, 2, 5]
     pointers: ["", "", ""]
   - name: cursor-record-traversal
+    payload_prefix: " \t"
+    payload_suffix: "\t "
     namespace: record
     harness: cursor
     source: |
@@ -59,6 +63,8 @@ cases:
     positions: [0, 2, 5]
     pointers: ["", "", ""]
   - name: strike-record-traversal
+    payload_prefix: " \t"
+    payload_suffix: "\t "
     namespace: record
     harness: strike
     source: |
