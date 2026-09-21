@@ -59,9 +59,10 @@ const (
 
 // ClaudeIndexer parses Claude Code JSONL transcripts into SessionEntry slices.
 type ClaudeIndexer struct {
-	fs          FileSystem
-	fullDepth   bool
-	fullContent bool
+	retainUnknown bool
+	fs            FileSystem
+	fullDepth     bool
+	fullContent   bool
 	// maxRecordBytes is the per-record read limit. Zero means the
 	// production limit; a test injects a small one so it can prove the
 	// over-limit path without building a record of production size.
@@ -178,6 +179,23 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		if len(trimmed) == 0 {
 			continue
 		}
+		var unknown []RetainedUnknown
+		if idx.retainUnknown {
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, trimmed, scanner.Line())
+			if err != nil {
+				return nil, err
+			}
+			if whole {
+				carrier, err := RetainedUnknownEntry(sessionID, entryIndex, records[0])
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, carrier)
+				entryIndex++
+				continue
+			}
+			trimmed, unknown = filtered, records
+		}
 
 		var line claudeIndexLine
 		decodeErr := json.Unmarshal(trimmed, &line)
@@ -205,6 +223,9 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			// Malformed line — skip silently.
 			entryIndex++
 			continue
+		}
+		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
+			return nil, err
 		}
 		entries = append(entries, entry)
 		parentIndex := entryIndex

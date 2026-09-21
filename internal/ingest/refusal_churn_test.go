@@ -151,8 +151,8 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 	}
 	switch stored {
 	case "refusal":
-		if capture.FailureCode != ingest.ContentCaptureStrictRefused {
-			t.Fatalf("first harvest did not record the strict refusal: %+v; diagnostics=%+v", capture, first.Diagnostics)
+		if capture.FailureCode != ingest.ContentCaptureUnknownDataRetained {
+			t.Fatalf("first harvest did not retain the unknown data: %+v; diagnostics=%+v", capture, first.Diagnostics)
 		}
 	case "legacy_preview":
 		// The migrated shape: a complete capture rewritten to the preview-only

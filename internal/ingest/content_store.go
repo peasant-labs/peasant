@@ -57,6 +57,9 @@ type ContentCaptureFailureCode string
 const (
 	// ContentCaptureNoFailure is the absent code: nothing refused this capture.
 	ContentCaptureNoFailure ContentCaptureFailureCode = ""
+	// ContentCaptureUnknownDataRetained holds complete private evidence whose
+	// outbound projection is not yet supported. It is not a source omission.
+	ContentCaptureUnknownDataRetained ContentCaptureFailureCode = "unknown_data_retained"
 	// ContentCaptureStrictRefused means the strict parser refused this exact
 	// input under the recorded producer, and the tolerant projection was stored
 	// instead. Previews show it; nothing certifies it.
@@ -92,7 +95,7 @@ const (
 // put a session back into pending work on every harvest, forever.
 func NewContentCaptureFailureCode(s string) (ContentCaptureFailureCode, error) {
 	switch code := ContentCaptureFailureCode(s); code {
-	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureSourceRecordsOmitted, ContentCaptureLegacyPreviewOnly:
+	case ContentCaptureNoFailure, ContentCaptureStrictRefused, ContentCaptureSourceRecordsOmitted, ContentCaptureLegacyPreviewOnly, ContentCaptureUnknownDataRetained:
 		return code, nil
 	}
 	return "", fmt.Errorf("content capture: unknown failure code %q; use strict_capture_refused or source_records_omitted for a refusal this build recorded, legacy_preview_only for a capture that predates content capture, or the empty code when no failure was recorded, before storing capture", s)

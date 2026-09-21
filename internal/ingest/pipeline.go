@@ -104,16 +104,17 @@ type PipelineResult struct {
 
 // PipelineSummary holds aggregate counts for a pipeline run.
 type PipelineSummary struct {
-	New               int
-	Updated           int
-	Unchanged         int
-	Active            int
-	Errors            int
-	Indexed           int                           // sessions successfully indexed into session_entries
-	Computed          int                           // sessions whose metrics were (re)computed
-	StoreError        error                         // non-nil if DB insert failed; pipeline continued normally
-	HarvesterVersions map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
-	MetadataVersion   int                           // CurrentSchemaVersion used this run
+	RetainedUnknownKinds []RetainedUnknownKindCount `json:"retained_unknown_kinds,omitempty"`
+	New                  int
+	Updated              int
+	Unchanged            int
+	Active               int
+	Errors               int
+	Indexed              int                           // sessions successfully indexed into session_entries
+	Computed             int                           // sessions whose metrics were (re)computed
+	StoreError           error                         // non-nil if DB insert failed; pipeline continued normally
+	HarvesterVersions    map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
+	MetadataVersion      int                           // CurrentSchemaVersion used this run
 	// ReminedEvidenceRecords is how many cached discovery evidence records this
 	// run had to mine again. It is greater than zero on the first run after an
 	// upgrade that added a field the cached records do not carry, and zero on
@@ -251,6 +252,7 @@ type OrphanCleaner interface {
 // replaces asserted the reverse as settled fact, and that assertion - repeated
 // one layer downstream - is what got the outward safety-net re-redaction deleted.
 type indexedMeta struct {
+	retainedUnknown []RetainedUnknownKindCount
 	captureRevision int64
 	capturedSource  *captureFileSystem
 	// published reports that this run committed the artifact being indexed,
@@ -1546,7 +1548,8 @@ func (p *Pipeline) indexLoop(
 }
 
 type indexParseResult struct {
-	fullContent bool
+	retainedUnknown []RetainedUnknownKindCount
+	fullContent     bool
 	// partial reports that the strict parser refused the transcript and the
 	// tolerant projection was stored instead, as an incomplete capture whose
 	// recorded reason is strictRefusal. Previews show it; nothing certifies it.
@@ -1589,6 +1592,10 @@ type indexParseResult struct {
 // first: the strict parser stops at the omission before it can reach a record
 // it does not represent.
 func permanentRefusalCode(session DiscoveredSession, err error) ContentCaptureFailureCode {
+	var corruption *captureCorruptionError
+	if errors.As(err, &corruption) {
+		return ContentCaptureNoFailure
+	}
 	if session.ContentOmitted {
 		return ContentCaptureSourceRecordsOmitted
 	}
@@ -1928,6 +1935,26 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		}
 		input.transcript, input.tree = nil, nil
 	}
+	// Private evidence survives local indexing, but Extra is not an outbound
+	// payload channel. Do not certify publication until that projection exists.
+	if err == nil && parsed {
+		if v1, ok := output.(indexformat.V1); ok {
+			if outputRecordsItsOmissions(output) {
+				result.partial, result.omissionsRecorded = true, true
+				result.refusalCode = ContentCaptureSourceRecordsOmitted
+				result.strictRefusal = "oversized source records were omitted with positional placeholders"
+			}
+			var unknown []RetainedUnknown
+			unknown, err = retainedUnknownEntries(v1.Entries)
+			if err == nil && len(unknown) > 0 {
+				result.retainedUnknown = retainedUnknownCounts(unknown)
+				result.partial = true
+				result.omissionsRecorded = false
+				result.refusalCode = ContentCaptureUnknownDataRetained
+				result.strictRefusal = "uninterpreted source data was retained locally; export and publication require an outbound evidence projection"
+			}
+		}
+	}
 	// Only the strict format-1 capture path certifies complete content. A
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
@@ -2155,7 +2182,12 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		result.entryCount = writeResult.EntriesCount
 		logEntry := p.makeIndexLogEntry(result.im, outcome, result.entryCount, result.startedAt, nil, nil)
-		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true}
+		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true, retainedUnknown: result.retainedUnknown}
+		if len(result.retainedUnknown) > 0 {
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: "Keep the source capture; upgrade to a build with the matching outbound evidence contract before exporting or publishing this session."})
+		} else if result.omissionsRecorded {
+			p.reportDiagnostic(permanentRefusalDiagnostic(result.im.session.SessionID, result.refusalCode, true, errors.New(result.strictRefusal)))
+		}
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
 	}
@@ -3917,8 +3949,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 	indexed := 0
 	successfullyIndexed := make([]SessionID, 0, len(priorIndexed)+len(indexSessions))
 	remainingSuccessfullyIndexed := make([]SessionID, 0, len(indexSessions))
+	var retainedUnknown []RetainedUnknownKindCount
 	for _, im := range priorIndexed {
 		if im.indexed {
+			retainedUnknown = append(retainedUnknown, im.retainedUnknown...)
 			indexed++
 			successfullyIndexed = append(successfullyIndexed, im.session.SessionID)
 		}
@@ -3938,6 +3972,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 		refusedKinds = append(refusedKinds, batchRefused...)
 		for i, result := range batchIndexed {
 			if result.indexed {
+				retainedUnknown = append(retainedUnknown, result.retainedUnknown...)
 				indexed++
 				successfullyIndexed = append(successfullyIndexed, result.session.SessionID)
 				remainingSuccessfullyIndexed = append(remainingSuccessfullyIndexed, result.session.SessionID)
@@ -4157,6 +4192,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
 	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
 	pipelineResult.Summary.RefusedRecordKinds = AggregateRecordKindRefusals(refusedKinds)
+	pipelineResult.Summary.RetainedUnknownKinds = aggregateRetainedUnknownCounts(retainedUnknown)
 	pipelineResult.IndexCoverage = p.resolveIndexCoverage(ctx, indexLogEntries, logPrefix)
 	for _, sr := range sessionResults {
 		if sr.Error != nil {

@@ -1,0 +1,119 @@
+required_names:
+  - claude-records
+  - claude-blocks
+  - claude-recursive-blocks
+  - claude-corruption-wins
+  - claude-additive-fields
+  - cursor-records
+  - cursor-blocks
+  - cursor-corruption-wins
+  - cursor-additive-fields
+  - strike-records
+  - strike-blocks
+  - strike-corruption-wins
+  - strike-additive-fields
+cases:
+  - name: claude-records
+    harness: claude-code
+    source: |
+      {"type":"user","message":{"role":"user","content":"before"}}
+      {"type":"future_record","message":42,"payload":"PAYLOAD"}
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"assistant","message":{"role":"assistant","content":"after"}}
+    positions: [2, 3]
+    pointers: ["", ""]
+    kinds: [future_record, future_record]
+    texts: [before, after]
+    pipeline: true
+  - name: claude-blocks
+    harness: claude-code
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"before"},{"type":"future_block","text":42,"payload":"PAYLOAD"},{"type":"text","text":"after"}]}}
+    positions: [1]
+    pointers: [/message/content/1]
+    kinds: [future_block]
+    texts: [before, after]
+    pipeline: true
+  - name: claude-recursive-blocks
+    harness: claude-code
+    source: |
+      {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_synthetic","content":[{"type":"text","text":"before"},{"type":"future_nested","payload":"PAYLOAD"},{"type":"text","text":"after"}]}]}}
+    positions: [1]
+    pointers: [/message/content/0/content/1]
+    kinds: [future_nested]
+    texts: [before, after]
+  - name: claude-corruption-wins
+    harness: claude-code
+    source: |
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"future_block"},{"type":"text"}]}}
+    error: true
+  - name: claude-additive-fields
+    harness: claude-code
+    source: |
+      {"type":"user","future_field":{"x":1},"message":{"role":"user","content":"before","future_field":true}}
+    texts: [before]
+  - name: cursor-records
+    harness: cursor
+    source: |
+      {"role":"user","content":"before"}
+      {"type":"future_record","role":42,"payload":"PAYLOAD"}
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"role":"assistant","content":"after"}
+    positions: [2, 3]
+    pointers: ["", ""]
+    kinds: [future_record, future_record]
+    texts: [before, after]
+    pipeline: true
+  - name: cursor-blocks
+    harness: cursor
+    source: |
+      {"role":"assistant","content":[{"type":"text","text":"before"},{"type":"future_block","text":{"new":true},"payload":"PAYLOAD"},{"type":"text","text":"after"}]}
+    positions: [1]
+    pointers: [/content/1]
+    kinds: [future_block]
+    texts: [before, after]
+    pipeline: true
+  - name: cursor-corruption-wins
+    harness: cursor
+    source: |
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"role":"assistant","content":[{"type":"text","text":42}]}
+    error: true
+  - name: cursor-additive-fields
+    harness: cursor
+    source: |
+      {"role":"human","content":"before","future_field":{"x":1}}
+    texts: [before]
+  - name: strike-records
+    harness: strike
+    source: |
+      {"type":"user.message","data":{"text":"before"}}
+      {"type":"future_record","data":42,"payload":"PAYLOAD"}
+      {"type":"future_record","data":{},"payload":"PAYLOAD"}
+      {"type":"assistant.text","data":{"text":"after"}}
+    positions: [2, 3]
+    pointers: ["", ""]
+    kinds: [future_record, future_record]
+    texts: [before, after]
+    pipeline: true
+  - name: strike-blocks
+    harness: strike
+    source: |
+      {"type":"assistant.text","data":{"content":[{"type":"text","text":"before"},{"type":"future_block","payload":"PAYLOAD"},{"type":"text","text":"after"}]}}
+    positions: [1]
+    pointers: [/data/content/1]
+    kinds: [future_block]
+    texts: [before, after]
+    pipeline: true
+  - name: strike-corruption-wins
+    harness: strike
+    source: |
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"assistant.text","data":{"text":42}}
+    error: true
+  - name: strike-additive-fields
+    harness: strike
+    source: |
+      {"type":"user.message","future_field":true,"data":{"text":"before","new_metadata":[1,2]}}
+    texts: [before]

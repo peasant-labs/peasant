@@ -1,10 +1,12 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -18,18 +20,25 @@ var recordKindsRefusalYAML []byte
 type recordKindsRefusalFixture struct {
 	RequiredNames []string `yaml:"required_names"`
 	Cases         []struct {
-		Name       string `yaml:"name"`
-		Harness    string `yaml:"harness"`
-		Transcript string `yaml:"transcript"`
-		WantKind   string `yaml:"want_kind"`
+		Name         string `yaml:"name"`
+		Harness      string `yaml:"harness"`
+		Transcript   string `yaml:"transcript"`
+		WantKind     string `yaml:"want_kind"`
+		WantRetained bool   `yaml:"want_retained"`
 	} `yaml:"cases"`
 }
 
 func loadRecordKindsRefusalFixtures(t *testing.T) recordKindsRefusalFixture {
 	t.Helper()
 	var fixture recordKindsRefusalFixture
-	if err := yaml.Unmarshal(recordKindsRefusalYAML, &fixture); err != nil {
+	d := yaml.NewDecoder(bytes.NewReader(recordKindsRefusalYAML))
+	d.KnownFields(true)
+	if err := d.Decode(&fixture); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := d.Decode(&trailing); !errors.Is(err, io.EOF) {
+		t.Fatalf("trailing fixture document: %v", err)
 	}
 	seen := make(map[string]bool, len(fixture.Cases))
 	for _, row := range fixture.Cases {
@@ -89,10 +98,7 @@ func recordKindsCodeSets() map[Harness][]string {
 			knownOpenCodeSemanticPartKinds(),
 		),
 		HarnessCursor: concat(
-			captureRoleKinds(),
-			// Cursor accepts human-role lines as user turns without
-			// consulting validateCaptureRole; cursor dispatches on role.
-			[]string{"human"},
+			cursorCaptureRoleKinds(),
 			cursorStrictRecordKinds(),
 			captureContentBlockKinds(HarnessCursor),
 		),
@@ -270,7 +276,13 @@ func TestRecordKindsUnmappedKindsRefuse(t *testing.T) {
 			case HarnessCursor:
 				indexer = NewCursorIndexer(fs)
 			}
-			_, err := indexer.IndexTranscriptBytesForCapture(context.Background(), session, []byte(row.Transcript))
+			capture, err := indexer.IndexTranscriptBytesForCapture(context.Background(), session, []byte(row.Transcript))
+			if row.WantRetained {
+				if err != nil || len(capture.RetainedUnknown) != 1 || capture.RetainedUnknown[0].Kind != row.WantKind || capture.RetainedUnknown[0].Harness != harness {
+					t.Fatalf("unknown evidence not retained: %+v %v", capture.RetainedUnknown, err)
+				}
+				return
+			}
 			var unrepresented *UnrepresentedRecordError
 			if !errors.As(err, &unrepresented) {
 				t.Fatalf("expected UnrepresentedRecordError, got %v", err)

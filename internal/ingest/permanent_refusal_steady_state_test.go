@@ -167,7 +167,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 			if capture.Status == ingest.ContentCaptureComplete {
 				t.Fatalf("a refused transcript was certified complete: %+v", capture)
 			}
-			wantCode := ingest.ContentCaptureStrictRefused
+			wantCode := ingest.ContentCaptureUnknownDataRetained
 			if fixture.Omitted {
 				wantCode = ingest.ContentCaptureSourceRecordsOmitted
 			}

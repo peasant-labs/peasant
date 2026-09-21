@@ -519,9 +519,10 @@ func (a *CursorAdapter) dirExists(path string) bool {
 
 // CursorIndexer parses Cursor JSONL transcripts into SessionEntry slices.
 type CursorIndexer struct {
-	fs          FileSystem
-	fullDepth   bool
-	fullContent bool
+	retainUnknown bool
+	fs            FileSystem
+	fullDepth     bool
+	fullContent   bool
 	// maxRecordBytes is the per-record read limit. Zero means the
 	// production limit; a test injects a small one so it can prove the
 	// over-limit path without building a record of production size.
@@ -620,6 +621,23 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		if len(raw) == 0 {
 			continue
 		}
+		var unknown []RetainedUnknown
+		if idx.retainUnknown {
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessCursor, raw, scanner.Line())
+			if err != nil {
+				return nil, err
+			}
+			if whole {
+				carrier, err := RetainedUnknownEntry(sessionID, entryIndex, records[0])
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, carrier)
+				entryIndex++
+				continue
+			}
+			raw, unknown = filtered, records
+		}
 		var line cursorJSONLLine
 		decodeErr := json.Unmarshal(raw, &line)
 		if completion != nil {
@@ -643,6 +661,9 @@ func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			continue
 		}
 		parentIndex := entryIndex
+		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
+			return nil, err
+		}
 		entries = append(entries, entry)
 		entryIndex++
 		if idx.fullDepth {
@@ -695,7 +716,7 @@ func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSON
 	if line.ParentUUID != "" {
 		entry.ParentEntryID = &line.ParentUUID
 	}
-	if line.Type == "turn_ended" && line.Status == "aborted" && line.Error != nil {
+	if isCursorSpecialRecordKind(line.Type) && line.Status == "aborted" && line.Error != nil {
 		entry.Role, entry.EntryType, entry.IsError = RoleSystem, EntryTypeError, true
 		text := *line.Error
 		if !fullContent {
