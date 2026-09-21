@@ -322,6 +322,54 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestPipeline_RefusedRecordKindsReachSummary(t *testing.T) {
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	content := []byte(`{"sessionId":"test","type":"unmapped-e2e-xyz","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, content, 0644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", sourcePath, err)
+	}
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
+	meta := makeMinimalMeta(t, testSessionID)
+
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(
+			[]ingest.DiscoveredSession{session},
+			map[ingest.SessionID]*ingest.UnifiedMetadata{
+				session.SessionID: meta,
+			},
+		),
+	}
+
+	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, nil)
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+		ingest.WithStore(fixtureStore),
+		ingest.WithMetricsStore(fixtureStore),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+	result, err := pipeline.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// A refusal is best-effort: the run succeeds and stores an incomplete
+	// capture, and the summary aggregates the refused kind with its count.
+	refused := result.Summary.RefusedRecordKinds
+	if len(refused) != 1 {
+		t.Fatalf("RefusedRecordKinds has %d rows, want 1: %+v", len(refused), refused)
+	}
+	row := refused[0]
+	if row.Harness != ingest.HarnessClaudeCode || row.Kind != "unmapped-e2e-xyz" || row.Count != 1 {
+		t.Errorf("RefusedRecordKinds row is %+v, want claude-code/unmapped-e2e-xyz x1", row)
+	}
+}
+
 func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()

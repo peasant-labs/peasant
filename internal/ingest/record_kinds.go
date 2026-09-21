@@ -82,6 +82,8 @@ type RecordKindHarness struct {
 
 // RecordKindRegistry is the parsed record_kinds.yaml: the per-harness mapping
 // deliverable of peasant-labs/peasant#397.
+//
+//go:generate go run ../../scripts/record-kinds-docgen ../../docs/record-kinds.md
 type RecordKindRegistry struct {
 	Version   int                           `yaml:"version"`
 	Harnesses map[Harness]RecordKindHarness `yaml:"harnesses"`
@@ -187,9 +189,50 @@ func (h RecordKindHarness) KindsByName() map[string]RecordKind {
 	return byName
 }
 
+// RecordKindRefusal is one strict-parser refusal: the harness and the kind
+// this build does not represent. The pipeline aggregates one entry per
+// refused session into the run report.
+type RecordKindRefusal struct {
+	Harness Harness `json:"harness"`
+	Kind    string  `json:"kind"`
+}
+
+// RecordKindRefusalCount is the run-report row for one refused kind.
+type RecordKindRefusalCount struct {
+	Harness Harness `json:"harness"`
+	Kind    string  `json:"kind"`
+	Count   int     `json:"count"`
+}
+
+// RecordKindTracked is one stored-but-not-visualized registry kind, named for
+// the run report.
+type RecordKindTracked struct {
+	Harness Harness `json:"harness"`
+	Kind    string  `json:"kind"`
+}
+
+// AggregateRecordKindRefusals folds per-session refusals into deterministic
+// per-kind counts, ordered by harness then kind.
+func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefusalCount {
+	counts := make(map[RecordKindRefusal]int, len(refusals))
+	for _, refusal := range refusals {
+		counts[refusal]++
+	}
+	out := make([]RecordKindRefusalCount, 0, len(counts))
+	for refusal, count := range counts {
+		out = append(out, RecordKindRefusalCount{Harness: refusal.Harness, Kind: refusal.Kind, Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if string(out[i].Harness) != string(out[j].Harness) {
+			return string(out[i].Harness) < string(out[j].Harness)
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
+}
+
 // TrackedNotVisualized lists the kinds one harness stores without showing:
-// tracked-only rows no renderer shows yet. The run report names them so a
-// stored-but-invisible kind is a visible decision, not a silent drop.
+// tracked-only rows no renderer shows yet.
 func (h RecordKindHarness) TrackedNotVisualized() []RecordKind {
 	var hidden []RecordKind
 	for _, kind := range h.Kinds {
@@ -198,6 +241,24 @@ func (h RecordKindHarness) TrackedNotVisualized() []RecordKind {
 		}
 	}
 	return hidden
+}
+
+// TrackedNotVisualized lists every kind the registry stores without showing,
+// ordered by harness then file order. A stored-but-invisible kind is a visible
+// decision in the run report, not a silent drop.
+func (r RecordKindRegistry) TrackedNotVisualized() []RecordKindTracked {
+	var out []RecordKindTracked
+	harnesses := make([]Harness, 0, len(r.Harnesses))
+	for harness := range r.Harnesses {
+		harnesses = append(harnesses, harness)
+	}
+	sort.Slice(harnesses, func(i, j int) bool { return string(harnesses[i]) < string(harnesses[j]) })
+	for _, harness := range harnesses {
+		for _, kind := range r.Harnesses[harness].TrackedNotVisualized() {
+			out = append(out, RecordKindTracked{Harness: harness, Kind: kind.Kind})
+		}
+	}
+	return out
 }
 
 // Markdown renders the registry as the generated per-kind table owned by

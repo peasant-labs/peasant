@@ -1224,6 +1224,7 @@ type jsonPipelineResult struct {
 	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
 	IndexCoverage        *ingest.IndexCoverage        `json:"indexCoverage,omitempty"`
 	DiscoveryDiagnostics []ingest.DiscoveryDiagnostic `json:"discoveryDiagnostics,omitempty"`
+	TrackedNotVisualized []ingest.RecordKindTracked   `json:"trackedNotVisualized,omitempty"`
 }
 
 // jsonSessionResult is the JSON-safe equivalent of ingest.SessionResult.
@@ -1245,6 +1246,9 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 		IndexCoverage:        result.IndexCoverage,
 		DiscoveryDiagnostics: result.DiscoveryDiagnostics,
 	}
+	if registry, err := ingest.LoadRecordKindRegistry(); err == nil {
+		out.TrackedNotVisualized = registry.TrackedNotVisualized()
+	}
 	for _, sr := range result.Sessions {
 		js := jsonSessionResult{
 			SessionID:  sr.SessionID,
@@ -1260,6 +1264,32 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// printRecordKindsReport names this run's refused record kinds with counts
+// and the registry's tracked-but-not-visualized kinds. A refused kind keeps
+// its captures incomplete; a tracked-only kind is stored but invisible. Both
+// are visible decisions in the report, never silent drops. The tracked list
+// comes from the embedded registry; when it cannot load, the run still
+// reports its refusals.
+func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount) {
+	var tracked []ingest.RecordKindTracked
+	if registry, err := ingest.LoadRecordKindRegistry(); err == nil {
+		tracked = registry.TrackedNotVisualized()
+	}
+	if len(refused) == 0 && len(tracked) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "record kinds:")
+	for _, row := range refused {
+		fmt.Fprintf(w, "  refused: %s/%s x%d\n", string(row.Harness), row.Kind, row.Count)
+	}
+	if len(refused) > 0 {
+		fmt.Fprintln(w, "  These captures stay incomplete; export and publication refuse them until a build represents the kinds.")
+	}
+	for _, row := range tracked {
+		fmt.Fprintf(w, "  tracked, not visualized: %s/%s\n", string(row.Harness), row.Kind)
+	}
 }
 
 // printSummary outputs the human-readable pipeline summary.
@@ -1333,6 +1363,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 			fmt.Fprintf(w, "  %s: adapter_version=%d indexer_version=%d index_version=%d\n", harness, versions.AdapterVersion, versions.IndexerVersion, versions.IndexVersion)
 		}
 	}
+	printRecordKindsReport(w, s.RefusedRecordKinds)
 	// The coverage breakdown replaces the bare attempt count whenever the
 	// run measured it. Each sentence is omitted at its own zero: a run
 	// whose failures all kept their entries says nothing about empty

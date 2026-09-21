@@ -137,6 +137,10 @@ type PipelineSummary struct {
 	// and was skipped by the rebuild: a torn pair, or a valid pair whose bytes
 	// no longer match the recorded row. Their database rows are left untouched.
 	RebuildSkipped []SessionID `json:"rebuild_skipped,omitempty"`
+	// RefusedRecordKinds aggregates this run's strict-parser refusals by
+	// harness and kind: one row per refused kind with the sessions it
+	// refused. Empty when every session certified.
+	RefusedRecordKinds []RecordKindRefusalCount `json:"refused_record_kinds,omitempty"`
 }
 
 // SessionResult records the outcome of processing a single session.
@@ -1072,6 +1076,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	var drainResults []SessionResult
 	var drainIndexed []indexedMeta
 	var drainIndexLogEntries []IndexLogEntry
+	var drainRefusedKinds []RecordKindRefusal
 	var drainDownstream streamedDownstreamResult
 
 	// Stage 4a: EXTRACT+WRITE workers goroutine.
@@ -1141,7 +1146,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		defer wg.Done()
 		defer close(downstreamCh)
 		indexProfileStart := time.Now()
-		drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline", downstreamCh, writeLane)
+		drainIndexed, drainIndexLogEntries, drainRefusedKinds = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline", downstreamCh, writeLane)
 		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), len(toProcessEntries))
 	}()
 
@@ -1253,7 +1258,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.reconcileOrphanParentCaches(ctx, diffResult.Sessions, toProcessEntries)
 
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream, drainRefusedKinds)
 }
 
 // contentRecoveryReason labels a retained-content repair in the index log.
@@ -1465,7 +1470,7 @@ func (p *Pipeline) indexLoop(
 	logPrefix string,
 	downstreamCh chan<- indexedMeta,
 	writeLane *storeWriteLane,
-) (indexed []indexedMeta, logEntries []IndexLogEntry) {
+) (indexed []indexedMeta, logEntries []IndexLogEntry, refused []RecordKindRefusal) {
 	workers := parallelWorkers(p.config)
 	if workers < 1 {
 		workers = 1
@@ -1497,6 +1502,11 @@ func (p *Pipeline) indexLoop(
 	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
 	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
 	flushPending := func(results []indexParseResult) {
+		for _, result := range results {
+			if result.refusedKind != nil {
+				refused = append(refused, *result.refusedKind)
+			}
+		}
 		flush := p.flushIndexParseResults(ctx, results, outcome, logPrefix, writeLane)
 		for i, indexedResult := range flush.indexed {
 			indexed = append(indexed, indexedResult)
@@ -1532,7 +1542,7 @@ func (p *Pipeline) indexLoop(
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	}
-	return indexed, logEntries
+	return indexed, logEntries, refused
 }
 
 type indexParseResult struct {
@@ -1545,6 +1555,10 @@ type indexParseResult struct {
 	// refusalCode is why the strict parser refused, as the value the selector
 	// reads back to decide that re-trying cannot help.
 	refusalCode ContentCaptureFailureCode
+	// refusedKind names the harness record kind the strict parser refused, so
+	// the run report can aggregate refusals by kind. Nil unless the refusal is
+	// an unrepresented kind; omissions and corruption leave it unset.
+	refusedKind *RecordKindRefusal
 	// omissionsRecorded reports that the stored entries account for every
 	// record ingest left out, because a placeholder entry stands in each
 	// omitted record's position. Such a capture is incomplete but holds the
@@ -1883,6 +1897,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
 						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
+						if code == ContentCaptureStrictRefused {
+							var unrepresented *UnrepresentedRecordError
+							if errors.As(err, &unrepresented) {
+								result.refusedKind = &RecordKindRefusal{Harness: unrepresented.Harness, Kind: unrepresented.Kind}
+							}
+						}
 						// A session whose only gap is an omitted source record
 						// carries a placeholder entry in that record's place,
 						// so the tolerant projection still describes the whole
@@ -3881,6 +3901,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	outcome IndexOutcome,
 	logPrefix string,
 	priorDownstream *streamedDownstreamResult,
+	refusedKinds []RecordKindRefusal,
 ) (*PipelineResult, error) {
 	prog := p.config.Progress
 
@@ -4128,6 +4149,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
 	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
+	pipelineResult.Summary.RefusedRecordKinds = AggregateRecordKindRefusals(refusedKinds)
 	pipelineResult.IndexCoverage = p.resolveIndexCoverage(ctx, indexLogEntries, logPrefix)
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
@@ -4821,6 +4843,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var indexLogEntries []IndexLogEntry
 	var drainIndexed []indexedMeta
 	var drainIndexLogEntries []IndexLogEntry
+	var drainRefusedKinds []RecordKindRefusal
 	extractTotal := len(entryByID) // all extractable sessions (roots + children)
 
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: extractTotal + len(fallbackTargets)})
@@ -4910,7 +4933,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			defer close(reindexDownstreamCh)
 			indexProfileStart := time.Now()
-			drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex", reindexDownstreamCh, reindexWriteLane)
+			drainIndexed, drainIndexLogEntries, drainRefusedKinds = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex", reindexDownstreamCh, reindexWriteLane)
 			p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), extractTotal)
 		}()
 
@@ -4955,7 +4978,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		p.recordIndexProfileStage(StageExtract, fallbackExtractProfileStart, len(fallbackTargets), len(fallbackTargets))
 
 		// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream)
+		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream, drainRefusedKinds)
 	}
 
 	// No extractable sessions — all are fallback. Process fallback sessions directly.
@@ -4986,7 +5009,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var storeErr error
 
 	// Steps 3e-end: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil, nil)
 }
 
 // forcedNativeRefreshUsable decides whether harvest index --force re-reads a

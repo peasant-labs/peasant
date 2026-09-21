@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -96,6 +97,29 @@ func recordKindsCodeSets() map[Harness][]string {
 func TestRecordKindsRegistryLoads(t *testing.T) {
 	if _, err := LoadRecordKindRegistry(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRecordKindsDocCurrent(t *testing.T) {
+	registry, err := LoadRecordKindRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("../../docs/record-kinds.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := string(raw)
+	const beginMarker = "<!-- BEGIN GENERATED RECORD KINDS: do not hand-edit; run go generate ./internal/ingest/ -->"
+	const endMarker = "<!-- END GENERATED RECORD KINDS -->"
+	begin := strings.Index(document, beginMarker)
+	end := strings.Index(document, endMarker)
+	if begin < 0 || end < 0 || end < begin {
+		t.Fatal("docs/record-kinds.md lacks the generated-table markers")
+	}
+	want := document[:begin+len(beginMarker)] + "\n\n" + registry.Markdown() + document[end:]
+	if document != want {
+		t.Fatal("docs/record-kinds.md table differs from the registry; run go generate ./internal/ingest/")
 	}
 }
 
