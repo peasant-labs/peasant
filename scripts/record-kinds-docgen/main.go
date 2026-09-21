@@ -1,55 +1,42 @@
-// Command record-kinds-docgen rewrites the generated per-kind table in the
-// record-kind registry's human view. It takes the document path as its only
-// argument. The ingested package owns the table rendering; this command only
-// splices it between the document's markers:
-//
-//	go run ./scripts/record-kinds-docgen docs/record-kinds.md
+// Command record-kinds-docgen generates the entire human registry from the
+// embedded YAML. Run go generate ./internal/ingest/ after registry changes.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
-const (
-	beginMarker = "<!-- BEGIN GENERATED RECORD KINDS: do not hand-edit; run go generate ./internal/ingest/ -->"
-	endMarker   = "<!-- END GENERATED RECORD KINDS -->"
-)
-
-func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: record-kinds-docgen <docs/record-kinds.md>")
-		os.Exit(2)
+func generate(args []string, output io.Writer) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: record-kinds-docgen <docs/record-kinds.md>")
 	}
-	path := os.Args[1]
 	registry, err := ingest.LoadRecordKindRegistry()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "load registry:", err)
-		os.Exit(1)
+		return fmt.Errorf("load registry before generating document: %w", err)
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(args[0])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "read document:", err)
+		return fmt.Errorf("read existing document %q: %w; supply its writable file path", args[0], err)
+	}
+	updated := registry.Document()
+	if string(raw) == updated {
+		_, err = fmt.Fprintln(output, "record-kinds document already current")
+		return err
+	}
+	if err := os.WriteFile(args[0], []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("write generated document %q: %w", args[0], err)
+	}
+	_, err = fmt.Fprintln(output, "record-kinds document regenerated")
+	return err
+}
+
+func main() {
+	if err := generate(os.Args[1:], os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	document := string(raw)
-	begin := strings.Index(document, beginMarker)
-	end := strings.Index(document, endMarker)
-	if begin < 0 || end < 0 || end < begin {
-		fmt.Fprintln(os.Stderr, "document lacks the generated-table markers")
-		os.Exit(1)
-	}
-	updated := document[:begin+len(beginMarker)] + "\n\n" + registry.Markdown() + document[end:]
-	if updated != document {
-		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, "write document:", err)
-			os.Exit(1)
-		}
-		fmt.Println("record-kinds table regenerated")
-		return
-	}
-	fmt.Println("record-kinds table already current")
 }

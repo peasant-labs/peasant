@@ -1,215 +1,375 @@
-# Record-kind registry: human view
+# Record-kind registry
 
-The registry itself lives at `internal/ingest/record_kinds.yaml`: one row per
-harness record or part kind, naming the parser disposition, the stored shape,
-and the reader treatment. It is the per-harness mapping deliverable of
-peasant-labs/peasant#397, enforced by the drift test in
-`internal/ingest/record_kinds_drift_test.go`, which fails when production code
-and the registry disagree in either direction.
+Generated from internal/ingest/record_kinds.yaml. Do not hand-edit this document.
+Regenerate with: go generate ./internal/ingest/
 
-## Reading a row
+## Reading the registry
 
-- **Status** — `represented` (stored and shown as transcript content),
-  `tracked-only` (stored for tracking and search, hidden), `ignored-control`
-  (no entry; accounted with a reason, never blocks certification), `refused`
-  (no entry; the typed refusal names the kind and the capture stays
-  incomplete).
-- **Preview** — whether the kind carries a human-readable action line.
-- **Payload** — the retained `extra` shape, or `none`.
-- **Visualized** — `rendered` (with its renderer), `hidden`, `planned`, or
-  `not-applicable`. The `visualized` column is the shared source of truth with
-  the fairtrade rendering work (peasant-labs/fairtrade-design-system#87 for the
-  first renderer, #88 for the visibility rule).
-- **Detail** — the refusal or ignore reason, or the renderer for rendered
-  kinds.
-- **Source** — the first-party code reference, or the census comment on
-  peasant-labs/peasant#385 that observed the kind.
+The registry describes parser behavior; it is not a wire schema or a native-input
+allowlist. A previously unseen valid kind needs no named row or release to use
+the retained-unknown fallback. Adding a specialized handler does require a row.
+Invalid JSON, invalid known fields, corrupt managed data and failed retention
+remain errors, not successful unknown-kind captures.
 
-A kind absent from the registry is refused: every strict parser ends its
-dispatch with an `UnrepresentedRecordError` for an unlisted kind. The run
-report names refused kinds with counts and lists the tracked-not-visualized
-kinds, so both stay visible decisions.
+- **Context** separates retained format-1 indexing from native-generation parsing.
+  Pi uses format 1 even though its parser follows a native active graph.
+- **Namespace** separates discriminator domains. Equal record and block names
+  are not the same key. **Match** is literal unless explicitly marked prefix.
+- **Status** is represented (interpreted entries or owning-entry state),
+  tracked-only (stored non-conversation evidence), ignored-control (no row),
+  retained-unknown (complete redacted evidence without interpretation), or refused
+  (a known unsupported shape; never the default for arbitrary valid new names).
+- **Preview** means the mapping can populate a human-readable content preview,
+  not that every instance has nonempty text. Tool arguments alone are not preview
+  text. Renderer coverage is separate from this local storage property.
+- **Payload** describes local retained shape, not a new public schema. Generic
+  unknown payloads are complete JSON with source coordinates; known control limits
+  do not license truncating unknown evidence.
+- **Visualized** is rendered (named projection/renderer), hidden, planned or
+  not-applicable (entryless or structural). Tool display can depend on a recognized
+  tool kind and pairing; storing a generic tool name does not prove a renderer.
+  Unknown-record display is deferred; no new transcript renderer is claimed.
+- **Source** names first-party production code. Inventories are extracted from
+  actual dispatch/admission syntax, including explicit prefix matching, not a
+  second test-only vocabulary. Census observations are not an accept-list.
+- **Versions** are verification targets: baseline and native overrides match
+  their actual producer registries. They are not session producer stamps.
 
-## Changing the vocabulary
+## Reporting and verification
 
-Adding or removing a kind in a parser requires a registry edit in the same
-change, then a regeneration of the table below:
+Retained-unknown run rows count **occurrences** separately from affected
+**sessions** for each harness/namespace/kind after successful writes. Multiple
+unknown blocks in one session are multiple occurrences and one affected session.
+The legacy refusal API counts per-session refusal inputs; it does not enumerate
+all unknown occurrences and must not be used for retained-unknown accounting.
 
-```bash
-go generate ./internal/ingest/
-```
+Tracked-not-visualized is **registry-wide coverage**, not evidence that those
+kinds occurred in this run. It includes represented/planned and tracked/hidden
+rows, qualified by context and namespace. Unseen names have no static row; their
+actual occurrences belong in the run's retained-unknown summary.
 
-`adapter_version` and `indexer_version` name the `HarvesterVersionRegistry`
-baseline the mapping was written against; a version bump forces an explicit
-re-verification here. Pi has no section until it grows a strict kind
-vocabulary to walk. Version history for the indexer revisions lives in
-`docs/indexer-version-history.md`.
+Source inventory gates compare both directions. Behavioral fixtures separately
+check classification and previews. These checks are not proof of all source,
+storage, export and receiver paths: those require the harness and publication
+integration suites. Publication requires validated retained evidence, partial
+signaling and the receiver's preservation capability; failed or oversized
+transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-<!-- BEGIN GENERATED RECORD KINDS: do not hand-edit; run go generate ./internal/ingest/ -->
+## claude-code (adapter 1, indexer 18)
 
-## claude-code (adapter 1, indexer 17)
+Baseline index format: 1.
 
-| Kind | Status | Preview | Payload | Visualized | Detail |
-|---|---|---|---|---|---|
-| `user` | represented | yes | none | rendered | TranscriptViewer user turn (fairtrade adaptTranscript) |
-| `assistant` | represented | yes | none | rendered | TranscriptViewer assistant turn (fairtrade adaptTranscript) |
-| `human` | represented | yes | none | rendered | TranscriptViewer user turn (fairtrade adaptTranscript) |
-| `system` | represented | yes | none | rendered | TranscriptViewer system turn (fairtrade adaptTranscript) |
-| `summary` | represented | yes | none | rendered | TranscriptViewer system turn (fairtrade adaptTranscript) |
-| `result` | represented | yes | none | rendered | TranscriptViewer system turn (fairtrade adaptTranscript) |
-| `api_error` | represented | yes | none | rendered | TranscriptViewer system turn (fairtrade adaptTranscript) |
-| `text` | represented | yes | none | rendered | TranscriptViewer turn content (fairtrade adaptTranscript) |
-| `thinking` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `tool_use` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool_result` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool_reference` | ignored-control | no | none | not-applicable | Control block naming a deferred tool schema; no conversation content. |
-| `compact_boundary` | represented | yes | full compactMetadata | planned |  |
-| `permission-mode` | represented | yes | value + scope | planned |  |
-| `mode` | represented | yes | value + scope | planned |  |
-| `agent-setting` | represented | yes | value + scope | planned |  |
-| `agent-name` | represented | yes | value + scope | planned |  |
-| `ai-title` | represented | yes | value | planned |  |
-| `atis-latch` | represented | yes | payload | planned |  |
-| `attachment` | tracked-only | no | sub-kind + payload | hidden |  |
-| `bridge-session` | represented | yes | payload | planned |  |
-| `started` | represented | yes | payload + scope | planned |  |
-| `cost-state` | represented | yes | snapshot | planned |  |
-| `custom-title` | represented | yes | payload | planned |  |
-| `file-history-delta` | represented | yes | payload | planned |  |
-| `frame-link` | represented | yes | payload | planned |  |
-| `fork-context-ref` | represented | yes | payload | planned |  |
-| `worktree-state` | represented | yes | payload | planned |  |
-| `launched` | represented | yes | payload | planned |  |
-| `pr-link` | represented | yes | number/repository/url | planned |  |
-| `artifact-` | represented | yes | payload | planned |  |
-| `progress` | ignored-control | no | none | not-applicable | Contentless harness progress marker; a content-bearing record still refuses. |
-| `queue-operation` | ignored-control | no | none | not-applicable | Contentless harness queue marker; a content-bearing record still refuses. |
-| `file-history-snapshot` | ignored-control | no | none | not-applicable | Contentless history snapshot marker; a content-bearing record still refuses. |
-| `turn_duration` | ignored-control | no | none | not-applicable | Contentless system timing subtype. |
-| `stop_hook_summary` | ignored-control | no | none | not-applicable | Contentless system hook subtype. |
-| `last-prompt` | ignored-control | no | none | not-applicable | Mirror of the prompt the user turn already represents; recorded as metadata. |
-| `image` | refused | no | none | not-applicable | Content block with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `document` | refused | no | none | not-applicable | Content block with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `server_tool_use` | refused | no | none | not-applicable | Content block with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `advisor_tool_result` | refused | no | none | not-applicable | Content block with no representation; refusal keeps the capture incomplete until a build represents it. |
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+
+| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
+|---|---|---|---|---|---|---|---|---|---|
+| retained-format-1 | record | `user` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `assistant` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `human` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `system` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `summary` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `result` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `progress` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `queue-operation` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `file-history-snapshot` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `last-prompt` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `permission-mode` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `mode` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `agent-setting` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `agent-name` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `ai-title` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `atis-latch` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `attachment` | literal | tracked-only | no | bounded control extra | hidden |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `bridge-session` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `started` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `cost-state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `custom-title` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `file-history-delta` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `frame-link` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `fork-context-ref` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `worktree-state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `launched` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `pr-link` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `artifact-` | prefix | represented | yes | bounded control extra (oversized known controls retain identity only) | planned |  | `content_capture.go claudeStrictRecordKinds; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | system_subtype | `turn_duration` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go claudeStrictSystemSubtypes; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | system_subtype | `compact_boundary` | literal | represented | yes | compactMetadata | planned |  | `content_capture.go claudeStrictSystemSubtypes; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | system_subtype | `stop_hook_summary` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go claudeStrictSystemSubtypes; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | system_subtype | `api_error` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go claudeStrictSystemSubtypes; content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | content_block | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
+| retained-format-1 | content_block | `thinking` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
+| retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
+| retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
+| retained-format-1 | content_block | `tool_reference` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
 
 ## codex (adapter 1, indexer 16)
 
-| Kind | Status | Preview | Payload | Visualized | Detail |
-|---|---|---|---|---|---|
-| `session_meta` | ignored-control | no | none | not-applicable | Rollout envelope carrying session metadata, not conversation content. |
-| `turn_context` | ignored-control | no | none | not-applicable | Rollout envelope carrying turn metadata, not conversation content. |
-| `event_msg` | represented | no | none | not-applicable |  |
-| `response_item` | represented | no | none | not-applicable |  |
-| `token_count` | ignored-control | no | none | not-applicable | Control event carrying token counts, not conversation content. |
-| `task_started` | ignored-control | no | none | not-applicable | Control event marking task start, not conversation content. |
-| `task_complete` | ignored-control | no | none | not-applicable | Control event marking task completion, not conversation content. |
-| `turn_aborted` | ignored-control | no | none | not-applicable | Control event marking an aborted turn, not conversation content. |
-| `user_message` | ignored-control | no | none | not-applicable | Mirror of the conversation already represented by a response item; the mirror must match or the capture fails. |
-| `agent_message` | ignored-control | no | none | not-applicable | Mirror of the conversation already represented by a response item; the mirror must match or the capture fails. |
-| `agent_reasoning` | ignored-control | no | none | not-applicable | Mirror of the reasoning already represented by a response item; the mirror must match or the capture fails. |
-| `message` | represented | yes | none | rendered | TranscriptViewer turn (fairtrade adaptTranscript) |
-| `reasoning` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `function_call` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `custom_tool_call` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `function_call_output` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `custom_tool_call_output` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `input_text` | represented | yes | none | rendered | TranscriptViewer turn content (fairtrade adaptTranscript) |
-| `output_text` | represented | yes | none | rendered | TranscriptViewer turn content (fairtrade adaptTranscript) |
-| `summary_text` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `reasoning_text` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `text` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `response_item-unrepresentable` | refused | no | none | not-applicable | Response payload shapes with no representation (agent_message, web_search_call, tool_search_call, tool_search_output); the refusal names the response_item kind. |
-| `input_image` | refused | no | none | not-applicable | Message block with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `token_usage_record` | refused | no | none | not-applicable | Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `world_state` | refused | no | none | not-applicable | Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `inter_agent_communication_metadata` | refused | no | none | not-applicable | Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `compacted` | refused | no | none | not-applicable | Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `patch_apply_end` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `sub_agent_activity` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `item_completed` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `thread_settings_applied` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `web_search_end` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `context_compacted` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `mcp_tool_call_end` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `thread_rolled_back` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `thread_goal_updated` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `entered_review_mode` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `exited_review_mode` | refused | no | none | not-applicable | Event kind with no representation; refusal keeps the capture incomplete until a build represents it. |
+Baseline index format: 1.
 
-## cursor (adapter 1, indexer 16)
+Native generation: adapter 2, indexer 17, index format 2.
 
-| Kind | Status | Preview | Payload | Visualized | Detail |
-|---|---|---|---|---|---|
-| `user` | represented | yes | none | rendered | TranscriptViewer user turn (fairtrade adaptTranscript) |
-| `assistant` | represented | yes | none | rendered | TranscriptViewer assistant turn (fairtrade adaptTranscript) |
-| `human` | represented | yes | none | rendered | TranscriptViewer user turn (fairtrade adaptTranscript) |
-| `system` | represented | yes | none | rendered | TranscriptViewer system turn (fairtrade adaptTranscript) |
-| `tool` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `turn_ended` | represented | no | none | not-applicable |  |
-| `text` | represented | yes | none | rendered | TranscriptViewer turn content (fairtrade adaptTranscript) |
-| `thinking` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `tool_use` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool_result` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+
+| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
+|---|---|---|---|---|---|---|---|---|---|
+| retained-format-1 | envelope | `session_meta` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `turn_context` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `event_msg` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `token_count` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `task_started` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `task_complete` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `turn_aborted` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `user_message` | literal | ignored-control | no | none | not-applicable | Mirrored content is represented by response items. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `agent_message` | literal | ignored-control | no | none | not-applicable | Mirrored content is represented by response items. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `agent_reasoning` | literal | ignored-control | no | none | not-applicable | Mirrored content is represented by response items. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | response_item | `message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | response_item | `reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | response_item | `function_call` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | response_item | `custom_tool_call` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | response_item | `function_call_output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | response_item | `custom_tool_call_output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | message_block | `input_text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictMessageBlockKinds` |
+| retained-format-1 | message_block | `output_text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictMessageBlockKinds` |
+| retained-format-1 | reasoning_summary | `summary_text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictReasoningSummaryKinds` |
+| retained-format-1 | reasoning_content | `reasoning_text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictReasoningContentKinds` |
+| retained-format-1 | reasoning_content | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go codexStrictReasoningContentKinds` |
+| native-generation | envelope | `session_meta` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `turn_context` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `event_msg` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `compacted` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | event | `item_started` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `item_completed` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `turn_started` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `task_started` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `turn_complete` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `task_complete` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `thread_rolled_back` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | event | `turn_aborted` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `codex_history_replay.go codexReplayState.replayEventMessage` |
+| native-generation | response_item | `message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | response_item | `agent_message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | response_item | `reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | response_item | `function_call` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | response_item | `custom_tool_call` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | response_item | `function_call_output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | response_item | `custom_tool_call_output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `agent_message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `function_call` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `custom_tool_call` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `function_call_output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `custom_tool_call_output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `UserMessage` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `AgentMessage` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `Reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `FunctionCallOutput` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `CommandExecution` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `FileChange` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `SubAgentActivity` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `CollabAgentToolCall` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `ContextCompaction` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `Extension` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `Plan` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `HookPrompt` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `WebSearch` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `ImageView` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `ImageGeneration` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `McpToolCall` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `DynamicToolCall` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `EnteredReviewMode` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | item_body | `ExitedReviewMode` | literal | represented | yes | classified native item and provenance; display depends on mapped content | planned |  | `codex_history_replay.go codexItemNativeType; codex_history_replay.go codexResponseNativeType` |
+| native-generation | message_block | `input_text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | message_block | `output_text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | message_block | `input_image` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | message_block | `image` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | message_block | `image_url` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | message_block | `input_audio` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | message_block | `audio` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexMediaContentTypes; codex_provenance.go codexBlockModality` |
+| native-generation | content_kind | `user.text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `user.image` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `user.audio` | literal | represented | yes | media modality and textual display marker; not an image viewer | rendered | codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `user.answered_question` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `multi_agent.inter_agent_message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `multi_agent.inter_agent_completion_message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `compaction.summary` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `shell.user_command` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `images.resize_notice` | literal | represented | yes | diagnostic text and provenance; no standalone submitted-input count without a media sibling | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `images.preparation_error` | literal | represented | yes | diagnostic text and provenance; no standalone submitted-input count without a media sibling | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `images.unsupported` | literal | represented | yes | diagnostic text and provenance; no standalone submitted-input count without a media sibling | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `audio.unsupported` | literal | represented | yes | diagnostic text and provenance; no standalone submitted-input count without a media sibling | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `agents_md.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `environments.environment_context` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `environments.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `model.base_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `generic.developer_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `managed_config.developer_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `permissions.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `persistent_mode.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `personality.spec_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `collaboration_mode.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `model_switch.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `hooks.additional_context` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `skills.catalog` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `skills.selected_skill_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `memories.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `notes.thread_hint` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `apps.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `plugins.instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `plugins.usage_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `plugins.recommendations` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `tools.deferred_namespaces` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `multi_agent.subagent_notification` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `multi_agent.role_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `multi_agent.mode_instructions` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `multi_agent.usage_hint` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.policy` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.node_repl_policy` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.review_evidence` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.node_repl_review_evidence` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.trusted_tool` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.trusted_skills` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.approved_action` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `guardian.followup_review_reminder` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `generic.turn_aborted` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `current_time.reminder` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `token_budget.context_window` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `token_budget.context_window_guidance` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `token_budget.remaining_tokens` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `token_budget.reminder` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `rollout_budget.remaining_tokens` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `compaction.auto_fallback_prompt` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `permissions.approved_command_prefix_saved` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `network_proxy.rule_saved` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+| native-generation | content_kind | `user_verification.notice` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `codex_provenance.go codexContentKindRegistry` |
+
+## cursor (adapter 1, indexer 17)
+
+Baseline index format: 1.
+
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+
+| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
+|---|---|---|---|---|---|---|---|---|---|
+| retained-format-1 | role | `user` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureRoleKinds; unknown_jsonl.go cursorCaptureRoleKinds` |
+| retained-format-1 | role | `assistant` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureRoleKinds; unknown_jsonl.go cursorCaptureRoleKinds` |
+| retained-format-1 | role | `system` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureRoleKinds; unknown_jsonl.go cursorCaptureRoleKinds` |
+| retained-format-1 | role | `tool` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureRoleKinds; unknown_jsonl.go cursorCaptureRoleKinds` |
+| retained-format-1 | role | `human` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureRoleKinds; unknown_jsonl.go cursorCaptureRoleKinds` |
+| retained-format-1 | record | `turn_ended` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go cursorStrictRecordKinds` |
+| retained-format-1 | content_block | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureContentBlockKinds` |
+| retained-format-1 | content_block | `thinking` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureContentBlockKinds` |
+| retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `content_capture.go captureContentBlockKinds` |
+| retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `content_capture.go captureContentBlockKinds` |
 
 ## opencode (adapter 1, indexer 16)
 
-| Kind | Status | Preview | Payload | Visualized | Detail |
-|---|---|---|---|---|---|
-| `step-start` | ignored-control | no | none | not-applicable | Control part marking step start; a part carrying content still fails. |
-| `step-finish` | ignored-control | no | none | not-applicable | Control part marking step finish; a part carrying content still fails. |
-| `snapshot` | ignored-control | no | none | not-applicable | Control part carrying snapshot state; a part carrying content still fails. |
-| `patch` | ignored-control | no | none | not-applicable | Control part carrying patch state; a part carrying content still fails. |
-| `text` | represented | yes | none | rendered | TranscriptViewer turn content (fairtrade adaptTranscript) |
-| `reasoning` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `tool` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool_use` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool_result` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `compaction` | represented | yes | none | planned |  |
-| `subtask` | represented | yes | none | planned |  |
-| `agent` | represented | yes | none | planned |  |
-| `file` | refused | no | none | not-applicable | Part type with no representation in the strict path; the legacy SQLite path tolerates it with an OpenCodeUnknownPartType diagnostic instead of refusing. |
+Baseline index format: 1.
 
-## strike (adapter 1, indexer 16)
+Native generation: adapter 2, indexer 17, index format 2.
 
-| Kind | Status | Preview | Payload | Visualized | Detail |
-|---|---|---|---|---|---|
-| `session.started` | ignored-control | no | none | not-applicable | Session metadata event, not conversation content. |
-| `session.titled` | ignored-control | no | none | not-applicable | Session metadata event, not conversation content. |
-| `model.selected` | ignored-control | no | none | not-applicable | Session metadata event, not conversation content. |
-| `user.message` | represented | yes | none | rendered | TranscriptViewer user turn (fairtrade adaptTranscript) |
-| `turn.started` | represented | no | none | not-applicable |  |
-| `turn.completed` | represented | no | none | not-applicable |  |
-| `assistant.text` | represented | yes | none | rendered | TranscriptViewer assistant turn (fairtrade adaptTranscript) |
-| `assistant.text.delta` | represented | yes | none | rendered | TranscriptViewer assistant turn (fairtrade adaptTranscript) |
-| `assistant.message.delta` | represented | yes | none | rendered | TranscriptViewer assistant turn (fairtrade adaptTranscript) |
-| `text.delta` | represented | yes | none | rendered | TranscriptViewer assistant turn (fairtrade adaptTranscript) |
-| `assistant.reasoning` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `assistant.reasoning.delta` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `reasoning.delta` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `assistant.thinking.delta` | represented | yes | none | rendered | ThinkingVM (fairtrade adaptTranscript) |
-| `tool.begin` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool.output` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `tool.end` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `process.started` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `process.output` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `process.exited` | represented | yes | none | rendered | TranscriptViewer tool turn (fairtrade adaptTranscript) |
-| `usage.reported` | represented | no | none | not-applicable |  |
-| `agent.selected` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `permission.mode` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `effort.selected` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `autonomy.selected` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `phase.changed` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `child.started` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `child.completed` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `permission.asked` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `permission.resolved` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `session.meta` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `team.roster` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `engine.error` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `session.header` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `question.asked` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `question.resolved` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
-| `files.invalidated` | refused | no | none | not-applicable | Event type with no representation; refusal keeps the capture incomplete until a build represents it. |
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
 
-<!-- END GENERATED RECORD KINDS -->
+| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
+|---|---|---|---|---|---|---|---|---|---|
+| retained-format-1 | part | `step-start` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `step-finish` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `snapshot` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `patch` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `tool` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `tool_use` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `tool_result` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `compaction` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `subtask` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | part | `agent` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_capture.go openCodeCaptureControlKinds; opencode_indexer.go knownOpenCodeSemanticPartKinds` |
+| retained-format-1 | current_record | `user` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `assistant` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `shell` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `synthetic` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `system` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `skill` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `compaction` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `agent-switched` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_record | `model-switched` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go normalizeOpenCodeCurrentRow` |
+| retained-format-1 | current_content | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent` |
+| retained-format-1 | current_content | `reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent` |
+| retained-format-1 | current_content | `tool` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent` |
+| native-generation | record | `user` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `assistant` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `shell` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `synthetic` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `system` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `skill` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `compaction` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `agent-switched` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | record | `model-switched` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow` |
+| native-generation | content_block | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent` |
+| native-generation | content_block | `reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent` |
+| native-generation | content_block | `tool` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent` |
+| retained-format-1 | tool_content | `text` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `opencode_v2_projection.go decodeOpenCodeV2ToolState` |
+| retained-format-1 | tool_content | `file` | literal | represented | no | structured tool output URI/MIME; no general media renderer | planned |  | `opencode_v2_projection.go decodeOpenCodeV2ToolState` |
+| native-generation | tool_content | `text` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `opencode_v2_projection.go decodeOpenCodeV2ToolState` |
+| native-generation | tool_content | `file` | literal | represented | no | structured tool output URI/MIME; no general media renderer | planned |  | `opencode_v2_projection.go decodeOpenCodeV2ToolState` |
+
+## pi (adapter 2, indexer 17)
+
+Baseline index format: 1.
+
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+
+| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
+|---|---|---|---|---|---|---|---|---|---|
+| retained-format-1 | entry | `session` | literal | ignored-control | no | none | not-applicable | Required v3 document header; no conversation row. | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `message` | literal | represented | yes | PiExtra state and usage; role/block dependent content | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `thinking_level_change` | literal | tracked-only | no | PiExtra state carrier | hidden |  | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `model_change` | literal | tracked-only | no | PiExtra state carrier | hidden |  | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `compaction` | literal | represented | yes | summary and PiExtra usage/native metadata | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `branch_summary` | literal | represented | yes | summary and PiExtra usage/native metadata | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `custom` | literal | tracked-only | no | PiExtra native metadata | hidden |  | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `custom_message` | literal | represented | yes | text/media and PiExtra native metadata | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `label` | literal | tracked-only | no | PiExtra state carrier | hidden |  | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | entry | `session_info` | literal | tracked-only | no | PiExtra state carrier | hidden |  | `pi_source.go piEntryType.UnmarshalJSON` |
+| retained-format-1 | message_role | `user` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_indexer.go piMessageRole.UnmarshalJSON` |
+| retained-format-1 | message_role | `assistant` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_indexer.go piMessageRole.UnmarshalJSON` |
+| retained-format-1 | message_role | `toolResult` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `pi_indexer.go piMessageRole.UnmarshalJSON` |
+| retained-format-1 | message_role | `bashExecution` | literal | represented | yes | shell parent and paired execute tool entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_indexer.go piMessageRole.UnmarshalJSON` |
+| retained-format-1 | content_block | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_indexer.go piBlockType.UnmarshalJSON; pi_indexer.go piContent` |
+| retained-format-1 | content_block | `thinking` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_indexer.go piBlockType.UnmarshalJSON; pi_indexer.go piContent` |
+| retained-format-1 | content_block | `image` | literal | represented | yes | textual media marker (not native image rendering) | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `pi_indexer.go piBlockType.UnmarshalJSON; pi_indexer.go piContent` |
+| retained-format-1 | content_block | `toolCall` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `pi_indexer.go piBlockType.UnmarshalJSON; pi_indexer.go piContent` |
+
+## strike (adapter 1, indexer 17)
+
+Baseline index format: 1.
+
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+
+| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
+|---|---|---|---|---|---|---|---|---|---|
+| retained-format-1 | record | `session.started` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `session.titled` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `model.selected` | literal | ignored-control | no | none | not-applicable | Entryless control; unexpected conversation content remains a validation error. | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `user.message` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `turn.started` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `turn.completed` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `assistant.text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `assistant.text.delta` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `assistant.message.delta` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `text.delta` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `assistant.reasoning` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `assistant.reasoning.delta` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `reasoning.delta` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `assistant.thinking.delta` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `tool.begin` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `tool.output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `tool.end` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `process.started` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `process.output` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `process.exited` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | record | `usage.reported` | literal | represented | no | state on owning entry; no independent row | not-applicable |  | `strike.go knownStrikeEventKinds; strike_indexer.go StrikeIndexer.parseWithCompletion; content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | content_block | `text` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureContentBlockKinds` |
+| retained-format-1 | content_block | `thinking` | literal | represented | yes | session entries | rendered | internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer | `content_capture.go captureContentBlockKinds` |
+| retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments; renderer depends on recognized tool kind | planned |  | `content_capture.go captureContentBlockKinds` |
+| retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output; renderer depends on paired recognized tool kind | planned |  | `content_capture.go captureContentBlockKinds` |

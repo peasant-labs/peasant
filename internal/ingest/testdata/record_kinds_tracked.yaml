@@ -11,24 +11,36 @@ cases:
   - name: tracked-only hidden kind is listed
     harness: claude-code
     kind: attachment
+    context: retained-format-1
+    namespace: record
     want_listed: true
   - name: represented planned kind is listed
     harness: claude-code
     kind: compact_boundary
+    context: retained-format-1
+    namespace: system_subtype
     want_listed: true
   - name: rendered kind is absent
     harness: claude-code
     kind: user
+    context: retained-format-1
+    namespace: record
     want_listed: false
   - name: ignored kind is absent
     harness: claude-code
     kind: last-prompt
+    context: retained-format-1
+    namespace: record
     want_listed: false
   - name: refused kind is absent
     harness: claude-code
     kind: image
+    context: retained-format-1
+    namespace: content_block
     want_listed: false
   - name: container kind is absent
     harness: codex
     kind: event_msg
+    context: retained-format-1
+    namespace: envelope
     want_listed: false

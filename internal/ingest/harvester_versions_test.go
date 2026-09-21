@@ -11,20 +11,21 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/harvester_versions.yaml
 var harvesterVersionsYAML []byte
 
 type harvesterVersionFixture struct {
-	Name             string          `yaml:"name"`
-	Harnesses        []Harness       `yaml:"harnesses"`
-	Adapter          int             `yaml:"adapter"`
-	Indexer          int             `yaml:"indexer"`
-	IndexerOverrides map[Harness]int `yaml:"indexerOverrides"`
-	Index            int             `yaml:"index"`
-	Error            string          `yaml:"error"`
+	Name             string                         `yaml:"name"`
+	Harnesses        []Harness                      `yaml:"harnesses"`
+	Adapter          int                            `yaml:"adapter"`
+	AdapterOverrides map[Harness]int                `yaml:"adapterOverrides"`
+	Indexer          int                            `yaml:"indexer"`
+	IndexerOverrides map[Harness]int                `yaml:"indexerOverrides"`
+	NativeTargets    map[Harness]RecordKindVersions `yaml:"nativeTargets"`
+	Index            int                            `yaml:"index"`
+	Error            string                         `yaml:"error"`
 }
 
 type nonAtomicHarvesterStore struct {
@@ -75,11 +76,10 @@ func TestPipelineRefusesNonAtomicIndexerWrites(t *testing.T) {
 func loadHarvesterVersionFixtures(t *testing.T) []harvesterVersionFixture {
 	t.Helper()
 	var fixtures struct {
-		Cases []harvesterVersionFixture `yaml:"cases"`
+		Cases         []harvesterVersionFixture `yaml:"cases"`
+		RequiredNames []string                  `yaml:"required_names"`
 	}
-	if err := yaml.Unmarshal(harvesterVersionsYAML, &fixtures); err != nil {
-		t.Fatal(err)
-	}
+	decodeRegistryFixture(t, harvesterVersionsYAML, &fixtures)
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
@@ -87,11 +87,7 @@ func loadHarvesterVersionFixtures(t *testing.T) []harvesterVersionFixture {
 		}
 		names[fixture.Name] = true
 	}
-	for _, required := range []string{"canonical_registry", "injected_subset_without_indexers", "missing_adapter_target", "nonpositive_adapter", "nonpositive_indexer", "nonpositive_index", "unused_output_format_without_indexers", "unimplemented_harness"} {
-		if !names[required] {
-			t.Errorf("missing required harvester fixture %q", required)
-		}
-	}
+	checkRegistryFixtureNames(t, names, fixtures.RequiredNames)
 	return fixtures.Cases
 }
 
@@ -112,6 +108,14 @@ func TestHarvesterVersionRegistry(t *testing.T) {
 				versions.IndexerVersion = version
 				targets[harness] = versions
 			}
+			for harness, version := range fixture.AdapterOverrides {
+				versions, ok := targets[harness]
+				if !ok {
+					t.Fatalf("adapter override names undeclared harness %q", harness)
+				}
+				versions.AdapterVersion = version
+				targets[harness] = versions
+			}
 			adapters := map[Harness]AdapterFactory{HarnessClaudeCode: DefaultAdapterRegistry[HarnessClaudeCode]}
 			if fixture.Name == "canonical_registry" {
 				if !maps.Equal(targets, HarvesterVersionRegistry) {
@@ -122,6 +126,23 @@ func TestHarvesterVersionRegistry(t *testing.T) {
 					t.Fatal("production adapters, indexers and version targets must have exact harness membership")
 				}
 				adapters = DefaultAdapterRegistry
+				native := make(map[Harness]HarvesterVersions)
+				for harness, expected := range fixture.NativeTargets {
+					native[harness] = HarvesterVersions{AdapterVersion: expected.AdapterVersion, IndexerVersion: expected.IndexerVersion, IndexVersion: expected.IndexVersion}
+				}
+				if !maps.Equal(native, NativeGenerationRepairTargets) {
+					t.Fatalf("native targets %+v, want %+v", NativeGenerationRepairTargets, native)
+				}
+				merged := NativeGenerationTargets(targets)
+				for harness, baseline := range targets {
+					want := baseline
+					if override, ok := native[harness]; ok {
+						want = override
+					}
+					if merged[harness] != want {
+						t.Errorf("effective target %s = %+v, want %+v", harness, merged[harness], want)
+					}
+				}
 			}
 			option := WithHarvesterVersions(targets)
 			clear(targets) // neither this map nor one pipeline may mutate another's targets

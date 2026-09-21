@@ -5,6 +5,27 @@ existing SQLite `sessions.index_version` and `index_log.index_version` columns
 retain those integers unchanged. They describe the parser, not the stored index
 format. New parser targets live in `ingest.HarvesterVersionRegistry`.
 
+## Per-harness retention revisions
+
+The baseline below is the relational format-1 producer. These revisions describe
+code eligibility, not a claim that any stored session was produced by that code.
+Actual per-capture producer stamps are separate evidence.
+
+| Harness | Adapter change | Indexer change | Reason |
+|---|---|---|---|
+| Claude Code | unchanged at 1 | 17 → 18 | Retain unknown records, system subtypes and nested blocks with redacted payloads and positions instead of settling on unknown-kind refusal. |
+| Cursor | unchanged at 1 | 16 → 17 | Retain unknown roles/records/blocks while validating known content and preserving siblings. |
+| Strike | unchanged at 1 | 16 → 17 | Retain unknown events and nested blocks through authoritative and retained indexing while keeping tool/process validation. |
+| Pi | 1 → 2 | 16 → 17 | Native admission and metadata extraction now tolerate additive fields and unknown graph nodes; active-path indexing retains redacted unknown entry/role/block evidence. Format remains 1. |
+
+Claude Code, Cursor and Strike changes are in capture/indexing, not adapter
+metadata extraction, so their adapter revision does not change. Pi extraction
+and indexing share the changed native document decoder, so both revisions change.
+Managed-generation overrides are declared independently in
+`NativeGenerationRepairTargets`; never replace them with the format-1 baseline.
+
+## Former global revisions
+
 | Revision | Behavior |
 |---|---|
 | 1 | Initial indexing support with index-log tracking. |
