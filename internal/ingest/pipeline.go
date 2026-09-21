@@ -1720,18 +1720,19 @@ func indexResultWriteBytes(result indexformat.Result) int64 {
 }
 
 // indexBatch parses a batch, then serializes SQLite writes through one goroutine.
-func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry) {
+func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry, []RecordKindRefusal) {
 	indexed := make([]indexedMeta, 0, len(metas))
 	logs := make([]IndexLogEntry, 0, len(metas))
+	var refused []RecordKindRefusal
 	if len(metas) == 0 {
-		return indexed, logs
+		return indexed, logs, refused
 	}
 	if p.indexers == nil || p.metricsStore == nil {
 		for _, im := range metas {
 			indexed = append(indexed, indexedMeta{session: im.session, startMs: im.startMs})
 			logs = append(logs, IndexLogEntry{})
 		}
-		return indexed, logs
+		return indexed, logs, refused
 	}
 
 	var activeParses atomic.Int64
@@ -1755,6 +1756,11 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		flush := p.flushIndexParseResults(ctx, pending, outcome, logPrefix, nil)
 		indexed = append(indexed, flush.indexed...)
 		logs = append(logs, flush.logEntries...)
+		for _, result := range pending {
+			if result.refusedKind != nil {
+				refused = append(refused, *result.refusedKind)
+			}
+		}
 		for _, profileSession := range flush.profileSessions {
 			profileBatch.Entries += profileSession.Entries
 			profileBatch.Bytes += profileSession.Bytes
@@ -1790,7 +1796,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	flushPending()
 	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
-	return indexed, logs
+	return indexed, logs, refused
 }
 
 func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activeParses *atomic.Int64, maxActiveParses *atomic.Int64, logPrefix string) (result indexParseResult) {
@@ -3928,7 +3934,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	if p.indexers != nil && p.metricsStore != nil {
 		indexProfileStart := time.Now()
-		batchIndexed, batchLogs := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		batchIndexed, batchLogs, batchRefused := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		refusedKinds = append(refusedKinds, batchRefused...)
 		for i, result := range batchIndexed {
 			if result.indexed {
 				indexed++

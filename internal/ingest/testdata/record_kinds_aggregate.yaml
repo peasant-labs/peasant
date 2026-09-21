@@ -1,0 +1,33 @@
+# Record-kind refusal aggregation: per-session refusals fold into
+# deterministic per-kind counts ordered by harness then kind.
+required_names:
+  - merges duplicate refusals and orders by harness then kind
+  - separates one harness carrying several kinds
+  - separates one kind refused across harnesses
+cases:
+  - name: merges duplicate refusals and orders by harness then kind
+    refusals:
+      - {harness: strike, kind: child.started}
+      - {harness: codex, kind: world_state}
+      - {harness: codex, kind: world_state}
+      - {harness: claude-code, kind: image}
+    want:
+      - {harness: claude-code, kind: image, count: 1}
+      - {harness: codex, kind: world_state, count: 2}
+      - {harness: strike, kind: child.started, count: 1}
+  - name: separates one harness carrying several kinds
+    refusals:
+      - {harness: codex, kind: token_usage_record}
+      - {harness: codex, kind: world_state}
+      - {harness: codex, kind: token_usage_record}
+    want:
+      - {harness: codex, kind: token_usage_record, count: 2}
+      - {harness: codex, kind: world_state, count: 1}
+  - name: separates one kind refused across harnesses
+    refusals:
+      - {harness: cursor, kind: text}
+      - {harness: claude-code, kind: text}
+      - {harness: cursor, kind: text}
+    want:
+      - {harness: claude-code, kind: text, count: 1}
+      - {harness: cursor, kind: text, count: 2}

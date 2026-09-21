@@ -232,11 +232,15 @@ func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefus
 }
 
 // TrackedNotVisualized lists the kinds one harness stores without showing:
-// tracked-only rows no renderer shows yet.
+// stored rows no renderer shows yet. Ignored and refused kinds write no
+// entry, and structural entries write none of their own, so only stored
+// content with a hidden or planned treatment qualifies.
 func (h RecordKindHarness) TrackedNotVisualized() []RecordKind {
 	var hidden []RecordKind
 	for _, kind := range h.Kinds {
-		if kind.Status == RecordKindTrackedOnly && kind.Visualized != RecordKindRendered {
+		stored := kind.Status == RecordKindRepresented || kind.Status == RecordKindTrackedOnly
+		unshown := kind.Visualized == RecordKindHidden || kind.Visualized == RecordKindPlanned
+		if stored && unshown {
 			hidden = append(hidden, kind)
 		}
 	}

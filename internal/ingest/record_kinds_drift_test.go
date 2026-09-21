@@ -69,7 +69,7 @@ func recordKindsCodeSets() map[Harness][]string {
 		HarnessClaudeCode: concat(
 			claudeStrictRecordKinds(),
 			claudeStrictSystemSubtypes(),
-			claudeStrictBlockKinds(),
+			captureContentBlockKinds(HarnessClaudeCode),
 			claudeControlKindLabels(),
 		),
 		HarnessCodex: concat(
@@ -77,6 +77,8 @@ func recordKindsCodeSets() map[Harness][]string {
 			codexStrictEventMsgKinds(),
 			codexStrictResponsePayloadKinds(),
 			codexStrictMessageBlockKinds(),
+			codexStrictReasoningSummaryKinds(),
+			codexStrictReasoningContentKinds(),
 			// The unrepresentable response shape refuses under the envelope
 			// kind name; the registry tracks it under this qualified name.
 			[]string{"response_item-unrepresentable"},
@@ -87,9 +89,12 @@ func recordKindsCodeSets() map[Harness][]string {
 			knownOpenCodeSemanticPartKinds(),
 		),
 		HarnessCursor: concat(
-			cursorStrictRoleKinds(),
-			[]string{"turn_ended"},
-			cursorStrictBlockKinds(),
+			captureRoleKinds(),
+			// Cursor accepts human-role lines as user turns without
+			// consulting validateCaptureRole; cursor dispatches on role.
+			[]string{"human"},
+			cursorStrictRecordKinds(),
+			captureContentBlockKinds(HarnessCursor),
 		),
 	}
 }
