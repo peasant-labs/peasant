@@ -96,9 +96,14 @@ func piKnownUsageFields(raw json.RawMessage) (json.RawMessage, error) {
 func preparePiUnknown(entry piEntry, sessionID SessionID) (piEntry, []RetainedUnknown, bool, error) {
 	var records []RetainedUnknown
 	retain := func(namespace, kind, pointer string, raw json.RawMessage) error {
+		position, ok := entry.positions[pointer]
+		if !ok {
+			return fmt.Errorf("Pi retention has no captured traversal position for source line %d; no evidence was stored; repair the source traversal before retrying", entry.line)
+		}
 		record, err := NewRetainedUnknownFromSource(HarnessPi, namespace, kind, UnknownSourcePosition{
 			SourceEntryRef: schema.SourceEntryRef(PiPublicRef(sessionID.String(), "entry", entry.ID)),
 			SourceID:       entry.ID, Line: entry.line, Sequence: entry.sequence, JSONPointer: pointer,
+			Public: &UnknownPublicPosition{SourceRef: PiPublicRef(sessionID.String(), "stream", "recording"), RecordIndex: int64(entry.sequence - 1), Position: position},
 		}, raw)
 		if err == nil {
 			records = append(records, record)
@@ -159,4 +164,40 @@ func preparePiUnknown(entry piEntry, sessionID SessionID) (piEntry, []RetainedUn
 		entry.Content, err = filter(entry.Content, "/content")
 	}
 	return entry, records, false, err
+}
+
+// assignPiPositions walks each source record before active-path selection or
+// content folding. Records, message envelopes and content blocks each occupy
+// one traversal slot, including known nodes and nodes on inactive branches.
+// Blank physical lines are not records. Opaque variant payloads are not guessed
+// to contain additional native nodes. Semantic validation stays in project.
+func (entry *piEntry) assignPiPositions(next *int64) {
+	entry.positions = make(map[string]int64)
+	take := func(pointer string) {
+		entry.positions[pointer] = *next
+		*next++
+	}
+	take("")
+	var content json.RawMessage
+	var pointer string
+	switch entry.Type {
+	case piMessage:
+		take("/message")
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(entry.Message, &fields) != nil {
+			return
+		}
+		content, pointer = fields["content"], "/message/content"
+	case piCustomMessage:
+		content, pointer = entry.Content, "/content"
+	default:
+		return
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(content, &blocks) != nil {
+		return
+	}
+	for index := range blocks {
+		take(fmt.Sprintf("%s/%d", pointer, index))
+	}
 }

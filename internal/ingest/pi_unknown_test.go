@@ -1,15 +1,22 @@
 package ingest_test
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -76,6 +83,15 @@ func TestPiUnknownCarrierValidation(t *testing.T) {
 			if err != nil || len(found) != 1 {
 				t.Fatalf("common evidence extraction: %v", err)
 			}
+			if !reflect.DeepEqual(found, decoded.RetainedUnknown) {
+				t.Fatal("typed carrier round trip changed public coordinates")
+			}
+			if found[0].Position.Public != nil {
+				public, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessPi)
+				if err != nil || len(public) != 1 || public[0].RecordIndex != 0 || public[0].Position != 0 {
+					t.Fatalf("first zero position was lost: %+v %v", public, err)
+				}
+			}
 			if err := ingest.AttachRetainedUnknown(&entry, found); err != nil {
 				t.Fatal(err)
 			}
@@ -93,6 +109,7 @@ type piUnknownExpectation struct {
 	ID        string   `yaml:"id"`
 	Line      int      `yaml:"line"`
 	Sequence  int      `yaml:"sequence"`
+	Position  int64    `yaml:"position"`
 	Pointer   string   `yaml:"pointer"`
 	Contains  []string `yaml:"contains"`
 }
@@ -107,6 +124,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 			Source       string                 `yaml:"source"`
 			PaddingBytes int                    `yaml:"paddingBytes"`
 			Reject       bool                   `yaml:"reject"`
+			Publish      bool                   `yaml:"publish"`
 			Content      []string               `yaml:"content"`
 			Expected     []piUnknownExpectation `yaml:"expected"`
 		} `yaml:"cases"`
@@ -176,6 +194,10 @@ func TestPiUnknownPersistence(t *testing.T) {
 					if got.Position.Sequence != sequence {
 						t.Fatalf("record sequence: %d want %d", got.Position.Sequence, sequence)
 					}
+					public := got.Position.Public
+					if public == nil || public.SourceRef != ingest.PiPublicRef(sid.String(), "stream", "recording") || public.RecordIndex != int64(sequence-1) || public.Position != want.Position {
+						t.Fatalf("captured public coordinates: %+v want %+v", public, want)
+					}
 					if got.Namespace != want.Namespace || got.Kind != want.Kind || got.Harness != schema.HarnessPi || got.Position.Line != want.Line || got.Position.SourceID != want.ID || got.Position.JSONPointer != want.Pointer || string(got.Position.SourceEntryRef) != ingest.PiPublicRef(sid.String(), "entry", want.ID) {
 						t.Fatalf("evidence identity: %+v want %+v", got, want)
 					}
@@ -184,7 +206,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 							t.Fatalf("payload missing %q", text)
 						}
 					}
-					if strings.Contains(string(got.Payload), "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") {
+					if strings.Contains(string(got.Payload), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") {
 						t.Fatal("source secret persisted without redaction")
 					}
 					if tc.PaddingBytes > 0 && !strings.Contains(string(got.Payload), padding) {
@@ -261,6 +283,31 @@ func TestPiUnknownPersistence(t *testing.T) {
 				t.Fatal(err)
 			}
 			check(entries)
+			beforeExport, err := export.ExportSession(t.Context(), db, fs, sid.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantPublic, err := ingest.ProjectRetainedUnknown(capture.Entries, schema.HarnessPi)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(beforeExport.RetainedUnknown, wantPublic) {
+				t.Fatal("source-to-export evidence changed")
+			}
+			if !sort.SliceIsSorted(beforeExport.RetainedUnknown, func(i, j int) bool {
+				return beforeExport.RetainedUnknown[i].Position < beforeExport.RetainedUnknown[j].Position
+			}) {
+				t.Fatal("export did not restore captured source order")
+			}
+			if len(wantPublic) > 0 && (beforeExport.Diagnostics == nil || !beforeExport.Diagnostics.Partial) {
+				t.Fatal("export falsely complete")
+			}
+			if len(beforeExport.Turns) != len(tc.Content) {
+				t.Fatal("export invented unknown turns")
+			}
+			if tc.Publish {
+				assertPiUnknownPublication(t, db, fs, sid, output, beforeExport)
+			}
 			// Remove native input to exercise database-driven retained indexing,
 			// rather than mistaking another native capture for the batch route.
 			if err := os.Remove(path); err != nil {
@@ -281,6 +328,10 @@ func TestPiUnknownPersistence(t *testing.T) {
 			}
 			// Force an ordinary reindex with the real store behind a failing
 			// transaction boundary. A failed replacement cannot account evidence.
+			beforeExport, err = export.ExportSession(t.Context(), db, fs, sid.String())
+			if err != nil {
+				t.Fatal(err)
+			}
 			writer.fail = true
 			cfg.Force = true
 			failed := run()
@@ -291,6 +342,39 @@ func TestPiUnknownPersistence(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(entries, after) {
 				t.Fatal("failed replacement changed prior entries")
 			}
+			afterExport, err := export.ExportSession(t.Context(), db, fs, sid.String())
+			if err != nil || !reflect.DeepEqual(beforeExport, afterExport) {
+				t.Fatalf("failed replacement changed prior export: %v", err)
+			}
 		})
+	}
+}
+
+func assertPiUnknownPublication(t *testing.T, db *store.Store, fs ingest.FileSystem, sid schema.SessionID, output ingest.ResolvedPath, expected *schema.SessionDetailPayload) {
+	t.Helper()
+	publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}}
+	cfg := &config.Config{Output: config.OutputConfig{BasePath: output.String()}, Push: config.PushConfig{Method: config.PushMethodAll, Visibility: config.VisibilityPrivate}}
+	creds := &auth.Credentials{APIKey: "synthetic-key", KeyID: "synthetic-key-id", UserID: "synthetic-user", Username: "fixture", VillageURL: "https://village.example.com"}
+	var stderr bytes.Buffer
+	pipeline, err := push.NewPipeline(db, publisher, creds, cfg, fs, push.PipelineConfig{Force: true, Concurrency: 1}, &testutil.NoopRedactor{}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pipeline.Run(t.Context())
+	if err != nil || result.Errors != 0 || len(publisher.Calls) != 1 {
+		t.Fatalf("Pi publication: %v %+v %s", err, result, stderr.String())
+	}
+	content, err := schema.DecodeTranscriptContentRaw(publisher.Calls[0].TranscriptBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(content.SessionDetail.RetainedUnknown, expected.RetainedUnknown) {
+		t.Fatal("publication changed source payload or coordinates")
+	}
+	if content.SessionDetail.Diagnostics == nil || !content.SessionDetail.Diagnostics.Partial || len(publisher.AuthoritativeCalls) != 1 || publisher.AuthoritativeCalls[0].Diagnostics.Partial == nil || !*publisher.AuthoritativeCalls[0].Diagnostics.Partial {
+		t.Fatal("publication lost partial detail/metadata mirror")
+	}
+	if len(content.SessionDetail.NativeMetadata) != 0 || len(content.SessionDetail.Turns) != len(expected.Turns) {
+		t.Fatal("publication used Pi metadata or fabricated conversation")
 	}
 }
