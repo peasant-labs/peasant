@@ -1,0 +1,41 @@
+requiredNames:
+  - generation-zero-and-graph
+  - generation-positive-and-graph
+  - stale-capture-graph-cleared
+  - legacy-with-generation-support
+  - legacy-without-generation-support
+  - managed-without-content-support-refused
+  - corrupt-generation-refused
+cases:
+  - name: generation-zero-and-graph
+    managed: true
+    generationCount: 0
+    generationGraph: true
+  - name: generation-positive-and-graph
+    managed: true
+    generationCount: 3
+    generationGraph: true
+  - name: stale-capture-graph-cleared
+    managed: true
+    captureCount: 9
+    captureGraph: true
+    generationCount: 0
+  - name: legacy-with-generation-support
+  - name: legacy-without-generation-support
+    withoutContentSupport: true
+  - name: managed-without-content-support-refused
+    managed: true
+    generationCount: 0
+    withoutContentSupport: true
+    wantError: managed content support is not configured
+  - name: corrupt-generation-refused
+    managed: true
+    generationCount: 0
+    corrupt: true
+    wantError: invalid
+concurrency:
+  firstModel: recorded-model
+  secondModel: replacement-model
+  firstText: first captured content
+  secondText: replacement captured content
+  count: 2
