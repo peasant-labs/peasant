@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -17,14 +16,25 @@ import (
 // Line and Sequence are one-based when present; native sources may instead use
 // their stable ID or opaque source reference. JSONPointer addresses a nested value.
 type UnknownSourcePosition struct {
-	SourceEntryRef schema.SourceEntryRef `json:"sourceEntryRef,omitempty"`
-	SourceID       string                `json:"sourceId,omitempty"`
-	Line           int                   `json:"line,omitempty"`
-	Sequence       int                   `json:"sequence,omitempty"`
-	JSONPointer    string                `json:"jsonPointer,omitempty"`
+	Public         *UnknownPublicPosition `json:"public,omitempty"`
+	SourceEntryRef schema.SourceEntryRef  `json:"sourceEntryRef,omitempty"`
+	SourceID       string                 `json:"sourceId,omitempty"`
+	Line           int                    `json:"line,omitempty"`
+	Sequence       int                    `json:"sequence,omitempty"`
+	JSONPointer    string                 `json:"jsonPointer,omitempty"`
 }
 
-// RetainedUnknown is private, already-redacted source evidence. It is not a
+// UnknownPublicPosition is assigned while traversing the complete source, before
+// known records or blocks are folded away. SourceRef identifies the opaque source
+// stream, not a filesystem path or an individual native entry. Both coordinates
+// are zero-based; absence must never be confused with the first source record.
+type UnknownPublicPosition struct {
+	SourceRef   string `json:"sourceRef"`
+	RecordIndex int64  `json:"recordIndex"`
+	Position    int64  `json:"position"`
+}
+
+// RetainedUnknown is private source evidence with an explicit redaction boundary. It is not a
 // conversation turn or an outbound wire contract. Payload is never truncated.
 type RetainedUnknown struct {
 	Harness   Harness               `json:"harness"`
@@ -49,25 +59,16 @@ func NewRetainedUnknownFromSource(harness Harness, namespace, kind string, posit
 	if err != nil {
 		return RetainedUnknown{}, fmt.Errorf("initialize unknown-evidence redaction: %w; evidence was not stored; repair redaction configuration before retrying", err)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var value any
-	if !json.Valid(payload) {
-		return RetainedUnknown{}, fmt.Errorf("redact unknown source evidence: malformed JSON; preserve the prior capture and restore intact source")
-	}
-	if err := decoder.Decode(&value); err != nil {
-		return RetainedUnknown{}, err
-	}
-	encoded, err := json.Marshal(engine.RedactJSON(value))
+	encoded, err := RedactRetainedJSON(string(payload), engine, 0)
 	if err != nil {
 		return RetainedUnknown{}, err
 	}
 	position.SourceID = engine.RedactText(position.SourceID)
-	return NewRetainedUnknown(harness, namespace, engine.RedactText(kind), position, encoded)
+	return NewRetainedUnknown(harness, namespace, engine.RedactText(kind), position, json.RawMessage(encoded))
 }
 
-// NewRetainedUnknown accepts only bytes that the caller has already redacted
-// through the ordinary capture redaction boundary. It does not redact itself.
+// NewRetainedUnknown requires the caller to apply the ordinary capture redaction
+// boundary first. It does not redact itself.
 func NewRetainedUnknown(harness Harness, namespace, kind string, position UnknownSourcePosition, redactedPayload json.RawMessage) (RetainedUnknown, error) {
 	if position.SourceEntryRef != "" {
 		if err := position.SourceEntryRef.Validate(); err != nil {
@@ -78,7 +79,7 @@ func NewRetainedUnknown(harness Harness, namespace, kind string, position Unknow
 		position.Line < 0 || position.Sequence < 0 ||
 		(position.Line == 0 && position.Sequence == 0 && strings.TrimSpace(position.SourceID) == "" && position.SourceEntryRef == "") ||
 		!validUnknownPointer(position.JSONPointer) || !json.Valid(redactedPayload) {
-		return RetainedUnknown{}, fmt.Errorf("retain unknown source evidence in ingest: invalid harness, discriminator, source coordinate or JSON payload; no evidence was certified; supply already-redacted valid JSON and the actual source position")
+		return RetainedUnknown{}, fmt.Errorf("retain unknown source evidence in ingest: invalid harness, discriminator, source coordinate or JSON payload; no evidence was certified; apply baseline redaction to valid JSON and supply the actual source position")
 	}
 	return RetainedUnknown{Harness: harness, Namespace: namespace, Kind: kind, Position: position, Payload: append(json.RawMessage(nil), redactedPayload...)}, nil
 }

@@ -2,15 +2,12 @@ package push
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
@@ -18,17 +15,6 @@ import (
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
-
-// snapshotPublicationStore is the OPTIONAL durable snapshot surface a local
-// store may offer. It is asserted at runtime rather than added to PipelineStore:
-// a store opened without generation support is a supported configuration, and
-// extending a required interface would force every caller and double to
-// implement methods it cannot honor.
-type snapshotPublicationStore interface {
-	indexformat.SnapshotReader
-	indexformat.ContentResolver
-	GenerationSnapshotsSupported() bool
-}
 
 // BuildTranscriptContent builds the versioned, structured push wire body (D2):
 // a TranscriptContent envelope wrapping the SessionDetailPayload produced by the
@@ -90,114 +76,39 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 	}, nil
 }
 
-// BuildPublishTranscriptContent builds the transcript part of one publication.
-//
-// When the store offers the durable snapshot surface and reports generation
-// support, the envelope serializes the committed generation's validated detail,
-// hydrated through the ONE payload-construction boundary shared with detail
-// reads and export, with the publication consent overlay applied. That is what
-// carries session-level graph evidence (relationships with public anchors,
-// root identity, purpose and the input-submission count), retained earlier
-// history, per-block provenance and full hydrated tool bodies into the
-// published bytes.
-//
-// A legacy V1 read (transcript.ErrLegacySnapshot) uses the preserved entries
-// builder unchanged, including its TurnCount = len(Turns) stamp. Any OTHER
-// snapshot failure fails the session whole: a corrupt or missing managed
-// artifact is never silently published as truncated legacy content.
-//
-// store is deliberately untyped: the durable surface is an optional capability
-// of the concrete store, and a store that does not implement it takes the
-// preserved legacy path. Callers pass the same store they read capture
-// metadata from.
+// BuildPublishTranscriptContent applies consent to the already-hydrated
+// committed detail. Metadata and detail were selected together by the store;
+// this function does no I/O and never selects a newer generation. Legacy inputs
+// have no managed detail and use the preserved entries builder instead.
 func BuildPublishTranscriptContent(
-	ctx context.Context,
-	store any,
-	sessionID string,
+	committedDetail *schema.SessionDetailPayload,
 	meta *ingest.UnifiedMetadata,
 	entries []schema.SessionEntry,
 	emit schema.PushContractVersion,
 	fields config.PushFieldVisibility,
 	origin sessionorigin.Origin,
 ) (schema.TranscriptContent, error) {
-	if reader, ok := store.(snapshotPublicationStore); ok && reader.GenerationSnapshotsSupported() {
-		content, err := buildSnapshotPublishContent(ctx, reader, sessionID, meta, fields, origin, emit)
+	if committedDetail == nil {
+		content, err := BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
 		if err == nil {
-			return content, nil
+			mirrorInterpretationDiagnostics(meta, content.SessionDetail)
 		}
-		if !errors.Is(err, transcript.ErrLegacySnapshot) {
-			return schema.TranscriptContent{}, err
-		}
+		return content, err
 	}
-	return BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
+	detail := *committedDetail
+	applyPublishConsentOverlay(&detail, meta, fields)
+	mirrorInterpretationDiagnostics(meta, &detail)
+	return BuildTranscriptContentFromDetail(&detail, emit, origin), nil
 }
 
-// buildSnapshotPublishContent hydrates one committed generation inside the
-// shared session lock, applies the consent overlay and wraps the validated
-// detail in the publish envelope. The callback performs no network access and
-// mutates no store; hydration, folding, validation and envelope construction
-// all happen under the shared lock the snapshot boundary already holds.
-// mirrorDurablePublicationIdentity copies the active generation's durable
-// publication identity — the input-submission count and the graph mirrors (root
-// session, purpose, relationships) — onto the capture metadata before the
-// publish metadata part is assembled. The receiver compares those mirrors
-// against the durable detail and refuses any disagreement, so the metadata part
-// must carry exactly the same measured facts, including a measured zero that is
-// distinct from an absent count. A legacy session, or a store without the
-// managed snapshot surface, keeps the capture metadata unchanged.
-func mirrorDurablePublicationIdentity(ctx context.Context, candidateStore any, sessionID string, meta *ingest.UnifiedMetadata) {
-	if meta == nil {
-		return
+// Only the built, selected content may supply interpretation partial state.
+// Capture metadata may also describe older omission placeholders, so absence
+// of detail diagnostics must not clear an existing omission indication.
+func mirrorInterpretationDiagnostics(meta *ingest.UnifiedMetadata, detail *schema.SessionDetailPayload) {
+	if meta != nil && detail != nil && detail.Diagnostics != nil {
+		partial := detail.Diagnostics.Partial
+		meta.Diagnostics.Partial = &partial
 	}
-	reader, ok := candidateStore.(snapshotPublicationStore)
-	if !ok || !reader.GenerationSnapshotsSupported() {
-		return
-	}
-	// The snapshot read mirrors the exact values the durable detail will carry;
-	// a legacy snapshot (or a read error) leaves the capture metadata untouched
-	// and lets the content build decide the session's fate.
-	_ = reader.WithSessionSnapshot(ctx, schema.SessionID(sessionID), func(snapshot indexformat.ReadSnapshot) error {
-		if snapshot.Session.InputSubmissionCount == nil {
-			meta.Stats.InputSubmissionCount = nil
-		} else {
-			count := *snapshot.Session.InputSubmissionCount
-			meta.Stats.InputSubmissionCount = &count
-		}
-		if snapshot.Session.RootSessionID == nil {
-			meta.RootSessionID = nil
-		} else {
-			root := *snapshot.Session.RootSessionID
-			meta.RootSessionID = &root
-		}
-		meta.Purpose = snapshot.Session.Purpose
-		meta.Relationships = append([]schema.SessionRelationship(nil), snapshot.Session.Relationships...)
-		return nil
-	})
-}
-
-func buildSnapshotPublishContent(
-	ctx context.Context,
-	store snapshotPublicationStore,
-	sessionID string,
-	meta *ingest.UnifiedMetadata,
-	fields config.PushFieldVisibility,
-	origin sessionorigin.Origin,
-	emit schema.PushContractVersion,
-) (schema.TranscriptContent, error) {
-	var content schema.TranscriptContent
-	err := store.WithSessionSnapshot(ctx, schema.SessionID(sessionID), func(snapshot indexformat.ReadSnapshot) error {
-		detail, err := transcript.SnapshotToDetailValidated(ctx, snapshot, store)
-		if err != nil {
-			return err
-		}
-		applyPublishConsentOverlay(detail, meta, fields)
-		content = BuildTranscriptContentFromDetail(detail, emit, origin)
-		return nil
-	})
-	if err != nil {
-		return schema.TranscriptContent{}, err
-	}
-	return content, nil
 }
 
 // applyPublishConsentOverlay applies the publication field-consent gates to a
@@ -315,6 +226,35 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 	}
 	defer observeRedactionDocument(redactor, &err, redactionEntriesValidation)
 	entries = append([]schema.SessionEntry(nil), entries...)
+	unknown := make(map[int][]ingest.RetainedUnknown)
+	for i := range entries {
+		records, err := ingest.RetainedUnknownOf(entries[i])
+		if err != nil {
+			return nil, err
+		}
+		if len(records) == 0 {
+			continue
+		}
+		for j := range records {
+			payload, err := redactRetainedJSON(string(records[j].Payload), redactor, 0)
+			if err != nil {
+				return nil, err
+			}
+			records[j].Payload = json.RawMessage(payload)
+		}
+		unknown[i] = records
+		var extra map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(*entries[i].Extra), &extra); err != nil {
+			return nil, err
+		}
+		delete(extra, "retainedUnknown")
+		encoded, err := json.Marshal(extra)
+		if err != nil {
+			return nil, err
+		}
+		text := string(encoded)
+		entries[i].Extra = &text
+	}
 	protected := make(map[int]*string)
 	for i := range entries {
 		extra, pi, err := ingest.DecodePiEntryExtra(entries[i])
@@ -367,6 +307,11 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 		for i, extra := range protected {
 			entries[i].Extra = extra
 		}
+		for i, records := range unknown {
+			if err := ingest.AttachRetainedUnknown(&entries[i], records); err != nil {
+				return nil, err
+			}
+		}
 		return entries, nil
 	}
 	raw, err := json.Marshal(entries)
@@ -412,6 +357,11 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 				return nil, err
 			}
 			redactedEntries[index].Extra = restored
+		}
+	}
+	for i, records := range unknown {
+		if err := ingest.AttachRetainedUnknown(&redactedEntries[i], records); err != nil {
+			return nil, err
 		}
 	}
 	return redactedEntries, nil
@@ -536,6 +486,15 @@ func marshalTranscriptContent(
 }
 
 func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) (_ []byte, err error) {
+	// Embedded JSON is text on the public wire. Redact its decoded string
+	// tokens separately, preserving number literals and the capture's coordinates.
+	var retained []schema.RetainedUnknownRecord
+	if content.SessionDetail != nil {
+		retained, err = redactRetainedRecords(content.SessionDetail.RetainedUnknown, redactor)
+		if err != nil {
+			return nil, err
+		}
+	}
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)
@@ -547,6 +506,16 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 		return b, nil
 	}
 	defer observeRedactionDocument(redactor, &err, redactionTranscriptValidation)
+	if len(retained) > 0 {
+		copy := *content.SessionDetail
+		copy.RetainedUnknown = nil
+		redactionInput := content
+		redactionInput.SessionDetail = &copy
+		b, err = json.Marshal(redactionInput)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Through the SAME fail-closed round trip as the other two seams. This one
 	// called redact.RedactJSONDocBytes directly and returned its value, so a
 	// re-marshal failure published the assembled document exactly as built, with
@@ -595,6 +564,12 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	if content.SessionDetail != nil {
 		if err := restoreObservedModels(content.SessionDetail.Turns, check.SessionDetail.Turns); err != nil {
 			return nil, err
+		}
+		if len(retained) > 0 {
+			check.SessionDetail.RetainedUnknown = retained
+			if check.SessionDetail.Diagnostics == nil || !check.SessionDetail.Diagnostics.Partial {
+				return nil, transcriptShapeRedactionError("retained evidence lost its partial diagnostic")
+			}
 		}
 	}
 	final, err := json.Marshal(check)

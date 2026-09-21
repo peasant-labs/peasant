@@ -718,6 +718,8 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 
 	detail := &schema.SessionDetailPayload{
 		NativeMetadata:       s.NativeMetadata,
+		RetainedUnknown:      s.RetainedUnknown,
+		Diagnostics:          s.Diagnostics,
 		ID:                   string(s.ID),
 		Harness:              s.Harness,
 		StartTime:            s.StartTime.UTC(),
@@ -744,6 +746,9 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		ParentSessionID:      s.ParentSessionID,
 		InputSubmissionCount: s.InputSubmissionCount,
 		EarlierHistory:       earlierHistoryToDetail(s.EarlierHistory),
+	}
+	if len(detail.RetainedUnknown) > 0 {
+		detail.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
 	}
 	// Every served detail leaves this one producer bounded for display. A stored
 	// record may be far larger than the contract's document policy allows the

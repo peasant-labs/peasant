@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/schema"
 )
@@ -39,8 +40,12 @@ const (
 	PublicationNeedsIngest PublicationReadiness = "needs_ingest"
 )
 
-// PublicationInputBundle is read from one database snapshot, without file I/O.
+// PublicationInputBundle is read from one database snapshot. A committed read
+// includes the selected generation and composes its count and graph facts into
+// Metadata; capture-only reads leave Generation nil. Stored capture evidence is
+// never rewritten. Generation blobs may only be hydrated during the callback.
 type PublicationInputBundle struct {
+	Generation         *indexformat.ReadSnapshot
 	ProjectPath        string
 	ContentCapture     SessionContentCapture
 	Metadata           schema.UnifiedMetadata
@@ -53,8 +58,12 @@ type PublicationInputBundle struct {
 	Readiness          PublicationReadiness
 }
 
+// PublicationInputReader keeps managed content alive through the
+// callback. Consumers hydrate the generation there, then release the snapshot
+// before performing network I/O. An error is a refusal, not a legacy fallback.
 type PublicationInputReader interface {
-	LoadPublicationInput(context.Context, SessionID) (PublicationInputBundle, error)
+	indexformat.ContentResolver
+	WithCommittedPublicationInput(context.Context, SessionID, func(PublicationInputBundle) error) error
 }
 
 // PublicationCaptureStore is optional so existing SessionStore callers retain

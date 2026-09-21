@@ -5,8 +5,8 @@ import "github.com/peasant-labs/peasant/internal/ingest"
 // PublishableWithOmissions is THE rule for whether a stored content capture may
 // be read whole, exported and published.
 //
-// A complete capture always may. So may a capture that is incomplete for exactly
-// ONE reason: oversized source records were omitted at ingest. That capture holds
+// A complete capture always may. So may a capture with accounted oversized
+// omissions or retained unknown evidence certified by the full writer. An omitted capture holds
 // every entry the source had, with a placeholder standing in each omitted
 // record's place, and the session's own metadata diagnostics say so; refusing to
 // publish it would hide a session for a record its owner can already see is
@@ -18,6 +18,9 @@ import "github.com/peasant-labs/peasant/internal/ingest"
 //   - and an incomplete capture whose stored format is a bounded preview rather
 //     than the full text, whatever its code says.
 //
+// Retained unknown evidence is certified only after the full writer validates
+// payloads, opaque source identity and traversal coordinates. Full readers verify
+// those same bytes and coordinates; a failure-code string alone is not proof.
 // It is one predicate on one typed value so the readiness check, the
 // complete-content readers and the detail loader cannot drift apart. Callers pass
 // the capture the store read; nothing here reads the database.
@@ -72,7 +75,7 @@ func publishableCaptureState(status ingest.ContentCaptureStatus, code ingest.Con
 		// The exception, and it is where the format matters: the allowed code
 		// over a BOUNDED PREVIEW is still a preview, and a preview may never be
 		// published. Only a capture that stores the full text qualifies.
-		return code == ingest.ContentCaptureSourceRecordsOmitted &&
+		return (code == ingest.ContentCaptureSourceRecordsOmitted || code == ingest.ContentCaptureUnknownDataRetained) &&
 			format == ingest.ContentCaptureFormatFull
 	}
 	return false
