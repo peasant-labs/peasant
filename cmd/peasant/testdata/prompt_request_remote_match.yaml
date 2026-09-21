@@ -8,6 +8,12 @@
 # in, and the match that follows — and asserts the printed line, not the
 # comparison behind it.
 #
+# A request names two repositories: the base its pull request was opened against
+# (requestRemote) and the repository its head came from (requestHeadRemote, a
+# fork's repository or the base itself for a same-repository pull request). A
+# case that sets no head is a request from a village older than the field, which
+# names the base alone.
+#
 # The cases that print nothing are the point of the fixture as much as the ones
 # that do: a hint about a pull request that is not this repository's, or one that
 # is no longer waiting, sends an author looking for a request that is not open.
@@ -101,3 +107,36 @@ cases:
     pushedRemote: "git@github.com:peasant-labs/village.git"
     requestRemote: ""
     wantMatch: false
+
+  # The fork workflow: the author cloned their fork, so the remote on their
+  # machine names the fork while the request names the base it was raised
+  # against. The head remote is what lets that clone match.
+  - name: fork-clone-matches-its-request
+    pushedRemote: "git@github.com:author/widgets.git"
+    requestRemote: "peasant-labs/widgets"
+    requestHeadRemote: "author/widgets"
+    wantMatch: true
+  - name: fork-clone-with-another-name-matches-its-request
+    pushedRemote: "git@github.com:author/widgets-fork.git"
+    requestRemote: "peasant-labs/widgets"
+    requestHeadRemote: "author/widgets-fork"
+    wantMatch: true
+  - name: base-clone-matches-a-request-whose-head-is-a-fork
+    pushedRemote: "git@github.com:peasant-labs/widgets.git"
+    requestRemote: "peasant-labs/widgets"
+    requestHeadRemote: "author/widgets"
+    wantMatch: true
+  - name: fork-clone-does-not-match-another-forks-request
+    pushedRemote: "git@github.com:author/widgets.git"
+    requestRemote: "peasant-labs/widgets"
+    requestHeadRemote: "someone-else/widgets"
+    wantMatch: false
+  - name: fork-clone-does-not-match-a-same-repository-request
+    pushedRemote: "git@github.com:author/widgets.git"
+    requestRemote: "peasant-labs/widgets"
+    requestHeadRemote: "peasant-labs/widgets"
+    wantMatch: false
+  - name: request-without-a-head-remote-still-matches-the-base
+    pushedRemote: "git@github.com:peasant-labs/widgets.git"
+    requestRemote: "peasant-labs/widgets"
+    wantMatch: true

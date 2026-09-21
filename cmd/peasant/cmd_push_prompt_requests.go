@@ -108,8 +108,12 @@ func pushedRepositoryGit(ctx context.Context, repository string, scoped bool) (r
 }
 
 // printWaitingPromptRequests prints one line per request that names the
-// repository being pushed and is still waiting on its author, and returns how
-// many lines it printed.
+// repository being pushed, as the repository its pull request was opened against
+// or as the repository its head came from, and is still waiting on its author.
+// It returns how many lines it printed.
+//
+// The line names the base, because that is where the pull request lives, even
+// when the match came through the head.
 //
 // A request for any other repository prints nothing: the caller is pushing this
 // repository, and a request raised against a different one is not theirs to act
@@ -123,7 +127,7 @@ func printWaitingPromptRequests(w io.Writer, requests []schema.VillagePromptRequ
 		if request.State != schema.VillagePullRequestAttachmentWaiting {
 			continue
 		}
-		if !sameRepositoryFullName(request.Remote, pushedFullName) {
+		if !namesPushedRepository(request, pushedFullName) {
 			continue
 		}
 		fmt.Fprintf(w, "waiting: %s#%d — run 'peasant village push' to attach the prompts behind it\n",
@@ -131,6 +135,21 @@ func printWaitingPromptRequests(w io.Writer, requests []schema.VillagePromptRequ
 		printed++
 	}
 	return printed
+}
+
+// namesPushedRepository reports whether the pushed repository is one the request
+// names: the repository the pull request was opened against, or the repository
+// its head came from.
+//
+// The two differ exactly when the pull request came from a fork, which is the
+// ordinary contribution workflow: the author cloned their fork, so the remote on
+// their machine is the fork while the request names the base it was raised
+// against. Matching only the base leaves that author unread. A request from a
+// village older than the head remote carries an empty one, and the base decides
+// alone, exactly as before.
+func namesPushedRepository(request schema.VillagePromptRequest, pushedFullName string) bool {
+	return sameRepositoryFullName(request.Remote, pushedFullName) ||
+		sameRepositoryFullName(request.HeadRemote, pushedFullName)
 }
 
 // sameRepositoryFullName reports whether two "owner/name" repository names are

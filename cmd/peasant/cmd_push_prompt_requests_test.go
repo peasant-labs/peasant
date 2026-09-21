@@ -32,11 +32,12 @@ var promptRequestLookupFailureManifestYAML []byte
 
 type promptRequestRemoteMatchFixtures struct {
 	Cases []struct {
-		Name          string `yaml:"name"`
-		PushedRemote  string `yaml:"pushedRemote"`
-		RequestRemote string `yaml:"requestRemote"`
-		State         string `yaml:"state"`
-		WantMatch     bool   `yaml:"wantMatch"`
+		Name              string `yaml:"name"`
+		PushedRemote      string `yaml:"pushedRemote"`
+		RequestRemote     string `yaml:"requestRemote"`
+		RequestHeadRemote string `yaml:"requestHeadRemote"`
+		State             string `yaml:"state"`
+		WantMatch         bool   `yaml:"wantMatch"`
 	} `yaml:"cases"`
 }
 
@@ -106,9 +107,10 @@ func TestPromptRequestPrinting(t *testing.T) {
 				state = schema.VillagePullRequestAttachmentWaiting
 			}
 			request := schema.VillagePromptRequest{
-				Remote: fixture.RequestRemote,
-				Number: 216,
-				State:  state,
+				Remote:     fixture.RequestRemote,
+				HeadRemote: fixture.RequestHeadRemote,
+				Number:     216,
+				State:      state,
 			}
 			var out bytes.Buffer
 			printed := printWaitingPromptRequests(&out, []schema.VillagePromptRequest{request},
@@ -116,19 +118,19 @@ func TestPromptRequestPrinting(t *testing.T) {
 
 			if printed != 1 {
 				if fixture.WantMatch {
-					t.Errorf("pushed remote %q against request remote %q: nothing was printed, want the hint; output:\n%s",
-						fixture.PushedRemote, fixture.RequestRemote, out.String())
+					t.Errorf("pushed remote %q against request remotes %q and %q: nothing was printed, want the hint; output:\n%s",
+						fixture.PushedRemote, fixture.RequestRemote, fixture.RequestHeadRemote, out.String())
 					return
 				}
 				if out.Len() != 0 {
-					t.Errorf("pushed remote %q against request remote %q: printed without counting it; output:\n%s",
-						fixture.PushedRemote, fixture.RequestRemote, out.String())
+					t.Errorf("pushed remote %q against request remotes %q and %q: printed without counting it; output:\n%s",
+						fixture.PushedRemote, fixture.RequestRemote, fixture.RequestHeadRemote, out.String())
 				}
 				return
 			}
 			if !fixture.WantMatch {
-				t.Errorf("pushed remote %q against request remote %q: printed %q, want nothing",
-					fixture.PushedRemote, fixture.RequestRemote, out.String())
+				t.Errorf("pushed remote %q against request remotes %q and %q: printed %q, want nothing",
+					fixture.PushedRemote, fixture.RequestRemote, fixture.RequestHeadRemote, out.String())
 				return
 			}
 			want := promptRequestLine(fixture.RequestRemote, 216)
