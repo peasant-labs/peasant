@@ -29,7 +29,7 @@ func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputRea
 		return hydrateErr
 	})
 	if err != nil {
-		return ingest.PublicationInputBundle{}, nil, fmt.Errorf("load committed publication input from peasant.db: %w; nothing uploaded; repair the recorded generation and retry", err)
+		return ingest.PublicationInputBundle{}, nil, fmt.Errorf("load publication input from peasant.db before publication: %w; nothing uploaded; run peasant ingest and retry", err)
 	}
 	// The fully hydrated detail is the owned result. Do not expose a snapshot
 	// whose protected blob lifetime ended when the callback returned.
