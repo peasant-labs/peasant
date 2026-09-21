@@ -1,0 +1,19 @@
+required_names: [parts, inline]
+cases:
+  - name: parts
+    message: '{"role":"user"}'
+    parts:
+      prt_1: '{"type":"text","text":"before"}'
+      prt_2: '{"type":"future","payload":"PAYLOAD","precise":9007199254740993,"text":{"new":true}}'
+      prt_3: '{"type":"text","text":"after"}'
+    source_id: prt_2
+    pointer: ''
+    record_index: 1
+    position: 1
+  - name: inline
+    message: '{"role":"user","content":[{"type":"text","text":"before"},{"type":"future","payload":"PAYLOAD","precise":9007199254740993,"text":{"new":true}},{"type":"text","text":"after"}]}'
+    parts: {}
+    source_id: msg_1
+    pointer: /content/1
+    record_index: 0
+    position: 2

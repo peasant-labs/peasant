@@ -1,0 +1,67 @@
+required_names:
+  - current_unknown_row
+  - current_unknown_block
+  - current_additive_field
+  - current_corrupt_known_field
+  - current_broken_json
+  - current_unknown_tool_content
+  - current_all_unknown_tool_content
+cases:
+  - name: current_unknown_tool_content
+    texts: [before]
+    rows:
+      - {id: msg_before, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"before","time":{"created":1}}'}
+      - {id: msg_unknown, type: assistant, seq: 20, timeCreated: 2, timeUpdated: 2, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_unknown","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"known-output-before"},{"type":"future","new":"PAYLOAD","number":9007199254740993},{"type":"text","text":"known-output-after"}]},"time":{"created":2}}],"time":{"created":2,"completed":3}}'}
+    namespace: tool_content
+    kind: future
+    source_id: msg_unknown
+    position: 4
+    record_index: 1
+    pointer: /content/0/state/content/1
+  - name: current_all_unknown_tool_content
+    texts: [before]
+    rows:
+      - {id: msg_before, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"before","time":{"created":1}}'}
+      - {id: msg_unknown, type: assistant, seq: 20, timeCreated: 2, timeUpdated: 2, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_unknown","name":"read","state":{"status":"completed","input":{},"content":[{"type":"future","new":"PAYLOAD","number":9007199254740993}]},"time":{"created":2}}],"time":{"created":2,"completed":3}}'}
+    namespace: tool_content
+    kind: future
+    source_id: msg_unknown
+    position: 3
+    record_index: 1
+    pointer: /content/0/state/content/0
+  - name: current_unknown_row
+    texts: [before, after]
+    rows:
+      - {id: msg_before, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"before","time":{"created":1}}'}
+      - {id: msg_unknown, type: future, seq: 20, timeCreated: 2, timeUpdated: 2, data: '{"new":"PAYLOAD","number":9007199254740993,"text":{"new":true},"time":{"created":2}}'}
+      - {id: msg_after, type: user, seq: 30, timeCreated: 3, timeUpdated: 3, data: '{"text":"after","time":{"created":3}}'}
+    namespace: row
+    kind: future
+    source_id: msg_unknown
+    position: 1
+    record_index: 1
+    pointer: ''
+  - name: current_unknown_block
+    texts: [before, known-before, known-after]
+    rows:
+      - {id: msg_before, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"before","time":{"created":1}}'}
+      - {id: msg_unknown, type: assistant, seq: 20, timeCreated: 2, timeUpdated: 2, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","text":"known-before"},{"type":"future","new":"PAYLOAD","number":9007199254740993,"text":{"new":true}},{"type":"text","text":"known-after"}],"time":{"created":2,"completed":3}}'}
+    namespace: assistant_content
+    kind: future
+    source_id: msg_unknown
+    position: 3
+    record_index: 1
+    pointer: /content/1
+  - name: current_additive_field
+    texts: [before]
+    rows:
+      - {id: msg_before, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"before","future":{"anything":true},"time":{"created":1,"future":42}}'}
+  - name: current_corrupt_known_field
+    error: true
+    rows:
+      - {id: msg_unknown, type: future, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"new":"PAYLOAD"}'}
+      - {id: msg_after, type: user, seq: 20, timeCreated: 2, timeUpdated: 2, data: '{"text":42,"time":{"created":2}}'}
+  - name: current_broken_json
+    error: true
+    rows:
+      - {id: msg_unknown, type: future, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"new":"PAYLOAD"'}

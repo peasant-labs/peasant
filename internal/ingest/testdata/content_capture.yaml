@@ -134,11 +134,11 @@ cases:
     harness: opencode
     origin: legacy
     projection_part: '{"id":"part_bad","type":"future_tool","text":"unsupported trace"}'
-    reject: true
+    unknown: true
   - name: codex-unknown-event-message
     harness: codex
     source: '{"type":"event_msg","payload":{"type":"future_tool","message":"unrepresented trace"}}'
-    reject: true
+    unknown: true
   - name: strike-orphan-tool-output
     harness: strike
     source: '{"type":"tool.output","data":{"callId":"missing","output":"unrepresented trace"}}'

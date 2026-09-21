@@ -76,7 +76,8 @@ func (idx *OpenCodeIndexer) indexJSONInput(ctx context.Context, session Discover
 	if err != nil {
 		return completion.result(nil, err)
 	}
-	return completion.result(idx.indexSemanticMessages(session.SessionID, messages), nil)
+	entries, err := idx.indexSemanticMessages(session.SessionID, messages)
+	return completion.result(entries, err)
 }
 
 func parseOpenCodeJSONInput(input *openCodeJSONInput, completion *indexCompletion) ([]openCodeSemanticMessage, error) {

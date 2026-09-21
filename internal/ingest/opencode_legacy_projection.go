@@ -43,12 +43,13 @@ type openCodeLegacyProjection struct {
 }
 
 type openCodeLegacyProjectionMessage struct {
-	ID          string                         `json:"id"`
-	SessionID   string                         `json:"session_id"`
-	TimeCreated int64                          `json:"time_created"`
-	TimeUpdated int64                          `json:"time_updated"`
-	Data        json.RawMessage                `json:"data"`
-	Parts       []openCodeLegacyProjectionPart `json:"parts"`
+	RetainedUnknown []RetainedUnknown              `json:"retained_unknown,omitempty"`
+	ID              string                         `json:"id"`
+	SessionID       string                         `json:"session_id"`
+	TimeCreated     int64                          `json:"time_created"`
+	TimeUpdated     int64                          `json:"time_updated"`
+	Data            json.RawMessage                `json:"data"`
+	Parts           []openCodeLegacyProjectionPart `json:"parts"`
 	// Orphan marks a synthetic message that carries one orphan part whose parent
 	// message is absent from the selected source. The indexer reads it directly,
 	// so no fabricated parent link is needed.
@@ -503,7 +504,7 @@ func unusableOpenCodeOrphanPartReason(data []byte) string {
 	if err != nil {
 		return "its data does not decode as an OpenCode part: " + err.Error()
 	}
-	if !isKnownOpenCodeSemanticPartType(part.Data.Type) {
+	if isOpenCodeCaptureControl(part.Data.Type) {
 		return fmt.Sprintf("its type %q is outside the supported transcript part set", part.Data.Type)
 	}
 	return ""
@@ -543,8 +544,8 @@ func openCodeUnknownTypeDiagnostics(session DiscoveredSession, counts map[string
 		diagnostics = append(diagnostics, DiagnosticEntry{
 			ErrorType:   string(OpenCodeUnknownPartType),
 			Location:    fmt.Sprintf("selected OpenCode session %s from %s", session.SessionID, session.SourcePath),
-			Message:     fmt.Sprintf("%d %s row(s) of type %q are outside the known transcript vocabulary, so Peasant kept the session and every known row and treated the newer %s rows as inert; this is newer OpenCode vocabulary, not corruption", counts[typeName], subject, typeName, subject),
-			Remediation: "No action is required; upgrade Peasant when it adds first-class support for this type if you want it rendered as more than an inert note.",
+			Message:     fmt.Sprintf("%d %s row(s) of type %q are outside the interpreted transcript vocabulary; known content remains readable and opaque non-control payloads are retained without display", counts[typeName], subject, typeName),
+			Remediation: "No action is required; upgrade Peasant when it adds interpretation for this type.",
 		})
 	}
 	return diagnostics
@@ -1114,11 +1115,28 @@ func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expecte
 }
 
 func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID string, identities map[string]string) (openCodeLegacyProjectionMessage, error) {
-	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"}, "orphan", "control")
+	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"}, "orphan", "control", "retained_unknown")
 	if err != nil {
 		return openCodeLegacyProjectionMessage{}, err
 	}
 	var message openCodeLegacyProjectionMessage
+	if evidence, exists := fields["retained_unknown"]; exists {
+		decoder := json.NewDecoder(bytes.NewReader(evidence))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&message.RetainedUnknown); err != nil || len(message.RetainedUnknown) == 0 {
+			return message, fmt.Errorf("managed message retained_unknown must be a nonempty evidence array")
+		}
+		if err := validateOpenCodeUnknown(message.RetainedUnknown); err != nil {
+			return message, err
+		}
+		for i, record := range message.RetainedUnknown {
+			redacted, err := NewRetainedUnknownFromSource(record.Harness, record.Namespace, record.Kind, record.Position, record.Payload)
+			if err != nil {
+				return message, err
+			}
+			message.RetainedUnknown[i] = redacted
+		}
+	}
 	if orphanField, present := fields["orphan"]; present {
 		if err := json.Unmarshal(orphanField, &message.Orphan); err != nil {
 			return message, fmt.Errorf("decode orphan: %w", err)
