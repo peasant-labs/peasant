@@ -464,8 +464,9 @@ func TestUploadAnnotations_ConnectionReuse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Pooled client (CLI path), sized to 4.
-	client := village.NewVillageClientWithConcurrency(srv.URL, testAPIKey, 4)
+	// Pooled client (CLI path), sized to 4: the shape the CLI builds, where the
+	// pooled http client is what carries the sizing.
+	client := village.NewVillageClient(srv.URL, testAPIKey, village.NewPooledHTTPClient(srv.URL, 4))
 	sessionID := testutil.TestSessionUUID
 	req := schema.AnnotationPushRequest{Annotations: []schema.AnnotationPushItem{{
 		ContentHash: "h",
