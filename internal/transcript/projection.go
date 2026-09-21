@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -16,6 +17,7 @@ type ProjectedTarget struct {
 
 // Projection is the one fold result for local viewing and all outbound content.
 type Projection struct {
+	Diagnostics     *schema.InterpretationDiagnostics
 	RetainedUnknown []schema.RetainedUnknownRecord
 	Turns           []ingest.Turn
 	NativeMetadata  []schema.NativeMetadataRecord
@@ -24,7 +26,12 @@ type Projection struct {
 }
 
 // ProjectionOptions can require carrier agreement with the session harness.
-type ProjectionOptions struct{ Harness schema.Harness }
+type ProjectionOptions struct {
+	Harness schema.Harness
+	// BoundedPreview preserves existing local viewing of older private captures.
+	// Never set this for export or publication: missing coordinates remain a refusal.
+	BoundedPreview bool
+}
 
 // EntriesToProjectionValidated reconstructs evidence after SQLite reopen.
 func EntriesToProjectionValidated(entries []schema.SessionEntry, opts ProjectionOptions) (Projection, error) {
@@ -35,6 +42,10 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 	p := Projection{SourceMap: make(map[string]ProjectedTarget)}
 	var err error
 	p.RetainedUnknown, err = ingest.ProjectRetainedUnknown(entries, opts.Harness)
+	if opts.BoundedPreview && errors.Is(err, ingest.ErrUnknownPositionUnavailable) {
+		p.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
+		err = nil
+	}
 	if err != nil && validate {
 		return p, err
 	}
@@ -265,13 +276,11 @@ func SessionToDetailValidatedWithProjection(session *ingest.Session, p Projectio
 	copy := *session
 	copy.Turns = p.Turns
 	copy.NativeMetadata = p.NativeMetadata
+	copy.RetainedUnknown = p.RetainedUnknown
+	copy.Diagnostics = p.Diagnostics
 	detail, err := SessionToDetailValidated(&copy)
 	if err != nil {
 		return nil, err
-	}
-	detail.RetainedUnknown = p.RetainedUnknown
-	if len(p.RetainedUnknown) > 0 {
-		detail.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
 	}
 	return detail, schema.ValidateRetainedUnknown(*detail)
 }

@@ -2,11 +2,16 @@ package ingest
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/peasant-labs/schema"
 )
+
+// ErrUnknownPositionUnavailable distinguishes old private captures from corrupt
+// evidence. Only a bounded local preview may suppress this export refusal.
+var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete source traversal coordinates")
 
 // ProjectRetainedUnknown validates stored evidence and copies the retained JSON
 // text verbatim. Capture owns coordinates: entry indices, line numbers and native
@@ -24,7 +29,7 @@ func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 			}
 			position := record.Position.Public
 			if position == nil {
-				return nil, fmt.Errorf("project retained unknown evidence: stored capture lacks complete source traversal coordinates; line numbers and native IDs cannot reconstruct block positions; no detail was emitted; re-index with a position-aware adapter")
+				return nil, fmt.Errorf("project retained unknown evidence: %w; line numbers and native IDs cannot reconstruct block positions; no detail was emitted; re-index with a position-aware adapter", ErrUnknownPositionUnavailable)
 			}
 			projected = append(projected, schema.RetainedUnknownRecord{
 				SourceRef: position.SourceRef, RecordIndex: position.RecordIndex, Position: position.Position,

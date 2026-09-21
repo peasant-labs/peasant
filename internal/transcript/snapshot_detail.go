@@ -84,10 +84,6 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 			NativeMetadata: append([]schema.NativeMetadataRecord(nil), section.Content.NativeMetadata...),
 		})
 	}
-	detail, err := SessionToDetailValidated(session)
-	if err != nil {
-		return fail(err)
-	}
 	// Main and earlier partitions are display order, not source order. Restore
 	// the capture-assigned traversal order without merging distinct occurrences.
 	slices.SortStableFunc(unknown, func(a, b schema.RetainedUnknownRecord) int {
@@ -96,11 +92,9 @@ func SnapshotToDetailValidated(ctx context.Context, snapshot indexformat.ReadSna
 		}
 		return cmp.Compare(a.Position, b.Position)
 	})
-	detail.RetainedUnknown = unknown
-	if len(unknown) > 0 {
-		detail.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
-	}
-	if err := schema.ValidateRetainedUnknown(*detail); err != nil {
+	session.RetainedUnknown = unknown
+	detail, err := SessionToDetailValidated(session)
+	if err != nil {
 		return fail(err)
 	}
 	return detail, nil
