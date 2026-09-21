@@ -1,0 +1,36 @@
+# Default-closed strict vocabulary: one unmapped kind per harness that must
+# still refuse with a typed UnrepresentedRecordError naming the kind. These
+# cases prove the registry's closed rule from the other side: anything absent
+# from record_kinds.yaml refuses, so unmapped kinds are the only refusals.
+required_names:
+  - claude-code refuses unmapped record kind
+  - codex refuses unmapped envelope kind
+  - strike refuses unmapped event kind
+  - opencode refuses unmapped part kind
+  - cursor refuses unmapped block kind
+cases:
+  - name: claude-code refuses unmapped record kind
+    harness: claude-code
+    transcript: |
+      {"type":"unmapped-record-xyz","message":{"role":"user","content":"hello"}}
+    want_kind: unmapped-record-xyz
+  - name: codex refuses unmapped envelope kind
+    harness: codex
+    transcript: |
+      {"type":"unmapped-envelope-xyz","payload":{}}
+    want_kind: unmapped-envelope-xyz
+  - name: strike refuses unmapped event kind
+    harness: strike
+    transcript: |
+      {"type":"unmapped-event-xyz","time":1,"data":{}}
+    want_kind: unmapped-event-xyz
+  - name: opencode refuses unmapped part kind
+    harness: opencode
+    transcript: |
+      {"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"11111111-1111-4111-8111-111111111111","messages":[{"id":"msg_1","session_id":"11111111-1111-4111-8111-111111111111","time_created":1,"time_updated":2,"data":{"role":"user"},"parts":[{"id":"prt_1","message_id":"msg_1","session_id":"11111111-1111-4111-8111-111111111111","time_created":1,"time_updated":2,"data":{"id":"prt_1","type":"unmapped-part-xyz"}}]}]}
+    want_kind: unmapped-part-xyz
+  - name: cursor refuses unmapped block kind
+    harness: cursor
+    transcript: |
+      {"role":"user","content":[{"type":"unmapped-block-xyz","text":"hi"}]}
+    want_kind: unmapped-block-xyz

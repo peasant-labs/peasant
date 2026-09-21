@@ -117,12 +117,12 @@ harnesses:
         visualized: not-applicable
         reason: Control block naming a deferred tool schema; no conversation content.
         source: internal/ingest/content_capture.go validateCaptureContent tool_reference branch
-      - kind: compact-boundary
+      - kind: compact_boundary
         status: represented
         preview: yes
         payload: full compactMetadata
         visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordKind, claudeCompactBoundaryPreview
+        source: internal/ingest/claude_control_records.go claudeControlRecordKind, claudeCompactBoundaryPreview (retained as partType compact-boundary)
       - kind: permission-mode
         status: represented
         preview: yes
@@ -450,6 +450,13 @@ harnesses:
         visualized: rendered
         renderer: ThinkingVM (fairtrade adaptTranscript)
         source: internal/ingest/content_capture.go reasoning content validation
+      - kind: text
+        status: represented
+        preview: yes
+        payload: none
+        visualized: rendered
+        renderer: ThinkingVM (fairtrade adaptTranscript)
+        source: internal/ingest/content_capture.go reasoning content validation (reasoning content text block)
       - kind: response_item-unrepresentable
         status: refused
         preview: no

@@ -179,11 +179,20 @@ func (idx *OpenCodeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, 
 }
 
 func isOpenCodeCaptureControl(kind string) bool {
-	switch kind {
-	case "step-start", "step-finish", "snapshot", "patch":
-		return true
+	for _, control := range openCodeCaptureControlKinds() {
+		if kind == control {
+			return true
+		}
 	}
 	return false
+}
+
+// openCodeCaptureControlKinds is the closed set of OpenCode part types the
+// strict capture path ignores as control. It is the single source of truth
+// for isOpenCodeCaptureControl, and the record-kind drift test walks it
+// against the registry.
+func openCodeCaptureControlKinds() []string {
+	return []string{"step-start", "step-finish", "snapshot", "patch"}
 }
 
 func (idx *OpenCodeIndexer) captureSemanticMessages(ctx context.Context, s DiscoveredSession, messages []openCodeSemanticMessage) (TranscriptCaptureResult, error) {

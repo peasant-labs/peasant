@@ -24,6 +24,47 @@ type IgnoredSourceRecord struct {
 	Reason IgnoredRecordReason
 }
 
+// Strict vocabulary accessors for the record-kind drift test. Each set names
+// the discriminators one strict capture path accepts before it refuses an
+// unlisted kind; keep each set aligned with the switch it documents. Control
+// records accepted through a dedicated map (Claude) or a known-event slice
+// (Strike) live with those structures instead of here.
+func claudeStrictRecordKinds() []string {
+	return []string{"user", "assistant", "human", "system", "summary", "result", "progress", "queue-operation", "file-history-snapshot", "last-prompt"}
+}
+
+func claudeStrictSystemSubtypes() []string {
+	return []string{"turn_duration", "compact_boundary", "stop_hook_summary", "api_error"}
+}
+
+func claudeStrictBlockKinds() []string {
+	return []string{"text", "thinking", "tool_use", "tool_result", "tool_reference"}
+}
+
+func codexStrictEnvelopeKinds() []string {
+	return []string{"session_meta", "turn_context", "event_msg", "response_item"}
+}
+
+func codexStrictEventMsgKinds() []string {
+	return []string{"token_count", "task_started", "task_complete", "turn_aborted", "user_message", "agent_message", "agent_reasoning"}
+}
+
+func codexStrictResponsePayloadKinds() []string {
+	return []string{"message", "reasoning", "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"}
+}
+
+func codexStrictMessageBlockKinds() []string {
+	return []string{"input_text", "output_text", "summary_text", "reasoning_text", "text"}
+}
+
+func cursorStrictRoleKinds() []string {
+	return []string{"user", "assistant", "human", "system", "tool"}
+}
+
+func cursorStrictBlockKinds() []string {
+	return []string{"text", "thinking", "tool_use", "tool_result"}
+}
+
 type TranscriptCaptureResult struct {
 	Entries        []schema.SessionEntry
 	IgnoredRecords []IgnoredSourceRecord

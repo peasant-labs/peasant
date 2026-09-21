@@ -67,6 +67,20 @@ func isClaudeControlRecordType(recordType string) bool {
 	return claudeControlRecordTypes[recordType]
 }
 
+// claudeControlKindLabels names every provider kind this build retains as a
+// control entry: the closed control map, the artifact- prefix family, and the
+// compact_boundary system subtype (named by its wire form; the retained
+// partType label is compact-boundary). The record-kind drift test walks this
+// set against the registry.
+func claudeControlKindLabels() []string {
+	labels := make([]string, 0, len(claudeControlRecordTypes)+2)
+	for kind := range claudeControlRecordTypes {
+		labels = append(labels, kind)
+	}
+	labels = append(labels, "artifact-", "compact_boundary")
+	return labels
+}
+
 // claudeControlRecordKind returns the provider kind label for a control record
 // this build represents, or "" when the record is not a control record. The
 // compact_boundary system subtype is labeled "compact-boundary".

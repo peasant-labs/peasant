@@ -113,19 +113,47 @@ func decodeStrikeEventData(raw json.RawMessage) (strikeEventData, error) {
 	return data, nil
 }
 
+// knownStrikeEventKinds is the closed set of Strike event types this build
+// parses. It is the single source of truth for isKnownStrikeEvent, and the
+// record-kind drift test walks it against the registry.
+var knownStrikeEventKinds = []strikeEventType{
+	strikeEventSessionStarted,
+	strikeEventSessionTitled,
+	strikeEventUserMessage,
+	strikeEventTurnStarted,
+	strikeEventTurnCompleted,
+	strikeEventAssistantText,
+	strikeEventAssistantTextDelta,
+	strikeEventMessageDelta,
+	strikeEventTextDelta,
+	strikeEventReasoning,
+	strikeEventReasoningDelta,
+	strikeEventReasoningDeltaWire,
+	strikeEventThinkingDelta,
+	strikeEventToolBegin,
+	strikeEventToolOutput,
+	strikeEventToolEnd,
+	strikeEventProcessStarted,
+	strikeEventProcessOutput,
+	strikeEventProcessExited,
+	strikeEventUsageReported,
+	strikeEventModelSelected,
+}
+
 func isKnownStrikeEvent(eventType strikeEventType) bool {
-	switch eventType {
-	case strikeEventSessionStarted, strikeEventSessionTitled, strikeEventUserMessage,
-		strikeEventTurnStarted, strikeEventTurnCompleted, strikeEventAssistantText,
-		strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta,
-		strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire,
-		strikeEventThinkingDelta, strikeEventToolBegin, strikeEventToolOutput,
-		strikeEventToolEnd, strikeEventProcessStarted, strikeEventProcessOutput,
-		strikeEventProcessExited, strikeEventUsageReported, strikeEventModelSelected:
-		return true
-	default:
-		return false
+	for _, known := range knownStrikeEventKinds {
+		if eventType == known {
+			return true
+		}
 	}
+	return false
+}
+
+// strikeMetadataEventKinds names the known Strike events that carry session
+// metadata rather than conversation content. The strict capture path records
+// them as ignored metadata; keep this set aligned with its metadata branch.
+func strikeMetadataEventKinds() []strikeEventType {
+	return []strikeEventType{strikeEventSessionStarted, strikeEventSessionTitled, strikeEventModelSelected}
 }
 
 type strikeSidecar struct {

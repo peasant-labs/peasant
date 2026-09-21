@@ -224,12 +224,20 @@ func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, k
 }
 
 func isKnownOpenCodeSemanticPartType(partType string) bool {
-	switch partType {
-	case "text", "reasoning", "tool", "tool_use", "tool_result", "compaction", "subtask", "agent":
-		return true
-	default:
-		return false
+	for _, known := range knownOpenCodeSemanticPartKinds() {
+		if partType == known {
+			return true
+		}
 	}
+	return false
+}
+
+// knownOpenCodeSemanticPartKinds is the closed set of OpenCode semantic part
+// types this build indexes. It is the single source of truth for
+// isKnownOpenCodeSemanticPartType, and the record-kind drift test walks it
+// against the registry.
+func knownOpenCodeSemanticPartKinds() []string {
+	return []string{"text", "reasoning", "tool", "tool_use", "tool_result", "compaction", "subtask", "agent"}
 }
 
 // IndexTranscript reads all msg_*.json files under the message directory for a session
