@@ -17,12 +17,12 @@ type HarvesterVersions struct {
 // Indexer revision 15 preserves the former global parser baseline. Index format
 // 1 is the relational representation, not that parser revision.
 var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
-	HarnessPi:         {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
-	HarnessClaudeCode: {AdapterVersion: 1, IndexerVersion: 17, IndexVersion: 1},
+	HarnessPi:         {AdapterVersion: 2, IndexerVersion: 17, IndexVersion: 1},
+	HarnessClaudeCode: {AdapterVersion: 1, IndexerVersion: 18, IndexVersion: 1},
 	HarnessOpenCode:   {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 	HarnessCodex:      {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
-	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
-	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
+	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 17, IndexVersion: 1},
+	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 17, IndexVersion: 1},
 }
 
 // NativeGenerationRepairTargets declares the adapter, indexer and format

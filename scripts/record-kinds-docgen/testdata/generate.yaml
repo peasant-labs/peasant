@@ -1,0 +1,12 @@
+required_names:
+  - missing argument
+  - extra argument
+  - nonexistent document
+  - directory is not document
+  - regenerate whole document
+cases:
+  - {name: missing argument, mode: no-args, error: 'usage:'}
+  - {name: extra argument, mode: extra-args, error: 'usage:'}
+  - {name: nonexistent document, mode: missing, error: read existing document}
+  - {name: directory is not document, mode: directory, error: read existing document}
+  - {name: regenerate whole document, mode: file}

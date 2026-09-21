@@ -3,8 +3,6 @@ package ingest
 import (
 	_ "embed"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/record_kinds_aggregate.yaml
@@ -32,19 +30,19 @@ type recordKindsAggregateFixture struct {
 type recordKindsTrackedFixture struct {
 	RequiredNames []string `yaml:"required_names"`
 	Cases         []struct {
-		Name       string `yaml:"name"`
-		Harness    string `yaml:"harness"`
-		Kind       string `yaml:"kind"`
-		WantListed bool   `yaml:"want_listed"`
+		Name       string            `yaml:"name"`
+		Harness    string            `yaml:"harness"`
+		Kind       string            `yaml:"kind"`
+		Context    RecordKindContext `yaml:"context"`
+		Namespace  string            `yaml:"namespace"`
+		WantListed bool              `yaml:"want_listed"`
 	} `yaml:"cases"`
 }
 
 func loadRecordKindsAggregateFixtures(t *testing.T) recordKindsAggregateFixture {
 	t.Helper()
 	var fixture recordKindsAggregateFixture
-	if err := yaml.Unmarshal(recordKindsAggregateYAML, &fixture); err != nil {
-		t.Fatal(err)
-	}
+	decodeRegistryFixture(t, recordKindsAggregateYAML, &fixture)
 	seen := make(map[string]bool, len(fixture.Cases))
 	for _, row := range fixture.Cases {
 		if row.Name == "" || seen[row.Name] {
@@ -55,20 +53,14 @@ func loadRecordKindsAggregateFixtures(t *testing.T) recordKindsAggregateFixture 
 			t.Fatalf("record-kind aggregate fixture %q is incomplete", row.Name)
 		}
 	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing record-kind aggregate fixture %q", name)
-		}
-	}
+	checkRegistryFixtureNames(t, seen, fixture.RequiredNames)
 	return fixture
 }
 
 func loadRecordKindsTrackedFixtures(t *testing.T) recordKindsTrackedFixture {
 	t.Helper()
 	var fixture recordKindsTrackedFixture
-	if err := yaml.Unmarshal(recordKindsTrackedYAML, &fixture); err != nil {
-		t.Fatal(err)
-	}
+	decodeRegistryFixture(t, recordKindsTrackedYAML, &fixture)
 	seen := make(map[string]bool, len(fixture.Cases))
 	for _, row := range fixture.Cases {
 		if row.Name == "" || seen[row.Name] {
@@ -79,11 +71,7 @@ func loadRecordKindsTrackedFixtures(t *testing.T) recordKindsTrackedFixture {
 			t.Fatalf("record-kind tracked fixture %q is incomplete", row.Name)
 		}
 	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing record-kind tracked fixture %q", name)
-		}
-	}
+	checkRegistryFixtureNames(t, seen, fixture.RequiredNames)
 	return fixture
 }
 
@@ -134,16 +122,25 @@ func TestRecordKindsTrackedNotVisualized(t *testing.T) {
 			t.Errorf("tracked row names unknown harness %q", string(row.Harness))
 			continue
 		}
-		entry, ok := section.KindsByName()[row.Kind]
+		entry, ok := section.KindsByKey()[RecordKindKey{row.Context, row.Namespace, row.Kind, row.Match}]
 		if !ok {
 			t.Errorf("tracked row names unknown kind %q for harness %q", row.Kind, string(row.Harness))
 			continue
 		}
-		stored := entry.Status == RecordKindRepresented || entry.Status == RecordKindTrackedOnly
+		stored := entry.Status == RecordKindRepresented || entry.Status == RecordKindTrackedOnly || entry.Status == RecordKindRetainedUnknown
 		unshown := entry.Visualized == RecordKindHidden || entry.Visualized == RecordKindPlanned
 		if !stored || !unshown {
 			t.Errorf("tracked row %s/%s is not stored-but-unshown (status %q, visualized %q)",
 				string(row.Harness), row.Kind, string(entry.Status), string(entry.Visualized))
+		}
+	}
+	for harness, section := range registry.Harnesses {
+		for _, kind := range section.Kinds {
+			stored := kind.Status == RecordKindRepresented || kind.Status == RecordKindTrackedOnly || kind.Status == RecordKindRetainedUnknown
+			unshown := kind.Visualized == RecordKindHidden || kind.Visualized == RecordKindPlanned
+			if seen[RecordKindTracked{Harness: harness, Kind: kind.Kind, Context: kind.Context, Namespace: kind.Namespace, Match: kind.Match}] != (stored && unshown) {
+				t.Errorf("exact report membership differs for %+v", kind.Key())
+			}
 		}
 	}
 	for _, row := range loadRecordKindsTrackedFixtures(t).Cases {
@@ -152,7 +149,7 @@ func TestRecordKindsTrackedNotVisualized(t *testing.T) {
 			if !harness.IsKnown() {
 				t.Fatalf("unknown harness %q", row.Harness)
 			}
-			member := seen[RecordKindTracked{Harness: harness, Kind: row.Kind}]
+			member := seen[RecordKindTracked{Harness: harness, Kind: row.Kind, Context: row.Context, Namespace: row.Namespace, Match: RecordKindLiteral}]
 			if member != row.WantListed {
 				t.Errorf("tracked-not-visualized lists %s/%s = %v, want listed = %v",
 					row.Harness, row.Kind, member, row.WantListed)

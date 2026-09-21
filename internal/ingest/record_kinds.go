@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,8 @@ const (
 	// RecordKindRefused writes no entry; the typed refusal names the kind and
 	// the capture stays incomplete until a build represents it.
 	RecordKindRefused RecordKindStatus = "refused"
+	// RecordKindRetainedUnknown preserves evidence without interpreting it.
+	RecordKindRetainedUnknown RecordKindStatus = "retained-unknown"
 )
 
 // RecordKindPreview is the closed set for whether a kind carries a
@@ -62,6 +65,9 @@ const (
 // RecordKind is one row of the record-kind registry: the parser disposition,
 // the stored shape, and the reader treatment of one harness kind.
 type RecordKind struct {
+	Context    RecordKindContext    `yaml:"-"`
+	Namespace  string               `yaml:"-"`
+	Match      RecordKindMatch      `yaml:"match,omitempty"`
 	Kind       string               `yaml:"kind"`
 	Status     RecordKindStatus     `yaml:"status"`
 	Preview    RecordKindPreview    `yaml:"preview"`
@@ -75,9 +81,65 @@ type RecordKind struct {
 // RecordKindHarness is the registry section for one harness: the harvester
 // versions the mapping was written against, plus every mapped kind.
 type RecordKindHarness struct {
-	AdapterVersion int          `yaml:"adapter_version"`
-	IndexerVersion int          `yaml:"indexer_version"`
-	Kinds          []RecordKind `yaml:"kinds"`
+	AdapterVersion int                   `yaml:"adapter_version"`
+	IndexerVersion int                   `yaml:"indexer_version"`
+	IndexVersion   int                   `yaml:"index_version"`
+	NativeVersions *RecordKindVersions   `yaml:"native_versions,omitempty"`
+	Fallback       RecordKind            `yaml:"fallback"`
+	Inventories    []RecordKindInventory `yaml:"inventories"`
+	Kinds          []RecordKind          `yaml:"-"`
+}
+
+// RecordKindVersions identifies verification targets, never per-session stamps.
+type RecordKindVersions struct {
+	AdapterVersion int `yaml:"adapter_version"`
+	IndexerVersion int `yaml:"indexer_version"`
+	IndexVersion   int `yaml:"index_version"`
+}
+
+// RecordKindContext separates different producers of the same native spelling.
+type RecordKindContext string
+
+const (
+	RecordKindRetained RecordKindContext = "retained-format-1"
+	RecordKindNative   RecordKindContext = "native-generation"
+)
+
+// RecordKindMatch makes prefix families explicit, rather than fake literal kinds.
+type RecordKindMatch string
+
+const (
+	RecordKindLiteral RecordKindMatch = "literal"
+	RecordKindPrefix  RecordKindMatch = "prefix"
+)
+
+// RecordKindSource selects production syntax, not a duplicate test vocabulary.
+// Switch is an exact Go expression; empty selects a returned list or map.
+type RecordKindSource struct {
+	File           string `yaml:"file"`
+	Symbol         string `yaml:"symbol"`
+	Switch         string `yaml:"switch,omitempty"`
+	PrefixArgument string `yaml:"prefix_argument,omitempty"`
+	ListsOnly      bool   `yaml:"lists_only,omitempty"`
+}
+
+type RecordKindInventory struct {
+	Context   RecordKindContext  `yaml:"context"`
+	Namespace string             `yaml:"namespace"`
+	Sources   []RecordKindSource `yaml:"sources"`
+	Kinds     []RecordKind       `yaml:"kinds"`
+}
+
+// RecordKindKey is the unambiguous identity used by reports and drift checks.
+type RecordKindKey struct {
+	Context   RecordKindContext
+	Namespace string
+	Kind      string
+	Match     RecordKindMatch
+}
+
+func (k RecordKind) Key() RecordKindKey {
+	return RecordKindKey{k.Context, k.Namespace, k.Kind, k.Match}
 }
 
 // RecordKindRegistry is the parsed record_kinds.yaml: the per-harness mapping
@@ -90,17 +152,44 @@ type RecordKindRegistry struct {
 }
 
 // recordKindsFormatVersion is the registry schema this build reads.
-const recordKindsFormatVersion = 1
+const recordKindsFormatVersion = 2
 
 // LoadRecordKindRegistry parses and validates the embedded registry. A
 // registry that breaks a closed set, repeats a kind, or leaves a required
 // field empty is a programmer error the drift test reports.
 func LoadRecordKindRegistry() (RecordKindRegistry, error) {
+	return decodeRecordKindRegistry(recordKindsYAML)
+}
+
+func decodeRecordKindRegistry(data []byte) (RecordKindRegistry, error) {
 	var registry RecordKindRegistry
-	decoder := yaml.NewDecoder(bytes.NewReader(recordKindsYAML))
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&registry); err != nil {
 		return RecordKindRegistry{}, fmt.Errorf("record-kind registry: decode: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return RecordKindRegistry{}, fmt.Errorf("record-kind registry: expected one YAML document; remove trailing content (decode: %v)", err)
+	}
+	for harness, section := range registry.Harnesses {
+		for _, inventory := range section.Inventories {
+			for _, kind := range inventory.Kinds {
+				kind.Context, kind.Namespace = inventory.Context, inventory.Namespace
+				if kind.Match == "" {
+					kind.Match = RecordKindLiteral
+				}
+				if kind.Source == "" {
+					var refs []string
+					for _, source := range inventory.Sources {
+						refs = append(refs, source.File+" "+source.Symbol)
+					}
+					kind.Source = strings.Join(refs, "; ")
+				}
+				section.Kinds = append(section.Kinds, kind)
+			}
+		}
+		registry.Harnesses[harness] = section
 	}
 	if err := registry.validate(); err != nil {
 		return RecordKindRegistry{}, err
@@ -121,28 +210,82 @@ func (r RecordKindRegistry) validate() error {
 	if r.Version != recordKindsFormatVersion {
 		return fmt.Errorf("record-kind registry: version %d is not the supported version %d", r.Version, recordKindsFormatVersion)
 	}
-	if len(r.Harnesses) == 0 {
-		return fmt.Errorf("record-kind registry: no harness section")
+	for harness := range DefaultAdapterRegistry {
+		if _, ok := r.Harnesses[harness]; !ok {
+			return fmt.Errorf("record-kind registry: registered adapter %q has no section; declare its behavior", harness)
+		}
+	}
+	for harness := range HarvesterVersionRegistry {
+		if _, ok := r.Harnesses[harness]; !ok {
+			return fmt.Errorf("record-kind registry: versioned harness %q has no section", harness)
+		}
 	}
 	for harness, section := range r.Harnesses {
-		if !harness.IsKnown() {
-			return fmt.Errorf("record-kind registry: harness %q is not a known harness", string(harness))
+		if _, ok := DefaultAdapterRegistry[harness]; !ok {
+			return fmt.Errorf("record-kind registry: harness %q has no supported adapter", string(harness))
 		}
-		if section.AdapterVersion < 1 || section.IndexerVersion < 1 {
-			return fmt.Errorf("record-kind registry: harness %q declares nonpositive versions", string(harness))
+		target, ok := HarvesterVersionRegistry[harness]
+		if !ok || target != (HarvesterVersions{section.AdapterVersion, section.IndexerVersion, section.IndexVersion}) {
+			return fmt.Errorf("record-kind registry: harness %q baseline versions differ; verify against HarvesterVersionRegistry", harness)
 		}
-		seen := make(map[string]bool, len(section.Kinds))
+		native, hasNative := NativeGenerationRepairTargets[harness]
+		if hasNative != (section.NativeVersions != nil) {
+			return fmt.Errorf("record-kind registry: harness %q native version declaration missing or unexpected", harness)
+		}
+		if v := section.NativeVersions; v != nil && native != (HarvesterVersions{v.AdapterVersion, v.IndexerVersion, v.IndexVersion}) {
+			return fmt.Errorf("record-kind registry: harness %q native versions differ; verify against NativeGenerationRepairTargets", harness)
+		}
+		fallback := section.Fallback
+		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Visualized != RecordKindHidden || fallback.Renderer != "" || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" {
+			return fmt.Errorf("record-kind registry: harness %q must declare an unnamed hidden retained-unknown fallback with payload, reason and source", harness)
+		}
+		inventories := make(map[string]bool)
+		contexts := make(map[RecordKindContext]bool)
+		for _, inventory := range section.Inventories {
+			contexts[inventory.Context] = true
+			key := string(inventory.Context) + "/" + inventory.Namespace
+			if inventories[key] || inventory.Namespace == "" || len(inventory.Sources) == 0 || len(inventory.Kinds) == 0 {
+				return fmt.Errorf("record-kind registry: harness %q invalid or duplicate inventory %q", harness, key)
+			}
+			inventories[key] = true
+			if inventory.Context != RecordKindRetained && (inventory.Context != RecordKindNative || !hasNative) {
+				return fmt.Errorf("record-kind registry: harness %q unsupported context %q", harness, inventory.Context)
+			}
+			for _, source := range inventory.Sources {
+				if source.File == "" || source.Symbol == "" || strings.Contains(source.File, "..") || strings.HasSuffix(source.File, "_test.go") {
+					return fmt.Errorf("record-kind registry: harness %q requires a production source selector", harness)
+				}
+			}
+		}
+		if len(inventories) == 0 {
+			return fmt.Errorf("record-kind registry: harness %q has no inventories", harness)
+		}
+		if !contexts[RecordKindRetained] || hasNative != contexts[RecordKindNative] {
+			return fmt.Errorf("record-kind registry: harness %q context inventory does not cover its producer targets", harness)
+		}
+		seen := make(map[RecordKindKey]bool, len(section.Kinds))
 		for i, kind := range section.Kinds {
 			where := fmt.Sprintf("record-kind registry: harness %q kind %d", string(harness), i)
 			if kind.Kind == "" {
 				return fmt.Errorf("%s: empty kind name", where)
 			}
-			if seen[kind.Kind] {
+			if seen[kind.Key()] {
 				return fmt.Errorf("%s: duplicate kind %q", where, kind.Kind)
 			}
-			seen[kind.Kind] = true
+			seen[kind.Key()] = true
+			for _, other := range section.Kinds[:i] {
+				if kind.Context != other.Context || kind.Namespace != other.Namespace {
+					continue
+				}
+				if kind.Kind == other.Kind || (kind.Match == RecordKindPrefix && strings.HasPrefix(other.Kind, kind.Kind)) || (other.Match == RecordKindPrefix && strings.HasPrefix(kind.Kind, other.Kind)) {
+					return fmt.Errorf("%s: ambiguous overlapping match for %q", where, kind.Kind)
+				}
+			}
+			if kind.Match != RecordKindLiteral && kind.Match != RecordKindPrefix {
+				return fmt.Errorf("%s: invalid match %q", where, kind.Match)
+			}
 			switch kind.Status {
-			case RecordKindRepresented, RecordKindTrackedOnly, RecordKindIgnoredControl, RecordKindRefused:
+			case RecordKindRepresented, RecordKindTrackedOnly, RecordKindIgnoredControl, RecordKindRefused, RecordKindRetainedUnknown:
 			default:
 				return fmt.Errorf("%s %q: unknown status %q", where, kind.Kind, string(kind.Status))
 			}
@@ -162,7 +305,7 @@ func (r RecordKindRegistry) validate() error {
 			if kind.Source == "" {
 				return fmt.Errorf("%s %q: empty source; name the code reference or census", where, kind.Kind)
 			}
-			needsReason := kind.Status == RecordKindRefused || kind.Status == RecordKindIgnoredControl
+			needsReason := kind.Status == RecordKindRefused || kind.Status == RecordKindIgnoredControl || kind.Status == RecordKindRetainedUnknown
 			if needsReason && kind.Reason == "" {
 				return fmt.Errorf("%s %q: status %q requires a reason", where, kind.Kind, string(kind.Status))
 			}
@@ -180,13 +323,42 @@ func (r RecordKindRegistry) validate() error {
 	return nil
 }
 
-// KindsByName indexes one harness section by kind name.
+// KindsByName is the legacy name-only view. Ambiguous names are omitted, never
+// overwritten. New consumers must use KindsByKey to retain context/namespace.
 func (h RecordKindHarness) KindsByName() map[string]RecordKind {
 	byName := make(map[string]RecordKind, len(h.Kinds))
+	duplicates := make(map[string]bool)
 	for _, kind := range h.Kinds {
+		if _, exists := byName[kind.Kind]; exists {
+			duplicates[kind.Kind] = true
+		}
 		byName[kind.Kind] = kind
 	}
+	for name := range duplicates {
+		delete(byName, name)
+	}
 	return byName
+}
+
+func (h RecordKindHarness) KindsByKey() map[RecordKindKey]RecordKind {
+	result := make(map[RecordKindKey]RecordKind, len(h.Kinds))
+	for _, kind := range h.Kinds {
+		result[kind.Key()] = kind
+	}
+	return result
+}
+
+// Lookup describes handling; it never gates acceptance of arbitrary native names.
+// Malformed known input remains an error in the owning parser, not a new kind.
+func (h RecordKindHarness) Lookup(context RecordKindContext, namespace, name string) RecordKind {
+	for _, kind := range h.Kinds {
+		if kind.Context == context && kind.Namespace == namespace && ((kind.Match == RecordKindLiteral && kind.Kind == name) || (kind.Match == RecordKindPrefix && strings.HasPrefix(name, kind.Kind))) {
+			return kind
+		}
+	}
+	fallback := h.Fallback
+	fallback.Context, fallback.Namespace, fallback.Kind, fallback.Match = context, namespace, name, RecordKindLiteral
+	return fallback
 }
 
 // RecordKindRefusal is one strict-parser refusal: the harness and the kind
@@ -207,8 +379,11 @@ type RecordKindRefusalCount struct {
 // RecordKindTracked is one stored-but-not-visualized registry kind, named for
 // the run report.
 type RecordKindTracked struct {
-	Harness Harness `json:"harness"`
-	Kind    string  `json:"kind"`
+	Harness   Harness           `json:"harness"`
+	Kind      string            `json:"kind"`
+	Context   RecordKindContext `json:"context"`
+	Namespace string            `json:"namespace"`
+	Match     RecordKindMatch   `json:"match"`
 }
 
 // AggregateRecordKindRefusals folds per-session refusals into deterministic
@@ -238,7 +413,7 @@ func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefus
 func (h RecordKindHarness) TrackedNotVisualized() []RecordKind {
 	var hidden []RecordKind
 	for _, kind := range h.Kinds {
-		stored := kind.Status == RecordKindRepresented || kind.Status == RecordKindTrackedOnly
+		stored := kind.Status == RecordKindRepresented || kind.Status == RecordKindTrackedOnly || kind.Status == RecordKindRetainedUnknown
 		unshown := kind.Visualized == RecordKindHidden || kind.Visualized == RecordKindPlanned
 		if stored && unshown {
 			hidden = append(hidden, kind)
@@ -259,7 +434,7 @@ func (r RecordKindRegistry) TrackedNotVisualized() []RecordKindTracked {
 	sort.Slice(harnesses, func(i, j int) bool { return string(harnesses[i]) < string(harnesses[j]) })
 	for _, harness := range harnesses {
 		for _, kind := range r.Harnesses[harness].TrackedNotVisualized() {
-			out = append(out, RecordKindTracked{Harness: harness, Kind: kind.Kind})
+			out = append(out, RecordKindTracked{Harness: harness, Kind: kind.Kind, Context: kind.Context, Namespace: kind.Namespace, Match: kind.Match})
 		}
 	}
 	return out
@@ -277,15 +452,20 @@ func (r RecordKindRegistry) Markdown() string {
 	for _, harness := range harnesses {
 		section := r.Harnesses[harness]
 		fmt.Fprintf(&out, "## %s (adapter %d, indexer %d)\n\n", string(harness), section.AdapterVersion, section.IndexerVersion)
-		out.WriteString("| Kind | Status | Preview | Payload | Visualized | Detail |\n")
-		out.WriteString("|---|---|---|---|---|---|\n")
+		fmt.Fprintf(&out, "Baseline index format: %d.\n\n", section.IndexVersion)
+		if v := section.NativeVersions; v != nil {
+			fmt.Fprintf(&out, "Native generation: adapter %d, indexer %d, index format %d.\n\n", v.AdapterVersion, v.IndexerVersion, v.IndexVersion)
+		}
+		fmt.Fprintf(&out, "Unseen valid kinds: **%s**, preview **%s**, display **%s**. %s Payload: %s. Source: `%s`.\n\n", section.Fallback.Status, section.Fallback.Preview, section.Fallback.Visualized, section.Fallback.Reason, section.Fallback.Payload, section.Fallback.Source)
+		out.WriteString("| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |\n")
+		out.WriteString("|---|---|---|---|---|---|---|---|---|---|\n")
 		for _, kind := range section.Kinds {
 			detail := kind.Reason
 			if kind.Visualized == RecordKindRendered {
 				detail = kind.Renderer
 			}
-			fmt.Fprintf(&out, "| `%s` | %s | %s | %s | %s | %s |\n",
-				kind.Kind, string(kind.Status), string(kind.Preview), kind.Payload, string(kind.Visualized), detail)
+			fmt.Fprintf(&out, "| %s | %s | `%s` | %s | %s | %s | %s | %s | %s | `%s` |\n",
+				kind.Context, kind.Namespace, kind.Kind, kind.Match, kind.Status, kind.Preview, kind.Payload, kind.Visualized, detail, kind.Source)
 		}
 		out.WriteString("\n")
 	}

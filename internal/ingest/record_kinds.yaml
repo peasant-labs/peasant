@@ -1,1003 +1,476 @@
-# Record-kind registry: which harness record and part kinds peasant tracks,
-# refuses, or ignores, and how each one is shown.
-#
-# This file is the per-harness mapping deliverable of peasant-labs/peasant#397.
-# A test (record_kinds_drift_test.go) fails when production code and this file
-# disagree in either direction: adding or removing a kind in a parser requires
-# a registry edit in the same change.
-#
-# Closed rules, enforced by the loader and the drift test:
-# - status: represented | tracked-only | ignored-control | refused
-# - preview: yes | no
-# - payload: the retained extra shape, or none
-# - visualized: rendered | hidden | planned | not-applicable
-# - reason: required for refused and ignored-control, empty otherwise
-# - renderer: required for rendered, empty otherwise
-# - source: a first-party code reference (file and symbol) or the census
-#   comment on peasant-labs/peasant#385 that observed the kind
-# - A kind absent from this file is refused: every strict parser ends its
-#   dispatch with an UnrepresentedRecordError for an unlisted kind. The only
-#   exception is the OpenCode legacy SQLite path, which tolerates an unknown
-#   part with an OpenCodeUnknownPartType diagnostic instead of refusing; that
-#   tolerance is recorded on the file kind below and is itself under review in
-#   peasant-labs/peasant#447.
-# - adapter_version and indexer_version name the HarvesterVersionRegistry
-#   baseline this mapping was written against. A registry bump forces an
-#   explicit re-verification here, so a version change cannot silently widen
-#   or narrow the vocabulary.
-# - Pi has no strict record vocabulary to walk (its indexer keeps PiExtra
-#   state, never a kind switch), so it has no section until its mapping lands.
-version: 1
+# Parser behavior, not a native-input allowlist. One declaration per line.
+# Inventories point at production admission/dispatch syntax. Unknown valid names
+# use fallback without a new declaration. Invalid known fields remain errors.
+version: 2
 harnesses:
   claude-code:
     adapter_version: 1
+    indexer_version: 18
+    index_version: 1
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete redacted JSON and source coordinates in retainedUnknown
+      visualized: hidden
+      reason: Retain uninterpreted evidence and mark partial interpretation; display is deferred.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknownFromSource
+    inventories:
+      - context: retained-format-1
+        namespace: record
+        sources:
+          - {file: content_capture.go, symbol: claudeStrictRecordKinds}
+          - {file: content_capture.go, symbol: ClaudeIndexer.IndexTranscriptBytesForCapture, switch: line.Type}
+          - {file: claude_control_records.go, symbol: claudeControlRecordTypes}
+          - {file: claude_control_records.go, symbol: isClaudeControlRecordType, prefix_argument: recordType}
+        kinds:
+          - &text {kind: user, status: represented, preview: yes, payload: session entries, visualized: rendered, renderer: internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: human}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: summary}
+          - {<<: *text, kind: result}
+          - &ignored {kind: progress, status: ignored-control, preview: no, payload: none, visualized: not-applicable, reason: Entryless control; unexpected conversation content remains a validation error.}
+          - {<<: *ignored, kind: queue-operation}
+          - {<<: *ignored, kind: file-history-snapshot}
+          - {<<: *ignored, kind: last-prompt}
+          - &control {kind: permission-mode, status: represented, preview: yes, payload: bounded control extra (oversized known controls retain identity only), visualized: planned}
+          - {<<: *control, kind: mode}
+          - {<<: *control, kind: agent-setting}
+          - {<<: *control, kind: agent-name}
+          - {<<: *control, kind: ai-title}
+          - {<<: *control, kind: atis-latch}
+          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra, visualized: hidden}
+          - {<<: *control, kind: bridge-session}
+          - {<<: *control, kind: started}
+          - {<<: *control, kind: cost-state}
+          - {<<: *control, kind: custom-title}
+          - {<<: *control, kind: file-history-delta}
+          - {<<: *control, kind: frame-link}
+          - {<<: *control, kind: fork-context-ref}
+          - {<<: *control, kind: worktree-state}
+          - {<<: *control, kind: launched}
+          - {<<: *control, kind: pr-link}
+          - {<<: *control, kind: artifact-, match: prefix}
+      - context: retained-format-1
+        namespace: system_subtype
+        sources:
+          - {file: content_capture.go, symbol: claudeStrictSystemSubtypes}
+          - {file: content_capture.go, symbol: ClaudeIndexer.IndexTranscriptBytesForCapture, switch: line.Subtype}
+        kinds:
+          - {<<: *ignored, kind: turn_duration}
+          - {<<: *control, kind: compact_boundary, payload: compactMetadata}
+          - {<<: *ignored, kind: stop_hook_summary}
+          - {<<: *text, kind: api_error}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds}
+          - {file: content_capture.go, symbol: validateCaptureContent, switch: block.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments; renderer depends on recognized tool kind, visualized: planned}
+          - &result {kind: tool_result, status: represented, preview: yes, payload: tool output; renderer depends on paired recognized tool kind, visualized: planned}
+          - {<<: *ignored, kind: tool_reference}
+  cursor:
+    adapter_version: 1
     indexer_version: 17
-    kinds:
-      - kind: user
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer user turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture strict switch
-      - kind: assistant
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer assistant turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture strict switch
-      - kind: human
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer user turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture strict switch
-      - kind: system
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer system turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture strict switch
-      - kind: summary
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer system turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture strict switch
-      - kind: result
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer system turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go ClaudeIndexer.IndexTranscriptBytesForCapture strict switch
-      - kind: api_error
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer system turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go system api_error branch; internal/ingest/claude_indexer.go api_error preview
-      - kind: text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer turn content (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: thinking
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: tool_use
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: tool_result
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: tool_reference
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control block naming a deferred tool schema; no conversation content.
-        source: internal/ingest/content_capture.go validateCaptureContent tool_reference branch
-      - kind: compact_boundary
-        status: represented
-        preview: yes
-        payload: full compactMetadata
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordKind, claudeCompactBoundaryPreview (retained as partType compact-boundary)
-      - kind: permission-mode
-        status: represented
-        preview: yes
-        payload: value + scope
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: mode
-        status: represented
-        preview: yes
-        payload: value + scope
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: agent-setting
-        status: represented
-        preview: yes
-        payload: value + scope
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: agent-name
-        status: represented
-        preview: yes
-        payload: value + scope
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: ai-title
-        status: represented
-        preview: yes
-        payload: value
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: atis-latch
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: attachment
-        status: tracked-only
-        preview: no
-        payload: sub-kind + payload
-        visualized: hidden
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: bridge-session
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: started
-        status: represented
-        preview: yes
-        payload: payload + scope
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: cost-state
-        status: represented
-        preview: yes
-        payload: snapshot
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: custom-title
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: file-history-delta
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: frame-link
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: fork-context-ref
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: worktree-state
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: launched
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: pr-link
-        status: represented
-        preview: yes
-        payload: number/repository/url
-        visualized: planned
-        source: internal/ingest/claude_control_records.go claudeControlRecordTypes, claudeControlPreview
-      - kind: artifact-
-        status: represented
-        preview: yes
-        payload: payload
-        visualized: planned
-        source: internal/ingest/claude_control_records.go isClaudeControlRecordType prefix family
-      - kind: progress
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Contentless harness progress marker; a content-bearing record still refuses.
-        source: internal/ingest/content_capture.go progress branch
-      - kind: queue-operation
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Contentless harness queue marker; a content-bearing record still refuses.
-        source: internal/ingest/content_capture.go queue-operation branch
-      - kind: file-history-snapshot
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Contentless history snapshot marker; a content-bearing record still refuses.
-        source: internal/ingest/content_capture.go file-history-snapshot branch
-      - kind: turn_duration
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Contentless system timing subtype.
-        source: internal/ingest/content_capture.go system turn_duration branch
-      - kind: stop_hook_summary
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Contentless system hook subtype.
-        source: internal/ingest/content_capture.go system stop_hook_summary branch
-      - kind: last-prompt
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Mirror of the prompt the user turn already represents; recorded as metadata.
-        source: internal/ingest/content_capture.go last-prompt branch
-      - kind: image
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Content block with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go validateCaptureContent default branch
-      - kind: document
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Content block with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go validateCaptureContent default branch
-      - kind: server_tool_use
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Content block with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go validateCaptureContent default branch
-      - kind: advisor_tool_result
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Content block with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go validateCaptureContent default branch
+    index_version: 1
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: role
+        sources:
+          - {file: content_capture.go, symbol: captureRoleKinds}
+          - {file: unknown_jsonl.go, symbol: cursorCaptureRoleKinds}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: tool}
+          - {<<: *text, kind: human}
+      - context: retained-format-1
+        namespace: record
+        sources:
+          - {file: content_capture.go, symbol: cursorStrictRecordKinds}
+        kinds:
+          - {<<: *text, kind: turn_ended}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds, lists_only: true}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+  strike:
+    adapter_version: 1
+    indexer_version: 17
+    index_version: 1
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: record
+        sources:
+          - {file: strike.go, symbol: knownStrikeEventKinds}
+          - {file: strike_indexer.go, symbol: StrikeIndexer.parseWithCompletion, switch: envelope.Type}
+          - {file: content_capture.go, symbol: StrikeIndexer.IndexTranscriptBytesForCapture, switch: env.Type}
+        kinds:
+          - {<<: *ignored, kind: session.started}
+          - {<<: *ignored, kind: session.titled}
+          - {<<: *ignored, kind: model.selected}
+          - {<<: *text, kind: user.message}
+          - &structural {kind: turn.started, status: represented, preview: no, payload: state on owning entry; no independent row, visualized: not-applicable}
+          - {<<: *structural, kind: turn.completed}
+          - {<<: *text, kind: assistant.text}
+          - {<<: *text, kind: assistant.text.delta}
+          - {<<: *text, kind: assistant.message.delta}
+          - {<<: *text, kind: text.delta}
+          - {<<: *text, kind: assistant.reasoning}
+          - {<<: *text, kind: assistant.reasoning.delta}
+          - {<<: *text, kind: reasoning.delta}
+          - {<<: *text, kind: assistant.thinking.delta}
+          - {<<: *tool, kind: tool.begin}
+          - {<<: *result, kind: tool.output}
+          - {<<: *result, kind: tool.end}
+          - {<<: *tool, kind: process.started}
+          - {<<: *result, kind: process.output}
+          - {<<: *result, kind: process.exited}
+          - {<<: *structural, kind: usage.reported}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds, lists_only: true}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+  pi:
+    adapter_version: 2
+    indexer_version: 17
+    index_version: 1
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: entry
+        sources:
+          - {file: pi_source.go, symbol: piEntryType.UnmarshalJSON, switch: value}
+        kinds:
+          - {<<: *ignored, kind: session, reason: Required v3 document header; no conversation row.}
+          - {<<: *text, kind: message, payload: PiExtra state and usage; role/block dependent content}
+          - &carrier {kind: thinking_level_change, status: tracked-only, preview: no, payload: PiExtra state carrier, visualized: hidden}
+          - {<<: *carrier, kind: model_change}
+          - {<<: *text, kind: compaction, payload: summary and PiExtra usage/native metadata}
+          - {<<: *text, kind: branch_summary, payload: summary and PiExtra usage/native metadata}
+          - {<<: *carrier, kind: custom, payload: PiExtra native metadata}
+          - {<<: *text, kind: custom_message, payload: text/media and PiExtra native metadata}
+          - {<<: *carrier, kind: label}
+          - {<<: *carrier, kind: session_info}
+      - context: retained-format-1
+        namespace: message_role
+        sources:
+          - {file: pi_indexer.go, symbol: piMessageRole.UnmarshalJSON, switch: value}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *result, kind: toolResult}
+          - {<<: *text, kind: bashExecution, payload: shell parent and paired execute tool entries}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: pi_indexer.go, symbol: piBlockType.UnmarshalJSON, switch: value}
+          - {file: pi_indexer.go, symbol: piContent, switch: block.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *text, kind: image, payload: textual media marker (not native image rendering)}
+          - {<<: *tool, kind: toolCall}
   codex:
     adapter_version: 1
     indexer_version: 16
-    kinds:
-      - kind: session_meta
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Rollout envelope carrying session metadata, not conversation content.
-        source: internal/ingest/content_capture.go CodexIndexer.IndexTranscriptBytesForCapture envelope switch
-      - kind: turn_context
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Rollout envelope carrying turn metadata, not conversation content.
-        source: internal/ingest/content_capture.go CodexIndexer.IndexTranscriptBytesForCapture envelope switch
-      - kind: event_msg
-        status: represented
-        preview: no
-        payload: none
-        visualized: not-applicable
-        source: internal/ingest/content_capture.go CodexIndexer.IndexTranscriptBytesForCapture envelope switch (container envelope; disposition is per inner event kind below)
-      - kind: response_item
-        status: represented
-        preview: no
-        payload: none
-        visualized: not-applicable
-        source: internal/ingest/content_capture.go CodexIndexer.IndexTranscriptBytesForCapture envelope switch (container envelope; disposition is per inner payload type below; an unrepresentable payload shape refuses under this same kind name)
-      - kind: token_count
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control event carrying token counts, not conversation content.
-        source: internal/ingest/content_capture.go event_msg switch
-      - kind: task_started
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control event marking task start, not conversation content.
-        source: internal/ingest/content_capture.go event_msg switch
-      - kind: task_complete
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control event marking task completion, not conversation content.
-        source: internal/ingest/content_capture.go event_msg switch
-      - kind: turn_aborted
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control event marking an aborted turn, not conversation content.
-        source: internal/ingest/content_capture.go event_msg switch
-      - kind: user_message
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Mirror of the conversation already represented by a response item; the mirror must match or the capture fails.
-        source: internal/ingest/content_capture.go event_msg mirror branch
-      - kind: agent_message
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Mirror of the conversation already represented by a response item; the mirror must match or the capture fails.
-        source: internal/ingest/content_capture.go event_msg mirror branch
-      - kind: agent_reasoning
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Mirror of the reasoning already represented by a response item; the mirror must match or the capture fails.
-        source: internal/ingest/content_capture.go event_msg mirror branch
-      - kind: message
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go response payload switch; internal/ingest/codex.go codexResponseMessage
-      - kind: reasoning
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go response payload switch; internal/ingest/codex.go codexResponseReasoning
-      - kind: function_call
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go response payload switch; internal/ingest/codex.go codexResponseFunctionCall
-      - kind: custom_tool_call
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go response payload switch; internal/ingest/codex.go codexResponseCustomCall
-      - kind: function_call_output
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go response payload switch; internal/ingest/codex.go codexResponseFunctionOut
-      - kind: custom_tool_call_output
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go response payload switch; internal/ingest/codex.go codexResponseCustomCallOut
-      - kind: input_text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer turn content (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go message block validation
-      - kind: output_text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer turn content (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go message block validation
-      - kind: summary_text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go reasoning summary validation
-      - kind: reasoning_text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go reasoning content validation
-      - kind: text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go reasoning content validation (reasoning content text block)
-      - kind: response_item-unrepresentable
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Response payload shapes with no representation (agent_message, web_search_call, tool_search_call, tool_search_output); the refusal names the response_item kind.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go codexResponseItemEntry branch
-      - kind: input_image
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Message block with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go message block validation
-      - kind: token_usage_record
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go envelope default branch
-      - kind: world_state
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go envelope default branch
-      - kind: inter_agent_communication_metadata
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go envelope default branch
-      - kind: compacted
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Rollout envelope with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go envelope default branch
-      - kind: patch_apply_end
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: sub_agent_activity
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: item_completed
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: thread_settings_applied
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: web_search_end
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: context_compacted
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: mcp_tool_call_end
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: thread_rolled_back
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: thread_goal_updated
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: entered_review_mode
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-      - kind: exited_review_mode
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event kind with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/content_capture.go event_msg default branch
-  strike:
-    adapter_version: 1
-    indexer_version: 16
-    kinds:
-      - kind: session.started
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Session metadata event, not conversation content.
-        source: internal/ingest/content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture metadata branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: session.titled
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Session metadata event, not conversation content.
-        source: internal/ingest/content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture metadata branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: model.selected
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Session metadata event, not conversation content.
-        source: internal/ingest/content_capture.go StrikeIndexer.IndexTranscriptBytesForCapture metadata branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: user.message
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer user turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse user.message branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: turn.started
-        status: represented
-        preview: no
-        payload: none
-        visualized: not-applicable
-        source: internal/ingest/strike_indexer.go parse turn.started branch; internal/ingest/strike.go isKnownStrikeEvent (structural event that opens the turn; writes no entry of its own)
-      - kind: turn.completed
-        status: represented
-        preview: no
-        payload: none
-        visualized: not-applicable
-        source: internal/ingest/strike_indexer.go parse turn.completed branch; internal/ingest/strike.go isKnownStrikeEvent (structural event that records the stop reason on the parent entry; writes no entry of its own)
-      - kind: assistant.text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer assistant turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse assistant text branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: assistant.text.delta
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer assistant turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse assistant text branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: assistant.message.delta
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer assistant turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse assistant text branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: text.delta
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer assistant turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse assistant text branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: assistant.reasoning
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse reasoning branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: assistant.reasoning.delta
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse reasoning branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: reasoning.delta
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse reasoning branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: assistant.thinking.delta
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse reasoning branch; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: tool.begin
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse tool branches; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: tool.output
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse tool branches; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: tool.end
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse tool branches; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: process.started
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse process branches; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: process.output
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse process branches; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: process.exited
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/strike_indexer.go parse process branches; internal/ingest/strike.go isKnownStrikeEvent
-      - kind: usage.reported
-        status: represented
-        preview: no
-        payload: none
-        visualized: not-applicable
-        source: internal/ingest/strike_indexer.go parse usage.reported branch; internal/ingest/strike.go isKnownStrikeEvent (annotates token counts on the parent entry; writes no entry of its own)
-      - kind: agent.selected
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: permission.mode
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: effort.selected
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: autonomy.selected
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: phase.changed
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: child.started
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: child.completed
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: permission.asked
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: permission.resolved
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: session.meta
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: team.roster
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: engine.error
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: session.header
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: question.asked
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: question.resolved
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
-      - kind: files.invalidated
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Event type with no representation; refusal keeps the capture incomplete until a build represents it.
-        source: census on peasant-labs/peasant#385; internal/ingest/strike.go isKnownStrikeEvent default branch
+    index_version: 1
+    native_versions: {adapter_version: 2, indexer_version: 17, index_version: 2}
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: envelope
+        sources:
+          - {file: content_capture.go, symbol: codexStrictEnvelopeKinds}
+          - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: env.Type}
+        kinds:
+          - {<<: *ignored, kind: session_meta}
+          - {<<: *ignored, kind: turn_context}
+          - {<<: *structural, kind: event_msg}
+          - {<<: *structural, kind: response_item}
+      - context: retained-format-1
+        namespace: event
+        sources:
+          - {file: content_capture.go, symbol: codexStrictEventMsgKinds}
+          - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: event.Type}
+        kinds:
+          - {<<: *ignored, kind: token_count}
+          - {<<: *ignored, kind: task_started}
+          - {<<: *ignored, kind: task_complete}
+          - {<<: *ignored, kind: turn_aborted}
+          - {<<: *ignored, kind: user_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_reasoning, reason: Mirrored content is represented by response items.}
+      - context: retained-format-1
+        namespace: response_item
+        sources:
+          - {file: content_capture.go, symbol: codexStrictResponsePayloadKinds}
+          - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: payload.Type}
+        kinds:
+          - {<<: *text, kind: message}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: function_call}
+          - {<<: *tool, kind: custom_tool_call}
+          - {<<: *result, kind: function_call_output}
+          - {<<: *result, kind: custom_tool_call_output}
+      - context: retained-format-1
+        namespace: message_block
+        sources:
+          - {file: content_capture.go, symbol: codexStrictMessageBlockKinds}
+        kinds:
+          - {<<: *text, kind: input_text}
+          - {<<: *text, kind: output_text}
+      - context: retained-format-1
+        namespace: reasoning_summary
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningSummaryKinds}
+        kinds:
+          - {<<: *text, kind: summary_text}
+      - context: retained-format-1
+        namespace: reasoning_content
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningContentKinds}
+        kinds:
+          - {<<: *text, kind: reasoning_text}
+          - {<<: *text, kind: text}
+      - context: native-generation
+        namespace: envelope
+        sources:
+          - {file: codex_history_replay.go, symbol: recognizedCodexEnvelopeType, switch: envelopeType}
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayRecord, switch: record.EnvelopeType}
+        kinds:
+          - {<<: *structural, kind: session_meta}
+          - {<<: *structural, kind: turn_context}
+          - {<<: *structural, kind: event_msg}
+          - {<<: *structural, kind: response_item}
+          - {<<: *structural, kind: compacted}
+      - context: native-generation
+        namespace: event
+        sources:
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage, switch: payload.Type}
+        kinds:
+          - {<<: *structural, kind: item_started}
+          - {<<: *structural, kind: item_completed}
+          - {<<: *structural, kind: turn_started}
+          - {<<: *structural, kind: task_started}
+          - {<<: *structural, kind: turn_complete}
+          - {<<: *structural, kind: task_complete}
+          - {<<: *structural, kind: thread_rolled_back}
+          - {<<: *structural, kind: turn_aborted}
+      - context: native-generation
+        namespace: response_item
+        sources:
+          - {file: codex_history_replay.go, symbol: codexResponseNativeType, switch: payloadType}
+        kinds:
+          - {<<: *text, kind: message}
+          - {<<: *text, kind: agent_message}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: function_call}
+          - {<<: *tool, kind: custom_tool_call}
+          - {<<: *result, kind: function_call_output}
+          - {<<: *result, kind: custom_tool_call_output}
+      - context: native-generation
+        namespace: item_body
+        sources:
+          - {file: codex_history_replay.go, symbol: codexItemNativeType, switch: body.Type}
+          - {file: codex_history_replay.go, symbol: codexResponseNativeType, switch: payloadType}
+        kinds:
+          - {<<: *text, kind: message}
+          - {<<: *text, kind: agent_message}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: function_call}
+          - {<<: *tool, kind: custom_tool_call}
+          - {<<: *result, kind: function_call_output}
+          - {<<: *result, kind: custom_tool_call_output}
+          - {<<: *text, kind: UserMessage}
+          - {<<: *text, kind: AgentMessage}
+          - {<<: *text, kind: Reasoning}
+          - {<<: *result, kind: FunctionCallOutput}
+          - &nativeitem {kind: CommandExecution, status: represented, preview: yes, payload: classified native item and provenance; display depends on mapped content, visualized: planned}
+          - {<<: *nativeitem, kind: FileChange}
+          - {<<: *nativeitem, kind: SubAgentActivity}
+          - {<<: *nativeitem, kind: CollabAgentToolCall}
+          - {<<: *nativeitem, kind: ContextCompaction}
+          - {<<: *nativeitem, kind: Extension}
+          - {<<: *nativeitem, kind: Plan}
+          - {<<: *nativeitem, kind: HookPrompt}
+          - {<<: *nativeitem, kind: WebSearch}
+          - {<<: *nativeitem, kind: ImageView}
+          - {<<: *nativeitem, kind: ImageGeneration}
+          - {<<: *nativeitem, kind: McpToolCall}
+          - {<<: *nativeitem, kind: DynamicToolCall}
+          - {<<: *nativeitem, kind: EnteredReviewMode}
+          - {<<: *nativeitem, kind: ExitedReviewMode}
+      - context: native-generation
+        namespace: message_block
+        sources:
+          - {file: codex_provenance.go, symbol: codexMediaContentTypes}
+          - {file: codex_provenance.go, symbol: codexBlockModality, switch: contentType}
+        kinds:
+          - {<<: *text, kind: input_text}
+          - {<<: *text, kind: output_text}
+          - &media {kind: input_image, status: represented, preview: yes, payload: media modality and textual display marker; not an image viewer, visualized: rendered, renderer: codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer}
+          - {<<: *media, kind: image}
+          - {<<: *media, kind: image_url}
+          - {<<: *media, kind: input_audio}
+          - {<<: *media, kind: audio}
+      - context: native-generation
+        namespace: content_kind
+        sources:
+          - {file: codex_provenance.go, symbol: codexContentKindRegistry}
+        kinds:
+          - {<<: *text, kind: user.text}
+          - {<<: *media, kind: user.image}
+          - {<<: *media, kind: user.audio}
+          - {<<: *text, kind: user.answered_question}
+          - {<<: *text, kind: multi_agent.inter_agent_message}
+          - {<<: *text, kind: multi_agent.inter_agent_completion_message}
+          - {<<: *text, kind: compaction.summary}
+          - {<<: *text, kind: shell.user_command}
+          - &diagnostic {<<: *text, kind: images.resize_notice, payload: diagnostic text and provenance; no standalone submitted-input count without a media sibling}
+          - {<<: *diagnostic, kind: images.preparation_error}
+          - {<<: *diagnostic, kind: images.unsupported}
+          - {<<: *diagnostic, kind: audio.unsupported}
+          - {<<: *text, kind: agents_md.instructions}
+          - {<<: *text, kind: environments.environment_context}
+          - {<<: *text, kind: environments.instructions}
+          - {<<: *text, kind: model.base_instructions}
+          - {<<: *text, kind: generic.developer_instructions}
+          - {<<: *text, kind: managed_config.developer_instructions}
+          - {<<: *text, kind: permissions.instructions}
+          - {<<: *text, kind: persistent_mode.instructions}
+          - {<<: *text, kind: personality.spec_instructions}
+          - {<<: *text, kind: collaboration_mode.instructions}
+          - {<<: *text, kind: model_switch.instructions}
+          - {<<: *text, kind: hooks.additional_context}
+          - {<<: *text, kind: skills.catalog}
+          - {<<: *text, kind: skills.selected_skill_instructions}
+          - {<<: *text, kind: memories.instructions}
+          - {<<: *text, kind: notes.thread_hint}
+          - {<<: *text, kind: apps.instructions}
+          - {<<: *text, kind: plugins.instructions}
+          - {<<: *text, kind: plugins.usage_instructions}
+          - {<<: *text, kind: plugins.recommendations}
+          - {<<: *text, kind: tools.deferred_namespaces}
+          - {<<: *text, kind: multi_agent.subagent_notification}
+          - {<<: *text, kind: multi_agent.role_instructions}
+          - {<<: *text, kind: multi_agent.mode_instructions}
+          - {<<: *text, kind: multi_agent.usage_hint}
+          - {<<: *text, kind: guardian.policy}
+          - {<<: *text, kind: guardian.node_repl_policy}
+          - {<<: *text, kind: guardian.review_evidence}
+          - {<<: *text, kind: guardian.node_repl_review_evidence}
+          - {<<: *text, kind: guardian.trusted_tool}
+          - {<<: *text, kind: guardian.trusted_skills}
+          - {<<: *text, kind: guardian.approved_action}
+          - {<<: *text, kind: guardian.followup_review_reminder}
+          - {<<: *text, kind: generic.turn_aborted}
+          - {<<: *text, kind: current_time.reminder}
+          - {<<: *text, kind: token_budget.context_window}
+          - {<<: *text, kind: token_budget.context_window_guidance}
+          - {<<: *text, kind: token_budget.remaining_tokens}
+          - {<<: *text, kind: token_budget.reminder}
+          - {<<: *text, kind: rollout_budget.remaining_tokens}
+          - {<<: *text, kind: compaction.auto_fallback_prompt}
+          - {<<: *text, kind: permissions.approved_command_prefix_saved}
+          - {<<: *text, kind: network_proxy.rule_saved}
+          - {<<: *text, kind: user_verification.notice}
   opencode:
     adapter_version: 1
     indexer_version: 16
-    kinds:
-      - kind: step-start
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control part marking step start; a part carrying content still fails.
-        source: internal/ingest/opencode_capture.go isOpenCodeCaptureControl
-      - kind: step-finish
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control part marking step finish; a part carrying content still fails.
-        source: internal/ingest/opencode_capture.go isOpenCodeCaptureControl
-      - kind: snapshot
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control part carrying snapshot state; a part carrying content still fails.
-        source: internal/ingest/opencode_capture.go isOpenCodeCaptureControl
-      - kind: patch
-        status: ignored-control
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Control part carrying patch state; a part carrying content still fails.
-        source: internal/ingest/opencode_capture.go isOpenCodeCaptureControl
-      - kind: text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer turn content (fairtrade adaptTranscript)
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: reasoning
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: tool
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: tool_use
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: tool_result
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: compaction
-        status: represented
-        preview: yes
-        payload: none
-        visualized: planned
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: subtask
-        status: represented
-        preview: yes
-        payload: none
-        visualized: planned
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: agent
-        status: represented
-        preview: yes
-        payload: none
-        visualized: planned
-        source: internal/ingest/opencode_indexer.go isKnownOpenCodeSemanticPartType
-      - kind: file
-        status: refused
-        preview: no
-        payload: none
-        visualized: not-applicable
-        reason: Part type with no representation in the strict path; the legacy SQLite path tolerates it with an OpenCodeUnknownPartType diagnostic instead of refusing.
-        source: census on peasant-labs/peasant#385; internal/ingest/opencode_capture.go UnrepresentedRecordError branch
-  cursor:
-    adapter_version: 1
-    indexer_version: 16
-    kinds:
-      - kind: user
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer user turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go CursorIndexer.IndexTranscriptBytesForCapture role validation
-      - kind: assistant
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer assistant turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go CursorIndexer.IndexTranscriptBytesForCapture role validation
-      - kind: human
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer user turn (fairtrade adaptTranscript)
-        source: internal/ingest/cursor.go cursorJSONLLine roles; internal/ingest/content_capture.go role validation
-      - kind: system
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer system turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go CursorIndexer.IndexTranscriptBytesForCapture role validation
-      - kind: tool
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go CursorIndexer.IndexTranscriptBytesForCapture role validation
-      - kind: turn_ended
-        status: represented
-        preview: no
-        payload: none
-        visualized: not-applicable
-        source: internal/ingest/content_capture.go CursorIndexer.IndexTranscriptBytesForCapture turn_ended branch (turn boundary record; an aborted turn carries the recorded error text, a completed turn carries the conversation already validated above)
-      - kind: text
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer turn content (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: thinking
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: ThinkingVM (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: tool_use
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
-      - kind: tool_result
-        status: represented
-        preview: yes
-        payload: none
-        visualized: rendered
-        renderer: TranscriptViewer tool turn (fairtrade adaptTranscript)
-        source: internal/ingest/content_capture.go validateCaptureContent block switch
+    index_version: 1
+    native_versions: {adapter_version: 2, indexer_version: 17, index_version: 2}
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: part
+        sources:
+          - {file: opencode_capture.go, symbol: openCodeCaptureControlKinds}
+          - {file: opencode_indexer.go, symbol: knownOpenCodeSemanticPartKinds}
+        kinds:
+          - {<<: *ignored, kind: step-start}
+          - {<<: *ignored, kind: step-finish}
+          - {<<: *ignored, kind: snapshot}
+          - {<<: *ignored, kind: patch}
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: tool}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+          - {<<: *text, kind: compaction}
+          - {<<: *text, kind: subtask}
+          - {<<: *text, kind: agent}
+      - context: retained-format-1
+        namespace: current_record
+        sources:
+          - {file: opencode_current_projection.go, symbol: normalizeOpenCodeCurrentRow, switch: row.Type.String()}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: shell}
+          - {<<: *text, kind: synthetic}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: skill}
+          - {<<: *text, kind: compaction}
+          - {<<: *text, kind: agent-switched}
+          - {<<: *text, kind: model-switched}
+      - context: retained-format-1
+        namespace: current_content
+        sources:
+          - {file: opencode_current_projection.go, symbol: appendOpenCodeCurrentAssistantContent, switch: discriminator.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: tool}
+      - context: native-generation
+        namespace: record
+        sources:
+          - {file: opencode_provenance_decode.go, symbol: DecodeOpenCodeProvenanceRow, switch: row.Type}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: shell}
+          - {<<: *text, kind: synthetic}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: skill}
+          - {<<: *text, kind: compaction}
+          - {<<: *text, kind: agent-switched}
+          - {<<: *text, kind: model-switched}
+      - context: native-generation
+        namespace: content_block
+        sources:
+          - {file: opencode_current_projection.go, symbol: appendOpenCodeCurrentAssistantContent, switch: discriminator.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: tool}
+      - context: retained-format-1
+        namespace: tool_content
+        sources:
+          - {file: opencode_v2_projection.go, symbol: decodeOpenCodeV2ToolState, switch: value.Type}
+        kinds:
+          - {<<: *result, kind: text}
+          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME; no general media renderer, visualized: planned}
+      - context: native-generation
+        namespace: tool_content
+        sources:
+          - {file: opencode_v2_projection.go, symbol: decodeOpenCodeV2ToolState, switch: value.Type}
+        kinds:
+          - {<<: *result, kind: text}
+          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME; no general media renderer, visualized: planned}
