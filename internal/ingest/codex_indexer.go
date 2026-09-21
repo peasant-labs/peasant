@@ -310,6 +310,25 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		if len(trimmed) == 0 {
 			continue
 		}
+		prepared, unknown, prepareErr := prepareCodexRecord(trimmed, UnknownSourcePosition{Line: scanner.Line()}, false)
+		if prepareErr != nil {
+			if completion == nil && !json.Valid(trimmed) {
+				continue
+			}
+			return nil, prepareErr
+		}
+		if prepared == nil {
+			for _, evidence := range unknown {
+				entry, err := RetainedUnknownEntry(sessionID, entryIndex, evidence)
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, entry)
+				entryIndex++
+			}
+			continue
+		}
+		trimmed = prepared
 
 		var env codexRolloutLine
 		if completion != nil {
@@ -375,6 +394,9 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		entry, ok := codexResponseItemEntry(sessionID, entryIndex, env, len(trimmed), idx.fullContent, payload, decodeErr)
 		if !ok {
 			continue
+		}
+		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
+			return nil, err
 		}
 		entries = append(entries, entry)
 		if completion != nil {

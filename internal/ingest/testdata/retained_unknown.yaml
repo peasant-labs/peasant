@@ -1,4 +1,8 @@
 required_names:
+  - codex-records
+  - codex-blocks
+  - codex-corruption-wins
+  - codex-additive-fields
   - claude-records
   - claude-blocks
   - claude-recursive-blocks
@@ -16,6 +20,38 @@ required_names:
   - strike-corruption-wins
   - strike-additive-fields
 cases:
+  - name: codex-records
+    harness: codex
+    source: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"}]}}
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"after"}]}}
+    positions: [2, 3]
+    pointers: ["", ""]
+    kinds: [future_record, future_record]
+    texts: [before, after]
+    pipeline: true
+  - name: codex-blocks
+    harness: codex
+    source: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"},{"type":"future_block","payload":"PAYLOAD"},{"type":"input_text","text":"after"}]}}
+    positions: [1]
+    pointers: [/payload/content/1]
+    kinds: [future_block]
+    texts: [before, after]
+    pipeline: true
+  - name: codex-corruption-wins
+    harness: codex
+    source: |
+      {"type":"future_record","payload":"PAYLOAD"}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":42}]}}
+    error: true
+  - name: codex-additive-fields
+    harness: codex
+    source: |
+      {"type":"response_item","future_field":true,"payload":{"type":"message","role":"user","future_field":42,"content":[{"type":"input_text","text":"before","future_field":true}]}}
+    texts: [before]
   - name: claude-records
     harness: claude-code
     source: |

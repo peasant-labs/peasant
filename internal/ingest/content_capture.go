@@ -431,7 +431,15 @@ func (idx *CodexIndexer) IndexTranscriptForCapture(ctx context.Context, s Discov
 }
 func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
 	var mirrors []string
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+		prepared, _, err := prepareCodexRecord(raw, UnknownSourcePosition{Line: 1}, false)
+		if err != nil {
+			return nil, err
+		}
+		if prepared == nil {
+			return nil, nil
+		}
+		raw = prepared
 		var env codexRolloutLine
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return nil, err
@@ -585,7 +593,8 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("conversation event has no equivalent response item"))
 		}
 	}
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
 func (idx *StrikeIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
