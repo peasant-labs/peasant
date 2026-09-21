@@ -234,15 +234,15 @@ func TestRecordKindsUnmappedKindsRefuse(t *testing.T) {
 		t.Run(row.Name, func(t *testing.T) {
 			var harness Harness
 			switch row.Harness {
-			case "claude-code":
+			case string(HarnessClaudeCode):
 				harness = HarnessClaudeCode
-			case "codex":
+			case string(HarnessCodex):
 				harness = HarnessCodex
-			case "strike":
+			case string(HarnessStrike):
 				harness = HarnessStrike
-			case "opencode":
+			case string(HarnessOpenCode):
 				harness = HarnessOpenCode
-			case "cursor":
+			case string(HarnessCursor):
 				harness = HarnessCursor
 			default:
 				t.Fatalf("unknown harness %q", row.Harness)

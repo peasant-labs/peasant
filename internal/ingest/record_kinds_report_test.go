@@ -16,13 +16,13 @@ func TestAggregateRecordKindRefusals(t *testing.T) {
 		t.Fatalf("aggregate has %d rows, want 3", len(out))
 	}
 	first, second, third := out[0], out[1], out[2]
-	if string(first.Harness) != "claude-code" || first.Kind != "image" || first.Count != 1 {
+	if first.Harness != HarnessClaudeCode || first.Kind != "image" || first.Count != 1 {
 		t.Errorf("first row is %+v, want claude-code/image x1", first)
 	}
-	if string(second.Harness) != "codex" || second.Kind != "world_state" || second.Count != 2 {
+	if second.Harness != HarnessCodex || second.Kind != "world_state" || second.Count != 2 {
 		t.Errorf("second row is %+v, want codex/world_state x2", second)
 	}
-	if string(third.Harness) != "strike" || third.Kind != "child.started" || third.Count != 1 {
+	if third.Harness != HarnessStrike || third.Kind != "child.started" || third.Count != 1 {
 		t.Errorf("third row is %+v, want strike/child.started x1", third)
 	}
 }
