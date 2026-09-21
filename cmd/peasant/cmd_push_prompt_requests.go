@@ -72,9 +72,10 @@ func reportWaitingPromptRequests(ctx context.Context, cmd *cobra.Command, client
 	printWaitingPromptRequests(out, response.Requests, pushedFullName)
 }
 
-// pushedRepositoryRemote returns the raw git remote of the repository being
-// pushed. An empty remote (a repository with no origin) is reported as an error
-// so the caller prints nothing rather than matching an empty name.
+// pushedRepositoryGit returns the canonical root of the repository being pushed
+// and the raw git remote at it. An empty remote (a repository with no origin) is
+// reported as an error so the caller prints nothing rather than matching an
+// empty name.
 func pushedRepositoryGit(ctx context.Context, repository string, scoped bool) (root string, remote string, err error) {
 	path := "."
 	if scoped {

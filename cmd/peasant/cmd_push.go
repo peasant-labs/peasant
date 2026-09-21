@@ -165,13 +165,16 @@ func BuildPushCommand() *cobra.Command {
 				// a hook-triggered push opens one set of connections instead of
 				// two. It is built only when credentials are already in hand; a run
 				// that has to load them itself builds its own client as before. The
-				// pool is the default size because the upload's concurrency is
-				// resolved inside the budget, after this point — so the upload
-				// reuses this client when its concurrency fits the default pool and
-				// builds a wider one when it does not.
+				// pool is sized to what a push resolves to when nothing overrides
+				// the concurrency, because the upload's own resolution happens
+				// inside the budget, after this point — so the upload reuses this
+				// client whenever its concurrency fits that pool and builds a wider
+				// one when it does not.
+				run.sharedClientPoolSize = push.DefaultConcurrencyForCPU(runtime.NumCPU())
 				run.sharedClient = village.NewVillageClient(creds.VillageURL, creds.APIKey,
-					village.NewPooledHTTPClient(creds.VillageURL, village.DefaultPoolSize))
+					village.NewPooledHTTPClient(creds.VillageURL, run.sharedClientPoolSize))
 				run.sharedClientBaseURL = creds.VillageURL
+				run.sharedClientAPIKey = creds.APIKey
 				if run.pushedRemote != "" {
 					reportWaitingPromptRequests(ctx, cmd, run.sharedClient, run.pushedRemote)
 				}
@@ -474,7 +477,7 @@ func BuildPushCommand() *cobra.Command {
 				}
 
 				client := run.sharedClient
-				if client == nil || run.sharedClientBaseURL != creds.VillageURL || resolvedConcurrency > village.DefaultPoolSize {
+				if client == nil || run.sharedClientBaseURL != creds.VillageURL || run.sharedClientAPIKey != creds.APIKey || resolvedConcurrency > run.sharedClientPoolSize {
 					// No client was built ahead of the clock, or the credentials or
 					// the requested parallelism differ from what it was built for:
 					// build one sized to the concurrency, exactly as before.
@@ -812,8 +815,8 @@ func resolveRepositoryScope(ctx context.Context, db *store.Store, root, preResol
 	// ran it — this resolves it exactly as it always did.
 	canonicalRoot, remote := preResolvedRoot, preResolvedRemote
 	resolver := &ingest.ExecGitResolver{}
-	// The path the messages below name: the root the caller resolved, or the one
-	// resolved here when it had none.
+	// The path the messages below name: the caller's resolved root when it gave
+	// one, and otherwise the absolute path this resolves the root from.
 	abs := canonicalRoot
 	if canonicalRoot == "" || remote == "" {
 		resolvedAbs, err := filepath.Abs(root)
@@ -1097,13 +1100,17 @@ type pushRun struct {
 	pushedRemote string
 	// sharedClient is the pooled client the lookup used, when credentials were
 	// already in hand ahead of the clock: the upload reuses it so one push opens
-	// one set of connections. sharedClientBaseURL records what it was built for,
-	// so a run whose credentials resolve differently does not reuse it.
-	sharedClient        *village.VillageClient
-	sharedClientBaseURL string
-	scope               *push.RepositoryScope
-	result              *push.PushResult
-	annotationSummary   *push.AnnotationPushSummary
+	// one set of connections. The three fields beside it record what it was built
+	// for and how wide its pool is, so a run whose credentials or concurrency
+	// differ from those builds its own: a client built for one village, one key
+	// or one parallelism must not serve another.
+	sharedClient         *village.VillageClient
+	sharedClientBaseURL  string
+	sharedClientAPIKey   string
+	sharedClientPoolSize int
+	scope                *push.RepositoryScope
+	result               *push.PushResult
+	annotationSummary    *push.AnnotationPushSummary
 	// binding is the explicitly-overridden config/data/state context this push
 	// runs under. Every recovery command must retain it or it diagnoses a
 	// different store from the one that failed.

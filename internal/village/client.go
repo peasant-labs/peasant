@@ -115,8 +115,9 @@ func NewVillageClient(baseURL, apiKey string, httpClient *http.Client) *VillageC
 // waiting-request lookup and the upload: MaxIdleConnsPerHost and
 // MaxConnsPerHost both equal poolSize, so reruns reuse pooled connections (no
 // fresh TLS handshake per upload) and in-flight uploads are not throttled below
-// the requested parallelism. Pass it to NewVillageClient, which is what sizes
-// the pool to the resolved --concurrency value.
+// the requested parallelism. The caller chooses poolSize — the CLI passes the
+// concurrency a push resolves to when nothing overrides it — and passes the
+// result to NewVillageClient.
 func NewPooledHTTPClient(baseURL string, poolSize int) *http.Client {
 	return newPooledHTTPClient(baseURL, poolSize)
 }
