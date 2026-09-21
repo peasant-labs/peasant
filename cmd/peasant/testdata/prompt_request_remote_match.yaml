@@ -116,6 +116,11 @@ cases:
     requestRemote: "peasant-labs/widgets"
     requestHeadRemote: "author/widgets"
     wantMatch: true
+  # A renamed fork matches here, because the request names the fork as its head.
+  # Completing that request by hand is narrower than this match: the by-hand push
+  # finds an attachment by the repository name the fork shares with the base,
+  # which a renamed fork no longer shares. The pull request's own attach flow is
+  # not affected.
   - name: fork-clone-with-another-name-matches-its-request
     pushedRemote: "git@github.com:author/widgets-fork.git"
     requestRemote: "peasant-labs/widgets"
@@ -136,6 +141,11 @@ cases:
     requestRemote: "peasant-labs/widgets"
     requestHeadRemote: "peasant-labs/widgets"
     wantMatch: false
+  - name: fork-owner-case-difference-matches-its-request
+    pushedRemote: "git@github.com:Author/village.git"
+    requestRemote: "peasant-labs/village"
+    requestHeadRemote: "author/village"
+    wantMatch: true
   - name: request-without-a-head-remote-still-matches-the-base
     pushedRemote: "git@github.com:peasant-labs/widgets.git"
     requestRemote: "peasant-labs/widgets"

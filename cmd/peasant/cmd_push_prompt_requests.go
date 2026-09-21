@@ -141,12 +141,14 @@ func printWaitingPromptRequests(w io.Writer, requests []schema.VillagePromptRequ
 // names: the repository the pull request was opened against, or the repository
 // its head came from.
 //
-// The two differ exactly when the pull request came from a fork, which is the
-// ordinary contribution workflow: the author cloned their fork, so the remote on
-// their machine is the fork while the request names the base it was raised
-// against. Matching only the base leaves that author unread. A request from a
-// village older than the head remote carries an empty one, and the base decides
-// alone, exactly as before.
+// The two differ when the pull request came from a fork whose head repository
+// GitHub reports, which is the ordinary contribution workflow: the author cloned
+// their fork, so the remote on their machine is the fork while the request names
+// the base it was raised against. They are equal for a same-repository pull
+// request and for a fork whose head repository is unknown, and matching only the
+// base leaves a fork's author unread. A request from a village older than the
+// head remote carries an empty one, and the base decides alone, exactly as
+// before.
 func namesPushedRepository(request schema.VillagePromptRequest, pushedFullName string) bool {
 	return sameRepositoryFullName(request.Remote, pushedFullName) ||
 		sameRepositoryFullName(request.HeadRemote, pushedFullName)

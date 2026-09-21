@@ -197,6 +197,14 @@ func promptRequest(remote string, number int) map[string]any {
 	}
 }
 
+// forkPromptRequest builds one waiting request for a pull request opened against
+// base whose head came from head, as the village serves it.
+func forkPromptRequest(base, head string, number int) map[string]any {
+	request := promptRequest(base, number)
+	request["head_remote"] = head
+	return request
+}
+
 // gitRepositoryWithRemote creates a real repository with the given origin, which
 // is what --repository resolves through git rather than through a stub.
 func gitRepositoryWithRemote(t *testing.T, dir, remote string) string {
@@ -234,6 +242,29 @@ func TestPushCmd_PrintsOneLinePerWaitingRequestForThisRepository(t *testing.T) {
 	}
 	if got := strings.Count(stdout, "waiting: "); got != 2 {
 		t.Errorf("printed %d hint lines, want 2; stdout:\n%s", got, stdout)
+	}
+}
+
+// TestPushCmd_APushFromAForkPrintsTheRequestWaitingOnIt is the workflow the head
+// remote exists for: the author cloned their fork, so the repository being pushed
+// is the fork while the request names the base it was raised against. Matching
+// the base alone left this author with nothing to read, which is the ordinary
+// contribution workflow left unread.
+func TestPushCmd_APushFromAForkPrintsTheRequestWaitingOnIt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	server := waitingPromptRequestsServer(t, []map[string]any{
+		forkPromptRequest("peasant-labs/village", "author/village", 216),
+	})
+	writeTestCredentialsFor(t, dir, server.URL)
+	repo := gitRepositoryWithRemote(t, dir, "git@github.com:author/village.git")
+
+	stdout, stderr, err := executePushCmdSeparate(t, dir, []string{"--dry-run", "--repository", repo})
+	if err != nil {
+		t.Fatalf("a push from a fork must not fail: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, promptRequestLine("peasant-labs/village", 216)) {
+		t.Errorf("a push from the fork the head came from must print the request waiting on the base; stdout:\n%s", stdout)
 	}
 }
 

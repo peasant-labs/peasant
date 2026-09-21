@@ -276,7 +276,9 @@ A reviewer can ask the author to attach the prompts behind a pull request. When 
 
 **What attaching does, and does not do:** attaching a pull request's prompts **never uploads anything.** It does not publish a transcript into the commons, and it does not share one with GitHub. It only widens who may read transcripts that are **already published**, by granting a pull request's readers access to the transcripts attached to it. If you have nothing published, attaching publishes nothing.
 
-**What it matches:** the request names the repository the pull request is opened against. A push from a fork's clone names the fork instead, so the hint does not appear there; the request is still waiting, and the by-hand push from a clone of the pull request's own repository is what completes it.
+**What it matches:** the request names two repositories: the one the pull request is opened against, and the one its head came from, which is a fork's repository or the base itself for a pull request from the same repository. A push from a clone of either prints the hint, so an author working from their fork sees it.
+
+**One limit on a renamed fork:** a fork renamed away from the base's repository name prints the hint, but the by-hand `peasant village push` cannot complete it. That path finds an attachment by the repository name the fork shares with the base, which a renamed fork no longer shares. The pull request's own attach flow still works.
 
 **What it prints:** one line per waiting request for the repository being pushed, for example:
 
