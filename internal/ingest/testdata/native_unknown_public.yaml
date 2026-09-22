@@ -1,0 +1,225 @@
+required_names:
+  - codex-retained-records
+  - codex-native-records
+  - codex-native-opaque-only
+  - opencode-retained-rows
+  - opencode-native-rows
+  - opencode-native-opaque-only
+  - codex-native-earlier
+  - codex-native-inherited
+  - codex-native-rollback
+  - codex-retained-blocks
+  - codex-native-blocks
+  - opencode-retained-tool-output
+  - opencode-native-tool-output
+  - opencode-legacy-json
+  - opencode-legacy-sqlite
+  - opencode-legacy-unaccounted-omission
+  - codex-retained-opaque-only
+  - opencode-retained-opaque-only
+  - codex-native-main-and-earlier
+payload: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "embedded":"{\"\\u0067hp_SECRET_BODY\":\"\\u0067hp_SECRET_BODY\"}" }'
+expected: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "embedded":"{\"\\u003cGITHUB_PAT\\u003e\":\"\\u003cGITHUB_PAT\\u003e\"}" }'
+corrupt:
+  codex: '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":42}]}}'
+  opencode: '{"text":42,"time":{"created":1}}'
+cases:
+  - name: opencode-legacy-json
+    harness: opencode
+    legacy: file-tree
+    message: &legacy_message '{"id":"msg_legacy_public","role":"assistant","modelID":"gpt-5","cwd":"/workspace","time":{"created":1,"completed":4}}'
+    rows: &legacy_parts
+      - {id: prt_1, data: '{"type":"text","text":"opening"}'}
+      - {id: prt_2, data: 'UNKNOWN'}
+      - {id: prt_3, data: '{"type":"text","text":"closing"}'}
+    namespace: part
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: opencode-legacy-sqlite
+    harness: opencode
+    legacy: sqlite
+    message: *legacy_message
+    rows: *legacy_parts
+    namespace: part
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: opencode-legacy-unaccounted-omission
+    harness: opencode
+    legacy: sqlite
+    unaccounted: true
+    message: *legacy_message
+    rows: *legacy_parts
+    namespace: part
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: codex-retained-blocks
+    harness: codex
+    source: &codex_blocks |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"opening"}]}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"known before"},UNKNOWN,{"type":"output_text","text":"closing"}]}}
+    namespace: message_block
+    record_indices: [3]
+    positions: [8]
+    pointers: [/payload/content/1]
+  - name: codex-native-blocks
+    harness: codex
+    native: true
+    source: *codex_blocks
+    namespace: message_block
+    record_indices: [3]
+    positions: [8]
+    pointers: [/payload/content/1]
+  - name: opencode-retained-tool-output
+    retained_fallback: true
+    harness: opencode
+    rows: &opencode_tool
+      - {id: msg_opening, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"opening","time":{"created":1},"metadata":{"cwd":"/workspace"}}'}
+      - {id: msg_tool, type: assistant, seq: 70, timeCreated: 3, timeUpdated: 3, data: '{"agent":"build","model":{"id":"gpt-5","providerID":"openai"},"content":[{"type":"tool","id":"call_read","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"known before"},UNKNOWN,{"type":"text","text":"closing"}]},"time":{"created":3}}],"time":{"created":3,"completed":4}}'}
+    namespace: tool_content
+    record_indices: [1]
+    positions: [4]
+    pointers: [/content/0/state/content/1]
+  - name: opencode-native-tool-output
+    harness: opencode
+    native: true
+    rows: *opencode_tool
+    namespace: tool_content
+    record_indices: [1]
+    positions: [4]
+    pointers: [/content/0/state/content/1]
+  - name: codex-retained-records
+    harness: codex
+    source: &codex |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"opening"}]}}
+       UNKNOWN 
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"closing"}]}}
+    namespace: envelope
+    record_indices: [3]
+    positions: [5]
+    pointers: ['']
+    framing: true
+  - name: codex-native-records
+    harness: codex
+    native: true
+    source: *codex
+    namespace: envelope
+    record_indices: [3]
+    positions: [5]
+    pointers: ['']
+    framing: true
+  - name: codex-native-opaque-only
+    harness: codex
+    native: true
+    opaque_only: true
+    source: &codex_opaque |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      UNKNOWN
+    namespace: envelope
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: codex-retained-opaque-only
+    harness: codex
+    opaque_only: true
+    source: *codex_opaque
+    namespace: envelope
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: codex-native-main-and-earlier
+    harness: codex
+    native: true
+    copy_boundary: 3
+    source: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"opening"}]}}
+      UNKNOWN
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"closing"}]}}
+      UNKNOWN
+    namespace: envelope
+    record_indices: [3, 5]
+    positions: [5, 9]
+    pointers: ['', '']
+  - name: codex-native-earlier
+    harness: codex
+    native: true
+    source: *codex
+    copy_boundary: 3
+    namespace: envelope
+    record_indices: [3]
+    positions: [5]
+    pointers: ['']
+    framing: true
+  - name: codex-native-inherited
+    harness: codex
+    native: true
+    source: *codex
+    copy_boundary: 3
+    inherited: true
+    namespace: envelope
+    record_indices: [3]
+    positions: [5]
+    pointers: ['']
+    framing: true
+  - name: codex-native-rollback
+    harness: codex
+    native: true
+    source: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"reverted"}]}}
+      UNKNOWN
+      {"type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+      {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"closing"}]}}
+      UNKNOWN
+    namespace: envelope
+    record_indices: [6]
+    positions: [11]
+    pointers: ['']
+    forbidden: [reverted]
+  - name: opencode-retained-rows
+    retained_fallback: true
+    harness: opencode
+    rows: &opencode
+      - {id: msg_opening, type: user, seq: 10, timeCreated: 1, timeUpdated: 1, data: '{"text":"opening","time":{"created":1},"metadata":{"cwd":"/workspace"}}'}
+      - {id: msg_future, type: future, seq: 30, timeCreated: 2, timeUpdated: 2, data: 'UNKNOWN'}
+      - {id: msg_closing, type: assistant, seq: 90, timeCreated: 3, timeUpdated: 3, data: '{"agent":"build","model":{"id":"gpt-5","providerID":"openai"},"content":[{"type":"text","text":"closing"}],"time":{"created":3,"completed":4}}'}
+    namespace: row
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: opencode-native-rows
+    harness: opencode
+    native: true
+    rows: *opencode
+    namespace: row
+    record_indices: [1]
+    positions: [1]
+    pointers: ['']
+  - name: opencode-native-opaque-only
+    harness: opencode
+    native: true
+    opaque_only: true
+    rows: &opencode_opaque
+      - {id: msg_future, type: future, seq: 30, timeCreated: 2, timeUpdated: 2, data: 'UNKNOWN'}
+    namespace: row
+    record_indices: [0]
+    positions: [0]
+    pointers: ['']
+  - name: opencode-retained-opaque-only
+    retained_fallback: true
+    harness: opencode
+    opaque_only: true
+    rows: *opencode_opaque
+    namespace: row
+    record_indices: [0]
+    positions: [0]
+    pointers: ['']

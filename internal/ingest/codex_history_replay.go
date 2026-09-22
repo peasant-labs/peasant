@@ -249,7 +249,7 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 		}
 		line++
 		trimmed := bytes.TrimSpace(recordLine)
-		record.RawJSON = append(json.RawMessage(nil), trimmed...)
+		record.RawJSON = append(json.RawMessage(nil), bytes.TrimSuffix(recordLine, []byte{'\n'})...)
 		record.TraversalPosition = traversalPosition
 		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
 		switch {

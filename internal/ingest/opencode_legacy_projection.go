@@ -15,10 +15,9 @@ import (
 
 const (
 	openCodeLegacyProjectionFormat = "peasant.opencode.legacy-sqlite"
-	// openCodeLegacyProjectionVersion is version 2: the orphan slot is a typed
-	// message field. The minimum readable version is the version-field floor a
-	// decoded artifact must meet.
-	openCodeLegacyProjectionVersion            = 2
+	// Version 3 retains lexical opaque source values before RawMessage encoding
+	// can normalize their whitespace. Earlier managed projections remain readable.
+	openCodeLegacyProjectionVersion            = 3
 	openCodeLegacyProjectionMinReadableVersion = 1
 	openCodeLegacyMaterializePage              = 128
 	// openCodeLegacyMessageBudgetShare is the fraction of a bounded read's byte
@@ -355,6 +354,10 @@ func (a *OpenCodeAdapter) finishLegacyManagedProjection(ctx context.Context, ses
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q from %q produced no messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
 	}
+	unknown, err := retainOpenCodeLegacyProjection(session.SessionID, &projection)
+	if err != nil {
+		return nil, nil, err
+	}
 	data, err := json.Marshal(projection)
 	if err != nil {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while encoding the versioned managed JSON projection: %w; detached source rows remain unchanged and no managed state was written; report the unsupported row shape", session.SessionID, err)
@@ -365,6 +368,7 @@ func (a *OpenCodeAdapter) finishLegacyManagedProjection(ctx context.Context, ses
 		return nil, nil, err
 	}
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, droppedOpenCodeOrphanPartDiagnostics(session, dropped)...)
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknown, "retained source")...)
 	return metadata, data, nil
 }
 
@@ -542,7 +546,7 @@ func openCodeUnknownTypeDiagnostics(session DiscoveredSession, counts map[string
 	diagnostics := make([]DiagnosticEntry, 0, len(types))
 	for _, typeName := range types {
 		diagnostics = append(diagnostics, DiagnosticEntry{
-			ErrorType:   string(OpenCodeUnknownPartType),
+			ErrorType:   string(ContentCaptureUnknownDataRetained),
 			Location:    fmt.Sprintf("selected OpenCode session %s from %s", session.SessionID, session.SourcePath),
 			Message:     fmt.Sprintf("%d %s row(s) of type %q are outside the interpreted transcript vocabulary; known content remains readable and opaque non-control payloads are retained without display", counts[typeName], subject, typeName),
 			Remediation: "No action is required; upgrade Peasant when it adds interpretation for this type.",

@@ -349,6 +349,55 @@ func validateOpenCodeUnknown(records []RetainedUnknown) error {
 	return nil
 }
 
+// Preserve original SQLite JSON values before serializing the managed envelope.
+// RawMessage encoding compacts JSON; the private evidence codec deliberately
+// stores lexical payload text. Known rows still use their ordinary projection.
+func retainOpenCodeLegacyProjection(sessionID SessionID, projection *openCodeLegacyProjection) (map[string]int, error) {
+	messages, _, err := parseManagedOpenCodeSemanticMessages(*projection, "legacy acquisition")
+	if err != nil {
+		return nil, err
+	}
+	messages, err = retainOpenCodeSemantic(sessionID, messages)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[string]int{}
+	for i, message := range messages {
+		if len(message.RetainedUnknown) == 0 {
+			continue
+		}
+		row := &projection.Messages[i]
+		row.RetainedUnknown = message.RetainedUnknown
+		for _, record := range message.RetainedUnknown {
+			counts[record.Kind]++
+		}
+		parts := map[string]openCodeSemanticPart{}
+		for _, part := range message.Parts {
+			parts[part.EntryID] = part
+		}
+		kept := make([]openCodeLegacyProjectionPart, 0, len(message.Parts))
+		for _, part := range row.Parts {
+			if prepared, exists := parts[part.ID]; exists {
+				part.Data = prepared.Raw
+				kept = append(kept, part)
+			}
+		}
+		row.Parts = kept
+		if len(message.Data.Content) > 0 {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(row.Data, &fields); err != nil {
+				return nil, err
+			}
+			fields["content"] = message.Data.Content
+			row.Data, err = json.Marshal(fields)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return counts, nil
+}
+
 func attachOpenCodeUnknownEntry(entry *schema.SessionEntry, evidence []RetainedUnknown) error {
 	if len(evidence) == 0 {
 		return nil
