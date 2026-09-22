@@ -13,6 +13,13 @@ import (
 
 const codexOpaqueBlock = "__peasant_retained_unknown__"
 
+// A compatibility preview may tolerate an unreadable source shape, but it must
+// never hide a failure to retain otherwise valid opaque evidence.
+type codexEvidenceRetentionError struct{ cause error }
+
+func (err *codexEvidenceRetentionError) Error() string { return err.cause.Error() }
+func (err *codexEvidenceRetentionError) Unwrap() error { return err.cause }
+
 // prepareCodexRecord separates opaque variants before decoding known unions.
 // Unknown blocks are replaced only in the interpretation copy; their complete
 // redacted source values retain their original JSON pointers and physical line.
@@ -38,15 +45,16 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			if index, ok := traversal[pointer]; ok {
 				public.Position += index
 			} else {
-				return fmt.Errorf("retain Codex evidence: source pointer is outside the captured traversal; no evidence was stored; repair the capture traversal")
+				return &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex evidence: source pointer is outside the captured traversal; no evidence was stored; repair the capture traversal")}
 			}
 			at.Public = &public
 		}
 		evidence, err := NewRetainedUnknownFromSource(HarnessCodex, namespace, kind, at, value)
-		if err == nil {
-			unknown = append(unknown, evidence)
+		if err != nil {
+			return &codexEvidenceRetentionError{cause: err}
 		}
-		return err
+		unknown = append(unknown, evidence)
+		return nil
 	}
 	if !slices.Contains(codexStrictEnvelopeKinds(), kind) && !(native && kind == "compacted") {
 		err := retain("envelope", kind, "", raw)

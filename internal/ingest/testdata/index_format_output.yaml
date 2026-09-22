@@ -1,5 +1,5 @@
 requiredNames:
-  - codex-control-plus-unknown-preserves-last-good
+  - codex-control-plus-unknown-retains-evidence
   - strike-control-plus-unknown-retains-evidence
   - completed-empty-opencode-directory
   - mixed-malformed-opencode-preserves-last-good
@@ -27,15 +27,18 @@ requiredNames:
   - future-format-write-refusal-is-visible
   - logs-ignore-unwritten-index-format
 cases:
-  - name: codex-control-plus-unknown-preserves-last-good
+  - name: codex-control-plus-unknown-retains-evidence
     declaredFormat: 1
-    payload: empty
+    payload: v1
     realIndexer: true
     harness: codex
     transcript: |
       {"type":"session_meta","payload":{"id":"synthetic"}}
       {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
-    wantLogError: 'at source record 2: json: cannot unmarshal object'
+    wantIndexed: true
+    visibleTexts: []
+    retained:
+      - {namespace: response_item, kind: future-response, payload: '{"type":"future-response","content":{"future":"opaque"}}', line: 2, recordIndex: 1, position: 2, pointer: /payload}
   - name: strike-control-plus-unknown-retains-evidence
     declaredFormat: 1
     payload: v1
