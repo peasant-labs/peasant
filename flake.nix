@@ -47,7 +47,7 @@
       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
       # hash back here.
-      vendorHash = "sha256-mGvzzvreaeVMY3pLFkDCwFJf8y6BjZwO7QKj8I5C8nA=";
+      vendorHash = "sha256-nhHb/aMILzbILc6G7LLD7mQZf5jTVclQJAs23rsGk4s=";
 
       # Extra CLI tools available in the dev shell
       devTools = pkgs: with pkgs; [
