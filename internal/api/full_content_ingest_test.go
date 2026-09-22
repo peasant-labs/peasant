@@ -128,6 +128,12 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 		t.Fatal(err)
 	}
 	capture, found, err := db.GetSessionContentCapture(t.Context(), sid)
+	if fixture.Damage == "retained-no-model" {
+		if err != nil || !found || capture.Status != ingest.ContentCaptureIncomplete || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+			t.Fatalf("retained unknown capture was not certified locally: %+v %v", capture, err)
+		}
+		return db
+	}
 	if fixture.Damage == "source-omitted" {
 		if err != nil || found && capture.Status == ingest.ContentCaptureComplete {
 			t.Fatalf("native omission certified: %+v %v", capture, err)
