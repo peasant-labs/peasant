@@ -32,6 +32,8 @@ type retainedPublicationCase struct {
 	Kind               string `yaml:"kind"`
 	Namespace          string `yaml:"namespace"`
 	ExpectedReason     string `yaml:"expectedReason"`
+	ExpectedKind       string `yaml:"expectedKind"`
+	ExpectedNamespace  string `yaml:"expectedNamespace"`
 	Managed            bool   `yaml:"managed"`
 	Earlier            bool   `yaml:"earlier"`
 	Name               string `yaml:"name"`
@@ -251,6 +253,9 @@ func TestRetainedUnknownPublication(t *testing.T) {
 				t.Fatalf("payload changed or escaped secret leaked: %q", envelope.SessionDetail.RetainedUnknown[0].Payload)
 			}
 			last := envelope.SessionDetail.RetainedUnknown[wantRecords-1]
+			if c.ExpectedKind != "" && (last.Kind != c.ExpectedKind || last.Namespace != c.ExpectedNamespace) {
+				t.Fatal("native labels were stripped or changed instead of applying the configured rule")
+			}
 			if last.Pointer != c.Pointer || last.Position != 3 || last.RecordIndex != 1 {
 				t.Fatal("source coordinates changed")
 			}

@@ -63,7 +63,10 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			dir := t.TempDir()
 			fs := &ingest.OSFileSystem{}
-			payload := strings.ReplaceAll(fixture.Payload, "BODY", strings.Repeat("x", c.PaddingBytes))
+			// Use ordinary word-separated source text rather than a multi-megabyte
+			// identifier. The fixture tests byte budgets, not identifier matching.
+			padding := strings.Repeat("x ", c.PaddingBytes/2) + strings.Repeat("x", c.PaddingBytes%2)
+			payload := strings.ReplaceAll(fixture.Payload, "BODY", padding)
 			if len(payload) <= 8<<20 || len(payload) >= defaults.MaxJSONLRecordBytes {
 				t.Fatal("fixture does not straddle transfer/source boundary")
 			}

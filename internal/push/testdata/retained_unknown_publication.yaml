@@ -1,11 +1,15 @@
 cases:
   - name: configured_secret_whole_record_label
+    expectedKind: '[CUSTOM]'
+    expectedNamespace: '[CUSTOM]'
     kind: custom-secret
     namespace: custom-secret
     payload: '{"type":"custom-secret","n":9007199254740993}'
     expected: '{"type":"[CUSTOM]","n":9007199254740993}'
     advertised: true
   - name: configured_secret_nested_block_label
+    expectedKind: '[CUSTOM]'
+    expectedNamespace: content_block
     kind: custom-secret
     namespace: content_block
     pointer: /message/content/1
