@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
@@ -77,6 +78,11 @@ func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
 		}
 		if item.Transcript.Sync.ID != item.Transcript.Session.ID {
 			t.Fatalf("sync mirror id = %q, want %q", item.Transcript.Sync.ID, item.Transcript.Session.ID)
+		}
+		// The sync chooser summary rides the same Z-only datetime contract as
+		// the session lists: a local-zone offset fails client decoding.
+		if item.Transcript.Session.StartTime.Location() != time.UTC {
+			t.Errorf("grouped sync row %q startTime location = %v, want UTC", item.Transcript.Session.ID, item.Transcript.Session.StartTime.Location())
 		}
 	}
 
