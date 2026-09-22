@@ -214,7 +214,9 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 			}
 			return doc, piSourceError("raw validation", line+1, err)
 		}
-		entry, err := decodePiEntry(raw, line+1)
+		// Interpret/validate the trimmed view, but retain the scanner's original
+		// record text (excluding its newline delimiter) for unknown evidence.
+		entry, err := decodePiEntry(physical, line+1)
 		if err != nil {
 			return doc, piSourceError("decode", line+1, err)
 		}

@@ -42,13 +42,18 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 		t.Fatal("expected one YAML document")
 	}
 	seen := map[string]bool{}
+	var actualNames []string
 	for _, c := range fixture.Cases {
 		if c.Name == "" || seen[c.Name] {
 			t.Fatal("blank or duplicate case")
 		}
 		seen[c.Name] = true
+		actualNames = append(actualNames, c.Name)
 	}
 	if err := testutil.RequireFixtureNames("unknown consent", "case", fixture.RequiredNames, seen); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, actualNames, "unknown consent"); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range fixture.Cases {

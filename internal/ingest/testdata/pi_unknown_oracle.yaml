@@ -1,0 +1,17 @@
+requiredNames:
+  - complete-original
+  - deleted-summary
+  - normalized-whitespace
+cases:
+  - name: complete-original
+    original: ' { "type":"future", "summary":{"native":true}, "n":1.2300e+07 } '
+    mutation: unchanged
+  - name: deleted-summary
+    original: '{"type":"future","summary":{"native":true},"n":1.2300e+07}'
+    mutation: delete-summary
+    remove: '"summary":{"native":true},'
+    reject: true
+  - name: normalized-whitespace
+    original: ' { "type":"future", "summary":{"native":true}, "n":1.2300e+07 } '
+    mutation: compact
+    reject: true
