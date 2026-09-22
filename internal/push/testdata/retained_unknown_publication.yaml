@@ -1,4 +1,17 @@
 cases:
+  - name: configured_secret_whole_record_label
+    kind: custom-secret
+    namespace: custom-secret
+    payload: '{"type":"custom-secret","n":9007199254740993}'
+    expected: '{"type":"[CUSTOM]","n":9007199254740993}'
+    advertised: true
+  - name: configured_secret_nested_block_label
+    kind: custom-secret
+    namespace: content_block
+    pointer: /message/content/1
+    payload: '{ "type" : "custom-secret", "n":9007199254740993 }'
+    expected: '{ "type" : "[CUSTOM]", "n":9007199254740993 }'
+    advertised: true
   - name: managed_partition_preserves_unknown
     payload: '{"type":"future","number":9007199254740993}'
     expected: '{"type":"future","number":9007199254740993}'
@@ -29,6 +42,7 @@ cases:
     expected: '{"type":"future","data":"{\"secret\":\"[CUSTOM]\"}"}'
     advertised: true
   - name: receiver_without_preservation_refuses
+    expectedReason: 'the target Village did not advertise the exact required capability tokens'
     payload: '{"type":"future","number":9007199254740993}'
     expected: '{"type":"future","number":9007199254740993}'
     advertised: false

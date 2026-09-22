@@ -236,6 +236,10 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 			continue
 		}
 		for j := range records {
+			records[j].Kind, records[j].Namespace, err = redactRetainedLabels(records[j].Kind, records[j].Namespace, redactor)
+			if err != nil {
+				return nil, err
+			}
 			payload, err := redactRetainedJSON(string(records[j].Payload), redactor, 0)
 			if err != nil {
 				return nil, err

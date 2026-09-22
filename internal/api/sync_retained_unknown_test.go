@@ -28,6 +28,8 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
+			Kind    string `yaml:"kind"`
+			Pointer string `yaml:"pointer"`
 			Name    string `yaml:"name"`
 			Payload string `yaml:"payload"`
 		} `yaml:"cases"`
@@ -59,7 +61,11 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, err := ingest.NewRetainedUnknown(schema.HarnessClaudeCode, "record", "future", ingest.UnknownSourcePosition{Line: 2, Public: &ingest.UnknownPublicPosition{SourceRef: "source-0", RecordIndex: 1, Position: 2}}, json.RawMessage(c.Payload))
+			kind := c.Kind
+			if kind == "" {
+				kind = "future"
+			}
+			record, err := ingest.NewRetainedUnknownFromSource(schema.HarnessClaudeCode, "record", kind, ingest.UnknownSourcePosition{Line: 2, JSONPointer: c.Pointer, Public: &ingest.UnknownPublicPosition{SourceRef: "source-0", RecordIndex: 1, Position: 2}}, json.RawMessage(c.Payload))
 			if err != nil {
 				t.Fatal(err)
 			}
