@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -453,6 +454,43 @@ func TestStoreDataProvider_Sessions(t *testing.T) {
 	expectedDuration := 120 * time.Second
 	if sess.Metadata.Duration != expectedDuration {
 		t.Errorf("sessions[0].Metadata.Duration: expected %v, got %v", expectedDuration, sess.Metadata.Duration)
+	}
+}
+
+// Session summaries feed the grouped and flat session lists, whose startTime
+// the web client validates as a UTC (Z-suffixed) datetime. time.UnixMilli
+// returns local time, so summaries must normalize to UTC at construction;
+// otherwise the wire carries a numeric offset the contract rejects and the
+// surface refuses to render.
+func TestStoreDataProvider_SessionSummaries_StartTimeIsUTCInstant(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+
+	entry := makeStoreEntry(t, "11111111-1111-1111-1111-111111111111", hash1, "github.com-user-repo1",
+		defaults.HarnessClaudeCode, day1Ms+123456, 1000, 500, "project-alpha", 10, 5, 60000)
+
+	provider := seedStore(t, s, []ingest.StoreEntry{entry})
+	ctx := context.Background()
+
+	summaries, err := provider.SessionSummaries(ctx)
+	if err != nil {
+		t.Fatalf("SessionSummaries: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("SessionSummaries: expected 1, got %d", len(summaries))
+	}
+	start := summaries[0].StartTime
+	if start.Location() != time.UTC {
+		t.Errorf("summaries[0].StartTime location = %v, want UTC", start.Location())
+	}
+	raw, err := json.Marshal(struct {
+		StartTime time.Time `json:"startTime"`
+	}{StartTime: start})
+	if err != nil {
+		t.Fatalf("marshal startTime: %v", err)
+	}
+	if !strings.HasSuffix(string(raw), `Z"}`) {
+		t.Errorf("summaries[0].StartTime wire form = %s, want a Z-suffixed UTC instant", raw)
 	}
 }
 

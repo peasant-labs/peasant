@@ -222,7 +222,7 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		s := SessionSummary{
 			ID:            row.SessionID,
 			Harness:       defaults.Harness(row.ModelHarness),
-			StartTime:     time.UnixMilli(row.StartMs),
+			StartTime:     time.UnixMilli(row.StartMs).UTC(),
 			DurationMins:  row.DurationMinutes,
 			TotalTokens:   row.TokensTotal,
 			TurnCount:     row.TurnCount,
@@ -390,7 +390,7 @@ func (p *StoreDataProvider) ChildSessionsForParent(ctx context.Context, parentID
 		remote := r.CanonicalRemote
 		refs[i] = ChildSessionRef{
 			ID:        r.SessionID,
-			StartTime: time.UnixMilli(r.StartMs),
+			StartTime: time.UnixMilli(r.StartMs).UTC(),
 			Project:   projectlabel.Label(remote, r.ProjectName),
 		}
 	}
