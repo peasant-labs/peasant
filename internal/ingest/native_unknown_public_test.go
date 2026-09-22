@@ -79,13 +79,18 @@ func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 		t.Fatal("trailing fixture document", err)
 	}
 	names := map[string]bool{}
+	var actualNames []string
 	for _, c := range doc.Cases {
 		if c.Name == "" || names[c.Name] || len(c.Positions) == 0 || len(c.Positions) != len(c.RecordIndices) || len(c.Positions) != len(c.Pointers) {
 			t.Fatalf("invalid fixture %q", c.Name)
 		}
 		names[c.Name] = true
+		actualNames = append(actualNames, c.Name)
 	}
 	if err := testutil.RequireFixtureNames("native unknown public", "case", doc.Required, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: doc.Required}, actualNames, "native unknown public"); err != nil {
 		t.Fatal(err)
 	}
 	return doc

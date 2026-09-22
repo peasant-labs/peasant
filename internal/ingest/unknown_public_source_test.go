@@ -65,13 +65,18 @@ func loadUnknownPublicSources(t *testing.T) unknownPublicSourceDocument {
 		t.Fatalf("trailing fixture document: %v", err)
 	}
 	names := map[string]bool{}
+	var actualNames []string
 	for _, c := range doc.Cases {
 		if names[c.Name] || c.Name == "" || c.Source == "" || doc.Corrupt[c.Harness] == "" || (len(c.Positions) == 0) != c.Complete || len(c.Positions) != len(c.RecordIndices) || len(c.Positions) != len(c.Pointers) {
 			t.Fatalf("invalid source fixture %q", c.Name)
 		}
 		names[c.Name] = true
+		actualNames = append(actualNames, c.Name)
 	}
 	if err := testutil.RequireFixtureNames("unknown public source", "case", doc.Required, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: doc.Required}, actualNames, "unknown public source"); err != nil {
 		t.Fatal(err)
 	}
 	return doc

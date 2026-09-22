@@ -41,13 +41,18 @@ func loadEntryExtraPrecisionFixtures(t *testing.T) []entryExtraPrecisionFixture 
 		t.Fatal("expected one extra-precision fixture document")
 	}
 	names := make(map[string]bool)
+	var actualNames []string
 	for _, row := range corpus.Cases {
 		if row.Name == "" || names[row.Name] || row.Extra == "" || row.Payload == "" || len(row.ExpectedFields) == 0 {
 			t.Fatal("duplicate or incomplete extra-precision fixture")
 		}
 		names[row.Name] = true
+		actualNames = append(actualNames, row.Name)
 	}
 	if err := testutil.RequireFixtureNames("entry extra precision", "case", corpus.Required, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: corpus.Required}, actualNames, "entry extra precision"); err != nil {
 		t.Fatal(err)
 	}
 	return corpus.Cases

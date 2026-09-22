@@ -38,13 +38,18 @@ func TestUnknownPrivateEncoding(t *testing.T) {
 		t.Fatalf("trailing fixture document: %v", err)
 	}
 	names := map[string]bool{}
+	var actualNames []string
 	for _, c := range doc.Cases {
 		if c.Name == "" || names[c.Name] {
 			t.Fatal("duplicate or empty fixture name")
 		}
 		names[c.Name] = true
+		actualNames = append(actualNames, c.Name)
 	}
 	if err := testutil.RequireFixtureNames("unknown private encoding", "case", doc.Required, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: doc.Required}, actualNames, "unknown private encoding"); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range doc.Cases {
