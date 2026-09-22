@@ -29,6 +29,11 @@ var retainedPublicationYAML []byte
 var retainedPublicationManifest []byte
 
 type retainedPublicationCase struct {
+	Kind               string `yaml:"kind"`
+	Namespace          string `yaml:"namespace"`
+	ExpectedReason     string `yaml:"expectedReason"`
+	ExpectedKind       string `yaml:"expectedKind"`
+	ExpectedNamespace  string `yaml:"expectedNamespace"`
 	Managed            bool   `yaml:"managed"`
 	Earlier            bool   `yaml:"earlier"`
 	Name               string `yaml:"name"`
@@ -92,7 +97,14 @@ func TestRetainedUnknownPublication(t *testing.T) {
 			if !c.MissingCoordinates {
 				position.Public = &ingest.UnknownPublicPosition{SourceRef: "source-0", RecordIndex: 1, Position: 3}
 			}
-			record, err := ingest.NewRetainedUnknown(schema.HarnessClaudeCode, "record", "future", position, json.RawMessage(payload))
+			kind, namespace := c.Kind, c.Namespace
+			if kind == "" {
+				kind = "future"
+			}
+			if namespace == "" {
+				namespace = "record"
+			}
+			record, err := ingest.NewRetainedUnknownFromSource(schema.HarnessClaudeCode, namespace, kind, position, json.RawMessage(payload))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,10 +223,27 @@ func TestRetainedUnknownPublication(t *testing.T) {
 				if len(publisher.Calls) != 0 || result.Errors == 0 {
 					t.Fatalf("receiver silently downgraded: %+v", result)
 				}
+				if c.ExpectedReason == "" || len(result.Sessions) != 1 || result.Sessions[0].Error == nil || !strings.Contains(result.Sessions[0].Error.Error(), c.ExpectedReason) || !strings.Contains(result.Sessions[0].Error.Error(), "retained_unknown_v1") {
+					t.Fatal("refusal did not identify the missing retained evidence capability")
+				}
 				return
 			}
 			if len(publisher.Calls) != 1 || result.Errors != 0 {
 				t.Fatalf("publish failed: %+v", result)
+			}
+			if bytes.Contains(publisher.Calls[0].TranscriptBody, []byte("custom-secret")) {
+				t.Fatal("configured secret survived actual uploaded transcript")
+			}
+			private, err := push.RedactEntries(engine, entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			privateBytes, err := json.Marshal(private)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(privateBytes, []byte("custom-secret")) {
+				t.Fatal("private evidence restoration bypassed label redaction")
 			}
 			var envelope schema.TranscriptContent
 			if err := json.Unmarshal(publisher.Calls[0].TranscriptBody, &envelope); err != nil {
@@ -224,6 +253,9 @@ func TestRetainedUnknownPublication(t *testing.T) {
 				t.Fatalf("payload changed or escaped secret leaked: %q", envelope.SessionDetail.RetainedUnknown[0].Payload)
 			}
 			last := envelope.SessionDetail.RetainedUnknown[wantRecords-1]
+			if c.ExpectedKind != "" && (last.Kind != c.ExpectedKind || last.Namespace != c.ExpectedNamespace) {
+				t.Fatal("native labels were stripped or changed instead of applying the configured rule")
+			}
 			if last.Pointer != c.Pointer || last.Position != 3 || last.RecordIndex != 1 {
 				t.Fatal("source coordinates changed")
 			}

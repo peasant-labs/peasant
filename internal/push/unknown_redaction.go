@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/redact"
@@ -21,6 +22,11 @@ func redactRetainedJSON(payload string, redactor redact.JSONRedactor, depth int)
 func redactRetainedRecords(records []schema.RetainedUnknownRecord, redactor redact.JSONRedactor) ([]schema.RetainedUnknownRecord, error) {
 	out := append([]schema.RetainedUnknownRecord(nil), records...)
 	for i := range out {
+		var err error
+		out[i].Kind, out[i].Namespace, err = redactRetainedLabels(out[i].Kind, out[i].Namespace, redactor)
+		if err != nil {
+			return nil, err
+		}
 		payload, err := redactRetainedJSON(out[i].Payload, redactor, 0)
 		if err != nil {
 			return nil, err
@@ -33,6 +39,29 @@ func redactRetainedRecords(records []schema.RetainedUnknownRecord, redactor reda
 		}
 	}
 	return out, nil
+}
+
+// Native discriminators are user-derived text, unlike opaque source identities
+// and numeric coordinates. Protecting evidence structure must not exempt labels
+// from configured publication rules.
+func redactRetainedLabels(kind, namespace string, redactor redact.JSONRedactor) (string, string, error) {
+	rewrite := func(text string) (string, error) {
+		var value any = text
+		if redactor != nil {
+			value = redactor.RedactJSON(text)
+		}
+		result, ok := value.(string)
+		if !ok || strings.TrimSpace(result) == "" || !utf8.ValidString(result) {
+			return "", fmt.Errorf("redact retained evidence label before publication: a rule produced an empty, non-string or invalid Unicode label; nothing uploaded; correct the configured rule to preserve a nonempty string")
+		}
+		return result, nil
+	}
+	kind, err := rewrite(kind)
+	if err != nil {
+		return "", "", err
+	}
+	namespace, err = rewrite(namespace)
+	return kind, namespace, err
 }
 
 // PublicationReviewText validates the upload's actual redaction path, then

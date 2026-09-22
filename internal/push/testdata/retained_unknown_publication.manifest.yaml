@@ -1,4 +1,6 @@
 requiredNames:
+  - configured_secret_whole_record_label
+  - configured_secret_nested_block_label
   - managed_partition_preserves_unknown
   - earlier_history_restores_source_order
   - full_record_between_known_records
