@@ -278,7 +278,7 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 	}
 	capture := SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 	if len(unknown) > 0 {
-		if _, err := ProjectRetainedUnknown(selected, im.session.Harness); err != nil {
+		if _, err := CollectRetainedUnknown(selected, im.session.Harness); err != nil {
 			return fail(err)
 		}
 		capture.Status, capture.FailureCode = ContentCaptureIncomplete, ContentCaptureUnknownDataRetained

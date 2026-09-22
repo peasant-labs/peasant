@@ -10,7 +10,7 @@ import (
 // A status flag alone is not an evidence certificate. Verify the exact stored
 // payload and coordinates on both sides of the full-content trust boundary.
 func validateUnknownCapture(entries []schema.SessionEntry, status ingest.ContentCaptureStatus, code ingest.ContentCaptureFailureCode) error {
-	records, err := ingest.ProjectRetainedUnknown(entries, "")
+	records, err := ingest.CollectRetainedUnknown(entries, "")
 	if err != nil {
 		return fmt.Errorf("store full content evidence validation: %w; prior capture remains authoritative", err)
 	}

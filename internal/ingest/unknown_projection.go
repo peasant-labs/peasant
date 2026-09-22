@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/peasant-labs/schema"
 )
@@ -17,6 +19,28 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // text verbatim. Capture owns coordinates: entry indices, line numbers and native
 // IDs cannot reconstruct traversal positions after known blocks have been folded.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
+	projected, err := CollectRetainedUnknown(entries, harness)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range projected {
+		if len(record.Payload) > 8<<20 {
+			return nil, fmt.Errorf("export retained evidence: payload exceeds the published 8 MiB transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available")
+		}
+	}
+	if len(projected) > 0 {
+		if err := schema.ValidateRetainedUnknown(schema.SessionDetailPayload{RetainedUnknown: projected, Diagnostics: &schema.InterpretationDiagnostics{Partial: true}}); err != nil {
+			return nil, fmt.Errorf("export retained evidence: public syntax, position or byte/depth requirements are not met: %w; local evidence is unchanged; nothing exported or uploaded", err)
+		}
+	}
+	return projected, nil
+}
+
+// CollectRetainedUnknown certifies LOCAL evidence integrity and source positions.
+// It does not impose a public transfer budget on captured source bytes. Source
+// adapters own their source-size policy; export separately validates the public
+// contract through ProjectRetainedUnknown.
+func CollectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
 	var projected []schema.RetainedUnknownRecord
 	for _, entry := range entries {
 		records, err := RetainedUnknownOf(entry)
@@ -47,9 +71,72 @@ func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 			}
 			return cmp.Compare(a.Position, b.Position)
 		})
-		if err := schema.ValidateRetainedUnknown(schema.SessionDetailPayload{RetainedUnknown: projected, Diagnostics: &schema.InterpretationDiagnostics{Partial: true}}); err != nil {
-			return nil, fmt.Errorf("project retained unknown evidence: stored payload or source ordering is invalid: %w; nothing was emitted; re-index the intact source", err)
+		if err := validateLocalRetainedUnknown(projected); err != nil {
+			return nil, err
 		}
 	}
 	return projected, nil
+}
+
+func validateLocalRetainedUnknown(records []schema.RetainedUnknownRecord) error {
+	fail := func() error {
+		return fmt.Errorf("validate local retained evidence: corrupt JSON, invalid identity or conflicting source coordinates; no full-data certificate was issued; preserve the prior capture and re-index an intact source")
+	}
+	type cursor struct {
+		position, record int64
+		pointers         *localUnknownPointer
+	}
+	sources := map[string]cursor{}
+	for _, record := range records {
+		if record.SourceRef == "" || strings.TrimSpace(record.Kind) == "" || strings.TrimSpace(record.Namespace) == "" ||
+			!utf8.ValidString(record.SourceRef) || !utf8.ValidString(record.Kind) || !utf8.ValidString(record.Namespace) || !utf8.ValidString(record.Pointer) || !utf8.ValidString(record.Payload) ||
+			record.RecordIndex < 0 || record.RecordIndex > 9007199254740991 || record.Position < record.RecordIndex || record.Position > 9007199254740991 || !validUnknownPointer(record.Pointer) {
+			return fail()
+		}
+		prior, exists := sources[record.SourceRef]
+		if exists && (record.Position <= prior.position || record.RecordIndex < prior.record) {
+			return fail()
+		}
+		if !exists || record.RecordIndex != prior.record {
+			prior.pointers = &localUnknownPointer{}
+		}
+		if !prior.pointers.insert(record.Pointer) {
+			return fail()
+		}
+		// encoding/json accepts nesting through 10,000 levels. Scan with that
+		// syntax bound and the actual byte length, not a transport-size budget.
+		// Never surface scanner paths: they may contain private source text.
+		if err := schema.ScanRawJSONDocument([]byte(record.Payload), schema.RawJSONPathPolicy{MaxDocumentBytes: len(record.Payload), MaxDocumentDepth: 10000}); err != nil {
+			return fail()
+		}
+		sources[record.SourceRef] = cursor{record.Position, record.RecordIndex, prior.pointers}
+	}
+	return nil
+}
+
+type localUnknownPointer struct {
+	terminal bool
+	children map[string]*localUnknownPointer
+}
+
+func (node *localUnknownPointer) insert(pointer string) bool {
+	if pointer != "" {
+		for _, component := range strings.Split(pointer[1:], "/") {
+			if node.terminal {
+				return false
+			}
+			if node.children == nil {
+				node.children = map[string]*localUnknownPointer{}
+			}
+			if node.children[component] == nil {
+				node.children[component] = &localUnknownPointer{}
+			}
+			node = node.children[component]
+		}
+	}
+	if node.terminal || len(node.children) > 0 {
+		return false
+	}
+	node.terminal = true
+	return true
 }
