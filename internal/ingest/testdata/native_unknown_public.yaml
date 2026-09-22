@@ -18,8 +18,8 @@ required_names:
   - codex-retained-opaque-only
   - opencode-retained-opaque-only
   - codex-native-main-and-earlier
-payload: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "embedded":"{\"\\u0067hp_SECRET_BODY\":\"\\u0067hp_SECRET_BODY\"}" }'
-expected: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "embedded":"{\"\\u003cGITHUB_PAT\\u003e\":\"\\u003cGITHUB_PAT\\u003e\"}" }'
+payload: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "\u0067hp_SECRET_BODY":"\u0067hp_SECRET_BODY", "embedded":"{\"\\u0067hp_SECRET_BODY\":\"\\u0067hp_SECRET_BODY\"}" }'
+expected: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "\u003cGITHUB_PAT\u003e":"\u003cGITHUB_PAT\u003e", "embedded":"{\"\\u003cGITHUB_PAT\\u003e\":\"\\u003cGITHUB_PAT\\u003e\"}" }'
 corrupt:
   codex: '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":42}]}}'
   opencode: '{"text":42,"time":{"created":1}}'
