@@ -678,6 +678,20 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		return nil
 	}
 	payload := decodeCodexItemPayload(node.Payload)
+	if node.EnvelopeType == codexTypeEventMsg {
+		// Replay retains the complete lifecycle payload for identity/history
+		// proof. Interpret its carried item, not the outer completion marker.
+		var event codexHistoryReplayPayload
+		if err := json.Unmarshal(node.Payload, &event); err != nil {
+			return err
+		}
+		if event.Type == "item_completed" && len(event.Item) > 0 {
+			payload = decodeCodexItemPayload(event.Item)
+			if !payload.Delivery.isCorrelated() && event.Delivery.isCorrelated() {
+				payload.Delivery = *event.Delivery
+			}
+		}
+	}
 	if node.NativeType == "message" && len(payload.Content) > 0 {
 		opaqueOnly := true
 		for _, block := range payload.Content {

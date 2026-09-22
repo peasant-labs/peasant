@@ -1,4 +1,7 @@
 required_names:
+  - codex-native-canonical-user-lexical
+  - codex-native-canonical-reasoning-lexical
+  - codex-native-response-reasoning-summary-lexical
   - codex-retained-records
   - codex-native-records
   - codex-native-opaque-only
@@ -18,12 +21,53 @@ required_names:
   - codex-retained-opaque-only
   - opencode-retained-opaque-only
   - codex-native-main-and-earlier
-payload: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "\u0067hp_SECRET_BODY":"\u0067hp_SECRET_BODY", "embedded":"{\"\\u0067hp_SECRET_BODY\":\"\\u0067hp_SECRET_BODY\"}" }'
-expected: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "padding":"BODY", "\u003cGITHUB_PAT\u003e":"\u003cGITHUB_PAT\u003e", "embedded":"{\"\\u003cGITHUB_PAT\\u003e\":\"\\u003cGITHUB_PAT\\u003e\"}" }'
+no_model_reason: no model recorded in the session metadata
+missing_capability_reason: 'missing tokens: ["retained_unknown_v1"]'
+payload: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "\u0075nchanged":"\u0061\/b", "padding":"BODY", "\u0067hp_SECRET_BODY":"\u0067hp_SECRET_BODY", "embedded":"{\"\\u0067hp_SECRET_BODY\":\"\\u0067hp_SECRET_BODY\"}" }'
+expected: '{ "type" : "future", "integer":9007199254740993, "decimal":1.2300e+06, "zero":-0, "\u0075nchanged":"\u0061\/b", "padding":"BODY", "\u003cGITHUB_PAT\u003e":"\u003cGITHUB_PAT\u003e", "embedded":"{\"\\u003cGITHUB_PAT\\u003e\":\"\\u003cGITHUB_PAT\\u003e\"}" }'
 corrupt:
   codex: '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":42}]}}'
   opencode: '{"text":42,"time":{"created":1}}'
 cases:
+  - name: codex-native-canonical-user-lexical
+    harness: codex
+    native: true
+    known_texts: [known before, closing]
+    known_role: user
+    source: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"event_msg","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"canonical-user","content":[{"type":"input_text","text":"known before"},UNKNOWN,{"type":"input_text","text":"closing"}]}}}
+    namespace: message_block
+    record_indices: [2]
+    positions: [6]
+    pointers: [/payload/item/content/1]
+  - name: codex-native-canonical-reasoning-lexical
+    harness: codex
+    native: true
+    known_texts: [known before, closing]
+    known_role: assistant
+    source: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"event_msg","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"item_completed","item":{"type":"Reasoning","id":"canonical-reasoning","content":[{"type":"reasoning_text","text":"known before"},UNKNOWN,{"type":"reasoning_text","text":"closing"}]}}}
+    namespace: reasoning_content
+    record_indices: [2]
+    positions: [6]
+    pointers: [/payload/item/content/1]
+  - name: codex-native-response-reasoning-summary-lexical
+    harness: codex
+    native: true
+    known_texts: [known before, closing]
+    known_role: assistant
+    source: |
+      {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+      {"type":"turn_context","payload":{"model":"gpt-5"}}
+      {"type":"event_msg","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"item_completed","item":{"type":"reasoning","id":"response-reasoning","summary":[{"type":"summary_text","text":"known before"},UNKNOWN,{"type":"summary_text","text":"closing"}]}}}
+    namespace: reasoning_summary
+    record_indices: [2]
+    positions: [6]
+    pointers: [/payload/item/summary/1]
   - name: opencode-legacy-json
     harness: opencode
     legacy: file-tree
