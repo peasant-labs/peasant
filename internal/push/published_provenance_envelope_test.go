@@ -38,6 +38,7 @@ var publishedProvenanceEnvelopeManifestYAML []byte
 var (
 	ppePaths          = []string{"snapshot", "legacy"}
 	ppeStats          = []string{"absent", "zero", "positive"}
+	ppeCaptureCounts  = []string{"omitted", "mirrored"}
 	ppeRelationships  = []string{"none", "known", "known-retained", "unknown"}
 	ppeRootIdentities = []string{"present", "absent"}
 	ppePurposes       = []string{"interaction", "absent"}
@@ -70,19 +71,21 @@ type publishedProvenanceEnvelopeFixture struct {
 }
 
 type publishedProvenanceEnvelopeCase struct {
-	Name          string `yaml:"name"`
-	Path          string `yaml:"path"`
-	Stats         string `yaml:"stats"`
-	Relationships string `yaml:"relationships"`
-	RootIdentity  string `yaml:"rootIdentity"`
-	Purpose       string `yaml:"purpose"`
-	Earlier       string `yaml:"earlier"`
-	Visibility    string `yaml:"visibility"`
-	Advertisement string `yaml:"advertisement"`
-	Redaction     string `yaml:"redaction"`
-	Entries       string `yaml:"entries"`
-	Harness       string `yaml:"harness"`
-	BlobBytes     int    `yaml:"blobBytes"`
+	Name             string `yaml:"name"`
+	Path             string `yaml:"path"`
+	Stats            string `yaml:"stats"`
+	CaptureCount     string `yaml:"captureCount"`
+	OmitCaptureGraph bool   `yaml:"omitCaptureGraph"`
+	Relationships    string `yaml:"relationships"`
+	RootIdentity     string `yaml:"rootIdentity"`
+	Purpose          string `yaml:"purpose"`
+	Earlier          string `yaml:"earlier"`
+	Visibility       string `yaml:"visibility"`
+	Advertisement    string `yaml:"advertisement"`
+	Redaction        string `yaml:"redaction"`
+	Entries          string `yaml:"entries"`
+	Harness          string `yaml:"harness"`
+	BlobBytes        int    `yaml:"blobBytes"`
 	// GenerationTurnCount overrides the generation's durable turn mirror when
 	// set, so a case can prove the published turnCount is the captured mirror
 	// rather than len(Turns).
@@ -164,12 +167,16 @@ func loadPublishedProvenanceEnvelopeFixture(t *testing.T) publishedProvenanceEnv
 		if fixtureCase.Harness == "" {
 			fixtureCase.Harness = "claude-code"
 		}
+		if fixtureCase.CaptureCount == "" {
+			fixtureCase.CaptureCount = "omitted"
+		}
 		for label, pair := range map[string]struct {
 			value  string
 			closed []string
 		}{
 			"path":          {fixtureCase.Path, ppePaths},
 			"stats":         {fixtureCase.Stats, ppeStats},
+			"captureCount":  {fixtureCase.CaptureCount, ppeCaptureCounts},
 			"relationships": {fixtureCase.Relationships, ppeRelationships},
 			"rootIdentity":  {fixtureCase.RootIdentity, ppeRootIdentities},
 			"purpose":       {fixtureCase.Purpose, ppePurposes},
@@ -309,7 +316,10 @@ func ppeBuild(t *testing.T, c publishedProvenanceEnvelopeCase) ppeBuilt {
 		positive := int64(3)
 		inputCount = &positive
 	}
-	meta.Stats.InputSubmissionCount = inputCount
+	// The generation measures the count; capture metadata may still omit it.
+	if c.CaptureCount == "mirrored" {
+		meta.Stats.InputSubmissionCount = inputCount
+	}
 
 	target := schema.SessionID(ppeTargetID)
 	previous := schema.SessionID(ppePreviousID)
@@ -326,6 +336,11 @@ func ppeBuild(t *testing.T, c publishedProvenanceEnvelopeCase) ppeBuilt {
 
 	built := ppeBuilt{meta: &meta, harness: harness}
 	ppeBuildPartitions(t, &built, c, inputCount)
+	if c.OmitCaptureGraph {
+		meta.RootSessionID = nil
+		meta.Purpose = ""
+		meta.Relationships = nil
+	}
 	built.legacyEntries = built.legacyMainEntries()
 	return built
 }

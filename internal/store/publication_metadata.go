@@ -294,7 +294,10 @@ func stampPublicationIndex(conn *sqlite.Conn, id ingest.SessionID, revision int6
 	return sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_publication_capture_revision=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{revision, string(id)}})
 }
 
-// LoadPublicationInput takes one deferred read transaction. Every constituent
+// LoadPublicationInput reads recorded capture evidence for ingest/repair and
+// diagnostics. Publication consumers use WithCommittedPublicationInput instead,
+// which includes the current generation's derived facts. This capture-only read
+// takes one deferred read transaction. Every constituent
 // reader uses this same connection, including extension rows and current metrics.
 // Missing/unsupported captures return needs_ingest. Corrupt or conflicting
 // evidence returns an error, never an approximation or a filesystem fallback.
@@ -305,14 +308,21 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 		return bundle, err
 	}
 	defer s.pool.Put(conn)
+	end := sqlitex.Transaction(conn)
+	defer end(&err)
+	return s.loadPublicationInputOnConn(ctx, conn, id)
+}
+
+// loadPublicationInputOnConn reads capture evidence and content on the caller's
+// transaction, so the committed-generation reader can include them in its read.
+func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+	bundle.Readiness = ingest.PublicationNeedsIngest
 	defer func() {
 		if err != nil {
 			bundle.Readiness = ingest.PublicationNeedsIngest
 			bundle.Entries = nil
 		}
 	}()
-	end := sqlitex.Transaction(conn)
-	defer end(&err)
 	found := false
 	err = sqlitex.ExecuteTransient(conn, publicationMetadataSelect+` WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {

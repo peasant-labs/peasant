@@ -180,7 +180,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				}
 			}
 
-			bundle, err := push.LoadPublicationInput(ctx, db, testutil.TestSessionUUID)
+			bundle, _, err := push.LoadPublicationInput(ctx, db, testutil.TestSessionUUID)
 			if err != nil {
 				t.Fatalf("load the publication input: %v", err)
 			}

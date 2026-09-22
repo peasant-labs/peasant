@@ -883,7 +883,7 @@ func (p *Pipeline) pushSession(
 
 	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
 	defer func() { stage.finish(sr.Error) }()
-	input, err := p.readPublicationInput(ctx, sess)
+	input, detail, err := p.readPublicationInput(ctx, sess)
 	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if err == nil {
 		err = ValidatePublicationInput(input)
@@ -911,15 +911,6 @@ func (p *Pipeline) pushSession(
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
 
-	// Keep the metadata publication mirrors exact. The receiver compares the
-	// input-submission count and the graph mirrors (root session, purpose,
-	// relationships) against the durable detail's values and refuses a
-	// disagreement, and a measured zero is distinct from an absent count. The
-	// durable detail is hydrated from the active generation snapshot, so mirror
-	// that same snapshot identity here, before the metadata part is assembled. A
-	// legacy session, or a store without the managed snapshot surface, keeps
-	// the capture metadata unchanged.
-	mirrorDurablePublicationIdentity(ctx, p.store, sess.SessionID, &meta)
 	stage.next(perf.StagePushSessionLoad)
 
 	metrics := input.Quality
@@ -975,6 +966,13 @@ func (p *Pipeline) pushSession(
 
 	stage.next(perf.StagePushPayloadBuild)
 
+	// The committed input already pairs current metadata with its hydrated
+	// detail. Apply publication consent without re-reading the active generation.
+	content, err := BuildPublishTranscriptContent(detail, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
+	}
+
 	// 5. Map metadata to publishRequest JSON.
 	publishJSON, err := MapMetadata(MapOptions{
 		Meta:          &meta,
@@ -1017,17 +1015,6 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
-	// Stored origin belongs to the same database snapshot as metadata and entries.
-	//
-	// The envelope is built from the session's committed generation when the
-	// store supports the durable snapshot surface, so session-level provenance
-	// evidence and hydrated full tool bodies are published exactly as the local
-	// detail read serves them. A legacy V1 session keeps the preserved entries
-	// builder; a corrupt managed artifact fails this session whole.
-	content, err := BuildPublishTranscriptContent(ctx, p.store, sess.SessionID, &meta, entries, emit, p.cfg.Push.Fields, input.SessionOrigin)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
-	}
 	// Derive the receiver capabilities this durable payload requires BEFORE
 	// anything can be uploaded. The scan is local (no network) and validates the
 	// exact content that will be uploaded; it neither consults nor caches any
@@ -1273,7 +1260,7 @@ func (p *Pipeline) preflight(ctx context.Context, sessions []ingest.PushSessionR
 			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 		}
 		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
-		input, readErr := p.readPublicationInput(ctx, sess)
+		input, _, readErr := p.readPublicationInput(ctx, sess)
 		if readErr == nil {
 			readErr = ValidatePublicationInput(input)
 		}
