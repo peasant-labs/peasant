@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,6 +29,52 @@ var piUnknownYAML []byte
 
 //go:embed testdata/pi_unknown_carriers.yaml
 var piUnknownCarriersYAML []byte
+
+//go:embed testdata/pi_unknown_oracle.yaml
+var piUnknownOracleYAML []byte
+
+func TestPiUnknownOriginalPayloadOracle(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name     string `yaml:"name"`
+			Original string `yaml:"original"`
+			Mutation string `yaml:"mutation"`
+			Remove   string `yaml:"remove"`
+			Reject   bool   `yaml:"reject"`
+		} `yaml:"cases"`
+	}
+	if err := testutil.DecodeNamedFixtureYAML(piUnknownOracleYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			actual := c.Original
+			switch c.Mutation {
+			case "unchanged":
+			case "delete-summary":
+				if c.Remove == "" || strings.Count(actual, c.Remove) != 1 {
+					t.Fatal("vacuous field-deletion mutation")
+				}
+				actual = strings.Replace(actual, c.Remove, "", 1)
+				if !json.Valid([]byte(actual)) {
+					t.Fatal("field deletion damaged JSON rather than deleting only the selected field")
+				}
+			case "compact":
+				var compact bytes.Buffer
+				if err := json.Compact(&compact, []byte(actual)); err != nil {
+					t.Fatal(err)
+				}
+				actual = compact.String()
+			default:
+				t.Fatal("unknown oracle mutation")
+			}
+			if err := comparePiUnknownPayload(c.Original, actual); (err != nil) != c.Reject {
+				t.Fatalf("original-source oracle: %v, want rejection %t", err, c.Reject)
+			}
+		})
+	}
+}
 
 func TestPiUnknownCarrierValidation(t *testing.T) {
 	var fixture struct {
@@ -104,14 +151,27 @@ func TestPiUnknownCarrierValidation(t *testing.T) {
 }
 
 type piUnknownExpectation struct {
-	Namespace string   `yaml:"namespace"`
-	Kind      string   `yaml:"kind"`
-	ID        string   `yaml:"id"`
-	Line      int      `yaml:"line"`
-	Sequence  int      `yaml:"sequence"`
-	Position  int64    `yaml:"position"`
-	Pointer   string   `yaml:"pointer"`
-	Contains  []string `yaml:"contains"`
+	Namespace string `yaml:"namespace"`
+	Kind      string `yaml:"kind"`
+	ID        string `yaml:"id"`
+	Line      int    `yaml:"line"`
+	Sequence  int    `yaml:"sequence"`
+	Position  int64  `yaml:"position"`
+	Pointer   string `yaml:"pointer"`
+	Payload   string `yaml:"payload"`
+}
+
+// This comparison deliberately accepts fixture-owned text, never a projected
+// production capture as its expectation. Neither JSON normalization nor partial
+// substring matches can certify that the complete source payload survived.
+func comparePiUnknownPayload(expected, actual string) error {
+	if expected == "" || !json.Valid([]byte(expected)) {
+		return fmt.Errorf("missing complete fixture payload")
+	}
+	if expected != actual {
+		return fmt.Errorf("retained payload differs from complete source fixture (%d expected bytes, %d actual bytes)", len(expected), len(actual))
+	}
+	return nil
 }
 
 func TestPiUnknownPersistence(t *testing.T) {
@@ -141,6 +201,20 @@ func TestPiUnknownPersistence(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "source.jsonl")
 			padding := strings.Repeat("z", tc.PaddingBytes)
+			var wantPublic []schema.RetainedUnknownRecord
+			for i := range tc.Expected {
+				want := &tc.Expected[i]
+				want.Payload = strings.ReplaceAll(want.Payload, "PADDING", padding)
+				if err := comparePiUnknownPayload(want.Payload, want.Payload); err != nil {
+					t.Fatal(err)
+				}
+				sequence := want.Sequence
+				if sequence == 0 {
+					sequence = want.Line
+				}
+				wantPublic = append(wantPublic, schema.RetainedUnknownRecord{SourceRef: ingest.PiPublicRef(sid.String(), "stream", "recording"), RecordIndex: int64(sequence - 1), Position: want.Position, Pointer: want.Pointer, Namespace: want.Namespace, Kind: want.Kind, Payload: want.Payload})
+			}
+			sort.Slice(wantPublic, func(i, j int) bool { return wantPublic[i].Position < wantPublic[j].Position })
 			source := fixture.Header + "\n" + strings.ReplaceAll(tc.Source, "PADDING", padding)
 			if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 				t.Fatal(err)
@@ -201,10 +275,8 @@ func TestPiUnknownPersistence(t *testing.T) {
 					if got.Namespace != want.Namespace || got.Kind != want.Kind || got.Harness != schema.HarnessPi || got.Position.Line != want.Line || got.Position.SourceID != want.ID || got.Position.JSONPointer != want.Pointer || string(got.Position.SourceEntryRef) != ingest.PiPublicRef(sid.String(), "entry", want.ID) {
 						t.Fatalf("evidence identity: %+v want %+v", got, want)
 					}
-					for _, text := range want.Contains {
-						if !strings.Contains(string(got.Payload), text) {
-							t.Fatalf("payload missing %q", text)
-						}
+					if err := comparePiUnknownPayload(want.Payload, string(got.Payload)); err != nil {
+						t.Fatalf("source occurrence %d: %v", i, err)
 					}
 					if strings.Contains(string(got.Payload), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") {
 						t.Fatal("source secret persisted without redaction")
@@ -287,10 +359,6 @@ func TestPiUnknownPersistence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantPublic, err := ingest.ProjectRetainedUnknown(capture.Entries, schema.HarnessPi)
-			if err != nil {
-				t.Fatal(err)
-			}
 			if !reflect.DeepEqual(beforeExport.RetainedUnknown, wantPublic) {
 				t.Fatal("source-to-export evidence changed")
 			}
@@ -306,7 +374,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 				t.Fatal("export invented unknown turns")
 			}
 			if tc.Publish {
-				assertPiUnknownPublication(t, db, fs, sid, output, beforeExport)
+				assertPiUnknownPublication(t, db, fs, sid, output, wantPublic, len(tc.Content))
 			}
 			// Remove native input to exercise database-driven retained indexing,
 			// rather than mistaking another native capture for the batch route.
@@ -350,7 +418,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 	}
 }
 
-func assertPiUnknownPublication(t *testing.T, db *store.Store, fs ingest.FileSystem, sid schema.SessionID, output ingest.ResolvedPath, expected *schema.SessionDetailPayload) {
+func assertPiUnknownPublication(t *testing.T, db *store.Store, fs ingest.FileSystem, sid schema.SessionID, output ingest.ResolvedPath, expected []schema.RetainedUnknownRecord, turns int) {
 	t.Helper()
 	publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}}
 	cfg := &config.Config{Output: config.OutputConfig{BasePath: output.String()}, Push: config.PushConfig{Method: config.PushMethodAll, Visibility: config.VisibilityPrivate}}
@@ -368,13 +436,13 @@ func assertPiUnknownPublication(t *testing.T, db *store.Store, fs ingest.FileSys
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(content.SessionDetail.RetainedUnknown, expected.RetainedUnknown) {
+	if !reflect.DeepEqual(content.SessionDetail.RetainedUnknown, expected) {
 		t.Fatal("publication changed source payload or coordinates")
 	}
 	if content.SessionDetail.Diagnostics == nil || !content.SessionDetail.Diagnostics.Partial || len(publisher.AuthoritativeCalls) != 1 || publisher.AuthoritativeCalls[0].Diagnostics.Partial == nil || !*publisher.AuthoritativeCalls[0].Diagnostics.Partial {
 		t.Fatal("publication lost partial detail/metadata mirror")
 	}
-	if len(content.SessionDetail.NativeMetadata) != 0 || len(content.SessionDetail.Turns) != len(expected.Turns) {
+	if len(content.SessionDetail.NativeMetadata) != 0 || len(content.SessionDetail.Turns) != turns {
 		t.Fatal("publication used Pi metadata or fabricated conversation")
 	}
 }
