@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -38,6 +39,8 @@ import (
 var nativeUnknownPublicYAML []byte
 
 type nativeUnknownPublicCase struct {
+	KnownTexts       []string       `yaml:"known_texts"`
+	KnownRole        schema.Role    `yaml:"known_role"`
 	RetainedFallback bool           `yaml:"retained_fallback"`
 	Unaccounted      bool           `yaml:"unaccounted"`
 	Legacy           string         `yaml:"legacy"`
@@ -59,11 +62,13 @@ type nativeUnknownPublicCase struct {
 }
 
 type nativeUnknownPublicDocument struct {
-	Corrupt  map[ingest.Harness]string `yaml:"corrupt"`
-	Required []string                  `yaml:"required_names"`
-	Payload  string                    `yaml:"payload"`
-	Expected string                    `yaml:"expected"`
-	Cases    []nativeUnknownPublicCase `yaml:"cases"`
+	NoModelReason           string                    `yaml:"no_model_reason"`
+	MissingCapabilityReason string                    `yaml:"missing_capability_reason"`
+	Corrupt                 map[ingest.Harness]string `yaml:"corrupt"`
+	Required                []string                  `yaml:"required_names"`
+	Payload                 string                    `yaml:"payload"`
+	Expected                string                    `yaml:"expected"`
+	Cases                   []nativeUnknownPublicCase `yaml:"cases"`
 }
 
 func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
@@ -237,6 +242,34 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			if len(counts) != 1 || counts[0].Namespace != c.Namespace || counts[0].Occurrences != len(c.Positions) || counts[0].Sessions != 1 {
 				t.Fatalf("successful occurrence/session accounting: %+v", counts)
 			}
+			if len(c.KnownTexts) > 0 {
+				err := db.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {
+					entries := append([]schema.SessionEntry(nil), snapshot.Main.Entries...)
+					for _, section := range snapshot.Earlier {
+						entries = append(entries, section.Content.Entries...)
+					}
+					seen := 0
+					for _, entry := range entries {
+						records, err := ingest.RetainedUnknownOf(entry)
+						if err != nil {
+							return err
+						}
+						for _, record := range records {
+							seen++
+							if string(record.Payload) != expected {
+								t.Fatal("first activated capture changed the independent lexical payload")
+							}
+						}
+					}
+					if seen != len(c.Positions) {
+						t.Fatal("first activated capture lost an opaque occurrence")
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -273,6 +306,13 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				if len(publisher.Calls) != 0 || published.Errors == 0 {
 					t.Fatalf("publication invented a model: %+v", published)
 				}
+				failure := nativePublicationFailure(t, published, sid)
+				if !errors.Is(failure, push.ErrNoModel) || doc.NoModelReason == "" || !strings.Contains(failure.Error(), doc.NoModelReason) {
+					t.Fatalf("publication refused for the wrong prerequisite: %v", failure)
+				}
+				if detail.Model != "" {
+					t.Fatal("opaque-only export invented model evidence")
+				}
 			} else {
 				if len(publisher.Calls) != 1 || published.Errors != 0 {
 					t.Fatalf("production push failed: %+v calls=%d", published, len(publisher.Calls))
@@ -293,6 +333,10 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				refused := publish()
 				if len(publisher.Calls) != 0 || refused.Errors == 0 {
 					t.Fatal("receiver without retention capability received a stripped upload")
+				}
+				failure := nativePublicationFailure(t, refused, sid)
+				if doc.MissingCapabilityReason == "" || !strings.Contains(failure.Error(), doc.MissingCapabilityReason) || !slices.Contains(refused.Sessions[0].RequiredCapabilities, schema.ContentCapabilityRetainedUnknownV1) || len(publisher.AuthoritativeCalls) != 0 {
+					t.Fatalf("publication did not refuse the exact missing retention capability: %v", failure)
 				}
 			}
 			priorExport, err := export.ExportSession(t.Context(), db, fs, string(sid))
@@ -345,6 +389,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 	}
 }
 
+func nativePublicationFailure(t *testing.T, result *push.PushResult, sid schema.SessionID) error {
+	t.Helper()
+	if result == nil || result.Errors != 1 || len(result.Sessions) != 1 || result.Sessions[0].SessionID != string(sid) || result.Sessions[0].Status != push.PushStatusError || result.Sessions[0].Error == nil {
+		t.Fatalf("expected one source-specific publication failure: %+v", result)
+	}
+	return result.Sessions[0].Error
+}
+
 func checkNativeUnknownPublic(t *testing.T, c nativeUnknownPublicCase, expected string, detail *schema.SessionDetailPayload) {
 	t.Helper()
 	if detail == nil || detail.Diagnostics == nil || !detail.Diagnostics.Partial || len(detail.RetainedUnknown) != len(c.Positions) {
@@ -370,6 +422,17 @@ func checkNativeUnknownPublic(t *testing.T, c nativeUnknownPublicCase, expected 
 	turns := append([]schema.TurnDetail(nil), detail.Turns...)
 	for _, section := range detail.EarlierHistory {
 		turns = append(turns, section.Turns...)
+	}
+	for _, text := range c.KnownTexts {
+		found := false
+		for _, turn := range turns {
+			if strings.Contains(turn.Content, text) && turn.Role == c.KnownRole {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("known %s sibling %q disappeared or changed role", c.KnownRole, text)
+		}
 	}
 	for _, turn := range turns {
 		for _, call := range turn.ToolCalls {

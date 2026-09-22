@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -132,15 +133,19 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			if err != nil {
 				return nil, nil, err
 			}
-			for i := range nested {
-				nested[i].Position.JSONPointer = "/payload/item" + strings.TrimPrefix(nested[i].Position.JSONPointer, "/payload")
-				if position.Public != nil {
-					public := *position.Public
-					public.Position += traversal[nested[i].Position.JSONPointer]
-					nested[i].Position.Public = &public
+			for _, record := range nested {
+				// Normalization above is an interpretation copy. Rebind every
+				// retained leaf to the original item's raw value before redaction;
+				// marshaling the wrapper compacts RawMessage whitespace.
+				original, err := codexOriginalItemBlock(payload["item"], record.Position.JSONPointer)
+				if err != nil {
+					return nil, nil, err
+				}
+				pointer := "/payload/item" + strings.TrimPrefix(record.Position.JSONPointer, "/payload")
+				if err := retain(record.Namespace, record.Kind, pointer, original); err != nil {
+					return nil, nil, err
 				}
 			}
-			unknown = append(unknown, nested...)
 			if len(nested) > 0 {
 				var value map[string]json.RawMessage
 				if err := json.Unmarshal(prepared, &value); err != nil {
@@ -247,6 +252,29 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 	envelope["payload"] = encoded
 	encoded, err = json.Marshal(envelope)
 	return encoded, unknown, err
+}
+
+func codexOriginalItemBlock(raw json.RawMessage, pointer string) (json.RawMessage, error) {
+	fail := func() (json.RawMessage, error) {
+		return nil, &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+	}
+	parts := strings.Split(strings.TrimPrefix(pointer, "/payload/"), "/")
+	if len(parts) != 2 || (parts[0] != "content" && parts[0] != "summary") {
+		return fail()
+	}
+	index, err := strconv.Atoi(parts[1])
+	if err != nil || index < 0 {
+		return fail()
+	}
+	var item map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return fail()
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(item[parts[0]], &blocks); err != nil || index >= len(blocks) {
+		return fail()
+	}
+	return blocks[index], nil
 }
 
 // codexTraversalPointers assigns preorder coordinates to the source envelope,
