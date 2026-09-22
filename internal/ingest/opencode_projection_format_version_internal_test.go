@@ -79,8 +79,8 @@ func TestOpenCodeManagedProjectionFormatVersionDiscipline(t *testing.T) {
 	if openCodeCurrentProjectionVersion != 3 {
 		t.Fatalf("current projection write version = %d, want 3 after retained evidence was added", openCodeCurrentProjectionVersion)
 	}
-	if openCodeLegacyProjectionVersion != 2 {
-		t.Fatalf("legacy projection write version = %d, want 2; the legacy persisted shape is unchanged", openCodeLegacyProjectionVersion)
+	if openCodeLegacyProjectionVersion != 3 {
+		t.Fatalf("legacy projection write version = %d, want 3 for lexical retained evidence", openCodeLegacyProjectionVersion)
 	}
 	if openCodeLegacyProjectionMinReadableVersion != 1 {
 		t.Fatalf("minimum readable version = %d, want 1 so a previously persisted version 1 projection still decodes", openCodeLegacyProjectionMinReadableVersion)

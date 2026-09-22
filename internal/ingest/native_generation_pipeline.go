@@ -265,6 +265,29 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		version := target.AdapterVersion
 		generation.Generation.Metadata.AdapterVersion = &version
 	}
+	// Native partitions are the selected history, not every source node seen by
+	// replay. Validate and count their evidence before activation, then publish
+	// accounting only after the atomic generation write succeeds.
+	selected := append([]schema.SessionEntry(nil), generation.Generation.Main.Entries...)
+	for _, earlier := range generation.Generation.Earlier {
+		selected = append(selected, earlier.Content.Entries...)
+	}
+	unknown, err := retainedUnknownEntries(selected)
+	if err != nil {
+		return fail(err)
+	}
+	capture := SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
+	if len(unknown) > 0 {
+		if _, err := ProjectRetainedUnknown(selected, im.session.Harness); err != nil {
+			return fail(err)
+		}
+		capture.Status, capture.FailureCode = ContentCaptureIncomplete, ContentCaptureUnknownDataRetained
+		capture.FailureMessage = "source payloads and positions are retained; interpretation remains partial"
+		if result.input.session.ContentOmitted || generation.Generation.Completeness != indexformat.GenerationCompletenessComplete {
+			capture.CaptureFormat, capture.FailureCode = ContentCaptureFormatPreviewOnly, ContentCaptureSourceRecordsOmitted
+			capture.FailureMessage = "opaque evidence survives, but source capture or native history reconstruction is incomplete; recapture the complete native source"
+		}
+	}
 	activation := NativeGenerationActivation{
 		Generation:       generation,
 		Blobs:            candidate.Blobs,
@@ -272,7 +295,7 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		IndexerVersion:   target.IndexerVersion,
 		IndexedAtMs:      nowMs,
 		ExpectedState:    result.input.expected,
-		ContentCapture:   SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs},
+		ContentCapture:   capture,
 		CaptureRevision:  im.captureRevision,
 		IndexedInputHash: &result.input.inputHash,
 		ArtifactIdentity: artifactIdentity,
@@ -289,5 +312,5 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 	}
 	logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
 	profile := p.makeIndexProfileSession(result, logEntry, 0)
-	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
+	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: retainedUnknownCounts(unknown)}, logEntry, profile
 }

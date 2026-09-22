@@ -317,7 +317,7 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		}
 		position := UnknownSourcePosition{Line: scanner.Line(), Public: codexPublicPosition(sessionID.String(), scanner.Line(), traversalPosition)}
 		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
-		prepared, unknown, prepareErr := prepareCodexRecord(trimmed, position, false)
+		prepared, unknown, prepareErr := prepareCodexRecord(raw, position, false)
 		if prepareErr != nil {
 			if completion == nil && !json.Valid(trimmed) {
 				continue
