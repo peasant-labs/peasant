@@ -319,10 +319,16 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		traversalPosition += int64(len(codexTraversalPointers(trimmed)))
 		prepared, unknown, prepareErr := prepareCodexRecord(raw, position, false)
 		if prepareErr != nil {
-			if completion == nil && !json.Valid(trimmed) {
-				continue
+			var retentionErr *codexEvidenceRetentionError
+			if completion != nil || errors.As(prepareErr, &retentionErr) {
+				return nil, prepareErr
 			}
-			return nil, prepareErr
+			// Slice-returning compatibility reads historically let the original
+			// envelope/response decoder below skip malformed shapes and preserve
+			// readable siblings. They do not authorize canonical replacement:
+			// versioned reads have completion above, and authoritative capture
+			// validates the complete source before calling this shared kernel.
+			prepared, unknown = raw, nil
 		}
 		if prepared == nil {
 			for _, evidence := range unknown {
