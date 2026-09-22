@@ -20,3 +20,10 @@ requiredNames:
   - local-path-remote-does-not-match
   - empty-remote-does-not-match
   - empty-request-remote-does-not-match
+  - fork-clone-matches-its-request
+  - fork-clone-with-another-name-matches-its-request
+  - base-clone-matches-a-request-whose-head-is-a-fork
+  - fork-clone-does-not-match-another-forks-request
+  - fork-clone-does-not-match-a-same-repository-request
+  - fork-owner-case-difference-matches-its-request
+  - request-without-a-head-remote-still-matches-the-base
