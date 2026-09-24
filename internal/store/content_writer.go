@@ -78,6 +78,46 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 			return out, fmt.Errorf("store content write: entry belongs to a different session; batch unchanged; supply entries for the requested session")
 		}
 	}
+	// Store preflight runs before the full/preview branch, for preview as
+	// well as full writes. Retained integrity validation refuses corrupt
+	// input before entry replacement; the legacy preview policy permits only
+	// wholly absent coordinates after all other evidence validates.
+	evidenceEntries := entries
+	if managed, ok := w.Result.(indexformat.V2); ok && len(managed.Generation.Earlier) > 0 {
+		evidenceEntries = append([]schema.SessionEntry(nil), entries...)
+		for _, section := range managed.Generation.Earlier {
+			evidenceEntries = append(evidenceEntries, section.Content.Entries...)
+		}
+	}
+	if err := preflightUnknownEvidence(evidenceEntries, w.RequireFullContent); err != nil {
+		return out, err
+	}
+	// A caller-supplied assessment or full flag is not proof. Reuse the same
+	// evidence validator and capture-state mapping. In particular
+	// incomplete_new cannot write full or complete, even through direct batch
+	// writes, activation recovery, or a caller-supplied publication capture.
+	if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+		if w.RequireFullContent || w.ContentCapture.Status == ingest.ContentCaptureComplete || w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatFull {
+			return out, fmt.Errorf("store content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
+		}
+	}
+	if w.RequireFullContent {
+		if err := refuseForgedFullClaim(w, evidenceEntries); err != nil {
+			return out, err
+		}
+	}
+	// Last-good guard, evaluated in the same transaction as entry and capture
+	// changes. Full authority includes an existing incomplete/full accounted
+	// capture, not just status=complete. A preview replacement over full
+	// authority is refused; first-discovery previews and preview-to-preview
+	// refreshes remain supported.
+	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion {
+		if old, found, readErr := readCapture(conn, w.SessionID); readErr == nil && found && PublishableWithOmissions(old) {
+			return out, fmt.Errorf("store content write: preview replacement refused over full read authority; prior capture remains authoritative with byte-identical export; re-index the source for a certified capture")
+		} else if readErr != nil {
+			return out, readErr
+		}
+	}
 	if !w.RequireFullContent {
 		priorHash, hadPriorHash, err := readStoredSessionEntriesHash(conn, string(w.SessionID))
 		if err != nil {
@@ -144,13 +184,6 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	// the bounded preview it is.
 	if !FullCaptureWritable(c) || c.SourceAuthority == ingest.ContentSourceNone {
 		return out, fmt.Errorf("store full content write: capture %q with failure code %q is not a state this writer may certify as full content; prior data unchanged; resolve strict parser failures, or store the tolerant projection as a preview capture, before retrying", c.Status, c.FailureCode)
-	}
-	evidenceEntries := entries
-	if managed, ok := w.Result.(indexformat.V2); ok && len(managed.Generation.Earlier) > 0 {
-		evidenceEntries = append([]schema.SessionEntry(nil), entries...)
-		for _, section := range managed.Generation.Earlier {
-			evidenceEntries = append(evidenceEntries, section.Content.Entries...)
-		}
 	}
 	if err := validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode); err != nil {
 		return out, err
@@ -351,6 +384,107 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 		return err
 	}
 	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(string(c.FailureCode)), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
+}
+
+// refuseForgedFullClaim reuses the capture assessment to refuse a full write
+// whose requested status, format, or failure code disagrees with the state
+// justified by result completeness and validated evidence. A caller-supplied
+// full flag is not proof; the store derives the expected write from the same
+// mapping the pipeline uses and refuses incompatible claims before any entry
+// replacement, preserving last-good authority. V1 entries and V2 Main+Earlier
+// are each validated as one set; incomplete_new can never certify full.
+func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.SessionEntry) error {
+	isV2 := false
+	if _, ok := w.Result.(indexformat.V2); ok {
+		isV2 = true
+	} else if pv2, ok := w.Result.(*indexformat.V2); ok && pv2 != nil {
+		isV2 = true
+		w.Result = *pv2
+	}
+	if !isV2 {
+		v1, ok := w.Result.(indexformat.V1)
+		if !ok {
+			if pv1, ok := w.Result.(*indexformat.V1); ok && pv1 != nil {
+				v1 = *pv1
+			} else {
+				return nil
+			}
+		}
+		_ = v1
+	}
+	if len(evidence) == 0 {
+		// An incomplete_new generation can never certify full, even with no
+		// carriers: native completeness is carrier-independent. A complete
+		// empty session preserves the original allowance.
+		if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+			return fmt.Errorf("store full content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
+		}
+		if pv2, ok := w.Result.(*indexformat.V2); ok && pv2 != nil && pv2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+			return fmt.Errorf("store full content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
+		}
+		return nil
+	}
+	harness := ""
+	for _, e := range evidence {
+		if e.Harness != "" {
+			harness = string(e.Harness)
+			break
+		}
+	}
+	if harness == "" && isV2 {
+		// Native entries always carry their harness, but a forged or legacy
+		// batch may not; fall back to the generation's recorded harness so a
+		// missing entry harness cannot bypass forged-full refusal.
+		if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Metadata.ModelHarness != "" {
+			harness = string(v2.Generation.Metadata.ModelHarness)
+		}
+	}
+	if harness == "" {
+		return nil
+	}
+	hasOmissions := false
+	for _, e := range evidence {
+		if _, omitted := ingest.OmittedRecordOf(e); omitted {
+			hasOmissions = true
+			break
+		}
+	}
+	policy := ingest.CaptureFreshCandidate
+	if w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatLegacyPreviewOnly {
+		policy = ingest.CaptureLegacyPreview
+	}
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.Harness(harness), Result: w.Result, Policy: policy,
+		Authoritative: true, SourceOmitted: hasOmissions,
+	})
+	if err != nil {
+		return fmt.Errorf("store full content write: evidence assessment refused the requested full capture: %w; prior capture remains authoritative", err)
+	}
+	authority := w.ContentCapture.SourceAuthority
+	if authority == "" {
+		authority = ingest.ContentSourceNewIngest
+	}
+	origin := w.ContentCapture.TranscriptOrigin
+	capturedAt := w.ContentCapture.CapturedAtMs
+	if capturedAt == 0 {
+		capturedAt = 1
+	}
+	expected, err := assessment.ContentCapture(authority, origin, capturedAt)
+	if err != nil {
+		return fmt.Errorf("store full content write: evidence assessment refused the requested full capture: %w; prior capture remains authoritative", err)
+	}
+	wantStatus := w.ContentCapture.Status
+	if wantStatus == "" {
+		wantStatus = ingest.ContentCaptureComplete
+	}
+	wantFormat := w.ContentCapture.CaptureFormat
+	if wantFormat == "" {
+		wantFormat = ingest.ContentCaptureFormatFull
+	}
+	if expected.Status != wantStatus || expected.CaptureFormat != wantFormat || expected.FailureCode != w.ContentCapture.FailureCode {
+		return fmt.Errorf("store full content write: requested capture %q/%q/%q disagrees with assessed evidence %q/%q/%q; no full-content certificate was issued; prior capture remains authoritative; re-index the source with partial interpretation accounting", string(wantStatus), string(wantFormat), string(w.ContentCapture.FailureCode), string(expected.Status), string(expected.CaptureFormat), string(expected.FailureCode))
+	}
+	return nil
 }
 
 func contentBackfillPublicationRevision(conn *sqlite.Conn, id ingest.SessionID) (revision int64, err error) {
