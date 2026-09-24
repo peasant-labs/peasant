@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -116,6 +117,15 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			if err := json.Unmarshal(payload["item"], &item); err != nil {
 				return nil, nil, err
 			}
+			// Parse-once index of the original carried item's content/summary
+			// arrays. Record-local lifetime: built once here, used to resolve
+			// each retained leaf below by validated field/index, then
+			// discarded. Evidence comes from these RawMessage copies, never
+			// from marshaled output, so original lexical bytes survive.
+			originalBlocks, err := indexCodexOriginalBlocks(payload["item"])
+			if err != nil {
+				return nil, nil, err
+			}
 			originalType, originalRole := item["type"], item["role"]
 			item["type"], _ = json.Marshal(nativeType)
 			if len(originalRole) == 0 && role != "" {
@@ -136,8 +146,15 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			for _, record := range nested {
 				// Normalization above is an interpretation copy. Rebind every
 				// retained leaf to the original item's raw value before redaction;
-				// marshaling the wrapper compacts RawMessage whitespace.
-				original, err := codexOriginalItemBlock(payload["item"], record.Position.JSONPointer)
+				// marshaling the wrapper compacts RawMessage whitespace. The
+				// index above was parsed once; this loop performs no
+				// whole-item/array decode, only O(1) slice resolution plus
+				// the leaf retain.
+				field, index, err := parseCodexOriginalPointer(record.Position.JSONPointer)
+				if err != nil {
+					return nil, nil, err
+				}
+				original, err := originalBlocks.at(field, index)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -254,9 +271,90 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 	return encoded, unknown, err
 }
 
-func codexOriginalItemBlock(raw json.RawMessage, pointer string) (json.RawMessage, error) {
+// codexOriginalBlocks is the parse-once index of a canonical carried item's
+// content/summary arrays. It is built once per carried item before
+// normalization, resolves each retained leaf by validated field/index, and is
+// discarded with the record. Slices hold RawMessage copies from that single
+// parse; evidence never derives from marshaled output, so original lexical
+// bytes survive. It uses the shared raw-safety helpers (requireJSONObject,
+// validUnknownPointer shape checks live in the codec); it defines no new
+// envelope validation.
+type codexOriginalBlocks struct {
+	content []json.RawMessage
+	summary []json.RawMessage
+}
+
+// errCodexOriginalBlock is the single shared failure for an unaddressable
+// original carried-item block. All parse-once helpers delegate so the safe
+// message (what/effect/repair, no source bytes) cannot drift.
+func errCodexOriginalBlock() error {
+	return &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+}
+
+// indexCodexOriginalBlocks parses the original carried item and its
+// content/summary arrays once. It performs O(item bytes) work a single time;
+// per-leaf resolution via at is O(1) plus the leaf bytes.
+func indexCodexOriginalBlocks(item json.RawMessage) (codexOriginalBlocks, error) {
+	fail := func() (codexOriginalBlocks, error) {
+		return codexOriginalBlocks{}, errCodexOriginalBlock()
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(item, &obj); err != nil {
+		return fail()
+	}
+	var out codexOriginalBlocks
+	if raw, ok := obj["content"]; ok {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) > 0 && string(trimmed) != "null" {
+			var blocks []json.RawMessage
+			if err := json.Unmarshal(raw, &blocks); err != nil {
+				return fail()
+			}
+			out.content = blocks
+		}
+	}
+	if raw, ok := obj["summary"]; ok {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) > 0 && string(trimmed) != "null" {
+			var blocks []json.RawMessage
+			if err := json.Unmarshal(raw, &blocks); err != nil {
+				return fail()
+			}
+			out.summary = blocks
+		}
+	}
+	return out, nil
+}
+
+// at resolves one retained leaf by already-validated field/index without
+// reparsing the carried item. It never marshals; the returned RawMessage is
+// the original source block bytes from the index parse.
+func (b codexOriginalBlocks) at(field string, index int) (json.RawMessage, error) {
 	fail := func() (json.RawMessage, error) {
-		return nil, &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+		return nil, errCodexOriginalBlock()
+	}
+	var blocks []json.RawMessage
+	switch field {
+	case "content":
+		blocks = b.content
+	case "summary":
+		blocks = b.summary
+	default:
+		return fail()
+	}
+	if index < 0 || index >= len(blocks) {
+		return fail()
+	}
+	return blocks[index], nil
+}
+
+// parseCodexOriginalPointer validates a nested "/payload/<field>/<index>"
+// pointer from the normalized wrapper and returns the field/index for index
+// resolution. The caller rebinds the pointer to "/payload/item/..." and keeps
+// the outer traversal coordinates via retain.
+func parseCodexOriginalPointer(pointer string) (string, int, error) {
+	fail := func() (string, int, error) {
+		return "", 0, errCodexOriginalBlock()
 	}
 	parts := strings.Split(strings.TrimPrefix(pointer, "/payload/"), "/")
 	if len(parts) != 2 || (parts[0] != "content" && parts[0] != "summary") {
@@ -266,15 +364,7 @@ func codexOriginalItemBlock(raw json.RawMessage, pointer string) (json.RawMessag
 	if err != nil || index < 0 {
 		return fail()
 	}
-	var item map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return fail()
-	}
-	var blocks []json.RawMessage
-	if err := json.Unmarshal(item[parts[0]], &blocks); err != nil || index >= len(blocks) {
-		return fail()
-	}
-	return blocks[index], nil
+	return parts[0], index, nil
 }
 
 // codexTraversalPointers assigns preorder coordinates to the source envelope,
