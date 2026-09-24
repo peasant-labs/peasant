@@ -57,8 +57,12 @@ type NativeGenerationActivation struct {
 // NativeGenerationActivator stages and activates one managed generation in ONE
 // transaction after fsyncing its files, repairs the exported metadata, and
 // reconciles any interrupted activation. The production store implements it.
+// The outcome distinguishes newly-committed, already-committed, and
+// not-committed invocations so per-invocation counts stay truthful; a
+// post-commit repair failure returns CommittedNow or AlreadyCommitted with a
+// GenerationRepairPendingError, never a rollback.
 type NativeGenerationActivator interface {
-	ActivateNativeGeneration(context.Context, NativeGenerationActivation) error
+	ActivateNativeGeneration(context.Context, NativeGenerationActivation) (ActivationOutcome, error)
 }
 
 // NativeGenerationPrior is the last-good evidence a prior activation left for
@@ -79,4 +83,49 @@ type NativeGenerationPrior struct {
 // session's aliases.
 type NativeGenerationPriorReader interface {
 	ReadNativeGenerationPrior(context.Context, SessionID) (*NativeGenerationPrior, error)
+}
+
+// ActivationDisposition is the lock-derived disposition for the REQUESTED
+// candidate, independent of repair state. It is never inferred from an
+// unlocked read or error text. Counting is per-invocation, never
+// crash-global exactly-once: only CommittedNow counts once, AlreadyCommitted
+// and NotCommitted count zero.
+type ActivationDisposition uint8
+
+const (
+	// ActivationNotCommitted reports the requested candidate was not committed
+	// by this invocation, including pre-commit failures and unrelated
+	// prior-intent repair failures in the preamble.
+	ActivationNotCommitted ActivationDisposition = iota
+	// ActivationCommittedNow reports the requested candidate was newly
+	// committed during this invocation, including preamble-recovery commits.
+	ActivationCommittedNow
+	// ActivationAlreadyCommitted reports the requested candidate was already
+	// committed before this invocation. The call re-repaired from the
+	// committed row and changed no authority.
+	ActivationAlreadyCommitted
+)
+
+// ActivationOutcome is the request-scoped activation result. RepairPending
+// reports a post-commit metadata-repair failure: authority already committed,
+// never rollback. Repair carries the fixed repair category via
+// GenerationRepairPendingError, never raw I/O text.
+type ActivationOutcome struct {
+	Disposition   ActivationDisposition
+	CandidateID   string
+	RepairPending bool
+}
+
+// GenerationRepairPendingError reports committed authority with pending repair.
+// Only the store returns it, after commit is known to have succeeded. The
+// wrapper exposes a fixed repair category and validated identity only, never
+// raw I/O text or payload bytes. Callers classify with errors.As.
+type GenerationRepairPendingError struct {
+	SessionID   string
+	CandidateID string
+	Repair      string
+}
+
+func (e *GenerationRepairPendingError) Error() string {
+	return "store: generation " + e.CandidateID + " for session " + e.SessionID + " is active but " + e.Repair + " failed; the active generation is valid and the repair is retried on the next open or activation; no rollback was performed"
 }

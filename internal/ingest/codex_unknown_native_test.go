@@ -135,7 +135,7 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 				t.Fatal(err)
 			}
 			activation := ingest.NativeGenerationActivation{Generation: candidate.Result, Blobs: candidate.Blobs, IndexerVersion: 18, IndexedAtMs: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1}}
-			if err := db.ActivateNativeGeneration(t.Context(), activation); err != nil {
+			if _, err := db.ActivateNativeGeneration(t.Context(), activation); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
@@ -190,7 +190,7 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 			broken := activation
 			broken.Generation.Generation.ID = "broken-unknown-native"
 			broken.Blobs = map[schema.SourceEntryRef][]byte{}
-			if err := db.ActivateNativeGeneration(t.Context(), broken); err == nil {
+			if _, err := db.ActivateNativeGeneration(t.Context(), broken); err == nil {
 				t.Fatal("missing blobs authorized replacement")
 			}
 			if err := db.WithSessionSnapshot(t.Context(), sid, check); err != nil {

@@ -149,7 +149,7 @@ func TestRetainedUnknownPublication(t *testing.T) {
 				if err := generation.Validate(); err != nil {
 					t.Fatal(err)
 				}
-				writeErr = db.ActivateGeneration(ctx, store.GenerationActivation{Generation: generation, Blobs: built.blobs, IndexerVersion: versions.IndexerVersion, IndexedAtMs: 1, CaptureRevision: input.CaptureRevision, ContentCapture: capture})
+				_, writeErr = db.ActivateGeneration(ctx, store.GenerationActivation{Generation: generation, Blobs: built.blobs, IndexerVersion: versions.IndexerVersion, IndexedAtMs: 1, CaptureRevision: input.CaptureRevision, ContentCapture: capture})
 			} else {
 				written := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 					SessionID: ppeSessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: versions.IndexVersion,

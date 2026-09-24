@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -266,28 +267,27 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		generation.Generation.Metadata.AdapterVersion = &version
 	}
 	// Native partitions are the selected history, not every source node seen by
-	// replay. Validate and count their evidence before activation, then publish
+	// replay. The one capture assessment owns the mapping from validated
+	// evidence and parser coverage to the store write; native completeness is
+	// carrier-independent and never depends on retained carrier count. Counts
+	// stay candidates until the store outcome confirms CommittedNow.
+	// Validate Main + Earlier as one set via AssessCapture, then publish
 	// accounting only after the atomic generation write succeeds.
-	selected := append([]schema.SessionEntry(nil), generation.Generation.Main.Entries...)
-	for _, earlier := range generation.Generation.Earlier {
-		selected = append(selected, earlier.Content.Entries...)
-	}
-	unknown, err := retainedUnknownEntries(selected)
+	sourceOmitted := result.input.session.ContentOmitted || outputRecordsItsOmissions(generation)
+	unaccounted := result.input.session.ContentOmitted && !outputRecordsItsOmissions(generation)
+	assessment, err := AssessCapture(CaptureFacts{
+		Harness: im.session.Harness, Result: generation,
+		Policy: CaptureFreshCandidate, Authoritative: true,
+		SourceOmitted: sourceOmitted, Unaccounted: unaccounted,
+	})
 	if err != nil {
 		return fail(err)
 	}
-	capture := SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
-	if len(unknown) > 0 {
-		if _, err := CollectRetainedUnknown(selected, im.session.Harness); err != nil {
-			return fail(err)
-		}
-		capture.Status, capture.FailureCode = ContentCaptureIncomplete, ContentCaptureUnknownDataRetained
-		capture.FailureMessage = "source payloads and positions are retained; interpretation remains partial"
-		if result.input.session.ContentOmitted || generation.Generation.Completeness != indexformat.GenerationCompletenessComplete {
-			capture.CaptureFormat, capture.FailureCode = ContentCaptureFormatPreviewOnly, ContentCaptureSourceRecordsOmitted
-			capture.FailureMessage = "opaque evidence survives, but source capture or native history reconstruction is incomplete; recapture the complete native source"
-		}
+	capture, err := assessment.ContentCapture(contentAuthorityFor(result), im.session.TranscriptOrigin, nowMs)
+	if err != nil {
+		return fail(fmt.Errorf("%s: session %s assessment refused the store write; the stored index was preserved: %w", logPrefix, im.session.SessionID, err))
 	}
+	candidates := assessment.CandidateCounts()
 	activation := NativeGenerationActivation{
 		Generation:       generation,
 		Blobs:            candidate.Blobs,
@@ -301,16 +301,46 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		ArtifactIdentity: artifactIdentity,
 		Capture:          managedActivationCapture(result.input, im.session, generation.Generation.Completeness),
 	}
+	var activationOutcome ActivationOutcome
 	var activationErr error
 	p.runStoreWrite(writeLane, func() {
 		activationErr = p.withCurrentIndexInput(ctx, result.input, func() error {
-			return activator.ActivateNativeGeneration(ctx, activation)
+			var err error
+			activationOutcome, err = activator.ActivateNativeGeneration(ctx, activation)
+			return err
 		})
 	})
 	if activationErr != nil {
+		var repairPending *GenerationRepairPendingError
+		if errors.As(activationErr, &repairPending) {
+			// Post-commit repair failure: authority already committed, never
+			// rollback. CommittedNow counts once, AlreadyCommitted zero.
+			// Report repair pending honestly, not as a capture refusal, and
+			// never report duplicate successful retained occurrences.
+			if activationOutcome.Disposition == ActivationCommittedNow {
+				slog.Warn(logPrefix+": native generation committed with pending repair", "session_id", im.session.SessionID, "candidate", activationOutcome.CandidateID, "error", activationErr)
+				logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
+				profile := p.makeIndexProfileSession(result, logEntry, 0)
+				return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: candidates}, logEntry, profile
+			}
+			if activationOutcome.Disposition == ActivationAlreadyCommitted {
+				slog.Warn(logPrefix+": already-committed native generation repair pending", "session_id", im.session.SessionID, "candidate", activationOutcome.CandidateID, "error", activationErr)
+				logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
+				profile := p.makeIndexProfileSession(result, logEntry, 0)
+				return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
+			}
+		}
 		return fail(fmt.Errorf("%s: activate managed generation for session %s: %w; the stored generation and producer stamps are unchanged", logPrefix, im.session.SessionID, activationErr))
+	}
+	// Per-invocation counting, never crash-global exactly-once: only
+	// CommittedNow counts once. AlreadyCommitted is an idempotent repair with
+	// zero new counts, not a failed capture. NotCommitted carries no counts
+	// by construction (activationErr would be non-nil above).
+	var committed []RetainedUnknownKindCount
+	if activationOutcome.Disposition == ActivationCommittedNow {
+		committed = candidates
 	}
 	logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
 	profile := p.makeIndexProfileSession(result, logEntry, 0)
-	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: retainedUnknownCounts(unknown)}, logEntry, profile
+	return indexedMeta{session: im.session, startMs: im.startMs, indexed: true, retainedUnknown: committed}, logEntry, profile
 }

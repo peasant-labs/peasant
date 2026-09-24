@@ -102,7 +102,7 @@ func TestGenerationMirrors(t *testing.T) {
 					t.Fatalf("case %q requires typed first/second counts and adapters", tc.Name)
 				}
 				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, tc.FirstTitle, tc.FirstInputCount, tc.FirstAdapter, 1000, 2000, 2, nil, schema.SourceEntryRef(generationRefs[0]))
-				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 1, IndexedAtMs: 100}); err != nil {
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 1, IndexedAtMs: 100}); err != nil {
 					t.Fatalf("activate G1: %v", err)
 				}
 				assertMirrorRow(t, s, id, 1000, 2000, nil, tc.FirstInputCount, tc.FirstAdapter, 3, 2, tc.FirstTitle)
@@ -111,7 +111,7 @@ func TestGenerationMirrors(t *testing.T) {
 				g2, g2Blobs := buildMirrorGeneration(t, id, fixture.Generation.SecondID, tc.SecondTitle, tc.SecondInputCount, tc.SecondAdapter, 3000, 4000, 5, nil, schema.SourceEntryRef(generationRefs[0]))
 				// Turn count stays 3 (three entries) so the test isolates the
 				// mirrors that previously stayed stale.
-				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g2, Blobs: g2Blobs, IndexerVersion: 2, IndexedAtMs: 200}); err != nil {
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g2, Blobs: g2Blobs, IndexerVersion: 2, IndexedAtMs: 200}); err != nil {
 					t.Fatalf("activate G2: %v", err)
 				}
 				assertMirrorRow(t, s, id, 3000, 4000, nil, tc.SecondInputCount, tc.SecondAdapter, 3, 5, tc.SecondTitle)
@@ -132,7 +132,7 @@ func TestGenerationMirrors(t *testing.T) {
 					Evidence:      schema.EvidenceNativeTyped,
 				}}
 				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "child text", &zero, nil, 1000, 2000, 0, relationships, schema.SourceEntryRef(generationRefs[0]))
-				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
 					t.Fatalf("activate child with missing parent: %v", err)
 				}
 				// The availability cache stays NULL so the admitted child
@@ -170,7 +170,7 @@ func TestGenerationMirrors(t *testing.T) {
 				// stamps. The count must survive as absent, not measured zero.
 				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "text absent", nil, nil, 1000, 2000, 0, nil, schema.SourceEntryRef(generationRefs[0]))
 				g1 = markMirrorIncomplete(t, g1, g1Blobs)
-				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 77, IndexedAtMs: 777}); err != nil {
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 77, IndexedAtMs: 777}); err != nil {
 					t.Fatalf("activate absent count: %v", err)
 				}
 				stamps := readIndexStateForTest(t, s, id)
@@ -182,7 +182,7 @@ func TestGenerationMirrors(t *testing.T) {
 			case "zero-input-count-measured":
 				zero := int64(0)
 				g1, g1Blobs := buildMirrorGeneration(t, id, fixture.Generation.FirstID, "text zero", &zero, nil, 1000, 2000, 0, nil, schema.SourceEntryRef(generationRefs[0]))
-				if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs}); err != nil {
 					t.Fatalf("activate zero count: %v", err)
 				}
 				assertInputCountMirror(t, s, id, &zero)

@@ -103,7 +103,7 @@ func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 
 type nativeUnknownFailingStore struct{ *unknownFailingStore }
 
-func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) error {
+func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
 	if s.fail {
 		// Exercise the real artifact transaction's missing-blob failure, not a
 		// prepared success result or a fabricated accounting diagnostic.

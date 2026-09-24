@@ -36,7 +36,7 @@ func TestSessionSnapshotReleasesPoolConnection(t *testing.T) {
 	}
 	seedGenerationSession(t, s, string(sid))
 	v2, blobs := buildTestGeneration(t, sid, "gen_pool_g1", "pool text", "pool input", "pool output")
-	if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: v2, Blobs: blobs}); err != nil {
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: v2, Blobs: blobs}); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 
