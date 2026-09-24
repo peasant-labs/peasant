@@ -168,7 +168,7 @@ func buildSyncGroupedRow(row ingest.PushSessionRow, status string, ev store.Grou
 	summary := schema.SessionSummary{
 		ID:                   row.SessionID,
 		Harness:              harness,
-		StartTime:            start,
+		StartTime:            start.UTC(),
 		DurationMins:         float64(row.DurationMs) / 60000,
 		TotalTokens:          row.TokensTotal,
 		TurnCount:            row.TurnCount,
