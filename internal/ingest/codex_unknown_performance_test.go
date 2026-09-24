@@ -18,7 +18,9 @@ import (
 // retain. No json.Unmarshal of the carried item or its content/summary arrays
 // occurs inside that loop; indexCodexOriginalBlocks parses them once before
 // normalization. Verify with:
-//   grep -n "Unmarshal" internal/ingest/codex_unknown.go
+//
+//	grep -n "Unmarshal" internal/ingest/codex_unknown.go
+//
 // and confirm the sibling loop (for _, record := range nested) contains only
 // parseCodexOriginalPointer + at + retain.
 //
@@ -38,12 +40,12 @@ func TestCodexParseOncePerformance(t *testing.T) {
 	sort.Slice(wide, func(i, j int) bool { return wide[i].WideSiblings < wide[j].WideSiblings })
 
 	type measurement struct {
-		name       string
-		siblings   int
-		sourceLen  int
-		medianNs   int64
-		allocs     float64
-		samplesNs  []int64
+		name      string
+		siblings  int
+		sourceLen int
+		medianNs  int64
+		allocs    float64
+		samplesNs []int64
 	}
 	measurements := make([]measurement, 0, len(wide))
 	for _, row := range wide {

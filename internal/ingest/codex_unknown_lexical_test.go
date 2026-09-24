@@ -33,7 +33,7 @@ type codexLexicalCase struct {
 func loadCodexLexicalFixtures(t *testing.T) []codexLexicalCase {
 	t.Helper()
 	var fixture struct {
-		Required []string          `yaml:"required_names"`
+		Required []string           `yaml:"required_names"`
 		Cases    []codexLexicalCase `yaml:"cases"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(codexUnknownLexicalFixtures))
