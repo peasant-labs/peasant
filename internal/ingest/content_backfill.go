@@ -424,6 +424,11 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 // own completeness; every other strict parser either certifies the retained
 // bytes or refuses them. InputHash is the index input digest over the bytes
 // actually parsed, so an ordinary index run later recognizes the same input.
+//
+// The retained-batch route uses the same capture assessment as the ordinary
+// path: validated omission stand-ins in the immutable retained stream are the
+// omission evidence, not guessed original bytes. An invalid or unaccounted
+// candidate refuses before any counting or persistence.
 func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
 	if capturer, ok := indexer.(RetainedContentCapturer); ok {
 		capture, err := capturer.CaptureRetainedContent(ctx, session)
@@ -435,6 +440,18 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 			return ContentCaptureResult{}, err
 		}
 		if len(unknown) > 0 {
+			capture.Complete = false
+		}
+		if assessment, assessErr := AssessCapture(CaptureFacts{
+			Harness: session.Harness, Result: indexformat.V1{Entries: capture.Entries},
+			Policy: CaptureFreshCandidate, Authoritative: true,
+			SourceOmitted: session.ContentOmitted || outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
+			Unaccounted:   session.ContentOmitted && !outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
+		}); assessErr != nil {
+			return ContentCaptureResult{}, assessErr
+		} else if assessment.Coverage() != CaptureCoverageFull {
+			capture.Complete = false
+		} else if len(assessment.CandidateCounts()) > 0 || outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}) {
 			capture.Complete = false
 		}
 		capture.Authority = authority
@@ -455,7 +472,17 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: len(unknown) == 0, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
+	assessed, assessErr := AssessCapture(CaptureFacts{
+		Harness: session.Harness, Result: indexformat.V1{Entries: capture.Entries},
+		Policy: CaptureFreshCandidate, Authoritative: true,
+		SourceOmitted: session.ContentOmitted || outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
+		Unaccounted:   session.ContentOmitted && !outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
+	})
+	if assessErr != nil {
+		return ContentCaptureResult{}, assessErr
+	}
+	complete := len(unknown) == 0 && assessed.Coverage() == CaptureCoverageFull && len(assessed.CandidateCounts()) == 0 && !outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries})
+	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: complete, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
 }
 
 func captureHarness(raw string) (Harness, error) {

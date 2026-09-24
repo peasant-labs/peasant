@@ -276,11 +276,19 @@ func assessV1Capture(facts CaptureFacts, v1 indexformat.V1) (CaptureAssessment, 
 
 	// Unaccounted loss yields preview regardless of carrier count. A mixed
 	// result cannot erase an unaccounted reason merely because it also has
-	// one placeholder or one retained record.
+	// one placeholder or one retained record. When the omission itself is
+	// unaccounted (no placeholder stands in the gap), the stored code stays
+	// the omission code so the session keeps its accounted-unknown
+	// distinction; an additional unaccounted loss alongside an accounted
+	// placeholder reports the strict refusal.
 	if facts.Unaccounted {
+		code := ContentCaptureStrictRefused
+		if facts.SourceOmitted && !hasOmissions {
+			code = ContentCaptureSourceRecordsOmitted
+		}
 		return CaptureAssessment{
 			coverage: CaptureCoveragePreview, policy: facts.Policy,
-			partial: true, failure: ContentCaptureStrictRefused, retained: counts,
+			partial: true, failure: code, retained: counts,
 		}, nil
 	}
 	if !facts.Authoritative {
