@@ -284,31 +284,44 @@ type codexOriginalBlocks struct {
 	summary []json.RawMessage
 }
 
+// errCodexOriginalBlock is the single shared failure for an unaddressable
+// original carried-item block. All parse-once helpers delegate so the safe
+// message (what/effect/repair, no source bytes) cannot drift.
+func errCodexOriginalBlock() error {
+	return &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+}
+
 // indexCodexOriginalBlocks parses the original carried item and its
 // content/summary arrays once. It performs O(item bytes) work a single time;
 // per-leaf resolution via at is O(1) plus the leaf bytes.
 func indexCodexOriginalBlocks(item json.RawMessage) (codexOriginalBlocks, error) {
 	fail := func() (codexOriginalBlocks, error) {
-		return codexOriginalBlocks{}, &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+		return codexOriginalBlocks{}, errCodexOriginalBlock()
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(item, &obj); err != nil {
 		return fail()
 	}
 	var out codexOriginalBlocks
-	if raw, ok := obj["content"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
-		var blocks []json.RawMessage
-		if err := json.Unmarshal(raw, &blocks); err != nil {
-			return fail()
+	if raw, ok := obj["content"]; ok {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) > 0 && string(trimmed) != "null" {
+			var blocks []json.RawMessage
+			if err := json.Unmarshal(raw, &blocks); err != nil {
+				return fail()
+			}
+			out.content = blocks
 		}
-		out.content = blocks
 	}
-	if raw, ok := obj["summary"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
-		var blocks []json.RawMessage
-		if err := json.Unmarshal(raw, &blocks); err != nil {
-			return fail()
+	if raw, ok := obj["summary"]; ok {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) > 0 && string(trimmed) != "null" {
+			var blocks []json.RawMessage
+			if err := json.Unmarshal(raw, &blocks); err != nil {
+				return fail()
+			}
+			out.summary = blocks
 		}
-		out.summary = blocks
 	}
 	return out, nil
 }
@@ -318,7 +331,7 @@ func indexCodexOriginalBlocks(item json.RawMessage) (codexOriginalBlocks, error)
 // the original source block bytes from the index parse.
 func (b codexOriginalBlocks) at(field string, index int) (json.RawMessage, error) {
 	fail := func() (json.RawMessage, error) {
-		return nil, &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+		return nil, errCodexOriginalBlock()
 	}
 	var blocks []json.RawMessage
 	switch field {
@@ -341,7 +354,7 @@ func (b codexOriginalBlocks) at(field string, index int) (json.RawMessage, error
 // the outer traversal coordinates via retain.
 func parseCodexOriginalPointer(pointer string) (string, int, error) {
 	fail := func() (string, int, error) {
-		return "", 0, &codexEvidenceRetentionError{cause: fmt.Errorf("retain Codex canonical item: the original source block cannot be addressed; no evidence was certified; recapture intact source or repair the source-pointer mapping")}
+		return "", 0, errCodexOriginalBlock()
 	}
 	parts := strings.Split(strings.TrimPrefix(pointer, "/payload/"), "/")
 	if len(parts) != 2 || (parts[0] != "content" && parts[0] != "summary") {
@@ -352,22 +365,6 @@ func parseCodexOriginalPointer(pointer string) (string, int, error) {
 		return fail()
 	}
 	return parts[0], index, nil
-}
-
-func codexOriginalItemBlock(raw json.RawMessage, pointer string) (json.RawMessage, error) {
-	// Single-lookup compatibility path. The hot per-sibling loop must not use
-	// this: it would reparse the whole carried item per leaf. That loop builds
-	// one codexOriginalBlocks via indexCodexOriginalBlocks and resolves each
-	// leaf with at, for O(item + retained) instead of O(siblings * item).
-	field, index, err := parseCodexOriginalPointer(pointer)
-	if err != nil {
-		return nil, err
-	}
-	blocks, err := indexCodexOriginalBlocks(raw)
-	if err != nil {
-		return nil, err
-	}
-	return blocks.at(field, index)
 }
 
 // codexTraversalPointers assigns preorder coordinates to the source envelope,
