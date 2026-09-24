@@ -3,7 +3,6 @@ package ingest
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -95,13 +94,6 @@ func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, ori
 	if a == nil {
 		return SessionContentCaptureWrite{}, fmt.Errorf("ingest.ContentCapture: nil capture assessment cannot be converted to a store write; no persistence was authorized; assess the captured evidence before writing")
 	}
-	// Typed-nil detection: a non-nil interface holding a nil pointer must not
-	// certify. Callers pass *CaptureAssessment; a typed-nil pointer arrives
-	// here as a non-nil receiver only when the method set permits it, so
-	// defend with reflection as well as the nil comparison above.
-	if reflect.ValueOf(a).Kind() == reflect.Pointer && reflect.ValueOf(a).IsNil() {
-		return SessionContentCaptureWrite{}, fmt.Errorf("ingest.ContentCapture: nil capture assessment cannot be converted to a store write; no persistence was authorized; assess the captured evidence before writing")
-	}
 	coverage := a.Coverage()
 	if coverage == CaptureCoverageUnknown {
 		return SessionContentCaptureWrite{}, fmt.Errorf("ingest.ContentCapture: unknown capture coverage cannot be converted to a store write; no persistence was authorized; assess the captured evidence and resolve the refusal before writing")
@@ -147,14 +139,11 @@ func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, ori
 		// Preview-only activation is reported as a preview operation, never as
 		// a successful full or retained capture. The store's absent-value
 		// defaults must never promote this to full: the format is explicit.
+		// A preview with no recorded failure keeps the empty code: it is
+		// first-discovery incompleteness (for example native incomplete_new),
+		// not a refusal, so the selector can tell not-certified-yet from
+		// refused.
 		code := a.failure
-		if code == ContentCaptureNoFailure {
-			// A preview with no recorded failure is first-discovery
-			// incompleteness (for example native incomplete_new), not a
-			// refusal. Keep the empty code so the selector can tell
-			// not-certified-yet from refused.
-			code = ContentCaptureNoFailure
-		}
 		if _, err := NewContentCaptureFailureCode(string(code)); err != nil {
 			return SessionContentCaptureWrite{}, err
 		}
@@ -236,7 +225,7 @@ func assessV1Capture(facts CaptureFacts, v1 indexformat.V1) (CaptureAssessment, 
 			if facts.Policy == CaptureLegacyPreview {
 				// Legacy exception: only wholly absent coordinates after all
 				// other evidence validates. Corruption outranks compatibility.
-				if legacyCoordinatesWhollyAbsent(entries) {
+				if LegacyCoordinatesWhollyAbsent(entries) {
 					if err := validateV1LegacyEvidence(entries, facts.Harness); err != nil {
 						return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: legacy evidence invalid for harness %q: %w; no capture was certified", string(facts.Harness), err)
 					}
@@ -353,7 +342,7 @@ func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, 
 	collectedErr := validateV2Evidence(selected, facts.Harness)
 	if collectedErr != nil {
 		if errors.Is(collectedErr, ErrUnknownPositionUnavailable) {
-			if facts.Policy == CaptureLegacyPreview && legacyCoordinatesWhollyAbsent(selected) {
+			if facts.Policy == CaptureLegacyPreview && LegacyCoordinatesWhollyAbsent(selected) {
 				if err := validateV1LegacyEvidence(selected, facts.Harness); err != nil {
 					return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: legacy evidence invalid for harness %q: %w; no capture was certified", string(facts.Harness), err)
 				}
@@ -440,11 +429,13 @@ func validateV1Evidence(entries []schema.SessionEntry, harness Harness) error {
 	return err
 }
 
-// legacyCoordinatesWhollyAbsent reports whether every retained record lacks
-// public traversal coordinates. It is the narrow legacy exception: wholly
-// absent coordinates may still read as a bounded preview, but any present
-// coordinate set must validate as a whole.
-func legacyCoordinatesWhollyAbsent(entries []schema.SessionEntry) bool {
+// LegacyCoordinatesWhollyAbsent reports whether every retained record lacks
+// public traversal coordinates. It is the narrow legacy exception shared by
+// the ingest assessment and the store's preview preflight and available-read
+// paths: wholly absent coordinates may still read as a bounded preview, but
+// any present coordinate set must validate as a whole. One definition serves
+// all three call sites so a coordinate-policy change cannot diverge them.
+func LegacyCoordinatesWhollyAbsent(entries []schema.SessionEntry) bool {
 	found := false
 	for _, entry := range entries {
 		records, err := RetainedUnknownOf(entry)

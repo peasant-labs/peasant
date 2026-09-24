@@ -91,6 +91,9 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 	if err != nil {
 		return notCommitted(err)
 	}
+	// Best-effort preamble read: a nil intent forces the safe NotCommitted
+	// path below, so a read failure degrades to refusal, never to a wrong
+	// committed disposition.
 	pendingBefore, _ := s.generationArtifacts.ReadIntent(ctx, sessionID)
 
 	if err := s.recoverGenerationIntentLocked(ctx, sessionID); err != nil {
@@ -139,9 +142,13 @@ reconciled:
 		// metadata from the committed generation row, not caller data, re-persist
 		// the prior document when this activation carries it, and clear the
 		// intent; nothing else changes. Zero new counts: idempotent repair,
-		// not a failed capture.
+		// not a failed capture. The generation install already committed
+		// before its prior document is persisted, so a persist failure here is
+		// post-commit repair with committed authority, never a pre-commit
+		// refusal: report it as repair-pending like every sibling post-commit
+		// repair failure.
 		if err := s.persistPriorEvidence(ctx, sessionID, requestedID, activation.PriorEvidence); err != nil {
-			return ingest.ActivationOutcome{Disposition: ingest.ActivationAlreadyCommitted, CandidateID: requestedID}, err
+			return ingest.ActivationOutcome{Disposition: ingest.ActivationAlreadyCommitted, CandidateID: requestedID, RepairPending: true}, &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: requestedID, Repair: ingest.GenerationRepairPriorPersist}
 		}
 		if err := s.finishCommittedActivationLocked(ctx, sessionID, requestedID); err != nil {
 			var repairPending *ingest.GenerationRepairPendingError
@@ -200,10 +207,10 @@ reconciled:
 		}
 	}
 	if err := s.generationArtifacts.RepairMetadata(ctx, sessionID, metadataJSON); err != nil {
-		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID, RepairPending: true}, &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: requestedID, Repair: "metadata repair"}
+		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID, RepairPending: true}, &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: requestedID, Repair: ingest.GenerationRepairMetadata}
 	}
 	if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
-		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID, RepairPending: true}, &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: requestedID, Repair: "intent clear"}
+		return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID, RepairPending: true}, &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: requestedID, Repair: ingest.GenerationRepairIntentClear}
 	}
 	return ingest.ActivationOutcome{Disposition: ingest.ActivationCommittedNow, CandidateID: requestedID}, nil
 }
@@ -282,18 +289,21 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		return err
 	}
 	if active == intent.GenerationID {
+		// The generation install already committed before its prior document
+		// is persisted, so a persist failure here is post-commit repair with
+		// committed authority, never a pre-commit refusal.
 		if err := s.persistPriorEvidence(ctx, sessionID, intent.GenerationID, intent.PriorEvidence); err != nil {
-			return err
+			return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: ingest.GenerationRepairPriorPersist}
 		}
 		metadata, err := s.exportedMetadataForGeneration(ctx, sessionID, intent.GenerationID)
 		if err != nil {
 			return err
 		}
 		if err := s.generationArtifacts.RepairMetadata(ctx, sessionID, metadata); err != nil {
-			return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: "metadata repair"}
+			return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: ingest.GenerationRepairMetadata}
 		}
 		if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
-			return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: "intent clear"}
+			return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: ingest.GenerationRepairIntentClear}
 		}
 		return nil
 	}
@@ -378,17 +388,17 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		}
 	}
 	if err := s.persistPriorEvidence(ctx, sessionID, intent.GenerationID, intent.PriorEvidence); err != nil {
-		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: "prior persist"}
+		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: ingest.GenerationRepairPriorPersist}
 	}
 	metadataJSON, err := json.Marshal(generation.Metadata)
 	if err != nil {
 		return fmt.Errorf("store: recover pending activation for session %s: encode metadata: %w", sessionID, err)
 	}
 	if err := s.generationArtifacts.RepairMetadata(ctx, sessionID, metadataJSON); err != nil {
-		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: "metadata repair"}
+		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: ingest.GenerationRepairMetadata}
 	}
 	if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
-		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: "intent clear"}
+		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: intent.GenerationID, Repair: ingest.GenerationRepairIntentClear}
 	}
 	return nil
 }
@@ -424,10 +434,10 @@ func (s *Store) finishCommittedActivationLocked(ctx context.Context, sessionID s
 		return err
 	}
 	if err := s.generationArtifacts.RepairMetadata(ctx, sessionID, metadata); err != nil {
-		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: generationID, Repair: "metadata repair"}
+		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: generationID, Repair: ingest.GenerationRepairMetadata}
 	}
 	if err := s.generationArtifacts.ClearIntent(ctx, sessionID); err != nil {
-		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: generationID, Repair: "intent clear"}
+		return &ingest.GenerationRepairPendingError{SessionID: string(sessionID), CandidateID: generationID, Repair: ingest.GenerationRepairIntentClear}
 	}
 	return nil
 }

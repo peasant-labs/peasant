@@ -415,11 +415,9 @@ func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.Session
 	if len(evidence) == 0 {
 		// An incomplete_new generation can never certify full, even with no
 		// carriers: native completeness is carrier-independent. A complete
-		// empty session preserves the original allowance.
+		// empty session preserves the original allowance. The result was
+		// normalized to a V2 value above, so one form covers both spellings.
 		if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
-			return fmt.Errorf("store full content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
-		}
-		if pv2, ok := w.Result.(*indexformat.V2); ok && pv2 != nil && pv2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
 			return fmt.Errorf("store full content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
 		}
 		return nil

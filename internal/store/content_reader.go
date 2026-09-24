@@ -527,29 +527,12 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 	// Legacy wholly-absent coordinates remain preview-eligible after all other
 	// evidence validates; any other corruption refuses.
 	if _, err := ingest.CollectRetainedUnknown(entries, ""); err != nil {
-		if errors.Is(err, ingest.ErrUnknownPositionUnavailable) && availableLegacyWhollyAbsent(entries) {
+		if errors.Is(err, ingest.ErrUnknownPositionUnavailable) && ingest.LegacyCoordinatesWhollyAbsent(entries) {
 			return entries, capture, nil
 		}
 		return nil, capture, fmt.Errorf("store available content read: stored retained evidence is corrupt; no preview was served; re-index the source with a position-aware adapter")
 	}
 	return entries, capture, nil
-}
-
-func availableLegacyWhollyAbsent(entries []schema.SessionEntry) bool {
-	found := false
-	for _, entry := range entries {
-		records, err := ingest.RetainedUnknownOf(entry)
-		if err != nil || len(records) == 0 {
-			continue
-		}
-		for _, record := range records {
-			found = true
-			if record.Position.Public != nil {
-				return false
-			}
-		}
-	}
-	return found
 }
 
 func entryStringBytes(e schema.SessionEntry) int64 {

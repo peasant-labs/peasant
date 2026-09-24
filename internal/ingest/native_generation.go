@@ -116,6 +116,26 @@ type ActivationOutcome struct {
 	RepairPending bool
 }
 
+// GenerationRepairKind names the fixed post-commit repair categories a
+// GenerationRepairPendingError may carry. The set is closed: only the store
+// assigns these values after commit is known to have succeeded, and callers
+// classify with errors.As, never by comparing category text.
+type GenerationRepairKind string
+
+const (
+	// GenerationRepairMetadata reports the exported metadata repair failed
+	// after the generation committed.
+	GenerationRepairMetadata GenerationRepairKind = "metadata repair"
+	// GenerationRepairIntentClear reports the pending-intent clear failed
+	// after the generation committed.
+	GenerationRepairIntentClear GenerationRepairKind = "intent clear"
+	// GenerationRepairPriorPersist reports the prior-evidence persist failed
+	// after the generation committed. The generation install commits before
+	// its prior document is persisted, so a persist failure is post-commit
+	// repair, never a pre-commit refusal.
+	GenerationRepairPriorPersist GenerationRepairKind = "prior persist"
+)
+
 // GenerationRepairPendingError reports committed authority with pending repair.
 // Only the store returns it, after commit is known to have succeeded. The
 // wrapper exposes a fixed repair category and validated identity only, never
@@ -123,9 +143,9 @@ type ActivationOutcome struct {
 type GenerationRepairPendingError struct {
 	SessionID   string
 	CandidateID string
-	Repair      string
+	Repair      GenerationRepairKind
 }
 
 func (e *GenerationRepairPendingError) Error() string {
-	return "store: generation " + e.CandidateID + " for session " + e.SessionID + " is active but " + e.Repair + " failed; the active generation is valid and the repair is retried on the next open or activation; no rollback was performed"
+	return "store: generation " + e.CandidateID + " for session " + e.SessionID + " is active but " + string(e.Repair) + " failed; the active generation is valid and the repair is retried on the next open or activation; no rollback was performed"
 }

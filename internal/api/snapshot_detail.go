@@ -72,6 +72,10 @@ func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotRea
 			return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, err)
 		}
 	}
+	// Legacy V1 snapshot or a reader without generation support: serve the
+	// preserved legacy path explicitly. Reaching here is the selected legacy
+	// route, never an error-triggered managed-to-legacy fallback: integrity
+	// errors returned above, and incomplete content selects preview above.
 	detail, err := legacy(ctx, id)
 	if err != nil {
 		return nil, err
