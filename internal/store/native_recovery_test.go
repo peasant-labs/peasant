@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -24,6 +23,13 @@ type nativeRecoveryCase struct {
 	Completeness      string `yaml:"completeness"`
 	Fault             string `yaml:"fault"`
 	Prior             string `yaml:"prior"`
+	CarrierNamespace  string `yaml:"carrier_namespace"`
+	CarrierKind       string `yaml:"carrier_kind"`
+	CarrierSourceRef  string `yaml:"carrier_source_ref"`
+	CarrierRecordIdx  int64  `yaml:"carrier_record_index"`
+	CarrierPosition   int64  `yaml:"carrier_position"`
+	CarrierPointer    string `yaml:"carrier_pointer"`
+	CarrierPayload    string `yaml:"carrier_payload"`
 	WantDisposition   string `yaml:"want_disposition"`
 	WantOccurrences   int    `yaml:"want_occurrences"`
 	WantRepairPending bool   `yaml:"want_repair_pending"`
@@ -64,14 +70,14 @@ func loadNativeRecovery(t *testing.T) nativeRecoveryDocument {
 	return doc
 }
 
-func buildRecoveryCarrier(t *testing.T, sid schema.SessionID, index int) schema.SessionEntry {
+func buildRecoveryCarrier(t *testing.T, sid schema.SessionID, index int, c nativeRecoveryCase) schema.SessionEntry {
 	t.Helper()
 	position := ingest.UnknownSourcePosition{
-		Public:   &ingest.UnknownPublicPosition{SourceRef: "src-recovery", RecordIndex: 3, Position: 5},
-		SourceID: "src-recovery",
+		Public:   &ingest.UnknownPublicPosition{SourceRef: c.CarrierSourceRef, RecordIndex: c.CarrierRecordIdx, Position: c.CarrierPosition},
+		SourceID: c.CarrierSourceRef,
 	}
-	position.JSONPointer = "/payload/content/1"
-	record, err := ingest.NewRetainedUnknown(ingest.Harness("claude-code"), "message_block", "future", position, []byte(`{"type":"future","value":9}`))
+	position.JSONPointer = c.CarrierPointer
+	record, err := ingest.NewRetainedUnknown(ingest.Harness("claude-code"), c.CarrierNamespace, c.CarrierKind, position, []byte(c.CarrierPayload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +88,7 @@ func buildRecoveryCarrier(t *testing.T, sid schema.SessionID, index int) schema.
 	return entry
 }
 
-func buildRecoveryV2(t *testing.T, sid schema.SessionID, genID, completeness string, withCarrier bool) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+func buildRecoveryV2(t *testing.T, sid schema.SessionID, genID, completeness string, withCarrier bool, c nativeRecoveryCase) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
 	t.Helper()
 	var v2 indexformat.V2
 	var blobs map[schema.SourceEntryRef][]byte
@@ -92,7 +98,7 @@ func buildRecoveryV2(t *testing.T, sid schema.SessionID, genID, completeness str
 		v2, blobs = buildIncompleteGeneration(t, sid, genID, "recovery preview text", "recovery preview input", "recovery preview output")
 	}
 	if withCarrier {
-		carrier := buildRecoveryCarrier(t, sid, len(v2.Generation.Main.Entries))
+		carrier := buildRecoveryCarrier(t, sid, len(v2.Generation.Main.Entries), c)
 		v2.Generation.Main.Entries = append(v2.Generation.Main.Entries, carrier)
 		v2.Generation.Metadata.Stats.TurnCount = len(v2.Generation.Main.Entries)
 	}
@@ -125,7 +131,7 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			// Prior full authority when requested.
 			priorID := "gen-recovery-prior-" + c.Name
 			if c.Prior == "full" {
-				priorV2, priorBlobs := buildRecoveryV2(t, sid, priorID, "complete", true)
+				priorV2, priorBlobs := buildRecoveryV2(t, sid, priorID, "complete", true, c)
 				priorCapture := recoveryCapture(t, priorV2)
 				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 					Generation: priorV2, Blobs: priorBlobs,
@@ -135,7 +141,7 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 				}
 			}
 			genID := "gen-recovery-" + c.Name
-			v2, blobs := buildRecoveryV2(t, sid, genID, c.Completeness, true)
+			v2, blobs := buildRecoveryV2(t, sid, genID, c.Completeness, true, c)
 			capture := recoveryCapture(t, v2)
 			// Candidates for per-invocation counting via real assessment.
 			assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
@@ -181,7 +187,7 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 					t.Fatalf("read state: %v", err)
 				}
 				// Advance with an intermediate so the captured state is stale.
-				midV2, midBlobs := buildRecoveryV2(t, sid, "gen-recovery-mid-"+c.Name, "complete", false)
+				midV2, midBlobs := buildRecoveryV2(t, sid, "gen-recovery-mid-"+c.Name, "complete", false, c)
 				midCapture := recoveryCapture(t, midV2)
 				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 					Generation: midV2, Blobs: midBlobs,
@@ -192,7 +198,7 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 				outcome, actErr = execActivate(capture, blobs, staleState)
 			case "unrelated_prior":
 				unrelatedID := "gen-unrelated-" + c.Name
-				unrelatedV2, unrelatedBlobs := buildRecoveryV2(t, sid, unrelatedID, "complete", false)
+				unrelatedV2, unrelatedBlobs := buildRecoveryV2(t, sid, unrelatedID, "complete", false, c)
 				staged, err := s.generationArtifacts.Stage(context.Background(), unrelatedV2.Generation, unrelatedBlobs)
 				if err != nil {
 					t.Fatalf("stage unrelated: %v", err)
@@ -241,6 +247,32 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 					s.generationArtifacts = faultArtifacts{GenerationArtifactStore: s.generationArtifacts, failRepair: true}
 				}
 				outcome, actErr = execActivate(capture, blobs, nil)
+			case "forged_intent_replay":
+				// Forged recovery: an incomplete_new candidate staged under an
+				// intent that claims a full/complete capture. Recovery replays
+				// the persisted envelope through the same guarded write, which
+				// refuses the forged claim and preserves last-good authority.
+				digest, err := computeActivationBinding(v2.Generation, bindingFromBlobs(blobs))
+				if err != nil {
+					t.Fatalf("binding: %v", err)
+				}
+				forged := ingest.SessionContentCaptureWrite{
+					Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
+					TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 2,
+				}
+				if _, err := s.generationArtifacts.Stage(context.Background(), v2.Generation, blobs); err != nil {
+					t.Fatalf("stage forged: %v", err)
+				}
+				if err := s.generationArtifacts.WriteIntent(context.Background(), GenerationIntent{
+					SessionID: sid, GenerationID: genID,
+					ManifestPath: "generations/" + genID + "/manifest.json",
+					Completeness: string(v2.Generation.Completeness), StagedAtMs: 1,
+					IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: forged,
+					CandidateDigest: digest,
+				}); err != nil {
+					t.Fatalf("write forged intent: %v", err)
+				}
+				outcome, actErr = s.RecoverGenerationActivation(context.Background(), sid)
 			default:
 				t.Fatalf("unknown fault %q", c.Fault)
 			}
@@ -305,33 +337,54 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			if active != wantActiveID {
 				t.Fatalf("active = %q, want %q", active, wantActiveID)
 			}
-			// Actual read verdicts, never readiness alone. Raw safety: no
-			// error, diagnostic, or count may carry raw payload bytes.
+			// Actual read verdicts, never readiness alone. success_empty pins
+			// the refused-no-prior half the review flagged: a store bug that
+			// served stale or foreign entries on available after a refused
+			// activation still fails here. Unknown expectations fail closed
+			// instead of passing vacuously.
 			_, _, fullErr := s.LoadFullSessionEntries(context.Background(), sid, 0)
-			if c.WantFullRead == "success" && fullErr != nil {
-				t.Fatalf("full read refused committed authority: %v", fullErr)
-			}
-			if c.WantFullRead == "refused" && fullErr == nil {
-				t.Fatal("full read certified refused authority")
+			switch c.WantFullRead {
+			case "success":
+				if fullErr != nil {
+					t.Fatalf("full read refused committed authority: %v", fullErr)
+				}
+			case "refused":
+				if fullErr == nil {
+					t.Fatal("full read certified refused authority")
+				}
+			default:
+				t.Fatalf("unknown want_full_read %q", c.WantFullRead)
 			}
 			page, err := s.ReadSessionEntries(context.Background(), ingest.SessionID(sid), ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadAvailable, Limit: 100})
 			if err != nil {
 				t.Fatalf("available read failed: %v", err)
 			}
-			if c.WantAvailable == "success" && len(page.Entries) == 0 {
-				t.Fatal("available read returned no entries for valid authority")
+			switch c.WantAvailable {
+			case "success":
+				if len(page.Entries) == 0 {
+					t.Fatal("available read returned no entries for valid authority")
+				}
+			case "success_empty":
+				if len(page.Entries) != 0 {
+					t.Fatalf("available read served %d entries with no authority; want empty", len(page.Entries))
+				}
+			default:
+				t.Fatalf("unknown want_available %q", c.WantAvailable)
 			}
 			// Raw-never-in-errors: refused and repair-pending errors must not
-			// echo payload bytes, kind/namespace labels, or position strings.
+			// echo payload bytes, source labels, or coordinate namespaces. The
+			// secrets are YAML-owned, like the carrier that introduced them.
 			if actErr != nil {
 				msg := actErr.Error()
-				for _, secret := range []string{`{"type":"future"`, "src-recovery", "message_block"} {
-					if strings.Contains(msg, secret) {
+				secrets := []string{c.CarrierPayload, c.CarrierSourceRef, c.CarrierNamespace}
+				if i := strings.Index(c.CarrierPayload, ","); i > 0 {
+					secrets = append(secrets, c.CarrierPayload[:i]+`"`)
+				}
+				for _, secret := range secrets {
+					if secret != "" && strings.Contains(msg, secret) {
 						t.Fatalf("error echoes raw evidence %q: %v", secret, actErr)
 					}
 				}
-				raw, _ := json.Marshal(v2)
-				_ = raw
 			}
 		})
 	}

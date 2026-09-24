@@ -42,9 +42,13 @@ type nativeCoverageCase struct {
 	Carriers        []nativeCoverageCarrier `yaml:"carriers"`
 	Prior           string                  `yaml:"prior"`
 	ForgedFull      bool                    `yaml:"forged_full"`
+	SourceOmitted   bool                    `yaml:"source_omitted"`
+	Unaccounted     bool                    `yaml:"unaccounted"`
 	WantDisposition string                  `yaml:"want_disposition"`
 	WantOccurrences int                     `yaml:"want_occurrences"`
 	WantExport      string                  `yaml:"want_export"`
+	WantFullRead    string                  `yaml:"want_full_read"`
+	WantFailureCode string                  `yaml:"want_failure_code"`
 }
 
 type nativeCoverageDocument struct {
@@ -73,13 +77,32 @@ func loadNativeCoverage(t *testing.T) nativeCoverageDocument {
 		names[c.Name] = true
 		actual = append(actual, c.Name)
 	}
-	if err := testutil.RequireFixtureNames("native coverage", "case", doc.Required, names); err != nil {
-		t.Fatal(err)
-	}
+	// Exact-set manifest in one check: every declared name present, no
+	// undeclared row. A second subset-only check would add no signal.
 	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: doc.Required}, actual, "native coverage"); err != nil {
 		t.Fatal(err)
 	}
 	return doc
+}
+
+// assertCoverageErrorRawSafe pins invariant 12 on one coverage refusal: the
+// error must carry only fixed refusal categories and validated identities,
+// never raw payload bytes, source labels, or coordinate namespaces.
+func assertCoverageErrorRawSafe(t *testing.T, err error, carriers []nativeCoverageCarrier) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want a refusal error, got nil")
+	}
+	msg := err.Error()
+	secrets := []string{`{"type":"future"`}
+	for _, carrier := range carriers {
+		secrets = append(secrets, carrier.SourceRef, carrier.Namespace, carrier.Payload)
+	}
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(msg, secret) {
+			t.Fatalf("coverage refusal echoes raw evidence %q: %v", secret, err)
+		}
+	}
 }
 
 func seedCoverageSession(t *testing.T, dbPath, sid string) {
@@ -233,12 +256,15 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
 				Harness: ingest.Harness("claude-code"), Result: v2,
 				Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+				SourceOmitted: c.SourceOmitted, Unaccounted: c.Unaccounted,
 			})
 			if err != nil {
 				// One-set duplicate refusal: Main+Earlier validated together
 				// refuses cross-partition duplicates before any counting or
-				// persistence. Expected NotCommitted with no authority.
+				// persistence. Expected NotCommitted with no authority and no
+				// entries served.
 				if c.WantDisposition == "not_committed" && c.Name == "main-and-earlier-duplicate-refused" {
+					assertCoverageErrorRawSafe(t, err, c.Carriers)
 					var activeID string
 					_ = db.WithSessionSnapshot(t.Context(), sid, func(snapshot indexformat.ReadSnapshot) error {
 						activeID = snapshot.GenerationID
@@ -250,6 +276,16 @@ func TestNativeCoverageMatrix(t *testing.T) {
 					if _, exportErr := export.ExportSession(t.Context(), db, fs, string(sid)); exportErr == nil {
 						t.Fatal("export certified duplicate evidence")
 					}
+					if _, _, fullErr := db.LoadFullSessionEntries(t.Context(), sid, 0); fullErr == nil {
+						t.Fatal("full read certified duplicate evidence")
+					}
+					emptyPage, readErr := db.ReadSessionEntries(t.Context(), sid, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadAvailable, Limit: 100})
+					if readErr != nil {
+						t.Fatalf("available read failed after refused duplicate: %v", readErr)
+					}
+					if len(emptyPage.Entries) != 0 {
+						t.Fatalf("available read served %d entries with no authority after refused duplicate", len(emptyPage.Entries))
+					}
 					return
 				}
 				t.Fatalf("assessment refused valid matrix case: %v", err)
@@ -258,6 +294,12 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			capture, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 2)
 			if err != nil {
 				t.Fatalf("capture conversion: %v", err)
+			}
+			// The assessed failure code is YAML-owned: omission facts must map
+			// to their preview codes, complete controls to no failure, and
+			// retained carriers to unknown_data_retained.
+			if string(capture.FailureCode) != c.WantFailureCode {
+				t.Fatalf("failure code = %q, want %q", string(capture.FailureCode), c.WantFailureCode)
 			}
 			if c.ForgedFull {
 				// Direct forged-full: incomplete_new claiming full/complete.
@@ -276,6 +318,9 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			}
 			if !wantCommitted && (err == nil || outcome.Disposition != ingest.ActivationNotCommitted) {
 				t.Fatalf("want NotCommitted refusal, got %+v err=%v", outcome, err)
+			}
+			if !wantCommitted {
+				assertCoverageErrorRawSafe(t, err, c.Carriers)
 			}
 			// Per-invocation counts: CommittedNow counts candidates once,
 			// NotCommitted zero. Preview CommittedNow carries zero candidates
@@ -326,19 +371,26 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			default:
 				t.Fatalf("unknown want_export %q", c.WantExport)
 			}
-			// Local reads: full succeeds only for complete controls; available
-			// serves an honest preview for valid incomplete, never corruption
-			// (all matrix cases are valid). A refused activation with no prior
-			// authority honestly serves no entries.
+			// Local reads: full serves only publishable authority (complete
+			// controls and preserved priors); available serves an honest
+			// preview for valid incomplete, never corruption (all matrix cases
+			// are valid). A refused activation with no prior authority
+			// honestly serves no entries. Both verdicts are YAML-owned, never
+			// inferred from each other: a complete generation committed under
+			// a preview capture exports via the snapshot boundary yet stays
+			// refused on the full-read path.
 			_, _, fullErr := db.LoadFullSessionEntries(t.Context(), sid, 0)
-			if c.WantExport == "success" && fullErr != nil {
-				t.Fatalf("full read refused complete control: %v", fullErr)
-			}
-			if c.WantExport == "refused" && fullErr == nil {
-				t.Fatal("full read certified incomplete control")
-			}
-			if c.WantExport == "prior_preserved" && fullErr != nil {
-				t.Fatalf("full read lost prior authority: %v", fullErr)
+			switch c.WantFullRead {
+			case "success":
+				if fullErr != nil {
+					t.Fatalf("full read refused committed authority: %v", fullErr)
+				}
+			case "refused":
+				if fullErr == nil {
+					t.Fatal("full read certified refused authority")
+				}
+			default:
+				t.Fatalf("unknown want_full_read %q", c.WantFullRead)
 			}
 			page, err := db.ReadSessionEntries(t.Context(), sid, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadAvailable, Limit: 100})
 			if err != nil {
@@ -349,6 +401,9 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			}
 			if c.Prior == "full" && len(page.Entries) == 0 {
 				t.Fatal("available read lost prior full entries")
+			}
+			if c.WantDisposition == "not_committed" && c.Prior != "full" && len(page.Entries) != 0 {
+				t.Fatalf("available read served %d entries with no authority after refused activation", len(page.Entries))
 			}
 		})
 	}
