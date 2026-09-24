@@ -32,8 +32,8 @@ func preflightUnknownEvidence(entries []schema.SessionEntry, requireFull bool) e
 		return nil
 	}
 	if errors.Is(err, ingest.ErrUnknownPositionUnavailable) {
-		if !requireFull && legacyEvidenceWhollyAbsent(entries) {
-			if legacyErr := validateLegacyEvidence(entries); legacyErr != nil {
+		if !requireFull && ingest.LegacyCoordinatesWhollyAbsent(entries) {
+			if legacyErr := ingest.ValidateV1LegacyEvidence(entries, ""); legacyErr != nil {
 				return fmt.Errorf("store preview evidence validation: %w; prior capture remains authoritative", legacyErr)
 			}
 			return nil
@@ -41,36 +41,4 @@ func preflightUnknownEvidence(entries []schema.SessionEntry, requireFull bool) e
 		return fmt.Errorf("store content evidence validation: %w; prior capture remains authoritative", err)
 	}
 	return fmt.Errorf("store content evidence validation: %w; prior capture remains authoritative", err)
-}
-
-func legacyEvidenceWhollyAbsent(entries []schema.SessionEntry) bool {
-	found := false
-	for _, entry := range entries {
-		records, err := ingest.RetainedUnknownOf(entry)
-		if err != nil || len(records) == 0 {
-			continue
-		}
-		for _, record := range records {
-			found = true
-			if record.Position.Public != nil {
-				return false
-			}
-		}
-	}
-	return found
-}
-
-func validateLegacyEvidence(entries []schema.SessionEntry) error {
-	for _, entry := range entries {
-		records, err := ingest.RetainedUnknownOf(entry)
-		if err != nil {
-			return err
-		}
-		for _, record := range records {
-			if record.Position.Public != nil {
-				return fmt.Errorf("legacy evidence carries public coordinates; no legacy preview was certified; re-index the source with a position-aware adapter")
-			}
-		}
-	}
-	return nil
 }

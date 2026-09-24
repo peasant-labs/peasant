@@ -386,6 +386,31 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(string(c.FailureCode)), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
 }
 
+// factsFromEvidenceOnly builds the assessment facts for a store-side forged
+// full-claim check from the entries actually presented. The store cannot know
+// session-level omission state, so Unaccounted stays false here by explicit
+// choice: only the pipeline, which sees the session, may declare an omission
+// unaccounted (ingest.V1CaptureFacts). A requested legacy-preview format
+// selects the legacy policy; every other full claim is judged as a fresh
+// candidate.
+func factsFromEvidenceOnly(harness string, result indexformat.Result, evidence []schema.SessionEntry, requestedFormat ingest.ContentCaptureFormat) ingest.CaptureFacts {
+	hasOmissions := false
+	for _, e := range evidence {
+		if _, omitted := ingest.OmittedRecordOf(e); omitted {
+			hasOmissions = true
+			break
+		}
+	}
+	policy := ingest.CaptureFreshCandidate
+	if requestedFormat == ingest.ContentCaptureFormatLegacyPreviewOnly {
+		policy = ingest.CaptureLegacyPreview
+	}
+	return ingest.CaptureFacts{
+		Harness: ingest.Harness(harness), Result: result, Policy: policy,
+		Authoritative: true, SourceOmitted: hasOmissions,
+	}
+}
+
 // refuseForgedFullClaim reuses the capture assessment to refuse a full write
 // whose requested status, format, or failure code disagrees with the state
 // justified by result completeness and validated evidence. A caller-supplied
@@ -393,15 +418,11 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 // mapping the pipeline uses and refuses incompatible claims before any entry
 // replacement, preserving last-good authority.
 func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.SessionEntry) error {
-	v1, ok := w.Result.(indexformat.V1)
-	if !ok {
-		if pv1, ok := w.Result.(*indexformat.V1); ok && pv1 != nil {
-			v1 = *pv1
-		} else {
+	if _, ok := w.Result.(indexformat.V1); !ok {
+		if pv1, ok := w.Result.(*indexformat.V1); !ok || pv1 == nil {
 			return nil
 		}
 	}
-	_ = v1
 	// Unknown enums have their own specific refusals downstream (closed-set
 	// errors naming the valid members). Let those fire instead of masking
 	// them with a forged-claim message.
@@ -436,21 +457,7 @@ func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.Session
 	if harness == "" {
 		return nil
 	}
-	hasOmissions := false
-	for _, e := range evidence {
-		if _, omitted := ingest.OmittedRecordOf(e); omitted {
-			hasOmissions = true
-			break
-		}
-	}
-	policy := ingest.CaptureFreshCandidate
-	if w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatLegacyPreviewOnly {
-		policy = ingest.CaptureLegacyPreview
-	}
-	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
-		Harness: ingest.Harness(harness), Result: w.Result, Policy: policy,
-		Authoritative: true, SourceOmitted: hasOmissions,
-	})
+	assessment, err := ingest.AssessCapture(factsFromEvidenceOnly(harness, w.Result, evidence, w.ContentCapture.CaptureFormat))
 	if err != nil {
 		return fmt.Errorf("store full content write: evidence assessment refused the requested full capture: %w; prior capture remains authoritative", err)
 	}

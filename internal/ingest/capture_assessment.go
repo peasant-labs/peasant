@@ -3,7 +3,6 @@ package ingest
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"time"
 
@@ -42,6 +41,22 @@ type CaptureFacts struct {
 	Authoritative bool
 	SourceOmitted bool
 	Unaccounted   bool
+}
+
+// V1CaptureFacts builds the facts for one V1 candidate from the entries the
+// parser actually produced. SourceOmitted alone never grants full coverage:
+// an omission without a placeholder standing in the gap is unaccounted and
+// stays preview. The store cannot know session-level omission state, so its
+// evidence-only checks keep their own explicit builder rather than calling
+// this with a guessed flag.
+func V1CaptureFacts(harness Harness, result indexformat.Result, authoritative bool, contentOmitted bool) CaptureFacts {
+	hasOmissions := outputRecordsItsOmissions(result)
+	return CaptureFacts{
+		Harness: harness, Result: result,
+		Policy: CaptureFreshCandidate, Authoritative: authoritative,
+		SourceOmitted: contentOmitted || hasOmissions,
+		Unaccounted:   contentOmitted && !hasOmissions,
+	}
 }
 
 // CaptureAssessment is the one owner of the mapping from validated evidence
@@ -88,17 +103,10 @@ func (a *CaptureAssessment) CandidateCounts() []RetainedUnknownKindCount {
 // ContentCapture converts an assessed capture to a store write. It refuses
 // unknown, invalid, or zero conversion before persistence: an unknown
 // coverage never silently becomes a valid preview write through the store's
-// absent-value defaults. A nil or typed-nil receiver, an unknown coverage,
-// and any unsupported coverage or read-policy enum are refused with an error.
+// absent-value defaults. A nil receiver, an unknown coverage, and any
+// unsupported coverage or read-policy enum are refused with an error.
 func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, origin TranscriptOrigin, capturedAt int64) (SessionContentCaptureWrite, error) {
 	if a == nil {
-		return SessionContentCaptureWrite{}, fmt.Errorf("ingest.ContentCapture: nil capture assessment cannot be converted to a store write; no persistence was authorized; assess the captured evidence before writing")
-	}
-	// Typed-nil detection: a non-nil interface holding a nil pointer must not
-	// certify. Callers pass *CaptureAssessment; a typed-nil pointer arrives
-	// here as a non-nil receiver only when the method set permits it, so
-	// defend with reflection as well as the nil comparison above.
-	if reflect.ValueOf(a).Kind() == reflect.Pointer && reflect.ValueOf(a).IsNil() {
 		return SessionContentCaptureWrite{}, fmt.Errorf("ingest.ContentCapture: nil capture assessment cannot be converted to a store write; no persistence was authorized; assess the captured evidence before writing")
 	}
 	coverage := a.Coverage()
@@ -146,14 +154,11 @@ func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, ori
 		// Preview-only activation is reported as a preview operation, never as
 		// a successful full or retained capture. The store's absent-value
 		// defaults must never promote this to full: the format is explicit.
+		// A preview with no recorded failure is first-discovery
+		// incompleteness (for example native incomplete_new), not a
+		// refusal. Keep the empty code so the selector can tell
+		// not-certified-yet from refused.
 		code := a.failure
-		if code == ContentCaptureNoFailure {
-			// A preview with no recorded failure is first-discovery
-			// incompleteness (for example native incomplete_new), not a
-			// refusal. Keep the empty code so the selector can tell
-			// not-certified-yet from refused.
-			code = ContentCaptureNoFailure
-		}
 		if _, err := NewContentCaptureFailureCode(string(code)); err != nil {
 			return SessionContentCaptureWrite{}, err
 		}
@@ -229,14 +234,13 @@ func assessV1Capture(facts CaptureFacts, v1 indexformat.V1) (CaptureAssessment, 
 
 	// Validate the entire evidence set regardless of desired coverage.
 	// Evidence validates raw at rest; there is no redaction step here.
-	collectedErr := validateV1Evidence(entries, facts.Harness)
-	if collectedErr != nil {
+	if _, collectedErr := CollectRetainedUnknown(entries, facts.Harness); collectedErr != nil {
 		if errors.Is(collectedErr, ErrUnknownPositionUnavailable) {
 			if facts.Policy == CaptureLegacyPreview {
 				// Legacy exception: only wholly absent coordinates after all
 				// other evidence validates. Corruption outranks compatibility.
-				if legacyCoordinatesWhollyAbsent(entries) {
-					if err := validateV1LegacyEvidence(entries, facts.Harness); err != nil {
+				if LegacyCoordinatesWhollyAbsent(entries) {
+					if err := ValidateV1LegacyEvidence(entries, facts.Harness); err != nil {
 						return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: legacy evidence invalid for harness %q: %w; no capture was certified", string(facts.Harness), err)
 					}
 					legacyRetained, legacyErr := retainedUnknownEntries(entries)
@@ -364,16 +368,12 @@ func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, 
 	}, nil
 }
 
-func validateV1Evidence(entries []schema.SessionEntry, harness Harness) error {
-	_, err := CollectRetainedUnknown(entries, harness)
-	return err
-}
-
-// legacyCoordinatesWhollyAbsent reports whether every retained record lacks
+// LegacyCoordinatesWhollyAbsent reports whether every retained record lacks
 // public traversal coordinates. It is the narrow legacy exception: wholly
 // absent coordinates may still read as a bounded preview, but any present
-// coordinate set must validate as a whole.
-func legacyCoordinatesWhollyAbsent(entries []schema.SessionEntry) bool {
+// coordinate set must validate as a whole. The store preflight reuses this
+// predicate rather than carrying a second copy.
+func LegacyCoordinatesWhollyAbsent(entries []schema.SessionEntry) bool {
 	found := false
 	for _, entry := range entries {
 		records, err := RetainedUnknownOf(entry)
@@ -390,7 +390,11 @@ func legacyCoordinatesWhollyAbsent(entries []schema.SessionEntry) bool {
 	return found
 }
 
-func validateV1LegacyEvidence(entries []schema.SessionEntry, harness Harness) error {
+// ValidateV1LegacyEvidence validates legacy evidence record by record. An
+// empty harness skips the caller-ownership check (the store preflight
+// validates evidence without a declared harness); entry/record ownership and
+// the absent-coordinates requirement always apply.
+func ValidateV1LegacyEvidence(entries []schema.SessionEntry, harness Harness) error {
 	for _, entry := range entries {
 		records, err := RetainedUnknownOf(entry)
 		if err != nil {

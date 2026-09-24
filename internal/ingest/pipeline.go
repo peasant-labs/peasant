@@ -1993,13 +1993,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	if err == nil && parsed {
 		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil {
 			strictAuthoritative := authoritative && declared == strictIndexFormat
-			sourceOmitted := im.session.ContentOmitted || outputRecordsItsOmissions(output)
-			unaccounted := im.session.ContentOmitted && !outputRecordsItsOmissions(output)
-			if assessment, assessErr := AssessCapture(CaptureFacts{
-				Harness: im.session.Harness, Result: output,
-				Policy: CaptureFreshCandidate, Authoritative: strictAuthoritative,
-				SourceOmitted: sourceOmitted, Unaccounted: unaccounted,
-			}); assessErr != nil {
+			if assessment, assessErr := AssessCapture(V1CaptureFacts(
+				im.session.Harness, output, strictAuthoritative, im.session.ContentOmitted,
+			)); assessErr != nil {
 				err = assessErr
 			} else {
 				result.assessment = assessment

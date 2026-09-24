@@ -5,7 +5,10 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -17,6 +20,14 @@ import (
 
 //go:embed testdata/capture_assessment.yaml
 var captureAssessmentCorpus []byte
+
+// Omission placeholder dimensions shared with the store last-good guard: the
+// source line that overflowed, its byte size, and the limit it exceeded.
+const (
+	omissionPlaceholderLine  = 7
+	omissionPlaceholderSize  = 9000
+	omissionPlaceholderLimit = 8000
+)
 
 type captureAssessmentRecord struct {
 	Namespace   string `yaml:"namespace"`
@@ -53,34 +64,120 @@ type captureAssessmentDocument struct {
 	Cases    []captureAssessmentCase `yaml:"cases"`
 }
 
-func loadCaptureAssessmentFixtures(t *testing.T) captureAssessmentDocument {
-	t.Helper()
+func loadCaptureAssessment(data []byte) (captureAssessmentDocument, error) {
 	var doc captureAssessmentDocument
-	d := yaml.NewDecoder(bytes.NewReader(captureAssessmentCorpus))
+	d := yaml.NewDecoder(bytes.NewReader(data))
 	d.KnownFields(true)
 	if err := d.Decode(&doc); err != nil {
-		t.Fatal(err)
+		return captureAssessmentDocument{}, fmt.Errorf("decode capture assessment fixture first document: %w", err)
 	}
 	var trailing any
 	if err := d.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("trailing fixture document: %v", err)
+		return captureAssessmentDocument{}, fmt.Errorf("capture assessment fixture must contain exactly one YAML document: %v", trailing)
 	}
 	names := map[string]bool{}
-	var actual []string
 	for _, c := range doc.Cases {
 		if c.Name == "" || names[c.Name] {
-			t.Fatalf("duplicate or empty fixture name %q", c.Name)
+			return captureAssessmentDocument{}, fmt.Errorf("capture assessment fixture holds a duplicate or empty case name %q; each assessment shape needs exactly one pin", c.Name)
 		}
 		names[c.Name] = true
-		actual = append(actual, c.Name)
 	}
-	if err := testutil.RequireFixtureNames("capture assessment", "case", doc.Required, names); err != nil {
-		t.Fatal(err)
+	for _, required := range requiredCaptureAssessmentCaseNames {
+		if !names[required] {
+			return captureAssessmentDocument{}, fmt.Errorf("capture assessment fixture is missing required case %q; restore the pin instead of shrinking coverage", required)
+		}
 	}
-	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: doc.Required}, actual, "capture assessment"); err != nil {
+	for name := range names {
+		if !slices.Contains(requiredCaptureAssessmentCaseNames, name) {
+			return captureAssessmentDocument{}, fmt.Errorf("capture assessment fixture holds undeclared case %q; declare it in the required manifest or remove it", name)
+		}
+	}
+	return doc, nil
+}
+
+func loadCaptureAssessmentFixtures(t *testing.T) captureAssessmentDocument {
+	t.Helper()
+	doc, err := loadCaptureAssessment(captureAssessmentCorpus)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return doc
+}
+
+// requiredCaptureAssessmentCaseNames is the deletion guard. Each name is a V1
+// assessment shape the pins below prove; removing or renaming one must fail
+// the loader, not silently shrink coverage. It is the single manifest source
+// of truth: the YAML required_names header documents the same set for
+// readers, and the loader pins below prove refusal of missing, undeclared,
+// and same-count-renamed corpora.
+var requiredCaptureAssessmentCaseNames = []string{
+	"known-only",
+	"unknown-only",
+	"omitted-only",
+	"mixed-accounted",
+	"mixed-unaccounted",
+	"legacy-only",
+	"declared-format-mismatch",
+	"nil-result",
+	"typed-nil-result",
+	"zero-assessment",
+	"unsupported-enum",
+}
+
+func marshalCaptureAssessment(t *testing.T, doc captureAssessmentDocument) []byte {
+	t.Helper()
+	encoded, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal mutated fixture: %v", err)
+	}
+	return encoded
+}
+
+func TestLoadCaptureAssessmentRejectsDeletedCase(t *testing.T) {
+	t.Parallel()
+	doc, err := loadCaptureAssessment(captureAssessmentCorpus)
+	if err != nil {
+		t.Fatalf("load capture assessment fixture: %v", err)
+	}
+	trimmed := doc
+	trimmed.Cases = append([]captureAssessmentCase(nil), doc.Cases[1:]...)
+	if _, err := loadCaptureAssessment(marshalCaptureAssessment(t, trimmed)); err == nil {
+		t.Fatal("loader accepted a fixture with a required case removed")
+	} else if !strings.Contains(err.Error(), "missing required case") {
+		t.Fatalf("loader refused for the wrong reason: %v", err)
+	}
+}
+
+func TestLoadCaptureAssessmentRejectsUndeclaredCase(t *testing.T) {
+	t.Parallel()
+	doc, err := loadCaptureAssessment(captureAssessmentCorpus)
+	if err != nil {
+		t.Fatalf("load capture assessment fixture: %v", err)
+	}
+	extended := doc
+	extended.Cases = append(append([]captureAssessmentCase(nil), doc.Cases...),
+		captureAssessmentCase{Name: "undeclared-probe", Harness: ingest.HarnessClaudeCode, Policy: "fresh", WantCoverage: "full"})
+	if _, err := loadCaptureAssessment(marshalCaptureAssessment(t, extended)); err == nil {
+		t.Fatal("loader accepted a fixture with an undeclared case")
+	} else if !strings.Contains(err.Error(), "undeclared case") {
+		t.Fatalf("loader refused for the wrong reason: %v", err)
+	}
+}
+
+func TestLoadCaptureAssessmentRejectsSameCountRenamedCase(t *testing.T) {
+	t.Parallel()
+	doc, err := loadCaptureAssessment(captureAssessmentCorpus)
+	if err != nil {
+		t.Fatalf("load capture assessment fixture: %v", err)
+	}
+	renamed := doc
+	renamed.Cases = append([]captureAssessmentCase(nil), doc.Cases...)
+	renamed.Cases[0].Name = "renamed-probe"
+	if _, err := loadCaptureAssessment(marshalCaptureAssessment(t, renamed)); err == nil {
+		t.Fatal("loader accepted a fixture with a required case renamed at the same count")
+	} else if !strings.Contains(err.Error(), "missing required case") {
+		t.Fatalf("loader refused for the wrong reason: %v", err)
+	}
 }
 
 func buildAssessmentEntries(t *testing.T, c captureAssessmentCase, sid ingest.SessionID) []schema.SessionEntry {
@@ -116,7 +213,7 @@ func buildAssessmentEntries(t *testing.T, c captureAssessmentCase, sid ingest.Se
 		next++
 	}
 	if c.Omitted {
-		rec, err := ingest.NewOmittedRecord(ingest.OmittedRecordTooLarge, 7, 9000, 8000)
+		rec, err := ingest.NewOmittedRecord(ingest.OmittedRecordTooLarge, omissionPlaceholderLine, omissionPlaceholderSize, omissionPlaceholderLimit)
 		if err != nil {
 			t.Fatalf("%s: NewOmittedRecord: %v", c.Name, err)
 		}
@@ -134,10 +231,28 @@ func buildAssessmentEntries(t *testing.T, c captureAssessmentCase, sid ingest.Se
 	return entries
 }
 
+// assessmentPolicyForCase resolves the fixture policy name to the production
+// read policy, refusing unknown names so a typo cannot silently certify.
+func assessmentPolicyForCase(t *testing.T, c captureAssessmentCase) ingest.CaptureReadPolicy {
+	t.Helper()
+	if c.UnsupportedPolicy != nil {
+		return ingest.CaptureReadPolicy(*c.UnsupportedPolicy)
+	}
+	switch c.Policy {
+	case "legacy":
+		return ingest.CaptureLegacyPreview
+	case "", "fresh":
+		return ingest.CaptureFreshCandidate
+	default:
+		t.Fatalf("unknown policy %q", c.Policy)
+		return ingest.CaptureFreshCandidate
+	}
+}
+
 // TestCaptureAssessmentPins exercises the production AssessCapture and checked
-// ContentCapture conversion against YAML-owned expectations. A forged
-// full or preview claim must be rejected by the assessment, and an unknown,
+// ContentCapture conversion against YAML-owned expectations. An unknown,
 // invalid, or zero assessment must never convert to a store write.
+// Forged-claim disagreement is pinned by TestCaptureAssessmentForgedTupleDisagrees.
 func TestCaptureAssessmentPins(t *testing.T) {
 	t.Parallel()
 	doc := loadCaptureAssessmentFixtures(t)
@@ -148,17 +263,7 @@ func TestCaptureAssessmentPins(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			policy := ingest.CaptureFreshCandidate
-			switch {
-			case c.UnsupportedPolicy != nil:
-				policy = ingest.CaptureReadPolicy(*c.UnsupportedPolicy)
-			case c.Policy == "legacy":
-				policy = ingest.CaptureLegacyPreview
-			case c.Policy == "" || c.Policy == "fresh":
-				policy = ingest.CaptureFreshCandidate
-			default:
-				t.Fatalf("unknown policy %q", c.Policy)
-			}
+			policy := assessmentPolicyForCase(t, c)
 
 			var result indexformat.Result
 			switch {
@@ -245,16 +350,55 @@ func TestCaptureAssessmentPins(t *testing.T) {
 					t.Fatalf("complete write = %q/%q, want complete/no failure", string(write.Status), string(write.FailureCode))
 				}
 			}
+		})
+	}
+}
 
-			// A forged claim that bypasses the assessment must not certify:
-			// the store preflight (and the assessment itself) rejects a full
-			// write for a preview assessment and a preview write for an
-			// unknown assessment. Here pin the conversion refusal directly.
-			if c.ZeroAssessment {
-				var zero ingest.CaptureAssessment
-				if _, convErr := zero.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1); convErr == nil {
-					t.Fatalf("zero assessment converted, want refusal")
-				}
+// TestCaptureAssessmentForgedTupleDisagrees proves at the ingest level that a
+// hand-built complete/full claim cannot pass as the assessment's own
+// conversion. For every fixture case that yields a genuine write, the
+// canonical forgery (complete/full with no failure code) must disagree with
+// the assessed status/format/code triple — except the one case that genuinely
+// certifies complete full, which must agree as the control that keeps the
+// comparison from being vacuous. The store pins the same comparison at the
+// boundary in TestCaptureAssessmentLastGoodGuard.
+func TestCaptureAssessmentForgedTupleDisagrees(t *testing.T) {
+	t.Parallel()
+	doc := loadCaptureAssessmentFixtures(t)
+	for _, c := range doc.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			if c.WantCoverage == "error" {
+				t.Skip("refusal cases yield no genuine write to compare against")
+			}
+			sid, err := ingest.NewSessionID(testutil.TestSessionUUID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries := buildAssessmentEntries(t, c, sid)
+			assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+				Harness: c.Harness, Result: indexformat.V1{Entries: entries},
+				Policy:        assessmentPolicyForCase(t, c),
+				Authoritative: c.Authoritative,
+				SourceOmitted: c.SourceOmitted, Unaccounted: c.Unaccounted,
+			})
+			if err != nil {
+				t.Fatalf("AssessCapture: %v", err)
+			}
+			genuine, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1700000000000)
+			if err != nil {
+				t.Fatalf("ContentCapture: %v", err)
+			}
+			forged := ingest.SessionContentCaptureWrite{
+				Status: ingest.ContentCaptureComplete, CaptureFormat: ingest.ContentCaptureFormatFull,
+			}
+			control := c.WantCoverage == "full" && !c.WantPartial && c.WantFailure == ""
+			disagrees := genuine.Status != forged.Status || genuine.CaptureFormat != forged.CaptureFormat || genuine.FailureCode != forged.FailureCode
+			if control && disagrees {
+				t.Fatalf("control case %q: genuine complete/full write disagrees with itself: %+v", c.Name, genuine)
+			}
+			if !control && !disagrees {
+				t.Fatalf("case %q: forged complete/full claim agrees with assessed %+v/%+v/%+v", c.Name, genuine.Status, genuine.CaptureFormat, genuine.FailureCode)
 			}
 		})
 	}
@@ -275,6 +419,19 @@ func TestCaptureAssessmentCheckedConversionRefusals(t *testing.T) {
 	}
 	if got := nilAssessment.CandidateCounts(); len(got) != 0 {
 		t.Fatalf("nil candidate counts = %d, want 0", len(got))
+	}
+	// An interface-boxed typed-nil assessment still arrives as a nil receiver
+	// and must refuse without any reflection defense.
+	var boxedNil *ingest.CaptureAssessment
+	var boxed any = boxedNil
+	if boxed == nil {
+		t.Fatal("test setup: interface holding a typed-nil pointer must be non-nil")
+	}
+	if got := boxed.(*ingest.CaptureAssessment).Coverage(); got != ingest.CaptureCoverageUnknown {
+		t.Fatalf("boxed typed-nil coverage = %d, want unknown", uint8(got))
+	}
+	if _, err := boxed.(*ingest.CaptureAssessment).ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1); err == nil {
+		t.Fatal("boxed typed-nil assessment converted, want refusal")
 	}
 	var zero ingest.CaptureAssessment
 	if _, err := zero.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1); err == nil {

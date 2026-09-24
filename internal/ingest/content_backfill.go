@@ -439,19 +439,12 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 		if err != nil {
 			return ContentCaptureResult{}, err
 		}
-		if len(unknown) > 0 {
-			capture.Complete = false
-		}
-		if assessment, assessErr := AssessCapture(CaptureFacts{
-			Harness: session.Harness, Result: indexformat.V1{Entries: capture.Entries},
-			Policy: CaptureFreshCandidate, Authoritative: true,
-			SourceOmitted: session.ContentOmitted || outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
-			Unaccounted:   session.ContentOmitted && !outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
-		}); assessErr != nil {
+		v1 := indexformat.V1{Entries: capture.Entries}
+		if assessment, assessErr := AssessCapture(V1CaptureFacts(
+			session.Harness, v1, true, session.ContentOmitted,
+		)); assessErr != nil {
 			return ContentCaptureResult{}, assessErr
-		} else if assessment.Coverage() != CaptureCoverageFull {
-			capture.Complete = false
-		} else if len(assessment.CandidateCounts()) > 0 || outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}) {
+		} else if assessment.Coverage() != CaptureCoverageFull || len(unknown) > 0 || outputRecordsItsOmissions(v1) {
 			capture.Complete = false
 		}
 		capture.Authority = authority
@@ -472,16 +465,14 @@ func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer Authorita
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	assessed, assessErr := AssessCapture(CaptureFacts{
-		Harness: session.Harness, Result: indexformat.V1{Entries: capture.Entries},
-		Policy: CaptureFreshCandidate, Authoritative: true,
-		SourceOmitted: session.ContentOmitted || outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
-		Unaccounted:   session.ContentOmitted && !outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries}),
-	})
+	v1 := indexformat.V1{Entries: capture.Entries}
+	assessed, assessErr := AssessCapture(V1CaptureFacts(
+		session.Harness, v1, true, session.ContentOmitted,
+	))
 	if assessErr != nil {
 		return ContentCaptureResult{}, assessErr
 	}
-	complete := len(unknown) == 0 && assessed.Coverage() == CaptureCoverageFull && len(assessed.CandidateCounts()) == 0 && !outputRecordsItsOmissions(indexformat.V1{Entries: capture.Entries})
+	complete := assessed.Coverage() == CaptureCoverageFull && len(unknown) == 0 && !outputRecordsItsOmissions(v1)
 	return ContentCaptureResult{Entries: capture.Entries, Authority: authority, Complete: complete, InputHash: indexInputDigest(session, data, nil), InputBytes: int64(len(data))}, nil
 }
 
