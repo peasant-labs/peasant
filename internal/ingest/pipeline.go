@@ -1574,11 +1574,11 @@ type indexParseResult struct {
 	// The flags above remain as parser inputs and diagnostics, but the flush
 	// paths derive the store write from this assessment, never from the flags
 	// alone. It is valid only when assessmentReady is true.
-	assessment     CaptureAssessment
+	assessment      CaptureAssessment
 	assessmentReady bool
-	im                indexedMeta
-	input             *CapturedIndexInput
-	output            indexformat.Result
+	im              indexedMeta
+	input           *CapturedIndexInput
+	output          indexformat.Result
 	// nativeCandidate carries a validated managed-generation candidate with its
 	// captured content when the harness's declared output format is a managed
 	// generation. The write path stages and activates it instead of committing
