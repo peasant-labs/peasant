@@ -72,7 +72,9 @@ func TestCodexParseOncePerformance(t *testing.T) {
 		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 		median := times[len(times)/2]
 		allocs := testing.AllocsPerRun(5, func() {
-			_, _, _ = prepareCodexRecord([]byte(record), position, true)
+			if _, _, err := prepareCodexRecord([]byte(record), position, true); err != nil {
+				t.Fatal(err)
+			}
 		})
 		measurements = append(measurements, measurement{
 			name:      row.Name,

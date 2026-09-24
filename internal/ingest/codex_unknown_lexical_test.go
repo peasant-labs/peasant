@@ -18,16 +18,18 @@ import (
 var codexUnknownLexicalFixtures []byte
 
 type codexLexicalCase struct {
-	Name             string `yaml:"name"`
-	Kind             string `yaml:"kind"`
-	Namespace        string `yaml:"namespace"`
-	Pointer          string `yaml:"pointer"`
-	Record           string `yaml:"record"`
-	ExpectedPayload  string `yaml:"expected_payload"`
-	ExpectedSiblings int    `yaml:"expected_siblings"`
-	WideSiblings     int    `yaml:"wide_siblings"`
-	LeafSize         int    `yaml:"leaf_size"`
-	UnknownEvery     int    `yaml:"unknown_every"`
+	Name             string   `yaml:"name"`
+	Kind             string   `yaml:"kind"`
+	Namespace        string   `yaml:"namespace"`
+	Pointer          string   `yaml:"pointer"`
+	Record           string   `yaml:"record"`
+	ExpectedPayload  string   `yaml:"expected_payload"`
+	ExpectedSiblings int      `yaml:"expected_siblings"`
+	ExpectedKnown    []string `yaml:"expected_known"`
+	ExpectedPosition int64    `yaml:"expected_position"`
+	WideSiblings     int      `yaml:"wide_siblings"`
+	LeafSize         int      `yaml:"leaf_size"`
+	UnknownEvery     int      `yaml:"unknown_every"`
 }
 
 func loadCodexLexicalFixtures(t *testing.T) []codexLexicalCase {
@@ -129,6 +131,9 @@ func TestCodexLexicalFidelity(t *testing.T) {
 			if got.Position.Public == nil || got.Position.Line != 7 || !strings.HasPrefix(got.Position.Public.SourceRef, "src_") {
 				t.Fatalf("coordinates lost: %+v", got.Position)
 			}
+			if got.Position.Public.Position != row.ExpectedPosition {
+				t.Fatalf("traversal offset = %d, want %d (pointer %s)", got.Position.Public.Position, row.ExpectedPosition, row.Pointer)
+			}
 			// Known siblings survive in the interpretation copy with vector
 			// alignment preserved; the unknown leaf is replaced, never kept.
 			var envelope map[string]json.RawMessage
@@ -158,19 +163,12 @@ func TestCodexLexicalFidelity(t *testing.T) {
 				}
 				// Canonical type/role are restored to the original after the
 				// normalized interpretation pass.
-				var header struct {
-					Type string `json:"type"`
+				var typ string
+				if err := json.Unmarshal(item["type"], &typ); err != nil {
+					t.Fatalf("canonical type not decodable: %v", err)
 				}
-				if err := json.Unmarshal(item["type"], &header.Type); err != nil {
-					// type is a JSON string; decode directly.
-					var typ string
-					if err2 := json.Unmarshal(item["type"], &typ); err2 != nil {
-						t.Fatal(err2)
-					}
-					header.Type = typ
-				}
-				if header.Type != "UserMessage" && header.Type != "Reasoning" {
-					t.Fatalf("canonical type not restored: %s", header.Type)
+				if typ != "UserMessage" && typ != "Reasoning" {
+					t.Fatalf("canonical type not restored: %s", typ)
 				}
 				target = item["content"]
 				if target == nil {
@@ -189,15 +187,26 @@ func TestCodexLexicalFidelity(t *testing.T) {
 					t.Fatalf("unknown source text survived in interpretation copy: %s", string(b))
 				}
 			}
-			// At least one known sibling keeps its exact text.
-			known := 0
+			// Known siblings survive byte-exact in the interpretation copy.
+			if len(row.ExpectedKnown) != row.ExpectedSiblings {
+				t.Fatalf("fixture expected_known = %d, want expected_siblings %d", len(row.ExpectedKnown), row.ExpectedSiblings)
+			}
+			seen := map[string]int{}
 			for _, b := range blocks {
-				if bytes.Contains(b, []byte("before")) || bytes.Contains(b, []byte("after")) {
-					known++
+				seen[string(b)]++
+			}
+			for _, want := range row.ExpectedKnown {
+				if seen[want] != 1 {
+					t.Fatalf("known sibling not byte-exact once: want %q once, blocks %v", want, seen)
 				}
 			}
-			if known != row.ExpectedSiblings {
-				t.Fatalf("known siblings = %d, want %d", known, row.ExpectedSiblings)
+			// The single remaining block is the redacted placeholder.
+			wantPlaceholder := `{"type":"__peasant_retained_unknown__","text":""}`
+			if !native {
+				wantPlaceholder = `{"type":"input_text","text":""}`
+			}
+			if seen[wantPlaceholder] != 1 {
+				t.Fatalf("placeholder not byte-exact once: want %q once, blocks %v", wantPlaceholder, seen)
 			}
 		})
 	}
@@ -231,8 +240,15 @@ func TestCodexWideLexicalFidelity(t *testing.T) {
 			byPointer := map[string]string{}
 			for _, rec := range unknown {
 				byPointer[rec.Position.JSONPointer] = string(rec.Payload)
-				if rec.Position.Public == nil || rec.Position.Line != 11 {
+				if rec.Position.Public == nil || rec.Position.Line != 11 || !strings.HasPrefix(rec.Position.Public.SourceRef, "src_") {
 					t.Fatalf("coordinates lost: %+v", rec.Position)
+				}
+				var idx int
+				if _, err := fmt.Sscanf(rec.Position.JSONPointer, "/payload/item/content/%d", &idx); err != nil {
+					t.Fatalf("unparseable retained pointer %q: %v", rec.Position.JSONPointer, err)
+				}
+				if want := int64(3 + idx); rec.Position.Public.Position != want {
+					t.Fatalf("traversal offset = %d, want %d (pointer %s)", rec.Position.Public.Position, want, rec.Position.JSONPointer)
 				}
 			}
 			for _, idx := range unknownIndices {
