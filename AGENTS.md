@@ -219,3 +219,9 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - Generate the CLI reference pages with `make docs-cli`. Do not hand-edit generated CLI pages.
 - Never put credentials, private transcript content, personal filesystem paths, or private
   project history into issues, fixtures, logs, screenshots, or documentation.
+
+## Git staging and commits
+
+- Stage intended changes with `git add -- <path>...`; inspect `git diff --cached` before committing.
+- Never use `git add .`, `git add -A`, or wildcard staging.
+- Commit with `git agent-commit -m "..."`.
