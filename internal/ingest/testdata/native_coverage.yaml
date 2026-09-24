@@ -17,6 +17,8 @@ required_names:
   - main-and-earlier-one-set
   - main-and-earlier-duplicate-refused
   - forged-full-refused
+  - complete-source-omitted-accounted
+  - complete-source-omitted-unaccounted
 cases:
   - name: complete-zero-carriers
     completeness: complete
@@ -26,6 +28,8 @@ cases:
     want_disposition: committed_now
     want_occurrences: 0
     want_export: success
+    want_full_read: success
+    want_failure_code: ""
   - name: complete-nonzero-carriers
     completeness: complete
     carriers:
@@ -41,6 +45,8 @@ cases:
     want_disposition: committed_now
     want_occurrences: 1
     want_export: success
+    want_full_read: success
+    want_failure_code: unknown_data_retained
   - name: incomplete-zero-carriers
     completeness: incomplete_new
     carriers:
@@ -49,6 +55,8 @@ cases:
     want_disposition: committed_now
     want_occurrences: 0
     want_export: refused
+    want_full_read: refused
+    want_failure_code: ""
   - name: incomplete-nonzero-carriers
     completeness: incomplete_new
     carriers:
@@ -64,6 +72,8 @@ cases:
     want_disposition: committed_now
     want_occurrences: 0
     want_export: refused
+    want_full_read: refused
+    want_failure_code: ""
   - name: first-discovery-preview
     completeness: incomplete_new
     carriers:
@@ -79,6 +89,8 @@ cases:
     want_disposition: committed_now
     want_occurrences: 0
     want_export: refused
+    want_full_read: refused
+    want_failure_code: ""
   - name: prior-full-preserved
     completeness: incomplete_new
     carriers:
@@ -94,6 +106,8 @@ cases:
     want_disposition: not_committed
     want_occurrences: 0
     want_export: prior_preserved
+    want_full_read: success
+    want_failure_code: ""
   - name: main-and-earlier-one-set
     completeness: complete
     carriers:
@@ -117,6 +131,8 @@ cases:
     want_disposition: committed_now
     want_occurrences: 2
     want_export: success
+    want_full_read: success
+    want_failure_code: unknown_data_retained
   - name: main-and-earlier-duplicate-refused
     completeness: complete
     carriers:
@@ -140,6 +156,8 @@ cases:
     want_disposition: not_committed
     want_occurrences: 0
     want_export: refused
+    want_full_read: refused
+    want_failure_code: ""
   - name: forged-full-refused
     completeness: incomplete_new
     carriers:
@@ -156,3 +174,50 @@ cases:
     want_disposition: not_committed
     want_occurrences: 0
     want_export: refused
+    want_full_read: refused
+    want_failure_code: ""
+  # Source-omitted native rows (spec section 10: accounted/unaccounted cause).
+  # Both stay preview with refused export: the omission placeholder
+  # discriminator (outputRecordsItsOmissions) is V1-only by design, so a
+  # native omission never reaches accounted full certification here — the
+  # pipeline derives unaccounted from ContentOmitted for the same reason, and
+  # placeholder-accounted fullossification stays V1-lane owned. These rows pin
+  # the assessed failure-code distinction at the native scope.
+  - name: complete-source-omitted-accounted
+    completeness: complete
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-omitted-accounted
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":10}'
+    prior: none
+    source_omitted: true
+    unaccounted: false
+    want_disposition: committed_now
+    want_occurrences: 1
+    want_export: success
+    want_full_read: refused
+    want_failure_code: source_records_omitted
+  - name: complete-source-omitted-unaccounted
+    completeness: complete
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-omitted-unaccounted
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":11}'
+    prior: none
+    source_omitted: true
+    unaccounted: true
+    want_disposition: committed_now
+    want_occurrences: 1
+    want_export: success
+    want_full_read: refused
+    want_failure_code: strict_capture_refused

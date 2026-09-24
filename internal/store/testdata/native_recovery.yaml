@@ -6,7 +6,9 @@
 # prior preservation) AND per-invocation counts (CommittedNow once,
 # AlreadyCommitted/NotCommitted zero) plus actual read verdicts (full and
 # available, never readiness alone). Repair failures assert pending repair
-# with committed authority, never rollback or duplicate counts.
+# with committed authority, never rollback or duplicate counts. Recovery
+# carrier evidence (payload, coordinates, pointer) originates here, never in
+# the test body.
 required_names:
   - preview-direct-write
   - preview-intent-replay
@@ -19,11 +21,19 @@ required_names:
   - unrelated-prior-intent-failure
   - preamble-recovery-commit
   - retry-no-double-count
+  - forged-intent-replay
 cases:
   - name: preview-direct-write
     completeness: incomplete_new
     fault: none
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: committed_now
     want_occurrences: 0
     want_repair_pending: false
@@ -34,6 +44,13 @@ cases:
     completeness: incomplete_new
     fault: intent_replay
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: committed_now
     want_occurrences: 0
     want_repair_pending: false
@@ -44,6 +61,13 @@ cases:
     completeness: complete
     fault: stale
     prior: full
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: not_committed
     want_occurrences: 0
     want_repair_pending: false
@@ -54,6 +78,13 @@ cases:
     completeness: complete
     fault: missing_blob
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: not_committed
     want_occurrences: 0
     want_repair_pending: false
@@ -64,6 +95,13 @@ cases:
     completeness: complete
     fault: none
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: committed_now
     want_occurrences: 1
     want_repair_pending: false
@@ -74,6 +112,13 @@ cases:
     completeness: complete
     fault: fail_repair
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: committed_now
     want_occurrences: 1
     want_repair_pending: true
@@ -84,6 +129,13 @@ cases:
     completeness: complete
     fault: retry
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: already_committed
     want_occurrences: 0
     want_repair_pending: false
@@ -94,6 +146,13 @@ cases:
     completeness: complete
     fault: retry_fail_repair
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: already_committed
     want_occurrences: 0
     want_repair_pending: true
@@ -104,6 +163,13 @@ cases:
     completeness: complete
     fault: unrelated_prior
     prior: full
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: not_committed
     want_occurrences: 0
     want_repair_pending: false
@@ -114,19 +180,57 @@ cases:
     completeness: complete
     fault: preamble_pending
     prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: committed_now
     want_occurrences: 1
     want_repair_pending: false
     want_active: candidate
     want_full_read: success
     want_available: success
+  # retry-no-double-count replays over a seeded prior full authority while
+  # already-active-retry-repair-success replays with no prior: same retry
+  # shape, distinct authority setup.
   - name: retry-no-double-count
     completeness: complete
     fault: retry
-    prior: none
+    prior: full
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
     want_disposition: already_committed
     want_occurrences: 0
     want_repair_pending: false
     want_active: candidate
     want_full_read: success
     want_available: success
+  # Forged recovery: an incomplete_new candidate staged under an intent that
+  # claims a full/complete capture. Recovery replays the persisted envelope
+  # through the same guarded write, which refuses the forged claim and
+  # preserves last-good authority (none here).
+  - name: forged-intent-replay
+    completeness: incomplete_new
+    fault: forged_intent_replay
+    prior: none
+    carrier_namespace: message_block
+    carrier_kind: future
+    carrier_source_ref: src-recovery
+    carrier_record_index: 3
+    carrier_position: 5
+    carrier_pointer: /payload/content/1
+    carrier_payload: '{"type":"future","value":9}'
+    want_disposition: not_committed
+    want_occurrences: 0
+    want_repair_pending: false
+    want_active: none
+    want_full_read: refused
+    want_available: success_empty
