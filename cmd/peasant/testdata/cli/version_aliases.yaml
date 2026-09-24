@@ -1,0 +1,56 @@
+# version_aliases.yaml — named fixture cases driving the root -v / --version
+# aliases. Each case runs the BUILT root command (buildRootCommand), exactly as
+# a user types it, so the exit mapping in exitCodeFor is exercised together
+# with the printed output — not only the printVersion helper.
+#
+# Schema:
+#   cases[].name              — case name (used as the t.Run label)
+#   cases[].args             — full root arguments, spelled like the real CLI
+#   cases[].expect_version   — stdout must be exactly "peasant <version>\n" and
+#                              stderr must be empty
+#   cases[].sentinel_error   — the run must end in the versionRequestedError
+#                              sentinel, which exitCodeFor maps to exit 0
+#   cases[].expect_error     — the run must fail with a real error (exit 1)
+#   cases[].error_contains   — substrings the returned error must contain
+#   cases[].output_contains  — substrings stdout must contain
+#
+# The alias forms (short_flag, long_flag, inherited_persistent_flag) plus the
+# version subcommand all expect the one byte-identical version line. The
+# inherited case proves the persistent placement: `peasant web --version`
+# prints the version and stops before the web command runs. The
+# upgrade_string_flag_not_shadowed case proves the root boolean does NOT shadow
+# upgrade's own string --version, so `peasant upgrade --version <tag>` keeps
+# working: a bare `upgrade --version` still demands a release tag instead of
+# printing the program version.
+cases:
+  - name: short_flag
+    args: ["-v"]
+    expect_version: true
+    sentinel_error: true
+
+  - name: long_flag
+    args: ["--version"]
+    expect_version: true
+    sentinel_error: true
+
+  - name: version_subcommand
+    args: ["version"]
+    expect_version: true
+
+  - name: inherited_persistent_flag
+    args: ["web", "--version"]
+    expect_version: true
+    sentinel_error: true
+
+  - name: root_help_lists_version_alias
+    args: ["--help"]
+    output_contains: ["-v, --version"]
+
+  - name: version_subcommand_help
+    args: ["version", "--help"]
+    output_contains: ["peasant version"]
+
+  - name: upgrade_string_flag_not_shadowed
+    args: ["upgrade", "--version"]
+    expect_error: true
+    error_contains: ["flag needs an argument: --version"]
