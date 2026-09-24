@@ -464,10 +464,21 @@ func TestStoreDataProvider_Sessions(t *testing.T) {
 // surface refuses to render.
 func TestStoreDataProvider_SessionSummaries_StartTimeIsUTCInstant(t *testing.T) {
 	t.Parallel()
+	// Runs under a forced non-UTC local zone (see RunInForcedNonUTCLocalZone):
+	// without the construction-site .UTC() the summary would serialize with a
+	// local offset and the exact-string assertion below would fail.
+	if api.RunInForcedNonUTCLocalZone(t, "TestStoreDataProvider_SessionSummaries_StartTimeIsUTCInstant") {
+		return
+	}
 	s := openTestStore(t)
 
+	// day1Ms is 2024-01-15T00:00:00Z; +123456 ms is two minutes, three seconds,
+	// and 456 milliseconds past midnight, i.e. a known, sub-second instant.
+	const startMs = day1Ms + 123456
+	const wantStartTime = "2024-01-15T00:02:03.456Z"
+
 	entry := makeStoreEntry(t, "11111111-1111-1111-1111-111111111111", hash1, "github.com-user-repo1",
-		defaults.HarnessClaudeCode, day1Ms+123456, 1000, 500, "project-alpha", 10, 5, 60000)
+		defaults.HarnessClaudeCode, startMs, 1000, 500, "project-alpha", 10, 5, 60000)
 
 	provider := seedStore(t, s, []ingest.StoreEntry{entry})
 	ctx := context.Background()
@@ -483,14 +494,19 @@ func TestStoreDataProvider_SessionSummaries_StartTimeIsUTCInstant(t *testing.T) 
 	if start.Location() != time.UTC {
 		t.Errorf("summaries[0].StartTime location = %v, want UTC", start.Location())
 	}
-	raw, err := json.Marshal(struct {
-		StartTime time.Time `json:"startTime"`
-	}{StartTime: start})
-	if err != nil {
-		t.Fatalf("marshal startTime: %v", err)
+	// The instant must be the seeded one, not merely some UTC time: a shifted
+	// value can still be UTC-located and Z-suffixed.
+	if want := time.UnixMilli(startMs); !start.Equal(want) {
+		t.Errorf("summaries[0].StartTime instant = %v, want %v (seeded %d ms)", start.UTC(), want.UTC(), int64(startMs))
 	}
-	if !strings.HasSuffix(string(raw), `Z"}`) {
-		t.Errorf("summaries[0].StartTime wire form = %s, want a Z-suffixed UTC instant", raw)
+	// Marshal the real summary value (not a stand-in wrapper) and pin the exact
+	// serialized startTime the client contract expects.
+	raw, err := json.Marshal(summaries[0])
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	if want := `"startTime":"` + wantStartTime + `"`; !strings.Contains(string(raw), want) {
+		t.Errorf("summaries[0] wire form = %s, want it to contain %s", raw, want)
 	}
 }
 

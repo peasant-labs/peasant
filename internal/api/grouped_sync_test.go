@@ -18,6 +18,12 @@ import (
 // only the published grouped value selects the grouped payload, and the member
 // operation replays the sync route's exact predicate for the rendered group.
 func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
+	// Runs under a forced non-UTC local zone (see RunInForcedNonUTCLocalZone):
+	// without the construction-site .UTC() the grouped-sync rows would serialize
+	// with a local offset and the exact-string assertions below would fail.
+	if RunInForcedNonUTCLocalZone(t, "TestSyncGroupedViewIsOptInAndFlatRouteUnchanged") {
+		return
+	}
 	db := storetest.Open(t)
 	seedHelperGroupSession(t, db, helperGroupListingSession{
 		ID: "agent-sync-a1", StartMs: 500, Purpose: "interaction", Origin: "user", Pushable: true,
@@ -83,6 +89,67 @@ func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
 		// the session lists: a local-zone offset fails client decoding.
 		if item.Transcript.Session.StartTime.Location() != time.UTC {
 			t.Errorf("grouped sync row %q startTime location = %v, want UTC", item.Transcript.Session.ID, item.Transcript.Session.StartTime.Location())
+		}
+	}
+
+	// The seeded start instants, and the exact UTC wire strings they must
+	// serialize to. Pinning the RAW JSON (not only the decoded location) proves
+	// the value is both the seeded instant AND Z-suffixed: a local-zone offset,
+	// or a shifted instant, fails here even though it would decode into a
+	// time.Time that happens to report a UTC location.
+	seededStartMs := map[string]int64{
+		"agent-sync-a1": 500,
+		"agent-sync-b1": 490,
+		"agent-sync-b2": 480,
+	}
+	wantStartTime := map[string]string{
+		"agent-sync-a1": "1970-01-01T00:00:00.5Z",
+		"agent-sync-b1": "1970-01-01T00:00:00.49Z",
+		"agent-sync-b2": "1970-01-01T00:00:00.48Z",
+	}
+	var rawGrouped struct {
+		Items []struct {
+			Transcript *struct {
+				Session struct {
+					ID        string `json:"id"`
+					StartTime string `json:"startTime"`
+				} `json:"session"`
+			} `json:"transcript"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(grouped, &rawGrouped); err != nil {
+		t.Fatalf("decode grouped sync raw startTime: %v", err)
+	}
+	asserted := 0
+	for _, item := range rawGrouped.Items {
+		if item.Transcript == nil {
+			continue
+		}
+		id := item.Transcript.Session.ID
+		want, known := wantStartTime[id]
+		if !known {
+			t.Fatalf("grouped sync returned unexpected row %q; the fixture seeds only %v", id, seededStartMs)
+		}
+		if item.Transcript.Session.StartTime != want {
+			t.Errorf("grouped sync row %q raw startTime = %q, want %q", id, item.Transcript.Session.StartTime, want)
+		}
+		asserted++
+	}
+	if asserted == 0 {
+		t.Fatal("grouped sync returned no transcript rows to assert startTime against")
+	}
+	// The decoded instant must also match the seed for every asserted row.
+	for _, item := range payload.Items {
+		if item.Transcript == nil {
+			continue
+		}
+		id := item.Transcript.Session.ID
+		ms, known := seededStartMs[id]
+		if !known {
+			continue
+		}
+		if got := item.Transcript.Session.StartTime; !got.Equal(time.UnixMilli(ms)) {
+			t.Errorf("grouped sync row %q startTime instant = %v, want %v (seeded %d ms)", id, got.UTC(), time.UnixMilli(ms).UTC(), ms)
 		}
 	}
 
