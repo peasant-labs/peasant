@@ -50,7 +50,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 			}
 			at.Public = &public
 		}
-		evidence, err := NewRetainedUnknownFromSource(HarnessCodex, namespace, kind, at, value)
+		evidence, err := NewRetainedUnknown(HarnessCodex, namespace, kind, at, value)
 		if err != nil {
 			return &codexEvidenceRetentionError{cause: err}
 		}

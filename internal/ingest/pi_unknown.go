@@ -100,7 +100,7 @@ func preparePiUnknown(entry piEntry, sessionID SessionID) (piEntry, []RetainedUn
 		if !ok {
 			return fmt.Errorf("Pi retention has no captured traversal position for source line %d; no evidence was stored; repair the source traversal before retrying", entry.line)
 		}
-		record, err := NewRetainedUnknownFromSource(HarnessPi, namespace, kind, UnknownSourcePosition{
+		record, err := NewRetainedUnknown(HarnessPi, namespace, kind, UnknownSourcePosition{
 			SourceEntryRef: schema.SourceEntryRef(PiPublicRef(sessionID.String(), "entry", entry.ID)),
 			SourceID:       entry.ID, Line: entry.line, Sequence: entry.sequence, JSONPointer: pointer,
 			Public: &UnknownPublicPosition{SourceRef: PiPublicRef(sessionID.String(), "stream", "recording"), RecordIndex: int64(entry.sequence - 1), Position: position},

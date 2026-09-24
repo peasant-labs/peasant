@@ -7,9 +7,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
+	"unicode/utf8"
 
-	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -60,73 +59,297 @@ func (r RetainedUnknown) MarshalJSON() ([]byte, error) {
 	}{envelope: &fields, PayloadText: string(r.Payload)})
 }
 
-// UnmarshalJSON keeps older private captures readable without inventing their
-// absent public coordinates. A legacy payload value and a new payloadText may
-// not coexist: choosing one would discard potentially different evidence.
+// UnmarshalJSON decodes one owned evidence object with presence awareness.
+// The raw object is scanned before any map or struct decode, then checked
+// against the exact canonical member names and closed member sets: owned
+// envelope, position, and public coordinate objects. Required members must be
+// explicitly present and non-null; absent private coordinates are never
+// confused with the first source record. Public traversal coordinates decode
+// directly as int64, never float64.
+//
+// `public` may be wholly absent only for the legacy-read policy. An explicit
+// `public:null` is malformed, not legacy absence. A legacy raw `payload`,
+// including a JSON string value, is preserved verbatim and never confused
+// with the modern `payloadText` string encoding.
 func (r *RetainedUnknown) UnmarshalJSON(data []byte) error {
-	type envelope RetainedUnknown
-	var fields envelope
-	encoded := struct {
-		*envelope
-		PayloadText json.RawMessage `json:"payloadText"`
-	}{envelope: &fields}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&encoded); err != nil {
-		return fmt.Errorf("read retained evidence: invalid private envelope; no evidence was certified; restore a supported capture or re-index the source")
+	if err := ScanRawEvidenceDocument(data, "envelope"); err != nil {
+		return err
 	}
-	if encoded.PayloadText != nil {
-		if len(fields.Payload) != 0 {
-			return fmt.Errorf("read retained evidence: conflicting private payload encodings; no evidence was certified; restore an unambiguous capture or re-index the source")
+	if err := CheckCanonicalObjectKeys(data, retainedEnvelopeKeys, "envelope"); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return &EvidenceIntegrityError{Field: "envelope"}
+	}
+	harnessRaw, ok := fields["harness"]
+	if !ok || isNullJSON(harnessRaw) {
+		return &EvidenceIntegrityError{Field: "envelope.harness"}
+	}
+	namespaceRaw, ok := fields["namespace"]
+	if !ok || isNullJSON(namespaceRaw) {
+		return &EvidenceIntegrityError{Field: "envelope.namespace"}
+	}
+	kindRaw, ok := fields["kind"]
+	if !ok || isNullJSON(kindRaw) {
+		return &EvidenceIntegrityError{Field: "envelope.kind"}
+	}
+	positionRaw, ok := fields["position"]
+	if !ok || isNullJSON(positionRaw) {
+		return &EvidenceIntegrityError{Field: "position"}
+	}
+	payloadRaw, hasPayload := fields["payload"]
+	payloadTextRaw, hasText := fields["payloadText"]
+	if hasPayload && hasText {
+		return &EvidenceIntegrityError{Field: "envelope.payload"}
+	}
+	if !hasPayload && !hasText {
+		return &EvidenceIntegrityError{Field: "envelope.payload"}
+	}
+	var harness Harness
+	if err := json.Unmarshal(harnessRaw, &harness); err != nil {
+		return &EvidenceIntegrityError{Field: "envelope.harness"}
+	}
+	var namespace, kind string
+	if err := json.Unmarshal(namespaceRaw, &namespace); err != nil {
+		return &EvidenceIntegrityError{Field: "envelope.namespace"}
+	}
+	if err := json.Unmarshal(kindRaw, &kind); err != nil {
+		return &EvidenceIntegrityError{Field: "envelope.kind"}
+	}
+	position, err := decodeUnknownSourcePosition(positionRaw)
+	if err != nil {
+		return err
+	}
+	var payload json.RawMessage
+	if hasPayload {
+		if err := ScanRawEvidenceDocument(payloadRaw, "envelope.payload"); err != nil {
+			return err
+		}
+		payload = append(json.RawMessage(nil), payloadRaw...)
+	} else {
+		if isNullJSON(payloadTextRaw) {
+			return &EvidenceIntegrityError{Field: "envelope.payloadText"}
 		}
 		var text string
-		if err := json.Unmarshal(encoded.PayloadText, &text); err != nil || bytes.Equal(bytes.TrimSpace(encoded.PayloadText), []byte("null")) {
-			return fmt.Errorf("read retained evidence: payloadText must contain JSON text as a string; no evidence was certified; restore an intact capture or re-index the source")
+		if err := json.Unmarshal(payloadTextRaw, &text); err != nil {
+			return &EvidenceIntegrityError{Field: "envelope.payloadText"}
 		}
-		fields.Payload = json.RawMessage(text)
+		if !utf8.ValidString(text) {
+			return &EvidenceIntegrityError{Field: "envelope.payloadText"}
+		}
+		if err := ScanRawEvidenceDocument([]byte(text), "envelope.payloadText"); err != nil {
+			return err
+		}
+		payload = json.RawMessage(text)
 	}
-	*r = RetainedUnknown(fields)
+	record, err := checkRetainedUnknownShape(harness, namespace, kind, position, payload)
+	if err != nil {
+		return err
+	}
+	*r = record
 	return nil
+}
+
+// Canonical owned member names. Matching is exact: Go case folding is not a
+// compatibility feature, and escaped spellings of the same decoded key obey
+// duplicate detection in CheckCanonicalObjectKeys.
+var (
+	retainedEnvelopeKeys = []string{"harness", "namespace", "kind", "position", "payload", "payloadText"}
+	retainedPositionKeys = []string{"public", "sourceEntryRef", "sourceId", "line", "sequence", "jsonPointer"}
+	retainedPublicKeys   = []string{"sourceRef", "recordIndex", "position"}
+)
+
+// maxSafeCoordinate bounds owned traversal coordinates to the JSON-safe
+// integer range shared with the local evidence validator.
+const maxSafeCoordinate = int64(9007199254740991)
+
+func isNullJSON(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+// decodeUnknownSourcePosition decodes one owned position object. The public
+// coordinate object may be wholly absent (legacy reads only); when present it
+// must be a non-null object carrying exactly sourceRef, recordIndex, and
+// position, each explicitly present and non-null with integers decoded
+// directly as int64.
+func decodeUnknownSourcePosition(raw json.RawMessage) (UnknownSourcePosition, error) {
+	var position UnknownSourcePosition
+	if err := CheckCanonicalObjectKeys(raw, retainedPositionKeys, "position"); err != nil {
+		return position, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return position, &EvidenceIntegrityError{Field: "position"}
+	}
+	if publicRaw, ok := fields["public"]; ok {
+		if isNullJSON(publicRaw) {
+			return position, &EvidenceIntegrityError{Field: "position.public"}
+		}
+		public, err := decodeUnknownPublicPosition(publicRaw)
+		if err != nil {
+			return position, err
+		}
+		position.Public = public
+	}
+	if refRaw, ok := fields["sourceEntryRef"]; ok && !isNullJSON(refRaw) {
+		var ref string
+		if err := json.Unmarshal(refRaw, &ref); err != nil {
+			return position, &EvidenceIntegrityError{Field: "position.sourceEntryRef"}
+		}
+		position.SourceEntryRef = schema.SourceEntryRef(ref)
+	}
+	if idRaw, ok := fields["sourceId"]; ok && !isNullJSON(idRaw) {
+		var id string
+		if err := json.Unmarshal(idRaw, &id); err != nil {
+			return position, &EvidenceIntegrityError{Field: "position.sourceId"}
+		}
+		position.SourceID = id
+	}
+	if lineRaw, ok := fields["line"]; ok && !isNullJSON(lineRaw) {
+		line, err := DecodeOwnedInt64(lineRaw, "position.line")
+		if err != nil {
+			return position, err
+		}
+		if line < 0 || line > int64(maxIntCoordinate()) {
+			return position, &EvidenceIntegrityError{Field: "position.line"}
+		}
+		position.Line = int(line)
+	}
+	if sequenceRaw, ok := fields["sequence"]; ok && !isNullJSON(sequenceRaw) {
+		sequence, err := DecodeOwnedInt64(sequenceRaw, "position.sequence")
+		if err != nil {
+			return position, err
+		}
+		if sequence < 0 || sequence > int64(maxIntCoordinate()) {
+			return position, &EvidenceIntegrityError{Field: "position.sequence"}
+		}
+		position.Sequence = int(sequence)
+	}
+	if pointerRaw, ok := fields["jsonPointer"]; ok && !isNullJSON(pointerRaw) {
+		var pointer string
+		if err := json.Unmarshal(pointerRaw, &pointer); err != nil {
+			return position, &EvidenceIntegrityError{Field: "position.jsonPointer"}
+		}
+		position.JSONPointer = pointer
+	}
+	return position, nil
+}
+
+func maxIntCoordinate() int {
+	return int(^uint(0) >> 1)
+}
+
+// decodeUnknownPublicPosition decodes one owned public coordinate object with
+// all three members explicitly present and non-null.
+func decodeUnknownPublicPosition(raw json.RawMessage) (*UnknownPublicPosition, error) {
+	if err := CheckCanonicalObjectKeys(raw, retainedPublicKeys, "position.public"); err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, &EvidenceIntegrityError{Field: "position.public"}
+	}
+	sourceRaw, ok := fields["sourceRef"]
+	if !ok || isNullJSON(sourceRaw) {
+		return nil, &EvidenceIntegrityError{Field: "position.public.sourceRef"}
+	}
+	recordRaw, ok := fields["recordIndex"]
+	if !ok || isNullJSON(recordRaw) {
+		return nil, &EvidenceIntegrityError{Field: "position.public.recordIndex"}
+	}
+	positionRaw, ok := fields["position"]
+	if !ok || isNullJSON(positionRaw) {
+		return nil, &EvidenceIntegrityError{Field: "position.public.position"}
+	}
+	var sourceRef string
+	if err := json.Unmarshal(sourceRaw, &sourceRef); err != nil {
+		return nil, &EvidenceIntegrityError{Field: "position.public.sourceRef"}
+	}
+	recordIndex, err := DecodeOwnedInt64(recordRaw, "position.public.recordIndex")
+	if err != nil {
+		return nil, err
+	}
+	pos, err := DecodeOwnedInt64(positionRaw, "position.public.position")
+	if err != nil {
+		return nil, err
+	}
+	if recordIndex < 0 || recordIndex > maxSafeCoordinate || pos < recordIndex || pos > maxSafeCoordinate {
+		return nil, &EvidenceIntegrityError{Field: "position.public.position"}
+	}
+	return &UnknownPublicPosition{SourceRef: sourceRef, RecordIndex: recordIndex, Position: pos}, nil
 }
 
 const retainedUnknownKey = "retainedUnknown"
 
-var unknownEvidenceRedactor = sync.OnceValues(func() (redact.Redactor, error) {
-	return redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
-})
-
-// NewRetainedUnknownFromSource applies the canonical standard redaction rules
-// before constructing private evidence. Ordinary local ingest may retain raw
-// source artifacts; that policy is not proof that index evidence is redacted.
-// A caller with configured custom rules applies those first, as for known data.
-func NewRetainedUnknownFromSource(harness Harness, namespace, kind string, position UnknownSourcePosition, payload json.RawMessage) (RetainedUnknown, error) {
-	engine, err := unknownEvidenceRedactor()
-	if err != nil {
-		return RetainedUnknown{}, fmt.Errorf("initialize unknown-evidence redaction: %w; evidence was not stored; repair redaction configuration before retrying", err)
-	}
-	encoded, err := RedactRetainedJSON(string(payload), engine, 0)
-	if err != nil {
-		return RetainedUnknown{}, err
-	}
-	position.SourceID = engine.RedactText(position.SourceID)
-	return NewRetainedUnknown(harness, namespace, engine.RedactText(kind), position, json.RawMessage(encoded))
+// NewRetainedUnknown stores raw source payload and labels verbatim. Capture
+// applies no redaction: stored index Extra holds the raw unredacted payload,
+// kind, namespace, and position strings, and redaction applies at egress only
+// (push with configured rules, file/stdout export with the standard baseline
+// engine). There is no redactor dependency and no redactor-init failure mode
+// on this path. It validates shape, integrity, ownership, and coordinates
+// only. The registry source reference for retained-unknown evidence lives
+// here (see record_kinds.yaml).
+func NewRetainedUnknown(harness Harness, namespace, kind string, position UnknownSourcePosition, payload json.RawMessage) (RetainedUnknown, error) {
+	return checkRetainedUnknownShape(harness, namespace, kind, position, payload)
 }
 
-// NewRetainedUnknown requires the caller to apply the ordinary capture redaction
-// boundary first. It does not redact itself.
-func NewRetainedUnknown(harness Harness, namespace, kind string, position UnknownSourcePosition, redactedPayload json.RawMessage) (RetainedUnknown, error) {
+// checkRetainedUnknownShape is the single shape, integrity, ownership, and
+// coordinate validator shared by the capture constructor and the strict
+// presence-aware decode path. Failures name the owned field only and carry no
+// source bytes.
+func checkRetainedUnknownShape(harness Harness, namespace, kind string, position UnknownSourcePosition, payload json.RawMessage) (RetainedUnknown, error) {
+	fail := func(field string) (RetainedUnknown, error) {
+		return RetainedUnknown{}, &EvidenceIntegrityError{Field: field}
+	}
 	if position.SourceEntryRef != "" {
 		if err := position.SourceEntryRef.Validate(); err != nil {
-			return RetainedUnknown{}, fmt.Errorf("retain unknown source evidence: invalid opaque source reference; preserve the previous capture and correct the native reference allocator: %w", err)
+			return fail("position.sourceEntryRef")
 		}
 	}
-	if !slices.Contains(schema.Harnesses(), harness) || strings.TrimSpace(namespace) == "" || strings.TrimSpace(kind) == "" ||
-		position.Line < 0 || position.Sequence < 0 ||
-		(position.Line == 0 && position.Sequence == 0 && strings.TrimSpace(position.SourceID) == "" && position.SourceEntryRef == "") ||
-		!validUnknownPointer(position.JSONPointer) || !json.Valid(redactedPayload) {
-		return RetainedUnknown{}, fmt.Errorf("retain unknown source evidence in ingest: invalid harness, discriminator, source coordinate or JSON payload; no evidence was certified; apply baseline redaction to valid JSON and supply the actual source position")
+	if !slices.Contains(schema.Harnesses(), harness) {
+		return fail("envelope.harness")
 	}
-	return RetainedUnknown{Harness: harness, Namespace: namespace, Kind: kind, Position: position, Payload: append(json.RawMessage(nil), redactedPayload...)}, nil
+	if strings.TrimSpace(namespace) == "" {
+		return fail("envelope.namespace")
+	}
+	if strings.TrimSpace(kind) == "" {
+		return fail("envelope.kind")
+	}
+	if !utf8.ValidString(namespace) {
+		return fail("envelope.namespace")
+	}
+	if !utf8.ValidString(kind) {
+		return fail("envelope.kind")
+	}
+	if !utf8.ValidString(position.SourceID) {
+		return fail("position.sourceId")
+	}
+	if !utf8.ValidString(position.JSONPointer) {
+		return fail("position.jsonPointer")
+	}
+	if !utf8.ValidString(string(position.SourceEntryRef)) {
+		return fail("position.sourceEntryRef")
+	}
+	if position.Line < 0 {
+		return fail("position.line")
+	}
+	if position.Sequence < 0 {
+		return fail("position.sequence")
+	}
+	if position.Line == 0 && position.Sequence == 0 && strings.TrimSpace(position.SourceID) == "" && position.SourceEntryRef == "" {
+		return fail("position")
+	}
+	if !validUnknownPointer(position.JSONPointer) {
+		return fail("position.jsonPointer")
+	}
+	if len(payload) == 0 {
+		return fail("envelope.payload")
+	}
+	if err := ScanRawEvidenceDocument(payload, "envelope.payload"); err != nil {
+		return fail("envelope.payload")
+	}
+	return RetainedUnknown{Harness: harness, Namespace: namespace, Kind: kind, Position: position, Payload: append(json.RawMessage(nil), payload...)}, nil
 }
 
 func validUnknownPointer(pointer string) bool {
@@ -178,26 +401,43 @@ func AttachRetainedUnknown(entry *schema.SessionEntry, records []RetainedUnknown
 }
 
 // RetainedUnknownOf validates the read-side boundary before accounting evidence.
+// The Extra root is checked before any map decode: duplicate members and case
+// aliases of the reserved retainedUnknown key refuse, while unrelated
+// extension fields pass through untouched. Every retained payload must be
+// complete lexical JSON before a valid evidence set returns.
 func RetainedUnknownOf(entry schema.SessionEntry) ([]RetainedUnknown, error) {
 	if entry.Extra == nil {
 		return nil, nil
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(*entry.Extra), &fields); err != nil {
-		return nil, fmt.Errorf("read retained unknown evidence: malformed entry extra; preserve prior capture and repair its producer: %w", err)
+	raw, present, err := ExtractExtraRetainedArray(*entry.Extra)
+	if err != nil {
+		return nil, err
 	}
-	raw, exists := fields[retainedUnknownKey]
-	if !exists {
+	if !present {
 		return nil, nil
 	}
-	var records []RetainedUnknown
-	if err := json.Unmarshal(raw, &records); err != nil || len(records) == 0 {
-		return nil, fmt.Errorf("read retained unknown evidence: expected a nonempty evidence array; preserve prior capture and repair its producer")
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var raws []json.RawMessage
+	if err := decoder.Decode(&raws); err != nil {
+		return nil, &EvidenceIntegrityError{Field: "extra.retainedUnknown"}
 	}
-	for _, record := range records {
-		if _, err := NewRetainedUnknown(record.Harness, record.Namespace, record.Kind, record.Position, record.Payload); err != nil {
+	var trailing any
+	if err := decoder.Decode(&trailing); !isJSONEOF(err) {
+		return nil, &EvidenceIntegrityError{Field: "extra.retainedUnknown"}
+	}
+	if len(raws) == 0 {
+		return nil, &EvidenceIntegrityError{Field: "extra.retainedUnknown"}
+	}
+	records := make([]RetainedUnknown, 0, len(raws))
+	for _, item := range raws {
+		var record RetainedUnknown
+		if err := json.Unmarshal(item, &record); err != nil {
 			return nil, err
 		}
+		if _, err := checkRetainedUnknownShape(record.Harness, record.Namespace, record.Kind, record.Position, record.Payload); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
 	}
 	return records, nil
 }

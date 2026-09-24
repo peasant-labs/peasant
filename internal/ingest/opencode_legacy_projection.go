@@ -1134,11 +1134,11 @@ func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID strin
 			return message, err
 		}
 		for i, record := range message.RetainedUnknown {
-			redacted, err := NewRetainedUnknownFromSource(record.Harness, record.Namespace, record.Kind, record.Position, record.Payload)
+			validated, err := NewRetainedUnknown(record.Harness, record.Namespace, record.Kind, record.Position, record.Payload)
 			if err != nil {
 				return message, err
 			}
-			message.RetainedUnknown[i] = redacted
+			message.RetainedUnknown[i] = validated
 		}
 	}
 	if orphanField, present := fields["orphan"]; present {

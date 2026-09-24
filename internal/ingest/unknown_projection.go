@@ -40,8 +40,13 @@ func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 // It does not impose a public transfer budget on captured source bytes. Source
 // adapters own their source-size policy; export separately validates the public
 // contract through ProjectRetainedUnknown.
+//
+// The entire evidence set validates before any legacy missing-position result
+// returns: corruption in any record outranks legacy compatibility, so one old
+// record can never mask later corruption.
 func CollectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
 	var projected []schema.RetainedUnknownRecord
+	legacy := false
 	for _, entry := range entries {
 		records, err := RetainedUnknownOf(entry)
 		if err != nil {
@@ -49,11 +54,12 @@ func CollectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 		}
 		for _, record := range records {
 			if (harness != "" && record.Harness != harness) || (entry.Harness != "" && record.Harness != entry.Harness) {
-				return nil, fmt.Errorf("project retained unknown evidence: stored harness disagrees with its owner; no detail was emitted; re-index the original source")
+				return nil, &EvidenceIntegrityError{Field: "envelope.harness"}
 			}
 			position := record.Position.Public
 			if position == nil {
-				return nil, fmt.Errorf("project retained unknown evidence: %w; line numbers and native IDs cannot reconstruct block positions; no detail was emitted; re-index with a position-aware adapter", ErrUnknownPositionUnavailable)
+				legacy = true
+				continue
 			}
 			projected = append(projected, schema.RetainedUnknownRecord{
 				SourceRef: position.SourceRef, RecordIndex: position.RecordIndex, Position: position.Position,
@@ -75,12 +81,18 @@ func CollectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 			return nil, err
 		}
 	}
+	if legacy {
+		return nil, fmt.Errorf("project retained unknown evidence: %w; line numbers and native IDs cannot reconstruct block positions; no detail was emitted; re-index with a position-aware adapter", &LegacyPositionUnavailableError{})
+	}
 	return projected, nil
 }
 
 func validateLocalRetainedUnknown(records []schema.RetainedUnknownRecord) error {
-	fail := func() error {
-		return fmt.Errorf("validate local retained evidence: corrupt JSON, invalid identity or conflicting source coordinates; no full-data certificate was issued; preserve the prior capture and re-index an intact source")
+	coordinateFail := func() error {
+		return &EvidenceIntegrityError{Field: "position.public"}
+	}
+	payloadFail := func() error {
+		return &EvidenceIntegrityError{Field: "envelope.payload"}
 	}
 	type cursor struct {
 		position, record int64
@@ -91,23 +103,23 @@ func validateLocalRetainedUnknown(records []schema.RetainedUnknownRecord) error 
 		if record.SourceRef == "" || strings.TrimSpace(record.Kind) == "" || strings.TrimSpace(record.Namespace) == "" ||
 			!utf8.ValidString(record.SourceRef) || !utf8.ValidString(record.Kind) || !utf8.ValidString(record.Namespace) || !utf8.ValidString(record.Pointer) || !utf8.ValidString(record.Payload) ||
 			record.RecordIndex < 0 || record.RecordIndex > 9007199254740991 || record.Position < record.RecordIndex || record.Position > 9007199254740991 || !validUnknownPointer(record.Pointer) {
-			return fail()
+			return coordinateFail()
 		}
 		prior, exists := sources[record.SourceRef]
 		if exists && (record.Position <= prior.position || record.RecordIndex < prior.record) {
-			return fail()
+			return coordinateFail()
 		}
 		if !exists || record.RecordIndex != prior.record {
 			prior.pointers = &localUnknownPointer{}
 		}
 		if !prior.pointers.insert(record.Pointer) {
-			return fail()
+			return coordinateFail()
 		}
 		// encoding/json accepts nesting through 10,000 levels. Scan with that
 		// syntax bound and the actual byte length, not a transport-size budget.
 		// Never surface scanner paths: they may contain private source text.
 		if err := schema.ScanRawJSONDocument([]byte(record.Payload), schema.RawJSONPathPolicy{MaxDocumentBytes: len(record.Payload), MaxDocumentDepth: 10000}); err != nil {
-			return fail()
+			return payloadFail()
 		}
 		sources[record.SourceRef] = cursor{record.Position, record.RecordIndex, prior.pointers}
 	}
