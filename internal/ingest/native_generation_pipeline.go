@@ -288,6 +288,9 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		return fail(fmt.Errorf("%s: session %s assessment refused the store write; the stored index was preserved: %w", logPrefix, im.session.SessionID, err))
 	}
 	candidates := assessment.CandidateCounts()
+	// Operator-initiated native rebuilds opt out of the last-good refusal on
+	// the same principle as entry rebuilds; ordinary activations stay guarded.
+	explicit := p.config.Force || p.config.Reindex || outcome == IndexOutcomeReindexed
 	activation := NativeGenerationActivation{
 		Generation:       generation,
 		Blobs:            candidate.Blobs,
@@ -299,6 +302,7 @@ func (p *Pipeline) activateNativeGenerationResult(ctx context.Context, result in
 		CaptureRevision:  im.captureRevision,
 		IndexedInputHash: &result.input.inputHash,
 		ArtifactIdentity: artifactIdentity,
+		ExplicitRebuild:  explicit,
 		Capture:          managedActivationCapture(result.input, im.session, generation.Generation.Completeness),
 	}
 	var activationOutcome ActivationOutcome

@@ -177,7 +177,7 @@ cases:
     want_full_read: refused
     want_failure_code: ""
   # Source-omitted native rows (spec section 10: accounted/unaccounted cause).
-  # Both stay preview with refused export: the omission placeholder
+  # Both stay preview with refused full read: the omission placeholder
   # discriminator (outputRecordsItsOmissions) is V1-only by design, so a
   # native omission never reaches accounted full certification here — the
   # pipeline derives unaccounted from ContentOmitted for the same reason, and

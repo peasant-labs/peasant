@@ -22,6 +22,22 @@ const fullContentChunkBytes = 64 * 1024
 var ContentBackfillShapeMismatch = ingest.ContentBackfillShapeMismatch
 
 func contentSHA(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+
+// isManagedGenerationWrite reports whether a write carries a native managed
+// generation (V2 value or pointer). The last-good preview-over-full guard is
+// scoped to this lane: V1 entry projections are the legacy/manual lane whose
+// pinned downgrade-then-restore semantics must keep working, so they bypass
+// the guard while V2 accidental previews stay refused unless explicitly
+// rebuilding.
+func isManagedGenerationWrite(result indexformat.Result) bool {
+	if _, ok := result.(indexformat.V2); ok {
+		return true
+	}
+	if pv2, ok := result.(*indexformat.V2); ok && pv2 != nil {
+		return true
+	}
+	return false
+}
 func hashString(s *string) *string {
 	if s == nil {
 		return nil
@@ -108,10 +124,16 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	}
 	// Last-good guard, evaluated in the same transaction as entry and capture
 	// changes. Full authority includes an existing incomplete/full accounted
-	// capture, not just status=complete. A preview replacement over full
-	// authority is refused; first-discovery previews and preview-to-preview
-	// refreshes remain supported.
-	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion {
+	// capture, not just status=complete. An accidental preview replacement
+	// over native (V2 managed-generation) full authority is refused;
+	// first-discovery previews and preview-to-preview refreshes remain
+	// supported. V1 entry projections are the legacy/manual lane whose pinned
+	// downgrade-then-restore semantics (manual restamp, force/reindex) the
+	// guard must not break, so only V2 is guarded. Operator-initiated V2
+	// rebuilds opt out explicitly on the same principle as a format
+	// conversion: manual restamp, harvest index --force and Reindex proceed
+	// while accidental/hostile downgrades stay refused.
+	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion && mode != ingest.SessionEntryWriteExplicitRebuild && isManagedGenerationWrite(w.Result) {
 		if old, found, readErr := readCapture(conn, w.SessionID); readErr == nil && found && PublishableWithOmissions(old) {
 			return out, fmt.Errorf("store content write: preview replacement refused over full read authority; prior capture remains authoritative with byte-identical export; re-index the source for a certified capture")
 		} else if readErr != nil {

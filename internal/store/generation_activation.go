@@ -28,6 +28,11 @@ type GenerationActivation struct {
 	IndexedAtMs    int64
 	ExpectedState  *ingest.SessionIndexState
 	ContentCapture ingest.SessionContentCaptureWrite
+	// ExplicitRebuild marks an operator-initiated rebuild (harvest index
+	// --force, Reindex) that deliberately replaces full read authority with a
+	// preview. It exempts the last-good preview-over-full refusal on the same
+	// principle as a format conversion; accidental previews stay refused.
+	ExplicitRebuild bool
 	// PriorEvidence is the opaque activation-owned document a reopen reloads to
 	// reuse the candidate's identities and retained prefixes. Nil leaves prior
 	// evidence absent; the committed generation rows still supply aliases.
@@ -186,11 +191,15 @@ reconciled:
 	if capture.SourceAuthority == "" {
 		capture.SourceAuthority = ingest.ContentSourceNone
 	}
+	mode := ingest.SessionEntryWriteReplaceAll
+	if activation.ExplicitRebuild {
+		mode = ingest.SessionEntryWriteExplicitRebuild
+	}
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID:          sessionID,
 		Result:             indexformat.V2{Generation: staged},
 		IndexVersion:       2,
-		Mode:               ingest.SessionEntryWriteReplaceAll,
+		Mode:               mode,
 		RequireFullContent: captureRequiresFullContent(capture),
 		ContentCapture:     capture,
 		IndexerVersion:     activation.IndexerVersion,
@@ -357,11 +366,15 @@ func (s *Store) recoverGenerationIntentLocked(ctx context.Context, sessionID sch
 		indexedAtMs = 0
 		indexedInputHash = nil
 	}
+	mode := ingest.SessionEntryWriteReplaceAll
+	if intent.ExplicitRebuild {
+		mode = ingest.SessionEntryWriteExplicitRebuild
+	}
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID:          sessionID,
 		Result:             indexformat.V2{Generation: generation},
 		IndexVersion:       2,
-		Mode:               ingest.SessionEntryWriteReplaceAll,
+		Mode:               mode,
 		RequireFullContent: captureRequiresFullContent(capture),
 		ContentCapture:     capture,
 		IndexerVersion:     indexerVersion,
@@ -548,6 +561,7 @@ func (s *Store) stageWithIntent(ctx context.Context, sessionID schema.SessionID,
 		IndexerVersion:     indexerVersion,
 		IndexedAtMs:        indexedAtMs,
 		CaptureRevision:    activation.CaptureRevision,
+		ExplicitRebuild:    activation.ExplicitRebuild,
 		ExpectedState:      activation.ExpectedState,
 		ContentCapture:     capture,
 		IndexedInputHash:   indexedInputHash,

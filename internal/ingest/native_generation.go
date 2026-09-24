@@ -47,6 +47,11 @@ type NativeGenerationActivation struct {
 	CaptureRevision  int64
 	IndexedInputHash *string
 	ArtifactIdentity *string
+	// ExplicitRebuild marks an operator-initiated rebuild (harvest index
+	// --force, Reindex) that deliberately replaces full read authority with a
+	// preview. It exempts the last-good preview-over-full refusal on the same
+	// principle as a format conversion; accidental previews stay refused.
+	ExplicitRebuild bool
 	// Capture is the publication-capture agreement this activation records in
 	// the same transaction as the generation install, from the metadata
 	// snapshot and the provenance kind the pipeline certifies. Nil records no
