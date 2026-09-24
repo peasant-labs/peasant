@@ -1,0 +1,158 @@
+# Native coverage matrix (PROPOSAL-3 sections 5.2 native + 5.3 + 5.5 read split).
+#
+# Each case independently specifies completeness, retained carriers, prior
+# authority, and Main/Earlier distribution. The test builds a real V2
+# candidate with valid positions/payloads, activates through the real store,
+# and asserts authority (active generation, prior preservation) AND
+# per-invocation counts (CommittedNow once, AlreadyCommitted/NotCommitted
+# zero) plus actual export verdicts (real ExportSession success/failure and
+# byte stability), never readiness alone. Expected payloads originate here.
+required_names:
+  - complete-zero-carriers
+  - complete-nonzero-carriers
+  - incomplete-zero-carriers
+  - incomplete-nonzero-carriers
+  - first-discovery-preview
+  - prior-full-preserved
+  - main-and-earlier-one-set
+  - main-and-earlier-duplicate-refused
+  - forged-full-refused
+cases:
+  - name: complete-zero-carriers
+    completeness: complete
+    carriers:
+      []
+    prior: none
+    want_disposition: committed_now
+    want_occurrences: 0
+    want_export: success
+  - name: complete-nonzero-carriers
+    completeness: complete
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-complete-nonzero
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":1}'
+    prior: none
+    want_disposition: committed_now
+    want_occurrences: 1
+    want_export: success
+  - name: incomplete-zero-carriers
+    completeness: incomplete_new
+    carriers:
+      []
+    prior: none
+    want_disposition: committed_now
+    want_occurrences: 0
+    want_export: refused
+  - name: incomplete-nonzero-carriers
+    completeness: incomplete_new
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-incomplete-nonzero
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":2}'
+    prior: none
+    want_disposition: committed_now
+    want_occurrences: 0
+    want_export: refused
+  - name: first-discovery-preview
+    completeness: incomplete_new
+    carriers:
+      - partition: main
+        namespace: envelope
+        kind: future
+        source_ref: src-first-discovery
+        record_index: 1
+        position: 1
+        pointer: ""
+        payload: '{"type":"future","value":3}'
+    prior: none
+    want_disposition: committed_now
+    want_occurrences: 0
+    want_export: refused
+  - name: prior-full-preserved
+    completeness: incomplete_new
+    carriers:
+      - partition: main
+        namespace: envelope
+        kind: future
+        source_ref: src-prior-full
+        record_index: 1
+        position: 1
+        pointer: ""
+        payload: '{"type":"future","value":4}'
+    prior: full
+    want_disposition: not_committed
+    want_occurrences: 0
+    want_export: prior_preserved
+  - name: main-and-earlier-one-set
+    completeness: complete
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-one-set
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":5}'
+      - partition: earlier
+        namespace: envelope
+        kind: future
+        source_ref: src-one-set
+        record_index: 5
+        position: 9
+        pointer: ""
+        payload: '{"type":"future","value":6}'
+    prior: none
+    want_disposition: committed_now
+    want_occurrences: 2
+    want_export: success
+  - name: main-and-earlier-duplicate-refused
+    completeness: complete
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-duplicate
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":8}'
+      - partition: earlier
+        namespace: envelope
+        kind: future
+        source_ref: src-duplicate
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":8}'
+    prior: none
+    want_disposition: not_committed
+    want_occurrences: 0
+    want_export: refused
+  - name: forged-full-refused
+    completeness: incomplete_new
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-forged-full
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":7}'
+    prior: none
+    forged_full: true
+    want_disposition: not_committed
+    want_occurrences: 0
+    want_export: refused

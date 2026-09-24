@@ -151,6 +151,70 @@ func TestDetailPayloadSnapshotWiring(t *testing.T) {
 	}
 }
 
+func TestDetailPayloadPreviewSplit(t *testing.T) {
+	// Preview-only completeness serves an explicit bounded preview from the
+	// same valid snapshot, never a managed-to-legacy fallback. Corruption
+	// fails closed with no preview and no legacy.
+	sessionID := schema.SessionID("45454545-4545-4545-4545-454545454548")
+	harness := schema.HarnessCodex
+	bounded := "bounded preview prose"
+	previewEntries := []schema.SessionEntry{
+		{SessionID: sessionID, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &bounded},
+	}
+	previewSnapshot := indexformat.ReadSnapshot{
+		Session: schema.SessionDetailPayload{
+			ID: sessionID.String(), Harness: harness, TurnCount: 1,
+			Purpose: schema.SessionPurposeInteraction,
+		},
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: 1, SessionID: sessionID, ModelHarness: harness,
+			Stats:   schema.SessionStats{TurnCount: 1},
+			Purpose: schema.SessionPurposeInteraction,
+		},
+		GenerationID: "g-preview",
+		Completeness: indexformat.GenerationCompletenessIncompleteNew,
+		IndexVersion: 2,
+		Main:         indexformat.Partition{Entries: previewEntries},
+	}
+	previewCalls := 0
+	previewLegacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+		previewCalls++
+		return &schema.SessionDetailPayload{ID: "legacy"}, nil
+	}
+	preview, err := api.DetailPayloadWithReader(context.Background(), stubDetailReader{snapshot: previewSnapshot, supported: true}, stubDetailResolver{}, string(sessionID), previewLegacy)
+	if err != nil {
+		t.Fatalf("preview-only completeness must serve a bounded preview: %v", err)
+	}
+	if previewCalls != 0 {
+		t.Fatal("preview-only completeness must not fall back to legacy content")
+	}
+	if preview.Diagnostics == nil || !preview.Diagnostics.Partial {
+		t.Fatalf("preview must carry partial diagnostics: %+v", preview.Diagnostics)
+	}
+	if len(preview.Turns) != 1 || preview.Turns[0].Content != bounded {
+		t.Fatalf("preview turns = %+v, want bounded preview prose", preview.Turns)
+	}
+
+	corruptEntries := []schema.SessionEntry{
+		{SessionID: sessionID, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &bounded},
+		{SessionID: sessionID, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleAssistant, ContentPreview: &bounded},
+	}
+	corruptSnapshot := previewSnapshot
+	corruptSnapshot.GenerationID = "g-corrupt"
+	corruptSnapshot.Main = indexformat.Partition{Entries: corruptEntries}
+	corruptCalls := 0
+	corruptLegacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+		corruptCalls++
+		return &schema.SessionDetailPayload{ID: "legacy"}, nil
+	}
+	if _, err := api.DetailPayloadWithReader(context.Background(), stubDetailReader{snapshot: corruptSnapshot, supported: true}, stubDetailResolver{}, string(sessionID), corruptLegacy); err == nil {
+		t.Fatal("corrupt preview evidence must fail the detail read")
+	}
+	if corruptCalls != 0 {
+		t.Fatal("corrupt preview evidence must never fall back to legacy content")
+	}
+}
+
 // stubLinkProvider exercises the non-store subscription path: it offers exactly
 // one session through the preserved SessionByID conversion.
 type stubLinkProvider struct {

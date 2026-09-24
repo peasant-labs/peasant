@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -326,7 +327,19 @@ func assessV1Capture(facts CaptureFacts, v1 indexformat.V1) (CaptureAssessment, 
 }
 
 func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, error) {
-	if err := v2.Generation.Validate(); err != nil {
+	// Pre-stage validation: the candidate has not yet been staged, so content
+	// blob paths, aliases, segments, and title refs are still empty and are
+	// validated later in the store after staging fills them. Assessment owns
+	// only completeness, identity/harness, and the selected Main+Earlier
+	// evidence set. Full Generation.Validate runs in the store before authority
+	// changes.
+	if strings.TrimSpace(v2.Generation.ID) == "" {
+		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid managed generation for harness %q: generation id is empty; no capture was certified", string(facts.Harness))
+	}
+	if !v2.Generation.Completeness.IsValid() {
+		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid managed generation for harness %q: completeness %q is outside the closed set; no capture was certified", string(facts.Harness), string(v2.Generation.Completeness))
+	}
+	if _, err := schema.NewSessionID(string(v2.Generation.Metadata.SessionID)); err != nil {
 		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid managed generation for harness %q: %w; no capture was certified", string(facts.Harness), err)
 	}
 	// Select Main + all selected Earlier entries as one set. Validate owned
