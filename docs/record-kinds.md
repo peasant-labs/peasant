@@ -59,7 +59,7 @@ transfer must not silently discard evidence. Schema release/tag precedes pins.
 
 Baseline index format: 1.
 
-Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
 | Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
 |---|---|---|---|---|---|---|---|---|---|
@@ -107,7 +107,7 @@ Baseline index format: 1.
 
 Native generation: adapter 2, indexer 18, index format 2.
 
-Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
 | Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
 |---|---|---|---|---|---|---|---|---|---|
@@ -254,7 +254,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Re
 
 Baseline index format: 1.
 
-Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
 | Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
 |---|---|---|---|---|---|---|---|---|---|
@@ -275,7 +275,7 @@ Baseline index format: 1.
 
 Native generation: adapter 3, indexer 18, index format 2.
 
-Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
 | Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
 |---|---|---|---|---|---|---|---|---|---|
@@ -325,7 +325,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Re
 
 Baseline index format: 1.
 
-Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
 | Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
 |---|---|---|---|---|---|---|---|---|---|
@@ -352,7 +352,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Re
 
 Baseline index format: 1.
 
-Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete redacted JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknownFromSource`.
+Unseen valid kinds: **retained-unknown**, preview **no**, display **hidden**. Retain uninterpreted evidence and mark partial interpretation; display is deferred. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
 | Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |
 |---|---|---|---|---|---|---|---|---|---|

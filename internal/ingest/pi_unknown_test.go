@@ -278,8 +278,8 @@ func TestPiUnknownPersistence(t *testing.T) {
 					if err := comparePiUnknownPayload(want.Payload, string(got.Payload)); err != nil {
 						t.Fatalf("source occurrence %d: %v", i, err)
 					}
-					if strings.Contains(string(got.Payload), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") {
-						t.Fatal("source secret persisted without redaction")
+					if strings.Contains(want.Payload, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") && !strings.Contains(string(got.Payload), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") {
+						t.Fatal("stored evidence is not raw source bytes")
 					}
 					if tc.PaddingBytes > 0 && !strings.Contains(string(got.Payload), padding) {
 						t.Fatal("large evidence truncated")
