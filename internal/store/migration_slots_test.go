@@ -1,9 +1,11 @@
 package store
 
 import (
+	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -44,19 +46,35 @@ type migrationSlotManifest struct {
 }
 
 func LoadMigrationSlotFixtures() (migrationSlotFixtures, migrationSlotManifest, error) {
+	return loadMigrationSlotFixtures(migrationSlotsYAML, migrationSlotsManifestYAML)
+}
+
+func loadMigrationSlotFixtures(fixtureData, manifestData []byte) (migrationSlotFixtures, migrationSlotManifest, error) {
 	var fixtures migrationSlotFixtures
-	decoder := yaml.NewDecoder(strings.NewReader(string(migrationSlotsYAML)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
-		return fixtures, migrationSlotManifest{}, fmt.Errorf("decode internal/store/testdata/migration_slots.yaml: %w", err)
+	if err := decodeMigrationSlotYAML(fixtureData, &fixtures, "internal/store/testdata/migration_slots.yaml"); err != nil {
+		return fixtures, migrationSlotManifest{}, err
 	}
 	var manifest migrationSlotManifest
-	decoder = yaml.NewDecoder(strings.NewReader(string(migrationSlotsManifestYAML)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
-		return fixtures, manifest, fmt.Errorf("decode internal/store/testdata/migration_slots.manifest.yaml: %w", err)
+	if err := decodeMigrationSlotYAML(manifestData, &manifest, "internal/store/testdata/migration_slots.manifest.yaml"); err != nil {
+		return fixtures, manifest, err
 	}
 	return fixtures, manifest, nil
+}
+
+func decodeMigrationSlotYAML(data []byte, out any, path string) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(out); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("decode %s: fixture must contain exactly one YAML document", path)
+		}
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
 }
 
 func validateMigrationNames(required, actual []string, label string) error {
@@ -125,6 +143,17 @@ func validateMigrationSlots(migrations []string, rows []migrationSlotFixture, re
 		}
 	}
 	return nil
+}
+
+func TestLoadMigrationSlotFixturesRejectsTrailingDocuments(t *testing.T) {
+	fixtureData := append(append([]byte{}, migrationSlotsYAML...), []byte("\n---\nunknown: true\n")...)
+	if _, _, err := loadMigrationSlotFixtures(fixtureData, migrationSlotsManifestYAML); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("trailing migration-slot fixture document must be rejected: %v", err)
+	}
+	manifestData := append(append([]byte{}, migrationSlotsManifestYAML...), []byte("\n---\nunknown: true\n")...)
+	if _, _, err := loadMigrationSlotFixtures(migrationSlotsYAML, manifestData); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("trailing migration-slot manifest document must be rejected: %v", err)
+	}
 }
 
 func TestMigrationSlotIdentity(t *testing.T) {
