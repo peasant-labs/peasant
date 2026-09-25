@@ -22,20 +22,23 @@ func validateUnknownCapture(entries []schema.SessionEntry, status ingest.Content
 }
 
 // preflightUnknownEvidence runs retained integrity validation before the
-// full/preview branch, for preview as well as full writes. The explicit
-// legacy preview policy permits only wholly absent coordinates after all
-// other evidence validates. Corrupt preview input refuses before entry
-// replacement, preserving last-good authority.
+// full/preview branch, for preview as well as full writes. The sentinel for
+// missing traversal coordinates proves every record decoded, every
+// coordinated record validated, and ownership agreed inside the collector, so
+// on the preview path it admits the set as legacy preview: mixed
+// legacy+valid sets stay legacy (bounded storage, never a full certificate;
+// export still refuses below). Corruption surfaces as integrity errors, never
+// this sentinel. Fresh candidates keep the stricter wholly-absent rule in
+// AssessCapture; the store is the durable boundary old rows cross on reindex.
+// Corrupt preview input refuses before entry replacement, preserving
+// last-good authority.
 func preflightUnknownEvidence(entries []schema.SessionEntry, requireFull bool) error {
 	_, err := ingest.CollectRetainedUnknown(entries, "")
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, ingest.ErrUnknownPositionUnavailable) {
-		if !requireFull && ingest.LegacyCoordinatesWhollyAbsent(entries) {
-			if legacyErr := ingest.ValidateV1LegacyEvidence(entries, ""); legacyErr != nil {
-				return fmt.Errorf("store preview evidence validation: %w; prior capture remains authoritative", legacyErr)
-			}
+		if !requireFull {
 			return nil
 		}
 		return fmt.Errorf("store content evidence validation: %w; prior capture remains authoritative", err)

@@ -166,10 +166,11 @@ func exportSessionBytes(t *testing.T, s *store.Store, id ingest.SessionID) strin
 }
 
 // TestCaptureAssessmentLastGoodGuard proves atomic last-good preservation at
-// the store boundary across harnesses: an invalid, unaccounted, forged, or
-// preview-over-full replacement is refused in the same transaction, reports
-// zero new counts, and leaves the old entries, capture, and export bytes
-// byte-identical.
+// the store boundary across harnesses: an invalid, unaccounted, or forged
+// replacement is refused in the same transaction, reports zero new counts,
+// and leaves the old entries, capture, and export bytes byte-identical. A V1
+// preview replacement is accepted with honest preview state (the V2-scoped
+// guard must not break pinned manual-lane downgrade semantics).
 func TestCaptureAssessmentLastGoodGuard(t *testing.T) {
 	t.Parallel()
 	for _, harness := range lastGoodHarnesses {
@@ -306,20 +307,8 @@ func runCaptureAssessmentLastGoodGuard(t *testing.T, harness ingest.Harness) {
 	}
 	assertUnchanged("forged-full-claim", r)
 
-	// Preview over full authority refuses to preserve last-good export bytes.
-	preview := withEntryHarness(batchTestEntries(id, "preview", 1), harness)
-	r = s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
-		SessionID: id, Result: indexformat.V1{Entries: preview}, IndexVersion: 1,
-		RequireFullContent: false,
-		ContentCapture: ingest.SessionContentCaptureWrite{
-			Status: ingest.ContentCaptureIncomplete, SourceAuthority: ingest.ContentSourceNone,
-			TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1700000005000,
-		},
-	}})[0]
-	if r.Err == nil || !strings.Contains(r.Err.Error(), "preview replacement refused over full read authority") {
-		t.Fatalf("preview-over-full did not report the last-good error: %v", r.Err)
-	}
-	assertUnchanged("preview-over-full", r)
+	// Preview over V1 full authority is covered at the end of this test, after
+	// all refusal cases: it is accepted with honest preview state (see below).
 
 	// Failed write reports zero counts and preserves prior bytes: a stale
 	// expected state refuses before any replacement.
@@ -342,6 +331,32 @@ func runCaptureAssessmentLastGoodGuard(t *testing.T, harness ingest.Harness) {
 	// this mode reports zero attempted rows as well.
 	if r.EntriesCount != 0 {
 		t.Fatalf("failed-write-no-count: stale refusal reported %d attempted rows, want zero before projection", r.EntriesCount)
+	}
+
+	// Preview over V1 full authority is accepted with honest preview state,
+	// last, so the refusal cases above keep their byte-identical baselines.
+	// The V1 entry projection is the legacy/manual lane whose pinned
+	// downgrade-then-restore semantics (manual restamp, force/reindex) the
+	// V2-scoped last-good guard must not break: only V2 managed-generation
+	// authority refuses accidental preview replacement.
+	preview := withEntryHarness(batchTestEntries(id, "preview", 1), harness)
+	r = s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: id, Result: indexformat.V1{Entries: preview}, IndexVersion: 1,
+		RequireFullContent: false,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			Status: ingest.ContentCaptureIncomplete, SourceAuthority: ingest.ContentSourceNone,
+			TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1700000005000,
+		},
+	}})[0]
+	if r.Err != nil {
+		t.Fatalf("V1 preview replacement refused: %v", r.Err)
+	}
+	snapshot, found, err := s.GetSessionContentCapture(ctx, id)
+	if err != nil || !found {
+		t.Fatalf("preview capture unreadable: %+v %v", snapshot, err)
+	}
+	if snapshot.Status != ingest.ContentCaptureIncomplete || snapshot.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly {
+		t.Fatalf("preview replacement certified completeness: %+v", snapshot)
 	}
 
 	// The unrelated session still commits after the refusals above.
