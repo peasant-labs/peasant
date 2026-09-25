@@ -110,9 +110,8 @@ jobs:
   # (rootless podman on the desktop; labels self-hosted/container), with a
   # Blacksmith amd64 fallback when no pool runner is online. Routing comes from
   # the shared runner-router reusable workflow; every routed job reads the label
-  # array from its output. `check` and `cgo0` build and test Go on arm64 and
-  # stay on their arm64 runner; the harvester guard needs the repository's Nix
-  # shell and stays too.
+  # array from its output. `check` and `cgo0` build and test the Go suite on
+  # arm64 and stay on their arm64 runner.
   determine-runner:
     if: >-
       github.event_name != 'pull_request' ||
@@ -231,11 +230,13 @@ jobs:
       github.event_name == 'pull_request' &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    # Not routed to the container pool: the guard compiles two revisions inside
-    # the repository's `nix develop` shell, and the pool image deliberately has
-    # no Nix. Revisit when the pool gains Nix or the guard gets a
-    # container-native toolchain.
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Routed to the container pool. The guard needs no Nix: it shells out only
+    # to git, tar, and `go test -race` (see scripts/harvester-version-guard),
+    # and the pool image already carries git, tar, and the C compiler the race
+    # detector requires. setup-go supplies the toolchain `nix develop` used to,
+    # and the Makefile target stays the single source of the guard invocation.
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -243,8 +244,10 @@ jobs:
         with:
           fetch-depth: 0 # The guard archives and compiles the exact base revision.
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
 
       # The guard's probes compile and run under -race, so it keeps its own race
       # lane rather than sharing the plain `make check` artifacts.
@@ -260,7 +263,7 @@ jobs:
       - name: Require harvester version bumps for changed behavior
         env:
           GUARD_BASE: ${{ github.event.pull_request.base.sha }}
-        run: nix develop -c make check-harvester-versions BASE="$GUARD_BASE" CANDIDATE=HEAD
+        run: make check-harvester-versions BASE="$GUARD_BASE" CANDIDATE=HEAD
 
   # CGO=0 build mode gate. The release binaries are built CGO_ENABLED=0 (static,
   # portable) — that is the mode the goreleaser/nix/distro builds ship. This job
