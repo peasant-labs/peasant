@@ -96,6 +96,31 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 
 ---
 
+## Record-kind vocabulary and generated registry
+
+Each of the six adapters owns one co-located vocabulary declaration: `claude_vocabulary.go`,
+`cursor_vocabulary.go`, `strike_vocabulary.go`, `codex_vocabulary.go`, `opencode_vocabulary.go`, or
+`pi_vocabulary.go`. The declaration mirrors the production dispatch and is the source of truth for
+recognized record, part, and content-block kinds.
+
+- The shared `indexformat.Outcome` enum records what the parser concluded: text, tool call, tool
+  result, control, ignored, or opaque. It is interpretation only; it does not decide admission.
+- The central lowering maps an outcome to stored entry mode, preview eligibility, payload shape, and
+  coordinate requirements. Adapters never own that policy.
+- An undeclared but well-formed valid kind resolves to opaque retained evidence with its source
+  position. Malformed known data and failed retention still fail validation and preserve prior good
+  data.
+- `record_kinds.yaml` and `docs/record-kinds.md` are generated output. Regenerate them with
+  `go generate ./internal/ingest`; committed bytes must equal fresh codegen.
+- The exact per-adapter production-census and required-name tests are the drift gates. The former
+  AST scanner is retired and must not be reintroduced.
+- Rendering belongs to `internal/transcript` and Fairtrade. Do not add visualization state, renderer
+  names, or viewer coverage to this registry.
+
+When adding or changing a kind, update the adapter declaration beside its dispatch, adjust the
+production-owned census when the dispatch shape changes, regenerate the artifacts, and bump the
+relevant indexer version when settled sessions must be re-indexed.
+
 ## Constraints
 
 | ID | Name | Rule |
