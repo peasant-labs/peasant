@@ -73,7 +73,7 @@ func TestUnknownLocalIntegrity(t *testing.T) {
 					rawExtra, marshalErr := json.Marshal(map[string]any{
 						"retainedUnknown": []any{
 							map[string]any{
-								"harness":   "codex",
+								"harness":   string(ingest.HarnessCodex),
 								"namespace": "record",
 								"kind":      "future",
 								"position": map[string]any{
