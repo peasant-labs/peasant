@@ -50,6 +50,7 @@ required_case_names:
   - missing_transcript_resolves_from_the_stored_first_user_message
   - a_degraded_row_stays_retryable_while_a_full_row_is_finalised
   - a_row_already_at_the_current_rule_version_is_skipped
+  - a_row_at_the_prior_rule_version_is_reclassified
   - a_settled_store_is_written_to_only_once
   - an_interrupted_pass_resumes_without_mis_marking
   - a_degraded_row_never_reaches_agent_on_unrecoverable_markers
@@ -341,6 +342,26 @@ cases:
         finalised: true
         examined: false
         written: false
+
+  # A row judged by the previous rule must be listed again when the rule
+  # changes, even when its stored verdict is now wrong.
+  - name: a_row_at_the_prior_rule_version_is_reclassified
+    arm: prior-version
+    transcripts:
+      - path: /claude/65000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"65000000-0000-4000-8000-000000000001","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    rows:
+      - session_id: 65000000-0000-4000-8000-000000000001
+        source_path: /claude/65000000-0000-4000-8000-000000000001.jsonl
+        stored_origin: agent
+        at_prior_rule_version: true
+    expected:
+      - session_id: 65000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: true
+        examined: true
+        written: true
 
   # Every arm runs the pass twice, but this one is named for it: once the
   # verdicts are right, a further pass persists nothing, including for the rows

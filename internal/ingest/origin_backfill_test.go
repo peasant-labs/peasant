@@ -66,6 +66,9 @@ type storedBackfillRow struct {
 	// AtCurrentRuleVersion puts the row above the version line before the pass
 	// runs, so the pass must not list it at all.
 	AtCurrentRuleVersion bool `yaml:"at_current_rule_version"`
+	// AtPriorRuleVersion puts the row one version below the current rule so the
+	// pass must list it and reclassify it under the new rule.
+	AtPriorRuleVersion bool `yaml:"at_prior_rule_version"`
 	// FirstUserMessage is the indexed first user entry, which is the last
 	// surviving content evidence once the transcript is gone.
 	FirstUserMessage *string `yaml:"first_user_message"`
@@ -139,6 +142,9 @@ func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 		}
 		stored := make(map[string]bool, len(tc.Rows))
 		for _, row := range tc.Rows {
+			if row.AtCurrentRuleVersion && row.AtPriorRuleVersion {
+				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q cannot be both at the current and prior rule version", tc.Name, row.SessionID)
+			}
 			if row.FirstUserMessage != nil && row.UserMessages != nil {
 				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q sets both first_user_message and user_messages during fixture loading; the stored record sequence is ambiguous, so no world can be seeded; use only one of these fields", tc.Name, row.SessionID)
 			}
@@ -292,18 +298,25 @@ func newStoredBackfillWorld(t *testing.T, tc storedBackfillCase) storedBackfillW
 		}
 	}
 
-	// Put the already-judged rows above the version line, through the same
-	// production update the pass itself uses.
+	// Put the already-judged rows above or one version below the current line,
+	// through the same production update the pass itself uses.
 	for _, row := range tc.Rows {
-		if !row.AtCurrentRuleVersion {
+		if !row.AtCurrentRuleVersion && !row.AtPriorRuleVersion {
 			continue
 		}
 		sid, err := ingest.NewSessionID(row.SessionID)
 		if err != nil {
 			t.Fatalf("NewSessionID(%q): %v", row.SessionID, err)
 		}
-		if err := database.UpdateOriginState(ctx, sid, storedBackfillStoredOrigin(row), storedBackfillRuleVersion); err != nil {
-			t.Fatalf("put %q above the version line: %v", row.SessionID, err)
+		version := storedBackfillRuleVersion
+		if row.AtPriorRuleVersion {
+			version--
+			if version < 1 {
+				t.Fatalf("row %q requests a prior rule version below the supported watermark", row.SessionID)
+			}
+		}
+		if err := database.UpdateOriginState(ctx, sid, storedBackfillStoredOrigin(row), version); err != nil {
+			t.Fatalf("put %q at origin version %d: %v", row.SessionID, version, err)
 		}
 	}
 

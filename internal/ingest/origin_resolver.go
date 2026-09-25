@@ -15,7 +15,7 @@ import (
 // corrected ordering. Every stored row is then reclassified automatically, and
 // no separate migration and no separate command is needed. That is why the
 // backfill is a version watermark rather than a one-shot flag.
-const OriginRuleVersion = 1
+const OriginRuleVersion = 2
 
 // The audit baseline has a leading run of one record; eight leaves headroom
 // while bounding each session's stored evidence. Exhaustion refuses to guess.
