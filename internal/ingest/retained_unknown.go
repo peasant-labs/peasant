@@ -3,7 +3,6 @@ package ingest
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -123,6 +122,9 @@ func (r *RetainedUnknown) UnmarshalJSON(data []byte) error {
 	}
 	var payload json.RawMessage
 	if hasPayload {
+		if isNullJSON(payloadRaw) {
+			return &EvidenceIntegrityError{Field: "envelope.payload"}
+		}
 		if err := ScanRawEvidenceDocument(payloadRaw, "envelope.payload"); err != nil {
 			return err
 		}
@@ -343,7 +345,7 @@ func checkRetainedUnknownShape(harness Harness, namespace, kind string, position
 	if !validUnknownPointer(position.JSONPointer) {
 		return fail("position.jsonPointer")
 	}
-	if len(payload) == 0 {
+	if len(payload) == 0 || isNullJSON(payload) {
 		return fail("envelope.payload")
 	}
 	if err := ScanRawEvidenceDocument(payload, "envelope.payload"); err != nil {
@@ -384,7 +386,7 @@ func AttachRetainedUnknown(entry *schema.SessionEntry, records []RetainedUnknown
 	fields := map[string]json.RawMessage{}
 	if entry.Extra != nil {
 		if err := json.Unmarshal([]byte(*entry.Extra), &fields); err != nil || fields == nil {
-			return fmt.Errorf("retain source evidence: entry extra is not a JSON object; no capture was certified; repair the entry producer")
+			return &EvidenceIntegrityError{Field: "extra"}
 		}
 	}
 	fields[retainedUnknownKey], err = json.Marshal(append(prior, records...))

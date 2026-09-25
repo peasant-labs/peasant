@@ -115,10 +115,9 @@ func validateLocalRetainedUnknown(records []schema.RetainedUnknownRecord) error 
 		if !prior.pointers.insert(record.Pointer) {
 			return coordinateFail()
 		}
-		// encoding/json accepts nesting through 10,000 levels. Scan with that
-		// syntax bound and the actual byte length, not a transport-size budget.
-		// Never surface scanner paths: they may contain private source text.
-		if err := schema.ScanRawJSONDocument([]byte(record.Payload), schema.RawJSONPathPolicy{MaxDocumentBytes: len(record.Payload), MaxDocumentDepth: 10000}); err != nil {
+		// Scan through the shared raw-evidence helper so the local syntax
+		// depth and byte-budget policy stay single-sourced with capture.
+		if err := ScanRawEvidenceDocument([]byte(record.Payload), "envelope.payload"); err != nil {
 			return payloadFail()
 		}
 		sources[record.SourceRef] = cursor{record.Position, record.RecordIndex, prior.pointers}
