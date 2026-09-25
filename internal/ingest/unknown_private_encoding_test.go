@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -128,6 +129,41 @@ func TestUnknownPrivateEncoding(t *testing.T) {
 			}
 			assertCodecStoreRoundTrip(t, c.Extra, want, c.Payload, false)
 		})
+	}
+}
+
+// TestAttachRetainedUnknownCorruptExtra pins the write-side refusal when the
+// stored Extra root is not an object. AttachRetainedUnknown must fail closed
+// with the typed integrity error naming only the owned "extra" field.
+func TestAttachRetainedUnknownCorruptExtra(t *testing.T) {
+	t.Parallel()
+	position := ingest.UnknownSourcePosition{
+		Line:   1,
+		Public: &ingest.UnknownPublicPosition{SourceRef: "source-0", RecordIndex: 0, Position: 0},
+	}
+	record, err := ingest.NewRetainedUnknown(schema.HarnessClaudeCode, "record", "future", position, json.RawMessage(`{"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const marker = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	corrupt := `["` + marker + `"]`
+	entry := schema.SessionEntry{Harness: schema.HarnessClaudeCode, Extra: &corrupt}
+	err = ingest.AttachRetainedUnknown(&entry, []ingest.RetainedUnknown{record})
+	if err == nil {
+		t.Fatal("corrupt extra accepted on the write-side merge")
+	}
+	var integrity *ingest.EvidenceIntegrityError
+	if !errors.As(err, &integrity) {
+		t.Fatalf("corrupt extra did not surface the typed integrity error: %v", err)
+	}
+	if errors.Is(err, ingest.ErrUnknownPositionUnavailable) {
+		t.Fatalf("corruption masked as legacy missing-position compatibility: %v", err)
+	}
+	if integrity.Field != "extra" {
+		t.Fatalf("integrity error named %q want owned field %q", integrity.Field, "extra")
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatal("integrity error echoed raw source bytes")
 	}
 }
 
