@@ -1082,7 +1082,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		extractProfileStart := time.Now()
 		runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 			// Process root.
-			wr := p.processSession(ctx, entry)
+			wr := p.processSession(ctx, entry, writeLane)
 			wr.schedulingParentID = OperationalParentID(entry.Session)
 			wr.schedulingResolved = true
 			extractDoneAtomic.Add(1)
@@ -1098,7 +1098,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				childID := queue[0]
 				queue = queue[1:]
 				childEntry := entryByID[childID]
-				cwr := p.processSession(ctx, childEntry)
+				cwr := p.processSession(ctx, childEntry, writeLane)
 				cwr.schedulingParentID = OperationalParentID(childEntry.Session)
 				cwr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
@@ -2947,7 +2947,7 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 
 // processSession atomically writes the accepted capture and carries its bytes
 // and evidence into the existing store and streamed indexing path.
-func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) workerResult {
+func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, writeLane *storeWriteLane) workerResult {
 	session := entry.Session
 	result := SessionResult{
 		SessionID:  session.SessionID,
@@ -3320,7 +3320,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if err := p.fs.WriteFile(filepath.Join(tmpDir, metaFilename), metaJSON, defaults.PrivateFilePerm); err != nil {
 		return fail(errors.Join(fmt.Errorf("write metadata for %s: %w", session.SessionID, err), p.fs.RemoveAll(tmpDir)))
 	}
-	if err := p.replaceSessionDir(tmpDir, sessionDir, string(session.SessionID), metaFilename); err != nil {
+	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, string(session.SessionID), metaFilename, writeLane); err != nil {
 		return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
 	}
 	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
@@ -4860,7 +4860,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			extractProfileStart := time.Now()
 			runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
-				wr := p.processSession(ctx, entry)
+				wr := p.processSession(ctx, entry, reindexWriteLane)
 				wr.schedulingParentID = OperationalParentID(entry.Session)
 				wr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
@@ -4872,7 +4872,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 					childID := queue[0]
 					queue = queue[1:]
 					childEntry := entryByID[childID]
-					cwr := p.processSession(ctx, childEntry)
+					cwr := p.processSession(ctx, childEntry, reindexWriteLane)
 					cwr.schedulingParentID = OperationalParentID(childEntry.Session)
 					cwr.schedulingResolved = true
 					extractDoneAtomic.Add(1)

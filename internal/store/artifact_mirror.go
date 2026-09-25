@@ -14,6 +14,25 @@ import (
 
 var _ ingest.ArtifactMirrorStore = (*Store)(nil)
 
+// PrepareArtifactInstall clears only a settled row's input proof. The autocommit
+// must finish before the caller replaces any file, so process interruption leaves
+// the existing repair selector evidence even when the native source is unchanged.
+func (s *Store) PrepareArtifactInstall(ctx context.Context, sid ingest.SessionID) error {
+	if _, err := ingest.NewSessionID(string(sid)); err != nil {
+		return fmt.Errorf("prepare artifact install for %q: %w; no files were replaced; supply a valid session ID and retry harvest", sid, err)
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("prepare artifact install for %s: take database connection: %w; no files were replaced; restore database access and retry harvest", sid, err)
+	}
+	defer s.pool.Put(conn)
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET indexed_input_hash = NULL
+		WHERE session_id = ? AND artifact_hash IS NOT NULL AND indexed_input_hash IS NOT NULL`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
+		return fmt.Errorf("prepare artifact install for %s: clear indexed input proof: %w; no files were replaced; restore database access and retry harvest", sid, err)
+	}
+	return nil
+}
+
 // MirrorArtifacts reconciles bounded committed snapshots. Parent rows are
 // committed before dependent children, but the returned results retain request
 // order. A failed session rolls back all its metadata/evidence, not its peers.

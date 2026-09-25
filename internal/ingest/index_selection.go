@@ -145,9 +145,10 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	// Selection is database-first: it decides from the stored index state and
 	// never opens the pair. The pair is read only when a chosen target is
 	// indexed. A pair whose bytes changed through the write path had its
-	// indexed_input_hash NULLed by the mirror, so the hash-absent case IS the
-	// changed-pair case here. A hand-edited or torn pair on an otherwise
-	// settled row leaves no database signal and is not found by this scan: it
+	// indexed_input_hash cleared before installation (and kept NULL by the
+	// mirror), so process interruption selects it even before mirror commit.
+	// Hand edits or older unmarked damage on a settled row leave no database
+	// signal and are not found by this scan: that damage
 	// is reported as damaged on the next pair read (harvest index --all, the
 	// content stage, or peasant redact), through the pair hash check.
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
@@ -165,8 +166,8 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 // pending indexer work, reading no file. It is the database-first half of
 // capturedInputNeedsWork: it drops the input-hash comparison and the
 // publication byte proof, both of which need the pair. A changed pair reaches
-// this predicate as a NULL indexed_input_hash, because the write path's mirror
-// NULLs the hash when the pair changes; a revision left unbound is selected so
+// this predicate as a NULL indexed_input_hash, because the write path clears
+// the proof before installation and the mirror preserves it; a revision left unbound is selected so
 // the ordinary index write can bind it; and a stored producer or index format
 // newer than this build is selected so the shared parse path reports the
 // refusal once. A session with no stored pair identity is selected so the
