@@ -267,7 +267,7 @@ func bindDecodedRecordKindSemantics(kind *RecordKind) {
 	switch {
 	case kind.Status == RecordKindRetainedUnknown:
 		outcome = indexformat.OutcomeOpaque
-	case kind.Status == RecordKindIgnoredControl, kind.Payload == "state on owning entry; no independent row":
+	case kind.Status == RecordKindIgnoredControl, kind.Status == RecordKindRefused, kind.Payload == "state on owning entry; no independent row":
 		outcome = indexformat.OutcomeIgnored
 	case kind.Status == RecordKindTrackedOnly, strings.HasPrefix(kind.Payload, "bounded control extra"), kind.Payload == "compactMetadata":
 		outcome = indexformat.OutcomeControl
