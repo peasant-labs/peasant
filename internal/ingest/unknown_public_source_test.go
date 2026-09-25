@@ -198,10 +198,9 @@ func TestUnknownSourceToPublication(t *testing.T) {
 			if err != nil {
 				t.Fatalf("real capture is not exportable: %v", err)
 			}
-			// Interim raw-at-rest: export serves stored bytes verbatim until
-			// SLICE-5 lands export-time baseline redaction; the upload below
-			// already carries the redacted form via the configured engine.
-			assertUnknownPublicDetail(t, c, payload, detail)
+			// Raw-at-rest: stored bytes stay raw (asserted above); export emits
+			// the baseline-redacted egress form via the standard engine.
+			assertUnknownPublicDetail(t, c, expected, detail)
 			capture, found, err := db.GetSessionContentCapture(ctx, sid)
 			wantStatus, wantCode := ingest.ContentCaptureIncomplete, ingest.ContentCaptureUnknownDataRetained
 			if c.Complete {
