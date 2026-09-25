@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -159,6 +160,12 @@ type piUnknownExpectation struct {
 	Position  int64  `yaml:"position"`
 	Pointer   string `yaml:"pointer"`
 	Payload   string `yaml:"payload"`
+	// Redacted holds the YAML-owned baseline-redacted egress bytes for this
+	// occurrence (export and publication). Payload stays the raw-original
+	// source bytes asserted at rest. When absent, egress is byte-identical
+	// to Payload; any secret added without this field fails the egress
+	// comparison loudly rather than passing silently.
+	Redacted string `yaml:"redacted,omitempty"`
 }
 
 // This comparison deliberately accepts fixture-owned text, never a projected
@@ -208,11 +215,23 @@ func TestPiUnknownPersistence(t *testing.T) {
 				if err := comparePiUnknownPayload(want.Payload, want.Payload); err != nil {
 					t.Fatal(err)
 				}
+				// Raw-at-rest + redact-at-egress: stored entries assert the raw
+				// Payload above; export and publication emit the baseline-redacted
+				// egress form. The egress oracle is YAML-owned (Redacted, or
+				// Payload when redaction is identity), never production-derived.
+				egress := want.Redacted
+				if egress == "" {
+					egress = want.Payload
+				}
+				egress = strings.ReplaceAll(egress, "PADDING", padding)
+				if err := comparePiUnknownPayload(egress, egress); err != nil {
+					t.Fatal(err)
+				}
 				sequence := want.Sequence
 				if sequence == 0 {
 					sequence = want.Line
 				}
-				wantPublic = append(wantPublic, schema.RetainedUnknownRecord{SourceRef: ingest.PiPublicRef(sid.String(), "stream", "recording"), RecordIndex: int64(sequence - 1), Position: want.Position, Pointer: want.Pointer, Namespace: want.Namespace, Kind: want.Kind, Payload: want.Payload})
+				wantPublic = append(wantPublic, schema.RetainedUnknownRecord{SourceRef: ingest.PiPublicRef(sid.String(), "stream", "recording"), RecordIndex: int64(sequence - 1), Position: want.Position, Pointer: want.Pointer, Namespace: want.Namespace, Kind: want.Kind, Payload: egress})
 			}
 			sort.Slice(wantPublic, func(i, j int) bool { return wantPublic[i].Position < wantPublic[j].Position })
 			source := fixture.Header + "\n" + strings.ReplaceAll(tc.Source, "PADDING", padding)
@@ -424,7 +443,14 @@ func assertPiUnknownPublication(t *testing.T, db *store.Store, fs ingest.FileSys
 	cfg := &config.Config{Output: config.OutputConfig{BasePath: output.String()}, Push: config.PushConfig{Method: config.PushMethodAll, Visibility: config.VisibilityPrivate}}
 	creds := &auth.Credentials{APIKey: "synthetic-key", KeyID: "synthetic-key-id", UserID: "synthetic-user", Username: "fixture", VillageURL: "https://village.example.com"}
 	var stderr bytes.Buffer
-	pipeline, err := push.NewPipeline(db, publisher, creds, cfg, fs, push.PipelineConfig{Force: true, Concurrency: 1}, &testutil.NoopRedactor{}, &stderr)
+	// Publication is an egress boundary: exercise actual baseline redaction
+	// with the standard engine (as the network proof does), so the upload
+	// carries the same egress-redacted bytes the export assertion pins.
+	engine, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline, err := push.NewPipeline(db, publisher, creds, cfg, fs, push.PipelineConfig{Force: true, Concurrency: 1}, engine, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}

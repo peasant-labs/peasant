@@ -124,9 +124,9 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			// Replace the secret marker first so padding substitution cannot alter it.
 			payload := strings.ReplaceAll(strings.ReplaceAll(doc.Payload, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
 			expected := strings.ReplaceAll(doc.Expected, "BODY", strings.Repeat("synthetic-", 1024))
-			// Interim raw-at-rest: stored index Extra byte-equals the raw
-			// source; only the upload carries the redacted form until SLICE-5
-			// lands export-time baseline redaction.
+			// Raw-at-rest + redact-at-egress (PROPOSAL-3): stored index Extra
+			// byte-equals the raw source (asserted below); export and upload
+			// both emit the baseline-redacted egress form.
 			stored := payload
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			var path ingest.ResolvedPath
@@ -284,10 +284,11 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			if c.Framing {
-				stored = " " + stored + " "
 				expected = " " + expected + " "
 			}
-			checkNativeUnknownPublic(t, c, stored, detail)
+			// Raw-at-rest: stored bytes stay raw (asserted above); export emits
+			// the baseline-redacted egress form via the standard engine.
+			checkNativeUnknownPublic(t, c, expected, detail)
 			engine, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
 			if err != nil {
 				t.Fatal(err)
