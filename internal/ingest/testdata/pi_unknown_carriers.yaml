@@ -16,6 +16,7 @@ cases:
     evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":1,"public":{"sourceRef":"pi-recording","recordIndex":0,"position":0}},"payload":{"n":9007199254740993}}'
   - name: null-payload
     evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":2},"payload":null}'
+    reject: true
   - name: foreign-harness
     evidence: '{"harness":"codex","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":2},"payload":{}}'
     reject: true
