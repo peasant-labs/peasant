@@ -2,8 +2,10 @@ package ingest
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"testing"
@@ -28,13 +30,18 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "managed")
-	filesystem := &OSFileSystem{}
+	proof := artifact.ArtifactHash
+	store := &serialIndexStore{states: map[SessionID]*SessionIndexState{
+		artifact.Metadata.SessionID: {SessionID: artifact.Metadata.SessionID, ArtifactHash: &proof, IndexedInputHash: &proof},
+	}}
+	filesystem := &preparedRetainedFS{OSFileSystem: &OSFileSystem{}, store: store, sid: artifact.Metadata.SessionID}
 	versions := maps.Clone(HarvesterVersionRegistry)
 	versions[HarnessClaudeCode] = HarvesterVersions{AdapterVersion: 2, IndexerVersion: versions[HarnessClaudeCode].IndexerVersion, IndexVersion: versions[HarnessClaudeCode].IndexVersion}
 	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions))
 	if err != nil {
 		t.Fatal(err)
 	}
+	pipeline.metricsStore = store
 	session := DiscoveredSession{SessionID: artifact.Metadata.SessionID, Harness: artifact.Metadata.ModelHarness, SourceFormat: artifact.Metadata.Source.Format}
 	// Seed the saved pair by writing its files, the state a completed harvest
 	// leaves. The adapter refresh below reads it, extracts fresh metadata and
@@ -50,7 +57,9 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	if err := filesystem.WriteFile(path, artifact.MetadataJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := pipeline.processRetainedSession(t.Context(), session, path)
+	lane := newStoreWriteLane(1)
+	defer lane.close()
+	result := pipeline.processRetainedSession(t.Context(), session, path, lane)
 	if result.result.Error != nil {
 		t.Fatal(result.result.Error)
 	}
@@ -76,4 +85,25 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	if !bytes.Equal(before["extension"], after["extension"]) {
 		t.Fatal("unknown metadata object changed")
 	}
+}
+
+// Observe the existing retained fixture at the filesystem boundary, before any
+// installed file changes, rather than merely checking eventual index success.
+type preparedRetainedFS struct {
+	*OSFileSystem
+	store *serialIndexStore
+	sid   SessionID
+}
+
+var _ FileSystem = (*preparedRetainedFS)(nil)
+
+func (f *preparedRetainedFS) Rename(src, dst string) error {
+	state, err := f.store.ReadIndexState(context.Background(), f.sid)
+	if err != nil {
+		return err
+	}
+	if state.IndexedInputHash != nil {
+		return fmt.Errorf("retained publication renamed a file before preparation")
+	}
+	return f.OSFileSystem.Rename(src, dst)
 }

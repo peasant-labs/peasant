@@ -13,7 +13,7 @@ import (
 
 // processRetainedSession prepares from one captured pair and uses the same
 // metadata-last publisher and drain reconciliation as a native extraction.
-func (p *Pipeline) processRetainedSession(ctx context.Context, session DiscoveredSession, metadataPath string) workerResult {
+func (p *Pipeline) processRetainedSession(ctx context.Context, session DiscoveredSession, metadataPath string, writeLane *storeWriteLane) workerResult {
 	result := SessionResult{SessionID: session.SessionID, Harness: session.Harness, ParentUUID: session.ParentUUID, Status: DiffUpdated}
 	fail := func(err error) workerResult {
 		result.Error = err
@@ -79,7 +79,7 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 		metadataName:   metaFilename,
 		metadata:       candidate.MetadataJSON,
 	}
-	if err := p.installManagedPair(ctx, sessionDir, string(session.SessionID), pair, session); err != nil {
+	if err := p.installManagedPair(ctx, sessionDir, string(session.SessionID), pair, session, writeLane); err != nil {
 		return fail(err)
 	}
 	result.OutputPath = sessionDir
