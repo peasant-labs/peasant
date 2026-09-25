@@ -168,6 +168,13 @@ const (
 	// it preserves the producing indexer, its timestamp and the retained input
 	// proof.
 	SessionEntryWriteFormatConversion SessionEntryWriteMode = "format_conversion"
+	// SessionEntryWriteExplicitRebuild marks an operator-initiated rebuild
+	// (manual restamp, harvest index --force, Reindex) that deliberately
+	// replaces full read authority with a preview and carries honesty through
+	// readiness dropping to needs-ingest. It is exempt from the last-good
+	// preview-over-full refusal on the same principle as a format conversion:
+	// accidental/hostile downgrades stay refused, explicit rebuilds proceed.
+	SessionEntryWriteExplicitRebuild SessionEntryWriteMode = "explicit_rebuild"
 )
 
 func NewSessionEntryWriteMode(s string) (SessionEntryWriteMode, error) {
@@ -178,8 +185,10 @@ func NewSessionEntryWriteMode(s string) (SessionEntryWriteMode, error) {
 		return SessionEntryWriteContentBackfill, nil
 	case "format_conversion":
 		return SessionEntryWriteFormatConversion, nil
+	case "explicit_rebuild":
+		return SessionEntryWriteExplicitRebuild, nil
 	}
-	return "", fmt.Errorf("content write: unknown mode %q; use replace_all, content_backfill or format_conversion", s)
+	return "", fmt.Errorf("content write: unknown mode %q; use replace_all, content_backfill, format_conversion or explicit_rebuild", s)
 }
 
 type SessionContentCaptureWrite struct {

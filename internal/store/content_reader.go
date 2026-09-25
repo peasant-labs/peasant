@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
@@ -263,6 +264,23 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 		return err
 	}
 	if active != nil {
+		// For managed sessions cross-check stored generation completeness:
+		// a historical false complete/full row cannot bypass it. An
+		// incomplete_new generation can never back a publishable full
+		// capture, even with zero carriers; full reads refuse it as forged.
+		var completeness string
+		if err := sqlitex.ExecuteTransient(conn, `SELECT completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(id), *active},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				completeness = stmt.ColumnText(0)
+				return nil
+			},
+		}); err != nil {
+			return err
+		}
+		if completeness == string(indexformat.GenerationCompletenessIncompleteNew) && PublishableWithOmissions(c) {
+			return fmt.Errorf("store full content read: session %s generation %s is incomplete_new but the stored capture claims full authority; no complete transcript was returned; re-index the complete native source for a certified capture", id, *active)
+		}
 		snapshot, err := buildReadSnapshotOnConn(conn, id)
 		if err != nil {
 			return err
@@ -483,8 +501,12 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 // gate: the verified full text when the capture is complete, and the bounded
 // projection SQLite already holds otherwise. A damaged complete capture still
 // fails, because a preview may show less than the session, never something the
-// database cannot prove it stored. The caller validates the stored index format
-// on the same connection before calling this.
+// database cannot prove it stored. Available mode chooses an honest preview
+// for valid incomplete coverage, not for corruption: corrupt retained evidence
+// refuses instead of serving a preview. The caller validates the stored index
+// format on the same connection before calling this. Readers return raw
+// evidence and never echo raw payload bytes, labels, or position strings into
+// diagnostics, counts, logs, or errors.
 func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
 	capture, found, err := readCapture(conn, id)
 	if err != nil {
@@ -499,6 +521,16 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 	entries, err = listEntriesOnConn(conn, id)
 	if err != nil {
 		return nil, capture, err
+	}
+	// Honest preview for valid incomplete coverage, not for corruption: validate
+	// retained evidence as one set before serving the bounded projection.
+	// Legacy wholly-absent coordinates remain preview-eligible after all other
+	// evidence validates; any other corruption refuses.
+	if _, err := ingest.CollectRetainedUnknown(entries, ""); err != nil {
+		if errors.Is(err, ingest.ErrUnknownPositionUnavailable) && ingest.LegacyCoordinatesWhollyAbsent(entries) {
+			return entries, capture, nil
+		}
+		return nil, capture, fmt.Errorf("store available content read: stored retained evidence is corrupt; no preview was served; re-index the source with a position-aware adapter")
 	}
 	return entries, capture, nil
 }

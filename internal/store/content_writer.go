@@ -22,6 +22,22 @@ const fullContentChunkBytes = 64 * 1024
 var ContentBackfillShapeMismatch = ingest.ContentBackfillShapeMismatch
 
 func contentSHA(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+
+// isManagedGenerationWrite reports whether a write carries a native managed
+// generation (V2 value or pointer). The last-good preview-over-full guard is
+// scoped to this lane: V1 entry projections are the legacy/manual lane whose
+// pinned downgrade-then-restore semantics must keep working, so they bypass
+// the guard while V2 accidental previews stay refused unless explicitly
+// rebuilding.
+func isManagedGenerationWrite(result indexformat.Result) bool {
+	if _, ok := result.(indexformat.V2); ok {
+		return true
+	}
+	if pv2, ok := result.(*indexformat.V2); ok && pv2 != nil {
+		return true
+	}
+	return false
+}
 func hashString(s *string) *string {
 	if s == nil {
 		return nil
@@ -108,10 +124,16 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	}
 	// Last-good guard, evaluated in the same transaction as entry and capture
 	// changes. Full authority includes an existing incomplete/full accounted
-	// capture, not just status=complete. A preview replacement over full
-	// authority is refused; first-discovery previews and preview-to-preview
-	// refreshes remain supported.
-	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion {
+	// capture, not just status=complete. An accidental preview replacement
+	// over native (V2 managed-generation) full authority is refused;
+	// first-discovery previews and preview-to-preview refreshes remain
+	// supported. V1 entry projections are the legacy/manual lane whose pinned
+	// downgrade-then-restore semantics (manual restamp, force/reindex) the
+	// guard must not break, so only V2 is guarded. Operator-initiated V2
+	// rebuilds opt out explicitly on the same principle as a format
+	// conversion: manual restamp, harvest index --force and Reindex proceed
+	// while accidental/hostile downgrades stay refused.
+	if !w.RequireFullContent && mode != ingest.SessionEntryWriteFormatConversion && mode != ingest.SessionEntryWriteExplicitRebuild && isManagedGenerationWrite(w.Result) {
 		if old, found, readErr := readCapture(conn, w.SessionID); readErr == nil && found && PublishableWithOmissions(old) {
 			return out, fmt.Errorf("store content write: preview replacement refused over full read authority; prior capture remains authoritative with byte-identical export; re-index the source for a certified capture")
 		} else if readErr != nil {
@@ -386,65 +408,70 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 	return sqlitex.ExecuteTransient(conn, `INSERT INTO session_content_captures (session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,source_authority=excluded.source_authority,transcript_origin=excluded.transcript_origin,capture_format=excluded.capture_format,entry_count=excluded.entry_count,content_row_count=excluded.content_row_count,full_capture_sha256=excluded.full_capture_sha256,captured_at_ms=excluded.captured_at_ms,failure_code=excluded.failure_code,failure_message=excluded.failure_message,publication_capture_revision=excluded.publication_capture_revision`, &sqlitex.ExecOptions{Args: []any{string(id), string(c.Status), string(c.SourceAuthority), int(c.TranscriptOrigin), string(c.CaptureFormat), entries, rows, nullString(hash), c.CapturedAtMs, nullString(string(c.FailureCode)), nullString(c.FailureMessage), c.PublicationCaptureRevision}})
 }
 
-// factsFromEvidenceOnly builds the assessment facts for a store-side forged
-// full-claim check from the entries actually presented. The store cannot know
-// session-level omission state, so Unaccounted stays false here by explicit
-// choice: only the pipeline, which sees the session, may declare an omission
-// unaccounted (ingest.V1CaptureFacts). A requested legacy-preview format
-// selects the legacy policy; every other full claim is judged as a fresh
-// candidate.
-func factsFromEvidenceOnly(harness string, result indexformat.Result, evidence []schema.SessionEntry, requestedFormat ingest.ContentCaptureFormat) ingest.CaptureFacts {
-	hasOmissions := false
-	for _, e := range evidence {
-		if _, omitted := ingest.OmittedRecordOf(e); omitted {
-			hasOmissions = true
-			break
-		}
-	}
-	policy := ingest.CaptureFreshCandidate
-	if requestedFormat == ingest.ContentCaptureFormatLegacyPreviewOnly {
-		policy = ingest.CaptureLegacyPreview
-	}
-	return ingest.CaptureFacts{
-		Harness: ingest.Harness(harness), Result: result, Policy: policy,
-		Authoritative: true, SourceOmitted: hasOmissions,
-	}
-}
-
 // refuseForgedFullClaim reuses the capture assessment to refuse a full write
 // whose requested status, format, or failure code disagrees with the state
 // justified by result completeness and validated evidence. A caller-supplied
 // full flag is not proof; the store derives the expected write from the same
 // mapping the pipeline uses and refuses incompatible claims before any entry
-// replacement, preserving last-good authority.
+// replacement, preserving last-good authority. V1 entries and V2 Main+Earlier
+// are each validated as one set; incomplete_new can never certify full.
 func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.SessionEntry) error {
-	if _, ok := w.Result.(indexformat.V1); !ok {
-		if pv1, ok := w.Result.(*indexformat.V1); !ok || pv1 == nil {
-			return nil
-		}
-	}
-	// Unknown enums have their own specific refusals downstream (closed-set
-	// errors naming the valid members). Let those fire instead of masking
-	// them with a forged-claim message.
-	if w.ContentCapture.CaptureFormat != "" {
-		if _, err := ingest.NewContentCaptureFormat(string(w.ContentCapture.CaptureFormat)); err != nil {
-			return nil
-		}
+	// Closed-set precedence: a caller-supplied capture field outside its
+	// canonical set must surface the validator error, not the forged-claim
+	// assessment. writeCapture enforces the same closed sets at the row
+	// boundary; validating here first restores that error precedence for
+	// full writes the forged-claim gate would otherwise shadow. Empty
+	// status/source-authority/format mean "apply the full-write default"
+	// downstream, so only non-empty values are validated; the empty failure
+	// code is the valid absent code and the zero origin is the valid file
+	// origin, so both are always validated.
+	if err := w.ContentCapture.TranscriptOrigin.Validate(); err != nil {
+		return err
 	}
 	if w.ContentCapture.Status != "" {
 		if _, err := ingest.NewContentCaptureStatus(string(w.ContentCapture.Status)); err != nil {
-			return nil
+			return err
 		}
 	}
 	if w.ContentCapture.SourceAuthority != "" {
 		if _, err := ingest.NewContentSourceAuthority(string(w.ContentCapture.SourceAuthority)); err != nil {
-			return nil
+			return err
+		}
+	}
+	if w.ContentCapture.CaptureFormat != "" {
+		if _, err := ingest.NewContentCaptureFormat(string(w.ContentCapture.CaptureFormat)); err != nil {
+			return err
 		}
 	}
 	if _, err := ingest.NewContentCaptureFailureCode(string(w.ContentCapture.FailureCode)); err != nil {
-		return nil
+		return err
+	}
+	isV2 := false
+	if _, ok := w.Result.(indexformat.V2); ok {
+		isV2 = true
+	} else if pv2, ok := w.Result.(*indexformat.V2); ok && pv2 != nil {
+		isV2 = true
+		w.Result = *pv2
+	}
+	if !isV2 {
+		v1, ok := w.Result.(indexformat.V1)
+		if !ok {
+			if pv1, ok := w.Result.(*indexformat.V1); ok && pv1 != nil {
+				v1 = *pv1
+			} else {
+				return nil
+			}
+		}
+		_ = v1
 	}
 	if len(evidence) == 0 {
+		// An incomplete_new generation can never certify full, even with no
+		// carriers: native completeness is carrier-independent. A complete
+		// empty session preserves the original allowance. The result was
+		// normalized to a V2 value above, so one form covers both spellings.
+		if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+			return fmt.Errorf("store full content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
+		}
 		return nil
 	}
 	harness := ""
@@ -454,10 +481,32 @@ func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.Session
 			break
 		}
 	}
+	if harness == "" && isV2 {
+		// Native entries always carry their harness, but a forged or legacy
+		// batch may not; fall back to the generation's recorded harness so a
+		// missing entry harness cannot bypass forged-full refusal.
+		if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Metadata.ModelHarness != "" {
+			harness = string(v2.Generation.Metadata.ModelHarness)
+		}
+	}
 	if harness == "" {
 		return nil
 	}
-	assessment, err := ingest.AssessCapture(factsFromEvidenceOnly(harness, w.Result, evidence, w.ContentCapture.CaptureFormat))
+	hasOmissions := false
+	for _, e := range evidence {
+		if _, omitted := ingest.OmittedRecordOf(e); omitted {
+			hasOmissions = true
+			break
+		}
+	}
+	policy := ingest.CaptureFreshCandidate
+	if w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatLegacyPreviewOnly {
+		policy = ingest.CaptureLegacyPreview
+	}
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.Harness(harness), Result: w.Result, Policy: policy,
+		Authoritative: true, SourceOmitted: hasOmissions,
+	})
 	if err != nil {
 		return fmt.Errorf("store full content write: evidence assessment refused the requested full capture: %w; prior capture remains authoritative", err)
 	}

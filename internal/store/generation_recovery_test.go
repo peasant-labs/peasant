@@ -337,12 +337,13 @@ func visibleGeneration(t *testing.T, s *Store, sid schema.SessionID) string {
 
 func activateTestGeneration(t *testing.T, s *Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) error {
 	t.Helper()
-	return s.ActivateGeneration(context.Background(), GenerationActivation{
+	_, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 		Generation:     v2,
 		Blobs:          blobs,
 		IndexerVersion: 1,
 		IndexedAtMs:    1,
 	})
+	return err
 }
 
 // TestProjectionCommitRecovery drives the real activation through all six
@@ -397,7 +398,7 @@ func TestProjectionCommitRecovery(t *testing.T) {
 			clearRecoveryFault(t, s, tc.Seam)
 			switch tc.Recovery {
 			case "recover":
-				if err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
+				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
 					t.Fatalf("recover after seam %s: %v", tc.Seam, err)
 				}
 			case "retry":
@@ -470,7 +471,7 @@ func assertIntentDigestMismatchRefused(t *testing.T, s *Store, id schema.Session
 	if err := s.generationArtifacts.WriteIntent(context.Background(), *intent); err != nil {
 		t.Fatalf("rewrite the mismatched durable intent: %v", err)
 	}
-	if err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
+	if _, err := s.RecoverGenerationActivation(context.Background(), id); err == nil {
 		t.Fatal("recovery accepted a mismatched durable candidate binding; it must be refused")
 	}
 	if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {

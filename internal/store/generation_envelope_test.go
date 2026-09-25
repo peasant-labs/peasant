@@ -30,7 +30,7 @@ func TestGenerationEnvelopeRecovery(t *testing.T) {
 	g1, g1Blobs := buildTestGeneration(t, sid, "gen_env_g1", "env text G1", "env input G1", "env output G1")
 	g1.Generation.Metadata.Timestamp.Start = 1000
 	g1.Generation.Metadata.Timestamp.End = 2000
-	if err := s.ActivateGeneration(context.Background(), GenerationActivation{
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 		Generation:     g1,
 		Blobs:          g1Blobs,
 		IndexerVersion: 11,
@@ -72,7 +72,7 @@ func TestGenerationEnvelopeRecovery(t *testing.T) {
 		ExpectedState:  current,
 		ContentCapture: capture,
 	}
-	if err := s.ActivateGeneration(context.Background(), failedActivation); err == nil {
+	if _, err := s.ActivateGeneration(context.Background(), failedActivation); err == nil {
 		t.Fatal("activation across crash seam succeeded; expected interruption")
 	}
 	clearRecoveryFault(t, s, "after-rename-before-db")
@@ -95,7 +95,7 @@ func TestGenerationEnvelopeRecovery(t *testing.T) {
 
 	// Recovery replays the same guarded transaction and settles on G2 with
 	// the original stamps, versions and capture eligibility.
-	if err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
+	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
 	if got := visibleGeneration(t, s, sid); got != "gen_env_g2" {
@@ -136,7 +136,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	seedGenerationSession(t, s, string(sid))
 
 	g1, g1Blobs := buildTestGeneration(t, sid, "gen_stale_g1", "stale text G1", "stale input G1", "stale output G1")
-	if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 5, IndexedAtMs: 500}); err != nil {
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: g1, Blobs: g1Blobs, IndexerVersion: 5, IndexedAtMs: 500}); err != nil {
 		t.Fatalf("activate G1: %v", err)
 	}
 	staleState, err := s.ReadIndexState(context.Background(), sid)
@@ -146,7 +146,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	// Advance the state so the captured precondition goes stale: activate an
 	// intermediate complete generation.
 	gMid, gMidBlobs := buildTestGeneration(t, sid, "gen_stale_mid", "stale text mid", "stale input mid", "stale output mid")
-	if err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: gMid, Blobs: gMidBlobs, IndexerVersion: 6, IndexedAtMs: 600}); err != nil {
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{Generation: gMid, Blobs: gMidBlobs, IndexerVersion: 6, IndexedAtMs: 600}); err != nil {
 		t.Fatalf("activate mid: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 		ExpectedState:  staleState,
 		ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, SourceAuthority: ingest.ContentSourceNone, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly},
 	}
-	if err := s.ActivateGeneration(context.Background(), staleActivation); err == nil {
+	if _, err := s.ActivateGeneration(context.Background(), staleActivation); err == nil {
 		t.Fatal("stale activation succeeded; it must be refused")
 	} else if !isStaleError(err) {
 		t.Fatalf("stale activation error is not a stale refusal: %v", err)
@@ -173,7 +173,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	// The failed activation staged its candidate and recorded its intent
 	// before the guarded transaction refused it. Recovery replays the same
 	// stale envelope and is refused again; the prior generation stays visible.
-	if err := s.RecoverGenerationActivation(context.Background(), sid); err == nil {
+	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err == nil {
 		t.Fatal("stale recovery succeeded; it must stay inactive pending a verified retry")
 	} else if !isStaleError(err) {
 		t.Fatalf("stale recovery error is not a stale refusal: %v", err)
@@ -189,7 +189,7 @@ func TestGenerationStaleRecoveryRefused(t *testing.T) {
 	}
 	retry := staleActivation
 	retry.ExpectedState = current
-	if err := s.ActivateGeneration(context.Background(), retry); err != nil {
+	if _, err := s.ActivateGeneration(context.Background(), retry); err != nil {
 		t.Fatalf("verified retry: %v", err)
 	}
 	if got := visibleGeneration(t, s, sid); got != "gen_stale_g2" {

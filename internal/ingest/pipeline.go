@@ -2151,8 +2151,17 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			artifactIdentity = &identity
 		}
 		target := p.sessionVersionTarget(result.input.session)
+		// Operator-initiated rebuilds (harvest index --force, Reindex) carry
+		// explicit intent through the last-good guard on the same principle as
+		// a format conversion: accidental preview-over-full stays refused
+		// while deliberate downgrade-then-restore proceeds.
+		writeMode := SessionEntryWriteReplaceAll
+		if p.config.Force || p.config.Reindex || outcome == IndexOutcomeReindexed {
+			writeMode = SessionEntryWriteExplicitRebuild
+		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
+			Mode:               writeMode,
 			RequireFullContent: requireFullContent,
 			ContentCapture:     capture,
 			SessionID:          result.im.session.SessionID,

@@ -164,7 +164,7 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			t.Log("check stored retained entries")
 			check(stored)
 			activation := ingest.NativeGenerationActivation{Generation: candidate.Result, Blobs: candidate.Blobs, PriorEvidence: candidate.PriorEvidence, IndexerVersion: 18, IndexedAtMs: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1}}
-			if err := db.ActivateNativeGeneration(t.Context(), activation); err != nil {
+			if _, err := db.ActivateNativeGeneration(t.Context(), activation); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
@@ -183,7 +183,7 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			broken := activation
 			broken.Generation.Generation.ID = "failed-unknown-generation"
 			broken.Blobs = map[schema.SourceEntryRef][]byte{}
-			if err := db.ActivateNativeGeneration(t.Context(), broken); err == nil {
+			if _, err := db.ActivateNativeGeneration(t.Context(), broken); err == nil {
 				t.Fatal("missing blobs authorized replacement")
 			}
 			if err := db.WithSessionSnapshot(t.Context(), sid, verify); err != nil {

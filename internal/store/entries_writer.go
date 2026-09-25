@@ -103,6 +103,7 @@ type sessionEntryWriteOutcome struct {
 func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry) (err error) {
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+		Mode: ingest.SessionEntryWriteExplicitRebuild,
 	}})
 	return results[0].Err
 }
@@ -182,7 +183,9 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	// A forced retained-content repair replaces the projection, but still uses
 	// the same proven metadata/index revision as a content-only backfill. Resolve
 	// it inside this savepoint before replacement can invalidate the old proof.
-	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+	// An explicit rebuild carries the same repair semantics as an ordinary
+	// replace when it certifies full snapshot authority.
+	if (write.Mode == ingest.SessionEntryWriteReplaceAll || write.Mode == ingest.SessionEntryWriteExplicitRebuild || write.Mode == "") && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
 		var err error
 		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
 		if err != nil {

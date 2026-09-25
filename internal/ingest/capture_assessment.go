@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -103,8 +104,8 @@ func (a *CaptureAssessment) CandidateCounts() []RetainedUnknownKindCount {
 // ContentCapture converts an assessed capture to a store write. It refuses
 // unknown, invalid, or zero conversion before persistence: an unknown
 // coverage never silently becomes a valid preview write through the store's
-// absent-value defaults. A nil receiver, an unknown coverage, and any
-// unsupported coverage or read-policy enum are refused with an error.
+// absent-value defaults. A nil or typed-nil receiver, an unknown coverage,
+// and any unsupported coverage or read-policy enum are refused with an error.
 func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, origin TranscriptOrigin, capturedAt int64) (SessionContentCaptureWrite, error) {
 	if a == nil {
 		return SessionContentCaptureWrite{}, fmt.Errorf("ingest.ContentCapture: nil capture assessment cannot be converted to a store write; no persistence was authorized; assess the captured evidence before writing")
@@ -154,10 +155,10 @@ func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, ori
 		// Preview-only activation is reported as a preview operation, never as
 		// a successful full or retained capture. The store's absent-value
 		// defaults must never promote this to full: the format is explicit.
-		// A preview with no recorded failure is first-discovery
-		// incompleteness (for example native incomplete_new), not a
-		// refusal. Keep the empty code so the selector can tell
-		// not-certified-yet from refused.
+		// A preview with no recorded failure keeps the empty code: it is
+		// first-discovery incompleteness (for example native incomplete_new),
+		// not a refusal, so the selector can tell not-certified-yet from
+		// refused.
 		code := a.failure
 		if _, err := NewContentCaptureFailureCode(string(code)); err != nil {
 			return SessionContentCaptureWrite{}, err
@@ -234,7 +235,8 @@ func assessV1Capture(facts CaptureFacts, v1 indexformat.V1) (CaptureAssessment, 
 
 	// Validate the entire evidence set regardless of desired coverage.
 	// Evidence validates raw at rest; there is no redaction step here.
-	if _, collectedErr := CollectRetainedUnknown(entries, facts.Harness); collectedErr != nil {
+	collectedErr := validateV1Evidence(entries, facts.Harness)
+	if collectedErr != nil {
 		if errors.Is(collectedErr, ErrUnknownPositionUnavailable) {
 			if facts.Policy == CaptureLegacyPreview {
 				// Legacy exception: only wholly absent coordinates after all
@@ -338,12 +340,61 @@ func assessV1Capture(facts CaptureFacts, v1 indexformat.V1) (CaptureAssessment, 
 }
 
 func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, error) {
-	if err := v2.Generation.Validate(); err != nil {
+	// Pre-stage validation: the candidate has not yet been staged, so content
+	// blob paths, aliases, segments, and title refs are still empty and are
+	// validated later in the store after staging fills them. Assessment owns
+	// only completeness, identity/harness, and the selected Main+Earlier
+	// evidence set. Full Generation.Validate runs in the store before authority
+	// changes.
+	if strings.TrimSpace(v2.Generation.ID) == "" {
+		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid managed generation for harness %q: generation id is empty; no capture was certified", string(facts.Harness))
+	}
+	if !v2.Generation.Completeness.IsValid() {
+		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid managed generation for harness %q: completeness %q is outside the closed set; no capture was certified", string(facts.Harness), string(v2.Generation.Completeness))
+	}
+	if _, err := schema.NewSessionID(string(v2.Generation.Metadata.SessionID)); err != nil {
 		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid managed generation for harness %q: %w; no capture was certified", string(facts.Harness), err)
 	}
+	// Select Main + all selected Earlier entries as one set. Validate owned
+	// evidence syntax, payload integrity, harness ownership, coordinate
+	// presence, order, and overlaps for the entire set, regardless of desired
+	// coverage. Evidence validates raw at rest; there is no redaction step.
+	selected := append([]schema.SessionEntry(nil), v2.Generation.Main.Entries...)
+	for _, earlier := range v2.Generation.Earlier {
+		selected = append(selected, earlier.Content.Entries...)
+	}
+	collectedErr := validateV2Evidence(selected, facts.Harness)
+	if collectedErr != nil {
+		if errors.Is(collectedErr, ErrUnknownPositionUnavailable) {
+			if facts.Policy == CaptureLegacyPreview && LegacyCoordinatesWhollyAbsent(selected) {
+				if err := ValidateV1LegacyEvidence(selected, facts.Harness); err != nil {
+					return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: legacy evidence invalid for harness %q: %w; no capture was certified", string(facts.Harness), err)
+				}
+				legacyRetained, legacyErr := retainedUnknownEntries(selected)
+				if legacyErr != nil {
+					return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: legacy evidence invalid for harness %q: %w; no capture was certified", string(facts.Harness), legacyErr)
+				}
+				return CaptureAssessment{
+					coverage: CaptureCoveragePreview, policy: facts.Policy,
+					partial: true, failure: ContentCaptureLegacyPreviewOnly,
+					retained: retainedUnknownCounts(legacyRetained),
+				}, nil
+			}
+			return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: %w; no capture was certified; re-index the original source with a position-aware adapter, then retry", collectedErr)
+		}
+		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid retained evidence for harness %q: %w; no capture was certified", string(facts.Harness), collectedErr)
+	}
+	retained, err := retainedUnknownEntries(selected)
+	if err != nil {
+		return CaptureAssessment{}, fmt.Errorf("ingest.AssessCapture: invalid retained evidence for harness %q: %w; no capture was certified", string(facts.Harness), err)
+	}
+	counts := retainedUnknownCounts(retained)
+	hasUnknown := len(retained) > 0
+	hasOmissions := outputRecordsItsOmissions(facts.Result)
 	// V2 completeness is read directly from the result. Incomplete_new uses an
 	// honest preview regardless of carrier count and never invents a
-	// publication agreement.
+	// publication agreement. Carrier-independent: native completeness never
+	// depends on retained carrier count.
 	if v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
 		return CaptureAssessment{
 			coverage: CaptureCoveragePreview, policy: facts.Policy,
@@ -353,26 +404,61 @@ func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, 
 	if facts.Policy == CaptureLegacyPreview {
 		return CaptureAssessment{
 			coverage: CaptureCoveragePreview, policy: facts.Policy,
-			partial: true, failure: ContentCaptureLegacyPreviewOnly,
+			partial: true, failure: ContentCaptureLegacyPreviewOnly, retained: counts,
 		}, nil
 	}
 	if facts.Unaccounted || !facts.Authoritative {
 		return CaptureAssessment{
 			coverage: CaptureCoveragePreview, policy: facts.Policy,
-			partial: true, failure: ContentCaptureStrictRefused,
+			partial: true, failure: ContentCaptureStrictRefused, retained: counts,
 		}, nil
 	}
-	return CaptureAssessment{
-		coverage: CaptureCoverageFull, policy: facts.Policy,
-		partial: false, failure: ContentCaptureNoFailure,
-	}, nil
+	if facts.SourceOmitted && !hasOmissions {
+		return CaptureAssessment{
+			coverage: CaptureCoveragePreview, policy: facts.Policy,
+			partial: true, failure: ContentCaptureSourceRecordsOmitted, retained: counts,
+		}, nil
+	}
+	switch {
+	case hasUnknown && hasOmissions:
+		return CaptureAssessment{
+			coverage: CaptureCoverageFull, policy: facts.Policy,
+			partial: true, failure: ContentCaptureSourceRecordsOmitted, retained: counts,
+		}, nil
+	case hasUnknown:
+		return CaptureAssessment{
+			coverage: CaptureCoverageFull, policy: facts.Policy,
+			partial: true, failure: ContentCaptureUnknownDataRetained, retained: counts,
+		}, nil
+	case hasOmissions:
+		return CaptureAssessment{
+			coverage: CaptureCoverageFull, policy: facts.Policy,
+			partial: true, failure: ContentCaptureSourceRecordsOmitted, retained: counts,
+		}, nil
+	default:
+		return CaptureAssessment{
+			coverage: CaptureCoverageFull, policy: facts.Policy,
+			partial: false, failure: ContentCaptureNoFailure, retained: counts,
+		}, nil
+	}
+}
+
+func validateV2Evidence(entries []schema.SessionEntry, harness Harness) error {
+	_, err := CollectRetainedUnknown(entries, harness)
+	return err
+}
+
+func validateV1Evidence(entries []schema.SessionEntry, harness Harness) error {
+	_, err := CollectRetainedUnknown(entries, harness)
+	return err
 }
 
 // LegacyCoordinatesWhollyAbsent reports whether every retained record lacks
-// public traversal coordinates. It is the narrow legacy exception: wholly
-// absent coordinates may still read as a bounded preview, but any present
-// coordinate set must validate as a whole. The store preflight reuses this
-// predicate rather than carrying a second copy.
+// public traversal coordinates. It is the narrow legacy exception shared by
+// the ingest assessment and the store's preview preflight and available-read
+// paths: wholly absent coordinates may still read as a bounded preview, but
+// any present coordinate set must validate as a whole. One definition serves
+// all three call sites so a coordinate-policy change cannot diverge them.
 func LegacyCoordinatesWhollyAbsent(entries []schema.SessionEntry) bool {
 	found := false
 	for _, entry := range entries {
