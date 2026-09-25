@@ -1954,7 +1954,7 @@ func runHarvestNoTestConfig(t *testing.T, args ...string) string {
 	return buf.String()
 }
 
-func TestPrintSummary_RecordKindsRefusedAndTracked(t *testing.T) {
+func TestPrintSummary_RecordKindsRefused(t *testing.T) {
 	t.Parallel()
 	result := &ingest.PipelineResult{
 		Summary: ingest.PipelineSummary{
@@ -1977,8 +1977,8 @@ func TestPrintSummary_RecordKindsRefusedAndTracked(t *testing.T) {
 	if !strings.Contains(output, "refused: codex/world_state x2") {
 		t.Errorf("summary should name the refused kind with its count; got:\n%s", output)
 	}
-	if !strings.Contains(output, "tracked, not visualized: claude-code/retained-format-1/record/attachment") {
-		t.Errorf("summary should name the tracked-not-visualized kind; got:\n%s", output)
+	if strings.Contains(output, "not visualized") {
+		t.Errorf("summary must not report visualization state; got:\n%s", output)
 	}
 }
 
@@ -1997,20 +1997,14 @@ func TestPrintJSON_RecordKindsRoundTrip(t *testing.T) {
 	if err := printJSON(&buf, result); err != nil {
 		t.Fatalf("printJSON: %v", err)
 	}
+	if bytes.Contains(buf.Bytes(), []byte("trackedNotVisualized")) {
+		t.Fatal("JSON harvest report must not carry visualization state")
+	}
 	var decoded jsonPipelineResult
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode JSON output: %v", err)
 	}
 	if len(decoded.Summary.RefusedRecordKinds) != 1 || decoded.Summary.RefusedRecordKinds[0].Kind != "child.started" {
 		t.Errorf("JSON summary refused kinds = %+v, want one child.started row", decoded.Summary.RefusedRecordKinds)
-	}
-	foundAttachment := false
-	for _, row := range decoded.TrackedNotVisualized {
-		if row.Harness == ingest.HarnessClaudeCode && row.Kind == "attachment" {
-			foundAttachment = true
-		}
-	}
-	if !foundAttachment {
-		t.Errorf("JSON tracked-not-visualized omits claude-code/attachment: %+v", decoded.TrackedNotVisualized)
 	}
 }

@@ -1224,7 +1224,6 @@ type jsonPipelineResult struct {
 	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
 	IndexCoverage        *ingest.IndexCoverage        `json:"indexCoverage,omitempty"`
 	DiscoveryDiagnostics []ingest.DiscoveryDiagnostic `json:"discoveryDiagnostics,omitempty"`
-	TrackedNotVisualized []ingest.RecordKindTracked   `json:"trackedNotVisualized,omitempty"`
 }
 
 // jsonSessionResult is the JSON-safe equivalent of ingest.SessionResult.
@@ -1246,9 +1245,6 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 		IndexCoverage:        result.IndexCoverage,
 		DiscoveryDiagnostics: result.DiscoveryDiagnostics,
 	}
-	if registry, err := ingest.LoadRecordKindRegistry(); err == nil {
-		out.TrackedNotVisualized = registry.TrackedNotVisualized()
-	}
 	for _, sr := range result.Sessions {
 		js := jsonSessionResult{
 			SessionID:  sr.SessionID,
@@ -1266,15 +1262,11 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	return enc.Encode(out)
 }
 
-// printRecordKindsReport separates this run's retained/refused observations
-// from registry-wide display coverage. Retention counts occurrences and affected
-// sessions separately; a retained payload is never printed in the report.
+// printRecordKindsReport prints this run's retained and refused observations.
+// Retention counts occurrences and affected sessions separately; a retained
+// payload is never printed in the report.
 func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount, retained []ingest.RetainedUnknownKindCount) {
-	var tracked []ingest.RecordKindTracked
-	if registry, err := ingest.LoadRecordKindRegistry(); err == nil {
-		tracked = registry.TrackedNotVisualized()
-	}
-	if len(refused) == 0 && len(tracked) == 0 && len(retained) == 0 {
+	if len(refused) == 0 && len(retained) == 0 {
 		return
 	}
 	fmt.Fprintln(w, "record kinds:")
@@ -1286,13 +1278,6 @@ func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount
 	}
 	if len(refused) > 0 {
 		fmt.Fprintln(w, "  These captures stay incomplete; export and publication refuse them until a build represents the kinds.")
-	}
-	for _, row := range tracked {
-		match := ""
-		if row.Match == ingest.RecordKindPrefix {
-			match = " (prefix)"
-		}
-		fmt.Fprintf(w, "  registry coverage (not run observations), tracked, not visualized: %s/%s/%s/%s%s\n", row.Harness, row.Context, row.Namespace, row.Kind, match)
 	}
 }
 

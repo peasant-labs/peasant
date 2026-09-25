@@ -24,8 +24,7 @@ var retainedReportManifest []byte
 
 func TestRetainedUnknownReport(t *testing.T) {
 	var fixture struct {
-		CoverageExpected []string `yaml:"coverage_expected"`
-		Cases            []struct {
+		Cases []struct {
 			Name        string `yaml:"name"`
 			Harness     string `yaml:"harness"`
 			Namespace   string `yaml:"namespace"`
@@ -67,13 +66,8 @@ func TestRetainedUnknownReport(t *testing.T) {
 			if !strings.Contains(output.String(), c.Expected) {
 				t.Fatalf("missing occurrence/session distinction: %s", output.String())
 			}
-			if !strings.Contains(output.String(), "registry coverage (not run observations)") {
-				t.Fatal("global registry inventory is presented as run observations")
-			}
-			for _, expected := range fixture.CoverageExpected {
-				if !strings.Contains(output.String(), expected+"\n") {
-					t.Fatalf("missing qualified registry coverage %q: %s", expected, output.String())
-				}
+			if strings.Contains(output.String(), "not visualized") {
+				t.Fatalf("retained-kind report must not classify visualization: %s", output.String())
 			}
 			output.Reset()
 			if err := printJSON(&output, &ingest.PipelineResult{Summary: ingest.PipelineSummary{RetainedUnknownKinds: counts}}); err != nil {
@@ -85,13 +79,6 @@ func TestRetainedUnknownReport(t *testing.T) {
 			}
 			if !reflect.DeepEqual(decoded.Summary.RetainedUnknownKinds, counts) {
 				t.Fatal("JSON and human report disagree")
-			}
-			registry, err := ingest.LoadRecordKindRegistry()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(decoded.TrackedNotVisualized, registry.TrackedNotVisualized()) {
-				t.Fatal("JSON registry coverage lost qualified identities")
 			}
 		})
 	}
