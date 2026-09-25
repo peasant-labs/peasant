@@ -1,5 +1,17 @@
 package export
 
+// Export egress redaction (PROPOSAL-3 section 5.5): stored retained evidence
+// stays raw at rest; this package redacts at export time with the standard
+// baseline engine and refuses fail-closed on any redaction or cap failure.
+//
+// Local-owner detail exits stay raw by design and are intentionally untouched:
+// api.DetailPayloadWithReader / snapshot_detail.go, store_adapter.go,
+// detail_navigation.go, websocket.go, and server.go serve the owner's own
+// local data (display-to-owner on the owner-local API, consistent with
+// raw-local source artifacts). Diagnostics and errors on those paths carry
+// safe field paths only, never raw bytes or labels. Only this export egress
+// (and the push upload path with configured rules) emits the redacted form.
+
 import (
 	"encoding/json"
 	"fmt"
