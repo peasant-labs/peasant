@@ -1,0 +1,507 @@
+# Parser behavior, not a native-input allowlist. One declaration per line.
+# Inventories point at production admission/dispatch syntax. Unknown valid names
+# use fallback without a new declaration. Invalid known fields remain errors.
+version: 3
+harnesses:
+  claude-code:
+    adapter_version: 1
+    indexer_version: 18
+    index_version: 1
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete raw JSON and source coordinates in retainedUnknown
+      reason: Retain uninterpreted evidence and mark partial interpretation.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
+    inventories:
+      - context: retained-format-1
+        namespace: record
+        sources:
+          - {file: content_capture.go, symbol: claudeStrictRecordKinds}
+          - {file: content_capture.go, symbol: ClaudeIndexer.IndexTranscriptBytesForCapture, switch: line.Type}
+          - {file: claude_control_records.go, symbol: claudeControlRecordTypes}
+          - {file: claude_control_records.go, symbol: isClaudeControlRecordType, prefix_argument: recordType}
+        kinds:
+          - &text {kind: user, status: represented, preview: yes, payload: session entries}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: human}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: summary}
+          - {<<: *text, kind: result}
+          - &ignored {kind: progress, status: ignored-control, preview: no, payload: none, reason: Entryless control; unexpected conversation content remains a validation error.}
+          - {<<: *ignored, kind: queue-operation}
+          - {<<: *ignored, kind: file-history-snapshot}
+          - {<<: *ignored, kind: last-prompt}
+          - &control {kind: permission-mode, status: represented, preview: yes, payload: bounded control extra (oversized known controls retain identity only)}
+          - {<<: *control, kind: mode}
+          - {<<: *control, kind: agent-setting}
+          - {<<: *control, kind: agent-name}
+          - {<<: *control, kind: ai-title}
+          - {<<: *control, kind: atis-latch}
+          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra}
+          - {<<: *control, kind: bridge-session}
+          - {<<: *control, kind: started}
+          - {<<: *control, kind: cost-state}
+          - {<<: *control, kind: custom-title}
+          - {<<: *control, kind: file-history-delta}
+          - {<<: *control, kind: frame-link}
+          - {<<: *control, kind: fork-context-ref}
+          - {<<: *control, kind: worktree-state}
+          - {<<: *control, kind: launched}
+          - {<<: *control, kind: pr-link}
+          - {<<: *control, kind: artifact-, match: prefix}
+      - context: retained-format-1
+        namespace: system_subtype
+        sources:
+          - {file: content_capture.go, symbol: claudeStrictSystemSubtypes}
+          - {file: content_capture.go, symbol: ClaudeIndexer.IndexTranscriptBytesForCapture, switch: line.Subtype}
+        kinds:
+          - {<<: *ignored, kind: turn_duration}
+          - {<<: *control, kind: compact_boundary, payload: compactMetadata}
+          - {<<: *ignored, kind: stop_hook_summary}
+          - {<<: *text, kind: api_error}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds}
+          - {file: content_capture.go, symbol: validateCaptureContent, switch: block.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments}
+          - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
+          - {<<: *ignored, kind: tool_reference}
+  cursor:
+    adapter_version: 1
+    indexer_version: 17
+    index_version: 1
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: role
+        sources:
+          - {file: content_capture.go, symbol: captureRoleKinds}
+          - {file: unknown_jsonl.go, symbol: cursorCaptureRoleKinds}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: tool}
+          - {<<: *text, kind: human}
+      - context: retained-format-1
+        namespace: record
+        sources:
+          - {file: content_capture.go, symbol: cursorStrictRecordKinds}
+        kinds:
+          - {<<: *text, kind: turn_ended}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds, lists_only: true}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+  strike:
+    adapter_version: 1
+    indexer_version: 17
+    index_version: 1
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: record
+        sources:
+          - {file: strike.go, symbol: knownStrikeEventKinds}
+          - {file: strike_indexer.go, symbol: StrikeIndexer.parseWithCompletion, switch: envelope.Type}
+          - {file: content_capture.go, symbol: StrikeIndexer.IndexTranscriptBytesForCapture, switch: env.Type}
+        kinds:
+          - {<<: *ignored, kind: session.started}
+          - {<<: *ignored, kind: session.titled}
+          - {<<: *ignored, kind: model.selected}
+          - {<<: *text, kind: user.message}
+          - &structural {kind: turn.started, status: represented, preview: no, payload: state on owning entry; no independent row}
+          - {<<: *structural, kind: turn.completed}
+          - {<<: *text, kind: assistant.text}
+          - {<<: *text, kind: assistant.text.delta}
+          - {<<: *text, kind: assistant.message.delta}
+          - {<<: *text, kind: text.delta}
+          - {<<: *text, kind: assistant.reasoning}
+          - {<<: *text, kind: assistant.reasoning.delta}
+          - {<<: *text, kind: reasoning.delta}
+          - {<<: *text, kind: assistant.thinking.delta}
+          - {<<: *tool, kind: tool.begin}
+          - {<<: *result, kind: tool.output}
+          - {<<: *result, kind: tool.end}
+          - {<<: *tool, kind: process.started}
+          - {<<: *result, kind: process.output}
+          - {<<: *result, kind: process.exited}
+          - {<<: *structural, kind: usage.reported}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds, lists_only: true}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+  pi:
+    adapter_version: 2
+    indexer_version: 17
+    index_version: 1
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: entry
+        sources:
+          - {file: pi_source.go, symbol: piEntryType.UnmarshalJSON, switch: value}
+        kinds:
+          - {<<: *ignored, kind: session, reason: Required v3 document header; no conversation row.}
+          - {<<: *text, kind: message, payload: PiExtra state and usage; role/block dependent content}
+          - &carrier {kind: thinking_level_change, status: tracked-only, preview: no, payload: PiExtra state carrier}
+          - {<<: *carrier, kind: model_change}
+          - {<<: *text, kind: compaction, payload: summary and PiExtra usage/native metadata}
+          - {<<: *text, kind: branch_summary, payload: summary and PiExtra usage/native metadata}
+          - {<<: *carrier, kind: custom, payload: PiExtra native metadata}
+          - {<<: *text, kind: custom_message, payload: text/media and PiExtra native metadata}
+          - {<<: *carrier, kind: label}
+          - {<<: *carrier, kind: session_info}
+      - context: retained-format-1
+        namespace: message_role
+        sources:
+          - {file: pi_indexer.go, symbol: piMessageRole.UnmarshalJSON, switch: value}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *result, kind: toolResult}
+          - {<<: *text, kind: bashExecution, payload: shell parent and paired execute tool entries}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: pi_indexer.go, symbol: piBlockType.UnmarshalJSON, switch: value}
+          - {file: pi_indexer.go, symbol: piContent, switch: block.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *text, kind: image, payload: textual media marker}
+          - {<<: *tool, kind: toolCall}
+  codex:
+    adapter_version: 1
+    indexer_version: 17
+    index_version: 1
+    native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: envelope
+        sources:
+          - {file: content_capture.go, symbol: codexStrictEnvelopeKinds}
+          - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: env.Type}
+        kinds:
+          - {<<: *ignored, kind: session_meta}
+          - {<<: *ignored, kind: turn_context}
+          - {<<: *structural, kind: event_msg}
+          - {<<: *structural, kind: response_item}
+      - context: retained-format-1
+        namespace: event
+        sources:
+          - {file: content_capture.go, symbol: codexStrictEventMsgKinds}
+          - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: event.Type}
+        kinds:
+          - {<<: *ignored, kind: token_count}
+          - {<<: *ignored, kind: task_started}
+          - {<<: *ignored, kind: task_complete}
+          - {<<: *ignored, kind: turn_aborted}
+          - {<<: *ignored, kind: user_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_reasoning, reason: Mirrored content is represented by response items.}
+      - context: retained-format-1
+        namespace: response_item
+        sources:
+          - {file: content_capture.go, symbol: codexStrictResponsePayloadKinds}
+          - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: payload.Type}
+        kinds:
+          - {<<: *text, kind: message}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: function_call}
+          - {<<: *tool, kind: custom_tool_call}
+          - {<<: *result, kind: function_call_output}
+          - {<<: *result, kind: custom_tool_call_output}
+      - context: retained-format-1
+        namespace: message_block
+        sources:
+          - {file: content_capture.go, symbol: codexStrictMessageBlockKinds}
+        kinds:
+          - {<<: *text, kind: input_text}
+          - {<<: *text, kind: output_text}
+      - context: retained-format-1
+        namespace: reasoning_summary
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningSummaryKinds}
+        kinds:
+          - {<<: *text, kind: summary_text}
+      - context: retained-format-1
+        namespace: reasoning_content
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningContentKinds}
+        kinds:
+          - {<<: *text, kind: reasoning_text}
+          - {<<: *text, kind: text}
+      - context: native-generation
+        namespace: envelope
+        sources:
+          - {file: codex_history_replay.go, symbol: recognizedCodexEnvelopeType, switch: envelopeType}
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayRecord, switch: record.EnvelopeType}
+        kinds:
+          - {<<: *structural, kind: session_meta}
+          - {<<: *structural, kind: turn_context}
+          - {<<: *structural, kind: event_msg}
+          - {<<: *structural, kind: response_item}
+          - {<<: *structural, kind: compacted}
+      - context: native-generation
+        namespace: event
+        sources:
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage, switch: payload.Type, complete: true}
+          - {file: codex_unknown.go, symbol: prepareCodexRecord, switch: variant}
+          - {file: content_capture.go, symbol: codexStrictEventMsgKinds}
+        kinds:
+          - {<<: *ignored, kind: token_count, reason: Metadata event; no conversation row.}
+          - {<<: *ignored, kind: user_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_message, reason: Mirrored content is represented by response items.}
+          - {<<: *ignored, kind: agent_reasoning, reason: Mirrored content is represented by response items.}
+          - {<<: *structural, kind: item_started}
+          - {<<: *structural, kind: item_completed}
+          - {<<: *structural, kind: turn_started}
+          - {<<: *structural, kind: task_started}
+          - {<<: *structural, kind: turn_complete}
+          - {<<: *structural, kind: task_complete}
+          - {<<: *structural, kind: thread_rolled_back}
+          - {<<: *structural, kind: turn_aborted}
+      - context: native-generation
+        namespace: response_item
+        sources:
+          - {file: codex_history_replay.go, symbol: codexResponseNativeType, switch: payloadType}
+        kinds:
+          - {<<: *text, kind: message}
+          - {<<: *text, kind: agent_message}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: function_call}
+          - {<<: *tool, kind: custom_tool_call}
+          - {<<: *result, kind: function_call_output}
+          - {<<: *result, kind: custom_tool_call_output}
+      - context: native-generation
+        namespace: item_body
+        sources:
+          - {file: codex_history_replay.go, symbol: codexItemNativeType, switch: body.Type}
+          - {file: codex_history_replay.go, symbol: codexResponseNativeType, switch: payloadType}
+        kinds:
+          - {<<: *text, kind: message}
+          - {<<: *text, kind: agent_message}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: function_call}
+          - {<<: *tool, kind: custom_tool_call}
+          - {<<: *result, kind: function_call_output}
+          - {<<: *result, kind: custom_tool_call_output}
+          - {<<: *text, kind: UserMessage}
+          - {<<: *text, kind: AgentMessage}
+          - {<<: *text, kind: Reasoning}
+          - {<<: *result, kind: FunctionCallOutput}
+          - &nativeitem {kind: CommandExecution, status: represented, preview: yes, payload: classified native item and provenance}
+          - {<<: *nativeitem, kind: FileChange}
+          - {<<: *nativeitem, kind: SubAgentActivity}
+          - {<<: *nativeitem, kind: CollabAgentToolCall}
+          - {<<: *nativeitem, kind: ContextCompaction}
+          - {<<: *nativeitem, kind: Extension}
+          - {<<: *nativeitem, kind: Plan}
+          - {<<: *nativeitem, kind: HookPrompt}
+          - {<<: *nativeitem, kind: WebSearch}
+          - {<<: *nativeitem, kind: ImageView}
+          - {<<: *nativeitem, kind: ImageGeneration}
+          - {<<: *nativeitem, kind: McpToolCall}
+          - {<<: *nativeitem, kind: DynamicToolCall}
+          - {<<: *nativeitem, kind: EnteredReviewMode}
+          - {<<: *nativeitem, kind: ExitedReviewMode}
+      - context: native-generation
+        namespace: message_block
+        sources:
+          - {file: codex_provenance.go, symbol: codexMediaContentTypes}
+          - {file: codex_provenance.go, symbol: codexBlockModality, switch: contentType}
+          - {file: content_capture.go, symbol: codexStrictMessageBlockKinds}
+        kinds:
+          - {<<: *text, kind: input_text}
+          - {<<: *text, kind: output_text}
+          - &media {kind: input_image, status: represented, preview: yes, payload: media modality and textual marker}
+          - {<<: *media, kind: image}
+          - {<<: *media, kind: image_url}
+          - {<<: *media, kind: input_audio}
+          - {<<: *media, kind: audio}
+      - context: native-generation
+        namespace: reasoning_summary
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningSummaryKinds}
+        kinds:
+          - {<<: *text, kind: summary_text}
+      - context: native-generation
+        namespace: reasoning_content
+        sources:
+          - {file: content_capture.go, symbol: codexStrictReasoningContentKinds}
+        kinds:
+          - {<<: *text, kind: reasoning_text}
+          - {<<: *text, kind: text}
+      - context: native-generation
+        namespace: content_kind
+        sources:
+          - {file: codex_provenance.go, symbol: codexContentKindRegistry}
+        kinds:
+          - {<<: *text, kind: user.text}
+          - {<<: *media, kind: user.image}
+          - {<<: *media, kind: user.audio}
+          - {<<: *text, kind: user.answered_question}
+          - {<<: *text, kind: multi_agent.inter_agent_message}
+          - {<<: *text, kind: multi_agent.inter_agent_completion_message}
+          - {<<: *text, kind: compaction.summary}
+          - {<<: *text, kind: shell.user_command}
+          - &diagnostic {<<: *text, kind: images.resize_notice, payload: diagnostic text and provenance; no standalone submitted-input count without a media sibling}
+          - {<<: *diagnostic, kind: images.preparation_error}
+          - {<<: *diagnostic, kind: images.unsupported}
+          - {<<: *diagnostic, kind: audio.unsupported}
+          - {<<: *text, kind: agents_md.instructions}
+          - {<<: *text, kind: environments.environment_context}
+          - {<<: *text, kind: environments.instructions}
+          - {<<: *text, kind: model.base_instructions}
+          - {<<: *text, kind: generic.developer_instructions}
+          - {<<: *text, kind: managed_config.developer_instructions}
+          - {<<: *text, kind: permissions.instructions}
+          - {<<: *text, kind: persistent_mode.instructions}
+          - {<<: *text, kind: personality.spec_instructions}
+          - {<<: *text, kind: collaboration_mode.instructions}
+          - {<<: *text, kind: model_switch.instructions}
+          - {<<: *text, kind: hooks.additional_context}
+          - {<<: *text, kind: skills.catalog}
+          - {<<: *text, kind: skills.selected_skill_instructions}
+          - {<<: *text, kind: memories.instructions}
+          - {<<: *text, kind: notes.thread_hint}
+          - {<<: *text, kind: apps.instructions}
+          - {<<: *text, kind: plugins.instructions}
+          - {<<: *text, kind: plugins.usage_instructions}
+          - {<<: *text, kind: plugins.recommendations}
+          - {<<: *text, kind: tools.deferred_namespaces}
+          - {<<: *text, kind: multi_agent.subagent_notification}
+          - {<<: *text, kind: multi_agent.role_instructions}
+          - {<<: *text, kind: multi_agent.mode_instructions}
+          - {<<: *text, kind: multi_agent.usage_hint}
+          - {<<: *text, kind: guardian.policy}
+          - {<<: *text, kind: guardian.node_repl_policy}
+          - {<<: *text, kind: guardian.review_evidence}
+          - {<<: *text, kind: guardian.node_repl_review_evidence}
+          - {<<: *text, kind: guardian.trusted_tool}
+          - {<<: *text, kind: guardian.trusted_skills}
+          - {<<: *text, kind: guardian.approved_action}
+          - {<<: *text, kind: guardian.followup_review_reminder}
+          - {<<: *text, kind: generic.turn_aborted}
+          - {<<: *text, kind: current_time.reminder}
+          - {<<: *text, kind: token_budget.context_window}
+          - {<<: *text, kind: token_budget.context_window_guidance}
+          - {<<: *text, kind: token_budget.remaining_tokens}
+          - {<<: *text, kind: token_budget.reminder}
+          - {<<: *text, kind: rollout_budget.remaining_tokens}
+          - {<<: *text, kind: compaction.auto_fallback_prompt}
+          - {<<: *text, kind: permissions.approved_command_prefix_saved}
+          - {<<: *text, kind: network_proxy.rule_saved}
+          - {<<: *text, kind: user_verification.notice}
+  opencode:
+    adapter_version: 2
+    indexer_version: 17
+    index_version: 1
+    native_versions: {adapter_version: 3, indexer_version: 18, index_version: 2}
+    fallback: *fallback
+    inventories:
+      - context: retained-format-1
+        namespace: part
+        sources:
+          - {file: opencode_capture.go, symbol: openCodeCaptureControlKinds}
+          - {file: opencode_indexer.go, symbol: knownOpenCodeSemanticPartKinds}
+        kinds:
+          - {<<: *ignored, kind: step-start}
+          - {<<: *ignored, kind: step-finish}
+          - {<<: *ignored, kind: snapshot}
+          - {<<: *ignored, kind: patch}
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: tool}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+          - {<<: *text, kind: compaction}
+          - {<<: *text, kind: subtask}
+          - {<<: *text, kind: agent}
+      - context: retained-format-1
+        namespace: row
+        sources:
+          - {file: opencode_current_projection.go, symbol: normalizeOpenCodeCurrentRowAt, switch: row.Type.String(), complete: true}
+          - {file: opencode_unknown.go, symbol: knownOpenCodeCurrentRow, switch: kind, complete: true}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: shell}
+          - {<<: *text, kind: synthetic}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: skill}
+          - {<<: *text, kind: compaction}
+          - {<<: *text, kind: agent-switched}
+          - {<<: *text, kind: model-switched}
+      - context: retained-format-1
+        namespace: assistant_content
+        sources:
+          - {file: opencode_current_projection.go, symbol: appendOpenCodeCurrentAssistantContent, switch: discriminator.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeCurrent, equal_operand: header.Type, complete: true}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: tool}
+      - context: native-generation
+        namespace: row
+        sources:
+          - {file: opencode_provenance_decode.go, symbol: DecodeOpenCodeProvenanceRow, switch: row.Type, complete: true}
+          - {file: opencode_unknown.go, symbol: knownOpenCodeCurrentRow, switch: kind, complete: true}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: shell}
+          - {<<: *text, kind: synthetic}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: skill}
+          - {<<: *text, kind: compaction}
+          - {<<: *text, kind: agent-switched}
+          - {<<: *text, kind: model-switched}
+      - context: native-generation
+        namespace: assistant_content
+        sources:
+          - {file: opencode_current_projection.go, symbol: appendOpenCodeCurrentAssistantContent, switch: discriminator.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeCurrent, equal_operand: header.Type, complete: true}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: reasoning}
+          - {<<: *tool, kind: tool}
+      - context: retained-format-1
+        namespace: content_block
+        sources:
+          - {file: opencode_unknown.go, symbol: retainOpenCodeSemantic, equal_operand: discriminator.Type}
+        kinds:
+          - {<<: *text, kind: text}
+      - context: retained-format-1
+        namespace: tool_content
+        sources:
+          - {file: opencode_v2_projection.go, symbol: decodeOpenCodeV2ToolState, switch: value.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeToolContent, equal_operand: header.Type, complete: true}
+        kinds:
+          - {<<: *result, kind: text}
+          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME}
+      - context: native-generation
+        namespace: tool_content
+        sources:
+          - {file: opencode_v2_projection.go, symbol: decodeOpenCodeV2ToolState, switch: value.Type}
+          - {file: opencode_unknown.go, symbol: prepareOpenCodeToolContent, equal_operand: header.Type, complete: true}
+        kinds:
+          - {<<: *result, kind: text}
+          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME}

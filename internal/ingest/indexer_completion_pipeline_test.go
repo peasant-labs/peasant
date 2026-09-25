@@ -179,6 +179,10 @@ func seedCompletionPeer(t *testing.T, filesystem *testutil.MemFS, database *stor
 	t.Helper()
 	metadata := makeReindexMeta(t, string(sessionID), "/synthetic/original.jsonl")
 	metadata.ModelHarness = harness
+	// Only the parser is stale in this fixture. An omitted adapter stamp means
+	// baseline revision 1 and would independently request metadata refresh.
+	adapterVersion := ingest.HarvesterVersionRegistry[harness].AdapterVersion
+	metadata.AdapterVersion = &adapterVersion
 	metadata.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	if harness == ingest.HarnessOpenCode {
 		metadata.Source.Format = ingest.SourceFormatJSON

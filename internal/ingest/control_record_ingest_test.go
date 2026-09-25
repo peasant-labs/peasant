@@ -1,9 +1,11 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +35,7 @@ type controlRecordIngestCase struct {
 	ExportAccepted      bool              `yaml:"export_accepted"`
 	PublicationReady    bool              `yaml:"publication_ready"`
 	PreflightAccepts    bool              `yaml:"preflight_accepts"`
+	RetainedKind        string            `yaml:"retained_kind"`
 }
 
 func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
@@ -41,8 +44,14 @@ func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
 		Required []string                  `yaml:"required_names"`
 		Cases    []controlRecordIngestCase `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(controlRecordIngestYAML, &document); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(controlRecordIngestYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("trailing fixture document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range document.Cases {
@@ -145,27 +154,34 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				if !fixture.ExportAccepted {
 					t.Fatal("the complete-content reader accepted an incomplete capture")
 				}
-				entry := findControlIngestEntry(snapshot.Entries, fixture)
-				if entry == nil {
-					t.Fatalf("the stored session lost its %q control record", fixture.ControlPartType)
-				}
-				if entry.ContentPreview == nil || *entry.ContentPreview != fixture.ControlPreview {
-					t.Fatalf("stored control preview = %v, want %q", entry.ContentPreview, fixture.ControlPreview)
-				}
-				if entry.Extra == nil {
-					t.Fatal("stored control record lost its payload")
-				}
-				var extra map[string]json.RawMessage
-				if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
-					t.Fatalf("stored control payload is not JSON: %v", err)
-				}
-				for key, want := range fixture.ControlExtraMembers {
-					raw, ok := extra[key]
-					if !ok {
-						t.Fatalf("stored control payload lacks %q", key)
+				if fixture.RetainedKind != "" {
+					records, err := ingest.ProjectRetainedUnknown(snapshot.Entries, ingest.HarnessClaudeCode)
+					if err != nil || len(records) != 1 || records[0].Kind != fixture.RetainedKind {
+						t.Fatalf("retained evidence missing: %+v %v", records, err)
 					}
-					if got := canonicalJSONValue(t, string(raw)); got != canonicalJSONValue(t, want) {
-						t.Fatalf("stored control payload[%q] = %s, want %s", key, got, want)
+				} else {
+					entry := findControlIngestEntry(snapshot.Entries, fixture)
+					if entry == nil {
+						t.Fatalf("the stored session lost its %q control record", fixture.ControlPartType)
+					}
+					if entry.ContentPreview == nil || *entry.ContentPreview != fixture.ControlPreview {
+						t.Fatalf("stored control preview = %v, want %q", entry.ContentPreview, fixture.ControlPreview)
+					}
+					if entry.Extra == nil {
+						t.Fatal("stored control record lost its payload")
+					}
+					var extra map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+						t.Fatalf("stored control payload is not JSON: %v", err)
+					}
+					for key, want := range fixture.ControlExtraMembers {
+						raw, ok := extra[key]
+						if !ok {
+							t.Fatalf("stored control payload lacks %q", key)
+						}
+						if got := canonicalJSONValue(t, string(raw)); got != canonicalJSONValue(t, want) {
+							t.Fatalf("stored control payload[%q] = %s, want %s", key, got, want)
+						}
 					}
 				}
 			}
@@ -175,6 +191,9 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				t.Fatalf("export accepted=%v, want %v (%v)", exportErr == nil, fixture.ExportAccepted, exportErr)
 			}
 			if fixture.ExportAccepted {
+				if fixture.RetainedKind != "" && (exported.Diagnostics == nil || !exported.Diagnostics.Partial || len(exported.RetainedUnknown) != 1) {
+					t.Fatal("export lost partial evidence")
+				}
 				if exported == nil || !strings.Contains(exportPayloadText(t, exported), fixture.ControlPreview) {
 					t.Fatalf("exported detail does not carry the control preview %q", fixture.ControlPreview)
 				}

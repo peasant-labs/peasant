@@ -1,7 +1,9 @@
 package ingest_test
 
 import (
+	"bytes"
 	_ "embed"
+	"io"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -42,8 +44,14 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			ExpectedHarnesses []ingest.Harness `yaml:"expectedHarnesses"`
 		} `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(harvesterPipelineYAML, &fixtures); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(harvesterPipelineYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixtures); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("harvester pipeline fixture must contain one YAML document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
@@ -146,9 +154,19 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			}
 		})
 	}
+	required := make(map[string]bool)
 	for _, name := range fixtures.RequiredNames {
+		if name == "" || required[name] {
+			t.Fatalf("invalid required fixture name %q", name)
+		}
+		required[name] = true
 		if !names[name] {
 			t.Fatalf("missing required fixture %q", name)
+		}
+	}
+	for name := range names {
+		if !required[name] {
+			t.Errorf("unlisted harvester fixture %q", name)
 		}
 	}
 }

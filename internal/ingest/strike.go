@@ -113,19 +113,52 @@ func decodeStrikeEventData(raw json.RawMessage) (strikeEventData, error) {
 	return data, nil
 }
 
+// knownStrikeEventKinds is the closed set of Strike event types this build
+// parses. It is the single source of truth for isKnownStrikeEvent, and the
+// record-kind vocabulary completeness check compares it with the declaration.
+var knownStrikeEventKinds = []strikeEventType{
+	strikeEventSessionStarted,
+	strikeEventSessionTitled,
+	strikeEventUserMessage,
+	strikeEventTurnStarted,
+	strikeEventTurnCompleted,
+	strikeEventAssistantText,
+	strikeEventAssistantTextDelta,
+	strikeEventMessageDelta,
+	strikeEventTextDelta,
+	strikeEventReasoning,
+	strikeEventReasoningDelta,
+	strikeEventReasoningDeltaWire,
+	strikeEventThinkingDelta,
+	strikeEventToolBegin,
+	strikeEventToolOutput,
+	strikeEventToolEnd,
+	strikeEventProcessStarted,
+	strikeEventProcessOutput,
+	strikeEventProcessExited,
+	strikeEventUsageReported,
+	strikeEventModelSelected,
+}
+
 func isKnownStrikeEvent(eventType strikeEventType) bool {
-	switch eventType {
-	case strikeEventSessionStarted, strikeEventSessionTitled, strikeEventUserMessage,
-		strikeEventTurnStarted, strikeEventTurnCompleted, strikeEventAssistantText,
-		strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta,
-		strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire,
-		strikeEventThinkingDelta, strikeEventToolBegin, strikeEventToolOutput,
-		strikeEventToolEnd, strikeEventProcessStarted, strikeEventProcessOutput,
-		strikeEventProcessExited, strikeEventUsageReported, strikeEventModelSelected:
-		return true
-	default:
-		return false
+	_, ok := knownStrikeEventKind(string(eventType))
+	return ok
+}
+
+func knownStrikeEventKind(raw string) (strikeEventType, bool) {
+	for _, known := range knownStrikeEventKinds {
+		if raw == string(known) {
+			return known, true
+		}
 	}
+	return "", false
+}
+
+// strikeMetadataEventKinds names the known Strike events that carry session
+// metadata rather than conversation content. The strict capture path records
+// them as ignored metadata; keep this set aligned with its metadata branch.
+func strikeMetadataEventKinds() []strikeEventType {
+	return []strikeEventType{strikeEventSessionStarted, strikeEventSessionTitled, strikeEventModelSelected}
 }
 
 type strikeSidecar struct {

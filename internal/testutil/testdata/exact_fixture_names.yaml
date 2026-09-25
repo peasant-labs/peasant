@@ -1,0 +1,24 @@
+requiredNames:
+  - exact-membership
+  - missing-required-case
+  - unmanifested-case
+  - same-count-different-membership
+cases:
+  - name: exact-membership
+    required: [first, second]
+    actual: [second, first]
+  - name: missing-required-case
+    required: [first, second]
+    actual: [first]
+    reject: true
+    reason: missing required case
+  - name: unmanifested-case
+    required: [first]
+    actual: [first, surprise]
+    reject: true
+    reason: undeclared case
+  - name: same-count-different-membership
+    required: [first, second]
+    actual: [first, surprise]
+    reject: true
+    reason: missing required case

@@ -5,6 +5,27 @@ initial: |
   {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"initial visible text","timestamp":1767312001000}}
 valid_append: |
   {"type":"message","id":"u2","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","message":{"role":"user","content":"acquired visible text","timestamp":1767312002000}}
+requiredNames:
+  - malformed-final-newline
+  - malformed-final-no-newline
+  - malformed-before-incomplete-tail
+  - incomplete-before-blank-final
+  - incomplete-before-whitespace-final
+  - duplicate-complete
+  - duplicate-incomplete
+  - null-complete
+  - unknown-type
+  - unknown-before-invalid-known-block
+  - unknown-before-invalid-known-field
+  - dangling-parent
+  - duplicate-entry-id
+  - invalid-utf8
+  - incomplete-final
+  - invalid-utf8-incomplete
+  - invalid-surrogate-incomplete
+  - incomplete-final-newline
+  - valid-append
+  - valid-blank-lines
 cases:
   - name: malformed-final-newline
     tail: "{\"type\":!}\n"
@@ -32,6 +53,12 @@ cases:
     reject: true
   - name: unknown-type
     tail: '{"type":"future","id":"x","parentId":"u2"}'
+    unknown: true
+  - name: unknown-before-invalid-known-block
+    tail: '{"type":"message","id":"x","parentId":"u2","message":{"role":"assistant","content":[{"type":"future","value":true},{"type":"text","text":17}]}}'
+    reject: true
+  - name: unknown-before-invalid-known-field
+    tail: '{"type":"message","id":"x","parentId":"u2","message":{"role":"assistant","model":17,"content":[{"type":"future"}]}}'
     reject: true
   - name: dangling-parent
     tail: '{"type":"message","id":"x","parentId":"missing","message":{"role":"user","content":"bad ref"}}'

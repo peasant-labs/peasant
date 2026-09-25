@@ -420,6 +420,19 @@ func writeSnapshotDelivery(sb *strings.Builder, delivered map[string]bool) {
 // field of one captured message, so a payload edit changes the digest while the
 // canonical encoding stays deterministic across runs.
 func writeSnapshotMessage(sb *strings.Builder, msg OpenCodeProvenanceMessage) {
+	for _, record := range msg.RetainedUnknown {
+		writeSnapshotField(sb, "opaque.harness", string(record.Harness))
+		writeSnapshotField(sb, "opaque.namespace", record.Namespace)
+		writeSnapshotField(sb, "opaque.kind", record.Kind)
+		writeSnapshotField(sb, "opaque.source", record.Position.SourceID)
+		writeSnapshotField(sb, "opaque.pointer", record.Position.JSONPointer)
+		writeSnapshotField(sb, "opaque.payload", string(record.Payload))
+		fmt.Fprintf(sb, "opaque.line=%d sequence=%d;", record.Position.Line, record.Position.Sequence)
+		if public := record.Position.Public; public != nil {
+			writeSnapshotField(sb, "opaque.stream", public.SourceRef)
+			fmt.Fprintf(sb, "opaque.record=%d position=%d;", public.RecordIndex, public.Position)
+		}
+	}
 	writeSnapshotField(sb, "m.msgid", msg.MessageID)
 	writeSnapshotField(sb, "m.session", msg.SessionID)
 	writeSnapshotField(sb, "m.shape", string(msg.Shape))

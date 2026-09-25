@@ -5,7 +5,8 @@ requiredNames:
   - native-pi-corrupt-chunk-refuses-consumers
   - native-pi-corrupt-hash-refuses-consumers
   - native-pi-force-backfill-preserves-annotations-and-commits
-  - native-opencode-omission-refuses-publication
+  - native-opencode-retained-unknown-requires-model
+  - unaccounted-source-omission-refuses-publication
   - normal-strike-structured-output-siblings
   - full-user-assistant-unicode-late-secret
   - incomplete-previews-but-refuses-export-and-publication
@@ -64,17 +65,23 @@ cases:
     secret: sk-ant-api03-SYNCDOORKEY00000000000x
     pii: synthetic.person@example.test
   - <<: *full
-    name: native-opencode-omission-refuses-publication
-    # The omitted native conversation was never recorded, so the previewer has
-    # no rows to show. It must still answer instead of failing: "nothing was
-    # recorded" is a different, and true, thing to show a person.
-    damage: source-omitted
+    name: native-opencode-retained-unknown-requires-model
+    retainedpayload: '{"time":{"created":2},"text":"SYNTHETIC-LOST-TRACE"}'
+    knownsibling: synthetic known request
+    # The future row is retained, not omitted. Export is partial and lossless;
+    # publication still requires a real observed model, absent from this source.
+    damage: retained-no-model
     previewable: true
-    wantremedy: peasant ingest
+    wantremedy: no model recorded
     harness: opencode
     sessionid: ses_3cd91f52effeXd3QAJ54jCtrl1
     nativesource: current-unknown-conversation-omission
     source: '{}'
+  - <<: *full
+    name: unaccounted-source-omission-refuses-publication
+    damage: source-omitted
+    previewable: true
+    wantremedy: peasant ingest
   - <<: *full
     name: normal-strike-structured-output-siblings
     roles: []

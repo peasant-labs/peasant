@@ -1,0 +1,128 @@
+sessionID: 11111111-2222-4333-8444-555555555555
+header: '{"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/synthetic/project"}'
+requiredNames:
+  - unknown-only-large
+  - mixed-namespaces
+  - active-branch-ownership
+  - known-additive-fields
+  - known-additive-usage-fields
+  - custom-block
+  - invalid-known-after-unknown
+  - unknown-dangling-parent
+  - unknown-cycle
+  - invalid-discriminator
+  - invalid-known-message-field
+  - incomplete-tail
+  - physical-and-record-coordinates
+  - forward-parent-source-order
+  - framed-record-publication
+cases:
+  - name: unknown-only-large
+    paddingBytes: 12000
+    source: |
+      {"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","embedded":"{\"secret\":\"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\"}","number":9007199254740993,"nullable":null,"padding":"PADDING"}}
+    expected:
+      - namespace: entry
+        kind: future
+        id: x
+        line: 2
+        position: 1
+        pointer: ''
+        payload: '{"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","embedded":"{\"secret\":\"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\"}","number":9007199254740993,"nullable":null,"padding":"PADDING"}}'
+        redacted: '{"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"\u003cGITHUB_PAT\u003e","embedded":"{\"secret\":\"\\u003cGITHUB_PAT\\u003e\"}","number":9007199254740993,"nullable":null,"padding":"PADDING"}}'
+  - name: mixed-namespaces
+    publish: true
+    paddingBytes: 12000
+    source: |
+      {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"before"}}
+      {"type":"future","id":"x","parentId":"u","payload":{"value":1,"number":9007199254740993,"exponent":1.2300e+07,"secret":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","padding":"PADDING"}}
+      {"type":"message","id":"m","parentId":"x","message":{"role":"future","content":{"new":"shape","padding":"PADDING"}}}
+      {"type":"message","id":"a","parentId":"m","message":{"role":"assistant","model":"observed-model","content":[{"type":"text","text":"after"},{"type":"future","text":{"new":true},"padding":"PADDING"},{"type":"text","text":"last"},{"type":"future","payload":2,"padding":"PADDING"}]}}
+      {"type":"session_info","id":"n","parentId":"a","name":"fixture title"}
+    content: [before, "after\nlast"]
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 3, position: 3, pointer: '', payload: '{"type":"future","id":"x","parentId":"u","payload":{"value":1,"number":9007199254740993,"exponent":1.2300e+07,"secret":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","padding":"PADDING"}}', redacted: '{"type":"future","id":"x","parentId":"u","payload":{"value":1,"number":9007199254740993,"exponent":1.2300e+07,"secret":"\u003cGITHUB_PAT\u003e","padding":"PADDING"}}'}
+      - {namespace: message_role, kind: future, id: m, line: 4, position: 5, pointer: /message, payload: '{"role":"future","content":{"new":"shape","padding":"PADDING"}}'}
+      - {namespace: content_block, kind: future, id: a, line: 5, position: 9, pointer: /message/content/1, payload: '{"type":"future","text":{"new":true},"padding":"PADDING"}'}
+      - {namespace: content_block, kind: future, id: a, line: 5, position: 11, pointer: /message/content/3, payload: '{"type":"future","payload":2,"padding":"PADDING"}'}
+  - name: active-branch-ownership
+    source: |
+      {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"root"}}
+      {"type":"future","id":"inactive","parentId":"u","payload":"not selected"}
+      {"type":"future","id":"active","parentId":"u","payload":"selected"}
+      {"type":"message","id":"a","parentId":"active","message":{"role":"assistant","content":"leaf"}}
+    content: [root, leaf]
+    expected:
+      - {namespace: entry, kind: future, id: active, line: 4, position: 4, pointer: '', payload: '{"type":"future","id":"active","parentId":"u","payload":"selected"}'}
+  - name: known-additive-fields
+    source: |
+      {"type":"message","id":"u","parentId":null,"extra":null,"message":{"role":"user","future":null,"content":[{"type":"text","text":"known","extra":null}]}}
+    content: [known]
+  - name: known-additive-usage-fields
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","usage":{"input":1,"future":null,"cost":{"total":0.1,"future":{"new":"shape"}}},"content":"known usage"}}
+    content: [known usage]
+  - name: custom-block
+    source: |
+      {"type":"custom_message","id":"u","parentId":null,"content":[{"type":"text","text":"context"},{"type":"future","payload":true}]}
+    content: [context]
+    expected:
+      - {namespace: content_block, kind: future, id: u, line: 2, position: 3, pointer: /content/1, payload: '{"type":"future","payload":true}'}
+  - name: invalid-known-after-unknown
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"future","payload":true},{"type":"text","text":5}]}}
+    reject: true
+  - name: unknown-dangling-parent
+    source: |
+      {"type":"future","id":"x","parentId":"missing"}
+    reject: true
+  - name: unknown-cycle
+    source: |
+      {"type":"future","id":"x","parentId":"x"}
+    reject: true
+  - name: invalid-discriminator
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":null}]}}
+    reject: true
+  - name: invalid-known-message-field
+    source: |
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":5,"content":[{"type":"future"}]}}
+    reject: true
+  - name: incomplete-tail
+    source: |
+      {"type":"future","id":"x","parentId":null,"payload":true}
+      {"type":
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 2, position: 1, pointer: '', payload: '{"type":"future","id":"x","parentId":null,"payload":true}'}
+  - name: physical-and-record-coordinates
+    source: |
+
+      {"type":"future","id":"x","parentId":null,"payload":1}
+
+      {"type":"future","id":"y","parentId":"x","payload":2}
+    expected:
+      - {namespace: entry, kind: future, id: x, line: 3, sequence: 2, position: 1, pointer: '', payload: '{"type":"future","id":"x","parentId":null,"payload":1}'}
+      - {namespace: entry, kind: future, id: y, line: 5, sequence: 3, position: 2, pointer: '', payload: '{"type":"future","id":"y","parentId":"x","payload":2}'}
+  - name: forward-parent-source-order
+    source: |
+      {"type":"future","id":"x","parentId":"y","payload":1}
+      {"type":"future","id":"y","parentId":null,"payload":2}
+      {"type":"message","id":"a","parentId":"x","message":{"role":"assistant","content":"leaf"}}
+    content: [leaf]
+    expected:
+      - {namespace: entry, kind: future, id: y, line: 3, position: 2, pointer: '', payload: '{"type":"future","id":"y","parentId":null,"payload":2}'}
+      - {namespace: entry, kind: future, id: x, line: 2, position: 1, pointer: '', payload: '{"type":"future","id":"x","parentId":"y","payload":1}'}
+  - name: framed-record-publication
+    publish: true
+    paddingBytes: 12000
+    source: " \t{ \"type\" : \"future\", \"id\":\"x\", \"parentId\":null, \"summary\": {\"native\":true}, \"\\u006e\":9007199254740993, \"decimal\":1.2300e+07, \"zero\":-0, \"padding\":\"PADDING\", \"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\":\"secret key\", \"embedded\":\"{\\\"\\\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\\\":1}\" }\t \n{\"type\":\"message\",\"id\":\"a\",\"parentId\":\"x\",\"message\":{\"role\":\"assistant\",\"model\":\"observed-model\",\"content\":\"known leaf\"}}\n"
+    content: [known leaf]
+    expected:
+      - namespace: entry
+        kind: future
+        id: x
+        line: 2
+        position: 1
+        pointer: ''
+        payload: " \t{ \"type\" : \"future\", \"id\":\"x\", \"parentId\":null, \"summary\": {\"native\":true}, \"\\u006e\":9007199254740993, \"decimal\":1.2300e+07, \"zero\":-0, \"padding\":\"PADDING\", \"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\":\"secret key\", \"embedded\":\"{\\\"\\\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\\\":1}\" }\t "
+        redacted: " \t{ \"type\" : \"future\", \"id\":\"x\", \"parentId\":null, \"summary\": {\"native\":true}, \"\\u006e\":9007199254740993, \"decimal\":1.2300e+07, \"zero\":-0, \"padding\":\"PADDING\", \"\\u003cGITHUB_PAT\\u003e\":\"secret key\", \"embedded\":\"{\\\"\\\\u003cGITHUB_PAT\\\\u003e\\\":1}\" }\t "

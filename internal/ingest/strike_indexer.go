@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -15,8 +14,9 @@ import (
 
 // StrikeIndexer parses Strike's event JSONL into the existing SessionEntry tree.
 type StrikeIndexer struct {
-	fs          FileSystem
-	fullContent bool
+	retainUnknown bool
+	fs            FileSystem
+	fullContent   bool
 	// maxRecordBytes is the per-record read limit. Zero means the
 	// production limit; a test injects a small one so it can prove the
 	// over-limit path without building a record of production size.
@@ -82,28 +82,16 @@ func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session Disc
 		return ContentCaptureResult{}, captureFailure(session, 0, err)
 	}
 	inputHash := indexInputDigest(session, data, nil)
-	if !session.ContentOmitted {
-		capture, err := i.IndexTranscriptBytesForCapture(ctx, session, data)
-		if err == nil {
-			return ContentCaptureResult{Entries: capture.Entries, Complete: true, InputHash: inputHash, InputBytes: int64(len(data))}, nil
-		}
-		var unrepresented *UnrepresentedRecordError
-		if ctx.Err() != nil || !errors.As(err, &unrepresented) {
-			return ContentCaptureResult{}, err
-		}
-	}
-	// Filtered or unrepresented records: report the represented entries from
-	// the tolerant projection as an incomplete capture, never an empty one and
-	// never a certified one. A malformed transcript is refused above.
-	result, err := i.IndexTranscriptBytesResult(ctx, session, data)
+	// Validate all surviving records even when an earlier filter omitted some.
+	// Unknown evidence remains retained; neither condition certifies backfill.
+	validationSession := session
+	validationSession.ContentOmitted = false
+	capture, err := i.IndexTranscriptBytesForCapture(ctx, validationSession, data)
 	if err != nil {
 		return ContentCaptureResult{}, err
 	}
-	var entries []schema.SessionEntry
-	if v1, ok := result.(indexformat.V1); ok {
-		entries = v1.Entries
-	}
-	return ContentCaptureResult{Entries: entries, Complete: false, InputHash: inputHash, InputBytes: int64(len(data))}, nil
+	complete := !session.ContentOmitted && len(capture.RetainedUnknown) == 0
+	return ContentCaptureResult{Entries: capture.Entries, Complete: complete, InputHash: inputHash, InputBytes: int64(len(data))}, nil
 }
 
 // IndexTranscriptResult verifies completion before authorizing persistent replacement.
@@ -169,6 +157,7 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 }
 
 func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	var traversal unknownJSONLTraversal
 	a := &strikeAssembly{
 		sessionID:      sessionID,
 		fullContent:    i.fullContent,
@@ -212,6 +201,28 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			return
+		}
+		if i.retainUnknown {
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessStrike, raw, line, &traversal)
+			if err != nil {
+				parseErr = err
+				return
+			}
+			// Strike coalesces deltas into existing parents. Keep unknowns as
+			// independent evidence entries with their physical coordinates.
+			for _, record := range records {
+				carrier, err := RetainedUnknownEntry(sessionID, a.nextIndex, record)
+				if err != nil {
+					parseErr = err
+					return
+				}
+				a.entries = append(a.entries, carrier)
+				a.nextIndex++
+			}
+			if whole {
+				return
+			}
+			trimmed = filtered
 		}
 		var envelope strikeEnvelope
 		if completion != nil {
@@ -657,6 +668,9 @@ func strikeOutputText(event strikeEventData) string {
 
 func strikeRawValue(raw json.RawMessage) *string {
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("[]")) {
 		return nil
 	}
 	var text string

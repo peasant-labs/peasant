@@ -1,0 +1,12 @@
+required_names:
+  - missing argument
+  - extra argument
+  - nonexistent registry output
+  - directory is not registry output
+  - regenerate registry and document
+cases:
+  - {name: missing argument, mode: no-args, error: 'usage:'}
+  - {name: extra argument, mode: extra-args, error: 'usage:'}
+  - {name: nonexistent registry output, mode: missing, error: read existing generated file}
+  - {name: directory is not registry output, mode: directory, error: read existing generated file}
+  - {name: regenerate registry and document, mode: file}

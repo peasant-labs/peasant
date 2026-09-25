@@ -36,9 +36,13 @@ func (p *StoreDataProvider) DetailPayload(ctx context.Context, id string) (*sche
 // DetailPayloadWithReader serves one validated detail payload through the
 // durable snapshot boundary when the reader supports it, and through the
 // preserved legacy callback otherwise. A legacy V1 snapshot explicitly selects
-// the legacy path; a session with no stored metadata is reported as the API
+// the legacy path; a preview-only V2 generation explicitly selects the bounded
+// native preview builder from the same valid snapshot, with partial
+// diagnostics. A session with no stored metadata is reported as the API
 // not-found sentinel; any other snapshot failure is returned, never hidden
-// behind truncated content.
+// behind truncated content. There is no error-triggered managed-to-legacy
+// fallback: integrity errors fail closed, and incomplete content never becomes
+// unavailable merely for incompleteness.
 func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotReader, resolver indexformat.ContentResolver, id string, legacy func(context.Context, string) (*schema.SessionDetailPayload, error)) (*schema.SessionDetailPayload, error) {
 	sessionID, err := ingest.NewSessionID(id)
 	if err != nil {
@@ -48,6 +52,19 @@ func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotRea
 	if ok && supported.GenerationSnapshotsSupported() {
 		if _, payload, err := transcript.BuildSnapshotDetailBytes(ctx, reader, resolver, sessionID); err == nil {
 			return payload, nil
+		} else if errors.Is(err, transcript.ErrSnapshotIncomplete) {
+			// Preview-only completeness: explicitly select the bounded native
+			// preview builder from the same valid snapshot. Deep links stay
+			// available for incomplete content; corruption still fails closed
+			// inside the preview builder.
+			if _, preview, previewErr := transcript.BuildSnapshotPreviewBytes(ctx, reader, sessionID); previewErr == nil {
+				return preview, nil
+			} else {
+				if errors.Is(previewErr, indexformat.ErrSnapshotNotFound) {
+					return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, ErrSessionNotFound)
+				}
+				return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, previewErr)
+			}
 		} else if !errors.Is(err, transcript.ErrLegacySnapshot) {
 			if errors.Is(err, indexformat.ErrSnapshotNotFound) {
 				return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, ErrSessionNotFound)
@@ -55,6 +72,10 @@ func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotRea
 			return nil, fmt.Errorf("store adapter: detail payload for session %q: %w", id, err)
 		}
 	}
+	// Legacy V1 snapshot or a reader without generation support: serve the
+	// preserved legacy path explicitly. Reaching here is the selected legacy
+	// route, never an error-triggered managed-to-legacy fallback: integrity
+	// errors returned above, and incomplete content selects preview above.
 	detail, err := legacy(ctx, id)
 	if err != nil {
 		return nil, err

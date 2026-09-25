@@ -8,14 +8,16 @@ import (
 
 // Session represents a normalized agent coding session.
 type Session struct {
-	ID             SessionID
-	Project        string
-	Harness        Harness
-	StartTime      time.Time
-	EndTime        time.Time
-	Turns          []Turn
-	NativeMetadata []schema.NativeMetadataRecord
-	Metadata       SessionMetadata
+	ID              SessionID
+	Project         string
+	Harness         Harness
+	StartTime       time.Time
+	EndTime         time.Time
+	Turns           []Turn
+	NativeMetadata  []schema.NativeMetadataRecord
+	RetainedUnknown []schema.RetainedUnknownRecord
+	Diagnostics     *schema.InterpretationDiagnostics
+	Metadata        SessionMetadata
 
 	// Detail fields — populated by SessionByID for the detail view.
 	Model       string // from sessions.model_id

@@ -369,12 +369,14 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness})
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture)})
 	if validationErr != nil {
 		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
 	s.Turns = projection.Turns
 	s.NativeMetadata = projection.NativeMetadata
+	s.RetainedUnknown = projection.RetainedUnknown
+	s.Diagnostics = projection.Diagnostics
 
 	return &s, nil
 }

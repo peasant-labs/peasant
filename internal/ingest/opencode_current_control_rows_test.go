@@ -127,7 +127,7 @@ func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {
 
 	byType := make(map[string]int)
 	for _, warning := range metadata.Diagnostics.Warnings {
-		if warning.ErrorType != string(ingest.OpenCodeUnknownPartType) {
+		if warning.ErrorType != string(ingest.ContentCaptureUnknownDataRetained) {
 			continue
 		}
 		for _, expected := range testCase.ExpectedSkippedControlTypes {

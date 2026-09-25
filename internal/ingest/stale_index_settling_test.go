@@ -1,9 +1,11 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"testing"
 
@@ -35,13 +37,20 @@ type staleIndexSettlingFixture struct {
 	WantCaptureFormat string `yaml:"wantCaptureFormat"`
 	WantFailureCode   string `yaml:"wantFailureCode"`
 	WantEntries       int    `yaml:"wantEntries"`
+	WantRetainedKind  string `yaml:"wantRetainedKind"`
 }
 
 func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 	t.Helper()
 	var document staleIndexSettlingDocument
-	if err := yaml.Unmarshal(staleIndexSettlingFixtureData, &document); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(staleIndexSettlingFixtureData))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("trailing stale-index fixture document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range document.Cases {
@@ -215,6 +224,23 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 			}
 			if len(entries) != fixture.WantEntries {
 				t.Fatalf("stored entries = %d, want %d; the represented entries must be stored", len(entries), fixture.WantEntries)
+			}
+			if fixture.WantRetainedKind != "" {
+				var records []ingest.RetainedUnknown
+				for _, entry := range entries {
+					found, err := ingest.RetainedUnknownOf(entry)
+					if err != nil {
+						t.Fatal(err)
+					}
+					records = append(records, found...)
+				}
+				if len(records) != 1 || records[0].Kind != fixture.WantRetainedKind || len(records[0].Payload) == 0 {
+					t.Fatalf("retained source evidence missing: %+v", records)
+				}
+				counts := first.Summary.RetainedUnknownKinds
+				if len(counts) != 1 || counts[0].Kind != fixture.WantRetainedKind || counts[0].Occurrences != 1 || counts[0].Sessions != 1 {
+					t.Fatalf("retained accounting: %+v", counts)
+				}
 			}
 
 			second := run()

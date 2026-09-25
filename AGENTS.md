@@ -68,6 +68,25 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 - Keep dependencies injectable. Production wiring uses real dependencies. Tests may replace them.
 - Use atomic file operations for persisted data. Keep the existing XDG directory layout.
 
+### Record-kind vocabulary
+
+- Each harness owns one co-located vocabulary declaration under `internal/ingest/*_vocabulary.go`. Those
+  declarations are the source of truth for the record and content-block kinds the parser recognizes.
+  Never hand-edit `internal/ingest/record_kinds.yaml` or `docs/record-kinds.md`; both are generated
+  output.
+- `internal/indexformat.Outcome` is the interpretation IR: text, tool call, tool result, control,
+  ignored, or opaque. Adapters declare only the outcome. The central lowering owns stored entry mode,
+  preview eligibility, payload shape, and coordinate requirements.
+- A well-formed valid kind that is absent from the vocabulary resolves to opaque retained evidence by
+  default. Malformed known data and failed retention remain validation failures. The registry is
+  reporting-only and never admits or refuses parser input.
+- Rendering is a Fairtrade consumer concern. Do not add visualization state, renderer names, or
+  viewer coverage to the registry or the harvest report.
+- Keep the exact per-adapter production-census and required-name tests green. Do not reintroduce the
+  retired AST scanner. After changing a vocabulary or its stored behavior, run `go generate
+  ./internal/ingest`, the registry/docgen tests, and bump the relevant indexer version when settled
+  sessions must be re-indexed.
+
 Run the ast-grep rules of the repository when you change Go types or literals:
 
 ```bash

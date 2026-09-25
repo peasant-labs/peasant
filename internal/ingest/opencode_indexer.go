@@ -154,7 +154,7 @@ func (idx *OpenCodeIndexer) indexManagedProjection(session DiscoveredSession, da
 	if err != nil {
 		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while decoding its normalized semantic corpus: %w; no partial entry rows were stored, so regenerate the managed artifact from a supported source and retry", kind, session.SessionID, err)
 	}
-	return idx.indexSemanticMessages(session.SessionID, messages), nil
+	return idx.indexSemanticMessages(session.SessionID, messages)
 }
 
 func managedOpenCodeProjectionKind(origin TranscriptOrigin) string {
@@ -180,10 +180,9 @@ func managedOpenCodeProjectionFormat(origin TranscriptOrigin) (string, int, erro
 }
 
 // parseManagedOpenCodeSemanticMessages decodes the shared semantic corpus. A
-// part whose declared type is outside the known transcript vocabulary no longer
-// fails the session: it is kept as an inert system note when it carries
-// renderable text and dropped when it does not, and each distinct unknown type
-// is counted so one diagnostic per type can name it. An undecodable part, or a
+// part whose declared type is outside the known transcript vocabulary remains
+// available for redacted opaque retention, regardless of renderable text. Each
+// distinct unknown type is counted for diagnostics. An undecodable part, or a
 // message with an invalid role, still fails the session, so corruption stays
 // fatal while merely newer vocabulary becomes tolerant.
 func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, kind string) ([]openCodeSemanticMessage, map[string]int, error) {
@@ -202,18 +201,16 @@ func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, k
 		}
 		semantic.Orphan = message.Orphan
 		semantic.Control = message.Control
+		semantic.RetainedUnknown = message.RetainedUnknown
 		for _, part := range message.Parts {
 			semanticPart, partErr := parseOpenCodeSemanticPart(part.ID, part.TimeCreated, part.Data)
 			if partErr != nil {
 				return nil, nil, fmt.Errorf("decode %s part row %q for message %q: %w", kind, part.ID, message.ID, partErr)
 			}
 			if !isKnownOpenCodeSemanticPartType(semanticPart.Data.Type) {
+				// Counted by raw type text: stored evidence stays raw at rest
+				// with no capture-time redaction; egress redacts before upload.
 				unknownPartTypes[semanticPart.Data.Type]++
-				if semanticPart.Data.Text == "" {
-					// No renderable text, so there is nothing to show: drop the
-					// row and let the per-type diagnostic account for it.
-					continue
-				}
 				semanticPart.UnknownType = true
 			}
 			semantic.Parts = append(semantic.Parts, semanticPart)
@@ -224,11 +221,28 @@ func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, k
 }
 
 func isKnownOpenCodeSemanticPartType(partType string) bool {
-	switch partType {
-	case "text", "reasoning", "tool", "tool_use", "tool_result", "compaction", "subtask", "agent":
-		return true
-	default:
-		return false
+	for _, known := range knownOpenCodeSemanticPartKinds() {
+		if partType == known {
+			return true
+		}
+	}
+	return false
+}
+
+// knownOpenCodeSemanticPartKinds is the closed set of OpenCode semantic part
+// types this build indexes. It is the single source of truth for
+// isKnownOpenCodeSemanticPartType, and the vocabulary completeness check
+// compares it with the declaration.
+func knownOpenCodeSemanticPartKinds() []string {
+	return []string{
+		"text",
+		"reasoning",
+		"tool",
+		"tool_use",
+		"tool_result",
+		"compaction",
+		"subtask",
+		"agent",
 	}
 }
 
@@ -250,7 +264,7 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 		return idx.indexManagedProjection(session, data)
 	}
 	messages := loadOpenCodeJSONSemanticMessages(idx.fs, session)
-	return idx.indexSemanticMessages(session.SessionID, messages), nil
+	return idx.indexSemanticMessages(session.SessionID, messages)
 }
 
 func loadOpenCodeJSONSemanticMessages(filesystem FileSystem, session DiscoveredSession) []openCodeSemanticMessage {
@@ -424,12 +438,13 @@ func (message openCodeIndexMsg) semanticModelID() string {
 // OpenCode source loader. Outer storage formats supply row identity, ordering,
 // and raw bytes; indexing consumes only this model.
 type openCodeSemanticMessage struct {
-	EntryID       string
-	TimeCreated   int64
-	TimeCompleted int64
-	Raw           []byte
-	Data          openCodeIndexMsg
-	Parts         []openCodeSemanticPart
+	RetainedUnknown []RetainedUnknown
+	EntryID         string
+	TimeCreated     int64
+	TimeCompleted   int64
+	Raw             []byte
+	Data            openCodeIndexMsg
+	Parts           []openCodeSemanticPart
 	// Orphan marks a synthetic message that holds one orphan part whose parent
 	// is absent from the selected source. It replaces the in-band data marker.
 	Orphan bool
@@ -445,11 +460,8 @@ type openCodeSemanticPart struct {
 	TimeCreated int64
 	Raw         []byte
 	Data        openCodeIndexPart
-	// UnknownType marks a well-formed part whose declared type is outside the
-	// known transcript vocabulary. The parser keeps such a part only when it
-	// carries renderable text, and the renderer maps it to an inert system note
-	// rather than a tool, thinking, or text turn, so newer OpenCode part types
-	// never fail a session and never inflate the tool count.
+	// UnknownType identifies a part awaiting opaque retention before indexing.
+	// Its raw fields are not interpreted as a known content union.
 	UnknownType bool
 }
 
@@ -500,6 +512,15 @@ func parseOpenCodeSemanticMessage(entryID string, outerTimeCreated int64, raw []
 }
 
 func parseOpenCodeSemanticPart(entryID string, outerTimeCreated int64, raw []byte) (openCodeSemanticPart, error) {
+	var header struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil || header.Type == "" {
+		return openCodeSemanticPart{}, fmt.Errorf("OpenCode part requires its string type")
+	}
+	if !isKnownOpenCodeSemanticPartType(header.Type) && !isOpenCodeCaptureControl(header.Type) {
+		return openCodeSemanticPart{EntryID: entryID, TimeCreated: outerTimeCreated, Raw: append([]byte(nil), raw...), Data: openCodeIndexPart{Type: header.Type}, UnknownType: true}, nil
+	}
 	var data openCodeIndexPart
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return openCodeSemanticPart{}, err
@@ -518,7 +539,12 @@ func parseOpenCodeSemanticPart(entryID string, outerTimeCreated int64, raw []byt
 	return openCodeSemanticPart{EntryID: entryID, TimeCreated: timestamp, Raw: append([]byte(nil), raw...), Data: data}, nil
 }
 
-func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages []openCodeSemanticMessage) []schema.SessionEntry {
+func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages []openCodeSemanticMessage) ([]schema.SessionEntry, error) {
+	var err error
+	messages, err = retainOpenCodeSemantic(sessionID, messages)
+	if err != nil {
+		return nil, err
+	}
 	entries := make([]schema.SessionEntry, 0, len(messages))
 	messageIndexes := make(map[string]int, len(messages))
 	messageParents := make(map[int]string, len(messages))
@@ -573,6 +599,12 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 			}
 		}
 		parentIndex := entryIndex
+		if len(message.RetainedUnknown) > 0 && entry.ContentPreview == nil && len(message.Parts) == 0 {
+			entry.Role, entry.EntryType = RoleSystem, EntryTypeSystem
+		}
+		if err := attachOpenCodeUnknownEntry(&entry, message.RetainedUnknown); err != nil {
+			return nil, err
+		}
 		entries = append(entries, entry)
 		if message.EntryID != "" {
 			messageIndexes[message.EntryID] = parentIndex
@@ -600,7 +632,7 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 		}
 	}
 	normalizeOpenCodeEntryGraph(entries, messageIndexes, messageParents)
-	return entries
+	return entries, nil
 }
 
 // normalizeOpenCodeEntryGraph carries the OpenCode message graph on
@@ -931,22 +963,9 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		entry.TimestampMs = &timestamp
 	}
 	if part.UnknownType {
-		// A tolerated unknown part carries renderable text but no known role, so
-		// it renders as an inert system note. It never becomes a tool, thinking,
-		// or assistant turn.
-		entry.EntryType, entry.Role = EntryTypeSystem, RoleSystem
-		if part.Data.Text != "" {
-			text := part.Data.Text
-			if !idx.fullContent {
-				text = truncateString(text, defaults.ContentPreviewLimit)
-			}
-			entry.ContentPreview = &text
-		}
-		if part.EntryID != "" {
-			entryID := part.EntryID
-			entry.EntryID = &entryID
-		}
-		return entry, true
+		// Opaque parts were retained on their owner before layout. A part
+		// without a known interpretation must never fabricate conversation.
+		return entry, false
 	}
 	switch partType {
 	case "tool":

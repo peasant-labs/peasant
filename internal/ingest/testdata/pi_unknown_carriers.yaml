@@ -1,0 +1,41 @@
+requiredNames:
+  - full-evidence
+  - first-public-position-zero
+  - null-payload
+  - foreign-harness
+  - mismatched-owner
+  - absent-owner
+  - missing-position
+  - unknown-persisted-field
+  - null-array
+  - empty-array
+cases:
+  - name: full-evidence
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":2},"payload":{"n":9007199254740993,"value":null}}'
+  - name: first-public-position-zero
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":1,"public":{"sourceRef":"pi-recording","recordIndex":0,"position":0}},"payload":{"n":9007199254740993}}'
+  - name: null-payload
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":2},"payload":null}'
+    reject: true
+  - name: foreign-harness
+    evidence: '{"harness":"codex","namespace":"entry","kind":"future","position":{"sourceEntryRef":"SOURCE","line":2},"payload":{}}'
+    reject: true
+  - name: mismatched-owner
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"line":2},"payload":{}}'
+    reject: true
+  - name: absent-owner
+    owner: ''
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{"line":2},"payload":{}}'
+    reject: true
+  - name: missing-position
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","position":{},"payload":{}}'
+    reject: true
+  - name: unknown-persisted-field
+    evidence: '{"harness":"pi","namespace":"entry","kind":"future","unexpected":true,"position":{"sourceEntryRef":"SOURCE","line":2},"payload":{}}'
+    reject: true
+  - name: null-array
+    array: 'null'
+    reject: true
+  - name: empty-array
+    array: '[]'
+    reject: true

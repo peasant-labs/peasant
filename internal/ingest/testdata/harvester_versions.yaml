@@ -1,9 +1,22 @@
+required_names:
+  - canonical_registry
+  - injected_subset_without_indexers
+  - missing_adapter_target
+  - nonpositive_adapter
+  - nonpositive_indexer
+  - nonpositive_index
+  - unused_output_format_without_indexers
+  - unimplemented_harness
 cases:
   - name: canonical_registry
     harnesses: [claude-code, opencode, codex, cursor, strike, pi]
     adapter: 1
+    adapterOverrides: {pi: 2, opencode: 2}
     indexer: 15
-    indexerOverrides: {claude-code: 17, codex: 16, cursor: 16, strike: 16, opencode: 16, pi: 16}
+    indexerOverrides: {claude-code: 18, codex: 17, cursor: 17, strike: 17, opencode: 17, pi: 17}
+    nativeTargets:
+      codex: {adapter_version: 2, indexer_version: 18, index_version: 2}
+      opencode: {adapter_version: 3, indexer_version: 18, index_version: 2}
     index: 1
   - name: injected_subset_without_indexers
     harnesses: [claude-code]

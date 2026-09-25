@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/peasant-labs/schema"
 )
@@ -24,10 +25,130 @@ type IgnoredSourceRecord struct {
 	Reason IgnoredRecordReason
 }
 
+// Specialized vocabularies consumed by production capture and unknown-data
+// preparation. A kind outside these lists uses the retained-evidence fallback;
+// a known kind still receives strict field validation. Source-derived registry
+// checks require declarations when a specialized handler is added or removed.
+func claudeStrictRecordKinds() []string {
+	return []string{
+		"user",
+		"assistant",
+		"human",
+		"system",
+		"summary",
+		"result",
+		"progress",
+		"queue-operation",
+		"file-history-snapshot",
+		"last-prompt",
+	}
+}
+
+func claudeStrictSystemSubtypes() []string {
+	return []string{
+		"turn_duration",
+		"compact_boundary",
+		"stop_hook_summary",
+		"api_error",
+	}
+}
+
+// captureContentBlockKinds names the content blocks the strict capture path
+// validates for one harness. Claude alone admits tool_reference control
+// blocks; other unrecognized blocks are retained before known-field validation.
+func captureContentBlockKinds(harness Harness) []string {
+	kinds := []string{
+		"text",
+		"thinking",
+		"tool_use",
+		"tool_result",
+	}
+	if harness == HarnessClaudeCode {
+		kinds = append(kinds, "tool_reference")
+	}
+	return kinds
+}
+
+// captureRoleKinds names the conversation roles the strict capture path
+// accepts across harnesses. Cursor additionally accepts human-role lines,
+// which read as user turns.
+func captureRoleKinds() []string {
+	return []string{
+		"user",
+		"assistant",
+		"system",
+		"tool",
+	}
+}
+
+func codexStrictEnvelopeKinds() []string {
+	return []string{
+		codexTypeSessionMeta,
+		codexTypeTurnContext,
+		codexTypeEventMsg,
+		codexTypeResponse,
+	}
+}
+
+func codexStrictEventMsgKinds() []string {
+	return []string{
+		"token_count",
+		"task_started",
+		"task_complete",
+		"turn_aborted",
+		"user_message",
+		"agent_message",
+		"agent_reasoning",
+	}
+}
+
+func codexStrictResponsePayloadKinds() []string {
+	return []string{
+		codexResponseMessage,
+		codexResponseReasoning,
+		codexResponseFunctionCall,
+		codexResponseCustomCall,
+		codexResponseFunctionOut,
+		codexResponseCustomCallOut,
+	}
+}
+
+func codexStrictMessageBlockKinds() []string {
+	return []string{
+		"input_text",
+		"output_text",
+	}
+}
+
+func codexStrictReasoningSummaryKinds() []string {
+	return []string{"summary_text"}
+}
+
+func codexStrictReasoningContentKinds() []string {
+	return []string{
+		"reasoning_text",
+		"text",
+	}
+}
+
+// cursorStrictRecordKinds names the Cursor record types with dedicated
+// handling. Cursor dispatches on role rather than type, so turn_ended is the
+// only type-gated branch; every other line is validated by role and blocks.
+func cursorStrictRecordKinds() []string {
+	return []string{"turn_ended"}
+}
+
+func isCursorSpecialRecordKind(kind string) bool {
+	return slices.Contains(cursorStrictRecordKinds(), kind)
+}
+
 type TranscriptCaptureResult struct {
 	Entries        []schema.SessionEntry
 	IgnoredRecords []IgnoredSourceRecord
 	Diagnostics    []DiagnosticEntry
+	// RetainedUnknown records uninterpreted occurrences, not affected sessions.
+	// They are also embedded in Entries for transactional local persistence.
+	RetainedUnknown []RetainedUnknown
 }
 
 // AuthoritativeTranscriptIndexer never certifies the surviving subset of a
@@ -38,8 +159,7 @@ type AuthoritativeTranscriptIndexer interface {
 }
 
 func validateCaptureRole(role string) error {
-	switch role {
-	case "user", "assistant", "system", "tool":
+	if slices.Contains(captureRoleKinds(), role) {
 		return nil
 	}
 	return fmt.Errorf("unsupported conversation role %q", role)
@@ -162,6 +282,15 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 	// returned only when the whole array is otherwise valid.
 	var refusal *UnrepresentedRecordError
 	for i, block := range blocks {
+		if block.Type == "" {
+			return fmt.Errorf("content block lacks its type")
+		}
+		if !slices.Contains(captureContentBlockKinds(harness), block.Type) {
+			if refusal == nil {
+				refusal = &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
+			}
+			continue
+		}
 		switch block.Type {
 		case "text":
 			if fields[i]["text"] == nil {
@@ -193,21 +322,13 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 			if refusal == nil {
 				refusal = unrepresented
 			}
-		default:
-			if block.Type == "" {
-				return fmt.Errorf("content block lacks its type")
-			}
+		case "tool_reference":
 			// Claude attaches a tool_reference block when it loads a deferred
 			// tool's schema. It is a control block with no conversation
-			// content, so it is accepted as long as it names its tool.
-			if harness == HarnessClaudeCode && block.Type == "tool_reference" {
-				if block.ToolName == "" && block.Name == "" {
-					return fmt.Errorf("tool_reference requires tool_name")
-				}
-				continue
-			}
-			if refusal == nil {
-				refusal = &UnrepresentedRecordError{Harness: harness, Kind: block.Type}
+			// content, so it is accepted as long as it names its tool. The
+			// kinds gate above admits it for Claude only.
+			if block.ToolName == "" && block.Name == "" {
+				return fmt.Errorf("tool_reference requires tool_name")
 			}
 		}
 	}
@@ -226,10 +347,21 @@ func (idx *ClaudeIndexer) IndexTranscriptForCapture(ctx context.Context, s Disco
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		var line claudeIndexLine
 		if err := json.Unmarshal(raw, &line); err != nil {
 			return nil, err
+		}
+		if line.Type == "" {
+			// A missing discriminator is corruption, not vocabulary:
+			// settling it would hide an actionable malformed record.
+			return nil, fmt.Errorf("record lacks its type")
+		}
+		// The kinds slice governs reachability: a case body below cannot run
+		// for an unlisted kind, so extending the vocabulary means extending
+		// this production census.
+		if !slices.Contains(claudeStrictRecordKinds(), line.Type) && !isClaudeControlRecordType(line.Type) {
+			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
 		}
 		switch line.Type {
 		case "user", "assistant", "human":
@@ -243,6 +375,9 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			content := line.Content
 			if len(content) == 0 {
 				content = line.Message.Content
+			}
+			if len(content) == 0 && !slices.Contains(claudeStrictSystemSubtypes(), line.Subtype) {
+				return nil, validateMessageContent(HarnessClaudeCode, content)
 			}
 			if len(content) == 0 {
 				switch line.Subtype {
@@ -273,13 +408,10 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			// carries no payload of its own, so it is recorded as metadata.
 			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordMetadata}, nil
 		default:
-			if line.Type == "" {
-				// A missing discriminator is corruption, not vocabulary:
-				// settling it would hide an actionable malformed record.
-				return nil, fmt.Errorf("record lacks its type")
-			}
 			// A represented control record. The indexer retains its kind and
-			// payload as a depth=0 row, so the capture can certify.
+			// payload as a depth=0 row, so the capture can certify. The gate
+			// above refused every other unlisted kind; the refusal below is
+			// defense in depth.
 			if isClaudeControlRecordType(line.Type) {
 				return nil, nil
 			}
@@ -296,23 +428,25 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	copy := *idx
 	copy.fullContent = true
 	copy.fullDepth = true
+	copy.retainUnknown = true
 	entries, err := copy.parseJSONL(s.SessionID, data)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
 func (idx *CursorIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	_, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	_, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		var line cursorJSONLLine
 		if err := json.Unmarshal(raw, &line); err != nil {
 			return nil, err
 		}
-		if line.Type == "turn_ended" && line.Status == "aborted" {
+		if isCursorSpecialRecordKind(line.Type) && line.Status == "aborted" {
 			if len(line.content()) != 0 {
 				return nil, fmt.Errorf("aborted turn carries unrepresented conversation content")
 			}
@@ -322,10 +456,8 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			return nil, nil
 		}
 		role := firstNonEmpty(line.Role, line.Message.Role)
-		if role != "human" {
-			if err := validateCaptureRole(role); err != nil {
-				return nil, err
-			}
+		if !slices.Contains(cursorCaptureRoleKinds(), role) {
+			return nil, fmt.Errorf("unsupported conversation role %q", role)
 		}
 		return nil, validateCaptureContent(HarnessCursor, line.content(), false)
 	})
@@ -335,11 +467,13 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	copy := *idx
 	copy.fullContent = true
 	copy.fullDepth = true
+	copy.retainUnknown = true
 	entries, err := copy.parseJSONL(s.SessionID, data)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
-	return TranscriptCaptureResult{Entries: entries}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, RetainedUnknown: unknown}, err
 }
 
 func (idx *CodexIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
@@ -347,15 +481,31 @@ func (idx *CodexIndexer) IndexTranscriptForCapture(ctx context.Context, s Discov
 }
 func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
 	var mirrors []string
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+		prepared, _, err := prepareCodexRecord(raw, UnknownSourcePosition{Line: 1}, false)
+		if err != nil {
+			return nil, err
+		}
+		if prepared == nil {
+			return nil, nil
+		}
+		raw = prepared
 		var env codexRolloutLine
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return nil, err
 		}
+		if env.Type == "" {
+			return nil, fmt.Errorf("rollout record lacks its type")
+		}
+		// The envelope slice governs reachability, as with the Claude record
+		// gate above: extending the vocabulary means extending the slice.
+		if !slices.Contains(codexStrictEnvelopeKinds(), env.Type) {
+			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
+		}
 		switch env.Type {
-		case "session_meta", "turn_context":
+		case codexTypeSessionMeta, codexTypeTurnContext:
 			return &IgnoredSourceRecord{Kind: env.Type, Reason: IgnoredRecordMetadata}, nil
-		case "event_msg":
+		case codexTypeEventMsg:
 			var event struct {
 				Type    string `json:"type"`
 				Message string `json:"message"`
@@ -363,6 +513,14 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			}
 			if err := json.Unmarshal(env.Payload, &event); err != nil {
 				return nil, err
+			}
+			if event.Type == "" {
+				return nil, fmt.Errorf("event message lacks its type")
+			}
+			// The event slice governs reachability: a case body below cannot
+			// run for an unlisted event type.
+			if !slices.Contains(codexStrictEventMsgKinds(), event.Type) {
+				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: event.Type}
 			}
 			switch event.Type {
 			case "token_count", "task_started", "task_complete", "turn_aborted":
@@ -375,9 +533,6 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 				mirrors = append(mirrors, text)
 				return &IgnoredSourceRecord{Kind: event.Type, Reason: IgnoredRecordMirror}, nil
 			default:
-				if event.Type == "" {
-					return nil, fmt.Errorf("event message lacks its type")
-				}
 				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: event.Type}
 			}
 		case codexTypeResponse:
@@ -386,6 +541,12 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 				return nil, err
 			}
 			if _, ok := codexResponseItemEntry(s.SessionID, 0, env, len(raw), true, payload, nil); !ok {
+				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: "response_item"}
+			}
+			// The payload slice governs reachability: entry-ok holds exactly
+			// for these six shapes, so the gate below is behavior-identical
+			// and a new shape must join the walked slice to validate further.
+			if !slices.Contains(codexStrictResponsePayloadKinds(), payload.Type) {
 				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: "response_item"}
 			}
 			switch payload.Type {
@@ -411,7 +572,7 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 					if block.Type == "" {
 						return nil, fmt.Errorf("message block lacks its type")
 					}
-					if block.Type != "input_text" && block.Type != "output_text" {
+					if !slices.Contains(codexStrictMessageBlockKinds(), block.Type) {
 						if refusal == nil {
 							refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 						}
@@ -430,7 +591,7 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 					if block.Type == "" {
 						return nil, fmt.Errorf("reasoning summary block lacks its type")
 					}
-					if block.Type != "summary_text" && refusal == nil {
+					if !slices.Contains(codexStrictReasoningSummaryKinds(), block.Type) && refusal == nil {
 						refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
 				}
@@ -438,7 +599,7 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 					if block.Type == "" {
 						return nil, fmt.Errorf("reasoning block lacks its type")
 					}
-					if block.Type != "reasoning_text" && block.Type != "text" && refusal == nil {
+					if !slices.Contains(codexStrictReasoningContentKinds(), block.Type) && refusal == nil {
 						refusal = &UnrepresentedRecordError{Harness: HarnessCodex, Kind: block.Type}
 					}
 				}
@@ -456,9 +617,8 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			}
 			return nil, nil
 		default:
-			if env.Type == "" {
-				return nil, fmt.Errorf("rollout record lacks its type")
-			}
+			// Unreachable: the envelope gate above refused every unlisted
+			// type. Kept refuse-closed rather than open.
 			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
 		}
 	})
@@ -483,7 +643,8 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("conversation event has no equivalent response item"))
 		}
 	}
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
 func (idx *StrikeIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
@@ -493,7 +654,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	calls := make(map[string]bool)
 	processes := make(map[string]string)
 	pending := make(map[string]bool)
-	ignored, err := validateCaptureJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
+	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		if strikeRecordTooLarge(raw, 0) {
 			return nil, fmt.Errorf("record exceeds Strike format limit")
 		}
@@ -502,7 +663,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 			return nil, err
 		}
 		if !isKnownStrikeEvent(env.Type) {
-			return nil, &UnrepresentedRecordError{Harness: HarnessStrike, Kind: string(env.Type)}
+			return nil, fmt.Errorf("event lacks its type")
 		}
 		if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
 			return nil, fmt.Errorf("event requires data object")
@@ -511,9 +672,10 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 		if err != nil {
 			return nil, err
 		}
-		switch env.Type {
-		case strikeEventSessionStarted, strikeEventSessionTitled, strikeEventModelSelected:
+		if slices.Contains(strikeMetadataEventKinds(), env.Type) {
 			return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata}, nil
+		}
+		switch env.Type {
 		case strikeEventToolBegin:
 			if event.CallID == "" || firstNonEmpty(event.Name, event.Title) == "" || (len(event.Args) == 0 && len(event.Input) == 0) {
 				return nil, fmt.Errorf("tool begin requires callId, name and input")
@@ -545,7 +707,7 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 				return nil, fmt.Errorf("conversation event requires text payload")
 			}
 		case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
-			if strikeReasoningText(event) == "" {
+			if strikeReasoningText(event) == "" && !bytes.Equal(bytes.TrimSpace(event.Content), []byte("[]")) && !bytes.Equal(bytes.TrimSpace(event.Message), []byte("[]")) {
 				return nil, fmt.Errorf("reasoning event requires text payload")
 			}
 		}
@@ -559,5 +721,11 @@ func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	}
 	copy := *idx
 	copy.fullContent = true
-	return TranscriptCaptureResult{Entries: copy.parse(s.SessionID, data), IgnoredRecords: ignored}, nil
+	copy.retainUnknown = true
+	entries, err := copy.parseWithCompletion(s.SessionID, data, nil)
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	unknown, err := retainedUnknownEntries(entries)
+	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }

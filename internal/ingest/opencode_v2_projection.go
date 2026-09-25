@@ -192,6 +192,9 @@ func decodeOpenCodeV2ToolState(raw json.RawMessage) (openCodeCurrentToolState, b
 		}
 		state.Status, state.Input = "pending", fields["input"]
 	case openCodeV2ToolRunningStatus:
+		if fields["content"] != nil || fields["error"] != nil {
+			return state, true, errors.New("native running tool carries completed-only content or error")
+		}
 		var value openCodeV2ToolRunning
 		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
 			return state, true, fmt.Errorf("native running tool requires object input and metadata: %w", err)
@@ -201,6 +204,9 @@ func decodeOpenCodeV2ToolState(raw json.RawMessage) (openCodeCurrentToolState, b
 		}
 		state.Input, state.Structured = fields["input"], value.Metadata
 	case openCodeV2ToolCompletedStatus:
+		if fields["error"] != nil {
+			return state, true, errors.New("native completed tool cannot carry error")
+		}
 		var value openCodeV2ToolCompleted
 		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
 			return state, true, fmt.Errorf("native completed tool requires object input: %w", err)
@@ -336,6 +342,9 @@ func normalizeOpenCodeV2StructuralRow(row OpenCodeCurrentMessageRow, raw []byte,
 	case "shell":
 		if fields["shellID"] == nil {
 			return raw, nil
+		}
+		if fields["callID"] != nil {
+			return nil, errors.New("native shell mixes shellID and callID identities")
 		}
 		var value openCodeV2Shell
 		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {

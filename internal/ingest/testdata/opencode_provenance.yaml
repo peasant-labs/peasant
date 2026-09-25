@@ -424,7 +424,7 @@ cases:
         data: '{"id":"msg_o_future","type":"future-widget","time":{"created":1000}}'
     want:
       own: 0
-      turnCount: 1
+      turnCount: 0
       titleRefs: []
       main:
         - ref: e_ounknown
@@ -432,13 +432,13 @@ cases:
           role: system
           entryType: system
           depth: 0
-          content: '{"id":"msg_o_future","type":"future-widget","time":{"created":1000}}'
+          content: ''
           origin: unknown
           actor: unknown
           delivery: unknown
           ownership: local
-          evidence: unknown
-          modality: unknown
+          evidence: native_typed
+          modality: none
 
 # Historical-shape controls. These drive the real JSON message/part readers,
 # the pinned semantic parsers, the section 3.2 classifier, and the shared

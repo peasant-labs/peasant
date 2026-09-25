@@ -157,13 +157,29 @@ func TestPublicationOmissions(t *testing.T) {
 
 			recorded := "the session said this"
 			omitted := ""
-			entries := []schema.SessionEntry{
+			baseEntries := []schema.SessionEntry{
 				{SessionID: meta.SessionID, EntryIndex: 1, Harness: meta.ModelHarness, Role: schema.RoleUser, EntryType: schema.EntryTypeText, ContentPreview: &recorded},
-				// The placeholder that stands in an omitted record's place: it is
-				// an entry like any other, so a publishable capture carries it.
-				{SessionID: meta.SessionID, EntryIndex: 2, Harness: meta.ModelHarness, Role: schema.RoleTool, EntryType: schema.EntryTypeToolResult, ContentPreview: &omitted, RawByteLength: intPtrPublicationOmissions(300 << 20)},
 			}
-			revision := seedPublicationOmissionsSession(t, db, meta, entries)
+			entries := append([]schema.SessionEntry(nil), baseEntries...)
+			if fixtureCase.Status == string(ingest.ContentCaptureIncomplete) && fixtureCase.FailureCode == string(ingest.ContentCaptureSourceRecordsOmitted) {
+				omission, err := ingest.NewOmittedRecord(ingest.OmittedRecordTooLarge, 2, 300<<20, 256<<20)
+				if err != nil {
+					t.Fatal(err)
+				}
+				omissionExtra, err := omission.Extra()
+				if err != nil {
+					t.Fatal(err)
+				}
+				// The placeholder stands in an omitted record's place. Its typed
+				// extra is the evidence that the gap is accounted for rather than
+				// merely claimed by the failure code.
+				entries = append(entries, schema.SessionEntry{
+					SessionID: meta.SessionID, EntryIndex: 2, Harness: meta.ModelHarness, Role: schema.RoleTool,
+					EntryType: schema.EntryTypeToolResult, ContentPreview: &omitted,
+					RawByteLength: intPtrPublicationOmissions(300 << 20), Extra: &omissionExtra,
+				})
+			}
+			revision := seedPublicationOmissionsSession(t, db, meta, baseEntries)
 
 			// The case's capture state, offered to the FULL-content writer.
 			write := ingest.SessionContentCaptureWrite{
@@ -176,8 +192,8 @@ func TestPublicationOmissions(t *testing.T) {
 			}
 			// A certified complete capture first, so every case starts from the
 			// same stored entries, counts and full-capture proof and differs only
-			// in the capture state under test.
-			indexPublicationOmissions(t, db, meta, entries, revision, ingest.SessionContentCaptureWrite{
+			// in the capture state and accounted evidence under test.
+			indexPublicationOmissions(t, db, meta, baseEntries, revision, ingest.SessionContentCaptureWrite{
 				Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceNewIngest,
 				CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: meta.Timestamp.Start,
 			})
@@ -215,11 +231,12 @@ func TestPublicationOmissions(t *testing.T) {
 			if (preflightErr == nil) != fixtureCase.Publishable {
 				t.Errorf("push preflight err=%v, want publishable=%v", preflightErr, fixtureCase.Publishable)
 			}
-			// A refusal has to say which one incompleteness is still allowed,
-			// otherwise a user whose session was omitted-records cannot tell
-			// this refusal from the one their session is exempt from.
-			if preflightErr != nil && !strings.Contains(preflightErr.Error(), "oversized source records that ingest omitted") {
-				t.Errorf("the refusal does not name the one allowed incompleteness: %v", preflightErr)
+			// A refusal explains both forms of accounted partial content.
+			// An omission or unknown-data failure code alone is not proof
+			// that its position and payload have been accounted for.
+			if preflightErr != nil && (!strings.Contains(preflightErr.Error(), "positional omission placeholders") ||
+				!strings.Contains(preflightErr.Error(), "validated retained unknown payloads with complete source coordinates")) {
+				t.Errorf("the refusal does not explain accounted partial content: %v", preflightErr)
 			}
 
 			snapshot, readErr := db.ReadSessionContent(ctx, meta.SessionID.String())

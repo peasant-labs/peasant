@@ -1,0 +1,42 @@
+requiredNames:
+  - valid_nested_siblings
+  - duplicate_location
+  - overlapping_location
+  - reversed_record_coordinate
+  - duplicate_json_member
+  - missing_traversal_coordinates
+  - local_depth_is_not_transfer_depth
+cases:
+  - name: valid_nested_siblings
+    records:
+      - {record: 1, position: 2, pointer: /content/0, payload: '{"value":9007199254740993}'}
+      - {record: 1, position: 3, pointer: /content/1, payload: '{"value":-0}'}
+  - name: duplicate_location
+    localError: true
+    records:
+      - {record: 1, position: 2, pointer: /content/0, payload: '{}'}
+      - {record: 1, position: 3, pointer: /content/0, payload: '{}'}
+  - name: overlapping_location
+    localError: true
+    records:
+      - {record: 1, position: 2, pointer: /content, payload: '{}'}
+      - {record: 1, position: 3, pointer: /content/0, payload: '{}'}
+  - name: reversed_record_coordinate
+    localError: true
+    records:
+      - {record: 1, position: 2, pointer: '', payload: '{}'}
+      - {record: 0, position: 3, pointer: '', payload: '{}'}
+  - name: duplicate_json_member
+    localError: true
+    records:
+      - {record: 1, position: 2, pointer: '', payload: '{"private-key":1,"private-key":2}'}
+  - name: missing_traversal_coordinates
+    localError: true
+    missing: true
+    records:
+      - {record: 1, position: 2, pointer: '', payload: '{}'}
+  - name: local_depth_is_not_transfer_depth
+    depth: 70
+    publicError: true
+    records:
+      - {record: 1, position: 2, pointer: '', payload: '{}'}

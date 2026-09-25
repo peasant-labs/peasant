@@ -282,7 +282,7 @@ func TestIndexComputeAndFinalize(t *testing.T) {
 			p := coverageFinalizePipeline(t, sessionStore)
 			log := buildIndexCoverageFinalizeLog(spec.Rows)
 
-			result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeIndexed, spec.LogPrefix, nil)
+			result, err := p.indexComputeAndFinalize(context.Background(), nil, nil, nil, nil, time.Now(), log, IndexOutcomeIndexed, spec.LogPrefix, nil, nil)
 			if err != nil {
 				t.Fatalf("indexComputeAndFinalize: %v", err)
 			}

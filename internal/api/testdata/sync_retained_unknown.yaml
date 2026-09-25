@@ -1,0 +1,17 @@
+requiredNames:
+  - configured_kind_whole_record
+  - configured_kind_nested_block
+  - escaped_json_string
+  - embedded_json_string
+cases:
+  - name: configured_kind_whole_record
+    kind: custom-secret
+    payload: '{"type":"custom-secret","n":9007199254740993}'
+  - name: configured_kind_nested_block
+    kind: custom-secret
+    pointer: /message/content/1
+    payload: '{"type":"custom-secret","n":9007199254740993}'
+  - name: escaped_json_string
+    payload: '{"secret":"custom\u002dsecret","n":9007199254740993}'
+  - name: embedded_json_string
+    payload: '{"data":"{\"secret\":\"custom\\u002dsecret\"}"}'

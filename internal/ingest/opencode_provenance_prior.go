@@ -12,8 +12,8 @@ import (
 )
 
 // openCodeProvenancePriorFormatVersion is the persisted prior document version.
-// A reader refuses any other version rather than guessing at a different shape.
-const openCodeProvenancePriorFormatVersion = 1
+// Version 2 preserves opaque captured-prefix evidence. Version 1 remains readable.
+const openCodeProvenancePriorFormatVersion = 2
 
 // openCodeProvenancePriorDocument is the durable, activation-owned form of
 // OpenCodeProvenancePrior. It carries the alias and submission maps as ordered
@@ -79,8 +79,8 @@ func DecodeOpenCodeProvenancePrior(data []byte) (OpenCodeProvenancePrior, error)
 	if err := ensureOpenCodePriorEOF(decoder); err != nil {
 		return OpenCodeProvenancePrior{}, err
 	}
-	if document.Version != openCodeProvenancePriorFormatVersion {
-		return OpenCodeProvenancePrior{}, fmt.Errorf("ingest.DecodeOpenCodeProvenancePrior: the persisted prior evidence declares version %d, but this build reads version %d; the prior cannot be interpreted; rewrite the prior from a valid generation", document.Version, openCodeProvenancePriorFormatVersion)
+	if document.Version < 1 || document.Version > openCodeProvenancePriorFormatVersion {
+		return OpenCodeProvenancePrior{}, fmt.Errorf("ingest.DecodeOpenCodeProvenancePrior: the persisted prior evidence declares version %d, but this build reads versions 1..%d; the prior cannot be interpreted; rewrite the prior from a valid generation", document.Version, openCodeProvenancePriorFormatVersion)
 	}
 	prior := OpenCodeProvenancePrior{
 		Aliases:               NewProjectionPriorState(),

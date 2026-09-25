@@ -72,7 +72,11 @@ func (i *PiIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session 
 	if err != nil {
 		return TranscriptCaptureResult{}, err
 	}
-	return TranscriptCaptureResult{Entries: entries, Diagnostics: doc.warnings}, nil
+	unknown, err := retainedUnknownEntries(entries)
+	if err != nil {
+		return TranscriptCaptureResult{}, err
+	}
+	return TranscriptCaptureResult{Entries: entries, Diagnostics: doc.warnings, RetainedUnknown: unknown}, nil
 }
 
 func (i *PiIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
@@ -103,24 +107,22 @@ const (
 	piRoleBash       piMessageRole = "bashExecution"
 )
 
+func piMessageRoleKinds() []piMessageRole {
+	return []piMessageRole{piRoleUser, piRoleAssistant, piRoleToolResult, piRoleBash}
+}
+
 func (r *piMessageRole) UnmarshalJSON(raw []byte) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	switch value {
-	case string(piRoleUser):
-		*r = piRoleUser
-	case string(piRoleAssistant):
-		*r = piRoleAssistant
-	case string(piRoleToolResult):
-		*r = piRoleToolResult
-	case string(piRoleBash):
-		*r = piRoleBash
-	default:
-		return fmt.Errorf("unknown Pi message role")
+	for _, role := range piMessageRoleKinds() {
+		if value == string(role) {
+			*r = role
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("unknown Pi message role")
 }
 
 type piBlockType string
@@ -132,24 +134,22 @@ const (
 	piBlockToolCall piBlockType = "toolCall"
 )
 
+func piBlockTypeKinds() []piBlockType {
+	return []piBlockType{piBlockText, piBlockThinking, piBlockImage, piBlockToolCall}
+}
+
 func (t *piBlockType) UnmarshalJSON(raw []byte) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	switch value {
-	case string(piBlockText):
-		*t = piBlockText
-	case string(piBlockThinking):
-		*t = piBlockThinking
-	case string(piBlockImage):
-		*t = piBlockImage
-	case string(piBlockToolCall):
-		*t = piBlockToolCall
-	default:
-		return fmt.Errorf("unknown Pi content block type")
+	for _, kind := range piBlockTypeKinds() {
+		if value == string(kind) {
+			*t = kind
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("unknown Pi content block type")
 }
 
 type piMessagePayload struct {
@@ -279,7 +279,20 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		return nil
 	}
 	for _, entry := range doc.active {
+		entry, unknown, carrierOnly, err := preparePiUnknown(entry, sessionID)
+		if err != nil {
+			return nil, piSourceError("unknown evidence", entry.line, err)
+		}
 		extra := PiExtra{Kind: PiExtraState, Harness: schema.HarnessPi, SourceRef: PiPublicRef(sessionID.String(), "entry", entry.ID)}
+		extra.RetainedUnknown = unknown
+		if carrierOnly {
+			carrier, err := NewPiCarrier(sessionID, len(rows), extra)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, carrier)
+			continue
+		}
 		row := schema.SessionEntry{Role: RoleSystem, EntryType: EntryTypeSystem, TimestampMs: parseIndexTimestamp(entry.Timestamp)}
 		var scope schema.UsageScope
 		var rawUsage json.RawMessage
@@ -292,7 +305,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 		case piMessage:
 			var message piMessagePayload
 			if err := json.Unmarshal(entry.Message, &message); err != nil {
-				return nil, piSourceError("message", 0, err)
+				return nil, piSourceError("message", entry.line, err)
 			}
 			if message.Role == piRoleBash {
 				// A user shell execution has a real execute-style result, but is not
@@ -304,6 +317,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				if err := appendRow(row, extra); err != nil {
 					return nil, err
 				}
+				extra.RetainedUnknown = nil // evidence belongs to the source owner only
 				toolID := PiPublicRef(sessionID.String(), "tool", entry.ID)
 				name := "bash"
 				kind := classifyToolKind(name)
@@ -328,7 +342,7 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 			var err error
 			content, tools, err = piContent(message.Content, message.Role == piRoleAssistant)
 			if err != nil {
-				return nil, piSourceError("message content", 0, err)
+				return nil, piSourceError("message content", entry.line, err)
 			}
 			switch message.Role {
 			case piRoleUser:

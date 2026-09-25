@@ -134,11 +134,11 @@ cases:
     harness: opencode
     origin: legacy
     projection_part: '{"id":"part_bad","type":"future_tool","text":"unsupported trace"}'
-    reject: true
+    unknown: true
   - name: codex-unknown-event-message
     harness: codex
     source: '{"type":"event_msg","payload":{"type":"future_tool","message":"unrepresented trace"}}'
-    reject: true
+    unknown: true
   - name: strike-orphan-tool-output
     harness: strike
     source: '{"type":"tool.output","data":{"callId":"missing","output":"unrepresented trace"}}'
@@ -180,7 +180,7 @@ cases:
   - name: cursor-unknown-block
     harness: cursor
     source: '{"role":"assistant","content":[{"type":"future_tool","text":"not represented"}]}'
-    reject: true
+    unknown: true
   - name: codex-missing-tool-output
     harness: codex
     source: '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_a"}}'
@@ -188,7 +188,7 @@ cases:
   - name: strike-unknown-event
     harness: strike
     source: '{"type":"assistant.future","data":{"text":"not represented"}}'
-    reject: true
+    unknown: true
   # Control records: harness state rather than conversation content. Each must
   # certify, keep its provider kind and payload, and surface a factual preview.
   # The payload assertions decode Extra: an exact key set proves the transcript
@@ -437,4 +437,4 @@ cases:
   - name: claude-unknown-record-kind
     harness: claude-code
     source: '{"type":"future-record","payload":"a record kind no shipped build represents"}'
-    reject: true
+    unknown: true
