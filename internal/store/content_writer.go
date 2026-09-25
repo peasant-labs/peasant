@@ -478,6 +478,21 @@ func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.Session
 			}
 		}
 		_ = v1
+		// A V1 accounted-omission claim defers to the state gates below
+		// (FullCaptureWritable plus retained-evidence validation). The
+		// evidence assessment cannot tell a placeholder it was never shown:
+		// a direct V1 write carries no session-level omission flag, so
+		// re-deriving the capture from entries alone would refuse an
+		// incomplete/omitted/full state the readers serve on state alone,
+		// and the writer would disagree with the readiness and
+		// complete-content readers over the same row. Forged completeness is
+		// still refused: only the accounted-omission state is exempt, and a
+		// complete claim over incomplete evidence mismatches below.
+		if w.ContentCapture.Status == ingest.ContentCaptureIncomplete &&
+			w.ContentCapture.FailureCode == ingest.ContentCaptureSourceRecordsOmitted &&
+			(w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatFull || w.ContentCapture.CaptureFormat == "") {
+			return nil
+		}
 	}
 	if len(evidence) == 0 {
 		// An incomplete_new generation can never certify full, even with no
