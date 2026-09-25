@@ -7,7 +7,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"gopkg.in/yaml.v3"
@@ -24,8 +23,8 @@ const (
 	// RecordKindRepresented stores the kind as session entries that read as
 	// transcript content.
 	RecordKindRepresented RecordKindStatus = "represented"
-	// RecordKindTrackedOnly stores the kind for tracking and search without
-	// showing it in the transcript.
+	// RecordKindTrackedOnly stores the kind as non-conversation evidence
+	// outside interpreted transcript entries.
 	RecordKindTrackedOnly RecordKindStatus = "tracked-only"
 	// RecordKindIgnoredControl writes no entry; the capture accounts for the
 	// kind with a recorded reason and can still certify complete.
@@ -48,23 +47,9 @@ const (
 	RecordKindPreviewNo RecordKindPreview = "no"
 )
 
-// RecordKindVisualized is the closed set for how a stored kind reaches a
-// reader.
-type RecordKindVisualized string
-
-const (
-	// RecordKindRendered reads as a transcript element through a named renderer.
-	RecordKindRendered RecordKindVisualized = "rendered"
-	// RecordKindHidden is stored but deliberately never shown.
-	RecordKindHidden RecordKindVisualized = "hidden"
-	// RecordKindPlanned is stored with rendering intended but not yet built.
-	RecordKindPlanned RecordKindVisualized = "planned"
-	// RecordKindNotApplicable writes no entry, so there is nothing to show.
-	RecordKindNotApplicable RecordKindVisualized = "not-applicable"
-)
-
-// RecordKind is one row of the record-kind registry: the parser disposition,
-// the stored shape, and the reader treatment of one harness kind.
+// RecordKind is one row of the record-kind registry: the parser disposition
+// and the stored shape of one harness kind. Rendering is a consumer concern and
+// is intentionally outside this registry.
 type RecordKind struct {
 	Context     RecordKindContext               `yaml:"-"`
 	Namespace   string                          `yaml:"-"`
@@ -73,8 +58,6 @@ type RecordKind struct {
 	Status      RecordKindStatus                `yaml:"status"`
 	Preview     RecordKindPreview               `yaml:"preview"`
 	Payload     string                          `yaml:"payload"`
-	Visualized  RecordKindVisualized            `yaml:"visualized"`
-	Renderer    string                          `yaml:"renderer"`
 	Reason      string                          `yaml:"reason"`
 	Source      string                          `yaml:"source"`
 	Outcome     indexformat.Outcome             `yaml:"-"`
@@ -137,7 +120,7 @@ type RecordKindInventory struct {
 	Kinds     []RecordKind       `yaml:"kinds"`
 }
 
-// RecordKindKey is the unambiguous identity used by reports and drift checks.
+// RecordKindKey is the unambiguous identity used by qualified lookups.
 type RecordKindKey struct {
 	Context   RecordKindContext
 	Namespace string
@@ -159,7 +142,7 @@ type RecordKindRegistry struct {
 }
 
 // recordKindsFormatVersion is the registry schema this build reads.
-const recordKindsFormatVersion = 2
+const recordKindsFormatVersion = 3
 
 // LoadRecordKindRegistry builds and validates the registry from adapter
 // vocabulary declarations. The embedded YAML is generated reporting output,
@@ -242,15 +225,6 @@ func decodeRecordKindRegistry(data []byte) (RecordKindRegistry, error) {
 	return registry, nil
 }
 
-var loadRecordKindsOnce = sync.OnceValues(LoadRecordKindRegistry)
-
-// cachedRecordKindRegistry serves the production report path. Reporting stays
-// best-effort: a caller that cannot load the registry omits the
-// tracked-not-visualized list instead of failing the run.
-func cachedRecordKindRegistry() (RecordKindRegistry, error) {
-	return loadRecordKindsOnce()
-}
-
 func (r RecordKindRegistry) validate() error {
 	if r.Version != recordKindsFormatVersion {
 		return fmt.Errorf("record-kind registry: version %d is not the supported version %d", r.Version, recordKindsFormatVersion)
@@ -281,8 +255,8 @@ func (r RecordKindRegistry) validate() error {
 			return fmt.Errorf("record-kind registry: harness %q native versions differ; verify against NativeGenerationRepairTargets", harness)
 		}
 		fallback := section.Fallback
-		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Visualized != RecordKindHidden || fallback.Renderer != "" || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" || fallback.Outcome != indexformat.OutcomeOpaque || fallback.EntryMode != RecordKindEntryModeRetainedEvidence || fallback.Coordinates != RecordKindCoordinatesRequired {
-			return fmt.Errorf("record-kind registry: harness %q must lower an unnamed hidden valid-kind fallback to retained evidence with payload, coordinates, reason and source", harness)
+		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" || fallback.Outcome != indexformat.OutcomeOpaque || fallback.EntryMode != RecordKindEntryModeRetainedEvidence || fallback.Coordinates != RecordKindCoordinatesRequired {
+			return fmt.Errorf("record-kind registry: harness %q must lower an unnamed valid-kind fallback to retained evidence with payload, coordinates, reason and source", harness)
 		}
 		inventories := make(map[string]bool)
 		contexts := make(map[RecordKindContext]bool)
@@ -352,11 +326,6 @@ func (r RecordKindRegistry) validate() error {
 			default:
 				return fmt.Errorf("%s %q: preview must be yes or no, got %q", where, kind.Kind, string(kind.Preview))
 			}
-			switch kind.Visualized {
-			case RecordKindRendered, RecordKindHidden, RecordKindPlanned, RecordKindNotApplicable:
-			default:
-				return fmt.Errorf("%s %q: unknown visualized %q", where, kind.Kind, string(kind.Visualized))
-			}
 			if kind.Payload == "" {
 				return fmt.Errorf("%s %q: empty payload; state the retained extra shape or none", where, kind.Kind)
 			}
@@ -369,12 +338,6 @@ func (r RecordKindRegistry) validate() error {
 			}
 			if !needsReason && kind.Reason != "" {
 				return fmt.Errorf("%s %q: status %q carries no reason, got %q", where, kind.Kind, string(kind.Status), kind.Reason)
-			}
-			if kind.Visualized == RecordKindRendered && kind.Renderer == "" {
-				return fmt.Errorf("%s %q: visualized rendered requires a renderer", where, kind.Kind)
-			}
-			if kind.Visualized != RecordKindRendered && kind.Renderer != "" {
-				return fmt.Errorf("%s %q: visualized %q names no renderer, got %q", where, kind.Kind, string(kind.Visualized), kind.Renderer)
 			}
 			if !kind.Outcome.IsValid() {
 				return fmt.Errorf("%s %q: outcome %q is outside the shared closed set", where, kind.Kind, kind.Outcome.String())
@@ -451,16 +414,6 @@ type RecordKindRefusalCount struct {
 	Count   int     `json:"count"`
 }
 
-// RecordKindTracked is one stored-but-not-visualized registry kind, named for
-// the run report.
-type RecordKindTracked struct {
-	Harness   Harness           `json:"harness"`
-	Kind      string            `json:"kind"`
-	Context   RecordKindContext `json:"context"`
-	Namespace string            `json:"namespace"`
-	Match     RecordKindMatch   `json:"match"`
-}
-
 // AggregateRecordKindRefusals folds per-session refusals into deterministic
 // per-kind counts, ordered by harness then kind.
 func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefusalCount {
@@ -481,40 +434,6 @@ func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefus
 	return out
 }
 
-// TrackedNotVisualized lists the kinds one harness stores without showing:
-// stored rows no renderer shows yet. Ignored and refused kinds write no
-// entry, and structural entries write none of their own, so only stored
-// content with a hidden or planned treatment qualifies.
-func (h RecordKindHarness) TrackedNotVisualized() []RecordKind {
-	var hidden []RecordKind
-	for _, kind := range h.Kinds {
-		stored := kind.Status == RecordKindRepresented || kind.Status == RecordKindTrackedOnly || kind.Status == RecordKindRetainedUnknown
-		unshown := kind.Visualized == RecordKindHidden || kind.Visualized == RecordKindPlanned
-		if stored && unshown {
-			hidden = append(hidden, kind)
-		}
-	}
-	return hidden
-}
-
-// TrackedNotVisualized lists every kind the registry stores without showing,
-// ordered by harness then file order. A stored-but-invisible kind is a visible
-// decision in the run report, not a silent drop.
-func (r RecordKindRegistry) TrackedNotVisualized() []RecordKindTracked {
-	var out []RecordKindTracked
-	harnesses := make([]Harness, 0, len(r.Harnesses))
-	for harness := range r.Harnesses {
-		harnesses = append(harnesses, harness)
-	}
-	sort.Slice(harnesses, func(i, j int) bool { return string(harnesses[i]) < string(harnesses[j]) })
-	for _, harness := range harnesses {
-		for _, kind := range r.Harnesses[harness].TrackedNotVisualized() {
-			out = append(out, RecordKindTracked{Harness: harness, Kind: kind.Kind, Context: kind.Context, Namespace: kind.Namespace, Match: kind.Match})
-		}
-	}
-	return out
-}
-
 // Markdown renders the registry as the generated per-kind table owned by
 // docs/record-kinds.md. Harness sections sort by name; kinds keep file order.
 func (r RecordKindRegistry) Markdown() string {
@@ -531,16 +450,12 @@ func (r RecordKindRegistry) Markdown() string {
 		if v := section.NativeVersions; v != nil {
 			fmt.Fprintf(&out, "Native generation: adapter %d, indexer %d, index format %d.\n\n", v.AdapterVersion, v.IndexerVersion, v.IndexVersion)
 		}
-		fmt.Fprintf(&out, "Unseen valid kinds: **%s**, preview **%s**, display **%s**. %s Payload: %s. Source: `%s`.\n\n", section.Fallback.Status, section.Fallback.Preview, section.Fallback.Visualized, section.Fallback.Reason, section.Fallback.Payload, section.Fallback.Source)
-		out.WriteString("| Context | Namespace | Kind | Match | Status | Preview | Payload | Visualized | Detail | Source |\n")
-		out.WriteString("|---|---|---|---|---|---|---|---|---|---|\n")
+		fmt.Fprintf(&out, "Unseen valid kinds: **%s**, preview **%s**. %s Payload: %s. Source: `%s`.\n\n", section.Fallback.Status, section.Fallback.Preview, section.Fallback.Reason, section.Fallback.Payload, section.Fallback.Source)
+		out.WriteString("| Context | Namespace | Kind | Match | Status | Preview | Payload | Detail | Source |\n")
+		out.WriteString("|---|---|---|---|---|---|---|---|---|\n")
 		for _, kind := range section.Kinds {
-			detail := kind.Reason
-			if kind.Visualized == RecordKindRendered {
-				detail = kind.Renderer
-			}
-			fmt.Fprintf(&out, "| %s | %s | `%s` | %s | %s | %s | %s | %s | %s | `%s` |\n",
-				kind.Context, kind.Namespace, kind.Kind, kind.Match, kind.Status, kind.Preview, kind.Payload, kind.Visualized, detail, kind.Source)
+			fmt.Fprintf(&out, "| %s | %s | `%s` | %s | %s | %s | %s | %s | `%s` |\n",
+				kind.Context, kind.Namespace, kind.Kind, kind.Match, kind.Status, kind.Preview, kind.Payload, kind.Reason, kind.Source)
 		}
 		out.WriteString("\n")
 	}

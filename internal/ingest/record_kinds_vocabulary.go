@@ -10,15 +10,15 @@ import (
 // recordKindAdapterVocabulary is the concrete local equivalent of the design's
 // vocabulary input. Rules carry only the parser interpretation outcome; the
 // Production callback is the adapter's runtime census used by exact
-// completeness tests. Storage, preview, coordinates and visualization policy
-// are lowered centrally from Outcome.
+// completeness tests. Storage and preview policy are lowered centrally from
+// Outcome; rendering is a consumer concern and is not declared here.
 type recordKindAdapterVocabulary struct {
 	Harness     Harness
 	Inventories []recordKindInventoryDeclaration
 }
 
 // recordKindRule is the complete adapter-owned interpretation declaration.
-// Storage, preview and visualization policy are lowered centrally from Outcome.
+// Storage and preview policy are lowered centrally from Outcome.
 type recordKindRule struct {
 	Context   RecordKindContext
 	Namespace string

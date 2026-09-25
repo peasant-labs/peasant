@@ -98,7 +98,6 @@ func writeRecordKindFallback(out *strings.Builder, fallback RecordKind, indent s
 	fmt.Fprintf(out, "%s  status: %s\n", indent, fallback.Status)
 	fmt.Fprintf(out, "%s  preview: %s\n", indent, fallback.Preview)
 	fmt.Fprintf(out, "%s  payload: %s\n", indent, fallback.Payload)
-	fmt.Fprintf(out, "%s  visualized: %s\n", indent, fallback.Visualized)
 	fmt.Fprintf(out, "%s  reason: %s\n", indent, fallback.Reason)
 	fmt.Fprintf(out, "%s  source: %s\n", indent, fallback.Source)
 }
@@ -151,12 +150,6 @@ func writeRecordKindYAMLRow(out *strings.Builder, kind RecordKind, profile recor
 	if kind.Payload != anchor.Payload {
 		parts = append(parts, "payload: "+kind.Payload)
 	}
-	if kind.Visualized != anchor.Visualized {
-		parts = append(parts, "visualized: "+string(kind.Visualized))
-	}
-	if kind.Renderer != anchor.Renderer {
-		parts = append(parts, "renderer: "+kind.Renderer)
-	}
 	if kind.Reason != anchor.Reason {
 		parts = append(parts, "reason: "+kind.Reason)
 	}
@@ -176,11 +169,7 @@ func writeFullRecordKindYAMLRow(out *strings.Builder, kind RecordKind, anchor st
 		"status: "+string(kind.Status),
 		"preview: "+string(kind.Preview),
 		"payload: "+kind.Payload,
-		"visualized: "+string(kind.Visualized),
 	)
-	if kind.Renderer != "" {
-		parts = append(parts, "renderer: "+kind.Renderer)
-	}
 	if kind.Reason != "" {
 		parts = append(parts, "reason: "+kind.Reason)
 	}

@@ -34,21 +34,6 @@ func NewRecordKindPreview(raw string) (RecordKindPreview, error) {
 	}
 }
 
-func NewRecordKindVisualized(raw string) (RecordKindVisualized, error) {
-	switch raw {
-	case string(RecordKindRendered):
-		return RecordKindRendered, nil
-	case string(RecordKindHidden):
-		return RecordKindHidden, nil
-	case string(RecordKindPlanned):
-		return RecordKindPlanned, nil
-	case string(RecordKindNotApplicable):
-		return RecordKindNotApplicable, nil
-	default:
-		return "", fmt.Errorf("record-kind registry: unknown visualization %q; use rendered, hidden, planned or not-applicable", raw)
-	}
-}
-
 func NewRecordKindContext(raw string) (RecordKindContext, error) {
 	switch raw {
 	case string(RecordKindRetained):
@@ -88,9 +73,6 @@ func (v *RecordKindStatus) UnmarshalYAML(n *yaml.Node) error {
 }
 func (v *RecordKindPreview) UnmarshalYAML(n *yaml.Node) error {
 	return decodeRecordKindEnum(n, v, NewRecordKindPreview)
-}
-func (v *RecordKindVisualized) UnmarshalYAML(n *yaml.Node) error {
-	return decodeRecordKindEnum(n, v, NewRecordKindVisualized)
 }
 func (v *RecordKindContext) UnmarshalYAML(n *yaml.Node) error {
 	return decodeRecordKindEnum(n, v, NewRecordKindContext)

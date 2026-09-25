@@ -3,7 +3,6 @@ package ingest
 import (
 	"bytes"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -146,7 +145,7 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 				kind := registry.Harnesses[HarnessCodex].Lookup(RecordKindNative, "event", row.Kind)
 				state := &codexReplayState{}
 				result = state.replayEventMessage("fixture", codexDecodedSegment{}, codexHistoryRecord{}, codexHistoryReplayPayload{Type: row.Kind}, CodexOwnershipOwn, CodexHistoryModeLegacy)
-				if result == nil && (len(state.nodes) != 0 || kind.Status != RecordKindIgnoredControl || kind.Preview != RecordKindPreviewNo || kind.Visualized != RecordKindNotApplicable) {
+				if result == nil && (len(state.nodes) != 0 || kind.Status != RecordKindIgnoredControl || kind.Preview != RecordKindPreviewNo) {
 					result = fmt.Errorf("native metadata/mirror behavior differs from registry")
 				}
 			default:
@@ -179,13 +178,6 @@ func TestRecordKindsNamespacesDoNotCollide(t *testing.T) {
 	if _, ok := section.KindsByName()["message"]; ok {
 		t.Fatal("ambiguous name-only key survived")
 	}
-	encoded, err := json.Marshal(registry.TrackedNotVisualized())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(encoded, []byte(`"namespace"`)) || !bytes.Contains(encoded, []byte(`"context"`)) {
-		t.Fatal("report lost qualified identity")
-	}
 }
 
 func TestRecordKindsEverySupportedHarnessHasOpenFallback(t *testing.T) {
@@ -201,8 +193,8 @@ func TestRecordKindsEverySupportedHarnessHasOpenFallback(t *testing.T) {
 		for _, inventory := range section.Inventories {
 			name := "valid_kind_not_declared_in_the_registry"
 			row := section.Lookup(inventory.Context, inventory.Namespace, name)
-			if row.Status != RecordKindRetainedUnknown || row.Visualized != RecordKindHidden || row.Preview != RecordKindPreviewNo || row.Kind != name {
-				t.Errorf("%s/%s/%s lacks open hidden fallback", harness, inventory.Context, inventory.Namespace)
+			if row.Status != RecordKindRetainedUnknown || row.Preview != RecordKindPreviewNo || row.Kind != name {
+				t.Errorf("%s/%s/%s lacks open retained-evidence fallback", harness, inventory.Context, inventory.Namespace)
 			}
 		}
 	}

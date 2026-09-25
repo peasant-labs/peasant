@@ -3,14 +3,12 @@ required_names:
   - unknown YAML field rejected
   - unknown status rejected
   - unknown preview rejected
-  - unknown visualized rejected
   - unknown context rejected
   - unknown match rejected
   - conflicting source selection rejected
   - duplicate kind rejected
   - same name different namespace accepted
   - overlapping prefix rejected
-  - rendered without renderer rejected
   - ignored without reason rejected
   - missing supported harness rejected
   - unsupported adapter rejected
@@ -33,17 +31,15 @@ required_names:
   - prefix family is explicit
 cases:
   - {name: trailing YAML document rejected, operation: trailing, error: one YAML document}
-  - {name: unknown YAML field rejected, operation: yaml, find: 'version: 2', replace: 'versoin: 2', error: field versoin}
+  - {name: unknown YAML field rejected, operation: yaml, find: 'version: 3', replace: 'versoin: 3', error: field versoin}
   - {name: unknown status rejected, operation: yaml, find: 'status: represented', replace: 'status: representd', error: unknown status}
   - {name: unknown preview rejected, operation: yaml, find: 'preview: yes', replace: 'preview: maybe', error: unknown preview}
-  - {name: unknown visualized rejected, operation: yaml, find: 'visualized: hidden', replace: 'visualized: hiddden', error: unknown visualization}
   - {name: unknown context rejected, operation: yaml, find: 'context: retained-format-1', replace: 'context: imaginary', error: unknown context}
   - {name: unknown match rejected, operation: yaml, find: 'match: prefix', replace: 'match: regexp', error: unknown match}
   - {name: conflicting source selection rejected, operation: yaml, find: 'switch: line.Type}', replace: 'switch: line.Type, equal_operand: line.Type}', error: conflicting selection modes}
   - {name: duplicate kind rejected, operation: yaml, find: '{<<: *text, kind: assistant}', replace: '{<<: *text, kind: user}', error: duplicate kind}
   - {name: same name different namespace accepted, operation: yaml, find: '{<<: *text, kind: api_error}', replace: '{<<: *text, kind: user}'}
   - {name: overlapping prefix rejected, operation: yaml, find: '{<<: *control, kind: artifact-, match: prefix}', replace: '{<<: *control, kind: agent-, match: prefix}', error: ambiguous overlapping match}
-  - {name: rendered without renderer rejected, operation: yaml, find: 'renderer: internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer', replace: 'renderer: ""', error: requires a renderer}
   - {name: ignored without reason rejected, operation: yaml, find: 'reason: Entryless control; unexpected conversation content remains a validation error.', replace: 'reason: ""', error: requires a reason}
   - {name: missing supported harness rejected, operation: yaml, find: '  pi:', replace: '  gemini-cli:', error: 'has no section'}
   - {name: unsupported adapter rejected, operation: yaml, find: 'harnesses:', replace: "harnesses:\n  gemini-cli: {}", error: no supported adapter}

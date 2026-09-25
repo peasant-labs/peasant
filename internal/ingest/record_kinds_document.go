@@ -28,14 +28,12 @@ remain errors, not successful unknown-kind captures.
   (a known unsupported shape; never the default for arbitrary valid new names).
 - **Preview** means the mapping can populate a human-readable content preview,
   not that every instance has nonempty text. Tool arguments alone are not preview
-  text. Renderer coverage is separate from this local storage property.
+  text.
 - **Payload** describes local retained shape, not a new public schema. Generic
   unknown payloads are complete JSON with source coordinates; known control limits
   do not license truncating unknown evidence.
-- **Visualized** is rendered (named projection/renderer), hidden, planned or
-  not-applicable (entryless or structural). Tool display can depend on a recognized
-  tool kind and pairing; storing a generic tool name does not prove a renderer.
-  Unknown-record display is deferred; no new transcript renderer is claimed.
+- **Rendering is a consumer concern and is intentionally outside this registry.**
+  The registry does not classify, track or report whether a kind is rendered.
 - **Source** names first-party production code as generated reporting metadata.
   Each adapter vocabulary is compared exactly with its runtime dispatch/census;
   a source pointer is never parsed as Go syntax. Census observations are not an
@@ -50,11 +48,6 @@ Retained-unknown run rows count **occurrences** separately from affected
 unknown blocks in one session are multiple occurrences and one affected session.
 The legacy refusal API counts per-session refusal inputs; it does not enumerate
 all unknown occurrences and must not be used for retained-unknown accounting.
-
-Tracked-not-visualized is **registry-wide coverage**, not evidence that those
-kinds occurred in this run. It includes represented/planned and tracked/hidden
-rows, qualified by context and namespace. Unseen names have no static row; their
-actual occurrences belong in the run's retained-unknown summary.
 
 Vocabulary completeness compares declarations and production censuses in both
 directions without assuming a Go syntax shape. Behavioral fixtures separately

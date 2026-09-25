@@ -1,7 +1,7 @@
 # Parser behavior, not a native-input allowlist. One declaration per line.
 # Inventories point at production admission/dispatch syntax. Unknown valid names
 # use fallback without a new declaration. Invalid known fields remain errors.
-version: 2
+version: 3
 harnesses:
   claude-code:
     adapter_version: 1
@@ -11,8 +11,7 @@ harnesses:
       status: retained-unknown
       preview: no
       payload: complete raw JSON and source coordinates in retainedUnknown
-      visualized: hidden
-      reason: Retain uninterpreted evidence and mark partial interpretation; display is deferred.
+      reason: Retain uninterpreted evidence and mark partial interpretation.
       source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
@@ -23,23 +22,23 @@ harnesses:
           - {file: claude_control_records.go, symbol: claudeControlRecordTypes}
           - {file: claude_control_records.go, symbol: isClaudeControlRecordType, prefix_argument: recordType}
         kinds:
-          - &text {kind: user, status: represented, preview: yes, payload: session entries, visualized: rendered, renderer: internal/transcript EntriesToTurns text projection and fairtrade TranscriptViewer}
+          - &text {kind: user, status: represented, preview: yes, payload: session entries}
           - {<<: *text, kind: assistant}
           - {<<: *text, kind: human}
           - {<<: *text, kind: system}
           - {<<: *text, kind: summary}
           - {<<: *text, kind: result}
-          - &ignored {kind: progress, status: ignored-control, preview: no, payload: none, visualized: not-applicable, reason: Entryless control; unexpected conversation content remains a validation error.}
+          - &ignored {kind: progress, status: ignored-control, preview: no, payload: none, reason: Entryless control; unexpected conversation content remains a validation error.}
           - {<<: *ignored, kind: queue-operation}
           - {<<: *ignored, kind: file-history-snapshot}
           - {<<: *ignored, kind: last-prompt}
-          - &control {kind: permission-mode, status: represented, preview: yes, payload: bounded control extra (oversized known controls retain identity only), visualized: planned}
+          - &control {kind: permission-mode, status: represented, preview: yes, payload: bounded control extra (oversized known controls retain identity only)}
           - {<<: *control, kind: mode}
           - {<<: *control, kind: agent-setting}
           - {<<: *control, kind: agent-name}
           - {<<: *control, kind: ai-title}
           - {<<: *control, kind: atis-latch}
-          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra, visualized: hidden}
+          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra}
           - {<<: *control, kind: bridge-session}
           - {<<: *control, kind: started}
           - {<<: *control, kind: cost-state}
@@ -69,8 +68,8 @@ harnesses:
         kinds:
           - {<<: *text, kind: text}
           - {<<: *text, kind: thinking}
-          - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments; renderer depends on recognized tool kind, visualized: planned}
-          - &result {kind: tool_result, status: represented, preview: yes, payload: tool output; renderer depends on paired recognized tool kind, visualized: planned}
+          - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments}
+          - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
           - {<<: *ignored, kind: tool_reference}
   cursor:
     adapter_version: 1
@@ -121,7 +120,7 @@ harnesses:
           - {<<: *ignored, kind: session.titled}
           - {<<: *ignored, kind: model.selected}
           - {<<: *text, kind: user.message}
-          - &structural {kind: turn.started, status: represented, preview: no, payload: state on owning entry; no independent row, visualized: not-applicable}
+          - &structural {kind: turn.started, status: represented, preview: no, payload: state on owning entry; no independent row}
           - {<<: *structural, kind: turn.completed}
           - {<<: *text, kind: assistant.text}
           - {<<: *text, kind: assistant.text.delta}
@@ -160,7 +159,7 @@ harnesses:
         kinds:
           - {<<: *ignored, kind: session, reason: Required v3 document header; no conversation row.}
           - {<<: *text, kind: message, payload: PiExtra state and usage; role/block dependent content}
-          - &carrier {kind: thinking_level_change, status: tracked-only, preview: no, payload: PiExtra state carrier, visualized: hidden}
+          - &carrier {kind: thinking_level_change, status: tracked-only, preview: no, payload: PiExtra state carrier}
           - {<<: *carrier, kind: model_change}
           - {<<: *text, kind: compaction, payload: summary and PiExtra usage/native metadata}
           - {<<: *text, kind: branch_summary, payload: summary and PiExtra usage/native metadata}
@@ -185,7 +184,7 @@ harnesses:
         kinds:
           - {<<: *text, kind: text}
           - {<<: *text, kind: thinking}
-          - {<<: *text, kind: image, payload: textual media marker (not native image rendering)}
+          - {<<: *text, kind: image, payload: textual media marker}
           - {<<: *tool, kind: toolCall}
   codex:
     adapter_version: 1
@@ -308,7 +307,7 @@ harnesses:
           - {<<: *text, kind: AgentMessage}
           - {<<: *text, kind: Reasoning}
           - {<<: *result, kind: FunctionCallOutput}
-          - &nativeitem {kind: CommandExecution, status: represented, preview: yes, payload: classified native item and provenance; display depends on mapped content, visualized: planned}
+          - &nativeitem {kind: CommandExecution, status: represented, preview: yes, payload: classified native item and provenance}
           - {<<: *nativeitem, kind: FileChange}
           - {<<: *nativeitem, kind: SubAgentActivity}
           - {<<: *nativeitem, kind: CollabAgentToolCall}
@@ -332,7 +331,7 @@ harnesses:
         kinds:
           - {<<: *text, kind: input_text}
           - {<<: *text, kind: output_text}
-          - &media {kind: input_image, status: represented, preview: yes, payload: media modality and textual display marker; not an image viewer, visualized: rendered, renderer: codexMediaDisplayContent then EntriesToTurns and fairtrade TranscriptViewer}
+          - &media {kind: input_image, status: represented, preview: yes, payload: media modality and textual marker}
           - {<<: *media, kind: image}
           - {<<: *media, kind: image_url}
           - {<<: *media, kind: input_audio}
@@ -497,7 +496,7 @@ harnesses:
           - {file: opencode_unknown.go, symbol: prepareOpenCodeToolContent, equal_operand: header.Type, complete: true}
         kinds:
           - {<<: *result, kind: text}
-          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME; no general media renderer, visualized: planned}
+          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME}
       - context: native-generation
         namespace: tool_content
         sources:
@@ -505,4 +504,4 @@ harnesses:
           - {file: opencode_unknown.go, symbol: prepareOpenCodeToolContent, equal_operand: header.Type, complete: true}
         kinds:
           - {<<: *result, kind: text}
-          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME; no general media renderer, visualized: planned}
+          - {kind: file, status: represented, preview: no, payload: structured tool output URI/MIME}
