@@ -644,7 +644,11 @@ Requires either --session for a single session or --session-from-file for a batc
 					continue
 				}
 
-				if writeErr := os.WriteFile(outPath, data, 0644); writeErr != nil {
+				// Atomic-write boundary: a failed export leaves an existing
+				// target untouched. Marshal and redaction already validated
+				// before this point, so stdout stays silent until the rename
+				// commits the new bytes.
+				if writeErr := writeFileAtomic(outPath, data, 0644); writeErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: write %s: %v\n", sid, outPath, writeErr)
 					failed++
 					continue
@@ -737,6 +741,36 @@ func buildExportAnnotationsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&outputDir, "output-dir", ".", "Directory to write exported annotation JSONL files")
 
 	return cmd
+}
+
+// writeFileAtomic writes data to path atomically: bytes go to a temp file in
+// the same directory, fsynced, then renamed over the target. A failed export
+// leaves an existing target untouched; stdout stays silent until the rename.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".export-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // writeJSONL writes a slice of values as newline-delimited JSON to the given path.
