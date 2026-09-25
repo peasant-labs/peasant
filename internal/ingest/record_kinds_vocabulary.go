@@ -7,6 +7,16 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 )
 
+// recordKindAdapterVocabulary is the concrete local equivalent of the design's
+// vocabulary input. Rules carry only the parser interpretation outcome; the
+// Production callback is the adapter's runtime census used by exact
+// completeness tests. Storage, preview, coordinates and visualization policy
+// are lowered centrally from Outcome.
+type recordKindAdapterVocabulary struct {
+	Harness     Harness
+	Inventories []recordKindInventoryDeclaration
+}
+
 // recordKindRule is the complete adapter-owned interpretation declaration.
 // Storage, preview and visualization policy are lowered centrally from Outcome.
 type recordKindRule struct {
@@ -37,11 +47,6 @@ type recordKindInventoryDeclaration struct {
 	Sources    []RecordKindSource
 	Rules      []recordKindRule
 	Production func() recordKindProductionSet
-}
-
-type recordKindAdapterVocabulary struct {
-	Harness     Harness
-	Inventories []recordKindInventoryDeclaration
 }
 
 func recordKindLiteral(kind string, outcome indexformat.Outcome) recordKindRule {
