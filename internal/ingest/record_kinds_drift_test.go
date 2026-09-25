@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -31,6 +32,16 @@ type recordKindsCaptureFixture struct {
 func TestRecordKindsRegistryLoads(t *testing.T) {
 	if _, err := LoadRecordKindRegistry(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRecordKindsYAMLCurrent(t *testing.T) {
+	generated, err := GenerateRecordKindRegistryYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated, recordKindsYAML) {
+		t.Fatal("internal/ingest/record_kinds.yaml is stale; run go generate ./internal/ingest/")
 	}
 }
 

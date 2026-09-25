@@ -15,6 +15,23 @@ import (
 
 const codexOpaqueBlock = "__peasant_retained_unknown__"
 
+func codexNativeEventMsgKinds() []string {
+	return []string{
+		"token_count",
+		"user_message",
+		"agent_message",
+		"agent_reasoning",
+		"item_started",
+		"item_completed",
+		"turn_started",
+		"task_started",
+		"turn_complete",
+		"task_complete",
+		"thread_rolled_back",
+		"turn_aborted",
+	}
+}
+
 // A compatibility preview may tolerate an unreadable source shape, but it must
 // never hide a failure to retain otherwise valid opaque evidence.
 type codexEvidenceRetentionError struct{ cause error }
@@ -58,7 +75,7 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 		unknown = append(unknown, evidence)
 		return nil
 	}
-	if !slices.Contains(codexStrictEnvelopeKinds(), kind) && !(native && kind == "compacted") {
+	if !slices.Contains(codexStrictEnvelopeKinds(), kind) && !(native && slices.Contains(codexNativeEnvelopeKinds(), kind)) {
 		err := retain("envelope", kind, "", raw)
 		return nil, unknown, err
 	}

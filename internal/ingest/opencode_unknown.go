@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/schema"
@@ -16,29 +17,34 @@ func openCodeUnknownPosition(sessionID, stream, sourceID string, record, positio
 	return UnknownSourcePosition{SourceID: sourceID, JSONPointer: pointer, Public: &UnknownPublicPosition{SourceRef: "src_" + hex.EncodeToString(sum[:]), RecordIndex: record, Position: position}}
 }
 
-func knownOpenCodeCurrentRow(kind string) bool {
-	switch kind {
-	case "user":
-		return true
-	case "assistant":
-		return true
-	case "shell":
-		return true
-	case "synthetic":
-		return true
-	case "system":
-		return true
-	case "skill":
-		return true
-	case "compaction":
-		return true
-	case "agent-switched":
-		return true
-	case "model-switched":
-		return true
-	default:
-		return false
+func knownOpenCodeCurrentRowKinds() []string {
+	return []string{
+		"user",
+		"assistant",
+		"shell",
+		"synthetic",
+		"system",
+		"skill",
+		"compaction",
+		"agent-switched",
+		"model-switched",
 	}
+}
+
+func knownOpenCodeCurrentRow(kind string) bool {
+	return slices.Contains(knownOpenCodeCurrentRowKinds(), kind)
+}
+
+func knownOpenCodeAssistantContentKinds() []string {
+	return []string{"text", "reasoning", "tool"}
+}
+
+func knownOpenCodeInlineContentKinds() []string {
+	return []string{"text"}
+}
+
+func knownOpenCodeToolContentKinds() []string {
+	return []string{"text", "file"}
 }
 
 // prepareOpenCodeCurrent preserves unrecognized row and nested discriminators
@@ -95,7 +101,7 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 		if err := json.Unmarshal(block, &header); err != nil || header.Type == "" {
 			return nil, nil, fmt.Errorf("OpenCode assistant block requires a string type")
 		}
-		if header.Type == "tool" {
+		if slices.Contains(knownOpenCodeAssistantContentKinds(), header.Type) && header.Type == "tool" {
 			position := position
 			if position.Public != nil {
 				public := *position.Public
@@ -110,7 +116,7 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 			kept = append(kept, prepared)
 			continue
 		}
-		if header.Type == "text" || header.Type == "reasoning" {
+		if slices.Contains(knownOpenCodeAssistantContentKinds(), header.Type) {
 			kept = append(kept, block)
 			continue
 		}
@@ -190,7 +196,7 @@ func prepareOpenCodeToolContent(raw json.RawMessage, pointer string, position Un
 		if err := json.Unmarshal(block, &header); err != nil || header.Type == "" {
 			return nil, nil, fmt.Errorf("OpenCode tool output block requires a string type")
 		}
-		if header.Type == "text" || header.Type == "file" {
+		if slices.Contains(knownOpenCodeToolContentKinds(), header.Type) {
 			kept = append(kept, block)
 			continue
 		}
@@ -306,7 +312,7 @@ func retainOpenCodeSemantic(sessionID SessionID, messages []openCodeSemanticMess
 			if err := json.Unmarshal(block, &discriminator); err != nil || discriminator.Type == "" {
 				return nil, fmt.Errorf("OpenCode inline block requires a string type")
 			}
-			if discriminator.Type == "text" {
+			if slices.Contains(knownOpenCodeInlineContentKinds(), discriminator.Type) {
 				if err := json.Unmarshal(block, &header); err != nil || header.Text == nil {
 					return nil, fmt.Errorf("OpenCode text block requires string text")
 				}

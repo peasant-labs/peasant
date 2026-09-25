@@ -1,8 +1,9 @@
-// Command record-kinds-docgen generates the entire human registry from the
-// embedded YAML. Run go generate ./internal/ingest/ after registry changes.
+// Command record-kinds-docgen generates the checked-in registry and its human
+// document from adapter vocabularies. Run go generate ./internal/ingest/.
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -11,27 +12,50 @@ import (
 )
 
 func generate(args []string, output io.Writer) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: record-kinds-docgen <docs/record-kinds.md>")
+	if len(args) != 2 {
+		return fmt.Errorf("usage: record-kinds-docgen <record_kinds.yaml> <docs/record-kinds.md>")
+	}
+	registryYAML, err := ingest.GenerateRecordKindRegistryYAML()
+	if err != nil {
+		return fmt.Errorf("generate record-kind registry YAML: %w", err)
 	}
 	registry, err := ingest.LoadRecordKindRegistry()
 	if err != nil {
-		return fmt.Errorf("load registry before generating document: %w", err)
+		return fmt.Errorf("load generated registry before generating document: %w", err)
 	}
-	raw, err := os.ReadFile(args[0])
+	document := []byte(registry.Document())
+	yamlCurrent, err := generatedFileCurrent(args[0], registryYAML)
 	if err != nil {
-		return fmt.Errorf("read existing document %q: %w; supply its writable file path", args[0], err)
-	}
-	updated := registry.Document()
-	if string(raw) == updated {
-		_, err = fmt.Fprintln(output, "record-kinds document already current")
 		return err
 	}
-	if err := os.WriteFile(args[0], []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("write generated document %q: %w", args[0], err)
+	documentCurrent, err := generatedFileCurrent(args[1], document)
+	if err != nil {
+		return err
 	}
-	_, err = fmt.Fprintln(output, "record-kinds document regenerated")
+	if !yamlCurrent {
+		if err := os.WriteFile(args[0], registryYAML, 0o644); err != nil {
+			return fmt.Errorf("write generated registry YAML %q: %w", args[0], err)
+		}
+	}
+	if !documentCurrent {
+		if err := os.WriteFile(args[1], document, 0o644); err != nil {
+			return fmt.Errorf("write generated document %q: %w", args[1], err)
+		}
+	}
+	if yamlCurrent && documentCurrent {
+		_, err = fmt.Fprintln(output, "record-kind registry and document already current")
+		return err
+	}
+	_, err = fmt.Fprintln(output, "record-kind registry and document regenerated")
 	return err
+}
+
+func generatedFileCurrent(path string, generated []byte) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read existing generated file %q: %w; supply its writable file path", path, err)
+	}
+	return bytes.Equal(raw, generated), nil
 }
 
 func main() {

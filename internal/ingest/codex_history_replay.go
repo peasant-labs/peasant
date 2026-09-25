@@ -12,6 +12,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
@@ -84,57 +86,46 @@ func codexItemBodyCarriesPayload(body codexItemBody) bool {
 	return false
 }
 
+type codexNativeItem struct {
+	Type string
+	Role string
+}
+
+var codexCanonicalNativeItemTypes = map[string]codexNativeItem{
+	"UserMessage":         {Type: "message", Role: "user"},
+	"AgentMessage":        {Type: "message", Role: "assistant"},
+	"Reasoning":           {Type: "reasoning", Role: "assistant"},
+	"FunctionCallOutput":  {Type: "function_call_output", Role: "tool"},
+	"CommandExecution":    {Type: "command_execution", Role: "assistant"},
+	"FileChange":          {Type: "file_change", Role: "assistant"},
+	"SubAgentActivity":    {Type: "sub_agent_activity", Role: "assistant"},
+	"CollabAgentToolCall": {Type: "collab_agent_tool_call", Role: "assistant"},
+	"ContextCompaction":   {Type: "context_compaction", Role: "system"},
+	"Extension":           {Type: "extension", Role: "assistant"},
+	"Plan":                {Type: "plan", Role: "assistant"},
+	"HookPrompt":          {Type: "hook_prompt", Role: "system"},
+	"WebSearch":           {Type: "web_search", Role: "assistant"},
+	"ImageView":           {Type: "image_view", Role: "user"},
+	"ImageGeneration":     {Type: "image_generation", Role: "assistant"},
+	"McpToolCall":         {Type: "mcp_tool_call", Role: "assistant"},
+	"DynamicToolCall":     {Type: "dynamic_tool_call", Role: "assistant"},
+	"EnteredReviewMode":   {Type: "entered_review_mode", Role: "system"},
+	"ExitedReviewMode":    {Type: "exited_review_mode", Role: "system"},
+}
+
 // codexItemNativeType maps a canonical item body discriminator to the bounded
 // native node type and native role. It recognizes both the canonical TurnItem
-// variants (UserMessage, AgentMessage, Reasoning, CommandExecution, ...) and
-// the ResponseItem-shaped variants the same item can carry. An unrecognized
-// discriminator is not a native item and returns ok=false.
+// variants and the ResponseItem-shaped variants the same item can carry.
 func codexItemNativeType(body codexItemBody) (nativeType, role string, ok bool) {
 	if mapped, known := codexResponseNativeType(body.Type); known {
 		return mapped, body.Role, true
 	}
-	switch body.Type {
-	case "UserMessage":
-		return "message", "user", true
-	case "AgentMessage":
-		return "message", "assistant", true
-	case "Reasoning":
-		return "reasoning", "assistant", true
-	case "FunctionCallOutput":
-		return "function_call_output", "tool", true
-	case "CommandExecution":
-		return "command_execution", "assistant", true
-	case "FileChange":
-		return "file_change", "assistant", true
-	case "SubAgentActivity":
-		return "sub_agent_activity", "assistant", true
-	case "CollabAgentToolCall":
-		return "collab_agent_tool_call", "assistant", true
-	case "ContextCompaction":
-		return "context_compaction", "system", true
-	case "Extension":
-		return "extension", "assistant", true
-	case "Plan":
-		return "plan", "assistant", true
-	case "HookPrompt":
-		return "hook_prompt", "system", true
-	case "WebSearch":
-		return "web_search", "assistant", true
-	case "ImageView":
-		return "image_view", "user", true
-	case "ImageGeneration":
-		return "image_generation", "assistant", true
-	case "McpToolCall":
-		return "mcp_tool_call", "assistant", true
-	case "DynamicToolCall":
-		return "dynamic_tool_call", "assistant", true
-	case "EnteredReviewMode":
-		return "entered_review_mode", "system", true
-	case "ExitedReviewMode":
-		return "exited_review_mode", "system", true
-	default:
-		return "", "", false
-	}
+	mapped, known := codexCanonicalNativeItemTypes[body.Type]
+	return mapped.Type, mapped.Role, known
+}
+
+func codexNativeItemBodyKinds() []string {
+	return append(slices.Sorted(maps.Keys(codexCanonicalNativeItemTypes)), codexNativeResponsePayloadKinds()...)
 }
 
 // codexItemIsAdmission reports whether an item lifecycle body is a native
@@ -207,16 +198,15 @@ type codexHistoryRecord struct {
 	Malformed bool
 }
 
+func codexNativeEnvelopeKinds() []string {
+	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, "compacted"}
+}
+
 // recognizedCodexEnvelopeType reports whether an envelope type advances the
 // decoded native ordinal checkpoint. Session and turn headers advance the
 // checkpoint even though they never become content nodes.
 func recognizedCodexEnvelopeType(envelopeType string) bool {
-	switch envelopeType {
-	case codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, "compacted":
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(codexNativeEnvelopeKinds(), envelopeType)
 }
 
 // parseCodexHistoryRecords splits bounded decoded bytes into ordered records
@@ -1570,27 +1560,25 @@ func (state *codexReplayState) checkpointRefs(threadID string) []schema.SourceEn
 	return refs
 }
 
+var codexNativeResponseTypes = map[string]string{
+	codexResponseMessage:       "message",
+	codexResponseAgentMessage:  "message",
+	codexResponseReasoning:     "reasoning",
+	codexResponseFunctionCall:  "function_call",
+	codexResponseCustomCall:    "custom_tool_call",
+	codexResponseFunctionOut:   "function_call_output",
+	codexResponseCustomCallOut: "custom_tool_call_output",
+}
+
+func codexNativeResponsePayloadKinds() []string {
+	return slices.Sorted(maps.Keys(codexNativeResponseTypes))
+}
+
 // codexResponseNativeType maps a response_item payload type to the bounded
 // native node type.
 func codexResponseNativeType(payloadType string) (string, bool) {
-	switch payloadType {
-	case codexResponseMessage:
-		return "message", true
-	case codexResponseAgentMessage:
-		return "message", true
-	case codexResponseReasoning:
-		return "reasoning", true
-	case codexResponseFunctionCall:
-		return "function_call", true
-	case codexResponseCustomCall:
-		return "custom_tool_call", true
-	case codexResponseFunctionOut:
-		return "function_call_output", true
-	case codexResponseCustomCallOut:
-		return "custom_tool_call_output", true
-	default:
-		return "", false
-	}
+	mapped, ok := codexNativeResponseTypes[payloadType]
+	return mapped, ok
 }
 
 // codexNativeKey builds the bounded local identity the ref registry keys on. A

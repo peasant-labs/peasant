@@ -115,7 +115,7 @@ func decodeStrikeEventData(raw json.RawMessage) (strikeEventData, error) {
 
 // knownStrikeEventKinds is the closed set of Strike event types this build
 // parses. It is the single source of truth for isKnownStrikeEvent, and the
-// record-kind drift test walks it against the registry.
+// record-kind vocabulary completeness check compares it with the declaration.
 var knownStrikeEventKinds = []strikeEventType{
 	strikeEventSessionStarted,
 	strikeEventSessionTitled,

@@ -7,8 +7,8 @@ import "strings"
 func (r RecordKindRegistry) Document() string {
 	return `# Record-kind registry
 
-Generated from internal/ingest/record_kinds.yaml. Do not hand-edit this document.
-Regenerate with: go generate ./internal/ingest/
+Generated from the co-located adapter vocabulary declarations. Do not hand-edit this document.
+Regenerate the registry and document with: go generate ./internal/ingest/
 
 ## Reading the registry
 
@@ -36,9 +36,10 @@ remain errors, not successful unknown-kind captures.
   not-applicable (entryless or structural). Tool display can depend on a recognized
   tool kind and pairing; storing a generic tool name does not prove a renderer.
   Unknown-record display is deferred; no new transcript renderer is claimed.
-- **Source** names first-party production code. Inventories are extracted from
-  actual dispatch/admission syntax, including explicit prefix matching, not a
-  second test-only vocabulary. Census observations are not an accept-list.
+- **Source** names first-party production code as generated reporting metadata.
+  Each adapter vocabulary is compared exactly with its runtime dispatch/census;
+  a source pointer is never parsed as Go syntax. Census observations are not an
+  accept-list.
 - **Versions** are verification targets: baseline and native overrides match
   their actual producer registries. They are not session producer stamps.
 
@@ -55,7 +56,8 @@ kinds occurred in this run. It includes represented/planned and tracked/hidden
 rows, qualified by context and namespace. Unseen names have no static row; their
 actual occurrences belong in the run's retained-unknown summary.
 
-Source inventory gates compare both directions. Behavioral fixtures separately
+Vocabulary completeness compares declarations and production censuses in both
+directions without assuming a Go syntax shape. Behavioral fixtures separately
 check classification and previews. These checks are not proof of all source,
 storage, export and receiver paths: those require the harness and publication
 integration suites. Publication requires validated retained evidence, partial

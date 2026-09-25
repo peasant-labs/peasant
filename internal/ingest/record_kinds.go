@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,17 +66,20 @@ const (
 // RecordKind is one row of the record-kind registry: the parser disposition,
 // the stored shape, and the reader treatment of one harness kind.
 type RecordKind struct {
-	Context    RecordKindContext    `yaml:"-"`
-	Namespace  string               `yaml:"-"`
-	Match      RecordKindMatch      `yaml:"match,omitempty"`
-	Kind       string               `yaml:"kind"`
-	Status     RecordKindStatus     `yaml:"status"`
-	Preview    RecordKindPreview    `yaml:"preview"`
-	Payload    string               `yaml:"payload"`
-	Visualized RecordKindVisualized `yaml:"visualized"`
-	Renderer   string               `yaml:"renderer"`
-	Reason     string               `yaml:"reason"`
-	Source     string               `yaml:"source"`
+	Context     RecordKindContext               `yaml:"-"`
+	Namespace   string                          `yaml:"-"`
+	Match       RecordKindMatch                 `yaml:"match,omitempty"`
+	Kind        string                          `yaml:"kind"`
+	Status      RecordKindStatus                `yaml:"status"`
+	Preview     RecordKindPreview               `yaml:"preview"`
+	Payload     string                          `yaml:"payload"`
+	Visualized  RecordKindVisualized            `yaml:"visualized"`
+	Renderer    string                          `yaml:"renderer"`
+	Reason      string                          `yaml:"reason"`
+	Source      string                          `yaml:"source"`
+	Outcome     indexformat.Outcome             `yaml:"-"`
+	EntryMode   RecordKindEntryMode             `yaml:"-"`
+	Coordinates RecordKindCoordinateRequirement `yaml:"-"`
 }
 
 // RecordKindHarness is the registry section for one harness: the harvester
@@ -113,11 +117,9 @@ const (
 	RecordKindPrefix  RecordKindMatch = "prefix"
 )
 
-// RecordKindSource selects production syntax, not a duplicate test vocabulary.
-// Switch and EqualOperand are exact Go expressions; neither set selects a
-// returned list or map unless PrefixArgument selects a prefix test. Complete
-// requires one selector to cover the entire namespace, so a surviving duplicate
-// dispatcher cannot hide a removed admission branch.
+// RecordKindSource is generated reporting metadata that names first-party
+// production code. Validation never parses these fields as Go syntax; exact
+// vocabulary completeness is checked against adapter runtime censuses.
 type RecordKindSource struct {
 	File           string `yaml:"file"`
 	Symbol         string `yaml:"symbol"`
@@ -150,7 +152,7 @@ func (k RecordKind) Key() RecordKindKey {
 // RecordKindRegistry is the parsed record_kinds.yaml: the per-harness mapping
 // deliverable of peasant-labs/peasant#397.
 //
-//go:generate go run ../../scripts/record-kinds-docgen ../../docs/record-kinds.md
+//go:generate go run ../../scripts/record-kinds-docgen record_kinds.yaml ../../docs/record-kinds.md
 type RecordKindRegistry struct {
 	Version   int                           `yaml:"version"`
 	Harnesses map[Harness]RecordKindHarness `yaml:"harnesses"`
@@ -159,11 +161,47 @@ type RecordKindRegistry struct {
 // recordKindsFormatVersion is the registry schema this build reads.
 const recordKindsFormatVersion = 2
 
-// LoadRecordKindRegistry parses and validates the embedded registry. A
-// registry that breaks a closed set, repeats a kind, or leaves a required
-// field empty is a programmer error the drift test reports.
+// LoadRecordKindRegistry builds and validates the registry from adapter
+// vocabulary declarations. The embedded YAML is generated reporting output,
+// not a parser or interpretation source.
 func LoadRecordKindRegistry() (RecordKindRegistry, error) {
-	return decodeRecordKindRegistry(recordKindsYAML)
+	return generateRecordKindRegistry()
+}
+
+func generateRecordKindRegistry() (RecordKindRegistry, error) {
+	registry := RecordKindRegistry{Version: recordKindsFormatVersion, Harnesses: make(map[Harness]RecordKindHarness, len(DefaultAdapterRegistry))}
+	for _, vocabulary := range allRecordKindVocabularies() {
+		versions, ok := HarvesterVersionRegistry[vocabulary.Harness]
+		if !ok {
+			return RecordKindRegistry{}, fmt.Errorf("record-kind registry: harness %q has no harvester versions; register its parser targets before generating", vocabulary.Harness)
+		}
+		section := RecordKindHarness{
+			AdapterVersion: versions.AdapterVersion,
+			IndexerVersion: versions.IndexerVersion,
+			IndexVersion:   versions.IndexVersion,
+			Fallback:       lowerRecordKindFallback(RecordKindRetained, "", ""),
+		}
+		if native, ok := NativeGenerationRepairTargets[vocabulary.Harness]; ok {
+			section.NativeVersions = &RecordKindVersions{AdapterVersion: native.AdapterVersion, IndexerVersion: native.IndexerVersion, IndexVersion: native.IndexVersion}
+		}
+		for _, declaration := range vocabulary.Inventories {
+			inventory := RecordKindInventory{Context: declaration.Context, Namespace: declaration.Namespace, Sources: declaration.Sources}
+			for _, declared := range declaration.Rules {
+				declared.Context = declaration.Context
+				declared.Namespace = declaration.Namespace
+				kind := lowerRecordKindRule(declared)
+				kind.Source = recordKindSourceLabel(inventory)
+				inventory.Kinds = append(inventory.Kinds, kind)
+				section.Kinds = append(section.Kinds, kind)
+			}
+			section.Inventories = append(section.Inventories, inventory)
+		}
+		registry.Harnesses[vocabulary.Harness] = section
+	}
+	if err := registry.validate(); err != nil {
+		return RecordKindRegistry{}, err
+	}
+	return registry, nil
 }
 
 func decodeRecordKindRegistry(data []byte) (RecordKindRegistry, error) {
@@ -191,9 +229,11 @@ func decodeRecordKindRegistry(data []byte) (RecordKindRegistry, error) {
 					}
 					kind.Source = strings.Join(refs, "; ")
 				}
+				bindDecodedRecordKindSemantics(&kind)
 				section.Kinds = append(section.Kinds, kind)
 			}
 		}
+		bindDecodedRecordKindSemantics(&section.Fallback)
 		registry.Harnesses[harness] = section
 	}
 	if err := registry.validate(); err != nil {
@@ -241,8 +281,8 @@ func (r RecordKindRegistry) validate() error {
 			return fmt.Errorf("record-kind registry: harness %q native versions differ; verify against NativeGenerationRepairTargets", harness)
 		}
 		fallback := section.Fallback
-		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Visualized != RecordKindHidden || fallback.Renderer != "" || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" {
-			return fmt.Errorf("record-kind registry: harness %q must declare an unnamed hidden retained-unknown fallback with payload, reason and source", harness)
+		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Visualized != RecordKindHidden || fallback.Renderer != "" || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" || fallback.Outcome != indexformat.OutcomeOpaque || fallback.EntryMode != RecordKindEntryModeRetainedEvidence || fallback.Coordinates != RecordKindCoordinatesRequired {
+			return fmt.Errorf("record-kind registry: harness %q must lower an unnamed hidden valid-kind fallback to retained evidence with payload, coordinates, reason and source", harness)
 		}
 		inventories := make(map[string]bool)
 		contexts := make(map[RecordKindContext]bool)
@@ -335,6 +375,23 @@ func (r RecordKindRegistry) validate() error {
 			}
 			if kind.Visualized != RecordKindRendered && kind.Renderer != "" {
 				return fmt.Errorf("%s %q: visualized %q names no renderer, got %q", where, kind.Kind, string(kind.Visualized), kind.Renderer)
+			}
+			if !kind.Outcome.IsValid() {
+				return fmt.Errorf("%s %q: outcome %q is outside the shared closed set", where, kind.Kind, kind.Outcome.String())
+			}
+			switch kind.Outcome {
+			case indexformat.OutcomeOpaque:
+				if kind.EntryMode != RecordKindEntryModeRetainedEvidence || kind.Coordinates != RecordKindCoordinatesRequired {
+					return fmt.Errorf("%s %q: opaque evidence must retain complete payload coordinates", where, kind.Kind)
+				}
+			case indexformat.OutcomeIgnored:
+				if kind.EntryMode != RecordKindEntryModeNone || kind.Coordinates != RecordKindCoordinatesNone {
+					return fmt.Errorf("%s %q: recognized ignored input must remain entryless", where, kind.Kind)
+				}
+			default:
+				if kind.EntryMode != RecordKindEntryModeRepresented || kind.Coordinates != RecordKindCoordinatesNone {
+					return fmt.Errorf("%s %q: represented interpretation must emit an ordinary entry without fallback coordinates", where, kind.Kind)
+				}
 			}
 		}
 	}

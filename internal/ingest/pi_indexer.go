@@ -107,24 +107,22 @@ const (
 	piRoleBash       piMessageRole = "bashExecution"
 )
 
+func piMessageRoleKinds() []piMessageRole {
+	return []piMessageRole{piRoleUser, piRoleAssistant, piRoleToolResult, piRoleBash}
+}
+
 func (r *piMessageRole) UnmarshalJSON(raw []byte) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	switch value {
-	case string(piRoleUser):
-		*r = piRoleUser
-	case string(piRoleAssistant):
-		*r = piRoleAssistant
-	case string(piRoleToolResult):
-		*r = piRoleToolResult
-	case string(piRoleBash):
-		*r = piRoleBash
-	default:
-		return fmt.Errorf("unknown Pi message role")
+	for _, role := range piMessageRoleKinds() {
+		if value == string(role) {
+			*r = role
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("unknown Pi message role")
 }
 
 type piBlockType string
@@ -136,24 +134,22 @@ const (
 	piBlockToolCall piBlockType = "toolCall"
 )
 
+func piBlockTypeKinds() []piBlockType {
+	return []piBlockType{piBlockText, piBlockThinking, piBlockImage, piBlockToolCall}
+}
+
 func (t *piBlockType) UnmarshalJSON(raw []byte) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	switch value {
-	case string(piBlockText):
-		*t = piBlockText
-	case string(piBlockThinking):
-		*t = piBlockThinking
-	case string(piBlockImage):
-		*t = piBlockImage
-	case string(piBlockToolCall):
-		*t = piBlockToolCall
-	default:
-		return fmt.Errorf("unknown Pi content block type")
+	for _, kind := range piBlockTypeKinds() {
+		if value == string(kind) {
+			*t = kind
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("unknown Pi content block type")
 }
 
 type piMessagePayload struct {

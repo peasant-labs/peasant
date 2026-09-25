@@ -1,0 +1,26 @@
+required_names:
+  - claude-code vocabulary exactly matches production
+  - cursor vocabulary exactly matches production
+  - strike vocabulary exactly matches production
+  - pi vocabulary exactly matches production
+  - codex vocabulary exactly matches production
+  - opencode vocabulary exactly matches production
+  - claude-code declaration removal fails
+  - cursor declaration rename fails
+  - strike declaration removal fails
+  - pi declaration rename fails
+  - codex declaration removal fails
+  - opencode declaration rename fails
+cases:
+  - {name: claude-code vocabulary exactly matches production, harness: claude-code, operation: exact}
+  - {name: cursor vocabulary exactly matches production, harness: cursor, operation: exact}
+  - {name: strike vocabulary exactly matches production, harness: strike, operation: exact}
+  - {name: pi vocabulary exactly matches production, harness: pi, operation: exact}
+  - {name: codex vocabulary exactly matches production, harness: codex, operation: exact}
+  - {name: opencode vocabulary exactly matches production, harness: opencode, operation: exact}
+  - {name: claude-code declaration removal fails, harness: claude-code, operation: remove-first, error: has no declaration}
+  - {name: cursor declaration rename fails, harness: cursor, operation: rename-first, error: has no declaration}
+  - {name: strike declaration removal fails, harness: strike, operation: remove-first, error: has no declaration}
+  - {name: pi declaration rename fails, harness: pi, operation: rename-first, error: has no declaration}
+  - {name: codex declaration removal fails, harness: codex, operation: remove-first, error: has no declaration}
+  - {name: opencode declaration rename fails, harness: opencode, operation: rename-first, error: has no declaration}

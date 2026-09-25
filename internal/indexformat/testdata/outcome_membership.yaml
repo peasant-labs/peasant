@@ -1,0 +1,16 @@
+required_names:
+  - text
+  - tool call
+  - tool result
+  - control
+  - ignored
+  - opaque
+  - invalid
+cases:
+  - {name: text, outcome: 0, text: text, valid: true}
+  - {name: tool call, outcome: 1, text: tool-call, valid: true}
+  - {name: tool result, outcome: 2, text: tool-result, valid: true}
+  - {name: control, outcome: 3, text: control, valid: true}
+  - {name: ignored, outcome: 4, text: ignored, valid: true}
+  - {name: opaque, outcome: 5, text: opaque, valid: true}
+  - {name: invalid, outcome: 255, text: invalid, valid: false}

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
@@ -23,7 +22,6 @@ type recordKindsValidationFixtures struct {
 		Operation string            `yaml:"operation"`
 		Find      string            `yaml:"find"`
 		Replace   string            `yaml:"replace"`
-		File      string            `yaml:"file"`
 		Error     string            `yaml:"error"`
 		Harness   Harness           `yaml:"harness"`
 		Context   RecordKindContext `yaml:"context"`
@@ -119,45 +117,6 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 				_, result = decodeRecordKindRegistry([]byte(strings.Replace(string(recordKindsYAML), row.Find, row.Replace, 1)))
 			case "trailing":
 				_, result = decodeRecordKindRegistry(append(append([]byte{}, recordKindsYAML...), []byte("\n---\nversion: 2\n")...))
-			case "source":
-				raw, err := os.ReadFile(row.File)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if strings.Count(string(raw), row.Find) != 1 {
-					t.Fatal("source mutation must target exactly one location")
-				}
-				changed := []byte(strings.Replace(string(raw), row.Find, row.Replace, 1))
-				tree, err := readRecordKindSourceTree(map[string][]byte{row.File: changed})
-				if err != nil {
-					t.Fatal(err)
-				}
-				result = verifyRecordKindSources(registry, tree)
-			case "delete-row":
-				section := registry.Harnesses[row.Harness]
-				found := false
-				for i := range section.Inventories {
-					inv := &section.Inventories[i]
-					if inv.Context != row.Context || inv.Namespace != row.Namespace {
-						continue
-					}
-					for j, kind := range inv.Kinds {
-						if kind.Kind == row.Kind {
-							inv.Kinds = append(inv.Kinds[:j], inv.Kinds[j+1:]...)
-							found = true
-							break
-						}
-					}
-				}
-				if !found {
-					t.Fatal("row deletion did not occur")
-				}
-				registry.Harnesses[row.Harness] = section
-				tree, err := readRecordKindSourceTree(nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				result = verifyRecordKindSources(registry, tree)
 			case "behavior", "mutate-status", "mutate-preview":
 				section := registry.Harnesses[row.Harness]
 				for i := range section.Kinds {
