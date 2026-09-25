@@ -124,6 +124,10 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			// Replace the secret marker first so padding substitution cannot alter it.
 			payload := strings.ReplaceAll(strings.ReplaceAll(doc.Payload, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
 			expected := strings.ReplaceAll(doc.Expected, "BODY", strings.Repeat("synthetic-", 1024))
+			// Interim raw-at-rest: stored index Extra byte-equals the raw
+			// source; only the upload carries the redacted form until SLICE-5
+			// lands export-time baseline redaction.
+			stored := payload
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			var path ingest.ResolvedPath
 			var damageSource func()
@@ -256,7 +260,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 						}
 						for _, record := range records {
 							seen++
-							if string(record.Payload) != expected {
+							if string(record.Payload) != stored {
 								t.Fatal("first activated capture changed the independent lexical payload")
 							}
 						}
@@ -280,9 +284,10 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			if c.Framing {
+				stored = " " + stored + " "
 				expected = " " + expected + " "
 			}
-			checkNativeUnknownPublic(t, c, expected, detail)
+			checkNativeUnknownPublic(t, c, stored, detail)
 			engine, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
 			if err != nil {
 				t.Fatal(err)

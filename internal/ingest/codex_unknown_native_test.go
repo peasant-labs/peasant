@@ -168,8 +168,8 @@ func TestCodexUnknownNativePersistence(t *testing.T) {
 				if got.Namespace != row.Namespace || got.Kind != row.Kind || got.Position.Line != line || got.Position.JSONPointer != row.Pointer {
 					t.Fatalf("coordinates: %+v", got)
 				}
-				if bytes.Contains(got.Payload, []byte("ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD")) {
-					t.Fatal("raw secret persisted")
+				if strings.Contains(row.Record, "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD") && !bytes.Contains(got.Payload, []byte("ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD")) {
+					t.Fatal("stored evidence is not raw source bytes")
 				}
 				if row.Name == "envelope" && (!bytes.Contains(got.Payload, []byte(payload)) || !bytes.Contains(got.Payload, []byte("9007199254740993"))) {
 					t.Fatal("large payload or precise number lost")
