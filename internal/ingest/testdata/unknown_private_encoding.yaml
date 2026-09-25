@@ -7,6 +7,39 @@ required_names:
   - unknown-private-envelope-field-refused
   - unknown-private-position-field-refused
   - unknown-public-position-field-refused
+  - missing-public-sourceref-refused
+  - null-public-sourceref-refused
+  - missing-public-recordindex-refused
+  - null-public-recordindex-refused
+  - missing-public-position-refused
+  - null-public-position-refused
+  - public-null-refused
+  - fractional-coordinate-refused
+  - string-coordinate-refused
+  - negative-coordinate-refused
+  - envelope-duplicate-member-refused
+  - position-duplicate-member-refused
+  - public-duplicate-member-refused
+  - extra-root-duplicate-refused
+  - escaped-key-duplicate-refused
+  - envelope-case-alias-refused
+  - envelope-case-alias-reverse-refused
+  - extra-reserved-case-alias-refused
+  - extra-reserved-case-alias-reverse-refused
+  - extra-lone-alias-refused
+  - trailing-extra-value-refused
+  - trailing-evidence-value-refused
+  - missing-envelope-member-refused
+  - null-envelope-member-refused
+  - neither-payload-encoding-refused
+  - payloadtext-wrong-type-refused
+  - position-case-alias-refused
+  - public-case-alias-refused
+  - unrelated-extra-extension-accepted
+  - secret-echo-safety-refused
+  - legacy-then-corrupt-wins
+  - corrupt-then-legacy-wins
+  - legacy-then-valid-stays-legacy
 cases:
   - name: legacy-object-without-public-position
     extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payload":{ "n":9007199254740993 }}]}'
@@ -33,3 +66,104 @@ cases:
   - name: unknown-public-position-field-refused
     extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0,"unexpected":true}},"payloadText":"{}"}]}'
     error: true
+  - name: missing-public-sourceref-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: null-public-sourceref-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":null,"recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: missing-public-recordindex-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: null-public-recordindex-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":null,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: missing-public-position-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: null-public-position-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":null}},"payloadText":"{}"}]}'
+    error: true
+  - name: public-null-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":null},"payloadText":"{}"}]}'
+    error: true
+  - name: fractional-coordinate-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0.5,"position":0.5}},"payloadText":"{}"}]}'
+    error: true
+  - name: string-coordinate-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":"0","position":"0"}},"payloadText":"{}"}]}'
+    error: true
+  - name: negative-coordinate-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":-1,"position":-1}},"payloadText":"{}"}]}'
+    error: true
+  - name: envelope-duplicate-member-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","kind":"past","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: position-duplicate-member-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"line":2,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: public-duplicate-member-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0,"position":1}},"payloadText":"{}"}]}'
+    error: true
+  - name: extra-root-duplicate-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}],"retainedUnknown":[]}'
+    error: true
+  - name: escaped-key-duplicate-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","\u006eamespace":"oops","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: envelope-case-alias-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","Kind":"past","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: envelope-case-alias-reverse-refused
+    extra: '{"retainedUnknown":[{"Kind":"past","harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: extra-reserved-case-alias-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}],"RetainedUnknown":[]}'
+    error: true
+  - name: extra-reserved-case-alias-reverse-refused
+    extra: '{"RetainedUnknown":[],"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: extra-lone-alias-refused
+    extra: '{"RetainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: trailing-extra-value-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]} {}'
+    error: true
+  - name: trailing-evidence-value-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"} {"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":1,"position":1}},"payloadText":"{}"}]}'
+    error: true
+  - name: missing-envelope-member-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: null-envelope-member-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":null,"position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: neither-payload-encoding-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}}}]}'
+    error: true
+  - name: payloadtext-wrong-type-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":42}]}'
+    error: true
+  - name: position-case-alias-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"Line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: public-case-alias-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"SourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}]}'
+    error: true
+  - name: unrelated-extra-extension-accepted
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"}],"reviewedBy":"owner","schemaVersion":3}'
+    payload: '{}'
+  - name: secret-echo-safety-refused
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","unexpected":true,"position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{ \"token\": \"ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" }"}]}'
+    error: true
+    no_echo: 'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+  - name: legacy-then-corrupt-wins
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payload":{ "n":9007199254740993 }},{"harness":"claude-code","namespace":"record","kind":"future","unexpected":true,"position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":1,"position":1}},"payloadText":"{}"}]}'
+    error: true
+  - name: corrupt-then-legacy-wins
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","unexpected":true,"position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":"{}"},{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":2},"payload":{ "n":9007199254740993 }}]}'
+    error: true
+  - name: legacy-then-valid-stays-legacy
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1},"payload":{ "n":9007199254740993 }},{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":2,"public":{"sourceRef":"source-0","recordIndex":1,"position":1}},"payloadText":"{}"}]}'
+    count: 2
+    missing_public: true
