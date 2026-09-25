@@ -29,14 +29,14 @@ func TestPushNilRedactorRefusesWithRetained(t *testing.T) {
 		ContractVersion: schema.PushContractVersion("0.1.1"),
 		Kind:            schema.ContentKindSessionDetail,
 		SessionDetail: &schema.SessionDetailPayload{
-			SchemaVersion:    schema.PushContractVersion("0.1.1"),
-			ID:               "11111111-2222-3333-4444-555555555555",
-			Harness:          schema.HarnessClaudeCode,
-			Model:            "claude-sonnet-4-20250514",
-			RetainedUnknown:  records,
-			Diagnostics:      &schema.InterpretationDiagnostics{Partial: true},
-			Turns:            []schema.TurnDetail{{Index: 0, Role: schema.RoleAssistant, Depth: 0, Content: "closing"}},
-			SessionOrigin:    schema.SessionOriginAgent,
+			SchemaVersion:   schema.PushContractVersion("0.1.1"),
+			ID:              "11111111-2222-3333-4444-555555555555",
+			Harness:         schema.HarnessClaudeCode,
+			Model:           "claude-sonnet-4-20250514",
+			RetainedUnknown: records,
+			Diagnostics:     &schema.InterpretationDiagnostics{Partial: true},
+			Turns:           []schema.TurnDetail{{Index: 0, Role: schema.RoleAssistant, Depth: 0, Content: "closing"}},
+			SessionOrigin:   schema.SessionOriginAgent,
 		},
 	}
 	// PublicationReviewText with nil must refuse: it validates the upload path.
