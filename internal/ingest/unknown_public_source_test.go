@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -198,10 +199,9 @@ func TestUnknownSourceToPublication(t *testing.T) {
 			if err != nil {
 				t.Fatalf("real capture is not exportable: %v", err)
 			}
-			// Interim raw-at-rest: export serves stored bytes verbatim until
-			// SLICE-5 lands export-time baseline redaction; the upload below
-			// already carries the redacted form via the configured engine.
-			assertUnknownPublicDetail(t, c, payload, detail)
+			// Raw-at-rest: stored bytes stay raw (asserted above); export emits
+			// the baseline-redacted egress form via the standard engine.
+			assertUnknownPublicDetail(t, c, expected, detail)
 			capture, found, err := db.GetSessionContentCapture(ctx, sid)
 			wantStatus, wantCode := ingest.ContentCaptureIncomplete, ingest.ContentCaptureUnknownDataRetained
 			if c.Complete {
@@ -301,5 +301,70 @@ func assertUnknownPublicDetail(t *testing.T, c unknownPublicSourceCase, expected
 	}
 	if !found {
 		t.Fatal("known closing sibling lost")
+	}
+}
+
+// TestUnknownSourceDuplicateMemberRefuses pins that stored evidence with
+// duplicate owned members cannot be certified: the strict codec rejects it
+// before any index replacement, prior export bytes stay byte-identical, and
+// no retained counts are reported. Unblocked by the SLICE-1 strict codec;
+// exercised here through a real store write and export (not the validator
+// helper alone). Known-record duplicate admission at the source seam remains
+// slice-2 authoritative-admission scope and is not asserted here.
+func TestUnknownSourceDuplicateMemberRefuses(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := storetest.Open(t)
+	sid, err := ingest.NewSessionID(testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedSession(t, db, sid.String())
+	// Seed a prior good capture with one valid retained record.
+	position := ingest.UnknownSourcePosition{Line: 2, Public: &ingest.UnknownPublicPosition{SourceRef: "source-0", RecordIndex: 1, Position: 3}}
+	record, err := ingest.NewRetainedUnknown(ingest.HarnessClaudeCode, "record", "future", position, json.RawMessage(`{"type":"future","n":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier, err := ingest.RetainedUnknownEntry(sid, 1, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := testutil.HarvesterVersionsForSeed(t, ingest.HarnessClaudeCode)
+	seeded := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: sid, Result: indexformat.V1{Entries: []schema.SessionEntry{carrier}},
+		IndexVersion: versions.IndexVersion, IndexerVersion: versions.IndexerVersion,
+		CaptureRevision: 1, RequireFullContent: true,
+		ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, CaptureFormat: ingest.ContentCaptureFormatFull, SourceAuthority: ingest.ContentSourceNewIngest},
+	}})
+	if len(seeded) != 1 || seeded[0].Err != nil {
+		t.Fatalf("seed valid retained capture: %+v", seeded)
+	}
+	fs := testutil.NewMemFS()
+	before, err := export.ExportSession(ctx, db, fs, sid.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeBytes, _ := json.Marshal(before)
+	// Duplicate owned member: two retainedUnknown keys in one Extra document.
+	// The strict codec must reject this before any replacement.
+	dupExtra := `{"model_id":"m","retainedUnknown":{"harness":"claude-code"},"retainedUnknown":{"harness":"claude-code"}}`
+	dupEntry := schema.SessionEntry{SessionID: schema.SessionID(sid.String()), EntryIndex: 2, Harness: schema.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleAssistant, Extra: &dupExtra}
+	refused := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: sid, Result: indexformat.V1{Entries: []schema.SessionEntry{carrier, dupEntry}},
+		IndexVersion: versions.IndexVersion, IndexerVersion: versions.IndexerVersion,
+		CaptureRevision: 2, RequireFullContent: true,
+		ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, CaptureFormat: ingest.ContentCaptureFormatFull, SourceAuthority: ingest.ContentSourceNewIngest},
+	}})
+	if len(refused) != 1 || refused[0].Err == nil {
+		t.Fatalf("duplicate-member evidence certified: %+v", refused)
+	}
+	after, err := export.ExportSession(ctx, db, fs, sid.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterBytes, _ := json.Marshal(after)
+	if !bytes.Equal(beforeBytes, afterBytes) {
+		t.Fatal("duplicate-member evidence replaced prior export")
 	}
 }

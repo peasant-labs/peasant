@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -87,7 +88,18 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 			cfg := config.BaseConfig()
 			cfg.Redaction.CustomPatterns = []config.CustomPattern{{ID: "unknown-review", Category: config.CategoryProject, Pattern: "custom-secret", Replacement: "[CUSTOM]"}}
 			handler := &syncHandler{store: db, config: cfg}
-			raw, err := handler.readReviewContent(t.Context(), testutil.TestSessionUUID, nil)
+			// Consent scans raw pre-push evidence while uploads carry the
+			// redacted form: the review validates the upload path with the
+			// configured redactor yet exposes unredacted text to the scanner.
+			patterns, err := syncUserPatterns(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reviewRedactor, err := redact.NewRedactor(redact.Standard, patterns, redact.XDGPaths{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := handler.readReviewContent(t.Context(), testutil.TestSessionUUID, reviewRedactor)
 			if err != nil {
 				t.Fatal(err)
 			}

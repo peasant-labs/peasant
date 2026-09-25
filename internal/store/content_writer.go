@@ -38,6 +38,19 @@ func isManagedGenerationWrite(result indexformat.Result) bool {
 	}
 	return false
 }
+
+// asV2Value normalizes both V2 spellings to a value. A nil *V2 carries no
+// generation and reports not-ok, so pointer callers cannot bypass the
+// incomplete_new and Earlier-expansion guards through the pointer form.
+func asV2Value(result indexformat.Result) (indexformat.V2, bool) {
+	if v2, ok := result.(indexformat.V2); ok {
+		return v2, true
+	}
+	if pv2, ok := result.(*indexformat.V2); ok && pv2 != nil {
+		return *pv2, true
+	}
+	return indexformat.V2{}, false
+}
 func hashString(s *string) *string {
 	if s == nil {
 		return nil
@@ -99,9 +112,9 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	// input before entry replacement; the legacy preview policy permits only
 	// wholly absent coordinates after all other evidence validates.
 	evidenceEntries := entries
-	if managed, ok := w.Result.(indexformat.V2); ok && len(managed.Generation.Earlier) > 0 {
+	if v2, ok := asV2Value(w.Result); ok && len(v2.Generation.Earlier) > 0 {
 		evidenceEntries = append([]schema.SessionEntry(nil), entries...)
-		for _, section := range managed.Generation.Earlier {
+		for _, section := range v2.Generation.Earlier {
 			evidenceEntries = append(evidenceEntries, section.Content.Entries...)
 		}
 	}
@@ -112,7 +125,9 @@ func writeSessionContentOnConn(ctx context.Context, conn *sqlite.Conn, w ingest.
 	// evidence validator and capture-state mapping. In particular
 	// incomplete_new cannot write full or complete, even through direct batch
 	// writes, activation recovery, or a caller-supplied publication capture.
-	if v2, ok := w.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+	// Both V2 spellings are guarded: a nil *V2 carries no generation and is
+	// not a managed write, so it cannot bypass through the pointer form.
+	if v2, ok := asV2Value(w.Result); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
 		if w.RequireFullContent || w.ContentCapture.Status == ingest.ContentCaptureComplete || w.ContentCapture.CaptureFormat == ingest.ContentCaptureFormatFull {
 			return out, fmt.Errorf("store content write: incomplete_new generation cannot certify full or complete capture; prior capture remains authoritative; complete the generation before writing full content")
 		}
