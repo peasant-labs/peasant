@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -775,23 +776,19 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 // writeJSONL writes a slice of values as newline-delimited JSON to the given path.
 // Each value is marshalled as a single JSON line. An empty slice produces an empty file.
+//
+// The write goes through the same atomic boundary as session exports: lines
+// are encoded to a buffer first and committed with writeFileAtomic, so a
+// failed annotations export leaves an existing target untouched instead of a
+// truncated prefix.
 func writeJSONL[T any](path string, records []T) (err error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-	}()
-
-	enc := json.NewEncoder(f)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	for _, rec := range records {
 		if err := enc.Encode(rec); err != nil {
 			return err
 		}
 	}
-	return nil
+	return writeFileAtomic(path, buf.Bytes(), 0644)
 }

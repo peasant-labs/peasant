@@ -94,7 +94,10 @@ func redactExportLabels(kind, namespace string, redactor redact.JSONRedactor) (s
 // ValidateExportPayload checks public limits and the actual final serialized
 // detail bytes before anything is exposed or written. Typed validation alone
 // cannot catch redaction growth, escaping growth, or aggregate size: the
-// emitted bytes are what the cap constrains.
+// emitted bytes are what the cap constrains. The payload is serialized with
+// MarshalIndent because that is the exact shape the sessions command writes
+// to the target file; validating the compact form would understate the
+// emitted bytes.
 func ValidateExportPayload(payload *schema.SessionDetailPayload) error {
 	if payload == nil {
 		return fmt.Errorf("export session: no detail payload was built; nothing exported; re-index the source and retry")
@@ -102,7 +105,7 @@ func ValidateExportPayload(payload *schema.SessionDetailPayload) error {
 	if err := schema.ValidateSessionDetailPayload(*payload); err != nil {
 		return fmt.Errorf("export session: public validation failed: %w; nothing exported; re-index the source and retry", err)
 	}
-	encoded, err := json.Marshal(payload)
+	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return fmt.Errorf("export session: serialize validated detail: %w; nothing exported; re-index the source and retry", err)
 	}

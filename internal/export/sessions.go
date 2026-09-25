@@ -88,7 +88,7 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 // ExportSessionWithRedactor exports through the same paths with an explicit
 // engine for failure-injection tests. A nil engine refuses fail-closed when
 // retained records are present. Production callers use ExportSession.
-func ExportSessionWithRedactor(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, engine redact.JSONRedactor, managedRoots ...string) (*schema.SessionDetailPayload, error) {
+func ExportSessionWithRedactor(ctx context.Context, db *store.Store, fs ingest.FileSystem, sessionID string, engine redact.JSONRedactor) (*schema.SessionDetailPayload, error) {
 	if db.GenerationSnapshotsSupported() {
 		sid, err := ingest.NewSessionID(sessionID)
 		if err != nil {
