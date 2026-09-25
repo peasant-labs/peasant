@@ -416,6 +416,36 @@ func writeCapture(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionConten
 // replacement, preserving last-good authority. V1 entries and V2 Main+Earlier
 // are each validated as one set; incomplete_new can never certify full.
 func refuseForgedFullClaim(w ingest.SessionEntryWrite, evidence []schema.SessionEntry) error {
+	// Closed-set precedence: a caller-supplied capture field outside its
+	// canonical set must surface the validator error, not the forged-claim
+	// assessment. writeCapture enforces the same closed sets at the row
+	// boundary; validating here first restores that error precedence for
+	// full writes the forged-claim gate would otherwise shadow. Empty
+	// status/source-authority/format mean "apply the full-write default"
+	// downstream, so only non-empty values are validated; the empty failure
+	// code is the valid absent code and the zero origin is the valid file
+	// origin, so both are always validated.
+	if err := w.ContentCapture.TranscriptOrigin.Validate(); err != nil {
+		return err
+	}
+	if w.ContentCapture.Status != "" {
+		if _, err := ingest.NewContentCaptureStatus(string(w.ContentCapture.Status)); err != nil {
+			return err
+		}
+	}
+	if w.ContentCapture.SourceAuthority != "" {
+		if _, err := ingest.NewContentSourceAuthority(string(w.ContentCapture.SourceAuthority)); err != nil {
+			return err
+		}
+	}
+	if w.ContentCapture.CaptureFormat != "" {
+		if _, err := ingest.NewContentCaptureFormat(string(w.ContentCapture.CaptureFormat)); err != nil {
+			return err
+		}
+	}
+	if _, err := ingest.NewContentCaptureFailureCode(string(w.ContentCapture.FailureCode)); err != nil {
+		return err
+	}
 	isV2 := false
 	if _, ok := w.Result.(indexformat.V2); ok {
 		isV2 = true
