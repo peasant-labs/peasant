@@ -1570,9 +1570,15 @@ type indexParseResult struct {
 	// proof is written as the bounded preview it is.
 	omissionsRecorded bool
 	unknownRecorded   bool
-	im                indexedMeta
-	input             *CapturedIndexInput
-	output            indexformat.Result
+	// assessment is the one final write-selection authority for V1 captures.
+	// The flags above remain as parser inputs and diagnostics, but the flush
+	// paths derive the store write from this assessment, never from the flags
+	// alone. It is valid only when assessmentReady is true.
+	assessment      CaptureAssessment
+	assessmentReady bool
+	im              indexedMeta
+	input           *CapturedIndexInput
+	output          indexformat.Result
 	// nativeCandidate carries a validated managed-generation candidate with its
 	// captured content when the harness's declared output format is a managed
 	// generation. The write path stages and activates it instead of committing
@@ -1950,7 +1956,19 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			if err == nil && len(unknown) > 0 {
 				result.retainedUnknown = retainedUnknownCounts(unknown)
 				result.partial = true
-				if result.refusalCode == ContentCaptureSourceRecordsOmitted && !result.omissionsRecorded {
+				if result.refusalCode == ContentCaptureSourceRecordsOmitted && result.omissionsRecorded {
+					// Mixed accounted case: the omission placeholders and the
+					// retained unknown evidence are both present. Preserve
+					// both facts internally with all counts; the stored code
+					// stays the existing omission code. Never overwrite one
+					// reason to erase the other.
+					if projected, projectErr := CollectRetainedUnknown(v1.Entries, im.session.Harness); projectErr == nil && len(projected) == len(unknown) {
+						result.unknownRecorded = true
+						result.strictRefusal = "oversized source records were omitted with positional placeholders; uninterpreted source data was retained with complete payload and source coordinates; interpretation is partial and outbound transfer limits apply"
+					} else {
+						result.strictRefusal += "; surviving unknown source data was retained privately, but its coordinates do not validate"
+					}
+				} else if result.refusalCode == ContentCaptureSourceRecordsOmitted && !result.omissionsRecorded {
 					result.strictRefusal += "; surviving unknown source data was retained privately, but the earlier source omission remains unaccounted"
 				} else {
 					result.refusalCode = ContentCaptureUnknownDataRetained
@@ -1960,7 +1978,6 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 						result.strictRefusal = "uninterpreted source data was retained with complete payload and source coordinates; interpretation is partial and outbound transfer limits apply"
 					}
 				}
-				result.omissionsRecorded = false
 			}
 		}
 	}
@@ -1968,6 +1985,27 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
 	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat && !result.partial
+	// One final write decision owns V1 admission. The flags above remain as
+	// parser inputs and diagnostics, but the flush paths derive the store
+	// write from this assessment. An assessment error refuses the candidate
+	// before any counting or persistence: no parse failure becomes successful
+	// retained accounting.
+	if err == nil && parsed {
+		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil {
+			strictAuthoritative := authoritative && declared == strictIndexFormat
+			if assessment, assessErr := AssessCapture(V1CaptureFacts(
+				im.session.Harness, output, strictAuthoritative, im.session.ContentOmitted,
+			)); assessErr != nil {
+				err = assessErr
+			} else {
+				result.assessment = assessment
+				result.assessmentReady = true
+				// Candidate counts come only from validated selected evidence.
+				// They stay candidates until the store outcome confirms commit.
+				result.retainedUnknown = assessment.CandidateCounts()
+			}
+		}
+	}
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err == nil && parsed {
@@ -2074,8 +2112,24 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		// certified-complete case AND the one incompleteness that still holds
 		// every entry, because a bounded preview may never be read whole,
 		// exported or published, and an omitted-records session must be.
+		// The assessment is the one final write decision for V1 captures;
+		// the flags above remain as parser inputs and diagnostics.
 		requireFullContent := result.fullContent
-		if result.fullContent {
+		if result.assessmentReady {
+			assessed, assessErr := result.assessment.ContentCapture(contentAuthorityFor(result), result.im.session.TranscriptOrigin, nowMs)
+			if assessErr != nil {
+				err := fmt.Errorf("%s: session %s assessment refused the store write; the stored index was preserved: %w", logPrefix, result.im.session.SessionID, assessErr)
+				p.reportIndexRefusal(result.im.session.SessionID, err)
+				errMsg := err.Error()
+				logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+				flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
+				flush.logEntries[i] = logEntry
+				flush.profileSessions[i] = p.makeIndexProfileSession(result, logEntry, 0)
+				continue
+			}
+			capture = assessed
+			requireFullContent = assessed.CaptureFormat == ContentCaptureFormatFull
+		} else if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
 			format := ContentCaptureFormatPreviewOnly
