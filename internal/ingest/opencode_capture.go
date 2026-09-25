@@ -189,8 +189,8 @@ func isOpenCodeCaptureControl(kind string) bool {
 
 // openCodeCaptureControlKinds is the closed set of OpenCode part types the
 // strict capture path ignores as control. It is the single source of truth
-// for isOpenCodeCaptureControl, and the record-kind drift test walks it
-// against the registry.
+// for isOpenCodeCaptureControl, and the vocabulary completeness check compares
+// it with the declaration.
 func openCodeCaptureControlKinds() []string {
 	return []string{
 		"step-start",

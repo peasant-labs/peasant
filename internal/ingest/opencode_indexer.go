@@ -231,8 +231,8 @@ func isKnownOpenCodeSemanticPartType(partType string) bool {
 
 // knownOpenCodeSemanticPartKinds is the closed set of OpenCode semantic part
 // types this build indexes. It is the single source of truth for
-// isKnownOpenCodeSemanticPartType, and the record-kind drift test walks it
-// against the registry.
+// isKnownOpenCodeSemanticPartType, and the vocabulary completeness check
+// compares it with the declaration.
 func knownOpenCodeSemanticPartKinds() []string {
 	return []string{
 		"text",

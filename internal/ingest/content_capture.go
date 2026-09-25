@@ -359,7 +359,7 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 		}
 		// The kinds slice governs reachability: a case body below cannot run
 		// for an unlisted kind, so extending the vocabulary means extending
-		// the slice the drift test walks.
+		// this production census.
 		if !slices.Contains(claudeStrictRecordKinds(), line.Type) && !isClaudeControlRecordType(line.Type) {
 			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
 		}

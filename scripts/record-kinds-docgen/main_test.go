@@ -42,8 +42,9 @@ func TestGenerate(t *testing.T) {
 		names[row.Name] = true
 		t.Run(row.Name, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(dir, "registry.md")
-			args := []string{path}
+			registryPath := filepath.Join(dir, "record_kinds.yaml")
+			documentPath := filepath.Join(dir, "record-kinds.md")
+			args := []string{registryPath, documentPath}
 			switch row.Mode {
 			case "no-args":
 				args = nil
@@ -51,10 +52,15 @@ func TestGenerate(t *testing.T) {
 				args = append(args, "extra")
 			case "missing":
 			case "directory":
-				args = []string{dir}
+				args = []string{dir, documentPath}
 			case "file":
-				if err := os.WriteFile(path, []byte("obsolete manual policy"), 0o600); err != nil {
-					t.Fatal(err)
+				for path, contents := range map[string]string{
+					registryPath: "obsolete generated registry",
+					documentPath: "obsolete manual policy",
+				} {
+					if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			default:
 				t.Fatal("unknown fixture mode", row.Mode)
@@ -70,16 +76,27 @@ func TestGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			wantYAML, err := ingest.GenerateRecordKindRegistryYAML()
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotYAML, err := os.ReadFile(registryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(gotYAML, wantYAML) {
+				t.Fatal("generated YAML differs")
+			}
 			registry, err := ingest.LoadRecordKindRegistry()
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := os.ReadFile(path)
+			gotDocument, err := os.ReadFile(documentPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(got) != registry.Document() {
-				t.Fatal("generated output differs")
+			if string(gotDocument) != registry.Document() {
+				t.Fatal("generated document differs")
 			}
 			output.Reset()
 			if err := generate(args, &output); err != nil {

@@ -28,36 +28,33 @@ const (
 	piSessionInfo    piEntryType = "session_info"
 )
 
+func piEntryTypeKinds() []piEntryType {
+	return []piEntryType{
+		piSession,
+		piMessage,
+		piThinkingChange,
+		piModelChange,
+		piCompaction,
+		piBranchSummary,
+		piCustom,
+		piCustomMessage,
+		piLabel,
+		piSessionInfo,
+	}
+}
+
 func (t *piEntryType) UnmarshalJSON(raw []byte) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	switch value {
-	case string(piSession):
-		*t = piSession
-	case string(piMessage):
-		*t = piMessage
-	case string(piThinkingChange):
-		*t = piThinkingChange
-	case string(piModelChange):
-		*t = piModelChange
-	case string(piCompaction):
-		*t = piCompaction
-	case string(piBranchSummary):
-		*t = piBranchSummary
-	case string(piCustom):
-		*t = piCustom
-	case string(piCustomMessage):
-		*t = piCustomMessage
-	case string(piLabel):
-		*t = piLabel
-	case string(piSessionInfo):
-		*t = piSessionInfo
-	default:
-		return fmt.Errorf("unknown Pi entry type")
+	for _, kind := range piEntryTypeKinds() {
+		if value == string(kind) {
+			*t = kind
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("unknown Pi entry type")
 }
 
 type piEntry struct {
