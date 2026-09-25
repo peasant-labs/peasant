@@ -149,8 +149,8 @@ func (k RecordKind) Key() RecordKindKey {
 	return RecordKindKey{k.Context, k.Namespace, k.Kind, k.Match}
 }
 
-// RecordKindRegistry is the parsed record_kinds.yaml: the per-harness mapping
-// deliverable of peasant-labs/peasant#397.
+// RecordKindRegistry is the generated local view of adapter vocabularies: the
+// per-harness reporting artifact for peasant-labs/peasant#397.
 //
 //go:generate go run ../../scripts/record-kinds-docgen record_kinds.yaml ../../docs/record-kinds.md
 type RecordKindRegistry struct {
