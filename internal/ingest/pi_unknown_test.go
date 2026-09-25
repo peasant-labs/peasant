@@ -172,11 +172,18 @@ type piUnknownExpectation struct {
 // production capture as its expectation. Neither JSON normalization nor partial
 // substring matches can certify that the complete source payload survived.
 func comparePiUnknownPayload(expected, actual string) error {
-	if expected == "" || !json.Valid([]byte(expected)) {
-		return fmt.Errorf("missing complete fixture payload")
+	if err := validatePiUnknownFixturePayload(expected); err != nil {
+		return err
 	}
 	if expected != actual {
 		return fmt.Errorf("retained payload differs from complete source fixture (%d expected bytes, %d actual bytes)", len(expected), len(actual))
+	}
+	return nil
+}
+
+func validatePiUnknownFixturePayload(payload string) error {
+	if payload == "" || !json.Valid([]byte(payload)) {
+		return fmt.Errorf("missing complete fixture payload")
 	}
 	return nil
 }
@@ -212,7 +219,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 			for i := range tc.Expected {
 				want := &tc.Expected[i]
 				want.Payload = strings.ReplaceAll(want.Payload, "PADDING", padding)
-				if err := comparePiUnknownPayload(want.Payload, want.Payload); err != nil {
+				if err := validatePiUnknownFixturePayload(want.Payload); err != nil {
 					t.Fatal(err)
 				}
 				// Raw-at-rest + redact-at-egress: stored entries assert the raw
@@ -224,7 +231,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 					egress = want.Payload
 				}
 				egress = strings.ReplaceAll(egress, "PADDING", padding)
-				if err := comparePiUnknownPayload(egress, egress); err != nil {
+				if err := validatePiUnknownFixturePayload(egress); err != nil {
 					t.Fatal(err)
 				}
 				sequence := want.Sequence

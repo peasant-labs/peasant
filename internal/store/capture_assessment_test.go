@@ -290,6 +290,26 @@ func runCaptureAssessmentLastGoodGuard(t *testing.T, harness ingest.Harness) {
 	}
 	assertUnchanged("omission-plus-invalid", r)
 
+	// An accounted-omission claim is not self-authenticating. The stored
+	// entries must carry the positional placeholder that accounts for the
+	// gap; a failure code alone never certifies full content.
+	noPlaceholder := withEntryHarness(batchTestEntries(id, "omission-without-placeholder", 1), harness)
+	r = s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: id, Result: indexformat.V1{Entries: noPlaceholder}, IndexVersion: 1,
+		IndexerVersion: ingest.HarvesterVersionRegistry[harness].IndexerVersion, IndexedAtMs: 1700000003500,
+		RequireFullContent: true,
+		ContentCapture: ingest.SessionContentCaptureWrite{
+			Status: ingest.ContentCaptureIncomplete, SourceAuthority: ingest.ContentSourceNewIngest,
+			TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull,
+			FailureCode: ingest.ContentCaptureSourceRecordsOmitted, FailureMessage: "claimed without a placeholder",
+			CapturedAtMs: 1700000003500,
+		},
+	}})[0]
+	if r.Err == nil || !strings.Contains(r.Err.Error(), "disagrees with assessed evidence") {
+		t.Fatalf("omission without a placeholder did not report the assessment error: %v", r.Err)
+	}
+	assertUnchanged("omission-without-placeholder", r)
+
 	// Forged full claim over unknown evidence: the requested complete/full
 	// disagrees with the assessed incomplete/full/unknown_data_retained.
 	unknown := unknownCarrierEntries(t, id, harness, true)

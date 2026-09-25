@@ -77,7 +77,7 @@ func TestUnknownLocalIntegrity(t *testing.T) {
 								"namespace": "record",
 								"kind":      "future",
 								"position": map[string]any{
-									"line":      int(r.Record) + 1,
+									"line":        int(r.Record) + 1,
 									"jsonPointer": r.Pointer,
 									"public": func() any {
 										if c.Missing {

@@ -23,9 +23,10 @@ remain errors, not successful unknown-kind captures.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
 - **Status** is represented (interpreted entries or owning-entry state),
-  tracked-only (stored non-conversation evidence), ignored-control (no row),
-  retained-unknown (complete redacted evidence without interpretation), or refused
-  (a known unsupported shape; never the default for arbitrary valid new names).
+  tracked-only (stored non-conversation evidence), ignored-control (no row), or
+  retained-unknown (complete redacted evidence without interpretation). **Refused**
+  is reserved for a future explicit known-unsupported disposition; the current
+  lowering never emits it, and a valid undeclared name is never refused by default.
 - **Preview** means the mapping can populate a human-readable content preview,
   not that every instance has nonempty text. Tool arguments alone are not preview
   text.
