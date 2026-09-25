@@ -3,6 +3,8 @@ package export_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -105,9 +107,11 @@ func TestExportNilEngineRefuses(t *testing.T) {
 }
 
 // TestExportRedactionFailureLeavesTargetUntouched pins atomic no-prefix
-// failure: a failing baseline engine refuses the export, and the error carries
-// no raw bytes. The file writer only writes on nil error (cmd_export atomic
-// boundary), so no prefix or partial target is observable here.
+// failure at the file-target boundary: a failing baseline engine refuses the
+// export, the error carries no raw bytes, and a previously committed target
+// file keeps its exact bytes. The sessions command writes only on nil export
+// error through writeFileAtomic, so the failing export below never reaches
+// the writer and the committed target is the observable proof.
 func TestExportRedactionFailureLeavesTargetUntouched(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -156,6 +160,23 @@ func TestExportRedactionFailureLeavesTargetUntouched(t *testing.T) {
 	afterBytes, _ := json.Marshal(after)
 	if string(beforeBytes) != string(afterBytes) {
 		t.Fatal("failed export changed prior export bytes")
+	}
+	// File-target boundary: commit the good export to a target file, then run
+	// the failing export. The command layer writes only on nil error, so the
+	// committed file must keep its exact bytes.
+	target := filepath.Join(t.TempDir(), sessionID+".json")
+	if err := os.WriteFile(target, beforeBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := export.ExportSessionWithRedactor(ctx, s, testutil.NewMemFS(), sessionID, failingExportRedactor{}); err == nil {
+		t.Fatal("failing-engine export succeeded on the file-target pass; want refusal")
+	}
+	committed, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(committed) != string(beforeBytes) {
+		t.Fatal("failed export changed the committed target file")
 	}
 }
 

@@ -61,11 +61,54 @@ func TestCodexLexicalReopenExport(t *testing.T) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatal("trailing fixture document")
 	}
+	// The manifest owns the case list: deleting or renaming a fixture case
+	// fails here, and an undeclared row fails the same way. The fidelity test
+	// enforces the same manifest on the prepare path; this test enforces it
+	// on the store-boundary + egress path.
+	actualNames := make([]string, 0, len(fixture.Cases))
+	seenNames := map[string]bool{}
+	for _, row := range fixture.Cases {
+		if row.Name == "" || seenNames[row.Name] {
+			t.Fatalf("invalid lexical fixture %q", row.Name)
+		}
+		seenNames[row.Name] = true
+		actualNames = append(actualNames, row.Name)
+	}
+	if err := testutil.RequireFixtureNames("codex lexical export", "case", fixture.Required, seenNames); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.Required}, actualNames, "codex lexical export"); err != nil {
+		t.Fatal(err)
+	}
 	// Non-wide lexical cases: exact payload/position/siblings through
 	// close/reopen + export.
 	for _, row := range fixture.Cases {
 		if row.WideSiblings > 0 {
 			continue
+		}
+		// Oracle-field integrity: the prepare path is pinned in
+		// TestCodexLexicalFidelity, but these decoded fields must still mean
+		// something here — a shrunk or corrupted fixture row fails before any
+		// store work starts.
+		if !json.Valid([]byte(row.Record)) || !strings.Contains(row.Record, `"future"`) {
+			t.Fatalf("lexical fixture %q carries no future-bearing record", row.Name)
+		}
+		if !json.Valid([]byte(row.ExpectedPayload)) {
+			t.Fatalf("lexical fixture %q expected_payload is not JSON", row.Name)
+		}
+		if row.ExpectedSiblings != len(row.ExpectedKnown) {
+			t.Fatalf("lexical fixture %q expected_siblings=%d disagrees with %d known siblings", row.Name, row.ExpectedSiblings, len(row.ExpectedKnown))
+		}
+		for _, known := range row.ExpectedKnown {
+			if !json.Valid([]byte(known)) {
+				t.Fatalf("lexical fixture %q expected_known entry is not JSON: %.80s", row.Name, known)
+			}
+		}
+		if row.Pointer == "" || row.Pointer[0] != '/' {
+			t.Fatalf("lexical fixture %q pointer is not a JSON pointer: %q", row.Name, row.Pointer)
+		}
+		if row.Kind == "" || row.Namespace == "" {
+			t.Fatalf("lexical fixture %q names no kind or namespace", row.Name)
 		}
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
@@ -145,13 +188,36 @@ func TestCodexLexicalReopenExport(t *testing.T) {
 	}
 }
 
-// TestCodexWideReopenExport carries a wide sibling set (128 siblings, every
-// 3rd unknown) through close/reopen + export, asserting every retained leaf's
-// payload, pointer, and position survive. The 512/2048 recipes stay in the
-// fidelity/performance gate; this 128-leaf pass proves wide-count egress
-// without repeating the long trio.
+// TestCodexWideReopenExport carries a wide sibling set through close/reopen +
+// export, asserting every retained leaf's payload, pointer, and position
+// survive. The sibling recipe comes from the wide_128 fixture row (the 512/2048
+// recipes stay in the fidelity/performance gate); this pass proves wide-count
+// egress without repeating the long trio.
 func TestCodexWideReopenExport(t *testing.T) {
 	t.Parallel()
+	// The YAML-owned recipe: hardcoded counts would drift from the fixture.
+	var wideFixture struct {
+		Required []string                 `yaml:"required_names"`
+		Cases    []codexLexicalExportCase `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(codexLexicalExportYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&wideFixture); err != nil {
+		t.Fatal(err)
+	}
+	var wide *codexLexicalExportCase
+	for i := range wideFixture.Cases {
+		if wideFixture.Cases[i].Name == "wide_128" {
+			wide = &wideFixture.Cases[i]
+			break
+		}
+	}
+	if wide == nil {
+		t.Fatal("wide_128 recipe missing from codex lexical fixture")
+	}
+	if wide.WideSiblings <= 0 || wide.UnknownEvery <= 0 || wide.LeafSize <= 0 {
+		t.Fatalf("wide_128 recipe is not a positive recipe: %+v", *wide)
+	}
 	ctx := context.Background()
 	dbPath := storetest.CopyGoldenDB(t)
 	db, err := store.Open(dbPath, store.WithSkipMigrations())
@@ -163,8 +229,9 @@ func TestCodexWideReopenExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	storetest.SeedSession(t, db, sid.String())
-	const siblings = 128
-	const every = 3
+	siblings := wide.WideSiblings
+	every := wide.UnknownEvery
+	pad := strings.Repeat("x", wide.LeafSize/4)
 	var carriers []schema.SessionEntry
 	var want []struct {
 		payload  string
@@ -176,7 +243,7 @@ func TestCodexWideReopenExport(t *testing.T) {
 		if i%every != 0 {
 			continue
 		}
-		payload := fmt.Sprintf(`{"type":"future","leaf":%d,"pad":"%s"}`, i, strings.Repeat("x", 64))
+		payload := fmt.Sprintf(`{"type":"future","leaf":%d,"pad":"%s"}`, i, pad)
 		pointer := fmt.Sprintf("/payload/item/content/%d", i)
 		position := ingest.UnknownSourcePosition{
 			Line: 11 + i, SourceID: "lexical-wide-stream",
@@ -237,6 +304,4 @@ func TestCodexWideReopenExport(t *testing.T) {
 			t.Fatalf("wide leaf %s differs: %+v want payload %q position %d", w.pointer, got, w.payload, w.position)
 		}
 	}
-	var buf bytes.Buffer
-	_ = buf
 }
