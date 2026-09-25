@@ -1231,16 +1231,23 @@ func openCodeBuildTopologyProduction(t testing.TB) (string, []string) {
 		t.Fatal("resolve OpenCode build-topology guard location")
 	}
 	sourceDirectory := filepath.Dir(currentFile)
-	production, err := ingestProductionFiles(sourceDirectory)
+	production, release, err := prepareOpenCodeBuildTopologyProduction(sourceDirectory)
 	if err != nil {
 		t.Fatalf("discover production files for build-topology copies: %v", err)
 	}
+	// Registered before any case, so every case directory is removed before
+	// ownership of the source directory is released.
+	t.Cleanup(func() {
+		if releaseErr := release(); releaseErr != nil {
+			t.Errorf("release build-topology startup ownership after the case cleanups: %v", releaseErr)
+		}
+	})
 	return sourceDirectory, production
 }
 
 func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture, sourceDirectory string, production []string, fixtureCase openCodeBuildTopologyCase) error {
 	t.Helper()
-	directory, err := os.MkdirTemp(sourceDirectory, ".sqlite-topology-")
+	directory, err := os.MkdirTemp(sourceDirectory, openCodeBuildTopologyDirectoryPrefix)
 	if err != nil {
 		return fmt.Errorf("create isolated package for build-topology case %q: %w", fixtureCase.Name, err)
 	}
