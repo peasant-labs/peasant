@@ -1991,7 +1991,16 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	// before any counting or persistence: no parse failure becomes successful
 	// retained accounting.
 	if err == nil && parsed {
-		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil {
+		// The assessment certifies only parses by a certifying parser. A
+		// successful parse by a non-authoritative indexer is stored through
+		// the flag-derived capture below (uncertified preview, no refusal
+		// code): assessing it would stamp a strict refusal no strict parser
+		// ever raised, and the settled-refusal selector would then treat the
+		// session as permanently resolved and skip the worker re-read that
+		// heals parent-cache moves and changed-pair mirrors on later
+		// harvests. Genuine refusals still flow through the assessment via
+		// their Unaccounted flag and validated evidence.
+		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil && authoritative {
 			strictAuthoritative := authoritative && declared == strictIndexFormat
 			if assessment, assessErr := AssessCapture(V1CaptureFacts(
 				im.session.Harness, output, strictAuthoritative, im.session.ContentOmitted,
