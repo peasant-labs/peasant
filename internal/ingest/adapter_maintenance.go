@@ -497,7 +497,7 @@ func (e *adapterAcquisitionError) Unwrap() error { return e.cause }
 
 // processSession keeps adapter preparation separate from publication failure.
 // Only failed native acquisition permits the last-good retained index fallback.
-func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
+func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLane *storeWriteLane) workerResult {
 	var metadata *UnifiedMetadata
 	var metadataErr error
 	var metadataPath string
@@ -515,7 +515,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	// A forced run is an explicit manual refresh and tries native input first;
 	// routine version-driven maintenance prefers sufficient retained input.
 	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !p.config.Force && !entry.pairRepair && !p.nativeInputChanged(entry.Session, metadata) {
-		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath)
+		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath, writeLane)
 		var insufficient *InsufficientRetainedInputError
 		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
 			return refreshed
@@ -526,7 +526,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		result.result = SessionResult{SessionID: entry.Session.SessionID, Harness: entry.Session.Harness, ParentUUID: entry.Session.ParentUUID, Status: entry.Status,
 			Error: &adapterAcquisitionError{cause: fmt.Errorf("refresh retained session %s from native input: required original discovery context is unavailable or redacted; no native attribution or child paths were guessed; restore native discovery and retry harvest", entry.Session.SessionID)}}
 	} else {
-		result = p.processNativeSession(ctx, entry)
+		result = p.processNativeSession(ctx, entry, writeLane)
 	}
 	var acquisition *adapterAcquisitionError
 	if !errors.As(result.result.Error, &acquisition) || metadataPath == "" || pathErr != nil {
@@ -536,6 +536,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		// A repair has no usable retained pair by definition: when the native
 		// source cannot be acquired, the failure is the outcome. Falling back
 		// would try to read the missing or damaged pair and hide the error.
+		p.reportPairRepairUnavailable(entry.Session.SessionID, string(entry.Session.SourcePath))
 		return result
 	}
 	// The manual index refresh (harvest index --force) names its own

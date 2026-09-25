@@ -771,6 +771,18 @@ func (store *serialIndexStore) ReadIndexState(_ context.Context, sid SessionID) 
 
 // Local because importing Store from package ingest creates a cycle. Artifact
 // identity comes only from the real publisher's validated bytes, never a target.
+func (store *serialIndexStore) PrepareArtifactInstall(ctx context.Context, sid SessionID) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if state := store.states[sid]; state != nil && state.ArtifactHash != nil {
+		state.IndexedInputHash = nil
+	}
+	return nil
+}
+
 func (store *serialIndexStore) MirrorArtifacts(ctx context.Context, requests []ArtifactMirrorRequest) []ArtifactMirrorResult {
 	store.mu.Lock()
 	defer store.mu.Unlock()

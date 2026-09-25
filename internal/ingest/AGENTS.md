@@ -8,13 +8,19 @@ For detailed diagrams and sequence flows, see [README.md](README.md).
 ## Pipeline at a Glance
 
 The ordinary harvest selects its work from the database and walks no saved tree.
-A crash between the pair install and the mirror commit, or between the mirror and
-the entry commit, is repaired by the database-driven repair predicate on the next
+A process interruption during pair replacement or between the mirror and
+the entry commit is selected by the database-driven repair predicate on the next
 harvest; a one-time upgrade pass finishes writes an earlier build interrupted. The
 saved tree is walked only by `harvest index`; `harvest index --all` records rows
 the database is missing from the saved files and rebuilds a lost database. Explicit
 harness/session/since filters apply independently of saved discovery selection.
 Dry-run and file-only runs open no database.
+
+Before replacing the first installed file, the existing writer lane commits a
+clear of the row's indexed input proof. The mirror preserves that pending proof;
+successful indexing restores it. This covers process termination while the OS
+survives, not power loss or older unmarked damage. It introduces no repair tree
+scan and preserves the ordinary index command's existing inventory.
 
 Adapter refresh is independent of indexer eligibility. Claude, Codex and Cursor
 implement `ExtractMetadataFromTranscript` over captured JSONL and original
@@ -126,7 +132,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 |----|------|--------------------|
 | A1 | Linux Overcommit | 2 GiB arena uses virtual memory overcommit. RSS = actual transcript volume. May fail if `vm.overcommit_memory=2`. |
 | A2 | Shallow Trees | Root-owns-subtree (C1) assumes 1-2 levels. Deep trees cause load imbalance. |
-| A3 | Single Instance | One pipeline per process. External PID lock prevents concurrent `peasant ingest`. |
+| A3 | Single Instance | One pipeline per process; independent overlapping writers to the same session are unsupported. The pair installer adds no external lock. |
 | A4 | Unique Session IDs | UUIDs globally unique across providers/hosts. `committed` map + DB keys depend on this. |
 | A5 | Rename Atomicity | `os.Rename()` atomic on local FS (ext4, APFS, NTFS). Not guaranteed on network FS. |
 

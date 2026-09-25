@@ -1030,6 +1030,67 @@ WHERE role = 'user' AND depth = 0
 	return result, nil
 }
 
+// LeadingUserMessagesBulk returns at most perSession leading depth-zero user
+// previews per session, in entry_index order. Sessions without user entries are
+// omitted; NULL previews are empty elements, not missing records. Each element
+// is truncated to SessionPreviewMaxChars runes, like FirstUserMessage.
+func (s *Store) LeadingUserMessagesBulk(ctx context.Context, sessionIDs []string, perSession int) (_ map[string][]string, retErr error) {
+	if perSession < 1 {
+		return nil, fmt.Errorf("store: LeadingUserMessagesBulk cannot read leading previews with perSession=%d: a non-positive cap would discard all evidence while reporting success; no previews were read; pass a per-session cap of at least 1", perSession)
+	}
+	if len(sessionIDs) == 0 {
+		return map[string][]string{}, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: LeadingUserMessagesBulk take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, sessionIDs); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		placeholders := make([]string, len(selectedIDs))
+		args := make([]any, len(selectedIDs), len(selectedIDs)+1)
+		for i, id := range selectedIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		args = append(args, perSession)
+		q := `SELECT session_id, content_preview, rn FROM (
+  SELECT session_id, content_preview,
+    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY entry_index ASC) AS rn
+  FROM session_entries
+  WHERE session_id IN (` + strings.Join(placeholders, ", ") + `) AND role = 'user' AND depth = 0
+) WHERE rn <= ? ORDER BY session_id, rn`
+		err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				sid := stmt.ColumnText(0)
+				// Repeated requested IDs in later batches must not duplicate records.
+				if stmt.ColumnInt(2) == 1 {
+					result[sid] = nil
+				}
+				var preview string
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					preview = stmt.ColumnText(1)
+				}
+				result[sid] = append(result[sid], TruncateToRunes(preview, defaults.SessionPreviewMaxChars))
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: LeadingUserMessagesBulk query: %w", err)
+		}
+	}
+	return result, nil
+}
+
 // TruncateToRunes truncates s to at most maxRunes Unicode code points.
 // It always returns a valid UTF-8 string (no split multi-byte sequences).
 // Exported so that other packages, including CLI formatting, can reuse the
