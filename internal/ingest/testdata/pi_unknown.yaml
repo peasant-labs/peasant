@@ -28,7 +28,7 @@ cases:
         line: 2
         position: 1
         pointer: ''
-        payload: '{"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"\u003cGITHUB_PAT\u003e","embedded":"{\"secret\":\"\\u003cGITHUB_PAT\\u003e\"}","number":9007199254740993,"nullable":null,"padding":"PADDING"}}'
+        payload: '{"type":"future","id":"x","parentId":null,"summary":{"native":true},"payload":{"secret":"\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","embedded":"{\"secret\":\"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\"}","number":9007199254740993,"nullable":null,"padding":"PADDING"}}'
   - name: mixed-namespaces
     publish: true
     paddingBytes: 12000
@@ -40,7 +40,7 @@ cases:
       {"type":"session_info","id":"n","parentId":"a","name":"fixture title"}
     content: [before, "after\nlast"]
     expected:
-      - {namespace: entry, kind: future, id: x, line: 3, position: 3, pointer: '', payload: '{"type":"future","id":"x","parentId":"u","payload":{"value":1,"number":9007199254740993,"exponent":1.2300e+07,"secret":"\u003cGITHUB_PAT\u003e","padding":"PADDING"}}'}
+      - {namespace: entry, kind: future, id: x, line: 3, position: 3, pointer: '', payload: '{"type":"future","id":"x","parentId":"u","payload":{"value":1,"number":9007199254740993,"exponent":1.2300e+07,"secret":"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij","padding":"PADDING"}}'}
       - {namespace: message_role, kind: future, id: m, line: 4, position: 5, pointer: /message, payload: '{"role":"future","content":{"new":"shape","padding":"PADDING"}}'}
       - {namespace: content_block, kind: future, id: a, line: 5, position: 9, pointer: /message/content/1, payload: '{"type":"future","text":{"new":true},"padding":"PADDING"}'}
       - {namespace: content_block, kind: future, id: a, line: 5, position: 11, pointer: /message/content/3, payload: '{"type":"future","payload":2,"padding":"PADDING"}'}
@@ -123,4 +123,4 @@ cases:
         line: 2
         position: 1
         pointer: ''
-        payload: " \t{ \"type\" : \"future\", \"id\":\"x\", \"parentId\":null, \"summary\": {\"native\":true}, \"\\u006e\":9007199254740993, \"decimal\":1.2300e+07, \"zero\":-0, \"padding\":\"PADDING\", \"\\u003cGITHUB_PAT\\u003e\":\"secret key\", \"embedded\":\"{\\\"\\\\u003cGITHUB_PAT\\\\u003e\\\":1}\" }\t "
+        payload: " \t{ \"type\" : \"future\", \"id\":\"x\", \"parentId\":null, \"summary\": {\"native\":true}, \"\\u006e\":9007199254740993, \"decimal\":1.2300e+07, \"zero\":-0, \"padding\":\"PADDING\", \"\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\":\"secret key\", \"embedded\":\"{\\\"\\\\u0067hp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\\\":1}\" }\t "

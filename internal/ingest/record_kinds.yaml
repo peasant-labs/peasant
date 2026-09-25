@@ -10,10 +10,10 @@ harnesses:
     fallback: &fallback
       status: retained-unknown
       preview: no
-      payload: complete redacted JSON and source coordinates in retainedUnknown
+      payload: complete raw JSON and source coordinates in retainedUnknown
       visualized: hidden
       reason: Retain uninterpreted evidence and mark partial interpretation; display is deferred.
-      source: internal/ingest/retained_unknown.go NewRetainedUnknownFromSource
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
         namespace: record

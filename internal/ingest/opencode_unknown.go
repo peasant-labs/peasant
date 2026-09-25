@@ -66,7 +66,7 @@ func prepareOpenCodeCurrent(kind string, raw []byte, position UnknownSourcePosit
 			public.Position += offset
 			at.Public = &public
 		}
-		return NewRetainedUnknownFromSource(HarnessOpenCode, namespace, kind, at, value)
+		return NewRetainedUnknown(HarnessOpenCode, namespace, kind, at, value)
 	}
 	if !knownOpenCodeCurrentRow(kind) {
 		evidence, err := retain("row", kind, "", raw, 0)
@@ -201,7 +201,7 @@ func prepareOpenCodeToolContent(raw json.RawMessage, pointer string, position Un
 			public.Position += int64(i + 1)
 			at.Public = &public
 		}
-		evidence, err := NewRetainedUnknownFromSource(HarnessOpenCode, "tool_content", header.Type, at, block)
+		evidence, err := NewRetainedUnknown(HarnessOpenCode, "tool_content", header.Type, at, block)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -274,7 +274,7 @@ func retainOpenCodeSemantic(sessionID SessionID, messages []openCodeSemanticMess
 				kept = append(kept, part)
 				continue
 			}
-			evidence, err := NewRetainedUnknownFromSource(HarnessOpenCode, "part", part.Data.Type, position, part.Raw)
+			evidence, err := NewRetainedUnknown(HarnessOpenCode, "part", part.Data.Type, position, part.Raw)
 			if err != nil {
 				return nil, err
 			}
@@ -314,7 +314,7 @@ func retainOpenCodeSemantic(sessionID SessionID, messages []openCodeSemanticMess
 				continue
 			}
 			position := openCodeUnknownPosition(sessionID.String(), "messages", message.EntryID, int64(m), basePosition+int64(b+1), fmt.Sprintf("/content/%d", b))
-			evidence, err := NewRetainedUnknownFromSource(HarnessOpenCode, "content_block", discriminator.Type, position, block)
+			evidence, err := NewRetainedUnknown(HarnessOpenCode, "content_block", discriminator.Type, position, block)
 			if err != nil {
 				return nil, err
 			}

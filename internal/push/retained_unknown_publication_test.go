@@ -104,7 +104,7 @@ func TestRetainedUnknownPublication(t *testing.T) {
 			if namespace == "" {
 				namespace = "record"
 			}
-			record, err := ingest.NewRetainedUnknownFromSource(schema.HarnessClaudeCode, namespace, kind, position, json.RawMessage(payload))
+			record, err := ingest.NewRetainedUnknown(schema.HarnessClaudeCode, namespace, kind, position, json.RawMessage(payload))
 			if err != nil {
 				t.Fatal(err)
 			}

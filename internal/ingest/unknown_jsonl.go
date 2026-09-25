@@ -100,7 +100,7 @@ func prepareUnknownJSONL(harness Harness, raw []byte, line int, traversal *unkno
 		unknown = kind != "" && !known
 	}
 	if unknown {
-		record, err := NewRetainedUnknownFromSource(harness, namespace, kind, UnknownSourcePosition{Line: line, Public: public}, raw)
+		record, err := NewRetainedUnknown(harness, namespace, kind, UnknownSourcePosition{Line: line, Public: public}, raw)
 		return nil, []RetainedUnknown{record}, true, err
 	}
 	var records []RetainedUnknown
@@ -172,7 +172,7 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 				return nil, nil, fmt.Errorf("content block lacks a string type")
 			}
 			if !slices.Contains(captureContentBlockKinds(harness), kind) {
-				record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: pointer, Public: public}, raw)
+				record, err := NewRetainedUnknown(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: pointer, Public: public}, raw)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -224,7 +224,7 @@ func filterUnknownBlocks(harness Harness, raw json.RawMessage, line int, pointer
 		}
 		at := pointer + "/" + strconv.Itoa(i)
 		if !slices.Contains(captureContentBlockKinds(harness), kind) {
-			record, err := NewRetainedUnknownFromSource(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: at, Public: public}, block)
+			record, err := NewRetainedUnknown(harness, "content_block", kind, UnknownSourcePosition{Line: line, JSONPointer: at, Public: public}, block)
 			if err != nil {
 				return nil, nil, err
 			}

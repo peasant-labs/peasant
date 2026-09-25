@@ -190,15 +190,18 @@ func TestUnknownSourceToPublication(t *testing.T) {
 				if p == nil || p.SourceRef != "source-0" || p.RecordIndex != c.RecordIndices[i] || p.Position != c.Positions[i] || record.Position.Line != int(c.RecordIndices[i])+1 || record.Position.JSONPointer != c.Pointers[i] || record.Namespace != c.Namespace {
 					t.Fatalf("actual traversal not retained: %+v want record %d position %d pointer %s", record.Position, c.RecordIndices[i], c.Positions[i], c.Pointers[i])
 				}
-				if string(record.Payload) != expected {
-					t.Fatalf("baseline/durable lexical payload differs: got %.300s want %.300s", record.Payload, expected)
+				if string(record.Payload) != payload {
+					t.Fatalf("stored evidence is not raw source bytes: got %.300s want %.300s", record.Payload, payload)
 				}
 			}
 			detail, err := export.ExportSession(ctx, db, fs, sid.String())
 			if err != nil {
 				t.Fatalf("real capture is not exportable: %v", err)
 			}
-			assertUnknownPublicDetail(t, c, expected, detail)
+			// Interim raw-at-rest: export serves stored bytes verbatim until
+			// SLICE-5 lands export-time baseline redaction; the upload below
+			// already carries the redacted form via the configured engine.
+			assertUnknownPublicDetail(t, c, payload, detail)
 			capture, found, err := db.GetSessionContentCapture(ctx, sid)
 			wantStatus, wantCode := ingest.ContentCaptureIncomplete, ingest.ContentCaptureUnknownDataRetained
 			if c.Complete {

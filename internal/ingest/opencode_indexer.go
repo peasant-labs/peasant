@@ -208,11 +208,9 @@ func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, k
 				return nil, nil, fmt.Errorf("decode %s part row %q for message %q: %w", kind, part.ID, message.ID, partErr)
 			}
 			if !isKnownOpenCodeSemanticPartType(semanticPart.Data.Type) {
-				engine, err := unknownEvidenceRedactor()
-				if err != nil {
-					return nil, nil, err
-				}
-				unknownPartTypes[engine.RedactText(semanticPart.Data.Type)]++
+				// Counted by raw type text: stored evidence stays raw at rest
+				// with no capture-time redaction; egress redacts before upload.
+				unknownPartTypes[semanticPart.Data.Type]++
 				semanticPart.UnknownType = true
 			}
 			semantic.Parts = append(semantic.Parts, semanticPart)

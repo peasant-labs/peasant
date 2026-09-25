@@ -62,7 +62,46 @@ func TestUnknownLocalIntegrity(t *testing.T) {
 				}
 				record, err := ingest.NewRetainedUnknown(schema.HarnessCodex, "record", "future", position, json.RawMessage(payload))
 				if err != nil {
-					t.Fatal(err)
+					if !c.LocalError {
+						t.Fatal(err)
+					}
+					// The capture constructor refused corrupt evidence before
+					// persistence. The local boundary still holds, but the
+					// read-side defense needs a stored row to judge, so
+					// persist the corrupt bytes through the strict read path:
+					// RetainedUnknownOf must refuse them as well.
+					rawExtra, marshalErr := json.Marshal(map[string]any{
+						"retainedUnknown": []any{
+							map[string]any{
+								"harness":   "codex",
+								"namespace": "record",
+								"kind":      "future",
+								"position": map[string]any{
+									"line":      int(r.Record) + 1,
+									"jsonPointer": r.Pointer,
+									"public": func() any {
+										if c.Missing {
+											return nil
+										}
+										return map[string]any{"sourceRef": "source-0", "recordIndex": r.Record, "position": r.Position}
+									}(),
+								},
+								"payloadText": payload,
+							},
+						},
+					})
+					if marshalErr != nil {
+						t.Fatal(marshalErr)
+					}
+					// A nil public member marshals as explicit null, which is
+					// malformed rather than legacy absence; drop it so the
+					// fixture keeps testing wholly-absent coordinates.
+					extra := strings.ReplaceAll(string(rawExtra), `,"public":null`, "")
+					entry := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: i, Extra: &extra}
+					if _, readErr := ingest.RetainedUnknownOf(entry); readErr == nil {
+						t.Fatal("read boundary accepted evidence the constructor refused")
+					}
+					return
 				}
 				entry, err := ingest.RetainedUnknownEntry(testutil.TestSessionUUID, i, record)
 				if err != nil {

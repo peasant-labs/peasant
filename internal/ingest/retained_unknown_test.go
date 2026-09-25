@@ -234,8 +234,8 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 					}
 					for _, record := range records {
 						n++
-						if bytes.Contains(record.Payload, []byte(secret)) || !bytes.Contains(record.Payload, []byte("FULL_UNKNOWN_TAIL")) || len(record.Payload) < 8192 {
-							t.Fatal("unknown payload bypassed redaction or was truncated")
+						if !bytes.Contains(record.Payload, []byte(secret)) || !bytes.Contains(record.Payload, []byte("FULL_UNKNOWN_TAIL")) || len(record.Payload) < 8192 {
+							t.Fatal("stored evidence is not raw source bytes")
 						}
 					}
 				}

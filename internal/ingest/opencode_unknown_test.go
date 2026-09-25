@@ -127,8 +127,8 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 				if public := got.Position.Public; public == nil || public.Position != row.Position || public.RecordIndex != row.RecordIndex {
 					t.Fatalf("source traversal lost: %+v", public)
 				}
-				if len(got.Payload) < 8192 || !bytes.Contains(got.Payload, []byte("FULL_UNKNOWN_TAIL")) || bytes.Contains(got.Payload, []byte(secret)) || !bytes.Contains(got.Payload, []byte("9007199254740993")) {
-					t.Errorf("payload lost bytes/precision or bypassed redaction: length=%d tail=%t secret=%t precision=%t", len(got.Payload), bytes.Contains(got.Payload, []byte("FULL_UNKNOWN_TAIL")), bytes.Contains(got.Payload, []byte(secret)), bytes.Contains(got.Payload, []byte("9007199254740993")))
+				if len(got.Payload) < 8192 || !bytes.Contains(got.Payload, []byte("FULL_UNKNOWN_TAIL")) || !bytes.Contains(got.Payload, []byte(secret)) || !bytes.Contains(got.Payload, []byte("9007199254740993")) {
+					t.Errorf("stored evidence is not raw source bytes: length=%d tail=%t secret=%t precision=%t", len(got.Payload), bytes.Contains(got.Payload, []byte("FULL_UNKNOWN_TAIL")), bytes.Contains(got.Payload, []byte(secret)), bytes.Contains(got.Payload, []byte("9007199254740993")))
 				}
 				for _, turn := range transcript.EntriesToTurns(entries) {
 					if strings.Contains(turn.Content, "FULL_UNKNOWN_TAIL") {

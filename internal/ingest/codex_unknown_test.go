@@ -103,8 +103,8 @@ func TestCodexRetainedUnknown(t *testing.T) {
 			if record.Namespace != row.Namespace || record.Kind != row.Kind || record.Position.Line != line || record.Position.JSONPointer != row.Pointer {
 				t.Fatalf("wrong identity: %+v", record)
 			}
-			if strings.Contains(string(record.Payload), "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD") {
-				t.Fatal("secret retained")
+			if strings.Contains(row.Record, "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD") && !strings.Contains(string(record.Payload), "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD") {
+				t.Fatal("stored evidence is not raw source bytes")
 			}
 			if row.Name == "envelope" && !strings.Contains(string(record.Payload), "9007199254740993") {
 				t.Fatal("number precision lost")
