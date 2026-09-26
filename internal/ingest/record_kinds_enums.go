@@ -6,6 +6,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// recordKindStatusClosedSet is the canonical order of the status closed set, and
+// recordKindStatusNotes gives each status its one meaning. The generated document
+// is rendered from both plus the rows the registry actually declares, so it can
+// never claim a status is unemitted while a row carries it.
+var recordKindStatusClosedSet = []RecordKindStatus{
+	RecordKindRepresented,
+	RecordKindTrackedOnly,
+	RecordKindIgnoredControl,
+	RecordKindRetainedUnknown,
+	RecordKindRefused,
+}
+
+var recordKindStatusNotes = map[RecordKindStatus]string{
+	RecordKindRepresented:     "interpreted entries or owning-entry state",
+	RecordKindTrackedOnly:     "stored non-conversation evidence outside interpreted transcript entries",
+	RecordKindIgnoredControl:  "no row; the capture accounts for the kind and can still certify complete",
+	RecordKindRetainedUnknown: "complete redacted evidence without interpretation",
+	RecordKindRefused:         "an explicit known-unsupported disposition that leaves the capture incomplete until a build represents the kind",
+}
+
 func NewRecordKindStatus(raw string) (RecordKindStatus, error) {
 	switch raw {
 	case string(RecordKindRepresented):

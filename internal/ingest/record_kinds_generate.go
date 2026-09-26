@@ -38,9 +38,12 @@ func marshalRecordKindRegistry(registry RecordKindRegistry) ([]byte, error) {
 	out.WriteString("# use fallback without a new declaration. Invalid known fields remain errors.\n")
 	fmt.Fprintf(&out, "version: %d\n", registry.Version)
 	out.WriteString("harnesses:\n")
-	anchors := make(map[string]RecordKind)
 	for _, vocabulary := range allRecordKindVocabularies() {
 		section := registry.Harnesses[vocabulary.Harness]
+		// Anchors are reset per harness: a YAML anchor is document-scoped, so a
+		// shared map would make every harness after the first merge rows whose
+		// meaning it never declared.
+		anchors := make(map[string]bool)
 		fmt.Fprintf(&out, "  %s:\n", vocabulary.Harness)
 		fmt.Fprintf(&out, "    adapter_version: %d\n", section.AdapterVersion)
 		fmt.Fprintf(&out, "    indexer_version: %d\n", section.IndexerVersion)
@@ -48,11 +51,7 @@ func marshalRecordKindRegistry(registry RecordKindRegistry) ([]byte, error) {
 		if section.NativeVersions != nil {
 			fmt.Fprintf(&out, "    native_versions: {adapter_version: %d, indexer_version: %d, index_version: %d}\n", section.NativeVersions.AdapterVersion, section.NativeVersions.IndexerVersion, section.NativeVersions.IndexVersion)
 		}
-		if vocabulary.Harness == HarnessClaudeCode {
-			writeRecordKindFallback(&out, section.Fallback, "    ")
-		} else {
-			out.WriteString("    fallback: *fallback\n")
-		}
+		writeRecordKindFallback(&out, section.Fallback, "    ")
 		out.WriteString("    inventories:\n")
 		for _, inventory := range section.Inventories {
 			fmt.Fprintf(&out, "      - context: %s\n", inventory.Context)
@@ -94,6 +93,8 @@ func recordKindDeclaredProfiles() (map[recordKindProfileKey]recordKindProfile, e
 }
 
 func writeRecordKindFallback(out *strings.Builder, fallback RecordKind, indent string) {
+	// Every harness declares its own fallback anchor so a section never merges a
+	// definition another harness wrote.
 	fmt.Fprintf(out, "%sfallback: &fallback\n", indent)
 	fmt.Fprintf(out, "%s  status: %s\n", indent, fallback.Status)
 	fmt.Fprintf(out, "%s  preview: %s\n", indent, fallback.Preview)
@@ -122,18 +123,21 @@ func recordKindSourceYAML(source RecordKindSource) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
-func writeRecordKindYAMLRow(out *strings.Builder, kind RecordKind, profile recordKindProfile, anchors map[string]RecordKind) {
-	if profile.Anchor == "" {
+// writeRecordKindYAMLRow writes one row, declaring its anchor on the first row
+// that carries the anchor's canonical shape. Anchors already declared in this
+// harness are merged with the fields that differ from that shape.
+func writeRecordKindYAMLRow(out *strings.Builder, kind RecordKind, profile recordKindProfile, anchors map[string]bool) {
+	shape, shared := recordKindAnchorShapes[profile.Anchor]
+	if !shared {
 		writeFullRecordKindYAMLRow(out, kind, "")
 		return
 	}
-	anchor, declared := anchors[profile.Anchor]
-	if !declared {
-		anchors[profile.Anchor] = kind
-		if profile.Anchor == "diagnostic" {
-			fmt.Fprintf(out, "          - &diagnostic {<<: *text, kind: %s, payload: %s}\n", kind.Kind, kind.Payload)
+	if !anchors[profile.Anchor] {
+		if !recordKindShapeMatches(kind, shape) {
+			writeFullRecordKindYAMLRow(out, kind, "")
 			return
 		}
+		anchors[profile.Anchor] = true
 		writeFullRecordKindYAMLRow(out, kind, profile.Anchor)
 		return
 	}
@@ -141,16 +145,16 @@ func writeRecordKindYAMLRow(out *strings.Builder, kind RecordKind, profile recor
 	if kind.Match == RecordKindPrefix {
 		parts = append(parts, "match: prefix")
 	}
-	if kind.Status != anchor.Status {
+	if kind.Status != shape.Status {
 		parts = append(parts, "status: "+string(kind.Status))
 	}
-	if kind.Preview != anchor.Preview {
+	if kind.Preview != shape.Preview {
 		parts = append(parts, "preview: "+string(kind.Preview))
 	}
-	if kind.Payload != anchor.Payload {
+	if kind.Payload != shape.Payload {
 		parts = append(parts, "payload: "+kind.Payload)
 	}
-	if kind.Reason != anchor.Reason {
+	if kind.Reason != shape.Reason {
 		parts = append(parts, "reason: "+kind.Reason)
 	}
 	fmt.Fprintf(out, "          - {%s}\n", strings.Join(parts, ", "))
