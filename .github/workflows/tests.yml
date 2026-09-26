@@ -219,6 +219,9 @@ jobs:
       - name: make check
         run: nix develop -c make check RACE=${{ env.RACE }}
 
+      - name: Cross-compile for Windows
+        run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
   # ~15 minutes, so it gets its own job and its own budget in parallel with
@@ -471,3 +474,36 @@ jobs:
             exit 1
           fi
           echo "OK: real pnpm-built dashboard present at web/out/index.html"
+
+  windows:
+    name: windows-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build every package
+        run: go build ./...
+
+      - name: Run focused tests
+        run: go test ./internal/defaults/... ./internal/config/...
+
+      - name: Build peasant.exe and print its version
+        run: |
+          go build -o peasant.exe ./cmd/peasant
+          ./peasant.exe version
