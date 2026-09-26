@@ -75,6 +75,7 @@ func assertStoredCaptureRefusedNonfatally(t *testing.T, result *ingest.PipelineR
 }
 
 func TestPiCapturedAdmission(t *testing.T) {
+	t.Parallel()
 	var corpus struct {
 		SessionID      string          `yaml:"session_id"`
 		OtherSessionID string          `yaml:"other_session_id"`

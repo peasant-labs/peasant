@@ -23,6 +23,7 @@ var piMetadataCompatibilityYAML []byte
 var piMetadataCompatibilityManifest []byte
 
 func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
+	t.Parallel()
 	var f struct {
 		Cases []struct {
 			Name    string `yaml:"name"`

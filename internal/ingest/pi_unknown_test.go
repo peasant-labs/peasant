@@ -35,6 +35,7 @@ var piUnknownCarriersYAML []byte
 var piUnknownOracleYAML []byte
 
 func TestPiUnknownOriginalPayloadOracle(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -78,6 +79,7 @@ func TestPiUnknownOriginalPayloadOracle(t *testing.T) {
 }
 
 func TestPiUnknownCarrierValidation(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -189,6 +191,7 @@ func validatePiUnknownFixturePayload(payload string) error {
 }
 
 func TestPiUnknownPersistence(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		SessionID     string   `yaml:"sessionID"`
 		Header        string   `yaml:"header"`

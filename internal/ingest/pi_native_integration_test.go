@@ -37,6 +37,7 @@ var piSanitizedRecording []byte
 var piModelExpectationBoundaries []byte
 
 func TestPiSanitizedNativeRecording(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Name   string `yaml:"name"`
 		Source string `yaml:"source"`
@@ -106,6 +107,7 @@ type piSourceCase struct {
 }
 
 func TestPiFixtureModelExpectationValidation(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -183,6 +185,7 @@ func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, b
 }
 
 func TestPiNativeRegistryProjection(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string       `yaml:"requiredNames"`
 		Cases         []piSourceCase `yaml:"cases"`

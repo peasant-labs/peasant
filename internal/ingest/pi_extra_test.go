@@ -20,6 +20,7 @@ var piUsageYAML []byte
 var piUsageManifest []byte
 
 func TestPiUsageCarrierBoundaries(t *testing.T) {
+	t.Parallel()
 	var f struct {
 		Cases []struct {
 			Name         string `yaml:"name"`
