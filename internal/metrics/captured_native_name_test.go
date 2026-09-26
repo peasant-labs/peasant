@@ -98,6 +98,7 @@ func piRow(t *testing.T, sid ingest.SessionID, index int, role schema.Role, prev
 // remove the title, and a recorded name must pass the title privacy policy
 // before it is stored.
 func TestCapturedInputAppliesTheRecordedNativeSessionName(t *testing.T) {
+	t.Parallel()
 	for _, tc := range loadCapturedNativeNameCases(t) {
 		t.Run(tc.Name, func(t *testing.T) {
 			db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))

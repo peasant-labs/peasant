@@ -14,6 +14,7 @@ import (
 )
 
 func TestClassifierCapturedCompletionAndRetirement(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := store.Open(filepath.Join(t.TempDir(), "classifiers.db"), store.WithPoolSize(1))
 	if err != nil {
