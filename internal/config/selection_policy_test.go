@@ -303,7 +303,7 @@ func TestSaveAtomic_PreservesLoadedConfigAtExactPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat exact config path: %v", err)
 	}
-	if info.Mode().Perm() != defaults.PublicFilePerm {
+	if posixFileModeSupported() && info.Mode().Perm() != defaults.PublicFilePerm {
 		t.Fatalf("config mode = %o, want %o", info.Mode().Perm(), defaults.PublicFilePerm)
 	}
 }
