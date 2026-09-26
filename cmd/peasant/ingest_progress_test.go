@@ -916,12 +916,6 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 	}
 }
 
-func TestProgressRendererUsesGentleFrameRate(t *testing.T) {
-	if progressProgramFPS != 24 {
-		t.Fatalf("progressProgramFPS = %d, want 24", progressProgramFPS)
-	}
-}
-
 func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) {
 	line := kit.ProgressBar(ingest.StageExtract.String(), 126, 4953, false, false)
 	if !strings.Contains(line, "█") {

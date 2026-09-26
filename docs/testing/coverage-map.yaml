@@ -308,7 +308,7 @@ entries:
   - { name: "cmd/peasant.TestProgressModelSuccessClears", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRendererCancellationAcknowledgment", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRendererFailureCancelsOperation", destination: retained-in-place }
-  - { name: "cmd/peasant.TestProgressRendererUsesGentleFrameRate", destination: retained-in-place }
+  - { name: "cmd/peasant.TestProgressRendererUsesGentleFrameRate", destination: "deleted:progress-program-fps-tuning-constant" }
   - { name: "cmd/peasant.TestProgressRenderer_IsTTY_NonFileWriter", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRenderer_Run_NonTTY", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRenderer_Run_TTY_StartStop", destination: retained-in-place }
@@ -1380,7 +1380,7 @@ entries:
   - { name: "internal/ingest.TestCursorIndexer_UserQueryTagStripped", destination: retained-in-place }
   - { name: "internal/ingest.TestCursorSegmentVariants", destination: retained-in-place }
   - { name: "internal/ingest.TestDecodeClaudeSlug", destination: retained-in-place }
-  - { name: "internal/ingest.TestDecodeClaudeSlug_ParityWithLegacyInlineDecoder", destination: retained-in-place }
+  - { name: "internal/ingest.TestDecodeClaudeSlug_ParityWithLegacyInlineDecoder", destination: "deleted:claude-slug-parity-subset" }
   - { name: "internal/ingest.TestDecodeCursorSlug", destination: retained-in-place }
   - { name: "internal/ingest.TestDecodeCursorWorkspace", destination: retained-in-place }
   - { name: "internal/ingest.TestDeferredOpenCodeSourceCloseReleasesConnectionUnderCancelledContext", destination: retained-in-place }
