@@ -237,6 +237,7 @@ func loadSelectionMetricsFixture(t *testing.T) selectionMetricsFixture {
 }
 
 func TestSelectionMetricsFixtureGuards(t *testing.T) {
+	t.Parallel()
 	fixture := loadSelectionMetricsFixture(t)
 
 	unknown := bytes.Replace(selectionMetricsYAML, []byte("expectedCaseCount: 1"), []byte("expectedCaseCount: 1\nunexpected: true"), 1)
@@ -290,6 +291,7 @@ func TestSelectionMetricsFixtureGuards(t *testing.T) {
 }
 
 func TestSelectedMetricsExcludeHiddenExtremeFromUnusualSignalBaseline(t *testing.T) {
+	t.Parallel()
 	fixture := loadSelectionMetricsFixture(t)
 	for _, fixtureCase := range fixture.Cases {
 		fixtureCase := fixtureCase

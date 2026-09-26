@@ -119,6 +119,7 @@ func loadSelectionStateCorpus(t *testing.T) testcase.Corpus[selectionStateInput,
 // rejects the mutations it exists to catch (mirrors
 // TestProjectResolutionFixtureGuards's structure).
 func TestSelectionStateFixtureGuards(t *testing.T) {
+	t.Parallel()
 	swapped := bytes.Replace(selectionStateYAML, []byte("name: all_mode_selection_inactive_nothing_hidden"), []byte("name: replacement_case"), 1)
 	if _, err := decodeSelectionStateCorpus(swapped); err == nil {
 		t.Fatal("expected a count-preserving case-name swap to be rejected by the manifest guard")
@@ -159,6 +160,7 @@ func buildSelectionPolicy(t *testing.T, sel config.SelectionConfig) sessionvisib
 // derived from the same visibility pass ProjectSummaries uses to build Projects
 // after project-selection usability testing.
 func TestProjectSummaries_SelectionState(t *testing.T) {
+	t.Parallel()
 	corpus := loadSelectionStateCorpus(t)
 	for _, fixtureCase := range corpus.Cases {
 		t.Run(fixtureCase.Name, func(t *testing.T) {
