@@ -245,26 +245,6 @@ func isStructuralRecordKind(rule recordKindRule) bool {
 		rule.Context == RecordKindRetained && rule.Namespace == "envelope" && (rule.Kind == "event_msg" || rule.Kind == "response_item")
 }
 
-func bindDecodedRecordKindSemantics(kind *RecordKind) {
-	outcome := indexformat.OutcomeText
-	switch {
-	case kind.Status == RecordKindRetainedUnknown:
-		outcome = indexformat.OutcomeOpaque
-	case kind.Status == RecordKindIgnoredControl, kind.Status == RecordKindRefused, kind.Payload == "state on owning entry; no independent row":
-		outcome = indexformat.OutcomeIgnored
-	case kind.Status == RecordKindTrackedOnly, strings.HasPrefix(kind.Payload, "bounded control extra"), kind.Payload == "compactMetadata":
-		outcome = indexformat.OutcomeControl
-	case strings.HasPrefix(kind.Payload, "tool name and arguments"):
-		outcome = indexformat.OutcomeToolCall
-	case strings.HasPrefix(kind.Payload, "tool output"), strings.HasPrefix(kind.Payload, "structured tool output"):
-		outcome = indexformat.OutcomeToolResult
-	}
-	profile := recordKindOutcomeProfiles[outcome]
-	kind.Outcome = outcome
-	kind.EntryMode = profile.EntryMode
-	kind.Coordinates = profile.Coordinates
-}
-
 // recordKindSourceLabel is used only in generated report metadata. The
 // production census is compared structurally by the vocabulary tests instead.
 func recordKindSourceLabel(inventory RecordKindInventory) string {

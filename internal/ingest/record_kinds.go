@@ -1,19 +1,12 @@
 package ingest
 
 import (
-	"bytes"
-	_ "embed"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
-	"gopkg.in/yaml.v3"
 )
-
-//go:embed record_kinds.yaml
-var recordKindsYAML []byte
 
 // RecordKindStatus is the closed set of dispositions for one harness record
 // or part kind. It answers what the parser does with the kind.
@@ -145,8 +138,9 @@ type RecordKindRegistry struct {
 const recordKindsFormatVersion = 3
 
 // LoadRecordKindRegistry builds and validates the registry from adapter
-// vocabulary declarations. The embedded YAML is generated reporting output,
-// not a parser or interpretation source.
+// vocabulary declarations. The committed record_kinds.yaml is generated
+// reporting output compared against fresh codegen by the drift gate; it is not
+// a parser, interpretation, or runtime source.
 func LoadRecordKindRegistry() (RecordKindRegistry, error) {
 	return generateRecordKindRegistry()
 }
@@ -180,44 +174,6 @@ func generateRecordKindRegistry() (RecordKindRegistry, error) {
 			section.Inventories = append(section.Inventories, inventory)
 		}
 		registry.Harnesses[vocabulary.Harness] = section
-	}
-	if err := registry.validate(); err != nil {
-		return RecordKindRegistry{}, err
-	}
-	return registry, nil
-}
-
-func decodeRecordKindRegistry(data []byte) (RecordKindRegistry, error) {
-	var registry RecordKindRegistry
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&registry); err != nil {
-		return RecordKindRegistry{}, fmt.Errorf("record-kind registry: decode: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return RecordKindRegistry{}, fmt.Errorf("record-kind registry: expected one YAML document; remove trailing content (decode: %v)", err)
-	}
-	for harness, section := range registry.Harnesses {
-		for _, inventory := range section.Inventories {
-			for _, kind := range inventory.Kinds {
-				kind.Context, kind.Namespace = inventory.Context, inventory.Namespace
-				if kind.Match == "" {
-					kind.Match = RecordKindLiteral
-				}
-				if kind.Source == "" {
-					var refs []string
-					for _, source := range inventory.Sources {
-						refs = append(refs, source.File+" "+source.Symbol)
-					}
-					kind.Source = strings.Join(refs, "; ")
-				}
-				bindDecodedRecordKindSemantics(&kind)
-				section.Kinds = append(section.Kinds, kind)
-			}
-		}
-		bindDecodedRecordKindSemantics(&section.Fallback)
-		registry.Harnesses[harness] = section
 	}
 	if err := registry.validate(); err != nil {
 		return RecordKindRegistry{}, err
