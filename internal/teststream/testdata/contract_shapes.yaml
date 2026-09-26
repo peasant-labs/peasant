@@ -1,0 +1,35 @@
+# Frozen IP-A shapes for the shared stream library (SLICE-0).
+#
+# The parse/report core extracted from scripts/test-timing is consumed by the
+# gate and by scripts/test-timing. Its exported shape is a contract; see
+# internal/testgate/testdata/contract_shapes.yaml for the same mechanism on the
+# gate side.
+required_names:
+  - teststream.Event
+  - teststream.Record
+  - teststream.ReportOptions
+
+shapes:
+  - name: teststream.Event
+    fields:
+      - { name: Action,  type: string,  json: Action }
+      - { name: Package, type: string,  json: Package }
+      - { name: Test,    type: string,  json: Test }
+      - { name: Elapsed, type: float64, json: Elapsed }
+      - { name: Output,  type: string,  json: Output }
+      - { name: Time,    type: string,  json: Time }
+
+  - name: teststream.Record
+    fields:
+      - { name: Package, type: string }
+      - { name: Test,    type: string }
+      - { name: Elapsed, type: time.Duration }
+      - { name: Skipped, type: bool }
+      - { name: Failed,  type: bool }
+
+  - name: teststream.ReportOptions
+    fields:
+      - { name: Top,        type: int }
+      - { name: FamilyRe,   type: "*regexp.Regexp" }
+      - { name: NoFamilies, type: bool }
+      - { name: WarnPct,    type: float64 }
