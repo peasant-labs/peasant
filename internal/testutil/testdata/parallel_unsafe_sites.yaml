@@ -1,0 +1,79 @@
+# parallel_unsafe_sites.yaml — process-global sink sites that must stay serial.
+#
+# Each `cases` entry names a test that mutates a process-global sink
+# (`slog.SetDefault`, `os.Stdin`, `os.Stderr`). Such a test MUST NOT call
+# `t.Parallel()`: the failure is logical, not a data race — one test's log
+# lines land in another's buffer, or one test's stdin is another's /dev/null.
+# The race detector cannot observe it, so this fixture is the durable observer.
+#
+# `required_names` is a deletion-protection manifest: removing or renaming a
+# named site without updating the manifest fails. Adding a new site never
+# requires touching the list.
+#
+# `mutations` prove the checker is not vacuous: each feeds it a real test that
+# violates the rule and must be rejected for the named reason.
+version: 1
+
+required_names:
+  - harvest-metadata-json-slog-default
+  - harvest-metadata-tty-stderr
+  - harvest-metadata-tty-slog-default
+  - kickstart-metadata-slog-default
+  - prune-nontty-stdin
+  - scheduling-lookup-slog-default
+
+required_mutation_names:
+  - parallel-test-is-rejected
+  - absent-hazard-is-rejected
+
+cases:
+  - name: harvest-metadata-json-slog-default
+    file: cmd/peasant/harvest_metadata_diagnostics_test.go
+    line: 448
+    test: TestHarvestMetadataDiagnosticsJSON
+    hazard: slog.SetDefault
+
+  - name: harvest-metadata-tty-stderr
+    file: cmd/peasant/harvest_metadata_diagnostics_test.go
+    line: 528
+    test: TestHarvestMetadataDiagnosticsTTY
+    hazard: os.Stderr
+
+  - name: harvest-metadata-tty-slog-default
+    file: cmd/peasant/harvest_metadata_diagnostics_test.go
+    line: 535
+    test: TestHarvestMetadataDiagnosticsTTY
+    hazard: slog.SetDefault
+
+  - name: kickstart-metadata-slog-default
+    file: cmd/peasant/kickstart_metadata_diagnostics_test.go
+    line: 123
+    test: TestKickstartLocalIngestForwardsMetadataDiagnostics
+    hazard: slog.SetDefault
+
+  - name: prune-nontty-stdin
+    file: cmd/peasant/cmd_prune_test.go
+    line: 426
+    test: TestPruneCmd_NonTTY_NoConfirm_Error
+    hazard: os.Stdin
+
+  - name: scheduling-lookup-slog-default
+    file: internal/ingest/parent_lookup_log_internal_test.go
+    line: 42
+    test: TestSchedulingLookupWarningRefusesRawDependencyDetail
+    hazard: slog.SetDefault
+
+mutations:
+  - name: parallel-test-is-rejected
+    file: cmd/peasant/web_capabilities_matrix_test.go
+    line: 117
+    test: TestWebCapabilitiesMatrix
+    hazard: t.Parallel
+    want_error: calls t.Parallel
+
+  - name: absent-hazard-is-rejected
+    file: cmd/peasant/cmd_prune_test.go
+    line: 411
+    test: TestPruneCmd_NonTTY_NoConfirm_Error
+    hazard: slog.SetDefault
+    want_error: does not contain slog.SetDefault
