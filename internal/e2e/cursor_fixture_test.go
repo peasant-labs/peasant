@@ -37,6 +37,7 @@ func discoverCursorFixture(t *testing.T) []ingest.DiscoveredSession {
 }
 
 func TestFixture_CursorDiscover(t *testing.T) {
+	t.Parallel()
 	idx := loadCursorFixtureIndex(t)
 	sessions := discoverCursorFixture(t)
 	if len(sessions) != ExpectedCursorTranscripts {
@@ -89,6 +90,7 @@ func TestFixture_CursorDiscover(t *testing.T) {
 }
 
 func TestFixture_CursorIndexer(t *testing.T) {
+	t.Parallel()
 	sessions := discoverCursorFixture(t)
 	rootSID, err := ingest.NewSessionID(CursorFixtureRootSessionID)
 	if err != nil {

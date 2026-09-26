@@ -122,6 +122,7 @@ func piRoundTripNativeSource(t *testing.T, name string) string {
 }
 
 func TestPiRoundTripFixtureSources(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiRoundTripCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			piCheck(t, piRoundTripNativeSource(t, c.NativeCase) != "", "native fixture source required")

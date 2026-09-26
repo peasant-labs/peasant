@@ -55,6 +55,7 @@ func loadInfraReaperFixtures() (infraReaperFixtureDocument, error) {
 }
 
 func TestInfraReaperTargetsOnlyAbandonedPeasantE2EContainers(t *testing.T) {
+	t.Parallel()
 	document, err := loadInfraReaperFixtures()
 	if err != nil {
 		t.Fatal(err)

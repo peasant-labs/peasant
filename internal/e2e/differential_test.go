@@ -45,6 +45,7 @@ import (
 // one first. The bullets are the summary somebody reads; a correction below them
 // does not undo them.
 func TestFixture_MaximumDifferential(t *testing.T) {
+	t.Parallel()
 	text := injectedCodeBlockText(t)
 	if !strings.Contains(text, PinnedCodeIdentifier) {
 		t.Fatalf("could not locate the injected code block (identifier %q) in the fixture", PinnedCodeIdentifier)
