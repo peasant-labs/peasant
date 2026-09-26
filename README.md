@@ -329,7 +329,9 @@ next harvest reads it from its source.
 
 See [docs/pipeline.md](docs/pipeline.md) for the ingest write flow, staging
 directory behavior, and the distinction between on-disk transcripts and the
-canonical `SessionDetailPayload` representation.
+canonical `SessionDetailPayload` representation. See
+[docs/architecture.md](docs/architecture.md) for C4 diagrams and call sequences of the
+whole system.
 
 ## Analytics schema
 
