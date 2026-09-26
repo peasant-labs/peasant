@@ -1,0 +1,7 @@
+# Required-name manifest for testdata/authoritative-receipt-mismatches.yaml.
+# Name-only: every required mismatch case is named independently, so a
+# count-preserving swap cannot silently replace one case with a filler.
+requiredNames:
+  - content-hash-mismatch
+  - operation-fingerprint-mismatch
+  - parent-bearing-operation-fingerprint-mismatch
