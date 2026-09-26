@@ -1,9 +1,9 @@
 // Command test-timing summarizes a `go test -json` stream into a ranked
 // per-test and per-family wall-time report.
 //
-// It exists so the suite's cost is measured, not guessed. TESTING.md records how
-// `cmd/peasant` was taken from 86.9s to 19.6s under -race; this tool is the
-// reusable measurement for the packages that are still slow.
+// It exists so the suite's cost is measured, not guessed. TESTING.md records the
+// `cmd/peasant` optimization history; this tool is the reusable measurement for
+// the packages that are still slow.
 //
 // Usage:
 //
