@@ -7,9 +7,14 @@ import (
 
 // testIngestArenaBytes is the bounded staging arena every test pipeline uses.
 // Production keeps the environment default: the PEASANT_INGEST_ARENA_BYTES
-// override when set, else the 2 GiB slab. Tests inject this size through
-// WithArenaSizeBytes so no test has to mutate the process environment for the
-// whole binary.
+// override when set, else the 2 GiB slab. The bounded size is a measured win,
+// not a preference: at -parallel=1, the pipeline-backed
+// TestNormalIngestStoresAuthoritativeContent took 3.8s / 0.79 GiB peak RSS at
+// 64 MiB against 7.1s / 6.07 GiB at the 2 GiB production default, because a
+// large make() zeroes its pages. The real arena-full backoff stays covered by
+// TestStagingBuffer_ArenaFull_ConcurrentDrain, which fills a genuine
+// StagingBuffer; TestStagingArenaSizeKeepsTheEnvironmentDefault pins that an
+// un-overridden pipeline still resolves the production size.
 const testIngestArenaBytes = 64 << 20 // 64 MiB
 
 // newTestPipeline is ingest.NewPipeline with the injected test arena size.

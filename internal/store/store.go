@@ -22,12 +22,12 @@ import (
 // many too, but the cost is amortized over the process lifetime.
 const DefaultPoolSize = 10
 
-// EnvPoolSize overrides the pool size. Each Open creates PoolSize connections
-// up front, and every connection re-parses the schema + runs the PRAGMAs — so
-// the test suite (which needs a single connection per Open across hundreds of
-// Opens) sets this to "1" to avoid opening DefaultPoolSize connections each
-// time. Mirrors the village backend's POOL_MAX_CONNS env knob. An explicit
-// WithPoolSize option takes precedence over this.
+// EnvPoolSize overrides the pool size. An explicit WithPoolSize option takes
+// precedence over this environment default. It is a consistency knob, not a
+// performance milestone: a measurement of 400 golden Opens put the
+// one-connection default within about 1% of the ten-connection pool — a
+// negligible share of the suite's CPU. Mirrors the village backend's
+// POOL_MAX_CONNS env knob.
 const EnvPoolSize = "PEASANT_DB_POOL_SIZE"
 
 // resolvePoolSize picks the pool size: an explicit WithPoolSize option wins,
