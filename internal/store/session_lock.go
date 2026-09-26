@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/peasant-labs/schema"
-	"golang.org/x/sys/unix"
 )
 
 // SessionLocker acquires ONE per-session OS advisory lock from the shared
@@ -59,11 +58,11 @@ func NewFileSessionLocker(root string) (SessionLocker, error) {
 }
 
 func (l *fileSessionLocker) LockShared(ctx context.Context, id schema.SessionID) (func() error, error) {
-	return l.lock(ctx, id, unix.LOCK_SH, "shared")
+	return l.lock(ctx, id, lockShared, "shared")
 }
 
 func (l *fileSessionLocker) LockExclusive(ctx context.Context, id schema.SessionID) (func() error, error) {
-	return l.lock(ctx, id, unix.LOCK_EX, "exclusive")
+	return l.lock(ctx, id, lockExclusive, "exclusive")
 }
 
 func (l *fileSessionLocker) lock(ctx context.Context, id schema.SessionID, mode int, label string) (func() error, error) {
@@ -106,7 +105,7 @@ func (l *fileSessionLocker) lock(ctx context.Context, id schema.SessionID, mode 
 		return nil, fmt.Errorf("store: acquire %s session lock in fileSessionLocker for session %s: %s; no lock was taken; fix filesystem access and retry", label, id, sanitizeFSError(err))
 	}
 	release := func() error {
-		if err := unix.Flock(int(file.Fd()), unix.LOCK_UN); err != nil {
+		if err := flockRelease(file.Fd()); err != nil {
 			_ = file.Close()
 			return fmt.Errorf("store: release %s session lock in fileSessionLocker for session %s: %s; the lock was not released and the file description remains open; retry the release after fixing filesystem access", label, id, sanitizeFSError(err))
 		}
@@ -122,11 +121,11 @@ func (l *fileSessionLocker) lock(ctx context.Context, id schema.SessionID, mode 
 // instead of blocking forever on a held exclusive lock.
 func acquireFlock(ctx context.Context, fd uintptr, mode int) error {
 	for {
-		err := unix.Flock(int(fd), mode|unix.LOCK_NB)
+		err := flockAcquire(fd, mode)
 		if err == nil {
 			return nil
 		}
-		if err != unix.EWOULDBLOCK && err != unix.EAGAIN {
+		if !flockWouldBlock(err) {
 			return err
 		}
 		select {
