@@ -85,6 +85,7 @@ func newDurabilityPipeline(t *testing.T, mfs *testutil.MemFS, ds *durabilityStor
 // of the two write commits, then the next run's healing. It is the fixture
 // counterpart to the write path's "database is the durability point" claim.
 func TestWritePathDurability(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadDurabilityFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			switch fixture.Scenario {

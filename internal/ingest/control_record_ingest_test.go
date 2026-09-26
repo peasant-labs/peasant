@@ -74,6 +74,7 @@ func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
 // counterpart. The capture API alone cannot prove the ordinary path kept the
 // control fields or that export and publication accept the stored capture.
 func TestControlRecordIngestExportAndPublication(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadControlRecordIngestFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()

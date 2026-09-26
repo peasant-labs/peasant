@@ -363,6 +363,7 @@ func TestLoadIndexDispatchFixture_RejectsARenamedRequiredCase(t *testing.T) {
 // TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind verifies captured
 // file bytes, canonical native-tree parsing and actionable refusal through Store.
 func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T) {
+	t.Parallel()
 	document, err := loadIndexDispatchFixture(indexDispatchFixtureData)
 	if err != nil {
 		t.Fatal(err)

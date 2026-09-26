@@ -17,6 +17,7 @@ import (
 )
 
 func TestConcreteParserFailurePreservesOtherSessions(t *testing.T) {
+	t.Parallel()
 	covered := make(map[ingest.Harness]bool)
 	for _, fixture := range loadIndexFormatOutputFixtures(t) {
 		if fixture.HealthyTranscript == "" {

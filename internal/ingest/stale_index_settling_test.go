@@ -93,6 +93,7 @@ func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 // for input this build must not settle: the stale state is unchanged and the
 // refusal is reported.
 func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
+	t.Parallel()
 	document := loadStaleIndexSettlingFixtures(t)
 	for _, fixture := range document.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {

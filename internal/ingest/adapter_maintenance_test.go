@@ -106,6 +106,7 @@ var _ ingest.SourceAdapter = (*adapterMaintenanceAdapter)(nil)
 var _ ingest.TranscriptMetadataExtractor = (*adapterMaintenanceAdapter)(nil)
 
 func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
+	t.Parallel()
 	fixture := LoadAdapterMaintenanceFixtures(t)
 	for _, row := range fixture.Cases {
 		t.Run(row.Name, func(t *testing.T) {

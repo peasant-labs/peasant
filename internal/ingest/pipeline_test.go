@@ -236,6 +236,7 @@ func markJSONValue(value any) any {
 // --- Tests ---
 
 func TestDiffStatus_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		status ingest.DiffStatus
 		want   string
@@ -257,6 +258,7 @@ func TestDiffStatus_String(t *testing.T) {
 }
 
 func TestPipeline_EndToEnd(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -323,6 +325,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 }
 
 func TestPipeline_RetainedUnknownKindsReachSummary(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -371,6 +374,7 @@ func TestPipeline_RetainedUnknownKindsReachSummary(t *testing.T) {
 }
 
 func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 	sessionIDs := []string{testSessionID, testSessionID2}
@@ -427,6 +431,7 @@ func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T
 }
 
 func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
@@ -459,6 +464,7 @@ func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
 }
 
 func TestPipeline_Incremental(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -514,6 +520,7 @@ func TestPipeline_Incremental(t *testing.T) {
 }
 
 func TestPipeline_DryRun(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -561,6 +568,7 @@ func TestPipeline_DryRun(t *testing.T) {
 }
 
 func TestPipeline_Force(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -614,6 +622,7 @@ func TestPipeline_Force(t *testing.T) {
 }
 
 func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -687,6 +696,7 @@ func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
 }
 
 func TestPipeline_IncludeActive(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -746,6 +756,7 @@ func TestPipeline_IncludeActive(t *testing.T) {
 }
 
 func TestPipeline_ErrorResilience(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -836,6 +847,7 @@ func TestPipeline_ErrorResilience(t *testing.T) {
 }
 
 func TestPipeline_OrphanCleanup(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -877,6 +889,7 @@ func TestPipeline_OrphanCleanup(t *testing.T) {
 }
 
 func TestPipeline_MultipleProviders(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -926,6 +939,7 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 }
 
 func TestPipeline_NoSessionsDiscovered(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -952,6 +966,7 @@ func TestPipeline_NoSessionsDiscovered(t *testing.T) {
 }
 
 func TestPipeline_OutputFileNaming(t *testing.T) {
+	t.Parallel()
 	// Verify that the pipeline writes metadata and transcript with correct naming conventions.
 	// NOTE: MemFS does not track permission bits, so actual file permission verification
 	// requires OSFileSystem. This test focuses on naming only.
@@ -1000,6 +1015,7 @@ func TestPipeline_OutputFileNaming(t *testing.T) {
 }
 
 func TestPipeline_IncrementalUpdated(t *testing.T) {
+	t.Parallel()
 	// Verify that a session is re-ingested when source is newer than last ingest.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1084,6 +1100,7 @@ func TestPipeline_IncrementalUpdated(t *testing.T) {
 }
 
 func TestPipeline_Result_Duration(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1106,6 +1123,7 @@ func TestPipeline_Result_Duration(t *testing.T) {
 }
 
 func TestPipeline_MetadataContents(t *testing.T) {
+	t.Parallel()
 	// Verify that the written metadata JSON contains the expected fields.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1169,6 +1187,7 @@ func TestPipeline_MetadataContents(t *testing.T) {
 }
 
 func TestPipeline_SessionResultStatus(t *testing.T) {
+	t.Parallel()
 	// Verify that SessionResult.Status reflects the DiffStatus.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1211,6 +1230,7 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 }
 
 func TestPipeline_HostSlugFallback(t *testing.T) {
+	t.Parallel()
 	// When remote is empty, DeriveHostSlug uses the worktree path as fallback.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1279,6 +1299,7 @@ func TestPipeline_HostSlugFallback(t *testing.T) {
 }
 
 func TestPipeline_DiscoverPartialFailure(t *testing.T) {
+	t.Parallel()
 	// When one provider's Discover fails and another succeeds,
 	// the pipeline should process the successful provider's sessions.
 	mfs := testutil.NewMemFS()
@@ -1340,6 +1361,7 @@ func TestPipeline_DiscoverPartialFailure(t *testing.T) {
 }
 
 func TestPipeline_DiscoverAllProvidersFail(t *testing.T) {
+	t.Parallel()
 	// When ALL providers fail, the pipeline should return an error.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1385,6 +1407,7 @@ func TestPipeline_DiscoverAllProvidersFail(t *testing.T) {
 }
 
 func TestPipeline_SubagentNesting(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1461,6 +1484,7 @@ func TestPipeline_SubagentNesting(t *testing.T) {
 }
 
 func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
+	t.Parallel()
 	// When Force=true AND IncludeActive=true AND the session is active,
 	// the session should be processed (not skipped).
 	// classifySession returns DiffActive for active+force, but the filter
@@ -1525,6 +1549,7 @@ func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
 }
 
 func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
+	t.Parallel()
 	// When existing metadata predates the native-refresh compatibility boundary,
 	// the session should be classified as DiffUpdated on re-run.
 	mfs := testutil.NewMemFS()
@@ -1598,6 +1623,7 @@ func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
 }
 
 func TestPipeline_DebugFilesCopied(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1671,6 +1697,7 @@ func TestPipeline_DebugFilesCopied(t *testing.T) {
 }
 
 func TestNewPipeline_EmptyAdapters(t *testing.T) {
+	t.Parallel()
 	_, err := newTestPipeline(&testutil.MemFS{}, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{}, ingest.PipelineConfig{})
 	if err == nil {
 		t.Fatal("NewPipeline with empty adapters: expected error, got nil")
@@ -1683,6 +1710,7 @@ func TestNewPipeline_EmptyAdapters(t *testing.T) {
 // --- SessionStore integration tests ---
 
 func TestPipeline_WithStore_InsertsAfterWrite(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1748,6 +1776,7 @@ func TestPipeline_WithStore_InsertsAfterWrite(t *testing.T) {
 }
 
 func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1811,6 +1840,7 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 }
 
 func TestPipeline_WithoutStore_SkipsDB(t *testing.T) {
+	t.Parallel()
 	// This is essentially the existing behavior: no store, no DB interaction, no panic.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1856,6 +1886,7 @@ func TestPipeline_WithoutStore_SkipsDB(t *testing.T) {
 }
 
 func TestPipeline_WithStore_DryRun_SkipsDB(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -1901,6 +1932,7 @@ func TestPipeline_WithStore_DryRun_SkipsDB(t *testing.T) {
 }
 
 func TestPipeline_WithStore_MultipleSessionsInserted(t *testing.T) {
+	t.Parallel()
 	// Verify that multiple successfully processed sessions are all inserted.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -1962,6 +1994,7 @@ func TestPipeline_WithStore_MultipleSessionsInserted(t *testing.T) {
 }
 
 func TestPipeline_WithStore_ErrorSession_NotInserted(t *testing.T) {
+	t.Parallel()
 	// When one session fails extraction, only the successful session is inserted into the store.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -2031,6 +2064,7 @@ func TestPipeline_WithStore_ErrorSession_NotInserted(t *testing.T) {
 // --- v2 analytics stage tests ---
 
 func TestPipeline_WithRedactor_RedactsMetadataOnDisk(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2094,6 +2128,7 @@ func TestPipeline_WithRedactor_RedactsMetadataOnDisk(t *testing.T) {
 // TestPipeline_WithRedactor_SetsRedactionInfo verifies that when a redactor is wired,
 // the metadata on disk has RedactionInfo.Applied=true and a non-empty ContentHash.
 func TestPipeline_WithRedactor_SetsRedactionInfo(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2161,6 +2196,7 @@ func TestPipeline_WithRedactor_SetsRedactionInfo(t *testing.T) {
 // TestPipeline_NoRedactor_SetsRedactionInfoRaw verifies that without a redactor,
 // RedactionInfo.Applied=false and ContentHash/MetadataHash are still populated.
 func TestPipeline_NoRedactor_SetsRedactionInfoRaw(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2220,6 +2256,7 @@ func TestPipeline_NoRedactor_SetsRedactionInfoRaw(t *testing.T) {
 // TestPipeline_ContentHash_Deterministic verifies that the same transcript bytes
 // produce the same ContentHash across runs.
 func TestPipeline_ContentHash_Deterministic(t *testing.T) {
+	t.Parallel()
 	transcriptContent := `{"type":"user","content":"hello"}` + "\n"
 
 	var hashes [2]string
@@ -2275,6 +2312,7 @@ func TestPipeline_ContentHash_Deterministic(t *testing.T) {
 // TestPipeline_RedactsTranscript_MultiLineJSONL verifies that every valid JSONL line
 // in a multi-line transcript is redacted when a redactor is wired into the pipeline.
 func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2342,6 +2380,7 @@ func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
 
 // A completed malformed record must fail acquisition before redaction or writes.
 func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2390,6 +2429,7 @@ func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) 
 // TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough verifies that a
 // .json source that is not valid JSON passes through unchanged when a redactor is wired.
 func TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2446,6 +2486,7 @@ func TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough(t *testing.T)
 // TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript verifies that a single
 // pipeline run with a redactor redacts BOTH metadata fields AND transcript content.
 func TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2523,6 +2564,7 @@ func TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript(t *testing.T) {
 }
 
 func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2586,6 +2628,7 @@ func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
 }
 
 func TestPipeline_WithAnalyzer_ComputesMetrics(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2835,6 +2878,7 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 }
 
 func TestPipeline_IndexError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2895,6 +2939,7 @@ func TestPipeline_IndexError_NonFatal(t *testing.T) {
 }
 
 func TestPipeline_ComputeError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -2955,6 +3000,7 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 }
 
 func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3025,6 +3071,7 @@ func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
 }
 
 func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3076,6 +3123,7 @@ func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
 // with the correct days even when WithStore is NOT configured (p.store == nil).
 // This is the regression test for Fix A (day source) and Fix B (gate condition).
 func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3168,6 +3216,7 @@ func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
 // session whose metricsStore.IndexSessionEntries call fails is NOT included in
 // the session IDs passed to ComputeMetrics (Fix C).
 func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3253,6 +3302,7 @@ func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) 
 // --- AUDIT stage tests ---
 
 func TestPipeline_WithLogger_WritesAuditLog(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3305,6 +3355,7 @@ func TestPipeline_WithLogger_WritesAuditLog(t *testing.T) {
 }
 
 func TestPipeline_LoggerError_NonFatal(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3385,6 +3436,7 @@ func (m *wrappingRedactor) RuleSetVersion() string {
 // TextRedactor is wired, the JSONL transcript written to disk has its string
 // values redacted (T3, SourceFormatJSONL path).
 func TestPipeline_WithRedactor_RedactsJSONLTranscriptOnDisk(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3448,6 +3500,7 @@ func TestPipeline_WithRedactor_RedactsJSONLTranscriptOnDisk(t *testing.T) {
 // TextRedactor is wired, the JSON transcript written to disk has its string
 // values redacted (T3, SourceFormatJSON path).
 func TestPipeline_WithRedactor_RedactsJSONTranscriptOnDisk(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3520,6 +3573,7 @@ func TestPipeline_WithRedactor_RedactsJSONTranscriptOnDisk(t *testing.T) {
 // TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim verifies that when no
 // redactor is wired, the transcript is written verbatim (backward compatibility).
 func TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3570,6 +3624,7 @@ func TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim(t *testing.T) {
 // NewRedactor(level, userPatterns) + WithRedactor(r) redact matching content in JSONL
 // transcripts written to disk. This is the end-to-end integration test for redaction output.
 func TestPipeline_WithRedactor_CustomPattern(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3650,6 +3705,7 @@ func TestPipeline_WithRedactor_CustomPattern(t *testing.T) {
 // (via StubSessionStore) and ComputeInsights (via StubAnalyzer) are decoupled stages.
 // InsertSessions alone does not trigger daily_summary recomputation.
 func TestPipeline_InsertSessionsDoesNotRecomputeSummary(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3785,6 +3841,7 @@ func makeReindexMeta(t *testing.T, sessionIDStr, originalSourcePath string) *ing
 // TestPipeline_Reindex_DiscoversSessions verifies that --reindex scans the
 // peasant-sync output directory and discovers sessions from metadata files.
 func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3842,6 +3899,7 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 // TestPipeline_Reindex_ReExtractsWhenSourceExists verifies that when historical
 // metadata requires native refresh and source exists, reindex re-extracts it.
 func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -3916,6 +3974,7 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 // source file is missing, reindex falls back to INDEX+COMPUTE from the existing
 // peasant-sync transcript and records a fallback IndexLogEntry.
 func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4001,6 +4060,7 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 // TestPipeline_Reindex_ForceTargetsAll verifies that --reindex --force targets
 // ALL sessions in peasant-sync, not just those with stale index_version.
 func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4087,6 +4147,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 // TestPipeline_Reindex_IndexLogPopulated verifies that PipelineResult.IndexLog is
 // populated with correct outcomes during reindex mode.
 func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4163,6 +4224,7 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 // TestPipeline_Reindex_DryRun verifies that --reindex --dry-run shows what would
 // be processed without actually doing anything.
 func TestPipeline_Reindex_DryRun(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4217,6 +4279,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 // TestPipeline_Reindex_UpdatesIndexState verifies that after successful reindexing,
 // the pipeline calls UpdateIndexState with the harness indexer target.
 func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4304,6 +4367,7 @@ func setupPeasantSyncSubagentSession(t *testing.T, mfs *testutil.MemFS, outputDi
 // --dry-run path (which calls scanPeasantSyncSessions without needing a MetricsStore
 // stale-session filter).
 func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4387,6 +4451,7 @@ func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
 // can find a subagent session stored in the nested layout when the auto-detect stale
 // session mechanism in Run() looks it up.
 func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4473,6 +4538,7 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 // ListStaleIndexSessions is called with the harness indexer target, the session is indexed,
 // and UpdateIndexState is called with the new version.
 func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4554,6 +4620,7 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 // and repaired by `peasant harvest --force --session <id>`, never silently
 // re-indexed from source information on a plain harvest.
 func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4633,6 +4700,7 @@ func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
 // session, a subagent without a saved pair is a lost-metadata case left for
 // `harvest index`, never silently re-indexed from source information.
 func TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -4744,6 +4812,7 @@ func readMetadataFromMemFS(t *testing.T, mfs interface{ ReadFile(string) ([]byte
 }
 
 func TestPipeline_CommitDetection_WrittenToMetadata(t *testing.T) {
+	t.Parallel()
 	// Verify that commits returned by GitDiffAnalyzer are written to the
 	// session's {sessionId}--metadata.json file under Git.Commits.
 	mfs := testutil.NewMemFS()
@@ -4799,6 +4868,7 @@ func TestPipeline_CommitDetection_WrittenToMetadata(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_WrittenToDatabase(t *testing.T) {
+	t.Parallel()
 	// Verify that commits are persisted to the store via UpsertSessionCommits
 	// when both WithGitDiffAnalyzer and WithStore are configured.
 	mfs := testutil.NewMemFS()
@@ -4854,6 +4924,7 @@ func TestPipeline_CommitDetection_WrittenToDatabase(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_WithNoMatchingCommits(t *testing.T) {
+	t.Parallel()
 	// When the git analyzer returns commits whose author email does not match
 	// the session user email, the metadata should have no commits and
 	// UpsertSessionCommits should not be called.
@@ -4918,6 +4989,7 @@ func TestPipeline_CommitDetection_WithNoMatchingCommits(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_WithGitTimeout(t *testing.T) {
+	t.Parallel()
 	// When git log times out, the session still ingests and a diagnostic
 	// warning is recorded in metadata.Diagnostics.Warnings.
 	mfs := testutil.NewMemFS()
@@ -4980,6 +5052,7 @@ func TestPipeline_CommitDetection_WithGitTimeout(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_NotFatalOnGitFailure(t *testing.T) {
+	t.Parallel()
 	// When git log fails (e.g. repo not found), the session ingests with
 	// empty commits and a diagnostic warning — not a pipeline error.
 	mfs := testutil.NewMemFS()
@@ -5044,6 +5117,7 @@ func TestPipeline_CommitDetection_NotFatalOnGitFailure(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
+	t.Parallel()
 	// A second pipeline run for an unchanged session skips EXTRACT+WRITE,
 	// leaving the metadata (with commits) on disk from the first run intact.
 	// The store receives UpsertSessionCommits only on the first run.
@@ -5140,6 +5214,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_StandardRepo_NoWorktree(t *testing.T) {
+	t.Parallel()
 	// BLOCKER-3 regression test: commit detection must work when meta.Git.Worktree
 	// is nil (standard repo — the common case). Project.FilePath is used as fallback.
 	mfs := testutil.NewMemFS()
@@ -5193,6 +5268,7 @@ func TestPipeline_CommitDetection_StandardRepo_NoWorktree(t *testing.T) {
 }
 
 func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) {
+	t.Parallel()
 	// IMPORTANT-1 regression test: a --force re-ingest that finds 0 commits must
 	// call UpsertSessionCommits with an empty slice, deleting stale DB rows and
 	// keeping JSON metadata and DB in sync.
@@ -5275,6 +5351,7 @@ func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) 
 // (i.e., --detect-commits flag is OFF), commit detection never runs and
 // metadata.Git.Commits is nil in the written output.
 func TestPipeline_DetectCommitsFlag_OFF(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5319,6 +5396,7 @@ func TestPipeline_DetectCommitsFlag_OFF(t *testing.T) {
 // (not []CommitInfo{}) in the JSON when no commits match the author email.
 // This exercises the omitempty tag: an empty result must not appear in the JSON.
 func TestPipeline_DetectCommitsFlag_ON(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver() // email = testutil.TestEmail
 
@@ -5386,6 +5464,7 @@ func TestPipeline_DetectCommitsFlag_ON(t *testing.T) {
 // TestPipeline_Reindex_EmitsProgressEvents verifies that runReindex() drives
 // all 9 pipeline stages to completion via ProgressState.
 func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5452,6 +5531,7 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 // TestPipeline_Reindex_SummaryVersionFields verifies that PipelineSummary
 // includes per-harness targets and MetadataVersion after a reindex run.
 func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5502,6 +5582,7 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 // TestPipeline_NormalIngest_SummaryVersionFields verifies that PipelineSummary
 // includes per-harness targets and MetadataVersion after a normal (non-reindex) run.
 func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5557,6 +5638,7 @@ func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 // TestPipeline_Reindex_ParallelExtract verifies that when multiple sessions
 // have existing source files, reindex processes them via runParallel + StagingBuffer.
 func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5646,6 +5728,7 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 // The test also injects a store error to verify that errCh propagation reaches
 // Summary.StoreError without blocking any goroutine.
 func TestPipeline_GoroutineLifecycle_ParentChild(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5741,6 +5824,7 @@ func TestPipeline_GoroutineLifecycle_ParentChild(t *testing.T) {
 //
 // The test uses a brief timeout to confirm the pipeline returns in finite time.
 func TestPipeline_ContextCancellation_NoDeadlock(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5806,6 +5890,7 @@ func TestPipeline_ContextCancellation_NoDeadlock(t *testing.T) {
 // This test also exercises the combined path: store error via errCh, correct
 // session counts in the log entry, and non-fatal error handling.
 func TestPipeline_AuditLog_PreservedThroughGoroutineRefactor(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5889,6 +5974,7 @@ func TestPipeline_AuditLog_PreservedThroughGoroutineRefactor(t *testing.T) {
 // --- AllowedSessionIDs filter tests ---
 
 func TestPipeline_AllowedSessionIDs_NilAllowsAll(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5936,6 +6022,7 @@ func TestPipeline_AllowedSessionIDs_NilAllowsAll(t *testing.T) {
 }
 
 func TestPipeline_AllowedSessionIDs_Subset(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -5997,6 +6084,7 @@ func TestPipeline_AllowedSessionIDs_Subset(t *testing.T) {
 }
 
 func TestPipeline_AllowedSessionIDs_EmptyMap(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6040,6 +6128,7 @@ func TestPipeline_AllowedSessionIDs_EmptyMap(t *testing.T) {
 }
 
 func TestPipeline_AllowedSessionIDs_NoOverlap(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6088,6 +6177,7 @@ func TestPipeline_AllowedSessionIDs_NoOverlap(t *testing.T) {
 // TestPipeline_CWD_StoredInMetadata verifies that the CWD field flows through
 // the pipeline and is persisted in the written metadata JSON file.
 func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
+	t.Parallel()
 	const testCWD = "/home/test/myproject"
 
 	mfs := testutil.NewMemFS()
@@ -6149,6 +6239,7 @@ func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
 // database: the database is the source of truth for every derived field, so the
 // file is written once as the commit point and never restamped from DB state.
 func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6206,6 +6297,7 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 // metadata.json is still written successfully but DerivedAt is nil (no DB INSERT,
 // so no derived timestamp).
 func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6262,6 +6354,7 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 // point and never restamped afterwards. The DB mirror observes a complete,
 // DerivedAt-free file at insert time, and the file is unchanged after the run.
 func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
+	t.Parallel()
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
@@ -6333,6 +6426,7 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 // session record with a recent ingested_ms and current schema_version, the diff
 // stage classifies it as DiffUnchanged without needing to read metadata.json.
 func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
+	t.Parallel()
 	t.Skip("TODO: requires pipeline write-order inversion (DB INSERT before metadata.json write) — deferred")
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6404,6 +6498,7 @@ func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
 // when the DB has no record for a session but metadata.json exists on disk,
 // the diff stage reads the file (old pre-migration behavior).
 func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
+	t.Parallel()
 	t.Skip("TODO: requires pipeline write-order inversion (DB INSERT before metadata.json write) — deferred")
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6463,6 +6558,7 @@ func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
 // without a DerivedAt field still parses correctly (backward compat).
 // A v7 file should be classified as DiffUpdated (schema version mismatch).
 func TestPipeline_SchemaV8_V7MetadataParses(t *testing.T) {
+	t.Parallel()
 	// Construct a v7-style metadata JSON without derivedAt field.
 	v7JSON := `{
 		"schemaVersion": 7,

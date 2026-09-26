@@ -42,6 +42,7 @@ func seedColumnsPair(t *testing.T, fs ingest.FileSystem, sessionDir, sid string,
 // pair moves a counted column. The expected columns live in the fixture; "pair"
 // is the session's own transcript and metadata paths under peasant-sync.
 func TestWritePathColumns(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
@@ -227,6 +228,7 @@ func TestWritePathColumns(t *testing.T) {
 // the work, so the fixture asserts the bound the design guarantees rather than
 // a timing-dependent number.
 func TestWritePathMirrorsInPagesOf256(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// The store refuses a page larger than MirrorPageSize outright; this is why
@@ -306,6 +308,7 @@ func TestWritePathMirrorsInPagesOf256(t *testing.T) {
 // metadata installed first, the same fault would leave both files old and no
 // mixed pair, so this fixture fails if the order regresses.
 func TestWritePathInstallsMetadataLast(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mfs := testutil.NewCountingFS(testutil.NewMemFS())
 	git := testutil.DefaultGitResolver()
@@ -393,6 +396,7 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 // build is pruned with one RemoveAll; and the only read of the saved pair is the
 // single old-metadata read the replacement-header check makes.
 func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mfs := testutil.NewCountingFS(testutil.NewMemFS())
 	git := testutil.DefaultGitResolver()
