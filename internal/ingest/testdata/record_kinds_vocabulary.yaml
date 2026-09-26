@@ -11,6 +11,11 @@ required_names:
   - pi declaration rename fails
   - codex declaration removal fails
   - opencode declaration rename fails
+  - codex native event declaration removal fails
+  - codex native event census removal fails
+  - codex native event outcome alteration is reported
+  - codex native event rollback outcome is reported
+  - claude-code system subtype census removal fails
 cases:
   - {name: claude-code vocabulary exactly matches production, harness: claude-code, operation: exact}
   - {name: cursor vocabulary exactly matches production, harness: cursor, operation: exact}
@@ -24,3 +29,10 @@ cases:
   - {name: pi declaration rename fails, harness: pi, operation: rename-first, error: has no declaration}
   - {name: codex declaration removal fails, harness: codex, operation: remove-first, error: has no declaration}
   - {name: opencode declaration rename fails, harness: opencode, operation: rename-first, error: has no declaration}
+  # The Codex native event inventory is not the first inventory of its harness:
+  # these cases prove the census is checked there, in both directions.
+  - {name: codex native event declaration removal fails, harness: codex, operation: remove-first, context: native-generation, namespace: event, error: 'production native-generation/event/turn_aborted (literal) has no declaration'}
+  - {name: codex native event census removal fails, harness: codex, operation: remove-production, context: native-generation, namespace: event, kind: thread_rolled_back, error: 'declaration native-generation/event/thread_rolled_back (literal) is absent from production dispatch'}
+  - {name: codex native event outcome alteration is reported, harness: codex, operation: alter-outcome, context: native-generation, namespace: event, kind: item_completed, outcome: text, status: represented, preview: yes}
+  - {name: codex native event rollback outcome is reported, harness: codex, operation: alter-outcome, context: native-generation, namespace: event, kind: thread_rolled_back, outcome: tool-result, status: represented, preview: yes}
+  - {name: claude-code system subtype census removal fails, harness: claude-code, operation: remove-production, context: retained-format-1, namespace: system_subtype, kind: api_error, error: 'declaration retained-format-1/system_subtype/api_error (literal) is absent from production dispatch'}

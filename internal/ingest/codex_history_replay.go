@@ -541,15 +541,7 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 	current.descriptor.Coordinates = codexRangeCoordinates(current.records, indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindCodexOrdinalRange})
 	decoded = append(decoded, current)
 
-	state := &codexReplayState{
-		registry:       registry,
-		responseByItem: map[string]int{},
-		itemNodeByID:   map[string]int{},
-		eventOrdinal:   map[string]int64{},
-		seenKeys:       map[string]bool{},
-		openTurns:      map[string]int64{},
-		boundary:       &codexLegacyBoundaryReducer{pending: map[string]bool{}},
-	}
+	state := newCodexReplayState(registry)
 	for _, segment := range decoded {
 		if err := state.replaySegment(authority.StableThreadID, segment, mode); err != nil {
 			return CodexCapturedHistory{}, err
@@ -829,6 +821,21 @@ type codexReplayState struct {
 	// incomplete records replay evidence that could not be aligned or proved;
 	// it forces incomplete_new without inventing a positional pair.
 	incomplete bool
+}
+
+// newCodexReplayState is the one construction of the replay state. Every map an
+// arm writes to is allocated here, so no dispatch arm can meet a nil map and
+// the production wiring is the same wiring a focused test observes.
+func newCodexReplayState(registry *CodexRefRegistry) *codexReplayState {
+	return &codexReplayState{
+		registry:       registry,
+		responseByItem: map[string]int{},
+		itemNodeByID:   map[string]int{},
+		eventOrdinal:   map[string]int64{},
+		seenKeys:       map[string]bool{},
+		openTurns:      map[string]int64{},
+		boundary:       &codexLegacyBoundaryReducer{pending: map[string]bool{}},
+	}
 }
 
 // replaySegment reduces one decoded segment into the shared state. A segment
