@@ -62,4 +62,10 @@ func TestWriteReport_RoundTrips(t *testing.T) {
 			t.Errorf("report JSON missing %s:\n%s", want, got)
 		}
 	}
+	// Empty collections must serialize as [] rather than null.
+	for _, want := range []string{`"failed_tests": []`, `"invocation_errors": []`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("report JSON should normalize empty collections to [], missing %s:\n%s", want, got)
+		}
+	}
 }

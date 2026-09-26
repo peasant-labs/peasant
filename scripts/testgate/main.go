@@ -241,7 +241,7 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	streams := map[testgate.PassMode]map[string][]teststream.Record{}
 	walls := map[testgate.PassMode]time.Duration{}
 	var raceRecords, noRaceRecords []testgate.Record
-	var invocationErrors []string
+	invocationErrors := []string{}
 
 	if race {
 		resA, err := runner.Run(ctx, plan, testgate.ModeRace, true)

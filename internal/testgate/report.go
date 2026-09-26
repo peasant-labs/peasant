@@ -69,8 +69,21 @@ type ReportFinding struct {
 	Fix      string `json:"fix"`
 }
 
-// WriteReport writes the report as indented JSON.
+// WriteReport writes the report as indented JSON. Empty collections are
+// normalized to `[]` so a consumer never has to special-case null.
 func WriteReport(path string, report Report) error {
+	if report.Records == nil {
+		report.Records = []ReportRecord{}
+	}
+	if report.Findings == nil {
+		report.Findings = []ReportFinding{}
+	}
+	if report.FailedTests == nil {
+		report.FailedTests = []ReportTest{}
+	}
+	if report.InvocationErrors == nil {
+		report.InvocationErrors = []string{}
+	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return err
