@@ -1,0 +1,92 @@
+# no-race-partition.yaml — the anti-partition registry.
+#
+# `partition` entries run in the gate's no-race pass and are excluded from the
+# race pass; `protected` entries are pinned into the race pass and must never be
+# registered as partition members. Every entry carries:
+#   class            one of: single-threaded-bytes | subprocess | static-analysis | toolchain
+#   evidence         file:line inside the named test's file
+#   justification    why the production path has no shared-memory concurrency subject
+#   cost             the observed wall/cpu pair from a committed measurement
+#   build_flags      (subprocess only) the child build flags, resolved against exec_command_site;
+#                    a partition child must not be built with -race
+#   exec_command_site (subprocess only) file:line of the exec.Command call
+#
+# The fixture test internal/testgate/registry_test.go validates every entry
+# against the tree. The registry records no baseline and compares nothing across
+# time; it is the admission record for the partition only.
+version: 1
+
+partition:
+  - package: internal/moduleboundary
+    test: TestRedactionModuleBoundary
+    class: toolchain
+    evidence: internal/moduleboundary/redaction_boundary_test.go:65
+    justification: >-
+      Reads the module graph through `go mod edit`/`go list -m` and walks the
+      source tree for forbidden imports; the production path is the go tool and
+      the AST, with no shared-memory concurrency subject of its own.
+    cost: { wall_ms: 634, cpu_ms: 1014 }
+
+  - package: internal/moduleboundary
+    test: TestRedactionBoundaryFixtureStrictDecoding
+    class: single-threaded-bytes
+    evidence: internal/moduleboundary/redaction_boundary_test.go:117
+    justification: >-
+      Strict-decodes the embedded boundary fixture in-process; pure byte work,
+      no goroutines or shared state.
+    cost: { wall_ms: 583, cpu_ms: 934 }
+
+  - package: internal/moduleboundary
+    test: TestRedactionScannerHoldsALineAtTheRecordLimit
+    class: single-threaded-bytes
+    evidence: internal/moduleboundary/redaction_boundary_test.go:351
+    justification: >-
+      Redacts one at-limit record through the pinned engine; single-threaded
+      byte work on a private input.
+    cost: { wall_ms: 895, cpu_ms: 1240 }
+
+  - package: internal/moduleboundary
+    test: TestRedactionEngineHandlesRecordOverTheOldLimit
+    class: single-threaded-bytes
+    evidence: internal/moduleboundary/redaction_boundary_test.go:416
+    justification: >-
+      Redacts a record over the retired 10 MiB limit through the real engine.
+      The size is the invariant, so it stays; the work is single-threaded bytes
+      with no concurrency subject, and the race detector only inflates it.
+    cost: { wall_ms: 25700, cpu_ms: 26013 }
+
+  - package: internal/e2e
+    test: TestPeasantBinSeamUnsetBuildsGoBinary
+    class: subprocess
+    evidence: internal/e2e/skipgate_seams_test.go:53
+    justification: >-
+      The build IS the assertion: with PEASANT_BIN empty the seam must build the
+      real CLI and run it. The production code runs in the `go build` child, so
+      the race detector would instrument the child and change what is proven.
+    build_flags: []
+    exec_command_site: internal/e2e/skipgate_seams.go:99
+    cost: { wall_ms: 2773, cpu_ms: 4218 }
+
+  - package: internal/transcript
+    test: TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback
+    class: static-analysis
+    evidence: internal/transcript/snapshot_detail_lock_scope_test.go:46
+    justification: >-
+      The deterministic source oracle for the snapshot-lock boundary: it parses
+      production source and asserts where serialization lives. It reads bytes
+      and the AST; it runs no production goroutines.
+    cost: { wall_ms: 773, cpu_ms: 1331 }
+
+protected:
+  - package: internal/ingest
+    test: TestOpenCodeNativeCLI
+    class: subprocess
+    evidence: internal/ingest/opencode_native_cli_test.go:80
+    justification: >-
+      The pinned counter-example: its `go build` child is built with
+      nativeCLIRaceFlag, which is `-race=true` under the `race` build tag, so it
+      can never be a partition member — the child must carry the detector with
+      the enclosing suite.
+    build_flags: ["-race=true"]
+    exec_command_site: internal/ingest/opencode_native_cli_test.go:91
+    cost: { wall_ms: 39216, cpu_ms: 53162 }

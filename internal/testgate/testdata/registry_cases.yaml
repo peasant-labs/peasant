@@ -1,0 +1,126 @@
+# Named negative cases for the partition registry. Each case is a whole
+# registry (version + lists) with one deliberate defect; the fixture test
+# asserts the validator rejects it with want_error. required_names is the
+# manifest: the test fails if a case is deleted without updating the manifest.
+required_names:
+  - unknown-class
+  - empty-justification
+  - missing-evidence-file
+  - unparseable-evidence
+  - evidence-outside-test-file
+  - subprocess-without-build-flags
+  - protected-counter-example-moved-to-partition
+  - duplicate-registration
+  - missing-cost
+  - wrong-version
+
+cases:
+  - name: unknown-class
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: not-a-class
+        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        justification: strict fixture decode
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "unknown class"
+
+  - name: empty-justification
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        justification: ""
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "justification is empty"
+
+  - name: missing-evidence-file
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: internal/moduleboundary/does_not_exist_test.go:1
+        justification: strict fixture decode
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "evidence file"
+
+  - name: unparseable-evidence
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: "not-a-position"
+        justification: strict fixture decode
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "is not file:line"
+
+  - name: evidence-outside-test-file
+    partition:
+      - package: internal/e2e
+        test: TestPeasantBinSeamUnsetBuildsGoBinary
+        class: single-threaded-bytes
+        evidence: internal/e2e/skipgate_seams.go:99
+        justification: not the test's own file
+        cost: { wall_ms: 1, cpu_ms: 1 }
+    want_error: "is not inside the named test's file"
+
+  - name: subprocess-without-build-flags
+    partition:
+      - package: internal/e2e
+        test: TestPeasantBinSeamUnsetBuildsGoBinary
+        class: subprocess
+        evidence: internal/e2e/skipgate_seams_test.go:53
+        justification: the build IS the assertion
+        exec_command_site: internal/e2e/skipgate_seams.go:99
+        cost: { wall_ms: 2773, cpu_ms: 4218 }
+    want_error: "must declare build_flags"
+
+  - name: protected-counter-example-moved-to-partition
+    partition:
+      - package: internal/ingest
+        test: TestOpenCodeNativeCLI
+        class: subprocess
+        evidence: internal/ingest/opencode_native_cli_test.go:80
+        justification: the child is built with the race detector
+        build_flags: ["-race=true"]
+        exec_command_site: internal/ingest/opencode_native_cli_test.go:91
+        cost: { wall_ms: 39216, cpu_ms: 53162 }
+    want_error: "must be built without -race"
+
+  - name: duplicate-registration
+    protected:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        justification: strict fixture decode
+        cost: { wall_ms: 583, cpu_ms: 934 }
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        justification: strict fixture decode
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "duplicate registration"
+
+  - name: missing-cost
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        justification: strict fixture decode
+        cost: { wall_ms: 0, cpu_ms: 0 }
+    want_error: "cost must record"
+
+  - name: wrong-version
+    version: 2
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        justification: strict fixture decode
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "registry version"

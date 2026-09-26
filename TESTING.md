@@ -11,6 +11,93 @@ See `AGENTS.md` for the test package map, fixture tree, writing rules, and chann
 | Committed transcript fixtures (`internal/e2e/testdata/`) | `make check` | [Fixture meta-tests](#committed-fixture-meta-tests-make-check) + [`docs/e2e-fixture.md`](docs/e2e-fixture.md) |
 | Full-stack skip-gate + pull round-trip (podman + village + real CLI) | `make e2e` only | [Full-stack e2e](#full-stack-e2e-verified) + [`docs/e2e.md`](docs/e2e.md) |
 
+## Test gate
+
+`make check` runs the Go suite through `scripts/testgate`. The gate exists to move
+the suite's expensive non-race work out of the race pass **without dropping it**,
+and to prove that every test still runs exactly once across the passes.
+
+### Two passes, one registry
+
+- **`no-race-partition.yaml`** (committed at the repo root) is the admission
+  record. Its `partition` entries run in the **no-race pass** and are excluded
+  from the race pass; its `protected` entries are pinned into the race pass and
+  must never be registered as partition members.
+- Under `RACE=1` the gate runs a **race pass** (every listed test minus the
+  partition members) and a **no-race pass** (exactly the partition members).
+  Under `RACE=0` it runs a **single no-race pass** over every test, but still
+  computes the plan and applies the screen. The gate computes the plan from
+  `go test -list`, so `scripts/testgate plan` prints the plan and runs nothing.
+
+### Admission — all four criteria
+
+A registry entry is admitted only when it carries:
+
+1. `class` from the closed set `single-threaded-bytes` · `subprocess` ·
+   `static-analysis` · `toolchain`;
+2. `evidence`, a `file:line` that exists and is inside the named test's file;
+3. an observed `cost` pair (`wall_ms`, `cpu_ms`) from a committed measurement;
+4. for `subprocess`, `build_flags` resolved against the referenced
+   `exec_command_site` — a partition child must be built **without** `-race`.
+   `TestOpenCodeNativeCLI` is pinned in `protected` as the counter-example: its
+   `go build` child uses `nativeCLIRaceFlag`, which is `-race=true` under the
+   `race` build tag.
+
+`internal/testgate/registry_test.go` validates the committed registry against the
+tree and runs named negative cases from `testdata/registry_cases.yaml`; moving the
+counter-example into `partition` fails the test.
+
+### The four-rule exactly-once screen
+
+The screen merges the passes and checks, in both `RACE` modes:
+
+1. **exactly-once** — a test that ran in more than one pass is a double-run (FAIL);
+2. **partition containment** — a partition member must not run in the race pass (FAIL);
+3. **registered liveness** — a registered package with no test events, a partition
+   member that did not run, or a protected test that did not run (FAIL);
+4. **unregistered liveness** — a planned unregistered package with no events is
+   **reported only** (REPORT).
+
+The screen records no baseline and compares nothing across time. Any test failure,
+screen FAIL, or invocation error makes the gate exit non-zero.
+
+### Per-invocation records and run classes
+
+Each `go test` invocation is a recordable unit with a `{unit, class, wall, user,
+system}` record. The race pass records one unit per package (class `race`); the
+`RACE=1` no-race pass records one unit per partition test, carrying that entry's
+class. `user`/`system` come from `getrusage(RUSAGE_CHILDREN)`; under concurrency
+the counter is process-global, so per-unit CPU is best-effort while **wall is
+always exact**.
+
+Run classes (keep them separate):
+
+- **truth / budget (profile-free):** `-race -count=1 -timeout=0 -json -fullpath
+  -outputdir <d>`. This is the only quotable wall.
+- **attribution (profiles ON; wall not quotable):** add `-blockprofile`,
+  `-mutexprofile`, `-cpuprofile`, `-trace`. `-cpuprofile` does not profile child
+  processes, so it is for intra-binary attribution only.
+- **interactive debug:** `-v -fullpath -run <target>`.
+
+Do not pin `-parallel`: it defaults to `GOMAXPROCS` (cgroup-aware) and pinning
+changes the packing ceiling being measured. The gate prints the effective `-p`,
+`-parallel`, `-count`, and `GOMAXPROCS`.
+
+### Budget and calibration surface
+
+`budget.yaml` (committed by the release gate) carries the reference-machine
+budget; until then the gate reads `TEST_BUDGET` (seconds) from the environment and
+otherwise prints raw walls only. `CHECK_START_NS` is stamped by `make check` and
+the gate reports the pre-test wall (`test-start - CHECK_START_NS`) separately from
+the test wall. The calibration factor `L` is the gate's fixed CPU probe over the
+committed reference; `L > 4` is reported INCONCLUSIVE and does not fail the gate.
+
+### Counting-method rule
+
+Every count in a report must carry the exact command that produced it and the SHA
+it was run at, or be explicitly labelled **"carried, not re-verified"**. No relayed
+number may be restated without re-running it.
+
 ## Test performance: keeping `cmd/peasant` fast (and parallel)
 
 `cmd/peasant` is the CLI integration package — each test stands up SQLite + the
