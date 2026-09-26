@@ -14,6 +14,26 @@ import (
 //go:embed testdata/record_kinds_validation.yaml
 var recordKindsValidationYAML []byte
 
+//go:embed testdata/record_kinds_status_mutation.yaml
+var recordKindsStatusMutationYAML []byte
+
+// recordKindsStatusMutationFixture holds the status-boundary mutation cases:
+// names the derived constructor must refuse with a mutated closed set in hand,
+// and names the shipping constructor must keep refusing.
+type recordKindsStatusMutationFixture struct {
+	RequiredNames []string `yaml:"required_names"`
+	// OutOfSetName is refused by the derived constructor when the mutated set
+	// excludes it, proving the derivation reads the mutated set.
+	OutOfSetName string `yaml:"out_of_set_name"`
+	// ShippedAcceptedNames are the raw names the shipping constructor accepted
+	// at the time the fixture was written; they must remain members of
+	// recordKindStatusClosedSet, so a status cannot silently leave the set.
+	ShippedAcceptedNames []string `yaml:"shipped_accepted_names"`
+	// ShippedOutOfSetNames are the raw names the shipping constructor must
+	// keep refusing.
+	ShippedOutOfSetNames []string `yaml:"shipped_out_of_set_names"`
+}
+
 type recordKindsValidationFixtures struct {
 	RequiredNames []string `yaml:"required_names"`
 	Cases         []struct {
@@ -143,7 +163,10 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 				}
 			case "native-event-behavior":
 				kind := registry.Harnesses[HarnessCodex].Lookup(RecordKindNative, "event", row.Kind)
-				state := &codexReplayState{}
+				// The mutation goes through the one production constructor, so
+				// no fixture can satisfy a dispatch arm with the nil-map shape
+				// newCodexReplayState prevents.
+				state := newCodexReplayState(nil)
 				result = state.replayEventMessage("fixture", codexDecodedSegment{}, codexHistoryRecord{}, codexHistoryReplayPayload{Type: row.Kind}, CodexOwnershipOwn, CodexHistoryModeLegacy)
 				if result == nil && (len(state.nodes) != 0 || kind.Status != RecordKindIgnoredControl || kind.Preview != RecordKindPreviewNo) {
 					result = fmt.Errorf("native metadata/mirror behavior differs from registry")

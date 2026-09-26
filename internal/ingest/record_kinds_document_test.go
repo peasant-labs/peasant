@@ -64,6 +64,54 @@ func TestRecordKindsStatusTablesCoverTheParserClosedSet(t *testing.T) {
 	}
 }
 
+// TestRecordKindsStatusesDeriveFromOneSource pins NewRecordKindStatus to the
+// documented closed set: the constructor's accepted inputs and its refusal must
+// derive from recordKindStatusClosedSet, not from a second switch whose arms can
+// drift from the prose. Feeding a mutated set through the derivation proves the
+// derivation reads the set, so a status accepted at the parser boundary can
+// never be absent from the generated status prose. The YAML fixture pins the
+// out-of-set names the shipping constructor must keep refusing.
+func TestRecordKindsStatusesDeriveFromOneSource(t *testing.T) {
+	fixture := recordKindsStatusMutationFixture{}
+	decodeRegistryFixture(t, recordKindsStatusMutationYAML, &fixture)
+	shipped := map[string]bool{"accepted statuses derive from the closed set": true}
+	// The shipped constructor's arm list, read from the code as it stands: each
+	// accepted raw name is checked against the set it is supposed to read.
+	for _, status := range recordKindStatusClosedSet {
+		shipped[string(status)] = true
+		if _, err := NewRecordKindStatus(string(status)); err != nil {
+			t.Errorf("closed-set status %s is not derivable at the shipped boundary: %v", status, err)
+		}
+	}
+	checkRegistryFixtureNames(t, shipped, append([]string{"accepted statuses derive from the closed set"}, fixture.ShippedAcceptedNames...))
+	// A mutated set names a status the shipped constructor cannot know; the
+	// derivable form must accept exactly that mutated set, so a future
+	// constructor derivation cannot read any other list.
+	statuses := append(recordKindStatusClosedSet[:0:0], recordKindStatusClosedSet...)
+	statuses = append(statuses, RecordKindStatus("mutated-status"))
+	derived := func(raw string) (RecordKindStatus, error) {
+		return derivedRecordKindStatus(raw, statuses)
+	}
+	for _, status := range statuses {
+		got, err := derived(string(status))
+		if err != nil {
+			t.Errorf("derived constructor refused %s, a member of the mutated set: %v", status, err)
+		} else if got != status {
+			t.Errorf("derived constructor returned %s for %s", got, status)
+		}
+	}
+	if got, err := derived(fixture.OutOfSetName); err == nil || got != "" {
+		t.Errorf("derived constructor accepted %q outside the mutated set: %q %v", fixture.OutOfSetName, got, err)
+	}
+	// The shipping constructor refuses every fixture name the mutated set does
+	// not contain.
+	for _, raw := range fixture.ShippedOutOfSetNames {
+		if _, err := NewRecordKindStatus(raw); err == nil {
+			t.Errorf("NewRecordKindStatus accepted the out-of-set name %q", raw)
+		}
+	}
+}
+
 // TestRecordKindsDocumentStatusProseReportsDeclaredRows is the review gate for
 // the generated status prose. It reads the committed document, so a hand-tuned
 // claim about which statuses this build emits cannot be reintroduced: every
