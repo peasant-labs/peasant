@@ -213,7 +213,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			git.Remote = "https://example.com/changed/current.git"
 			run := func() *ingest.PipelineResult {
 				writer := &publicationReindexStore{Store: database, recapture: cfg.Reindex && c.ReindexConcurrentCapture, unreadableEntries: cfg.Reindex && c.ReindexUnreadableEntries}
-				pipeline, err := ingest.NewPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
+				pipeline, err := newTestPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
 					ingest.WithSalt(installationSalt), ingest.WithStore(writer), ingest.WithMetricsStore(writer),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {

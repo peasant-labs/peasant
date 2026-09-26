@@ -102,7 +102,7 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex, cfg.Force = true, fixture.Force
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{fixtures.ChildID: true}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, cfg,
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, cfg,
 				ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 			if err != nil {
 				t.Fatal(err)

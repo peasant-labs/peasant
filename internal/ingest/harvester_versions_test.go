@@ -146,13 +146,13 @@ func TestHarvesterVersionRegistry(t *testing.T) {
 			}
 			option := WithHarvesterVersions(targets)
 			clear(targets) // neither this map nor one pipeline may mutate another's targets
-			p, err := NewPipeline(nil, nil, adapters, PipelineConfig{}, option)
+			p, err := NewPipeline(nil, nil, adapters, PipelineConfig{}, option, WithArenaSizeBytes(testIngestArenaBytes))
 			if fixture.Error != "" {
 				if err == nil || !strings.Contains(err.Error(), fixture.Error) {
 					t.Fatalf("constructor error = %v, want %q", err, fixture.Error)
 				}
 				// Direct struct construction must fail before touching filesystem or DB.
-				direct := &Pipeline{adapters: adapters}
+				direct := &Pipeline{adapters: adapters, arenaSizeBytes: testIngestArenaBytes}
 				option(direct)
 				if _, err := direct.Run(context.Background()); err == nil || !strings.Contains(err.Error(), fixture.Error) {
 					t.Fatalf("direct Run error = %v, want %q", err, fixture.Error)
@@ -163,7 +163,7 @@ func TestHarvesterVersionRegistry(t *testing.T) {
 				t.Fatal(err)
 			}
 			clear(p.harvesterVersions)
-			if _, err := NewPipeline(nil, nil, adapters, PipelineConfig{}, option); err != nil {
+			if _, err := NewPipeline(nil, nil, adapters, PipelineConfig{}, option, WithArenaSizeBytes(testIngestArenaBytes)); err != nil {
 				t.Fatalf("reused option lost targets: %v", err)
 			}
 		})

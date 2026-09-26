@@ -89,7 +89,7 @@ func populateOpenCodeStorage(
 func TestOpenCodeAdapter_Provider(t *testing.T) {
 	fs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 
 	got := a.Harness()
 	if got != ingest.HarnessOpenCode {
@@ -110,7 +110,7 @@ func TestOpenCodeAdapter_Discover(t *testing.T) {
 
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", 1770000000000, 1770000100000, nil)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -155,7 +155,7 @@ func TestOpenCodeAdapter_Discover_EmptyStorage(t *testing.T) {
 
 	fs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
@@ -189,7 +189,7 @@ func TestOpenCodeAdapter_Discover_SubagentLinking(t *testing.T) {
 	// Write child session (parentID = parentSesID).
 	populateOpenCodeStorage(t, fs, root, projHash, directory, childSesID, directory, parentSesID, 1770000050000, 1770000100000, nil)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -258,7 +258,7 @@ func TestOpenCodeAdapter_ExtractMetadata(t *testing.T) {
 
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", created, updated, messages)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -361,7 +361,7 @@ func TestOpenCodeAdapter_ExtractMetadata_NoGit(t *testing.T) {
 
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", created, updated, nil)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -426,7 +426,7 @@ func TestOpenCodeAdapter_ExtractMetadata_CountsMessages(t *testing.T) {
 
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", created, updated, messages)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -489,7 +489,7 @@ func TestOpenCodeAdapter_ExtractMetadata_MissingModel(t *testing.T) {
 
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", created, updated, messages)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -552,7 +552,7 @@ func TestOpenCodeAdapter_ExtractMetadata_MessageDirNamingContract(t *testing.T) 
 	// not {root}/message/ses_ses_namingContract777XYZ/ (double prefix).
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", created, updated, messages)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -596,7 +596,7 @@ func TestOpenCodeAdapter_ExtractMetadata_EmptyDirectory(t *testing.T) {
 		"", // empty directory
 		"", created, updated, nil)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -662,7 +662,7 @@ func TestOpenCodeAdapter_ExtractMetadata_CountToolCallParts(t *testing.T) {
 		t.Fatalf("write non-json file: %v", err)
 	}
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -733,7 +733,7 @@ func TestOpenCodeAdapter_ExtractMetadata_TokenCounts(t *testing.T) {
 	// assistant message with 200 input, 120 output
 	writeMsg("msg_a2", "assistant", modelName, true, 200, 120)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -789,7 +789,7 @@ func TestOpenCodeAdapter_ExtractMetadata_NoTokenField(t *testing.T) {
 	git := testutil.DefaultGitResolver()
 	populateOpenCodeStorage(t, fs, root, projHash, directory, sesID, directory, "", created, updated, messages)
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,
@@ -829,7 +829,7 @@ func TestOpenCodeAdapter_Discover_CorruptSessionJSON(t *testing.T) {
 		t.Fatalf("WriteFile corrupt JSON: %v", err)
 	}
 
-	a := ingest.NewOpenCodeAdapter(fs, git, salt.Salt{})
+	a := newTestOpenCodeAdapter(fs, git, salt.Salt{})
 	cfg := ingest.SourceConfig{
 		Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(root)},
 		Enabled: true,

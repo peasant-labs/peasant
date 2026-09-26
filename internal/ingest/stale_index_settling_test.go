@@ -151,7 +151,7 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 				adapters := map[ingest.Harness]ingest.AdapterFactory{
 					ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 				}
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 				if err != nil {

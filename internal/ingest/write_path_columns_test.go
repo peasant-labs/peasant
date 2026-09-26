@@ -99,7 +99,7 @@ func TestWritePathColumns(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer db.Close()
-				pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+				pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 					ingest.WithStore(db), ingest.WithMetricsStore(db),
 					ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})))
 				if err != nil {
@@ -141,7 +141,7 @@ func TestWritePathColumns(t *testing.T) {
 					},
 				}
 				mfs.ResetCounts()
-				pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
+				pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -175,7 +175,7 @@ func TestWritePathColumns(t *testing.T) {
 					},
 				}
 				mfs.ResetCounts()
-				pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
+				pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -276,7 +276,7 @@ func TestWritePathMirrorsInPagesOf256(t *testing.T) {
 	indexer := &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile}
 
 	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir),
+	pipeline, err := newTestPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir),
 		ingest.WithStore(ds), ingest.WithMetricsStore(ds),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
@@ -327,7 +327,7 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta}),
 	}
-	first, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	first, err := newTestPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: makeMinimalMeta(t, testSessionID)}),
 	}
 	mfs.Fail(testutil.FSOpRename, metadataPath, fmt.Errorf("simulated crash before the metadata rename"))
-	second, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	second, err := newTestPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
 	}
 	defer db.Close()
 	runHarvest := func(sessions []ingest.DiscoveredSession) {
-		pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+		pipeline, err := newTestPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
 			ingest.HarnessClaudeCode: makeStubAdapter(sessions, metas),
 		}, makePipelineConfig(testOutputDir),
 			ingest.WithStore(db), ingest.WithMetricsStore(db),

@@ -37,10 +37,35 @@ var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
 var _ BoundedTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 var _ FirstPageTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 
+// OpenCodeAdapterOption configures the production OpenCodeAdapter constructor.
+type OpenCodeAdapterOption func(*openCodeAdapterOptions)
+
+type openCodeAdapterOptions struct {
+	environment OpenCodeEnvironmentLookup
+}
+
+// WithOpenCodeEnvironment overrides the environment lookup the adapter uses to
+// resolve the installation channel (OPENCODE_CHANNEL) and the database
+// overrides (OPENCODE_DB, OPENCODE_DISABLE_CHANNEL_DB). Production leaves it
+// unset so SystemOpenCodeEnvironment stays the default; a test injects a fixed
+// lookup instead of mutating the process environment, which would serialize
+// every other test in the binary under t.Setenv.
+func WithOpenCodeEnvironment(environment OpenCodeEnvironmentLookup) OpenCodeAdapterOption {
+	return func(o *openCodeAdapterOptions) {
+		if environment != nil {
+			o.environment = environment
+		}
+	}
+}
+
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
-func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {
+func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt, opts ...OpenCodeAdapterOption) *OpenCodeAdapter {
+	options := openCodeAdapterOptions{environment: SystemOpenCodeEnvironment()}
+	for _, opt := range opts {
+		opt(&options)
+	}
+	environment := options.environment
 	candidateFS, ok := fs.(OpenCodeCandidateFileSystem)
-	environment := SystemOpenCodeEnvironment()
 	channel := "latest"
 	if configuredChannel, exists := environment.LookupEnv(openCodeInstallationChannelEnv); exists && strings.TrimSpace(configuredChannel) != "" {
 		channel = configuredChannel

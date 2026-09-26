@@ -126,7 +126,8 @@ func TestPipelineCancellationBeforeDiff(t *testing.T) {
 			filesystem.canceled.Store(true)
 			adapter := progressAdapter{sessions: []DiscoveredSession{{SessionID: "session-one", Harness: HarnessClaudeCode}}}
 			pipeline := &Pipeline{
-				fs: filesystem,
+				arenaSizeBytes: testIngestArenaBytes,
+				fs:             filesystem,
 				adapters: map[Harness]AdapterFactory{
 					HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter { return adapter },
 				},
@@ -202,10 +203,11 @@ func TestPipelineReindexCancellationDuringDiffLookup(t *testing.T) {
 	// on disk for DIFF to have a target at all.
 	output := writeReindexProgressFixture(t)
 	pipeline := &Pipeline{
-		fs:           &OSFileSystem{},
-		store:        &cancelProgressStore{cancel: cancel, returnError: true},
-		metricsStore: &cancelReindexProgressStore{},
-		config:       PipelineConfig{Reindex: true, Progress: progress, OutputDir: ResolvedPath(output)},
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             &OSFileSystem{},
+		store:          &cancelProgressStore{cancel: cancel, returnError: true},
+		metricsStore:   &cancelReindexProgressStore{},
+		config:         PipelineConfig{Reindex: true, Progress: progress, OutputDir: ResolvedPath(output)},
 	}
 	_, err := pipeline.Run(ctx)
 	if !errors.Is(err, context.Canceled) {
@@ -272,7 +274,8 @@ func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
 	progress := NewProgressState()
 	filesystem := &cancelNestedDiffFS{cancel: cancel}
 	pipeline := &Pipeline{
-		fs: filesystem,
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             filesystem,
 		adapters: map[Harness]AdapterFactory{
 			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
 				return progressAdapter{sessions: []DiscoveredSession{
@@ -365,7 +368,8 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 		{SessionID: "session-two", Harness: HarnessClaudeCode},
 	}
 	pipeline := &Pipeline{
-		fs: filesystem,
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             filesystem,
 		adapters: map[Harness]AdapterFactory{
 			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
 				return progressAdapter{sessions: sessions}
@@ -438,7 +442,8 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		{SessionID: "session-two", Harness: HarnessClaudeCode},
 	}
 	pipeline := &Pipeline{
-		fs: emptyProgressFS{},
+		arenaSizeBytes: testIngestArenaBytes,
+		fs:             emptyProgressFS{},
 		adapters: map[Harness]AdapterFactory{
 			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
 				return progressAdapter{sessions: sessions}

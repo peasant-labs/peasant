@@ -289,7 +289,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			if !row.LogsOnly {
 				options = append(options, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, cfg, options...)
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, cfg, options...)
 			if row.WantConstructorError != "" {
 				if err == nil || !strings.Contains(err.Error(), row.WantConstructorError) {
 					t.Fatalf("constructor error=%v, want %q", err, row.WantConstructorError)

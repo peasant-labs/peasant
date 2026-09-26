@@ -58,7 +58,7 @@ func TestPersistentHarvestRetriesStoredDownstreamWithoutIndexing(t *testing.T) {
 	// No native or retained files exist. Discovery selection excludes everything;
 	// previously stored sessions still receive the invoked downstream maintenance.
 	config.SessionFilter = func(ingest.DiscoveredSession) bool { return false }
-	pipeline, err := ingest.NewPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(),
+	pipeline, err := newTestPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(),
 		map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, config,
 		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithAnalyzer(metrics.NewEngine(backing)), ingest.WithClassifier(classifier))
 	if err != nil {
@@ -160,7 +160,7 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 			}
 			config := makePipelineConfig(testOutputDir)
 			config.Reindex, config.Force = true, true
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, config,
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, config,
 				ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})),
 				ingest.WithAnalyzer(metrics.NewEngine(&metricsRefreshStore{Store: db, fail: row.FailSave})))
 			if err != nil {

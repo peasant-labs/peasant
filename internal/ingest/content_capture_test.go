@@ -225,7 +225,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 					return &captureFixtureAdapter{SourceAdapter: base(fs, git, salt), fs: fs}
 				}
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -266,7 +266,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 				text = strings.Repeat("界", 1000) + "CHANGED_CAPTURE_TAIL"
 				captureFixtureSource(t, fixture, fs, text)
 				cfg.Force = true
-				pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+				pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -293,7 +293,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.Reindex = true
-			pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}

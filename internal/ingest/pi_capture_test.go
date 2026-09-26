@@ -139,7 +139,7 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 	cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{resolved}}}, OutputDir: out, Parallelism: 1}
 	run := func() *ingest.PipelineResult {
 		t.Helper()
-		p, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessPi: ingest.NewPiIndexer(filesystem)}))
+		p, err := newTestPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessPi: ingest.NewPiIndexer(filesystem)}))
 		if err != nil {
 			t.Fatal(err)
 		}

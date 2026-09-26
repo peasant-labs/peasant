@@ -37,7 +37,7 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	filesystem := &preparedRetainedFS{OSFileSystem: &OSFileSystem{}, store: store, sid: artifact.Metadata.SessionID}
 	versions := maps.Clone(HarvesterVersionRegistry)
 	versions[HarnessClaudeCode] = HarvesterVersions{AdapterVersion: 2, IndexerVersion: versions[HarnessClaudeCode].IndexerVersion, IndexVersion: versions[HarnessClaudeCode].IndexVersion}
-	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions))
+	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions), WithArenaSizeBytes(testIngestArenaBytes))
 	if err != nil {
 		t.Fatal(err)
 	}

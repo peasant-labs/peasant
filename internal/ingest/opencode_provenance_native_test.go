@@ -26,7 +26,7 @@ func TestOpenCodeProvenanceNativeReadOnlySnapshot(t *testing.T) {
 	before := testfixture.SnapshotSource(t, source)
 	rowsBefore := countMaterializedCurrentRows(t, source.Path, openCodeNativeChild)
 
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{})
 	if err != nil {
 		t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
@@ -60,7 +60,7 @@ func TestOpenCodeProvenanceNativeReadOnlySnapshot(t *testing.T) {
 // thinner V1 result.
 func TestOpenCodeProvenanceIndexerWiring(t *testing.T) {
 	source := testfixture.MaterializeByName(t, "native-current-rows")
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	session := ingest.DiscoveredSession{
 		SessionID:        ingest.SessionID(openCodeNativeChild),
 		Harness:          ingest.HarnessOpenCode,
@@ -115,7 +115,7 @@ func TestOpenCodeProvenanceAdmissionThroughNativeSQL(t *testing.T) {
 				}
 				options.AgentDeliveredIDs = delivered
 			}
-			adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+			adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 			snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, row.Scope.SessionID, options)
 			if err != nil {
 				t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
@@ -167,7 +167,7 @@ func indexOpenCodeNative(t *testing.T, source testfixture.MaterializedSource, se
 }
 
 func openCodeNativeProvenanceConfig(source testfixture.MaterializedSource, sessionID string, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.OpenCodeProvenanceIndexerConfig {
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	return ingest.OpenCodeProvenanceIndexerConfig{
 		Enabled: true,
 		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {

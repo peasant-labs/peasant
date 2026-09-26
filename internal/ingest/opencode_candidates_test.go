@@ -3181,7 +3181,7 @@ func TestOpenCodeProductionAdapterDiscoversCurrentOnlySessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve synthetic OpenCode data root: %v", err)
 	}
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
 	discovered, err := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 	if err != nil {
 		t.Fatalf("run production OpenCode discovery with SQLite evidence: %v", err)
@@ -3224,7 +3224,7 @@ func TestOpenCodeAdapterDiscoveryCapabilities(t *testing.T) {
 				return
 			case openCodeAdapterIncapableLegacyOnly:
 				writeLegacyOnlyOpenCodeSession(t, root.String())
-				adapter := ingest.NewOpenCodeAdapter(legacyOnlyOpenCodeFileSystem{FileSystem: filesystem}, testutil.NoGitResolver(), salt.Salt{})
+				adapter := newTestOpenCodeAdapter(legacyOnlyOpenCodeFileSystem{FileSystem: filesystem}, testutil.NoGitResolver(), salt.Salt{})
 				discovered, discoverErr := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 				if discoverErr != nil {
 					t.Fatalf("incapable filesystem legacy-only discovery failed: %v", discoverErr)

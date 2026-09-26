@@ -460,6 +460,17 @@ func resolveArenaSizeBytes(def int64) int64 {
 	return def
 }
 
+// stagingArenaSize resolves this pipeline's staging-arena capacity: an explicit
+// WithArenaSizeBytes option wins; otherwise the EnvArenaSizeBytes override,
+// else DefaultArenaSizeBytes. Production passes no option, so the environment
+// remains the default at the composition root.
+func (p *Pipeline) stagingArenaSize() int64 {
+	if p.arenaSizeBytes > 0 {
+		return p.arenaSizeBytes
+	}
+	return resolveArenaSizeBytes(DefaultArenaSizeBytes)
+}
+
 // DefaultMaxDrainBatch is the maximum number of entries returned by a single
 // Drain call. Capping the batch size ensures that DB INSERT + INDEX per cycle
 // stays bounded, keeping TUI progress responsive and SQLite transactions small.

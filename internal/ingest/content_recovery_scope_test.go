@@ -234,7 +234,7 @@ func TestContentRecoveryScope(t *testing.T) {
 			if fixture.UnreadableRow {
 				sessionStore = &unreadableRowStore{Store: database, target: id}
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,7 +247,7 @@ func TestContentRecoveryScope(t *testing.T) {
 			var result *PipelineResult
 			for run := range runs {
 				if run > 0 {
-					pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
+					pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(sessionStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 					if err != nil {
 						t.Fatal(err)
 					}

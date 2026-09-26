@@ -344,7 +344,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{schema.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{resolved}}}, OutputDir: output, IncludeActive: true, Parallelism: 1}
 			run := func() *ingest.PipelineResult {
 				t.Helper()
-				p, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+				p, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -186,7 +186,7 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{c.Harness: {Enabled: true, Paths: []ingest.ResolvedPath{session.SourcePath}}}
 			adapters := map[ingest.Harness]ingest.AdapterFactory{c.Harness: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta})}
 			run := func() *ingest.PipelineResult {
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(writer), ingest.WithMetricsStore(writer))
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(writer), ingest.WithMetricsStore(writer))
 				if err != nil {
 					t.Fatal(err)
 				}

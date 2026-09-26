@@ -129,7 +129,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 				cfg := makePipelineConfig(testOutputDir)
 				cfg.Reindex = true
 				adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessStrike: makeStubAdapter(nil, nil)}
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithHarvesterVersions(versions),
 					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))

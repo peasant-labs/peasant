@@ -98,7 +98,7 @@ func TestOpenCodeSliceContinuation(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			materialized := testfixture.MaterializeByName(t, c.SourceFixture)
-			adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
+			adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
 			origin := ingest.TranscriptOriginOpenCodeLegacySQLite
 			if c.Origin == "current" {
 				origin = ingest.TranscriptOriginOpenCodeCurrentSQLite

@@ -156,7 +156,7 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 				baselineConfig := makePipelineConfig(output)
 				baselineConfig.Reindex = true
 				baselineConfig.Sources = nil
-				baseline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
+				baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -210,7 +210,7 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return adapter }}
 			config := makePipelineConfig(output)
 			config.Reindex = row.Reindex
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, ingest.WithHarvesterVersions(versions), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, ingest.WithHarvesterVersions(versions), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 			if err != nil {
 				t.Fatal(err)
 			}

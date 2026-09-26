@@ -191,7 +191,7 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			}
 			config := makePipelineConfig(output)
 			config.Reindex, config.Force = true, true
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{session.Harness: indexer}))
+			pipeline, err := newTestPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{session.Harness: indexer}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,7 +254,7 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			indexer := &capturedInputIndexer{TranscriptIndexer: ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})[harness]}
 			config := makePipelineConfig(output)
 			config.Reindex = mode == indexInputIndexRun
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
+			pipeline, err := newTestPipeline(filesystem, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
 			if err != nil {
 				t.Fatal(err)
 			}

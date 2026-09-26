@@ -360,7 +360,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 						baselineConfig := makePipelineConfig(testOutputDir)
 						baselineConfig.Reindex = true
 						baselineConfig.Sources = nil
-						baseline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, baselineConfig,
+						baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, baselineConfig,
 							ingest.WithStore(database), ingest.WithMetricsStore(database),
 							ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 						if err != nil {
@@ -405,7 +405,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg, options...)
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg, options...)
 			if err != nil {
 				t.Fatal(err)
 			}

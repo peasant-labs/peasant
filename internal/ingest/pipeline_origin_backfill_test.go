@@ -60,7 +60,7 @@ func TestPipeline_FillsInStoredOriginsAndReportsTheReMine(t *testing.T) {
 
 	run := func(label string) *ingest.PipelineResult {
 		t.Helper()
-		pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(),
+		pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(),
 			ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(database))
 		if err != nil {
 			t.Fatalf("NewPipeline (%s): %v", label, err)

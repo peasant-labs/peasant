@@ -110,7 +110,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			cfg.Force = true
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{ingest.HarnessCodex: {Enabled: true, Paths: []ingest.ResolvedPath{sourcePath}}}
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{sid: true}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 			if err != nil {
 				t.Fatal(err)
 			}

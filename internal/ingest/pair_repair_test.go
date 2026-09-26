@@ -208,7 +208,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 
 			run := func() *ingest.PipelineResult {
 				t.Helper()
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 				if err != nil {

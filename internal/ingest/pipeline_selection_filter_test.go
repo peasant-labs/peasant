@@ -167,7 +167,7 @@ func TestPipeline_SessionFilterExactChildDenialAndDryRunUseSharedPass(t *testing
 					return excluded[session.SessionID]
 				}
 			})
-			pipeline, err := ingest.NewPipeline(
+			pipeline, err := newTestPipeline(
 				mfs,
 				testutil.DefaultGitResolver(),
 				map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(sessions, metadata)},

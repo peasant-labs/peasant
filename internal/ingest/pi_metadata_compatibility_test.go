@@ -64,7 +64,7 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 			meta := makeMinimalMeta(t, testSessionID)
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta})}
 			cfg := makePipelineConfig(testOutputDir)
-			pipeline, err := ingest.NewPipeline(fs, git, adapters, cfg)
+			pipeline, err := newTestPipeline(fs, git, adapters, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +94,7 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			pipeline, err = ingest.NewPipeline(fs, git, adapters, cfg)
+			pipeline, err = newTestPipeline(fs, git, adapters, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

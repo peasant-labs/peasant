@@ -443,7 +443,7 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 			if testCase.Bytes == absent {
 				// Retained reindex starts without extraction bytes; capture must
 				// still deliver the committed file bytes directly to the parser.
-				seed, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+				seed, err := newTestPipeline(mfs, git, adapters, cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -453,7 +453,7 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 				}
 				cfg.Reindex, cfg.Force = true, true
 			}
-			pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+			pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{defaults.HarnessOpenCode: indexer}),
 				ingest.WithMetricsStore(fixtureStore),
 			)

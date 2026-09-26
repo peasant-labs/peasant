@@ -124,7 +124,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			// Replace the secret marker first so padding substitution cannot alter it.
 			payload := strings.ReplaceAll(strings.ReplaceAll(doc.Payload, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
 			expected := strings.ReplaceAll(doc.Expected, "BODY", strings.Repeat("synthetic-", 1024))
-			// Raw-at-rest + redact-at-egress (PROPOSAL-3): stored index Extra
+			// Raw-at-rest + redact-at-egress: stored index Extra
 			// byte-equals the raw source (asserted below); export and upload
 			// both emit the baseline-redacted egress form.
 			stored := payload
@@ -158,7 +158,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				sid = "ses_nativeUnknownPublic"
 				path = setupLegacyUnknownPublic(t, c, dir, sid, payload)
 				adapters[c.Harness] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-					return ingest.NewOpenCodeAdapter(fs, git, s)
+					return newTestOpenCodeAdapter(fs, git, s)
 				}
 			} else {
 				sid = "ses_nativeUnknownPublic"
@@ -183,7 +183,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				}
 				path = ingest.ResolvedPath(filepath.Dir(source.Path))
 				adapters[c.Harness] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-					return ingest.NewOpenCodeAdapter(fs, git, s)
+					return newTestOpenCodeAdapter(fs, git, s)
 				}
 			}
 			dbPath := storetest.CopyGoldenDB(t)
@@ -215,7 +215,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{c.Harness: {Enabled: true, Paths: []ingest.ResolvedPath{path}}}
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{sid: true}
 			run := func() *ingest.PipelineResult {
-				p, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+				p, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -84,7 +84,7 @@ func TestPipelineParentRefreshPreservesFilteredChildOutput(t *testing.T) {
 				child.SessionID:  makeMinimalMeta(t, testCase.ChildSessionID),
 			}
 			run := func(sessions []ingest.DiscoveredSession) *ingest.PipelineResult {
-				pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{
+				pipeline, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{
 					ingest.HarnessClaudeCode: makeStubAdapter(sessions, metas),
 				}, makePipelineConfig(testOutputDir))
 				if err != nil {

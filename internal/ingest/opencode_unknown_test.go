@@ -75,7 +75,7 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			}
 			source := testfixture.MaterializeByName(t, "native-current-rows")
 			seedOpenCodeProvenanceCase(t, source, ocProvCase{Scope: ocProvScope{SessionID: string(sid), ParentNullProven: true}, Rows: row.Rows})
-			adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+			adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessOpenCode, SourcePath: ingest.ResolvedPath(source.Path), TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite}
 			nativeIndexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(openCodeNativeProvenanceConfig(source, string(sid), ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)))
 			candidate, nativeErr := nativeIndexer.BuildNativeGeneration(t.Context(), session)

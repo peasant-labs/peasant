@@ -52,7 +52,7 @@ func TestPipeline_ClaudeSpawnLinkingConsultsTheStoreAcrossRuns(t *testing.T) {
 		OutputDir:          outputDir,
 		StalenessThreshold: time.Minute,
 	}
-	pipeline1, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(),
+	pipeline1, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(),
 		ingest.DefaultAdapterRegistry, cfg1, ingest.WithStore(database))
 	if err != nil {
 		t.Fatalf("NewPipeline (run 1): %v", err)
@@ -86,7 +86,7 @@ func TestPipeline_ClaudeSpawnLinkingConsultsTheStoreAcrossRuns(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	pipeline2, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(),
+	pipeline2, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(),
 		ingest.DefaultAdapterRegistry, cfg2, ingest.WithStore(database))
 	if err != nil {
 		t.Fatalf("NewPipeline (run 2): %v", err)

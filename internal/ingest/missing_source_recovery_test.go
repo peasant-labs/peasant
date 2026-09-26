@@ -127,7 +127,7 @@ func TestPipeline_AutoDetectMissingSourcesKeepsExistingEntriesStale(t *testing.T
 			}
 
 			fs := testutil.NewMemFS()
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{
 				ingest.HarnessClaudeCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return &emptyAdapter{} },
 			}, ingest.PipelineConfig{OutputDir: "/sync", Sources: map[ingest.Harness]ingest.SourceConfig{}},
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(testutil.NewMemFS())}),

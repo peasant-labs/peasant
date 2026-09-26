@@ -339,7 +339,7 @@ func runDeferredPairPipeline(t *testing.T, ctx context.Context, filesystem inges
 		ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})),
 		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),
 	}
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, append(base, options...)...)
+	pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config, append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

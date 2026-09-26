@@ -100,7 +100,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				OutputDir:   ingest.ResolvedPath(filepath.Join(root, "output")),
 				Parallelism: 1,
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+			pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 				ingest.WithStore(db), ingest.WithMetricsStore(db),
 				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 			if err != nil {

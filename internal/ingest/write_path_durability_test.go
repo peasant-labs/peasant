@@ -72,7 +72,7 @@ func durabilityStubEntries(sid ingest.SessionID) map[ingest.SessionID][]schema.S
 // wires one store into both roles.
 func newDurabilityPipeline(t *testing.T, mfs *testutil.MemFS, ds *durabilityStore, adapters map[ingest.Harness]ingest.AdapterFactory, indexer ingest.TranscriptIndexer, cfg ingest.PipelineConfig) *ingest.Pipeline {
 	t.Helper()
-	pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), adapters, cfg,
 		ingest.WithStore(ds), ingest.WithMetricsStore(ds),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
@@ -290,7 +290,7 @@ func runCrashMirrorEntriesOpenCodeLegacy(t *testing.T) {
 		ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{session.OriginalRoot}},
 	}
 	newOpenCodePipeline := func(ds *durabilityStore) *ingest.Pipeline {
-		pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(ds), ingest.WithMetricsStore(ds),
 			ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(mfs)}))
 		if err != nil {

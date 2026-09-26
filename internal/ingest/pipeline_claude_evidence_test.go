@@ -33,7 +33,7 @@ func TestPipeline_ClaudeDiscoveryFillsEvidenceCache(t *testing.T) {
 		OutputDir:          ingest.ResolvedPath(filepath.Join(root, "peasant-sync")),
 		StalenessThreshold: time.Minute,
 	}
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(),
+	pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(),
 		ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(database))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)

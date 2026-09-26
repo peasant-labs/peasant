@@ -155,7 +155,7 @@ func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, b
 	if err != nil {
 		t.Fatal(err)
 	}
-	pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
+	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{schema.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{source}}}, OutputDir: output, IncludeActive: true, Parallelism: 1,
 	}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(indexers))
 	if err != nil {
@@ -307,7 +307,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
+			pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
 				Sources: map[ingest.Harness]ingest.SourceConfig{schema.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{resolved}}}, OutputDir: output, IncludeActive: true, Parallelism: 1,
 			}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithAnalyzer(metrics.NewEngine(db)), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 			if err != nil {

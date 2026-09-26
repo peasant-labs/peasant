@@ -276,7 +276,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestPipeline_RetainedUnknownKindsReachSummary(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, nil)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})),
@@ -409,7 +409,7 @@ func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T
 			return prepared[session.SessionID]
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+	pipeline, err := newTestPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(sessions, metadata),
 	}, cfg)
 	if err != nil {
@@ -441,7 +441,7 @@ func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
 			return true
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+	pipeline, err := newTestPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{
 			session.SessionID: makeMinimalMeta(t, testSessionID),
 		}),
@@ -483,7 +483,7 @@ func TestPipeline_Incremental(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run: should ingest as new.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestPipeline_Incremental(t *testing.T) {
 
 	// Second run: source hasn't changed. Should be unchanged.
 	// The metadata written in run 1 has Ingested > modTime.
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestPipeline_DryRun(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.DryRun = true
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestPipeline_Force(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -600,7 +600,7 @@ func TestPipeline_Force(t *testing.T) {
 	cfgForce := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Force = true
 	})
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfgForce)
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfgForce)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 	// staleness threshold is 5 minutes; 30 seconds < 5 minutes, so it's active.
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -712,7 +712,7 @@ func TestPipeline_IncludeActive(t *testing.T) {
 		c.IncludeActive = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -784,7 +784,7 @@ func TestPipeline_ErrorResilience(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestPipeline_OrphanCleanup(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -907,7 +907,7 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -934,7 +934,7 @@ func TestPipeline_NoSessionsDiscovered(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -972,7 +972,7 @@ func TestPipeline_OutputFileNaming(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestPipeline_IncrementalUpdated(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1070,7 +1070,7 @@ func TestPipeline_IncrementalUpdated(t *testing.T) {
 		),
 	}
 
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters2, cfg)
+	pipeline2, err := newTestPipeline(mfs, git, adapters2, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1091,7 +1091,7 @@ func TestPipeline_Result_Duration(t *testing.T) {
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 	}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1125,7 +1125,7 @@ func TestPipeline_MetadataContents(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1189,7 +1189,7 @@ func TestPipeline_SessionResultStatus(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1235,7 +1235,7 @@ func TestPipeline_HostSlugFallback(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1318,7 +1318,7 @@ func TestPipeline_DiscoverPartialFailure(t *testing.T) {
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1371,7 +1371,7 @@ func TestPipeline_DiscoverAllProvidersFail(t *testing.T) {
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1428,7 +1428,7 @@ func TestPipeline_SubagentNesting(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1489,7 +1489,7 @@ func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
 		c.IncludeActive = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1548,7 +1548,7 @@ func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run: ingest as new.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1581,7 +1581,7 @@ func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
 	}
 
 	// Second run: should detect schema version mismatch → DiffUpdated.
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1631,7 +1631,7 @@ func TestPipeline_DebugFilesCopied(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1671,7 +1671,7 @@ func TestPipeline_DebugFilesCopied(t *testing.T) {
 }
 
 func TestNewPipeline_EmptyAdapters(t *testing.T) {
-	_, err := ingest.NewPipeline(&testutil.MemFS{}, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{}, ingest.PipelineConfig{})
+	_, err := newTestPipeline(&testutil.MemFS{}, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{}, ingest.PipelineConfig{})
 	if err == nil {
 		t.Fatal("NewPipeline with empty adapters: expected error, got nil")
 	}
@@ -1701,7 +1701,7 @@ func TestPipeline_WithStore_InsertsAfterWrite(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1770,7 +1770,7 @@ func TestPipeline_WithStore_InsertError_NonFatal(t *testing.T) {
 	metricsStore.StaleIndexSessions = []ingest.SessionID{session.SessionID}
 	indexer := &recordingIndexer{kind: ingest.TranscriptSourceFile}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store), ingest.WithMetricsStore(metricsStore), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1830,7 +1830,7 @@ func TestPipeline_WithoutStore_SkipsDB(t *testing.T) {
 
 	// No WithStore option — backward compatible path.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1876,7 +1876,7 @@ func TestPipeline_WithStore_DryRun_SkipsDB(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.DryRun = true
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -1929,7 +1929,7 @@ func TestPipeline_WithStore_MultipleSessionsInserted(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2001,7 +2001,7 @@ func TestPipeline_WithStore_ErrorSession_NotInserted(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2049,7 +2049,7 @@ func TestPipeline_WithRedactor_RedactsMetadataOnDisk(t *testing.T) {
 
 	redactor := &testutil.StubRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2112,7 +2112,7 @@ func TestPipeline_WithRedactor_SetsRedactionInfo(t *testing.T) {
 
 	redactor := &testutil.StubRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2178,7 +2178,7 @@ func TestPipeline_NoRedactor_SetsRedactionInfoRaw(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg) // no WithRedactor
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg) // no WithRedactor
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2241,7 +2241,7 @@ func TestPipeline_ContentHash_Deterministic(t *testing.T) {
 		}
 
 		cfg := makePipelineConfig(testOutputDir)
-		pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+		pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 		if err != nil {
 			t.Fatalf("NewPipeline: %v", err)
 		}
@@ -2301,7 +2301,7 @@ func TestPipeline_RedactsTranscript_MultiLineJSONL(t *testing.T) {
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2365,7 +2365,7 @@ func TestPipeline_RedactsTranscript_RejectsMalformedCompleteJSONL(t *testing.T) 
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2413,7 +2413,7 @@ func TestPipeline_RedactsTranscript_UnparseableJSONFilePassThrough(t *testing.T)
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2467,7 +2467,7 @@ func TestPipeline_WithRedactor_RedactsBothMetadataAndTranscript(t *testing.T) {
 
 	redactor := &markingRedactor{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -2556,7 +2556,7 @@ func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2615,7 +2615,7 @@ func TestPipeline_WithAnalyzer_ComputesMetrics(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -2685,7 +2685,7 @@ func TestPipeline_WithClassifier_AnnotatesNewSessions(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -2800,7 +2800,7 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 		c.Parallelism = 2
 	})
 	fixtureStore := newPipelineFixtureStore(t, nil, testutil.NewStubMetricsStore())
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
@@ -2858,7 +2858,7 @@ func TestPipeline_IndexError_NonFatal(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2924,7 +2924,7 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -2986,7 +2986,7 @@ func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 	cfg.IndexProfiler = profiler
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3043,7 +3043,7 @@ func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
 
 	// No optional deps — backward-compatible mode.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3106,7 +3106,7 @@ func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
 	// Deliberately NOT using WithStore — p.store will be nil.
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3219,7 +3219,7 @@ func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) 
 
 	cfg := makePipelineConfig(testOutputDir)
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3271,7 +3271,7 @@ func TestPipeline_WithLogger_WritesAuditLog(t *testing.T) {
 
 	logger := &testutil.StubIngestLogger{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3324,7 +3324,7 @@ func TestPipeline_LoggerError_NonFatal(t *testing.T) {
 	// Logger that always fails.
 	logger := &testutil.StubIngestLogger{Err: errors.New("log write failed")}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithLogger(logger))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3408,7 +3408,7 @@ func TestPipeline_WithRedactor_RedactsJSONLTranscriptOnDisk(t *testing.T) {
 
 	redactor := &wrappingRedactor{stub: &testutil.StubRedactor{}}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3484,7 +3484,7 @@ func TestPipeline_WithRedactor_RedactsJSONTranscriptOnDisk(t *testing.T) {
 
 	redactor := &wrappingRedactor{stub: &testutil.StubRedactor{}}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(redactor))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3541,7 +3541,7 @@ func TestPipeline_WithNilRedactor_TranscriptCopiedVerbatim(t *testing.T) {
 
 	// No WithRedactor option: redactor is nil.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3608,7 +3608,7 @@ func TestPipeline_WithRedactor_CustomPattern(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(r))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithRedactor(r))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -3672,7 +3672,7 @@ func TestPipeline_InsertSessionsDoesNotRecomputeSummary(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// Run with both WithStore and WithAnalyzer to observe both stages.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(sessionStore),
 		ingest.WithAnalyzer(analyzer),
 	)
@@ -3709,7 +3709,7 @@ func TestPipeline_InsertSessionsDoesNotRecomputeSummary(t *testing.T) {
 	setupSourceFile(t, mfs2, sourcePath2)
 	sessionStore2 := &testutil.StubSessionStore{}
 
-	pipeline2, err := ingest.NewPipeline(mfs2, git, adapters, cfg,
+	pipeline2, err := newTestPipeline(mfs2, git, adapters, cfg,
 		ingest.WithStore(sessionStore2),
 		// Deliberately NO WithAnalyzer
 	)
@@ -3815,7 +3815,7 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3876,7 +3876,7 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -3946,7 +3946,7 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4042,7 +4042,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 	cfgNoForce := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Reindex = true
 	})
-	pipelineNoForce, err := ingest.NewPipeline(mfs, git, adapters, cfgNoForce,
+	pipelineNoForce, err := newTestPipeline(mfs, git, adapters, cfgNoForce,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4065,7 +4065,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 		c.Reindex = true
 		c.Force = true
 	})
-	pipelineForce, err := ingest.NewPipeline(mfs, git, adapters, cfgForce,
+	pipelineForce, err := newTestPipeline(mfs, git, adapters, cfgForce,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4120,7 +4120,7 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4189,7 +4189,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 		c.DryRun = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
@@ -4242,7 +4242,7 @@ func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4343,7 +4343,7 @@ func TestPipeline_Reindex_IncludesSubagents(t *testing.T) {
 		c.DryRun = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
@@ -4437,7 +4437,7 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *parentMeta, parentBytes)
 	subagentContent := []byte(`{"type":"user","message":{"role":"user","content":"subagent hello"}}` + "\n")
 	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *subagentMeta, subagentContent)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4507,7 +4507,7 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	staleContent := []byte(`{"type":"user","message":{"role":"user","content":"hello"}}` + "\n")
 	storetest.SeedManagedArtifact(t, fixtureStore.Store, mfs, testOutputDir, *meta, staleContent)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4598,7 +4598,7 @@ func TestPipeline_AutoDetect_SourceInfoOnlySessionIsNotIndexed(t *testing.T) {
 	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: storedMeta}}); err != nil {
 		t.Fatal(err)
 	}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4684,7 +4684,7 @@ func TestPipeline_AutoDetect_SourceInfoOnlySubagentIsNotIndexed(t *testing.T) {
 	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: makeMinimalMeta(t, string(parentSid))}, {Metadata: storedMeta}}); err != nil {
 		t.Fatal(err)
 	}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -4768,7 +4768,7 @@ func TestPipeline_CommitDetection_WrittenToMetadata(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithGitDiffAnalyzer(gitAnalyzer))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithGitDiffAnalyzer(gitAnalyzer))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -4824,7 +4824,7 @@ func TestPipeline_CommitDetection_WrittenToDatabase(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -4887,7 +4887,7 @@ func TestPipeline_CommitDetection_WithNoMatchingCommits(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -4942,7 +4942,7 @@ func TestPipeline_CommitDetection_WithGitTimeout(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -5003,7 +5003,7 @@ func TestPipeline_CommitDetection_NotFatalOnGitFailure(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -5071,7 +5071,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -5167,7 +5167,7 @@ func TestPipeline_CommitDetection_StandardRepo_NoWorktree(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -5219,7 +5219,7 @@ func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) 
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -5243,7 +5243,7 @@ func TestPipeline_CommitDetection_ForceReingest_ClearsStaleDBRows(t *testing.T) 
 	cfgForce := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Force = true
 	})
-	pipelineForce, err := ingest.NewPipeline(mfs, git, adapters, cfgForce,
+	pipelineForce, err := newTestPipeline(mfs, git, adapters, cfgForce,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 		ingest.WithStore(store),
 	)
@@ -5293,7 +5293,7 @@ func TestPipeline_DetectCommitsFlag_OFF(t *testing.T) {
 
 	// No WithGitDiffAnalyzer — simulates --detect-commits flag OFF.
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5348,7 +5348,7 @@ func TestPipeline_DetectCommitsFlag_ON(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithGitDiffAnalyzer(gitAnalyzer),
 	)
 	if err != nil {
@@ -5414,7 +5414,7 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 		c.Progress = progState
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5476,7 +5476,7 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 		c.Reindex = true
 	})
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5531,7 +5531,7 @@ func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5602,7 +5602,7 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 	})
 
 	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
@@ -5690,7 +5690,7 @@ func TestPipeline_GoroutineLifecycle_ParentChild(t *testing.T) {
 	// Inject a store error to exercise the errCh → StoreError propagation path.
 	store := &testutil.StubSessionStore{InsertErr: errors.New("db locked")}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5766,7 +5766,7 @@ func TestPipeline_ContextCancellation_NoDeadlock(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5835,7 +5835,7 @@ func TestPipeline_AuditLog_PreservedThroughGoroutineRefactor(t *testing.T) {
 	logger := &testutil.StubIngestLogger{}
 	cfg := makePipelineConfig(testOutputDir)
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		ingest.WithStore(store),
 		ingest.WithLogger(logger),
 	)
@@ -5915,7 +5915,7 @@ func TestPipeline_AllowedSessionIDs_NilAllowsAll(t *testing.T) {
 
 	// nil AllowedSessionIDs → all sessions processed
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -5966,7 +5966,7 @@ func TestPipeline_AllowedSessionIDs_Subset(t *testing.T) {
 			session1.SessionID: true,
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6020,7 +6020,7 @@ func TestPipeline_AllowedSessionIDs_EmptyMap(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.AllowedSessionIDs = map[ingest.SessionID]bool{}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6066,7 +6066,7 @@ func TestPipeline_AllowedSessionIDs_NoOverlap(t *testing.T) {
 			nonExistentID: true,
 		}
 	})
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6110,7 +6110,7 @@ func TestPipeline_CWD_StoredInMetadata(t *testing.T) {
 	}
 
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6167,7 +6167,7 @@ func TestPipeline_SchemaV8_DerivedAtPopulated(t *testing.T) {
 
 	store := &testutil.StubSessionStore{}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6224,7 +6224,7 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	// No WithStore — backward compatible path.
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6295,7 +6295,7 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 		},
 	}
 	cfg := makePipelineConfig(testOutputDir)
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6356,7 +6356,7 @@ func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
 
 	// First run: ingest and write to DB+disk.
 	store := &testutil.StubSessionStore{}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6381,7 +6381,7 @@ func TestPipeline_SchemaV8_DiffUsesDBIngestedMs(t *testing.T) {
 		},
 	}
 
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
 	if err != nil {
 		t.Fatalf("NewPipeline (2nd): %v", err)
 	}
@@ -6426,7 +6426,7 @@ func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 
 	// First run without store: writes only metadata.json (no DB state).
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -6445,7 +6445,7 @@ func TestPipeline_SchemaV8_DiffFallsBackToFile(t *testing.T) {
 		LocationsByID: map[ingest.SessionID]ingest.SessionLocation{}, // empty — no DB record
 	}
 
-	pipeline2, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
+	pipeline2, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(store2))
 	if err != nil {
 		t.Fatalf("NewPipeline (2nd): %v", err)
 	}

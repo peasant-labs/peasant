@@ -93,7 +93,7 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 	cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(filepath.Join(root, "source"))}}}, OutputDir: ingest.ResolvedPath(filepath.Join(root, "output")), Parallelism: 1}
 	run := func() *ingest.PipelineResult {
 		t.Helper()
-		pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs)}))
+		pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs)}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +210,7 @@ func TestStoreFreeCapturedFileLifecycle(t *testing.T) {
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(sourceRoot)}}}, OutputDir: ingest.ResolvedPath(filepath.Join(root, "output")), Parallelism: 1, StalenessThreshold: 100 * 365 * 24 * time.Hour}
 			run := func() *ingest.PipelineResult {
 				t.Helper()
-				pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, git, ingest.DefaultAdapterRegistry, cfg)
+				pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, git, ingest.DefaultAdapterRegistry, cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -322,7 +322,7 @@ func TestSourceAcquisitionUsesBoundedWorkers(t *testing.T) {
 			}
 			filesystem := &boundedCaptureFS{}
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(sourceRoot)}}}, OutputDir: ingest.ResolvedPath(filepath.Join(root, "output")), Parallelism: 1}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg)
+			pipeline, err := newTestPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

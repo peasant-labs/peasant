@@ -158,7 +158,7 @@ func TestHarvestRebuildFromFiles(t *testing.T) {
 				c.Force = true
 			})
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessStrike: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 				ingest.WithHarvesterVersions(maps.Clone(ingest.HarvesterVersionRegistry)),
 				ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))

@@ -127,7 +127,7 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 		t.Helper()
 		cfg := makePipelineConfig(testOutputDir)
 		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(sessions, metaMap)}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(indexStore), ingest.WithMetricsStore(indexStore), ingest.WithIndexLogger(database),
 			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 			ingest.WithHarvesterVersions(versions))
