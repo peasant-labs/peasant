@@ -44,6 +44,7 @@ func loadTitleMappingFixture(t *testing.T) titleMappingFixture {
 }
 
 func TestMapMetadata_RuntimeRulesCoverCanonicalTitle(t *testing.T) {
+	t.Parallel()
 	fixture := loadTitleMappingFixture(t)
 	redactor, err := redact.NewRedactor(redact.Standard, []redact.UserPattern{{
 		ID: "configured-project-name", Category: redact.CategoryProject,

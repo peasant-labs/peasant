@@ -21,6 +21,7 @@ const wantVillageAPIVersion = "0.22.0"
 // request used by transport. The frozen Village 0.10.0 legacy validator does not
 // classify new harnesses; preflight uses the current 0.22.0 successor instead.
 func TestPinnedContractVersion_MatchesExpected(t *testing.T) {
+	t.Parallel()
 	if schema.VillageAPIVersion != wantVillageAPIVersion {
 		t.Fatalf(
 			"VillageAPIVersion mismatch.\n"+

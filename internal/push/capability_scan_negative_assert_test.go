@@ -5,6 +5,7 @@ package push_test
 import "testing"
 
 func TestCapabilityScanNegativeExactMountedFailureSet(t *testing.T) {
+	t.Parallel()
 	fixture := loadObservedModelCapabilityFixture(t)
 	actual := []string{}
 	for _, row := range fixture.Cases {

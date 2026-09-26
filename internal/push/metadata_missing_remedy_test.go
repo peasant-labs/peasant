@@ -20,6 +20,7 @@ var metadataMissingRemedyFixtureData []byte
 // Missing database capture needs normal ingest regardless of the historical
 // slug. Filesystem-path diagnosis no longer describes publication failures.
 func TestPipeline_MetadataMissingRequiresNormalIngest(t *testing.T) {
+	t.Parallel()
 	var cases []struct {
 		Name     string `yaml:"name"`
 		HostSlug string `yaml:"hostSlug"`

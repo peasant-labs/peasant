@@ -121,6 +121,7 @@ func loadPushProfileFixtures(t *testing.T) []pushProfileCase {
 }
 
 func TestPipelineProfileFixtures(t *testing.T) {
+	t.Parallel()
 	for _, tc := range loadPushProfileFixtures(t) {
 		t.Run(tc.Name, func(t *testing.T) {
 			first := runPushProfileFixture(t, tc)

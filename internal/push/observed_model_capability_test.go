@@ -72,6 +72,7 @@ func loadObservedModelCapabilityFixture(t *testing.T) observedModelCapabilityFix
 }
 
 func TestPipelineObservedModelCapabilityGate(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadObservedModelCapabilityFixture(t).Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {

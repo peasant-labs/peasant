@@ -102,6 +102,7 @@ func publicationOmissionsReadiness(name string) (ingest.PublicationReadiness, er
 }
 
 func TestPublicationOmissionsFixtureGuards(t *testing.T) {
+	t.Parallel()
 	loadPublicationOmissionsFixture(t)
 	manifest, err := testutil.DecodeRequiredNamesManifest(publicationOmissionsManifestYAML, "publication omissions")
 	if err != nil {

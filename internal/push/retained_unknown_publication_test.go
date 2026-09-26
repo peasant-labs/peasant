@@ -76,6 +76,7 @@ func loadRetainedPublicationCases(t *testing.T) []retainedPublicationCase {
 }
 
 func TestRetainedUnknownPublication(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadRetainedPublicationCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx := context.Background()

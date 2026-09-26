@@ -87,6 +87,7 @@ func loadProjectWireFixture(t *testing.T) projectWireFixture {
 // for the field-combination rows, and push.NewPipeline for the
 // nil_redactor_refused row.
 func TestProjectWire(t *testing.T) {
+	t.Parallel()
 	fixture := loadProjectWireFixture(t)
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {

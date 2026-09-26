@@ -13,6 +13,7 @@ import (
 // and the stored origin declaration, preserving every durable evidence field.
 // No network access and no store mutation happen here.
 func TestBuildTranscriptContentFromDetail(t *testing.T) {
+	t.Parallel()
 	inputCount := int64(1)
 	detail := &schema.SessionDetailPayload{
 		ID:                   "45454545-4545-4545-4545-454545454548",
