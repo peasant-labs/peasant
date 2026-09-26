@@ -20,6 +20,8 @@ required_names:
   - testgate.ReportRecord
   - testgate.ReportTest
   - testgate.ReportFinding
+  - testgate.ClassRow
+  - testgate.StepMeasurement
   - testgate.Cost
   - testgate.Entry
   - testgate.Registry
@@ -64,6 +66,8 @@ shapes:
       - { name: Streams, type: "map[testgate.PassMode]map[string][]teststream.Record" }
       - { name: Walls,   type: "map[testgate.PassMode]time.Duration" }
       - { name: Errors,  type: "[]string" }
+      - { name: User,    type: time.Duration }
+      - { name: System,  type: time.Duration }
 
   # --- report document schema (report.json) ---------------------------------
   - name: testgate.Report
@@ -83,6 +87,8 @@ shapes:
       - { name: Findings,         type: "[]testgate.ReportFinding", tag: 'json:"findings"' }
       - { name: FailedTests,      type: "[]testgate.ReportTest", tag: 'json:"failed_tests"' }
       - { name: InvocationErrors, type: "[]string", tag: 'json:"invocation_errors"' }
+      - { name: ClassTable,       type: "[]testgate.ClassRow", tag: 'json:"class_table"' }
+      - { name: PreTestSteps,     type: "[]testgate.ReportRecord", tag: 'json:"pre_test_steps,omitempty"' }
 
   - name: testgate.PassReport
     fields:
@@ -90,6 +96,9 @@ shapes:
       - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
       - { name: Packages, type: int, tag: 'json:"packages"' }
       - { name: Tests,    type: int, tag: 'json:"tests"' }
+      - { name: UserMS,   type: int64, tag: 'json:"user_ms"' }
+      - { name: SystemMS, type: int64, tag: 'json:"system_ms"' }
+      - { name: GapMS,    type: int64, tag: 'json:"gap_ms"' }
 
   - name: testgate.Calibration
     fields:
@@ -122,6 +131,28 @@ shapes:
       - { name: When,     type: string, tag: 'json:"when"' }
       - { name: Means,    type: string, tag: 'json:"means"' }
       - { name: Fix,      type: string, tag: 'json:"fix"' }
+
+  # --- per-class decision table row -----------------------------------------
+  - name: testgate.ClassRow
+    fields:
+      - { name: Class,    type: string, tag: 'json:"class"' }
+      - { name: Units,    type: int, tag: 'json:"units"' }
+      - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
+      - { name: UserMS,   type: int64, tag: 'json:"user_ms"' }
+      - { name: SystemMS, type: int64, tag: 'json:"system_ms"' }
+      - { name: GapMS,    type: int64, tag: 'json:"gap_ms"' }
+      - { name: Basis,    type: string, tag: 'json:"basis"' }
+
+  # --- one measured pre-test step -------------------------------------------
+  - name: testgate.StepMeasurement
+    fields:
+      - { name: Step,     type: testgate.PreTestStep }
+      - { name: Wall,     type: time.Duration }
+      - { name: User,     type: time.Duration }
+      - { name: System,   type: time.Duration }
+      - { name: ExitCode, type: int }
+      - { name: Failed,   type: bool }
+      - { name: LogPath,  type: string }
 
   # --- registry schema (no-race-partition.yaml) -----------------------------
   - name: testgate.Cost

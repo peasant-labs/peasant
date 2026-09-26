@@ -23,14 +23,24 @@ type Report struct {
 	Findings         []ReportFinding `json:"findings"`
 	FailedTests      []ReportTest    `json:"failed_tests"`
 	InvocationErrors []string        `json:"invocation_errors"`
+	// ClassTable is the per-class wall/user/system decision table. The
+	// wall − CPU gap is the work a core count cannot compress.
+	ClassTable []ClassRow `json:"class_table"`
+	// PreTestSteps carries one record per measured pre-test step when the
+	// pre-test measurement was fed into this run; empty when only the aggregate
+	// pre_test_wall_ms is known.
+	PreTestSteps []ReportRecord `json:"pre_test_steps,omitempty"`
 }
 
-// PassReport summarizes one pass.
+// PassReport summarizes one pass, including its whole-pass child CPU.
 type PassReport struct {
 	Name     string `json:"name"`
 	WallMS   int64  `json:"wall_ms"`
 	Packages int    `json:"packages"`
 	Tests    int    `json:"tests"`
+	UserMS   int64  `json:"user_ms"`
+	SystemMS int64  `json:"system_ms"`
+	GapMS    int64  `json:"gap_ms"`
 }
 
 // Calibration reports the load factor L and its inputs.
@@ -83,6 +93,9 @@ func WriteReport(path string, report Report) error {
 	}
 	if report.InvocationErrors == nil {
 		report.InvocationErrors = []string{}
+	}
+	if report.ClassTable == nil {
+		report.ClassTable = []ClassRow{}
 	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

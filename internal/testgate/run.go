@@ -85,6 +85,12 @@ type RunResult struct {
 	Streams map[PassMode]map[string][]teststream.Record // pass -> package -> records
 	Walls   map[PassMode]time.Duration
 	Errors  []string
+	// User and System are the whole-pass getrusage(RUSAGE_CHILDREN) deltas: the
+	// true CPU of every reaped child of the pass, including go-build
+	// grandchildren. They are the pass-level counterpart to the per-invocation
+	// Record deltas, which are only exact when the pass is serialized.
+	User   time.Duration
+	System time.Duration
 }
 
 // FailedTests returns every failed test across both passes.
@@ -186,6 +192,7 @@ func (r *Runner) Run(ctx context.Context, plan *Plan, mode PassMode, race bool) 
 	}
 
 	start := time.Now()
+	beforeUser, beforeSys, _ := readChildUsage()
 	var mu sync.Mutex
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -207,6 +214,9 @@ func (r *Runner) Run(ctx context.Context, plan *Plan, mode PassMode, race bool) 
 	}
 	wg.Wait()
 	result.Walls[mode] = time.Since(start)
+	afterUser, afterSys, _ := readChildUsage()
+	result.User = afterUser - beforeUser
+	result.System = afterSys - beforeSys
 	result.Streams[mode] = streams
 	return result, nil
 }

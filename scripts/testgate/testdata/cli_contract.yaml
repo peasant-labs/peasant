@@ -7,10 +7,15 @@
 required_names:
   - plan-subcommand
   - run-subcommand
+  - profile-subcommand
   - registry-flag
   - out-flag
   - concurrency-flag
   - race-flag
+  - pkg-flag
+  - batches-flag
+  - parallel-flag
+  - pretest-flag
   - exit-pass
   - exit-fail
   - exit-usage
@@ -18,15 +23,20 @@ required_names:
   - mutated-exit-code
 
 checks:
-  - { name: plan-subcommand,  contains: "testgate plan" }
-  - { name: run-subcommand,   contains: "testgate run" }
-  - { name: registry-flag,    contains: "-registry PATH" }
-  - { name: out-flag,         contains: "-out DIR" }
-  - { name: concurrency-flag, contains: "-p N" }
-  - { name: race-flag,        contains: "-race" }
-  - { name: exit-pass,        contains: "0  the gate passed" }
-  - { name: exit-fail,        contains: "1  a test failed, the screen failed, or an invocation errored" }
-  - { name: exit-usage,       contains: "2  usage, registry, or plan error" }
+  - { name: plan-subcommand,    contains: "testgate plan" }
+  - { name: run-subcommand,     contains: "testgate run" }
+  - { name: profile-subcommand, contains: "testgate profile" }
+  - { name: registry-flag,      contains: "-registry PATH" }
+  - { name: out-flag,           contains: "-out DIR" }
+  - { name: concurrency-flag,   contains: "-p N" }
+  - { name: race-flag,          contains: "-race" }
+  - { name: pkg-flag,           contains: "-pkg DIR" }
+  - { name: batches-flag,       contains: "-n N" }
+  - { name: parallel-flag,      contains: "-parallel N" }
+  - { name: pretest-flag,       contains: "-pretest" }
+  - { name: exit-pass,          contains: "0  the gate passed" }
+  - { name: exit-fail,          contains: "1  a test failed, the screen failed, or an invocation errored" }
+  - { name: exit-usage,         contains: "2  usage, registry, or plan error" }
 
 # A mutation replaces one check's expected substring with text that is not in
 # usage(); the checker must report the check as missing.
