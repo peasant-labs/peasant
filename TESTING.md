@@ -1,7 +1,9 @@
 # Testing Patterns
 
 Code examples and strategies for testing the Peasant web dashboard and WebSocket protocol.
-See `AGENTS.md` for the test package map, fixture tree, writing rules, and channel reference table.
+See [`AGENTS.md`](AGENTS.md) for the test and fixture writing rules and
+[`README.md`](README.md#package-map) for the package map; the documentation map below links each
+test layer to its entry point.
 
 ### E2E documentation map
 
