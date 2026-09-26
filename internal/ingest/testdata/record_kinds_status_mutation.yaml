@@ -1,0 +1,22 @@
+# Status-boundary mutation cases for the single-source derivation guard. The
+# derived constructor is fed a mutated closed set; these names pin what it must
+# refuse, and what the shipping constructor keeps accepting and refusing.
+required_names:
+  - accepted statuses derive from the closed set
+out_of_set_name: not-in-the-mutated-set
+# The status names accepted at the parser boundary when this fixture was
+# written. Each must remain a member of recordKindStatusClosedSet, so a status
+# cannot silently leave the documented set its prose is generated from.
+shipped_accepted_names:
+  - represented
+  - tracked-only
+  - ignored-control
+  - retained-unknown
+  - refused
+# The raw names the shipping constructor must keep refusing: a canonical-name
+# typo, a name of another enum, and a probing mutation of the closed set.
+shipped_out_of_set_names:
+  - imaginary-status
+  - representd
+  - Represented
+  - represented-mutated
