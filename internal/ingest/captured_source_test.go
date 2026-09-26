@@ -37,6 +37,7 @@ type capturedSourceCase struct {
 }
 
 func TestCapturedFileOrdinaryLifecycle(t *testing.T) {
+	t.Parallel()
 	fixtures := loadCapturedSourceFixtures(t)
 	for _, fixture := range fixtures {
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -188,6 +189,7 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 }
 
 func TestStoreFreeCapturedFileLifecycle(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCapturedSourceFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			root := t.TempDir()
@@ -307,6 +309,7 @@ func (f *boundedCaptureFS) WriteFile(path string, data []byte, mode fs.FileMode)
 }
 
 func TestSourceAcquisitionUsesBoundedWorkers(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCapturedSourceFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			root := t.TempDir()

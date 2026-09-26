@@ -23,6 +23,7 @@ import (
 var captureBackfillFixtureData []byte
 
 func TestRetainedContentBackfill(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
@@ -264,6 +265,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 // nowhere but the content stage: reverting the content-stage hash compare makes
 // this go silent.
 func TestContentStageDetectsTornPair(t *testing.T) {
+	t.Parallel()
 	t.Run("content_stage_detects_torn_pair", func(t *testing.T) {
 		ctx := context.Background()
 		fs := testutil.NewMemFS()

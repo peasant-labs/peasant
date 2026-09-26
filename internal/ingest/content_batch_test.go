@@ -56,6 +56,7 @@ func (s *captureBatchObserver) IndexSessionEntryBatch(_ context.Context, writes 
 // commit per session while that session's artifact is still the one it parsed, an
 // outcome recorded for every session, and a stop once the run is cancelled.
 func TestFullContentWriteBatchCommitsEachSession(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
@@ -275,6 +276,7 @@ func (s *budgetStore) IndexSessionEntryBatch(_ context.Context, writes []Session
 // Sizes are declared as a FRACTION of the shipped budget rather than in bytes, so
 // the corpus still describes the same situations if the budget ever moves.
 func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Budget   string   `yaml:"budget"`
 		Required []string `yaml:"required_names"`
@@ -702,6 +704,7 @@ func seedBudgetContentSession(t *testing.T, fs FileSystem, store *budgetTargetSt
 // continues that backlog with no stored cursor because the recovered session is
 // already complete and drops out. A budget of zero (harvest index) is unbounded.
 func TestContentBudgetStopsAfterK(t *testing.T) {
+	t.Parallel()
 	t.Run("content_budget_stops_after_K", func(t *testing.T) {
 		ctx := context.Background()
 		output := t.TempDir()

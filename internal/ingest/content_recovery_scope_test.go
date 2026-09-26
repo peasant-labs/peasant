@@ -146,6 +146,7 @@ func (s *unreadableRowStore) BulkLookupSessionLocations(ctx context.Context, ids
 }
 
 func TestContentRecoveryScope(t *testing.T) {
+	t.Parallel()
 	fixtures := loadContentRecoveryScopeFixtures(t)
 	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {

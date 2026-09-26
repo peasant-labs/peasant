@@ -20,6 +20,7 @@ import (
 var publicationCaptureChildYAML []byte
 
 func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Cases []struct {
 			Name     string `yaml:"name"`
