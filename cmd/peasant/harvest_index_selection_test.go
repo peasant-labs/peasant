@@ -93,6 +93,7 @@ func LoadHarvestIndexSelectionFixtures(t testing.TB) ([]harvestIndexSessionFixtu
 }
 
 func TestHarvestIndexSelectionMounted(t *testing.T) {
+	t.Parallel()
 	sessions, cases := LoadHarvestIndexSelectionFixtures(t)
 	// The mounted command opens its store with the managed-generation writer and
 	// snapshot reader, so the run advertises the activated native targets for the

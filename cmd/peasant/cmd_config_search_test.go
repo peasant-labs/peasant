@@ -106,6 +106,7 @@ func plainConfigScreen(model tea.Model) string {
 }
 
 func TestConfigCommandMountedScreenSearchParity(t *testing.T) {
+	t.Parallel()
 	document, err := decodeConfigSearchFixture(configSearchFixtureData)
 	if err != nil {
 		t.Fatal(err)
@@ -231,6 +232,7 @@ func assertMountedSelectionSearch(t *testing.T, view string) {
 }
 
 func TestConfigCommandSearchFixtureGuards(t *testing.T) {
+	t.Parallel()
 	if _, err := decodeConfigSearchFixture(append(append([]byte(nil), configSearchFixtureData...), []byte("\nunknownField: true\n")...)); err == nil {
 		t.Fatal("config search fixture accepted an unknown field")
 	}

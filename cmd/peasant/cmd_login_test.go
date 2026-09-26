@@ -14,6 +14,7 @@ import (
 // depend on the network/browser side effects a real login triggers (starting a
 // local callback listener, invoking the OS browser launcher).
 func TestLoginURLPrinterPrintsExactURLOnStart(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	const wantURL = "https://village.example.test/api/v1/auth/cli/login?port=54321&state=deadbeef"
 
@@ -33,6 +34,7 @@ func TestLoginURLPrinterPrintsExactURLOnStart(t *testing.T) {
 // is not a one-shot or failure-only guard, matching the acceptance criterion
 // that the standalone `peasant login` prints the URL on start every run.
 func TestLoginURLPrinterPrintsOnEveryCall(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	printer := loginURLPrinter(&out)
 

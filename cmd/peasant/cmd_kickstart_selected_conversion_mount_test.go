@@ -259,6 +259,7 @@ func mountedSelectionHasPathlessProject(selection config.SelectionConfig) bool {
 }
 
 func TestMountedLegacySelectedConversion_ConsentCancellationAndRerun(t *testing.T) {
+	t.Parallel()
 	document := loadMountedLegacySelectedDocument(t)
 	for _, scenario := range document.Scenarios {
 		scenario := scenario
@@ -477,6 +478,7 @@ func runMountedLegacySelectedExactRerun(
 func mountedLegacySelectedBool(value bool) *bool { return &value }
 
 func TestMountedLegacySelectedFixtureRejectsUnknownInitialSelectionKey(t *testing.T) {
+	t.Parallel()
 	malformed := bytes.Replace(
 		mountedLegacySelectedConversionData,
 		[]byte("initialSelection:"),

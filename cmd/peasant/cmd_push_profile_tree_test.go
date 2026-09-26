@@ -53,6 +53,7 @@ func loadPushProfileTreeFixtures(t *testing.T) pushProfileTreeFixtures {
 }
 
 func TestPushProfileTreeValidation(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadPushProfileTreeFixtures(t).Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			var spans []perf.ProfileSpan

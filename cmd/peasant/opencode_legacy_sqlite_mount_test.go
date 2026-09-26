@@ -171,6 +171,7 @@ func TestLegacyOpenCodeSQLiteKickstartEligibilityUsesTypedSessions(t *testing.T)
 }
 
 func TestLegacyOpenCodeMixedRootPreservesJSONBytes(t *testing.T) {
+	t.Parallel()
 	document := loadLegacySQLiteMountDocument(t)
 	for _, testCase := range document.Cases {
 		if testCase.Mutation != legacySQLiteMutationMixedJSON {
@@ -218,6 +219,7 @@ func assertNoOpenCodeSeqCursor(t *testing.T, cursors map[ingest.SessionID]int64,
 }
 
 func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t *testing.T) {
+	t.Parallel()
 	document := loadLegacySQLiteMountDocument(t)
 	for _, testCase := range document.Cases {
 		if testCase.Harvest == legacySQLiteHarvestSkip {

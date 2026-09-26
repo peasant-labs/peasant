@@ -79,6 +79,7 @@ func loadIndexFormatQueryFixtures(t *testing.T) indexFormatQueryDocument {
 }
 
 func TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection(t *testing.T) {
+	t.Parallel()
 	document := loadIndexFormatQueryFixtures(t)
 	for _, row := range document.Cases {
 		t.Run(row.Name, func(t *testing.T) {

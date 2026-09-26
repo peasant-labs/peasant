@@ -169,6 +169,7 @@ func (r *mountedOpenCodeGitResolver) Worktree(_ context.Context, directory strin
 }
 
 func TestOpenCodeProjectDirectoriesReachKickstartListings(t *testing.T) {
+	t.Parallel()
 	world := newMountedOpenCodeWorld(t)
 	git := newMountedOpenCodeGitResolver(world.cloneA, world.cloneB)
 	inventory, listings, _ := ftueDiscoverWith(
@@ -205,6 +206,7 @@ func TestOpenCodeProjectDirectoriesReachKickstartListings(t *testing.T) {
 }
 
 func TestKickstartReuseFallsBackToRecordedOpenCodeDirectories(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	root := filepath.Join(base, defaults.HarnessOpenCode.String())
 	worktree := filepath.Join(base, "recorded-worktree", "tool")
@@ -256,6 +258,7 @@ func TestKickstartReuseFallsBackToRecordedOpenCodeDirectories(t *testing.T) {
 }
 
 func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
+	t.Parallel()
 	world := newMountedOpenCodeWorld(t)
 	sourceBefore := snapshotMountedOpenCodeJSON(t, world.root)
 	git := newMountedOpenCodeGitResolver(world.cloneA, world.cloneB)
@@ -510,6 +513,7 @@ func errorsJoin(errs ...error) error {
 // name-keyed catch-all, so the attribution read is what places it under the
 // project.
 func TestOpenCodeSQLiteSessionDirectoryGroupsUnderProject(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	clone := filepath.Join(base, "team", "tool")
 	if err := os.MkdirAll(clone, 0o755); err != nil {

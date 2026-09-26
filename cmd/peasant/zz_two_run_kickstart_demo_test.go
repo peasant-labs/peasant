@@ -46,6 +46,7 @@ const (
 // run one wrote, and the two runs must agree on every visible row while
 // disagreeing on exactly one thing -- how much they had to mine.
 func TestTwoRunKickstartDemonstration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	workDir := filepath.Join(dataDir, "project")

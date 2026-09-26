@@ -20,6 +20,7 @@ import (
 var publicationReadinessYAML []byte
 
 func TestPublicationWizardAndReportUseDatabaseReadiness(t *testing.T) {
+	t.Parallel()
 	var cases []struct {
 		Name   string `yaml:"name"`
 		Action string `yaml:"action"`

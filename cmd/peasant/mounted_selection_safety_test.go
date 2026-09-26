@@ -266,6 +266,7 @@ func loadMountedSelectionSafety(t *testing.T) mountedSelectionSafetyDocument {
 }
 
 func TestMountedSelectionSafetyFixtureRejectsSemanticMutation(t *testing.T) {
+	t.Parallel()
 	mutated := bytes.Replace(mountedSelectionSafetyYAML, []byte("role: unique-name"), []byte("role: unknown-name-role"), 1)
 	if _, err := decodeMountedSelectionSafety(mutated); err == nil {
 		t.Fatal("a count-preserving selection-role mutation unexpectedly validated")
@@ -586,6 +587,7 @@ func mountedPipelineIDs(t *testing.T, fixture mountedSelectionSafetyCase, world 
 }
 
 func TestMountedSelectionPushChooserPipelineAndPruneKeepTheCloneBoundary(t *testing.T) {
+	t.Parallel()
 	fixtures := loadMountedSelectionSafety(t)
 	for _, fixture := range fixtures.Cases {
 		fixture := fixture

@@ -19,6 +19,7 @@ import (
 var kickstartJourneyDiagnosticsYAML []byte
 
 func TestKickstartJourneyPreservesWarningEvidenceAcrossRetries(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string               `yaml:"requiredNames"`
 		PriorWarning  ingest.DiagnosticEntry `yaml:"priorWarning"`

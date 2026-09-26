@@ -64,8 +64,22 @@ partition:
       real CLI and run it. The production code runs in the `go build` child, so
       the race detector would instrument the child and change what is proven.
     build_flags: []
-    exec_command_site: internal/e2e/skipgate_seams.go:99
+    exec_command_site: internal/e2e/skipgate_seams.go:106
     cost: { wall_ms: 2773, cpu_ms: 4218 }
+
+  - package: cmd/peasant
+    test: TestWebCapabilitiesMatrix
+    class: subprocess
+    evidence: cmd/peasant/web_capabilities_matrix_test.go:118
+    justification: >-
+      Boots the real CLI built without the race detector for each matrix case and
+      asserts the advertised capability set plus the mounted SPA routes. The
+      production code under test runs in the `go build` child; the in-process test
+      body only drives HTTP and asserts tokens, so it has no shared-memory
+      concurrency subject of its own.
+    build_flags: ["-race=false"]
+    exec_command_site: cmd/peasant/web_capabilities_matrix_test.go:181
+    cost: { wall_ms: 21330, cpu_ms: 138425 }
 
   - package: internal/transcript
     test: TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback

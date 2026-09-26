@@ -264,6 +264,7 @@ func (combination canonicalPersistenceCombination) includesJSON() bool {
 }
 
 func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
+	t.Parallel()
 	fixture, err := loadCanonicalPersistenceFixture(canonicalPersistenceYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -558,6 +559,7 @@ func mustCanonicalPersistenceSessionID(t testing.TB, raw string) ingest.SessionI
 }
 
 func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
+	t.Parallel()
 	fixture, err := loadCanonicalPersistenceFixture(canonicalPersistenceYAML)
 	if err != nil {
 		t.Fatal(err)

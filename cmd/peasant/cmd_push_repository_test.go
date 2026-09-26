@@ -213,6 +213,7 @@ cases:
 // forever, with no error. Admitting those subdirectories must not admit a nested
 // repository, which is a separate repository that happens to live inside this one.
 func TestPushCmd_RepositoryScopeUsesCanonicalProjectHash(t *testing.T) {
+	t.Parallel()
 	document, err := loadPushRepositoryScopeFixtures(pushRepositoryScopeFixtureData)
 	if err != nil {
 		t.Fatal(err)

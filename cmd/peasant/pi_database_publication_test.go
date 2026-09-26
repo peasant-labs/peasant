@@ -23,6 +23,7 @@ import (
 var piDatabasePublicationYAML []byte
 
 func TestPiDatabasePublicationThroughCLI(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		SessionID     string   `yaml:"sessionID"`

@@ -185,6 +185,7 @@ func selectionRunnerListings(sessions []selectionRunnerSourceSession) []ftue.Ses
 }
 
 func TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary(t *testing.T) {
+	t.Parallel()
 	document := loadSelectionRunnerFixture(t)
 	listings := selectionRunnerListings(document.SourceSessions)
 	for _, row := range document.Cases {
@@ -238,6 +239,7 @@ func TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary(t *test
 }
 
 func TestKickstartSelectedEmptyMutationStaysAllocated(t *testing.T) {
+	t.Parallel()
 	document := loadSelectionRunnerFixture(t)
 	listings := selectionRunnerListings(document.SourceSessions)
 	mutations := 0
@@ -274,6 +276,7 @@ func mutateSelectionRunnerCount(t *testing.T, field string, expected int) []byte
 }
 
 func TestSelectionRunnerFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionRunnerFixtureData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeSelectionRunnerFixture(mutated); err == nil {
 		t.Fatal("selection runner fixture accepted an unknown field")
@@ -281,6 +284,7 @@ func TestSelectionRunnerFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestSelectionRunnerFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionRunnerFixtureData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeSelectionRunnerFixture(mutated); err == nil {
 		t.Fatal("selection runner fixture accepted a trailing document")
@@ -288,6 +292,7 @@ func TestSelectionRunnerFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionRunnerFixturePinsCounts(t *testing.T) {
+	t.Parallel()
 	assertSelectionRunnerCountMutationRejected(t, "expectedSourceSessionCount", expectedSelectionRunnerSourceSessions)
 	assertSelectionRunnerCountMutationRejected(t, "expectedCaseCount", expectedSelectionRunnerCases)
 	assertSelectionRunnerCountMutationRejected(t, "expectedLegacyBroadeningMutationCount", expectedLegacyBroadeningMutations)

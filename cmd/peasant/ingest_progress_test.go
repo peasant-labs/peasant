@@ -200,6 +200,7 @@ func finalMessage(at time.Time, state *ingest.ProgressState, err error) ingestpr
 }
 
 func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
+	t.Parallel()
 	doc := loadIngestProgressFixtures(t)
 	validateNamedFixtures(t, "estimate", doc.Estimate.Required, len(doc.Estimate.Cases), func(i int) (string, bool) {
 		c := doc.Estimate.Cases[i]
@@ -322,6 +323,7 @@ func (w *pausedProgressCapture) Write(p []byte) (int, error) {
 var _ io.Writer = (*pausedProgressCapture)(nil)
 
 func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).Lifecycle.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -540,6 +542,7 @@ var _ harvestPipeline = (*controlledHarvestPipeline)(nil)
 var _ harvestProgressProgram = (*controlledHarvestProgram)(nil)
 
 func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).Execution.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -708,6 +711,7 @@ func awaitHarvestEvent[T any](t *testing.T, ch <-chan T) T {
 }
 
 func TestHarvestCommandCanceledBeforeSetup(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).CommandStartup.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -745,6 +749,7 @@ func TestHarvestCommandCanceledBeforeSetup(t *testing.T) {
 }
 
 func TestProgressModelSuccessClears(t *testing.T) {
+	t.Parallel()
 	m := harvestprogress.New(harvestprogress.Options{Progress: ingest.NewProgressState(), Theme: theme.New(theme.ModeDark), StartedAt: time.Now()})
 	updated, cmd := m.Update(ingestprogress.FinalMsg{At: time.Now(), Snapshot: ingest.NewProgressState().Snapshot(), Outcome: ingestprogress.FinalSucceeded})
 	if cmd == nil || updated.View().Content != "" {
@@ -753,6 +758,7 @@ func TestProgressModelSuccessClears(t *testing.T) {
 }
 
 func TestProgressModelAuthoritativeFinalOverridesPendingCancellation(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).FinalOverride.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			outcome := ingestprogress.FinalSucceeded
@@ -778,6 +784,7 @@ func TestProgressModelAuthoritativeFinalOverridesPendingCancellation(t *testing.
 }
 
 func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
+	t.Parallel()
 	started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	state := ingest.NewProgressState()
 	state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
@@ -800,6 +807,7 @@ func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
 }
 
 func TestProgressRendererFailureCancelsOperation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	master, terminal := openTestTerminal(t)
@@ -856,6 +864,7 @@ func validateNamedFixtures(t *testing.T, family string, required []string, count
 // in test environments, where the writer is a bytes.Buffer rather than *os.File),
 // Run() exits cleanly when completion is acknowledged without emitting ANSI.
 func TestProgressRenderer_Run_NonTTY(t *testing.T) {
+	t.Parallel()
 	state := ingest.NewProgressState()
 	var buf bytes.Buffer
 	r := newProgressProgram(&buf, state, nil)
@@ -882,6 +891,7 @@ func TestProgressRenderer_Run_NonTTY(t *testing.T) {
 // are always detected as non-TTY, preventing ANSI escape sequences from
 // being written to non-terminal destinations (e.g. log files, pipes).
 func TestProgressRenderer_IsTTY_NonFileWriter(t *testing.T) {
+	t.Parallel()
 	state := ingest.NewProgressState()
 	var buf bytes.Buffer
 	r := newProgressProgram(&buf, state, nil)
@@ -891,6 +901,7 @@ func TestProgressRenderer_IsTTY_NonFileWriter(t *testing.T) {
 }
 
 func TestProgressModelRenderWritesOutput(t *testing.T) {
+	t.Parallel()
 	state := ingest.NewProgressState()
 	// Emit a start event so the stage appears in the snapshot.
 	state.Update(ingest.ProgressEvent{
@@ -917,6 +928,7 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 }
 
 func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) {
+	t.Parallel()
 	line := kit.ProgressBar(ingest.StageExtract.String(), 126, 4953, false, false)
 	if !strings.Contains(line, "█") {
 		t.Fatalf("progress bar should show at least one filled cell for non-zero work; got %q", line)
@@ -930,6 +942,7 @@ func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) 
 // tick loop terminates cleanly after completion is acknowledged.
 // The renderer retains a final snapshot for a canceled operation.
 func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
+	t.Parallel()
 	state := ingest.NewProgressState()
 	state.Update(ingest.ProgressEvent{
 		Kind:  ingest.KindStart,
@@ -958,6 +971,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 }
 
 func TestProgressModelControlCCancelsPipeline(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	m := harvestprogress.New(harvestprogress.Options{Progress: ingest.NewProgressState(), Theme: theme.New(theme.ModeDark), StartedAt: time.Now(), Cancel: cancel})
 
@@ -978,6 +992,7 @@ func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 }
 
 func TestInlineProgressLayout(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).Inline.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			mode, err := theme.ModeFromConfig(c.Theme)
@@ -1053,6 +1068,7 @@ func TestHarvestInterruptProcess(t *testing.T) {
 }
 
 func TestHarvestInterruptMounted(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).Interrupt.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			source := testfixture.MaterializeByName(t, "native-v2-only")

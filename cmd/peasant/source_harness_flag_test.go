@@ -53,6 +53,7 @@ func LoadSourceHarnessFlagFixtures(t testing.TB) []sourceHarnessFlagFixture {
 }
 
 func TestSourceHarnessFlagMounted(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range LoadSourceHarnessFlagFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()

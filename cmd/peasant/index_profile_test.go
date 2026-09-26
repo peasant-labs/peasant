@@ -10,6 +10,7 @@ import (
 )
 
 func TestPrintIndexProfileShowsStagesAndWriteCauseCounters(t *testing.T) {
+	t.Parallel()
 	profile := ingest.IndexProfileSnapshot{
 		Batches: []ingest.IndexProfileBatch{{
 			Sessions:        2,

@@ -281,6 +281,7 @@ func runCoverageIntegration(t *testing.T, db *store.Store, outputDir string, fix
 // sessions; this pins the number a user reads to the entries the store
 // actually holds.
 func TestHarvestIndexCoverage_RealStoreThroughSummaryAndJSON(t *testing.T) {
+	t.Parallel()
 	for _, spec := range loadIndexCoverageIntegrationCases(t) {
 		spec := spec
 		t.Run(spec.Name, func(t *testing.T) {
