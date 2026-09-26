@@ -1,0 +1,9 @@
+# Required-name manifest for testdata/selection_clone_paths.yaml. Name-only:
+# no expectedCaseCount field, so adding or removing a case is a deliberate edit
+# to this list rather than a silent integer bump.
+requiredNames:
+  - legacy-selected-entry-without-clone-paths
+  - selected-non-git-entry-with-one-clone-path
+  - one-remote-keeps-many-clone-paths-and-one-branch-list
+  - legacy-all-mode-has-no-project-list
+  - selected-empty-remains-valid
