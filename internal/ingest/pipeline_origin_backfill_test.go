@@ -23,6 +23,7 @@ import (
 // the rows run 1 stored and finalise them, and its discovery must reuse the warm
 // cache and report no re-mine at all.
 func TestPipeline_FillsInStoredOriginsAndReportsTheReMine(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	database := openEvidenceStore(t, filepath.Join(root, "peasant.db"))
@@ -151,6 +152,7 @@ func TestPipeline_FillsInStoredOriginsAndReportsTheReMine(t *testing.T) {
 // accumulated instead of replacing would still report the first run's work here,
 // and the second-run gate in every consumer of this count would be unfalsifiable.
 func TestClaudeReminedCountDescribesOnlyTheMostRecentDiscovery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openEvidenceStore(t, filepath.Join(t.TempDir(), "peasant.db"))
 

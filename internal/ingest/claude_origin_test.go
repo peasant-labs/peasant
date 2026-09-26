@@ -153,6 +153,7 @@ func discoverClaudeOriginCase(t *testing.T, tc claudeOriginCase) map[string]inge
 // TestClaudeDiscoveryDeclaresAnOrigin runs the real discovery over raw transcript
 // bytes and checks the origin it declares for each session.
 func TestClaudeDiscoveryDeclaresAnOrigin(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
@@ -181,6 +182,7 @@ func TestClaudeDiscoveryDeclaresAnOrigin(t *testing.T) {
 // equality check against the literal agent, so the expected value is taken from
 // the rule itself: change step one and this assertion moves with it.
 func TestClaudeSubagentOriginAgreesWithTheRule(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
@@ -253,6 +255,7 @@ func (c *fakeClaudeEvidenceCache) SaveClaudeEvidence(_ context.Context, upserts 
 // the round trip only. It does NOT prove that the stored form keeps the origin.
 // The SQL round trip is proven where the columns are.
 func TestClaudeMinedOriginSurvivesTheCacheContract(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
@@ -314,6 +317,7 @@ func TestClaudeMinedOriginSurvivesTheCacheContract(t *testing.T) {
 }
 
 func TestLoadClaudeOriginFixturesRejectsADeletedCase(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadClaudeOriginFixtures(claudeOriginFixtureBytes)
 	if err != nil {
 		t.Fatalf("load Claude origin fixture: %v", err)
