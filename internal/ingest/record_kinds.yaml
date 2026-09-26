@@ -262,8 +262,9 @@ harnesses:
       - context: native-generation
         namespace: event
         sources:
-          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage, switch: payload.Type, complete: true}
-          - {file: codex_unknown.go, symbol: prepareCodexRecord, switch: variant}
+          - {file: codex_history_replay.go, symbol: codexNativeEventDispatch}
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage}
+          - {file: codex_history_replay.go, symbol: codexNativeOnlyEventTypes}
           - {file: content_capture.go, symbol: codexStrictEventMsgKinds}
         kinds:
           - {<<: *ignored, kind: token_count, reason: Metadata event; no conversation row.}

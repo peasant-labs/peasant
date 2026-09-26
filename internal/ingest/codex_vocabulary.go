@@ -124,8 +124,9 @@ var codexVocabulary = recordKindAdapterVocabulary{
 			Context:   RecordKindNative,
 			Namespace: "event",
 			Sources: []RecordKindSource{
-				recordKindCompleteSource("codex_history_replay.go", "codexReplayState.replayEventMessage", "payload.Type"),
-				recordKindSwitchSource("codex_unknown.go", "prepareCodexRecord", "variant"),
+				recordKindSource("codex_history_replay.go", "codexNativeEventDispatch"),
+				recordKindSource("codex_history_replay.go", "codexReplayState.replayEventMessage"),
+				recordKindSource("codex_history_replay.go", "codexNativeOnlyEventTypes"),
 				recordKindSource("content_capture.go", "codexStrictEventMsgKinds"),
 			},
 			Rules: []recordKindRule{
@@ -143,7 +144,7 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("turn_aborted", indexformat.OutcomeIgnored),
 			},
 			Production: func() recordKindProductionSet {
-				return recordKindProductionLiterals(codexNativeEventMsgKinds())
+				return recordKindProductionLiterals(recordKindProductionMapKeys(codexNativeEventDispatch))
 			},
 		},
 		{
