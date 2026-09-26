@@ -16,7 +16,7 @@ mutations:
   - { name: rename-field,            target: fsdecorator.Gate,             op: rename,         field: Path,  to: Location }
   - { name: drop-field,              target: fsdecorator.Bound,            op: drop,           field: MaxBytes }
   - { name: retype-field,            target: fsdecorator.Bound,            op: retype,         field: MaxCalls, to: int }
-  - { name: retag-yaml,              target: fsdecorator.Gate,             op: retag,          tag: yaml, field: Op, value: operation }
+  - { name: retag-yaml,              target: fsdecorator.Gate,             op: retag,          field: Op, value: 'yaml:"operation"' }
   - { name: reorder-fields,          target: fsdecorator.Gate,             op: reorder,        field: Op, with: Path }
   - { name: drop-enum-member,        target: fsdecorator.AllOps,           op: drop,           field: CopyFile }
   - { name: reorder-enum-members,    target: fsdecorator.AllCapabilities,  op: reorder,        field: counting, with: none }

@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// Compile-time pins for the shared stream library's exported contract (IP-A).
-// A rename, removal, or retype breaks this file's build; the runtime fixture in
+// Compile-time pins for the shared stream library's exported contract. A
+// rename, removal, or retype breaks this file's build; the runtime fixture in
 // contract_test.go adds struct tags and field order.
 
 var (

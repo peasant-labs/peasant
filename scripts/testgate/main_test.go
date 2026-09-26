@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These tests freeze the CLI and environment contract of the gate (IP-A):
+// These tests freeze the CLI and environment contract of the gate:
 // subcommands, flags, exit codes, budget/env precedence, and the
 // INCONCLUSIVE-under-load verdict. Expected values live in testdata/*.yaml; the
 // mutation cases prove each checker is not vacuous.

@@ -7,7 +7,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/teststream"
 )
 
-// Compile-time shape pins for the IP-A contract.
+// Compile-time shape pins for the gate contract.
 //
 // A rename, removal, or retype of any pinned field, constant, method, or free
 // function breaks THIS FILE's build. contract_test.go adds the runtime freeze for

@@ -1,7 +1,7 @@
-# Frozen IP-A shapes for the gate contract (SLICE-0).
+# Frozen shapes for the gate contract.
 #
 # This fixture is the authoritative expected shape of every exported type a
-# consumer (SLICE-2..SLICE-12) compiles against. contract_test.go reflects the
+# downstream consumer compiles against. contract_test.go reflects the
 # real types and compares field-for-field, in order, including struct tags. A
 # rename, removal, retype, retag, or reorder in the source fails the test with
 # the exact field named.
@@ -27,7 +27,7 @@ required_names:
   - testgate.Finding
 
 shapes:
-  # --- IP-1 per-invocation record: {unit, class, wall, user, system} --------
+  # --- per-invocation record: {unit, class, wall, user, system} -------------
   - name: testgate.Record
     fields:
       - { name: Unit,   type: string }
@@ -65,93 +65,93 @@ shapes:
       - { name: Walls,   type: "map[testgate.PassMode]time.Duration" }
       - { name: Errors,  type: "[]string" }
 
-  # --- IP-1 report document schema (report.json) ----------------------------
+  # --- report document schema (report.json) ---------------------------------
   - name: testgate.Report
     fields:
-      - { name: SchemaVersion,    type: int,                   json: schema_version }
-      - { name: Module,           type: string,                json: module }
-      - { name: Race,             type: bool,                  json: race }
-      - { name: Concurrency,      type: int,                   json: concurrency }
-      - { name: GOMAXPROCS,       type: int,                   json: gomaxprocs }
-      - { name: ListWallMS,       type: int64,                 json: list_wall_ms }
-      - { name: PassA,            type: "*testgate.PassReport", json: "pass_a,omitempty" }
-      - { name: PassB,            type: "*testgate.PassReport", json: "pass_b,omitempty" }
-      - { name: CombinedWallMS,   type: int64,                 json: combined_test_wall_ms }
-      - { name: PreTestWallMS,    type: int64,                 json: "pre_test_wall_ms,omitempty" }
-      - { name: Calibration,      type: testgate.Calibration,  json: calibration }
-      - { name: Records,          type: "[]testgate.ReportRecord",  json: records }
-      - { name: Findings,         type: "[]testgate.ReportFinding", json: findings }
-      - { name: FailedTests,      type: "[]testgate.ReportTest",    json: failed_tests }
-      - { name: InvocationErrors, type: "[]string",                json: invocation_errors }
+      - { name: SchemaVersion,    type: int, tag: 'json:"schema_version"' }
+      - { name: Module,           type: string, tag: 'json:"module"' }
+      - { name: Race,             type: bool, tag: 'json:"race"' }
+      - { name: Concurrency,      type: int, tag: 'json:"concurrency"' }
+      - { name: GOMAXPROCS,       type: int, tag: 'json:"gomaxprocs"' }
+      - { name: ListWallMS,       type: int64, tag: 'json:"list_wall_ms"' }
+      - { name: PassA,            type: "*testgate.PassReport", tag: 'json:"pass_a,omitempty"' }
+      - { name: PassB,            type: "*testgate.PassReport", tag: 'json:"pass_b,omitempty"' }
+      - { name: CombinedWallMS,   type: int64, tag: 'json:"combined_test_wall_ms"' }
+      - { name: PreTestWallMS,    type: int64, tag: 'json:"pre_test_wall_ms,omitempty"' }
+      - { name: Calibration,      type: testgate.Calibration, tag: 'json:"calibration"' }
+      - { name: Records,          type: "[]testgate.ReportRecord", tag: 'json:"records"' }
+      - { name: Findings,         type: "[]testgate.ReportFinding", tag: 'json:"findings"' }
+      - { name: FailedTests,      type: "[]testgate.ReportTest", tag: 'json:"failed_tests"' }
+      - { name: InvocationErrors, type: "[]string", tag: 'json:"invocation_errors"' }
 
   - name: testgate.PassReport
     fields:
-      - { name: Name,     type: string, json: name }
-      - { name: WallMS,   type: int64,  json: wall_ms }
-      - { name: Packages, type: int,    json: packages }
-      - { name: Tests,    type: int,    json: tests }
+      - { name: Name,     type: string, tag: 'json:"name"' }
+      - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
+      - { name: Packages, type: int, tag: 'json:"packages"' }
+      - { name: Tests,    type: int, tag: 'json:"tests"' }
 
   - name: testgate.Calibration
     fields:
-      - { name: L,            type: float64, json: l }
-      - { name: ProbeMS,      type: int64,   json: probe_ms }
-      - { name: ReferenceMS,  type: int64,   json: reference_ms }
-      - { name: Inconclusive, type: bool,    json: inconclusive }
+      - { name: L,            type: float64, tag: 'json:"l"' }
+      - { name: ProbeMS,      type: int64, tag: 'json:"probe_ms"' }
+      - { name: ReferenceMS,  type: int64, tag: 'json:"reference_ms"' }
+      - { name: Inconclusive, type: bool, tag: 'json:"inconclusive"' }
 
   - name: testgate.ReportRecord
     fields:
-      - { name: Unit,     type: string, json: unit }
-      - { name: Class,    type: string, json: class }
-      - { name: Pass,     type: string, json: pass }
-      - { name: WallMS,   type: int64,  json: wall_ms }
-      - { name: UserMS,   type: int64,  json: user_ms }
-      - { name: SystemMS, type: int64,  json: system_ms }
+      - { name: Unit,     type: string, tag: 'json:"unit"' }
+      - { name: Class,    type: string, tag: 'json:"class"' }
+      - { name: Pass,     type: string, tag: 'json:"pass"' }
+      - { name: WallMS,   type: int64, tag: 'json:"wall_ms"' }
+      - { name: UserMS,   type: int64, tag: 'json:"user_ms"' }
+      - { name: SystemMS, type: int64, tag: 'json:"system_ms"' }
 
   - name: testgate.ReportTest
     fields:
-      - { name: Package, type: string, json: package }
-      - { name: Test,    type: string, json: test }
+      - { name: Package, type: string, tag: 'json:"package"' }
+      - { name: Test,    type: string, tag: 'json:"test"' }
 
   - name: testgate.ReportFinding
     fields:
-      - { name: Rule,     type: string, json: rule }
-      - { name: Severity, type: string, json: severity }
-      - { name: What,     type: string, json: what }
-      - { name: Why,      type: string, json: why }
-      - { name: Where,    type: string, json: where }
-      - { name: When,     type: string, json: when }
-      - { name: Means,    type: string, json: means }
-      - { name: Fix,      type: string, json: fix }
+      - { name: Rule,     type: string, tag: 'json:"rule"' }
+      - { name: Severity, type: string, tag: 'json:"severity"' }
+      - { name: What,     type: string, tag: 'json:"what"' }
+      - { name: Why,      type: string, tag: 'json:"why"' }
+      - { name: Where,    type: string, tag: 'json:"where"' }
+      - { name: When,     type: string, tag: 'json:"when"' }
+      - { name: Means,    type: string, tag: 'json:"means"' }
+      - { name: Fix,      type: string, tag: 'json:"fix"' }
 
-  # --- IP-2 registry schema (no-race-partition.yaml) ------------------------
+  # --- registry schema (no-race-partition.yaml) -----------------------------
   - name: testgate.Cost
     fields:
-      - { name: WallMS, type: int64, yaml: wall_ms }
-      - { name: CPUMs,  type: int64, yaml: cpu_ms }
+      - { name: WallMS, type: int64, tag: 'yaml:"wall_ms"' }
+      - { name: CPUMs,  type: int64, tag: 'yaml:"cpu_ms"' }
 
   - name: testgate.Entry
     fields:
-      - { name: Package,         type: string,            yaml: package }
-      - { name: Test,            type: string,            yaml: test }
-      - { name: Class,           type: testgate.Class,    yaml: class }
-      - { name: Evidence,        type: string,            yaml: evidence }
-      - { name: Justification,   type: string,            yaml: justification }
-      - { name: Cost,            type: testgate.Cost,     yaml: cost }
-      - { name: BuildFlags,      type: "*testgate.BuildFlags", yaml: "build_flags,omitempty" }
-      - { name: ExecCommandSite, type: string,            yaml: "exec_command_site,omitempty" }
+      - { name: Package,         type: string, tag: 'yaml:"package"' }
+      - { name: Test,            type: string, tag: 'yaml:"test"' }
+      - { name: Class,           type: testgate.Class, tag: 'yaml:"class"' }
+      - { name: Evidence,        type: string, tag: 'yaml:"evidence"' }
+      - { name: Justification,   type: string, tag: 'yaml:"justification"' }
+      - { name: Cost,            type: testgate.Cost, tag: 'yaml:"cost"' }
+      - { name: BuildFlags,      type: "*testgate.BuildFlags", tag: 'yaml:"build_flags,omitempty"' }
+      - { name: ExecCommandSite, type: string, tag: 'yaml:"exec_command_site,omitempty"' }
 
   - name: testgate.Registry
     fields:
-      - { name: Version,   type: int,               yaml: version }
-      - { name: Partition, type: "[]testgate.Entry", yaml: partition }
-      - { name: Protected, type: "[]testgate.Entry", yaml: protected }
+      - { name: Version,   type: int, tag: 'yaml:"version"' }
+      - { name: Partition, type: "[]testgate.Entry", tag: 'yaml:"partition"' }
+      - { name: Protected, type: "[]testgate.Entry", tag: 'yaml:"protected"' }
 
-  # --- IP-3 budget schema (budget.yaml) -------------------------------------
+  # --- budget schema (budget.yaml) ------------------------------------------
   - name: testgate.Budget
     fields:
-      - { name: Version, type: int,    yaml: version }
-      - { name: Seconds, type: int,    yaml: seconds }
-      - { name: Basis,   type: string, yaml: basis }
+      - { name: Version, type: int, tag: 'yaml:"version"' }
+      - { name: Seconds, type: int, tag: 'yaml:"seconds"' }
+      - { name: Basis,   type: string, tag: 'yaml:"basis"' }
 
   # --- Screen finding shape that drives the exit verdict --------------------
   - name: testgate.Finding

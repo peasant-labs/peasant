@@ -66,8 +66,7 @@ var _ BoundedFS = boundedStub{}
 type contractField struct {
 	Name string `yaml:"name"`
 	Type string `yaml:"type"`
-	JSON string `yaml:"json"`
-	YAML string `yaml:"yaml"`
+	Tag  string `yaml:"tag"`
 }
 
 type contractShape struct {
@@ -104,7 +103,6 @@ type contractMutation struct {
 	Field  string `yaml:"field"`
 	To     string `yaml:"to"`
 	With   string `yaml:"with"`
-	Tag    string `yaml:"tag"`
 	Value  string `yaml:"value"`
 }
 
@@ -183,7 +181,7 @@ func reflectShape(typ reflect.Type) []contractField {
 	out := make([]contractField, 0, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
-		out = append(out, contractField{Name: f.Name, Type: f.Type.String(), JSON: f.Tag.Get("json"), YAML: f.Tag.Get("yaml")})
+		out = append(out, contractField{Name: f.Name, Type: f.Type.String(), Tag: string(f.Tag)})
 	}
 	return out
 }
@@ -204,11 +202,8 @@ func compareShape(name string, want, got []contractField) []string {
 			if w.Type != g.Type {
 				problems = append(problems, fmt.Sprintf("%s.%s: type is %s, want %s", name, g.Name, g.Type, w.Type))
 			}
-			if w.JSON != g.JSON {
-				problems = append(problems, fmt.Sprintf("%s.%s: json tag is %q, want %q", name, g.Name, g.JSON, w.JSON))
-			}
-			if w.YAML != g.YAML {
-				problems = append(problems, fmt.Sprintf("%s.%s: yaml tag is %q, want %q", name, g.Name, g.YAML, w.YAML))
+			if w.Tag != g.Tag {
+				problems = append(problems, fmt.Sprintf("%s.%s: tag is %q, want %q", name, g.Name, g.Tag, w.Tag))
 			}
 		}
 	}
@@ -446,14 +441,7 @@ func mutateShape(fields []contractField, m contractMutation) ([]contractField, e
 		if idx < 0 {
 			return nil, fmt.Errorf("mutation %q names field %q not in the shape", m.Name, m.Field)
 		}
-		switch m.Tag {
-		case "json":
-			out[idx].JSON = m.Value
-		case "yaml":
-			out[idx].YAML = m.Value
-		default:
-			return nil, fmt.Errorf("mutation %q names unknown tag %q", m.Name, m.Tag)
-		}
+		out[idx].Tag = m.Value
 		return out, nil
 	case "reorder":
 		with := -1

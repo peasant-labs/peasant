@@ -19,26 +19,26 @@ shapes:
 
   - name: coveragemap.InventoryName
     fields:
-      - { name: Name,  type: string, yaml: name }
-      - { name: Kind,  type: string, yaml: kind }
-      - { name: Where, type: string, yaml: where }
+      - { name: Name,  type: string, tag: 'yaml:"name"' }
+      - { name: Kind,  type: string, tag: 'yaml:"kind"' }
+      - { name: Where, type: string, tag: 'yaml:"where"' }
 
   - name: coveragemap.Inventory
     fields:
-      - { name: Version,    type: int,                        yaml: version }
-      - { name: FrozenFrom, type: string,                     yaml: frozen_from }
-      - { name: Names,      type: "[]coveragemap.InventoryName", yaml: names }
+      - { name: Version,    type: int, tag: 'yaml:"version"' }
+      - { name: FrozenFrom, type: string, tag: 'yaml:"frozen_from"' }
+      - { name: Names,      type: "[]coveragemap.InventoryName", tag: 'yaml:"names"' }
 
   - name: coveragemap.MapEntry
     fields:
-      - { name: Name,        type: string,                    yaml: name }
-      - { name: Destination, type: coveragemap.Destination,   yaml: destination }
+      - { name: Name,        type: string, tag: 'yaml:"name"' }
+      - { name: Destination, type: coveragemap.Destination, tag: 'yaml:"destination"' }
 
   - name: coveragemap.CoverageMap
     fields:
-      - { name: Version,   type: int,                  yaml: version }
-      - { name: Inventory, type: string,               yaml: inventory }
-      - { name: Entries,   type: "[]coveragemap.MapEntry", yaml: entries }
+      - { name: Version,   type: int, tag: 'yaml:"version"' }
+      - { name: Inventory, type: string, tag: 'yaml:"inventory"' }
+      - { name: Entries,   type: "[]coveragemap.MapEntry", tag: 'yaml:"entries"' }
 
 enums:
   - name: coveragemap.AllDestinationKinds

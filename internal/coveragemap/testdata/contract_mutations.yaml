@@ -14,7 +14,7 @@ mutations:
   - { name: rename-field,         target: coveragemap.Destination,       op: rename,  field: Ref,  to: Target }
   - { name: drop-field,           target: coveragemap.CoverageMap,       op: drop,    field: Inventory }
   - { name: retype-field,         target: coveragemap.Inventory,         op: retype,  field: Version, to: int64 }
-  - { name: retag-yaml,           target: coveragemap.InventoryName,     op: retag,   tag: yaml, field: Where, value: location }
+  - { name: retag-yaml,           target: coveragemap.InventoryName,     op: retag,   field: Where, value: 'yaml:"location"' }
   - { name: reorder-fields,       target: coveragemap.Destination,       op: reorder, field: Kind, with: Ref }
   - { name: drop-enum-member,     target: coveragemap.AllDestinationKinds, op: drop,  field: followup }
   - { name: reorder-enum-members, target: coveragemap.AllDestinationKinds, op: reorder, field: retained-in-place, with: followup }

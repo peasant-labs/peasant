@@ -1,4 +1,4 @@
-# Frozen budget/env contract cases for scripts/testgate (SLICE-0).
+# Frozen budget/env contract cases for scripts/testgate.
 #
 # budget precedence: budget.yaml (when present) > TEST_BUDGET (seconds) > none.
 # CHECK_START_NS: a positive Unix-ns integer; empty or malformed is "unset".

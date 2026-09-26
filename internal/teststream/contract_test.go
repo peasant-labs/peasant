@@ -13,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// This file freezes the shared stream library's exported shape (IP-A). The
+// This file freezes the shared stream library's exported shape. The
 // expected shapes live in testdata/contract_shapes.yaml; a deterministic
 // mutation of each axis is proven to be detected via testdata/contract_mutations.yaml.
 // The compile-time pins live in contract_compile_test.go.
@@ -27,7 +27,7 @@ var contractMutationsYAML []byte
 type contractField struct {
 	Name string `yaml:"name"`
 	Type string `yaml:"type"`
-	JSON string `yaml:"json"`
+	Tag  string `yaml:"tag"`
 }
 
 type contractShape struct {
@@ -47,7 +47,6 @@ type contractMutation struct {
 	Field  string `yaml:"field"`
 	To     string `yaml:"to"`
 	With   string `yaml:"with"`
-	Tag    string `yaml:"tag"`
 	Value  string `yaml:"value"`
 }
 
@@ -129,7 +128,7 @@ func reflectShape(typ reflect.Type) []contractField {
 	out := make([]contractField, 0, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
-		out = append(out, contractField{Name: f.Name, Type: f.Type.String(), JSON: f.Tag.Get("json")})
+		out = append(out, contractField{Name: f.Name, Type: f.Type.String(), Tag: string(f.Tag)})
 	}
 	return out
 }
@@ -150,8 +149,8 @@ func compareShape(name string, want, got []contractField) []string {
 			if w.Type != g.Type {
 				problems = append(problems, fmt.Sprintf("%s.%s: type is %s, want %s", name, g.Name, g.Type, w.Type))
 			}
-			if w.JSON != g.JSON {
-				problems = append(problems, fmt.Sprintf("%s.%s: json tag is %q, want %q", name, g.Name, g.JSON, w.JSON))
+			if w.Tag != g.Tag {
+				problems = append(problems, fmt.Sprintf("%s.%s: tag is %q, want %q", name, g.Name, g.Tag, w.Tag))
 			}
 		}
 	}
@@ -227,10 +226,10 @@ func mutateShape(fields []contractField, m contractMutation) ([]contractField, e
 		}
 		return out, nil
 	case "retag":
-		if idx < 0 || m.Tag != "json" {
-			return nil, fmt.Errorf("mutation %q needs a json field to retag", m.Name)
+		if idx < 0 {
+			return nil, fmt.Errorf("mutation %q names field %q not in the shape", m.Name, m.Field)
 		}
-		out[idx].JSON = m.Value
+		out[idx].Tag = m.Value
 		return out, nil
 	case "reorder":
 		with := -1

@@ -1,4 +1,4 @@
-# Shape-mutation cases for the IP-A contract freeze (SLICE-0).
+# Shape-mutation cases for the gate contract freeze.
 #
 # Each case mutates the FROZEN EXPECTATION (never the source) and asserts the
 # comparator in contract_test.go reports a mismatch against the real type. This
@@ -34,15 +34,13 @@ mutations:
   - name: retag-json
     target: testgate.ReportRecord
     op: retag
-    tag: json
     field: WallMS
-    value: wall
+    value: 'json:"wall"'
   - name: retag-yaml
     target: testgate.Entry
     op: retag
-    tag: yaml
     field: Evidence
-    value: source
+    value: 'yaml:"source"'
   - name: reorder-fields
     target: testgate.Record
     op: reorder

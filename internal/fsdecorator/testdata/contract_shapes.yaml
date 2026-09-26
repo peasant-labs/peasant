@@ -20,29 +20,29 @@ required_names:
 shapes:
   - name: fsdecorator.Gate
     fields:
-      - { name: Op,   type: fsdecorator.Op, yaml: op }
-      - { name: Path, type: string,         yaml: path }
+      - { name: Op,   type: fsdecorator.Op, tag: 'yaml:"op"' }
+      - { name: Path, type: string, tag: 'yaml:"path"' }
 
   - name: fsdecorator.Bound
     fields:
-      - { name: Op,       type: fsdecorator.Op, yaml: op }
-      - { name: Path,     type: string,         yaml: path }
-      - { name: MaxCalls, type: int64,          yaml: max_calls }
-      - { name: MaxBytes, type: int64,          yaml: max_bytes }
+      - { name: Op,       type: fsdecorator.Op, tag: 'yaml:"op"' }
+      - { name: Path,     type: string, tag: 'yaml:"path"' }
+      - { name: MaxCalls, type: int64, tag: 'yaml:"max_calls"' }
+      - { name: MaxBytes, type: int64, tag: 'yaml:"max_bytes"' }
 
   - name: fsdecorator.ClassificationEntry
     fields:
-      - { name: Type,       type: string,               yaml: type }
-      - { name: Package,    type: string,               yaml: package }
-      - { name: WhiteBox,   type: bool,                 yaml: white_box }
-      - { name: Capability, type: fsdecorator.Capability, yaml: capability }
-      - { name: Where,      type: string,               yaml: where }
-      - { name: Rationale,  type: string,               yaml: rationale }
+      - { name: Type,       type: string, tag: 'yaml:"type"' }
+      - { name: Package,    type: string, tag: 'yaml:"package"' }
+      - { name: WhiteBox,   type: bool, tag: 'yaml:"white_box"' }
+      - { name: Capability, type: fsdecorator.Capability, tag: 'yaml:"capability"' }
+      - { name: Where,      type: string, tag: 'yaml:"where"' }
+      - { name: Rationale,  type: string, tag: 'yaml:"rationale"' }
 
   - name: fsdecorator.Classification
     fields:
-      - { name: Version, type: int,                              yaml: version }
-      - { name: Entries, type: "[]fsdecorator.ClassificationEntry", yaml: entries }
+      - { name: Version, type: int, tag: 'yaml:"version"' }
+      - { name: Entries, type: "[]fsdecorator.ClassificationEntry", tag: 'yaml:"entries"' }
 
 enums:
   - name: fsdecorator.AllOps
