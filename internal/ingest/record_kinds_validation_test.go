@@ -143,7 +143,10 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 				}
 			case "native-event-behavior":
 				kind := registry.Harnesses[HarnessCodex].Lookup(RecordKindNative, "event", row.Kind)
-				state := &codexReplayState{}
+				// The mutation goes through the one production constructor, so
+				// no fixture can satisfy a dispatch arm with the nil-map shape
+				// newCodexReplayState prevents.
+				state := newCodexReplayState(nil)
 				result = state.replayEventMessage("fixture", codexDecodedSegment{}, codexHistoryRecord{}, codexHistoryReplayPayload{Type: row.Kind}, CodexOwnershipOwn, CodexHistoryModeLegacy)
 				if result == nil && (len(state.nodes) != 0 || kind.Status != RecordKindIgnoredControl || kind.Preview != RecordKindPreviewNo) {
 					result = fmt.Errorf("native metadata/mirror behavior differs from registry")
