@@ -1699,10 +1699,10 @@ entries:
   - { name: "internal/ingest.TestPhysicalPathResolver_UsesPhysicalDirectoryIdentity", destination: retained-in-place }
   - { name: "internal/ingest.TestPiCapturedAdmission", destination: retained-in-place }
   - { name: "internal/ingest.TestPiDiscoveryLocationsAndCandidates", destination: retained-in-place }
-  - { name: "internal/ingest.TestPiFixtureModelExpectationValidation", destination: retained-in-place }
-  - { name: "internal/ingest.TestPiNativeRegistryProjection", destination: retained-in-place }
+  - { name: "internal/ingest.TestPiFixtureModelExpectationValidation", destination: "moved:cmd/peasant/pi_native_integration_test.go" }
+  - { name: "internal/ingest.TestPiNativeRegistryProjection", destination: "moved:cmd/peasant/pi_native_integration_test.go" }
   - { name: "internal/ingest.TestPiReadPlacesRecordsAfterAStandInByTheBytesItRead", destination: retained-in-place }
-  - { name: "internal/ingest.TestPiSanitizedNativeRecording", destination: retained-in-place }
+  - { name: "internal/ingest.TestPiSanitizedNativeRecording", destination: "moved:cmd/peasant/pi_native_integration_test.go" }
   - { name: "internal/ingest.TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses", destination: retained-in-place }
   - { name: "internal/ingest.TestPiUnknownCarrierValidation", destination: retained-in-place }
   - { name: "internal/ingest.TestPiUnknownOriginalPayloadOracle", destination: retained-in-place }

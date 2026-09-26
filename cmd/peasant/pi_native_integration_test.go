@@ -1,4 +1,4 @@
-package ingest_test
+package main
 
 import (
 	"bytes"
