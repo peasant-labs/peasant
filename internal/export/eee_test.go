@@ -17,6 +17,7 @@ func boolPtr(v bool) *bool { return &v }
 
 // TestCategoricalNominal tests: enumerated+text, LowerIsBetter=nil -> categorical/nominal.
 func TestCategoricalNominal(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "quality.session_outcome",
 		Description:     "Session outcome",
@@ -41,6 +42,7 @@ func TestCategoricalNominal(t *testing.T) {
 
 // TestCategoricalOrdinal tests: enumerated+text, LowerIsBetter=true -> categorical/ordinal.
 func TestCategoricalOrdinal(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "quality.session_outcome",
 		ValueDomainKind: schema.DomainEnumerated,
@@ -62,6 +64,7 @@ func TestCategoricalOrdinal(t *testing.T) {
 
 // TestCategoricalOrdinal_ViaScaleKind tests: enumerated + ScaleKind=ordinal -> ordinal.
 func TestCategoricalOrdinal_ViaScaleKind(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "quality.session_outcome",
 		ValueDomainKind: schema.DomainEnumerated,
@@ -80,6 +83,7 @@ func TestCategoricalOrdinal_ViaScaleKind(t *testing.T) {
 
 // TestNumericRealWithRange tests: described+real with range -> numeric/continuous.
 func TestNumericRealWithRange(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "quality.signal_density",
 		ValueDomainKind: schema.DomainDescribed,
@@ -106,6 +110,7 @@ func TestNumericRealWithRange(t *testing.T) {
 
 // TestNumericIntegerNoRange tests: described+integer without range -> numeric, no range.
 func TestNumericIntegerNoRange(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "metrics.retry_loops",
 		ValueDomainKind: schema.DomainDescribed,
@@ -126,6 +131,7 @@ func TestNumericIntegerNoRange(t *testing.T) {
 
 // TestBooleanDescribed tests: described+boolean -> boolean.
 func TestBooleanDescribed(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "quality.has_errors",
 		ValueDomainKind: schema.DomainDescribed,
@@ -143,6 +149,7 @@ func TestBooleanDescribed(t *testing.T) {
 
 // TestBooleanEnumerated tests edge case: enumerated+boolean -> boolean (datatype wins).
 func TestBooleanEnumerated(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "quality.has_errors",
 		ValueDomainKind: schema.DomainEnumerated,
@@ -160,6 +167,7 @@ func TestBooleanEnumerated(t *testing.T) {
 
 // TestLowerIsBetterPassthrough tests nil/true/false passthrough.
 func TestLowerIsBetterPassthrough(t *testing.T) {
+	t.Parallel()
 	base := store.AnnotationTypeRow{
 		TypeID:          "quality.test",
 		ValueDomainKind: schema.DomainEnumerated,
@@ -199,6 +207,7 @@ func TestLowerIsBetterPassthrough(t *testing.T) {
 
 // TestDescribedText_CategoricalNominal tests: described+text -> categorical/nominal.
 func TestDescribedText_CategoricalNominal(t *testing.T) {
+	t.Parallel()
 	at := store.AnnotationTypeRow{
 		TypeID:          "metadata.freetext",
 		ValueDomainKind: schema.DomainDescribed,
@@ -223,6 +232,7 @@ func TestDescribedText_CategoricalNominal(t *testing.T) {
 
 // TestExportEEE_RoundTrip_JSON tests JSON marshal/unmarshal round-trip via ExportEEE.
 func TestExportEEE_RoundTrip_JSON(t *testing.T) {
+	t.Parallel()
 	types := []store.AnnotationTypeRow{
 		{
 			TypeID:          "quality.session_outcome",
@@ -271,6 +281,7 @@ func TestExportEEE_RoundTrip_JSON(t *testing.T) {
 
 // TestExportEEE_EmptyTypes tests that nil/empty input produces empty result.
 func TestExportEEE_EmptyTypes(t *testing.T) {
+	t.Parallel()
 	result, err := export.ExportEEE(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -285,6 +296,7 @@ func TestExportEEE_EmptyTypes(t *testing.T) {
 
 // TestEEEMapper_FormatName tests that EEEMapper.FormatName returns the official repo name.
 func TestEEEMapper_FormatName(t *testing.T) {
+	t.Parallel()
 	m := &export.EEEMapper{}
 	if got := m.FormatName(); got != "every_eval_ever" {
 		t.Errorf("FormatName() = %q, want %q", got, "every_eval_ever")
@@ -311,6 +323,7 @@ func (m *stubMapper) FormatName() string { return "stub" }
 
 // TestExport_GenericAggregation verifies Export[T] aggregates correctly with any mapper.
 func TestExport_GenericAggregation(t *testing.T) {
+	t.Parallel()
 	types := []store.AnnotationTypeRow{
 		{TypeID: "a"},
 		{TypeID: "b"},

@@ -268,6 +268,7 @@ func mustBarrierSessionID(t *testing.T, fixtureCase barrierCase) schema.SessionI
 // TestGenerationDetailBarrier drives every named corpus case through the real
 // generation-capable store and the production export exit.
 func TestGenerationDetailBarrier(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadGenerationDetailBarrierCorpus(t) {
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			switch fixtureCase.Operation {
