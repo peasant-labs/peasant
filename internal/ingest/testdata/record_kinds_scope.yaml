@@ -1,0 +1,8 @@
+# Visualization-boundary guard mutations: shapes that must never enter the
+# registry or the harvest report. Every case is reproduced in miniature by a
+# witness in TestRecordKindSurfaceMutationWitnesses, which feeds it through the
+# same reflection walk the standing guard uses.
+required_names:
+  - nested session result carries render graph
+  - nested index log entry carries viewer field
+  - nested index coverage carries rendered field
