@@ -50,6 +50,7 @@ func main() {
 	priorFlag := fs.String("prior", "", "profile: prior go test -json stream used for LPT batch weights")
 	cpuTopFlag := fs.Int("cpuprofile-top", 0, "profile: re-profile the N slowest tests with -cpuprofile")
 	pretestFlag := fs.Bool("pretest", false, "profile: measure the five pre-test steps instead of a package")
+	profilesFlag := fs.Bool("profiles", false, "profile: write Class B block/mutex/cpu/trace profiles per batch")
 	_ = fs.Parse(os.Args[2:])
 
 	root, err := findRepoRoot()
@@ -95,6 +96,7 @@ func main() {
 			prior:    *priorFlag,
 			cpuTop:   *cpuTopFlag,
 			pretest:  *pretestFlag,
+			profiles: *profilesFlag,
 			race:     *raceFlag,
 		})
 		os.Exit(code)
@@ -123,6 +125,7 @@ flags:
   -n N             profile: concurrent batches
   -parallel N      profile: per-batch -parallel; 0 is unpinned (isolated run)
   -prior FILE      profile: prior go test -json stream for LPT weights
+  -profiles        profile: write Class B block/mutex/cpu/trace profiles
   -pretest         profile: measure the five pre-test steps
 
 exit codes:

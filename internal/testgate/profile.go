@@ -163,8 +163,23 @@ type BatchProfileConfig struct {
 	// GOMAXPROCS), which is how an isolated package run is measured; a batched
 	// profiler pins 1 so each batch process holds one test at a time.
 	Parallel int
+	// Profiles enables Class B attribution: block, mutex, cpu, and trace
+	// profiles on each batch invocation. A profiled wall is NOT quotable; these
+	// files answer where the wall − CPU gap is, not how big it is.
+	Profiles ProfileFlags
 	Env      []string
 }
+
+// ProfileFlags selects the Class B attribution profiles to write per batch.
+type ProfileFlags struct {
+	Block bool
+	Mutex bool
+	CPU   bool
+	Trace bool
+}
+
+// Enabled reports whether any attribution profile was selected.
+func (p ProfileFlags) Enabled() bool { return p.Block || p.Mutex || p.CPU || p.Trace }
 
 // BatchResult is one profiler batch's measured boundary.
 type BatchResult struct {
@@ -174,6 +189,12 @@ type BatchResult struct {
 	UserMS     int64    `json:"user_ms"`
 	SystemMS   int64    `json:"system_ms"`
 	StreamPath string   `json:"stream_path"`
+	// Class B attribution artifacts, empty in a profile-free run. A profiled
+	// wall is not quotable; these locate the wall − CPU gap.
+	BlockProfile string `json:"block_profile,omitempty"`
+	MutexProfile string `json:"mutex_profile,omitempty"`
+	CPUProfile   string `json:"cpu_profile,omitempty"`
+	Trace        string `json:"trace,omitempty"`
 }
 
 // TestTiming is one top-level test's queue-free wall, attributed to its batch.
@@ -311,14 +332,37 @@ func ListTestsForPackage(ctx context.Context, goBin, root, pkg string) ([]string
 }
 
 func runOneBatch(ctx context.Context, cfg BatchProfileConfig, batch Batch) (BatchResult, []TestTiming, []string) {
+	batchDir := filepath.Join(cfg.OutDir, fmt.Sprintf("batch-%02d", batch.Index))
+	_ = os.MkdirAll(batchDir, 0o755)
 	streamPath := filepath.Join(cfg.OutDir, fmt.Sprintf("batch-%02d.json", batch.Index))
 	errPath := filepath.Join(cfg.OutDir, fmt.Sprintf("batch-%02d.err", batch.Index))
-	args := []string{"test", "-json", "-count=1", "-timeout", cfg.Timeout.String()}
+	args := []string{"test", "-json", "-count=1", "-timeout", cfg.Timeout.String(),
+		"-outputdir", batchDir}
 	if cfg.Parallel > 0 {
 		args = append(args, fmt.Sprintf("-parallel=%d", cfg.Parallel))
 	}
 	if cfg.Race {
 		args = append(args, "-race")
+	}
+	br := BatchResult{Index: batch.Index, Tests: batch.Tests, StreamPath: streamPath}
+	if cfg.Profiles.Enabled() {
+		prefix := filepath.Join(cfg.OutDir, fmt.Sprintf("batch-%02d", batch.Index))
+		if cfg.Profiles.Block {
+			br.BlockProfile = prefix + ".block.out"
+			args = append(args, "-blockprofile", br.BlockProfile, "-blockprofilerate", "10000")
+		}
+		if cfg.Profiles.Mutex {
+			br.MutexProfile = prefix + ".mutex.out"
+			args = append(args, "-mutexprofile", br.MutexProfile, "-mutexprofilefraction", "100")
+		}
+		if cfg.Profiles.CPU {
+			br.CPUProfile = prefix + ".cpu.out"
+			args = append(args, "-cpuprofile", br.CPUProfile)
+		}
+		if cfg.Profiles.Trace {
+			br.Trace = prefix + ".trace.out"
+			args = append(args, "-trace", br.Trace)
+		}
 	}
 	args = append(args, "-run", runRegexLiteral(batch.Tests), cfg.Package)
 
@@ -338,14 +382,9 @@ func runOneBatch(ctx context.Context, cfg BatchProfileConfig, batch Batch) (Batc
 	_ = os.WriteFile(streamPath, stdout.Bytes(), 0o644)
 	_ = os.WriteFile(errPath, stderr.Bytes(), 0o644)
 
-	br := BatchResult{
-		Index:      batch.Index,
-		Tests:      batch.Tests,
-		WallMS:     wall.Milliseconds(),
-		UserMS:     (afterUser - beforeUser).Milliseconds(),
-		SystemMS:   (afterSys - beforeSys).Milliseconds(),
-		StreamPath: streamPath,
-	}
+	br.WallMS = wall.Milliseconds()
+	br.UserMS = (afterUser - beforeUser).Milliseconds()
+	br.SystemMS = (afterSys - beforeSys).Milliseconds()
 	var errs []string
 	records, err := teststream.ParseStream(bytes.NewReader(stdout.Bytes()))
 	if err != nil {

@@ -24,6 +24,7 @@ type profileOptions struct {
 	prior    string
 	cpuTop   int
 	pretest  bool
+	profiles bool
 	race     bool
 }
 
@@ -136,7 +137,13 @@ func runPackageProfile(opts profileOptions) int {
 		Prior:         prior,
 		CPUProfileTop: opts.cpuTop,
 		Parallel:      opts.parallel,
-		Env:           os.Environ(),
+		Profiles: testgate.ProfileFlags{
+			Block: opts.profiles,
+			Mutex: opts.profiles,
+			CPU:   opts.profiles,
+			Trace: opts.profiles,
+		},
+		Env: os.Environ(),
 	}
 	ctx := context.Background()
 	res, err := testgate.RunBatchProfile(ctx, cfg)
@@ -156,6 +163,12 @@ func runPackageProfile(opts profileOptions) int {
 	fmt.Printf("%-6s %9s %9s %9s %6s\n", "BATCH", "WALL", "USER", "SYSTEM", "TESTS")
 	for _, b := range res.Batches {
 		fmt.Printf("%-6d %9s %9s %9s %6d\n", b.Index, ms(b.WallMS), ms(b.UserMS), ms(b.SystemMS), len(b.Tests))
+	}
+	for _, b := range res.Batches {
+		if b.CPUProfile != "" || b.BlockProfile != "" || b.MutexProfile != "" || b.Trace != "" {
+			fmt.Printf("  batch %d class B artifacts: cpu=%s block=%s mutex=%s trace=%s\n",
+				b.Index, b.CPUProfile, b.BlockProfile, b.MutexProfile, b.Trace)
+		}
 	}
 	fmt.Printf("\nslowest tests (top-level, queue-free):\n")
 	for i, t := range res.Tests {
