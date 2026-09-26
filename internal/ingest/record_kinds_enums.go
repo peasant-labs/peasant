@@ -27,20 +27,20 @@ var recordKindStatusNotes = map[RecordKindStatus]string{
 }
 
 func NewRecordKindStatus(raw string) (RecordKindStatus, error) {
-	switch raw {
-	case string(RecordKindRepresented):
-		return RecordKindRepresented, nil
-	case string(RecordKindTrackedOnly):
-		return RecordKindTrackedOnly, nil
-	case string(RecordKindIgnoredControl):
-		return RecordKindIgnoredControl, nil
-	case string(RecordKindRefused):
-		return RecordKindRefused, nil
-	case string(RecordKindRetainedUnknown):
-		return RecordKindRetainedUnknown, nil
-	default:
-		return "", fmt.Errorf("record-kind registry: unknown status %q; use a declared interpretation status", raw)
+	return derivedRecordKindStatus(raw, recordKindStatusClosedSet)
+}
+
+// derivedRecordKindStatus is the one constructor body for the status boundary:
+// the accepted set is the documented closed set passed in, so a status added
+// there is accepted at the parser boundary and rendered in the generated prose
+// by the same list. No second arm list can drift from it.
+func derivedRecordKindStatus[T ~string](raw string, closedSet []T) (T, error) {
+	for _, status := range closedSet {
+		if string(status) == raw {
+			return status, nil
+		}
 	}
+	return "", fmt.Errorf("record-kind registry: unknown status %q; use a declared interpretation status", raw)
 }
 
 func NewRecordKindPreview(raw string) (RecordKindPreview, error) {
