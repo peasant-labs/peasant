@@ -56,44 +56,6 @@ type recordKindProfile struct {
 	Coordinates RecordKindCoordinateRequirement
 }
 
-// recordKindAnchorShapes maps each shared generated-YAML anchor to the stored
-// shape it always carries. The table is built from the same profiles that lower
-// the rows, so it cannot drift from them. The generator declares an anchor on
-// the first row that matches the anchor's shape and writes a row overriding any
-// part of that shape in full: an anchor declared on an overriding row would
-// silently retag every later row of the same harness that merges it.
-var recordKindAnchorShapes = buildRecordKindAnchorShapes()
-
-func buildRecordKindAnchorShapes() map[string]RecordKind {
-	shapes := make(map[string]RecordKind)
-	record := func(profile recordKindProfile) {
-		if profile.Anchor == "" {
-			return
-		}
-		shapes[profile.Anchor] = RecordKind{
-			Status:  profile.Status,
-			Preview: profile.Preview,
-			Payload: profile.Payload,
-			Reason:  profile.Reason,
-		}
-	}
-	for _, profile := range recordKindOutcomeProfiles {
-		record(profile)
-	}
-	record(structuralRecordKindProfile())
-	record(piCarrierProfile(recordKindProfile{}))
-	record(codexNativeItemProfile(recordKindProfile{}))
-	record(codexMediaProfile(recordKindProfile{}))
-	record(codexDiagnosticProfile(recordKindProfile{}))
-	return shapes
-}
-
-// recordKindShapeMatches reports whether a lowered row carries exactly the shape
-// its shared anchor is defined to carry.
-func recordKindShapeMatches(kind, shape RecordKind) bool {
-	return kind.Status == shape.Status && kind.Preview == shape.Preview && kind.Payload == shape.Payload && kind.Reason == shape.Reason
-}
-
 var recordKindOutcomeProfiles = map[indexformat.Outcome]recordKindProfile{
 	indexformat.OutcomeText: {
 		Anchor: "text", Outcome: indexformat.OutcomeText,
@@ -133,6 +95,44 @@ func structuralRecordKindProfile() recordKindProfile {
 		Status: RecordKindRepresented, Preview: RecordKindPreviewNo, Payload: "state on owning entry; no independent row",
 		EntryMode: RecordKindEntryModeNone,
 	}
+}
+
+// recordKindAnchorShapes maps each shared generated-YAML anchor to the stored
+// shape it always carries. The table is built from the same profiles that lower
+// the rows, so it cannot drift from them. The generator declares an anchor on
+// the first row that matches the anchor's shape and writes a row overriding any
+// part of that shape in full: an anchor declared on an overriding row would
+// silently retag every later row of the same harness that merges it.
+var recordKindAnchorShapes = buildRecordKindAnchorShapes()
+
+func buildRecordKindAnchorShapes() map[string]RecordKind {
+	shapes := make(map[string]RecordKind)
+	record := func(profile recordKindProfile) {
+		if profile.Anchor == "" {
+			return
+		}
+		shapes[profile.Anchor] = RecordKind{
+			Status:  profile.Status,
+			Preview: profile.Preview,
+			Payload: profile.Payload,
+			Reason:  profile.Reason,
+		}
+	}
+	for _, profile := range recordKindOutcomeProfiles {
+		record(profile)
+	}
+	record(structuralRecordKindProfile())
+	record(piCarrierProfile(recordKindProfile{}))
+	record(codexNativeItemProfile(recordKindProfile{}))
+	record(codexMediaProfile(recordKindProfile{}))
+	record(codexDiagnosticProfile(recordKindProfile{}))
+	return shapes
+}
+
+// recordKindShapeMatches reports whether a lowered row carries exactly the shape
+// its shared anchor is defined to carry.
+func recordKindShapeMatches(kind, shape RecordKind) bool {
+	return kind.Status == shape.Status && kind.Preview == shape.Preview && kind.Payload == shape.Payload && kind.Reason == shape.Reason
 }
 
 func lowerRecordKindRule(rule recordKindRule) RecordKind {
