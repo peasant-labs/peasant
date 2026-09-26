@@ -146,6 +146,7 @@ func validateMigrationSlots(migrations []string, rows []migrationSlotFixture, re
 }
 
 func TestLoadMigrationSlotFixturesRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	fixtureData := append(append([]byte{}, migrationSlotsYAML...), []byte("\n---\nunknown: true\n")...)
 	if _, _, err := loadMigrationSlotFixtures(fixtureData, migrationSlotsManifestYAML); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
 		t.Fatalf("trailing migration-slot fixture document must be rejected: %v", err)
@@ -157,6 +158,7 @@ func TestLoadMigrationSlotFixturesRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestMigrationSlotIdentity(t *testing.T) {
+	t.Parallel()
 	fixtures, manifest, err := LoadMigrationSlotFixtures()
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +169,7 @@ func TestMigrationSlotIdentity(t *testing.T) {
 }
 
 func TestMigrationSlotAdjacentSwaps(t *testing.T) {
+	t.Parallel()
 	fixtures, manifest, err := LoadMigrationSlotFixtures()
 	if err != nil {
 		t.Fatal(err)
@@ -197,6 +200,7 @@ func TestMigrationSlotAdjacentSwaps(t *testing.T) {
 }
 
 func TestMigrationSlotGuards(t *testing.T) {
+	t.Parallel()
 	fixtures, manifest, err := LoadMigrationSlotFixtures()
 	if err != nil {
 		t.Fatal(err)

@@ -69,6 +69,7 @@ func decodeV39LegacyFixtureSource(source []byte) (v39LegacyFixtureSource, error)
 // step, and this case fails the moment the builder copies every source column
 // again.
 func TestBuildV39E2EFixture_CopiesFromLatestSchemaSource(t *testing.T) {
+	t.Parallel()
 	fixture, err := decodeV39LegacyFixtureSource(v39LegacyFixtureSourceBytes)
 	if err != nil {
 		t.Fatal(err)
