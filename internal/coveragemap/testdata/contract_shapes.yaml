@@ -1,0 +1,45 @@
+# Frozen shapes for the consolidation coverage map and its inventory.
+#
+# The destination enum and the two document shapes are what the downstream
+# relocation slices append to and what the coverage-map guard validates. See
+# internal/coveragemap/coveragemap.go for the re-freeze rule.
+required_names:
+  - coveragemap.Destination
+  - coveragemap.InventoryName
+  - coveragemap.Inventory
+  - coveragemap.MapEntry
+  - coveragemap.CoverageMap
+  - coveragemap.AllDestinationKinds
+
+shapes:
+  - name: coveragemap.Destination
+    fields:
+      - { name: Kind, type: coveragemap.DestinationKind }
+      - { name: Ref,  type: string }
+
+  - name: coveragemap.InventoryName
+    fields:
+      - { name: Name,  type: string, yaml: name }
+      - { name: Kind,  type: string, yaml: kind }
+      - { name: Where, type: string, yaml: where }
+
+  - name: coveragemap.Inventory
+    fields:
+      - { name: Version,    type: int,                        yaml: version }
+      - { name: FrozenFrom, type: string,                     yaml: frozen_from }
+      - { name: Names,      type: "[]coveragemap.InventoryName", yaml: names }
+
+  - name: coveragemap.MapEntry
+    fields:
+      - { name: Name,        type: string,                    yaml: name }
+      - { name: Destination, type: coveragemap.Destination,   yaml: destination }
+
+  - name: coveragemap.CoverageMap
+    fields:
+      - { name: Version,   type: int,                  yaml: version }
+      - { name: Inventory, type: string,               yaml: inventory }
+      - { name: Entries,   type: "[]coveragemap.MapEntry", yaml: entries }
+
+enums:
+  - name: coveragemap.AllDestinationKinds
+    members: [retained-in-place, moved, deleted, followup]
