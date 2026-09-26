@@ -1,0 +1,14 @@
+# Called-job names for reusable workflows in other repositories.
+#
+# A job that calls a reusable workflow produces one check run per job of the
+# called workflow, named "<caller display name or job id> / <called job name or
+# id>", nested further for deeper chains. The gate workflows call the shared
+# runner router, whose job names this repository cannot read, so each call
+# declares them here. A call with no declaration fails the manifest parity test
+# instead of guessing the name, and a declaration no workflow uses fails too.
+#
+# The key is the exact `uses` value, including the pinned tag, so the names
+# stay fixed for the immutable ref.
+calls:
+  peasant-labs/infra/.github/workflows/runner-router.yml@runner-router-v1:
+    - pick

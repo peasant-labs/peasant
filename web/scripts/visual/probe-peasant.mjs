@@ -18,6 +18,9 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 
 const CHROME = process.env.CHROME_PATH
 const URL = process.env.PEASANT_URL || 'http://localhost:3000/dev/visual-harness'
+// The app mounts a dev-only inspect + feedback tool; the probe holds it off with the same
+// ?fb=off switch the capture scripts use, so element measurements are not skewed by it.
+const feedbackOff = (url) => url + (url.includes('?') ? '&' : '?') + 'fb=off'
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,
@@ -29,7 +32,7 @@ await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduc
 const errs = []
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|hydrat/.test(m.text())) errs.push(m.text()) })
 page.on('pageerror', (e) => errs.push('pageerr: ' + e.message))
-await page.goto(URL, { waitUntil: 'networkidle0' })
+await page.goto(feedbackOff(URL), { waitUntil: 'networkidle0' })
 await new Promise((r) => setTimeout(r, 1200))
 
 const report = await page.evaluate(() => {

@@ -1,0 +1,98 @@
+# Snapshot hydration oracle for the durable detail path.
+#
+# Each case builds a captured V2 ReadSnapshot (main plus earlier partitions with
+# a content map of managed blobs) and drives it through the real production
+# boundary SnapshotToDetailValidated. Blobs carry the FULL text; entries carry
+# only refs before hydration, so the test proves full arguments/results arrive
+# BEFORE folding and survive to the wire payload.
+#
+# The section4_exact_layout case mirrors the ratified projected block layout:
+# one uncertain earlier block plus five main records from one qualifying
+# submission, with a folded tool whose call and result refs stay distinct.
+cases:
+  - name: section4_exact_layout
+    harness: codex
+    purpose: interaction
+    inputSubmissionCount: 1
+    turnCount: 5
+    earlier:
+      - state: uncertain_migrated
+        entries:
+          - {index: 0, role: user, entryType: text, ref: e_old, content: "unique old child question"}
+    main:
+      - {index: 0, role: user, entryType: text, ref: e_u1, submission: s_u1, origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, modality: text, content: "fix parser"}
+      - {index: 1, role: system, entryType: text, ref: e_ctx1, content: "injected AGENTS content"}
+      - {index: 2, role: user, entryType: text, ref: e_media1, submission: s_u1, origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, modality: media, content: "media display"}
+      - {index: 3, role: assistant, entryType: text, ref: e_a1, content: "I will inspect."}
+      - {index: 4, role: assistant, entryType: thinking, ref: e_reason1, content: "I will inspect."}
+      - {index: 5, role: assistant, depth: 1, parentIndex: 3, entryType: tool_use, ref: e_call1, toolCallId: call-section4, toolName: Search, content: "rg parser"}
+      - {index: 6, role: tool, depth: 1, parentIndex: 3, entryType: tool_result, ref: e_result1, toolCallId: call-section4, content: "parser.go:12 plus fixture result"}
+    expectedMainIndices: [0, 1, 2, 3, 4]
+    expectedFoldedTool: {parent: 3, call: e_call1, result: e_result1, arguments: "rg parser", resultText: "parser.go:12 plus fixture result"}
+    expectedEarlierCounts: [1]
+    expectedInputSubmissionCount: 1
+    expectedTurnCount: 5
+    expectedTurnContents: {0: "fix parser", 1: "injected AGENTS content", 2: "media display", 3: "I will inspect.", 4: "I will inspect."}
+    expectedTurnEntryTypes: {0: text, 1: text, 2: text, 3: text, 4: thinking}
+    expectedTurnSubmissions: {0: s_u1, 2: s_u1}
+    expectedEarlierContents: ["unique old child question"]
+
+  - name: long_tool_result_survives_hydration
+    harness: codex
+    purpose: interaction
+    inputSubmissionCount: 1
+    turnCount: 2
+    main:
+      - {index: 0, role: user, entryType: text, ref: e_long_u, submission: s_long, origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, modality: text, content: "show the log"}
+      - {index: 1, role: assistant, entryType: text, ref: e_long_a, content: "here is the log"}
+      - {index: 2, role: assistant, depth: 1, parentIndex: 1, entryType: tool_use, ref: e_long_call, toolCallId: call-long, toolName: Bash, content: "tail log"}
+      - {index: 3, role: tool, depth: 1, parentIndex: 1, entryType: tool_result, ref: e_long_result, toolCallId: call-long, contentSeed: "0123456789abcdef", contentRepeat: 160}
+    expectedMainIndices: [0, 1]
+    expectedFoldedTool: {parent: 1, call: e_long_call, result: e_long_result}
+    expectedLongResultBytes: 2560
+    expectedInputSubmissionCount: 1
+    expectedTurnCount: 2
+
+  - name: main_earlier_separate_identities
+    harness: opencode
+    purpose: interaction
+    inputSubmissionCount: 1
+    turnCount: 1
+    earlier:
+      - state: uncertain_migrated
+        entries:
+          - {index: 0, role: user, entryType: text, ref: e_earlier_same, content: "same input"}
+    main:
+      - {index: 0, role: user, entryType: text, ref: e_main_same, submission: s_same, origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, modality: text, content: "same input"}
+    expectedMainIndices: [0]
+    expectedEarlierCounts: [1]
+    expectedInputSubmissionCount: 1
+    expectedTurnCount: 1
+
+  - name: corrupt_blob_fails_detail
+    harness: codex
+    purpose: interaction
+    inputSubmissionCount: 1
+    turnCount: 1
+    corruptRef: e_broken_result
+    main:
+      - {index: 0, role: user, entryType: text, ref: e_broken_u, submission: s_broken, origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, modality: text, content: "fix parser"}
+      - {index: 1, role: assistant, entryType: text, ref: e_broken_a, content: "on it"}
+      - {index: 2, role: assistant, depth: 1, parentIndex: 1, entryType: tool_use, ref: e_broken_call, toolCallId: call-broken, toolName: Search, content: "rg parser"}
+      - {index: 3, role: tool, depth: 1, parentIndex: 1, entryType: tool_result, ref: e_broken_result, toolCallId: call-broken, content: "parser.go:12"}
+    expectError: true
+
+  - name: missing_content_record_fails_detail
+    harness: codex
+    purpose: interaction
+    inputSubmissionCount: 1
+    turnCount: 1
+    dropContentRef: e_dropped
+    main:
+      - {index: 0, role: user, entryType: text, ref: e_dropped, submission: s_dropped, origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, modality: text, content: "fix parser"}
+    expectError: true
+
+  - name: legacy_snapshot_reports_legacy_path
+    harness: codex
+    legacy: true
+    expectLegacy: true

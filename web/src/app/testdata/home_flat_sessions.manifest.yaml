@@ -1,0 +1,9 @@
+expectedCount: 2
+requiredNames:
+  - cross-project-filter-and-top-level-paging
+  - harness-filter-narrows-the-same-set
+expectedLoaderMutationCount: 3
+loaderMutations:
+  - {name: flat sessions count drift is rejected, target: manifest, find: "expectedCount: 2\nrequiredNames:", replace: "expectedCount: 1\nrequiredNames:", expectedError: exactly once}
+  - {name: flat sessions duplicate case names are rejected, target: cases, find: "  - name: harness-filter-narrows-the-same-set\n", replace: "  - name: cross-project-filter-and-top-level-paging\n", expectedError: duplicates}
+  - {name: flat sessions missing projection is rejected, target: cases, find: "    expectedFilteredCount: 30\n", replace: "    expectedFilteredRenamed: 30\n", expectedError: unknown fields}

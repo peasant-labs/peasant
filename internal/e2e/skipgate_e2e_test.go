@@ -44,8 +44,13 @@ import (
 )
 
 const (
-	postgresImage = "docker.io/library/postgres:16-alpine"
-	minioImage    = "docker.io/minio/minio:latest"
+	postgresImage = "quay.io/peasant-labs/postgres:16-alpine"
+	// docker.io/minio/minio no longer serves a pullable image (manifest
+	// requests are denied), so pull from Quay by digest. The digest is the
+	// multi-arch (arm64/amd64) manifest list that `quay.io/minio/minio:latest`
+	// resolved to on 2026-09-14 (RELEASE.2025-09-07T16-13-09Z) and matches
+	// the pin in village's backend-tests workflow.
+	minioImage = "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
 
 	pgUser, pgPassword, pgDatabase = "peasant", "peasant", "peasant"
 
@@ -575,7 +580,9 @@ func truncateVillageDatabase(t *testing.T, db *sql.DB) {
 				'users', 'groups', 'group_members', 'transcripts', 'tags',
 				'transcript_tags', 'transcript_shares', 'api_keys',
 				'cli_auth_sessions', 'user_github_orgs', 'attestations',
-				'annotations', 'transcript_commits', 'transcript_associations', 'github_app_installations',
+				'annotations', 'transcript_commits', 'transcript_associations',
+				'github_app_installations', 'github_webhook_deliveries',
+				'pull_request_attachments', 'pull_request_attachment_transcripts',
 				'collective_repositories', 'repository_commits',
 				'transcript_governance_events_audit',
 				'owner_overrides', 'transcript_share_attempts'

@@ -1,0 +1,24 @@
+requiredNames:
+  - generation-snapshot-equal
+  - legacy-snapshot-with-source
+  - session-id-mismatch
+  - harness-mismatch
+  - turn-count-mismatch
+  - input-count-absent-versus-zero-mismatch
+  - input-count-zero-versus-absent-mismatch
+  - root-session-id-mismatch
+  - purpose-mismatch
+  - relationships-mismatch
+  - v2-snapshot-with-legacy-source
+  - v1-snapshot-with-generation-partitions
+  - v2-snapshot-empty-generation-id
+  - v2-snapshot-invalid-completeness
+  - v1-snapshot-missing-legacy-source
+  - v2-snapshot-content-ref-outside-partitions
+  - v2-snapshot-title-ref-outside-main
+  - invalid-index-version
+  - v2-snapshot-main-entry-invalid-role
+  - v2-snapshot-earlier-entry-invalid-role
+  - v2-snapshot-duplicate-ref-across-partitions
+  - v2-snapshot-complete-absent-count-rejected
+  - v2-snapshot-incomplete-new-with-count-rejected

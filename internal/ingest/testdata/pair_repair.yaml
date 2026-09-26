@@ -51,11 +51,14 @@ cases:
     discovered: false
     wantRepaired: true
   # A transcript that cannot be READ is a fault to restore, not damage to
-  # overwrite: the pair and the stale state must survive untouched.
+  # overwrite: the pair and the stale state must survive untouched. The row is
+  # seeded captured: a pre-capture row is read from native input regardless,
+  # because only that read can capture it.
   - name: ordinary-transcript-read-fault-not-repaired
     pairState: damaged
     discovered: true
     transcriptReadFault: true
+    capturedSeed: true
     wantRepaired: false
   - name: reindex-missing-metadata-repairs
     pairState: missing-metadata

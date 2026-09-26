@@ -7,7 +7,8 @@ import { SearchIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { visibleNavSections, isSectionVisible } from '@/lib/nav/sections';
 import { useServerCapabilities } from '@/contexts/ServerCapabilitiesContext';
-import { fetchProjectSummaries, fetchSearch } from '@/lib/api/map';
+import { fetchProjectSummaries } from '@/lib/api/map';
+import { fetchGroupedSearchMatches } from '@/lib/api/grouped';
 import { fetchDiscovery, requireDiscoveryItem, type DiscoveryItem } from '@/lib/api/discovery';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
@@ -165,10 +166,10 @@ export function CommandPalette() {
     }
     let cancelled = false;
     const handle = setTimeout(() => {
-      Promise.all([fetchSearch(q, 20), fetchDiscovery()])
-        .then(([search, discovery]) => {
+      Promise.all([fetchGroupedSearchMatches(q, 20), fetchDiscovery()])
+        .then(([results, discovery]) => {
           if (!cancelled) {
-            setMessages(annotateSearchResults(search.results, discovery));
+            setMessages(annotateSearchResults(results, discovery));
             setSearchError(null);
           }
         })

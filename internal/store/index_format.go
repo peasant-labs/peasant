@@ -81,6 +81,17 @@ func (s *Store) SupportsIndexFormat(version int) bool {
 	return supported
 }
 
+// targetVersionRegistry returns the harness targets this store's capability
+// supports. A store that can persist and read a managed generation reports the
+// native repair targets; every other store reports the retained baseline, so an
+// entry-only caller's safety ceiling never exceeds what this build can store.
+func (s *Store) targetVersionRegistry() map[ingest.Harness]ingest.HarvesterVersions {
+	if s.SupportsIndexFormat(2) && s.GenerationSnapshotsSupported() {
+		return ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
+	}
+	return ingest.HarvesterVersionRegistry
+}
+
 func nilIndexValue(value any) bool {
 	if value == nil {
 		return true
@@ -214,6 +225,16 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	if err := format.Validate(write.Result); err != nil {
 		return nil, nil, fmt.Errorf("store: validate index result for %s before replacement: %w", write.SessionID, err)
 	}
+	// An incomplete managed generation never carries a successful producer
+	// stamp: positive caller-supplied indexer revisions remain available only
+	// to complete candidates. Incomplete writes leave success and indexed-at
+	// unset so maintenance stays required. Both V2 spellings are guarded; a
+	// nil *V2 carries no generation and is not a managed write.
+	if v2, ok := asV2Value(write.Result); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+		if write.IndexerVersion > 0 || write.IndexedAtMs != 0 || write.IndexedInputHash != nil {
+			return nil, nil, fmt.Errorf("store: incomplete generation for session %s claims producer revision %d; replacement was refused and the prior generation is preserved; incomplete_new leaves success and indexed-at unset", write.SessionID, write.IndexerVersion)
+		}
+	}
 	state, err := readIndexStateOnConn(conn, write.SessionID)
 	if err != nil {
 		return nil, nil, err
@@ -256,7 +277,7 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	if producer == 0 {
 		// Legacy entry-only callers do not claim a parser run. The current
 		// harness target is only a safety ceiling, never a provenance stamp.
-		target, registered := ingest.HarvesterVersionRegistry[state.Harness]
+		target, registered := s.targetVersionRegistry()[state.Harness]
 		if !registered {
 			return nil, nil, fmt.Errorf("store: session %s harness %q has no current indexer; entry-only replacement was refused; register a compatible indexer before retrying", write.SessionID, state.Harness)
 		}

@@ -1,0 +1,31 @@
+expectedCount: 19
+requiredNames:
+  - first-page-of-many
+  - middle-page
+  - last-partial-page
+  - exact-multiple-final-page
+  - clamped-past-last-page
+  - empty-scope-window
+  - single-short-page
+  - page-size-one
+  - first-page-default-limit
+  - first-page-custom-limit
+  - goto-next-page
+  - goto-page-preserves-limit-and-total
+  - with-total-records-served-page
+  - with-total-follows-server-lower-page
+  - window-rejects-zero-page
+  - window-rejects-zero-limit
+  - window-rejects-fractional-page
+  - goto-page-rejects-nonexistent-page
+  - first-page-rejects-zero-limit
+requiredOperations:
+  - window
+  - firstPage
+  - gotoPage
+  - withTotal
+expectedLoaderMutationCount: 3
+loaderMutations:
+  - {name: paging count drift is rejected, target: manifest, find: "expectedCount: 19\nrequiredNames:", replace: "expectedCount: 18\nrequiredNames:", expectedError: independent manifest}
+  - {name: paging duplicate case names are rejected, target: cases, find: "  - name: middle-page\n    operation: window", replace: "  - name: first-page-of-many\n    operation: window", expectedError: duplicates}
+  - {name: paging missing required case is rejected, target: manifest, find: "  - single-short-page\n", replace: "  - short-page-renamed\n", expectedError: required case}

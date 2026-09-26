@@ -1,0 +1,207 @@
+# Startup cleanup for the copied build-topology packages.
+#
+# The build-topology guards copy the ingest package into direct child
+# directories named `.sqlite-topology-*` and remove each one when its case ends.
+# A killed test process skips that removal and leaves compilable Go inside
+# internal/ingest. Before its first case, each guard now takes exclusive
+# ownership of the source directory, removes every leftover direct child
+# directory with the owned prefix, and only then lists the production files.
+#
+# Every case seeds a private temporary root. Entry paths are relative to that
+# root. `kind` is one of file, directory or symlink; a symlink `target` is
+# relative to the link's own directory and must stay inside the root.
+# `expected_absent` names entries the preparation removes; every other seeded
+# entry must survive with its type and content or link target unchanged.
+# `expected_inventory` lists the basenames of the production files the
+# preparation returns.
+#
+# Actions:
+#   prepare                     prepare once and release.
+#   prepare-again-after-release prepare, release, and prepare the same root again.
+#   busy-root                   a live owner holds the root; a competing
+#                               preparation fails and deletes nothing; after the
+#                               owner releases, a retry sweeps and succeeds.
+#   missing-root                prepare a root that does not exist.
+#   release-twice               release twice, take a new owner, call the old
+#                               release again, and prove the new owner still holds
+#                               the root.
+#   inventory-failure           prepare a root without production Go, then add
+#                               `repair_entries` and prepare again.
+#   release-close-failure       release a descriptor that is already closed.
+#   unsupported-platform        runs only where no safe directory lock exists:
+#                               preparation refuses before it touches anything.
+#
+# Supported platforms run every case except unsupported-platform; unsupported
+# platforms run only that case. The manifest is checked by name on every
+# platform.
+required_cases:
+  - removes-owned-directory-with-go
+  - removes-every-owned-directory
+  - preserves-unrelated-and-nested-directories
+  - preserves-matching-regular-file
+  - preserves-direct-symlink-and-target
+  - removes-contained-link-not-target
+  - no-leftovers-is-safe
+  - busy-root-preserves-live-package
+  - missing-source-root-fails
+  - release-is-idempotent
+  - inventory-failure-releases-ownership
+  - release-close-failure-is-reported
+  - unsupported-platform-preserves-leftover
+
+cases:
+  - name: removes-owned-directory-with-go
+    action: prepare
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: .sqlite-topology-1234, kind: directory}
+      - {path: .sqlite-topology-1234/opencode.go, kind: file, content: "package ingest\n"}
+      - {path: .sqlite-topology-1234/private_execution.go, kind: file, content: "package ingest\n\nfunc leftover() {}\n"}
+    expected_absent:
+      - .sqlite-topology-1234
+    expected_inventory:
+      - fixture.go
+
+  - name: removes-every-owned-directory
+    action: prepare
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: .sqlite-topology-first, kind: directory}
+      - {path: .sqlite-topology-first/opencode.go, kind: file, content: "package ingest\n"}
+      - {path: .sqlite-topology-second, kind: directory}
+      - {path: .sqlite-topology-second/opencode.go, kind: file, content: "package ingest\n"}
+      - {path: .sqlite-topology-third, kind: directory}
+    expected_absent:
+      - .sqlite-topology-first
+      - .sqlite-topology-second
+      - .sqlite-topology-third
+    expected_inventory:
+      - fixture.go
+
+  - name: preserves-unrelated-and-nested-directories
+    action: prepare
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: .sqlite-topology, kind: directory}
+      - {path: .sqlite-topology/keep.go, kind: file, content: "package nearmiss\n"}
+      - {path: .sqlite-topologyx, kind: directory}
+      - {path: .sqlite-topologyx/keep.go, kind: file, content: "package nearmiss\n"}
+      - {path: sqlite-topology-visible, kind: directory}
+      - {path: sqlite-topology-visible/keep.go, kind: file, content: "package nearmiss\n"}
+      - {path: testdata, kind: directory}
+      - {path: testdata/.sqlite-topology-nested, kind: directory}
+      - {path: testdata/.sqlite-topology-nested/keep.go, kind: file, content: "package nested\n"}
+      - {path: .sqlite-topology-owned, kind: directory}
+      - {path: .sqlite-topology-owned/opencode.go, kind: file, content: "package ingest\n"}
+    expected_absent:
+      - .sqlite-topology-owned
+    expected_inventory:
+      - fixture.go
+
+  - name: preserves-matching-regular-file
+    action: prepare
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: .sqlite-topology-notes, kind: file, content: "a regular file with the owned prefix is not a copied package\n"}
+    expected_inventory:
+      - fixture.go
+
+  - name: preserves-direct-symlink-and-target
+    action: prepare
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: sentinel, kind: directory}
+      - {path: sentinel/keep.go, kind: file, content: "package sentinel\n"}
+      - {path: .sqlite-topology-link, kind: symlink, target: sentinel}
+    expected_inventory:
+      - fixture.go
+
+  - name: removes-contained-link-not-target
+    action: prepare
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: sentinel, kind: directory}
+      - {path: sentinel/keep.go, kind: file, content: "package sentinel\n"}
+      - {path: .sqlite-topology-owned, kind: directory}
+      - {path: .sqlite-topology-owned/opencode.go, kind: file, content: "package ingest\n"}
+      - {path: .sqlite-topology-owned/sentinel-link, kind: symlink, target: ../sentinel}
+    expected_absent:
+      - .sqlite-topology-owned
+    expected_inventory:
+      - fixture.go
+
+  - name: no-leftovers-is-safe
+    action: prepare-again-after-release
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: second.go, kind: file, content: "package topologyfixture\n"}
+      - {path: fixture_test.go, kind: file, content: "package topologyfixture\n"}
+    expected_inventory:
+      - fixture.go
+      - second.go
+
+  - name: busy-root-preserves-live-package
+    action: busy-root
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: .sqlite-topology-live, kind: directory}
+      - {path: .sqlite-topology-live/opencode.go, kind: file, content: "package ingest\n"}
+    expected_absent:
+      - .sqlite-topology-live
+    expected_inventory:
+      - fixture.go
+    error_contains:
+      - exclusive startup ownership is busy because another test run holds this directory
+      - no sweep or case creation was performed
+      - stop the overlapping run or run tests in a separate worktree, then retry
+
+  - name: missing-source-root-fails
+    action: missing-root
+    root: missing-source
+    error_contains:
+      - open the source directory
+      - no such file or directory
+      - no sweep or case creation was performed
+
+  - name: release-is-idempotent
+    action: release-twice
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+    expected_inventory:
+      - fixture.go
+    error_contains:
+      - exclusive startup ownership is busy because another test run holds this directory
+
+  - name: inventory-failure-releases-ownership
+    action: inventory-failure
+    entries:
+      - {path: fixture_test.go, kind: file, content: "package topologyfixture\n"}
+    repair_entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+    expected_inventory:
+      - fixture.go
+    error_contains:
+      - list the production files after the leftover sweep
+      - no regular non-test Go files exist
+
+  - name: release-close-failure-is-reported
+    action: release-close-failure
+    entries:
+      - {path: owned-descriptor, kind: file, content: "a real file whose descriptor is closed before release\n"}
+    release_file: owned-descriptor
+    error_contains:
+      - close its directory descriptor
+      - file already closed
+      - cleanup cannot be certified
+      - end this isolated test process, then retry from a clean supported test environment
+
+  - name: unsupported-platform-preserves-leftover
+    action: unsupported-platform
+    entries:
+      - {path: fixture.go, kind: file, content: "package topologyfixture\n"}
+      - {path: .sqlite-topology-stale, kind: directory}
+      - {path: .sqlite-topology-stale/opencode.go, kind: file, content: "package ingest\n"}
+    error_contains:
+      - has no safe exclusive directory lock
+      - no files were opened, read, swept or created
+      - run the topology tests in a Linux or macOS checkout or container

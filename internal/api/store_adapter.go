@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -16,6 +17,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
+
+// ErrSessionNotFound reports that a validated session identifier names no
+// stored session. Callers map it to an honest not-found response rather than a
+// server error; it never means the caller lacked permission.
+var ErrSessionNotFound = errors.New("session not found")
 
 // displayProjectName prefers the row's git remote (formatted "host:owner/repo"
 // by projectlabel) over its already-coalesced canonical-cwd-or-hash value, so
@@ -160,10 +166,12 @@ func (p *StoreDataProvider) SessionSummariesByID(ctx context.Context, ids []stri
 	if len(ids) == 0 {
 		return []SessionSummary{}, nil
 	}
-	// Read through the same stored-row query the list path uses, so both paths
-	// see one projection of a session rather than two that can disagree. The
-	// preview lookup below is already scoped to the requested identifiers.
-	rows, err := p.store.AllSessions(ctx)
+	// Resolve through one parameterized exact-ID query, bounded to the named
+	// identifiers. Link resolution must never scan or materialize the whole
+	// stored library to test at most a couple of targets; the shared
+	// summariesFromRows below keeps this path's projection identical to the
+	// list path. The preview lookup is likewise scoped to the requested IDs.
+	rows, err := p.store.SessionsByIDs(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session summaries by id: %w", err)
 	}
@@ -214,7 +222,7 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		s := SessionSummary{
 			ID:            row.SessionID,
 			Harness:       defaults.Harness(row.ModelHarness),
-			StartTime:     time.UnixMilli(row.StartMs),
+			StartTime:     time.UnixMilli(row.StartMs).UTC(),
 			DurationMins:  row.DurationMinutes,
 			TotalTokens:   row.TokensTotal,
 			TurnCount:     row.TurnCount,
@@ -340,7 +348,7 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		return nil, fmt.Errorf("store adapter: session by id: %w", err)
 	}
 	if snapshot == nil {
-		return nil, fmt.Errorf("session not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
 	}
 	detailRow := snapshot.Detail
 	s := sessionRowToSession(&detailRow.SessionRow)
@@ -361,12 +369,14 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness})
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture)})
 	if validationErr != nil {
 		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
 	s.Turns = projection.Turns
 	s.NativeMetadata = projection.NativeMetadata
+	s.RetainedUnknown = projection.RetainedUnknown
+	s.Diagnostics = projection.Diagnostics
 
 	return &s, nil
 }
@@ -382,7 +392,7 @@ func (p *StoreDataProvider) ChildSessionsForParent(ctx context.Context, parentID
 		remote := r.CanonicalRemote
 		refs[i] = ChildSessionRef{
 			ID:        r.SessionID,
-			StartTime: time.UnixMilli(r.StartMs),
+			StartTime: time.UnixMilli(r.StartMs).UTC(),
 			Project:   projectlabel.Label(remote, r.ProjectName),
 		}
 	}

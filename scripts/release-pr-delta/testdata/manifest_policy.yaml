@@ -1,0 +1,9 @@
+# The required/optional partition the workflows produce. Every child of a gate
+# must be optional here exactly when it may legitimately skip: only the rc-only
+# macOS cask install is conditional. Any other child must be required; marking
+# one optional weakens the proof without changing the child names, so this
+# fixture pins the partition by name.
+optional_children:
+  e2e: []
+  release_validate:
+    - macos cask install (rc only)

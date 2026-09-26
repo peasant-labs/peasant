@@ -108,6 +108,59 @@ func TestTopoLevels_ParentNotInBatch(t *testing.T) {
 	}
 }
 
+// TestTopoLevels_IndependentNilEdgeIsRoot proves a nil operational edge on an
+// independently admitted harness is a deliberate dispatch root. The entries
+// carry cross logical ParentUUID links whose operational cycle edge was already
+// removed, so a fallback to the logical evidence would restore the cycle and
+// make the fixed-point loop non-terminating. Both members must settle at level
+// 0.
+func TestTopoLevels_IndependentNilEdgeIsRoot(t *testing.T) {
+	aID := SessionID("88888888-8888-4838-8838-888888888888")
+	bID := SessionID("99999999-9999-4939-8939-999999999999")
+	entries := []DiffEntry{
+		{Session: DiscoveredSession{SessionID: aID, Harness: HarnessCodex, ParentUUID: &bID}},
+		{Session: DiscoveredSession{SessionID: bID, Harness: HarnessCodex, ParentUUID: &aID}},
+	}
+	levels := topoLevels(entries)
+	if len(levels) != 1 {
+		t.Fatalf("expected both independent cycle members at level 0, got %d levels", len(levels))
+	}
+	if len(levels[0]) != 2 {
+		t.Fatalf("expected 2 root entries, got %d", len(levels[0]))
+	}
+}
+
+// TestTopoLevels_LegacyLogicalFallbackPreserved proves the guard only changes
+// independently admitted harnesses: a harness that never derived an operational
+// edge keeps the legacy logical leveling.
+func TestTopoLevels_LegacyLogicalFallbackPreserved(t *testing.T) {
+	aID := SessionID("a")
+	bID := SessionID("b")
+	entries := []DiffEntry{
+		{Session: DiscoveredSession{SessionID: aID, Harness: HarnessClaudeCode}},
+		{Session: DiscoveredSession{SessionID: bID, Harness: HarnessClaudeCode, ParentUUID: &aID}},
+	}
+	levels := topoLevels(entries)
+	if len(levels) != 2 {
+		t.Fatalf("expected the legacy logical fallback to keep 2 levels, got %d", len(levels))
+	}
+}
+
+// TestTopoLevels_LegacyLogicalCycleTerminates proves the fixed-point pass bound
+// keeps a legacy harness terminating when a pathological logical cycle was
+// reintroduced by an older caller.
+func TestTopoLevels_LegacyLogicalCycleTerminates(t *testing.T) {
+	aID := SessionID("a")
+	bID := SessionID("b")
+	entries := []DiffEntry{
+		{Session: DiscoveredSession{SessionID: aID, Harness: HarnessClaudeCode, ParentUUID: &bID}},
+		{Session: DiscoveredSession{SessionID: bID, Harness: HarnessClaudeCode, ParentUUID: &aID}},
+	}
+	if levels := topoLevels(entries); len(levels) == 0 {
+		t.Fatal("expected a bounded legacy cycle leveling, got no levels")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // SessionEntryQueue — basic single-goroutine behaviour
 // ---------------------------------------------------------------------------

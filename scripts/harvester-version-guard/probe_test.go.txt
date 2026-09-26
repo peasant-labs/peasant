@@ -202,6 +202,46 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			}
 		}
 	}
+	// The shared content-capture family is the named synthetic corpus for which
+	// record kinds a strict capture represents. The probe observes its control
+	// cases here so a change to the represented vocabulary is visible to the
+	// comparison; without this the guard passed while the parser change went
+	// unobserved. A historical corpus may predate the family, so a case is
+	// observed when present and no required-name manifest is enforced.
+	var contentCapture struct {
+		Cases []struct {
+			Name      string `yaml:"name"`
+			Harness   string `yaml:"harness"`
+			Source    string `yaml:"source"`
+			Control   bool   `yaml:"control"`
+			Oversized bool   `yaml:"oversized"`
+		} `yaml:"cases"`
+	}
+	if read("internal/ingest/testdata/content_capture.yaml", &contentCapture) {
+		for _, row := range contentCapture.Cases {
+			if !row.Control {
+				continue
+			}
+			data := row.Source
+			if row.Oversized {
+				// The fixture leaves the oversized scalar as TEXT; a small
+				// stand-in of the same shape trips the payload cap.
+				encoded, err := json.Marshal(strings.Repeat("x", 9000))
+				if err != nil {
+					t.Fatal(err)
+				}
+				data = strings.ReplaceAll(data, "TEXT", string(encoded))
+			}
+			filesystem := testutil.NewMemFS()
+			write(filesystem, "/synthetic/content-capture.jsonl", data)
+			observe("capture/"+row.Name, ingest.DiscoveredSession{
+				SessionID:    testutil.TestSessionUUID,
+				Harness:      ingest.Harness(row.Harness),
+				SourcePath:   ingest.ResolvedPath("/synthetic/content-capture.jsonl"),
+				SourceFormat: ingest.SourceFormatJSONL,
+			}, filesystem)
+		}
+	}
 	var openCode struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {

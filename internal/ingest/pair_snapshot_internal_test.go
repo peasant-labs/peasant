@@ -391,7 +391,7 @@ func TestFallbackCarrySurvivesConcurrentMetadataWrite(t *testing.T) {
 		SourcePath:   ResolvedPath(filepath.Join(string(output), "native-missing.jsonl")),
 		SourceFormat: SourceFormatJSONL,
 	}
-	result := pipeline.processSession(t.Context(), DiffEntry{Session: session, Status: DiffUpdated})
+	result := pipeline.processSession(t.Context(), DiffEntry{Session: session, Status: DiffUpdated}, nil)
 	if result.result.Error != nil {
 		t.Fatalf("the fallback run failed instead of carrying its retained pair: %v", result.result.Error)
 	}

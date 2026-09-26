@@ -1,15 +1,122 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
+	"reflect"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/leading_user_messages.yaml
+var leadingUserMessagesYAML []byte
+
+type leadingUserMessagesCase struct {
+	Name      string   `yaml:"name"`
+	Cap       int      `yaml:"cap"`
+	IDs       []string `yaml:"ids"`
+	RepeatIDs int      `yaml:"repeat_ids"`
+	Sessions  []struct {
+		ID      string `yaml:"id"`
+		Entries []struct {
+			Index   int         `yaml:"index"`
+			Role    schema.Role `yaml:"role"`
+			Depth   int         `yaml:"depth"`
+			Preview *string     `yaml:"preview"`
+		} `yaml:"entries"`
+	} `yaml:"sessions"`
+	Want          map[string][]string `yaml:"want"`
+	ErrorContains string              `yaml:"error_contains"`
+}
+
+func LoadLeadingUserMessagesFixtures(t *testing.T) []leadingUserMessagesCase {
+	t.Helper()
+	var fixture struct {
+		RequiredNames []string                  `yaml:"required_names"`
+		Cases         []leadingUserMessagesCase `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(leadingUserMessagesYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		if present[tc.Name] || tc.Name == "" {
+			t.Fatalf("leading-user fixture has duplicate or empty case name %q", tc.Name)
+		}
+		present[tc.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("leading-user fixture", "case", fixture.RequiredNames, present); err != nil {
+		t.Fatal(err)
+	}
+	return fixture.Cases
+}
+
+func TestLeadingUserMessagesBulk(t *testing.T) {
+	t.Parallel()
+	for _, tc := range LoadLeadingUserMessagesFixtures(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			s := storetest.Open(t)
+			for _, session := range tc.Sessions {
+				storetest.SeedSession(t, s, session.ID)
+				var entries []schema.SessionEntry
+				for _, entry := range session.Entries {
+					entries = append(entries, schema.SessionEntry{
+						SessionID: schema.SessionID(session.ID), EntryIndex: entry.Index,
+						Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText,
+						Role: entry.Role, Depth: entry.Depth, ContentPreview: entry.Preview,
+					})
+				}
+				if len(entries) > 0 {
+					if err := s.IndexSessionEntries(ctx, schema.SessionID(session.ID), entries); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			ids := tc.IDs
+			for i := 1; i < tc.RepeatIDs; i++ {
+				ids = append(ids, tc.IDs...)
+			}
+			got, err := s.LeadingUserMessagesBulk(ctx, ids, tc.Cap)
+			if tc.ErrorContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.ErrorContains) {
+					t.Fatalf("error = %v, want %q", err, tc.ErrorContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.Want) {
+				t.Fatalf("previews = %#v, want %#v", got, tc.Want)
+			}
+			for id, previews := range got {
+				single, err := s.FirstUserMessage(ctx, id)
+				if err != nil || previews[0] != single {
+					t.Errorf("first preview for %s = %q; single = %q, error = %v", id, previews[0], single, err)
+				}
+				for _, preview := range previews {
+					if !utf8.ValidString(preview) || utf8.RuneCountInString(preview) > defaults.SessionPreviewMaxChars {
+						t.Errorf("preview is not capped rune-safe text: %q", preview)
+					}
+				}
+			}
+		})
+	}
+}
 
 // ---------------------------------------------------------------------------
 // C1: FirstUserMessageBulk — parity with per-row FirstUserMessage

@@ -152,7 +152,9 @@ func BoundServedDetail(detail *schema.SessionDetailPayload, budget ServedDocumen
 }
 
 // collectServedTextFields walks the payload once, in document order, so the
-// bound is deterministic for a given payload.
+// bound is deterministic for a given payload. Main turns come first, then each
+// earlier-history section in order, so retained history is served under the
+// same single bound application as current turns.
 func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextField {
 	fields := make([]servedTextField, 0, len(detail.Turns))
 	for turnIndex := range detail.Turns {
@@ -162,6 +164,18 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 			call := &turn.ToolCalls[callIndex]
 			fields = append(fields, servedTextField{target: &call.Arguments, original: call.Arguments, kind: ServedTextToolArguments})
 			fields = append(fields, servedTextField{target: &call.Result, original: call.Result, kind: ServedTextToolResult})
+		}
+	}
+	for sectionIndex := range detail.EarlierHistory {
+		section := &detail.EarlierHistory[sectionIndex]
+		for turnIndex := range section.Turns {
+			turn := &section.Turns[turnIndex]
+			fields = append(fields, servedTextField{target: &turn.Content, original: turn.Content, kind: ServedTextTurnContent})
+			for callIndex := range turn.ToolCalls {
+				call := &turn.ToolCalls[callIndex]
+				fields = append(fields, servedTextField{target: &call.Arguments, original: call.Arguments, kind: ServedTextToolArguments})
+				fields = append(fields, servedTextField{target: &call.Result, original: call.Result, kind: ServedTextToolResult})
+			}
 		}
 	}
 	for index := range fields {

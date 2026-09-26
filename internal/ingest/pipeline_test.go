@@ -322,6 +322,54 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestPipeline_RetainedUnknownKindsReachSummary(t *testing.T) {
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	content := []byte(`{"sessionId":"test","type":"unmapped-e2e-xyz","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}` + "\n")
+	if err := mfs.WriteFile(sourcePath, content, 0644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", sourcePath, err)
+	}
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
+	meta := makeMinimalMeta(t, testSessionID)
+
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(
+			[]ingest.DiscoveredSession{session},
+			map[ingest.SessionID]*ingest.UnifiedMetadata{
+				session.SessionID: meta,
+			},
+		),
+	}
+
+	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, nil)
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+		ingest.WithStore(fixtureStore),
+		ingest.WithMetricsStore(fixtureStore),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+	result, err := pipeline.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Unknown data is retained, not refused. Occurrences and affected sessions
+	// are separate counts, and only a committed capture may report them.
+	retained := result.Summary.RetainedUnknownKinds
+	if len(retained) != 1 {
+		t.Fatalf("RetainedUnknownKinds has %d rows, want 1: %+v", len(retained), retained)
+	}
+	row := retained[0]
+	if row.Harness != ingest.HarnessClaudeCode || row.Kind != "unmapped-e2e-xyz" || row.Occurrences != 1 || row.Sessions != 1 {
+		t.Errorf("RetainedUnknownKinds row is %+v, want claude-code/unmapped-e2e-xyz x1 occurrence in one session", row)
+	}
+}
+
 func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()

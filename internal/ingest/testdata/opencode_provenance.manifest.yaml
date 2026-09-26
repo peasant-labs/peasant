@@ -1,0 +1,10 @@
+requiredNames:
+  - opencode-current-typed-user
+  - opencode-agent-delivery
+  - opencode-unproved-child-delivery
+  - opencode-synthetic-system-skill-shell-compaction
+  - opencode-child-shell-action
+  - opencode-agent-delivered-shell-action
+  - opencode-tool-part-ids
+  - opencode-unsupported-type-unknown
+  - opencode-historical-user-and-synthetic

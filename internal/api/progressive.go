@@ -152,6 +152,18 @@ func (p *ProgressiveProvider) ChildSessionsForParent(ctx context.Context, parent
 	return prov.ChildSessionsForParent(ctx, parentID)
 }
 
+// DetailReadPayload forwards the flat local detail read to the provider that
+// backs the sessions section, so the production progressive provider serves
+// the durable snapshot boundary and resolved navigation rather than falling
+// back to the bounded SessionByID conversion.
+func (p *ProgressiveProvider) DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error) {
+	prov, err := p.getProvider(defaults.MockSections.Sessions)
+	if err != nil {
+		return nil, err
+	}
+	return SessionDetailReadForProvider(ctx, prov, id)
+}
+
 func (p *ProgressiveProvider) ProjectSummaries(ctx context.Context) (*codemap.ProjectSummariesResult, error) {
 	prov, err := p.getProvider(defaults.MockSections.Map)
 	if err != nil {
@@ -222,6 +234,40 @@ func (p *ProgressiveProvider) Search(ctx context.Context, query string, limit in
 		return nil, err
 	}
 	return prov.Search(ctx, query, limit)
+}
+
+// GroupedCandidates forwards the opt-in grouped list/search predicate to the
+// provider that backs the matching section, so a production progressive server
+// serves grouped views from the real store rather than a mock fold.
+func (p *ProgressiveProvider) GroupedCandidates(ctx context.Context, filters GroupedFilters) ([]GroupedCandidate, error) {
+	section := defaults.MockSections.Sessions
+	switch filters.Variant {
+	case GroupedRouteSessions:
+		section = defaults.MockSections.Sessions
+	case GroupedRouteSearch:
+		section = defaults.MockSections.Search
+	default:
+		return nil, fmt.Errorf("api.ProgressiveProvider.GroupedCandidates: route variant %q has no local predicate in this build: %w; the grouped list cannot be served from it; request view=grouped from a registered route", filters.Variant, errGroupedScopeNotMatched)
+	}
+	prov, err := p.getProvider(section)
+	if err != nil {
+		return nil, err
+	}
+	grouped, ok := prov.(groupedCandidateProvider)
+	if !ok {
+		return nil, fmt.Errorf("api.ProgressiveProvider.GroupedCandidates: provider %T cannot serve grouped route %q; no grouped rows were returned because that provider has no route predicate to replay; disable the mocked section or use the flat route, then retry", prov, filters.Variant)
+	}
+	return grouped.GroupedCandidates(ctx, filters)
+}
+
+// GroupedScopeRevision reports the real provider's selection revision. Mock
+// sections carry no persisted selection, so the scope refusal tracks the
+// selection that actually gates the store-backed lists.
+func (p *ProgressiveProvider) GroupedScopeRevision() string {
+	if grouped, ok := p.real.(groupedCandidateProvider); ok {
+		return grouped.GroupedScopeRevision()
+	}
+	return ""
 }
 
 // Ensure implementation of DataProvider interface.

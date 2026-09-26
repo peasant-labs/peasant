@@ -74,6 +74,25 @@ Run the ast-grep rules of the repository when you change Go types or literals:
 ast-grep scan --config sgconfig.yml .
 ```
 
+### Record-kind vocabulary
+
+- Each harness owns one co-located vocabulary declaration under `internal/ingest/*_vocabulary.go`. Those
+  declarations are the source of truth for the record and content-block kinds the parser recognizes.
+  Never hand-edit `internal/ingest/record_kinds.yaml` or `docs/record-kinds.md`; both are generated
+  output.
+- `internal/indexformat.Outcome` is the interpretation IR: text, tool call, tool result, control,
+  ignored, or opaque. Adapters declare only the outcome. The central lowering owns stored entry mode,
+  preview eligibility, payload shape, and coordinate requirements.
+- A well-formed valid kind that is absent from the vocabulary resolves to opaque retained evidence by
+  default. Malformed known data and failed retention remain validation failures. The registry is
+  reporting-only and never admits or refuses parser input.
+- Rendering is a Fairtrade consumer concern. Do not add visualization state, renderer names, or
+  viewer coverage to the registry or the harvest report.
+- Keep the exact per-adapter production-census and required-name tests green. Do not reintroduce the
+  retired AST scanner. After changing a vocabulary or its stored behavior, run `go generate
+  ./internal/ingest`, the registry/docgen tests, and bump the relevant indexer version when settled
+  sessions must be re-indexed.
+
 ## Data and contract invariants
 
 - Produce `SessionDetailPayload` through one conversion path:
@@ -175,6 +194,11 @@ the server serves the newly built assets before you trust a screenshot or a comp
   automatically or in the background. It draws only from the sessions the user recorded. Pulled
   transcripts are not re-pushable. Governance for re-sharing pulled sessions is a tracked
   follow-up.
+- The consented publication paths are the `/share` wizard, the upload hook installed by
+  `peasant village hooks install`, and attaching the prompts behind a pull request. Attaching is
+  a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+  transcripts already published. Do not add a path that publishes without one of these, and do
+  not make any of them automatic.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
   user-facing lists show only the configured selection. An explicit session selection must not
   widen visibility to the sibling sessions of its project. Apply the boundary server-side.
@@ -214,3 +238,9 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - Generate the CLI reference pages with `make docs-cli`. Do not hand-edit generated CLI pages.
 - Never put credentials, private transcript content, personal filesystem paths, or private
   project history into issues, fixtures, logs, screenshots, or documentation.
+
+## Git staging and commits
+
+- Stage intended changes with `git add -- <path>...`; inspect `git diff --cached` before committing.
+- Never use `git add .`, `git add -A`, or wildcard staging.
+- Commit with `git agent-commit -m "..."`.

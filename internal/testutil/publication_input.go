@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -13,6 +14,18 @@ import (
 )
 
 var _ ingest.PublicationInputReader = (*StubPushStore)(nil)
+
+func (s *StubPushStore) WithCommittedPublicationInput(ctx context.Context, id ingest.SessionID, fn func(ingest.PublicationInputBundle) error) error {
+	input, err := s.LoadPublicationInput(ctx, id)
+	if err != nil {
+		return err
+	}
+	return fn(input)
+}
+
+func (s *StubPushStore) ReadFullContent(context.Context, schema.SessionID, string, indexformat.ContentRecord) ([]byte, error) {
+	return nil, fmt.Errorf("stub publication store has no managed blobs")
+}
 
 func (s *StubPushStore) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (ingest.PublicationInputBundle, error) {
 	s.mu.Lock()

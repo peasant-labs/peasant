@@ -15,10 +15,12 @@ import (
 // TestCanonicalOpenCodeParentsEmittedBeforeChildren proves that discovery
 // orders a subagent after its root even when the child's raw session ID sorts
 // before the parent's. OpenCode session IDs are time-descending, so a child
-// created after its parent sorts first by raw ID. The pipeline parent gate
-// admits a subagent only after its root passed the selection filter, so a
-// child emitted first would be marked unchanged in selected mode. The mounted
-// dry run asserts both the root and the subagent are admitted.
+// created after its parent sorts first by raw ID. Parent-before-child ordering
+// keeps the subagent's DB insert behind its stored parent.
+//
+// An OpenCode child receives its own selection decision: the mounted dry run
+// admits the root and denies a subagent that fails the selection filter on its
+// own evidence, without inheriting or widening the parent decision.
 func TestCanonicalOpenCodeParentsEmittedBeforeChildren(t *testing.T) {
 	const (
 		childID  = "ses_3cd91f52effeXd3QAJ54jOyzv5" // sorts before the parent by raw ID
@@ -61,7 +63,8 @@ func TestCanonicalOpenCodeParentsEmittedBeforeChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Selected mode: admit only root sessions; subagents inherit their root.
+	// Selected mode: admit only root sessions. An OpenCode subagent is decided
+	// on its own evidence, so it is denied rather than inheriting its root.
 	selectedRoots := func(session ingest.DiscoveredSession) bool {
 		return session.ParentUUID == nil
 	}
@@ -80,7 +83,7 @@ func TestCanonicalOpenCodeParentsEmittedBeforeChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Summary.New != 2 || result.Summary.Unchanged != 0 {
-		t.Fatalf("selected-mode admission summary=%+v, want the root and its subagent both admitted (New=2, Unchanged=0)", result.Summary)
+	if result.Summary.New != 1 || result.Summary.Unchanged != 1 {
+		t.Fatalf("selected-mode admission summary=%+v, want the root admitted and the subagent denied on its own selection (New=1, Unchanged=1)", result.Summary)
 	}
 }

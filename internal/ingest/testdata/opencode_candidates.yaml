@@ -271,6 +271,10 @@ allowed_query_statements:
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 order by seq limit ?2'
   - name: current-messages-after
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
+  - name: current-messages-before
+    statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq < ?2 order by seq limit ?3'
+  - name: current-messages-bounded
+    statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 and seq < ?3 order by seq limit ?4'
   - name: legacy-message-freshness-by-session
     statement: 'select session_id, max(max(time_created, time_updated)) from message group by session_id'
   - name: legacy-part-freshness-by-session

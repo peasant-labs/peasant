@@ -225,14 +225,14 @@ func assertPiRoundTripDetail(t *testing.T, fixture piRoundTripCase, detail *sche
 	for _, record := range detail.NativeMetadata {
 		nativeID, ok := fixture.MetadataSources[record.Kind]
 		piCheck(t, ok, "unexpected metadata kind")
-		piEqual(t, ingest.PiPublicRef(fixture.SessionID, "entry", nativeID), record.Source.EntryRef)
+		piEqual(t, ingest.PiPublicRef(fixture.SessionID, "entry", nativeID), string(record.Source.EntryRef))
 		piEqual(t, ingest.PiPublicRef(fixture.SessionID, "metadata", nativeID), record.ID)
 	}
 	owners := make(map[string]schema.UsageDetail)
 	toolCount := 0
 	for _, turn := range detail.Turns {
 		if turn.Usage != nil {
-			owners[turn.Usage.SourceEntryRef] = *turn.Usage
+			owners[string(turn.Usage.SourceEntryRef)] = *turn.Usage
 			if turn.Usage.Scope == schema.UsageScopeAssistant {
 				if fixture.AssistantCost == nil {
 					piCheck(t, turn.Usage.Cost == nil, "unrecorded cost must remain absent, not a fabricated zero estimate")
@@ -259,7 +259,7 @@ func assertPiRoundTripDetail(t *testing.T, fixture piRoundTripCase, detail *sche
 			piNoError(t, json.Unmarshal([]byte(fixture.Tool.Arguments), &wantArguments))
 			piEqual(t, wantArguments, gotArguments)
 			if tool.Usage != nil {
-				owners[tool.Usage.SourceEntryRef] = *tool.Usage
+				owners[string(tool.Usage.SourceEntryRef)] = *tool.Usage
 				piEqual(t, tool.ResultEntryRef, tool.Usage.SourceEntryRef)
 			}
 		}
@@ -280,9 +280,10 @@ func piReadVillageDetail(t *testing.T, base, key, id string) *schema.SessionDeta
 	t.Helper()
 	status, raw := villageAPIRequest(t, http.MethodGet, base, "/api/v1/transcripts/"+id+"/content", key, nil)
 	piEqual(t, http.StatusOK, status, "Village content read: "+string(raw))
-	detail, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	envelope, err := schema.DecodeTranscriptContentRaw(raw)
 	piNoError(t, err)
-	return &detail
+	piCheck(t, envelope.SessionDetail != nil, "Village content read must serve the TranscriptContent envelope")
+	return envelope.SessionDetail
 }
 
 func assertPiCiphertext(t *testing.T, stack harnessStack, stored legacyStorageSnapshot, plaintext []byte) {

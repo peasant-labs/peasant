@@ -152,44 +152,20 @@ func (f summariesByIDFixture) row(t *testing.T, role string) summariesByIDRow {
 	return summariesByIDRow{}
 }
 
-func TestSessionSummariesByIDFixtureRejectsRoleDeletion(t *testing.T) {
-	t.Parallel()
-	for _, role := range requiredSessionSummariesByIDRoles {
-		t.Run(role, func(t *testing.T) {
-			mutated := bytes.Replace(sessionSummariesByIDYAML, []byte("role: "+role+"\n"), []byte("role: removed-"+role+"\n"), 1)
-			if bytes.Equal(mutated, sessionSummariesByIDYAML) {
-				t.Fatalf("role %q was not present to rename; the deletion guard cannot be trusted", role)
-			}
-			if _, err := decodeSummariesByID(mutated); err == nil || !strings.Contains(err.Error(), "missing required role") {
-				t.Fatalf("renamed-role fixture error = %v, want a missing-required-role rejection", err)
-			}
-		})
-	}
-}
-
-// TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes is the mounted
-// evidence for the two halves of the link-resolution contract:
-//
-//   - the discovery list applies BOTH scopes, so an agent-driven root and an
-//     unselected project's root are absent from it;
-//   - the by-id route applies NEITHER, so both of them resolve when a caller
-//     names them, and an identifier naming no stored session is omitted rather
-//     than failing the batch.
-//
-// The selection half rests on the rule this project already ratified for stored
-// sessions: a narrowed selection hides a session from every list, and a direct
-// link to it still resolves.
-func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
-	t.Parallel()
-	fixture := loadSummariesByID(t)
-
-	db := openTestStore(t)
-	clonePaths := make(map[string]string, len(fixture.Rows))
-	sessionIDByRole := make(map[string]string, len(fixture.Rows))
-	entries := make([]ingest.StoreEntry, 0, len(fixture.Rows))
+// seedSummariesByIDStore inserts every fixture row into db, wiring each row's
+// clone worktree, branch, origin, and (where set) parent link, then marks the
+// stored sessions indexed. It returns the session ID per role and the temp
+// clone path per clone name. Both the link-resolution evidence and the
+// child-reference regression seed from this one loop so they share the exact
+// same parent/child rows rather than duplicating seed data.
+func seedSummariesByIDStore(t *testing.T, db *store.Store, fixture summariesByIDFixture) (sessionIDByRole map[string]string, clonePaths map[string]string) {
+	t.Helper()
+	clonePaths = make(map[string]string, len(fixture.Rows))
+	sessionIDByRole = make(map[string]string, len(fixture.Rows))
 	for _, row := range fixture.Rows {
 		sessionIDByRole[row.Role] = row.SessionID
 	}
+	entries := make([]ingest.StoreEntry, 0, len(fixture.Rows))
 	for _, row := range fixture.Rows {
 		clonePath, ok := clonePaths[row.Clone]
 		if !ok {
@@ -231,6 +207,120 @@ func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
 		t.Fatalf("seed linked-session rows: %v", err)
 	}
 	api.MarkStoredSessionsIndexed(t, db)
+	return sessionIDByRole, clonePaths
+}
+
+// TestStoreDataProviderChildReferencesNormalizeStartTimeToUTC covers the
+// child-session reference construction path: the store-backed provider converts
+// each child's stored Unix-millisecond start into a ChildSessionRef.StartTime
+// the WebSocket session-detail envelope carries, and the pinned client validates
+// that value as a UTC (Z-suffixed) datetime. It runs under a forced non-UTC
+// local zone so that dropping the construction-site .UTC() surfaces here as a
+// local-offset wire string rather than staying invisible on a UTC host.
+func TestStoreDataProviderChildReferencesNormalizeStartTimeToUTC(t *testing.T) {
+	t.Parallel()
+	if api.RunInForcedNonUTCLocalZone(t, "TestStoreDataProviderChildReferencesNormalizeStartTimeToUTC") {
+		return
+	}
+	fixture := loadSummariesByID(t)
+
+	db := openTestStore(t)
+	sessionIDByRole, _ := seedSummariesByIDStore(t, db, fixture)
+
+	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	parentID := sessionIDByRole["listed-user-root"]
+	refs, err := provider.ChildSessionsForParent(context.Background(), parentID)
+	if err != nil {
+		t.Fatalf("ChildSessionsForParent(%s): %v", parentID, err)
+	}
+
+	// The two subagent rows the fixture parents under listed-user-root, and the
+	// exact UTC wire string each child's stored start must serialize to. Both
+	// children start on 2024-01-15: listed-user-subagent-row at +3m, the hidden
+	// agent-driven subagent at +4m past midnight UTC.
+	childSubagent := fixture.row(t, "listed-user-subagent-row")
+	hiddenSubagent := fixture.row(t, "hidden-agent-subagent-row")
+	wantStartMs := map[string]int64{
+		childSubagent.SessionID:  childSubagent.StartMs,
+		hiddenSubagent.SessionID: hiddenSubagent.StartMs,
+	}
+	wantStartTime := map[string]string{
+		childSubagent.SessionID:  "2024-01-15T00:03:00Z",
+		hiddenSubagent.SessionID: "2024-01-15T00:04:00Z",
+	}
+
+	// Exact child-ID membership: neither more nor fewer than the two parented
+	// rows. A by-id lookup ignores discovery scope, so the hidden agent child is
+	// present here even though it never lists.
+	gotIDs := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if gotIDs[ref.ID] {
+			t.Fatalf("child references repeated session %s", ref.ID)
+		}
+		gotIDs[ref.ID] = true
+	}
+	for id := range wantStartTime {
+		if !gotIDs[id] {
+			t.Fatalf("child references omitted %s; got %v, want exactly %v", id, gotIDs, wantStartTime)
+		}
+		delete(gotIDs, id)
+	}
+	for id := range gotIDs {
+		t.Fatalf("child references returned unexpected session %s; want exactly the two parented subagent rows", id)
+	}
+
+	for _, ref := range refs {
+		if ref.StartTime.Location() != time.UTC {
+			t.Errorf("child %s StartTime location = %v, want UTC", ref.ID, ref.StartTime.Location())
+		}
+		if want := time.UnixMilli(wantStartMs[ref.ID]); !ref.StartTime.Equal(want) {
+			t.Errorf("child %s StartTime instant = %v, want %v (seeded %d ms)", ref.ID, ref.StartTime.UTC(), want.UTC(), wantStartMs[ref.ID])
+		}
+		// Marshal the real wire type and pin the exact serialized startTime the
+		// child-reference contract requires.
+		raw, err := json.Marshal(ref)
+		if err != nil {
+			t.Fatalf("marshal child ref %s: %v", ref.ID, err)
+		}
+		if want := `"startTime":"` + wantStartTime[ref.ID] + `"`; !strings.Contains(string(raw), want) {
+			t.Errorf("child %s wire form = %s, want it to contain %s", ref.ID, raw, want)
+		}
+	}
+}
+
+func TestSessionSummariesByIDFixtureRejectsRoleDeletion(t *testing.T) {
+	t.Parallel()
+	for _, role := range requiredSessionSummariesByIDRoles {
+		t.Run(role, func(t *testing.T) {
+			mutated := bytes.Replace(sessionSummariesByIDYAML, []byte("role: "+role+"\n"), []byte("role: removed-"+role+"\n"), 1)
+			if bytes.Equal(mutated, sessionSummariesByIDYAML) {
+				t.Fatalf("role %q was not present to rename; the deletion guard cannot be trusted", role)
+			}
+			if _, err := decodeSummariesByID(mutated); err == nil || !strings.Contains(err.Error(), "missing required role") {
+				t.Fatalf("renamed-role fixture error = %v, want a missing-required-role rejection", err)
+			}
+		})
+	}
+}
+
+// TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes is the mounted
+// evidence for the two halves of the link-resolution contract:
+//
+//   - the discovery list applies BOTH scopes, so an agent-driven root and an
+//     unselected project's root are absent from it;
+//   - the by-id route applies NEITHER, so both of them resolve when a caller
+//     names them, and an identifier naming no stored session is omitted rather
+//     than failing the batch.
+//
+// The selection half rests on the rule this project already ratified for stored
+// sessions: a narrowed selection hides a session from every list, and a direct
+// link to it still resolves.
+func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
+	t.Parallel()
+	fixture := loadSummariesByID(t)
+
+	db := openTestStore(t)
+	_, clonePaths := seedSummariesByIDStore(t, db, fixture)
 
 	projects := make([]config.ProjectSelection, 0, len(clonePaths))
 	seenClone := make(map[string]bool, len(clonePaths))

@@ -43,6 +43,41 @@ requireExactRequiredFields(validFixture, ['search', 'discovery'], 'search discov
 const invalidFixtures = fixture.invalid as Array<Record<string, unknown>>;
 if (invalidFixtures.length !== 4) throw new Error(`search discovery fixture must contain exactly 4 invalid rows, got ${invalidFixtures.length}`);
 
+/**
+ * Wrap the fixture's flat search results in the opt-in grouped envelope the
+ * production palette reads (`view=grouped`). Each flat hit becomes the owner
+ * transcript's own match, which is exactly how the grouped route carries an
+ * ordinary result. Discovery validation is what the invalid cases exercise.
+ */
+function groupedEnvelope(search: Record<string, unknown>) {
+  const results = Array.isArray(search.results) ? (search.results as Array<Record<string, unknown>>) : [];
+  return {
+    items: results.map((result) => ({
+      kind: 'transcript',
+      transcript: {
+        session: {
+          id: result.sessionId,
+          harness: 'codex',
+          startTime: '2026-06-01T09:00:00Z',
+          durationMins: 1,
+          turnCount: 1,
+          totalTokens: 1,
+          toolCallCount: 0,
+          project: result.project,
+          projectHash: result.projectHash,
+        },
+        matches: [result],
+      },
+      helperGroups: [],
+    })),
+    page: 1,
+    limit: 20,
+    totalItems: results.length,
+    ordinarySessionTotal: results.length,
+    helperThreadTotal: 0,
+  };
+}
+
 const fetchMock = vi.fn();
 vi.stubGlobal('fetch', fetchMock);
 
@@ -54,7 +89,7 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (input: string | URL) => {
     const url = new URL(String(input), 'http://localhost');
     if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
-    if (url.pathname === '/api/v1/search') return Response.json({ query: url.searchParams.get('q'), results: [] });
+    if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope({ results: [] }));
     if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
     throw new Error(`unexpected test request ${url.pathname}`);
   });
@@ -157,7 +192,7 @@ describe('CommandPalette', () => {
         if (projectCalls === 1) throw new Error('database unavailable');
         return Response.json({ projects: [{ projectHash: PROJECT_HASH, project: '/work/alpha-project', sessions: 3, recordedFiles: 1, totalFiles: 2, openChanges: 1 }] });
       }
-      if (url.pathname === '/api/v1/search') return Response.json({ query: url.searchParams.get('q'), results: [] });
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope({ results: [] }));
       if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
       throw new Error(`unexpected test request ${url.pathname}`);
     });
@@ -186,7 +221,7 @@ describe('CommandPalette', () => {
     const discovery = validFixture.discovery;
     fetchMock.mockImplementation(async (input: string | URL) => {
       const url = new URL(String(input), 'http://localhost');
-      if (url.pathname === '/api/v1/search') return Response.json(valid);
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
       if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
@@ -195,7 +230,7 @@ describe('CommandPalette', () => {
     const input = screen.getByRole('combobox');
     fireEvent.change(input, { target: { value: 'pipeline' } });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=pipeline&limit=20')));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=pipeline&view=grouped&limit=20')));
     const hit = await screen.findByText('fix the [pipeline] retry');
     expect(screen.getAllByText('Messages')).toHaveLength(2);
     expect(screen.getAllByTestId('search-annotation')).toHaveLength(2);
@@ -212,7 +247,7 @@ describe('CommandPalette', () => {
     const valid = validFixture.search as Record<string, unknown>;
     fetchMock.mockImplementation(async (input: string | URL) => {
       const url = new URL(String(input), 'http://localhost');
-      if (url.pathname === '/api/v1/search') return Response.json(valid);
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(validFixture.discovery);
       if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
@@ -234,7 +269,7 @@ describe('CommandPalette', () => {
     const discovery = row.discovery;
     fetchMock.mockImplementation(async (input: string | URL) => {
       const url = new URL(String(input), 'http://localhost');
-      if (url.pathname === '/api/v1/search') return Response.json(search);
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(search));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
       if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);

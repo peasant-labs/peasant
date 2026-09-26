@@ -104,16 +104,17 @@ type PipelineResult struct {
 
 // PipelineSummary holds aggregate counts for a pipeline run.
 type PipelineSummary struct {
-	New               int
-	Updated           int
-	Unchanged         int
-	Active            int
-	Errors            int
-	Indexed           int                           // sessions successfully indexed into session_entries
-	Computed          int                           // sessions whose metrics were (re)computed
-	StoreError        error                         // non-nil if DB insert failed; pipeline continued normally
-	HarvesterVersions map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
-	MetadataVersion   int                           // CurrentSchemaVersion used this run
+	RetainedUnknownKinds []RetainedUnknownKindCount `json:"retained_unknown_kinds,omitempty"`
+	New                  int
+	Updated              int
+	Unchanged            int
+	Active               int
+	Errors               int
+	Indexed              int                           // sessions successfully indexed into session_entries
+	Computed             int                           // sessions whose metrics were (re)computed
+	StoreError           error                         // non-nil if DB insert failed; pipeline continued normally
+	HarvesterVersions    map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
+	MetadataVersion      int                           // CurrentSchemaVersion used this run
 	// ReminedEvidenceRecords is how many cached discovery evidence records this
 	// run had to mine again. It is greater than zero on the first run after an
 	// upgrade that added a field the cached records do not carry, and zero on
@@ -137,6 +138,10 @@ type PipelineSummary struct {
 	// and was skipped by the rebuild: a torn pair, or a valid pair whose bytes
 	// no longer match the recorded row. Their database rows are left untouched.
 	RebuildSkipped []SessionID `json:"rebuild_skipped,omitempty"`
+	// RefusedRecordKinds aggregates this run's strict-parser refusals by
+	// harness and kind: one row per refused kind with the sessions it
+	// refused. Empty when every session certified.
+	RefusedRecordKinds []RecordKindRefusalCount `json:"refused_record_kinds,omitempty"`
 }
 
 // SessionResult records the outcome of processing a single session.
@@ -247,6 +252,7 @@ type OrphanCleaner interface {
 // replaces asserted the reverse as settled fact, and that assertion - repeated
 // one layer downstream - is what got the outward safety-net re-redaction deleted.
 type indexedMeta struct {
+	retainedUnknown []RetainedUnknownKindCount
 	captureRevision int64
 	capturedSource  *captureFileSystem
 	// published reports that this run committed the artifact being indexed,
@@ -270,6 +276,17 @@ type Pipeline struct {
 	config   PipelineConfig
 	store    SessionStore // nil = skip DB insert (backward compatible)
 	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
+
+	// nativeGenerationIDs optionally assigns the installed identity of each
+	// managed generation candidate. Production leaves it nil and mints a fresh
+	// opaque identity per attempt; a deterministic caller injects its own.
+	nativeGenerationIDs func(DiscoveredSession) string
+
+	// resolvedVersions caches the effective harness targets once, after the
+	// store capability gate has decided whether native generations are enabled.
+	// versionTargets is read in hot per-session loops, so the overlay is
+	// resolved once rather than on every lookup.
+	resolvedVersions map[Harness]HarvesterVersions
 
 	// contentRecoveries holds this run's completed retained-content repairs,
 	// keyed by session, so the index log and summary can report them.
@@ -410,6 +427,14 @@ func WithStore(s SessionStore) PipelineOption {
 	return func(p *Pipeline) { p.store = s }
 }
 
+// WithNativeGenerationID overrides the installed identity assigned to native
+// managed-generation candidates. Production leaves it unset so every attempt
+// mints a fresh opaque identity; a deterministic caller injects a stable
+// source. The identity must be a single confined path component.
+func WithNativeGenerationID(assign func(DiscoveredSession) string) PipelineOption {
+	return func(p *Pipeline) { p.nativeGenerationIDs = assign }
+}
+
 // WithSalt injects a per-installation HMAC salt for project hash derivation.
 // When set, DeriveProjectIdentifiers uses HMAC-SHA256(salt, normalizedRemote)
 // instead of the zero salt, making project hashes opaque and
@@ -513,10 +538,71 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 	for _, opt := range opts {
 		opt(p)
 	}
+	p.resolvedVersions = p.resolveVersionTargets()
 	if err := p.validateHarvesterVersions(); err != nil {
 		return nil, err
 	}
 	return p, nil
+}
+
+// storedParentSet reports which out-of-cohort logical parents already exist in
+// the committed store. An independently admitted child whose parent is already
+// stored keeps its available operational edge, stable nested location and FK
+// cache instead of being treated as an orphan. The pre-DIFF location cache
+// already covers discovered parents; sessions not discovered this run are
+// resolved by one bulk lookup. On a lookup failure the pending targets keep
+// their legacy available edge rather than being re-homed as orphans.
+func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map[SessionID]bool {
+	cohort := make(map[SessionID]bool, len(entries))
+	for i := range entries {
+		cohort[entries[i].Session.SessionID] = true
+	}
+	needed := make(map[SessionID]bool)
+	stored := make(map[SessionID]bool)
+	for i := range entries {
+		parent := entries[i].Session.ParentUUID
+		if parent == nil || cohort[*parent] {
+			continue
+		}
+		if _, ok := p.locationCache[*parent]; ok {
+			stored[*parent] = true
+			continue
+		}
+		needed[*parent] = true
+	}
+	if len(needed) == 0 || p.store == nil {
+		return stored
+	}
+	ids := make([]SessionID, 0, len(needed))
+	for id := range needed {
+		ids = append(ids, id)
+	}
+	locations, err := p.store.BulkLookupSessionLocations(ctx, ids)
+	if err != nil {
+		// A transient store failure must not re-home an admitted child under a
+		// root it does not own. Keep the legacy available-parent edge for the
+		// unresolved targets; the next successful harvest resolves them.
+		// The cause is classified into a bounded reason code before logging:
+		// the raw dependency error can carry a private path or stored value,
+		// and this warning must never reproduce it.
+		slog.Warn("pipeline: resolve stored scheduling parents",
+			"reason", storeLookupReasonCode(err),
+			"pending_parents", len(ids),
+			"what", "could not confirm stored logical parents for independent child scheduling",
+			"why", "the session-location lookup failed",
+			"user_impact", "an independently admitted child keeps its previous nested location and FK cache until the next harvest",
+			"how_to_fix", "restore database access and rerun harvest")
+		for id := range needed {
+			stored[id] = true
+		}
+		return stored
+	}
+	for id := range locations {
+		if needed[id] {
+			stored[id] = true
+		}
+	}
+	return stored
 }
 
 // Run executes the full ingest pipeline and returns a summary result.
@@ -725,10 +811,27 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 
 		// SessionFilter: skip sessions rejected by the selection index filter.
-		// Root sessions are checked against the filter; subagents inherit their
-		// parent's result — if the parent was rejected, the subagent is too.
+		// Codex and OpenCode children receive their own selection decision: the
+		// filter runs against the child itself, and no parent is rescued or
+		// widened because a child exists. A positively selected child is not
+		// rescued from its own explicit exclusion or denied SessionFilter, and
+		// a selected child never admits its parent or siblings. Every other
+		// harness keeps its existing inheritance: root sessions are checked
+		// against the filter and subagents inherit their parent's result.
 		if p.config.SessionFilter != nil {
-			if entry.Session.ParentUUID == nil {
+			if IndependentAdmissionHarness(entry.Session.Harness) {
+				if !p.config.SessionFilter(entry.Session) {
+					recordDryRun(entry, DiffUnchanged)
+					sessionResults = append(sessionResults, SessionResult{
+						SessionID:  entry.Session.SessionID,
+						Harness:    entry.Session.Harness,
+						ParentUUID: entry.Session.ParentUUID,
+						Status:     DiffUnchanged,
+					})
+					advanceFilter()
+					continue
+				}
+			} else if entry.Session.ParentUUID == nil {
 				if !p.config.SessionFilter(entry.Session) {
 					recordDryRun(entry, DiffUnchanged)
 					sessionResults = append(sessionResults, SessionResult{
@@ -852,6 +955,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
 	toProcess := len(toProcessEntries)
 
+	// Derive the local operational scheduling edge after the admission
+	// decision. Missing, unselected, and cyclic parents yield no edge; each
+	// admitted child without an edge is an independent dispatch root. An
+	// already-stored parent stays available so a normal child keeps its stable
+	// location. The logical ParentUUID is retained untouched on every entry.
+	toProcessEntries = ApplySchedulingParents(toProcessEntries, p.storedParentSet(ctx, toProcessEntries))
+
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
 	// denial, and parent-inheritance decisions as a real run. It stops only after
 	// that shared FILTER pass and performs no extraction, write, or store action.
@@ -883,17 +993,19 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 
 	// Stage 4a: EXTRACT + WRITE — parallel pool, one goroutine per root session.
 	//
-	// Each root session owns its full subagent subtree. Within one goroutine,
+	// Each root session owns its full operational subtree. Within one goroutine,
 	// the root is processed first, then each child is processed in series.
 	// This eliminates the directory race where a parent's RemoveAll races with
 	// a child's MkdirAll on the same {hostSlug}/{parentID}/ path.
 	//
-	// Parent→children index: built in O(n). Only root entries (no in-batch
-	// parent) are dispatched to runParallel; children and all descendants are
-	// processed inline by the root's goroutine via BFS.
+	// Roots and children are derived from the operational scheduling edge, not
+	// the logical ParentUUID: an admitted child with no edge is a dispatch root
+	// even when its logical parent names another session. Cycles were already
+	// removed from the operational graph, so every admitted entry is reachable
+	// from exactly one root and no admitted child waits forever.
 	//
 	// The StagingBuffer still enforces parent-before-child ordering at DB
-	// INSERT time (FK constraint), just as before.
+	// INSERT time for available parents, just as before.
 	entryByID := make(map[SessionID]DiffEntry, len(toProcessEntries))
 	childrenOf := make(map[SessionID][]SessionID, len(toProcessEntries))
 	inBatch := make(map[SessionID]bool, len(toProcessEntries))
@@ -904,13 +1016,16 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	}
 	var rootEntries []DiffEntry
 	for _, e := range toProcessEntries {
-		if e.Session.ParentUUID != nil {
-			pid := *e.Session.ParentUUID
-			if inBatch[pid] {
-				childrenOf[pid] = append(childrenOf[pid], e.Session.SessionID)
+		if parent := OperationalParentID(e.Session); parent != nil {
+			if inBatch[*parent] {
+				childrenOf[*parent] = append(childrenOf[*parent], e.Session.SessionID)
 				continue // child: will be processed by its root's goroutine
 			}
-			externalParents[pid] = struct{}{}
+		}
+		if e.Session.ParentUUID != nil {
+			if _, ok := inBatch[*e.Session.ParentUUID]; !ok {
+				externalParents[*e.Session.ParentUUID] = struct{}{}
+			}
 		}
 		rootEntries = append(rootEntries, e)
 	}
@@ -963,6 +1078,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	var drainResults []SessionResult
 	var drainIndexed []indexedMeta
 	var drainIndexLogEntries []IndexLogEntry
+	var drainRefusedKinds []RecordKindRefusal
 	var drainDownstream streamedDownstreamResult
 
 	// Stage 4a: EXTRACT+WRITE workers goroutine.
@@ -973,7 +1089,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		extractProfileStart := time.Now()
 		runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 			// Process root.
-			wr := p.processSession(ctx, entry)
+			wr := p.processSession(ctx, entry, writeLane)
+			wr.schedulingParentID = OperationalParentID(entry.Session)
+			wr.schedulingResolved = true
 			extractDoneAtomic.Add(1)
 			emitAdvance(prog, StageExtract, 1, toProcess)
 			staging.Add(wr)
@@ -987,7 +1105,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				childID := queue[0]
 				queue = queue[1:]
 				childEntry := entryByID[childID]
-				cwr := p.processSession(ctx, childEntry)
+				cwr := p.processSession(ctx, childEntry, writeLane)
+				cwr.schedulingParentID = OperationalParentID(childEntry.Session)
+				cwr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, toProcess)
 				staging.Add(cwr)
@@ -1028,7 +1148,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		defer wg.Done()
 		defer close(downstreamCh)
 		indexProfileStart := time.Now()
-		drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline", downstreamCh, writeLane)
+		drainIndexed, drainIndexLogEntries, drainRefusedKinds = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline", downstreamCh, writeLane)
 		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), len(toProcessEntries))
 	}()
 
@@ -1130,8 +1250,17 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 	}
 
+	// Heal the FK availability cache of stored independently admitted children
+	// whose logical parent this harvest made available. The discovered
+	// independent sessions are the reconciliation targets, so an already-stored
+	// parent whose earlier reconciliation failed is retried on this harvest
+	// without waiting for a new session. A child rewritten this harvest already
+	// had its cache decided by the write path and is left alone. Only the cache
+	// moves; the children were never re-extracted, relocated or re-selected.
+	p.reconcileOrphanParentCaches(ctx, diffResult.Sessions, toProcessEntries)
+
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream, drainRefusedKinds)
 }
 
 // contentRecoveryReason labels a retained-content repair in the index log.
@@ -1226,6 +1355,7 @@ func (p *Pipeline) drainLoop(
 		if len(batch.Results) > 0 {
 			var batchMetas []indexedMeta
 			var committedIDs []SessionID
+			var failedIDs []SessionID
 			mirrorFailed := p.mirrorDrainedBatch(ctx, batch.Results, writeLane, errCh)
 			for index := range batch.Results {
 				wr := &batch.Results[index]
@@ -1242,11 +1372,21 @@ func (p *Pipeline) drainLoop(
 					})
 				}
 				sessionResults = append(sessionResults, wr.result)
-				committedIDs = append(committedIDs, wr.result.SessionID)
+				// A failed parent is never marked committed: admitted children
+				// of a failed parent drain independently with a nil parent
+				// cache instead of waiting on a commit that never lands.
+				if wr.result.Error != nil || mirrorFailed[wr.result.SessionID] {
+					failedIDs = append(failedIDs, wr.result.SessionID)
+				} else {
+					committedIDs = append(committedIDs, wr.result.SessionID)
+				}
 			}
 
 			// Commit BEFORE Ack — unlocks children for next Drain sooner.
+			// Failed parents are recorded separately so their admitted
+			// children release without falsely claiming a DB commit.
 			staging.Commit(committedIDs...)
+			staging.MarkFailed(failedIDs...)
 
 			if len(batchMetas) == 0 {
 				staging.AckBatch(batch)
@@ -1332,7 +1472,7 @@ func (p *Pipeline) indexLoop(
 	logPrefix string,
 	downstreamCh chan<- indexedMeta,
 	writeLane *storeWriteLane,
-) (indexed []indexedMeta, logEntries []IndexLogEntry) {
+) (indexed []indexedMeta, logEntries []IndexLogEntry, refused []RecordKindRefusal) {
 	workers := parallelWorkers(p.config)
 	if workers < 1 {
 		workers = 1
@@ -1364,6 +1504,11 @@ func (p *Pipeline) indexLoop(
 	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
 	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
 	flushPending := func(results []indexParseResult) {
+		for _, result := range results {
+			if result.refusedKind != nil {
+				refused = append(refused, *result.refusedKind)
+			}
+		}
 		flush := p.flushIndexParseResults(ctx, results, outcome, logPrefix, writeLane)
 		for i, indexedResult := range flush.indexed {
 			indexed = append(indexed, indexedResult)
@@ -1399,11 +1544,12 @@ func (p *Pipeline) indexLoop(
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 		p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	}
-	return indexed, logEntries
+	return indexed, logEntries, refused
 }
 
 type indexParseResult struct {
-	fullContent bool
+	retainedUnknown []RetainedUnknownKindCount
+	fullContent     bool
 	// partial reports that the strict parser refused the transcript and the
 	// tolerant projection was stored instead, as an incomplete capture whose
 	// recorded reason is strictRefusal. Previews show it; nothing certifies it.
@@ -1412,6 +1558,10 @@ type indexParseResult struct {
 	// refusalCode is why the strict parser refused, as the value the selector
 	// reads back to decide that re-trying cannot help.
 	refusalCode ContentCaptureFailureCode
+	// refusedKind names the harness record kind the strict parser refused, so
+	// the run report can aggregate refusals by kind. Nil unless the refusal is
+	// an unrepresented kind; omissions and corruption leave it unset.
+	refusedKind *RecordKindRefusal
 	// omissionsRecorded reports that the stored entries account for every
 	// record ingest left out, because a placeholder entry stands in each
 	// omitted record's position. Such a capture is incomplete but holds the
@@ -1419,14 +1569,26 @@ type indexParseResult struct {
 	// readable, exportable and publishable; a partial capture without that
 	// proof is written as the bounded preview it is.
 	omissionsRecorded bool
-	im                indexedMeta
-	input             *CapturedIndexInput
-	output            indexformat.Result
-	entryCount        int
-	startedAt         int64
-	logEntry          IndexLogEntry
-	parseDuration     time.Duration
-	bytes             int64
+	unknownRecorded   bool
+	// assessment is the one final write-selection authority for V1 captures.
+	// The flags above remain as parser inputs and diagnostics, but the flush
+	// paths derive the store write from this assessment, never from the flags
+	// alone. It is valid only when assessmentReady is true.
+	assessment      CaptureAssessment
+	assessmentReady bool
+	im              indexedMeta
+	input           *CapturedIndexInput
+	output          indexformat.Result
+	// nativeCandidate carries a validated managed-generation candidate with its
+	// captured content when the harness's declared output format is a managed
+	// generation. The write path stages and activates it instead of committing
+	// a bare entry replacement.
+	nativeCandidate *NativeGenerationCandidate
+	entryCount      int
+	startedAt       int64
+	logEntry        IndexLogEntry
+	parseDuration   time.Duration
+	bytes           int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -1437,6 +1599,10 @@ type indexParseResult struct {
 // first: the strict parser stops at the omission before it can reach a record
 // it does not represent.
 func permanentRefusalCode(session DiscoveredSession, err error) ContentCaptureFailureCode {
+	var corruption *captureCorruptionError
+	if errors.As(err, &corruption) {
+		return ContentCaptureNoFailure
+	}
 	if session.ContentOmitted {
 		return ContentCaptureSourceRecordsOmitted
 	}
@@ -1568,18 +1734,19 @@ func indexResultWriteBytes(result indexformat.Result) int64 {
 }
 
 // indexBatch parses a batch, then serializes SQLite writes through one goroutine.
-func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry) {
+func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry, []RecordKindRefusal) {
 	indexed := make([]indexedMeta, 0, len(metas))
 	logs := make([]IndexLogEntry, 0, len(metas))
+	var refused []RecordKindRefusal
 	if len(metas) == 0 {
-		return indexed, logs
+		return indexed, logs, refused
 	}
 	if p.indexers == nil || p.metricsStore == nil {
 		for _, im := range metas {
 			indexed = append(indexed, indexedMeta{session: im.session, startMs: im.startMs})
 			logs = append(logs, IndexLogEntry{})
 		}
-		return indexed, logs
+		return indexed, logs, refused
 	}
 
 	var activeParses atomic.Int64
@@ -1603,6 +1770,11 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		flush := p.flushIndexParseResults(ctx, pending, outcome, logPrefix, nil)
 		indexed = append(indexed, flush.indexed...)
 		logs = append(logs, flush.logEntries...)
+		for _, result := range pending {
+			if result.refusedKind != nil {
+				refused = append(refused, *result.refusedKind)
+			}
+		}
 		for _, profileSession := range flush.profileSessions {
 			profileBatch.Entries += profileSession.Entries
 			profileBatch.Bytes += profileSession.Bytes
@@ -1638,7 +1810,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	flushPending()
 	profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
-	return indexed, logs
+	return indexed, logs, refused
 }
 
 func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activeParses *atomic.Int64, maxActiveParses *atomic.Int64, logPrefix string) (result indexParseResult) {
@@ -1680,7 +1852,15 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	input, err := p.captureIndexInput(ctx, im, indexer)
 	var output indexformat.Result
 	parsed := false
-	declared := p.versionTargets()[im.session.Harness].IndexVersion
+	// The effective declared format follows the session's own captured layout:
+	// a session whose native snapshot this build cannot read keeps the retained
+	// baseline format and is served by the ordinary adapter refresh, even when
+	// the harness target is the managed-generation override.
+	declaredSession := im.session
+	if input != nil {
+		declaredSession = input.session
+	}
+	declared := p.sessionVersionTarget(declaredSession).IndexVersion
 	if err == nil {
 		result.input = input
 		// The write binds the index to the current metadata capture when the
@@ -1692,7 +1872,27 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		}
 		if p.capturedInputNeedsWork(input) {
 			parsed = true
-			output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
+			// A harness whose declared output format is a managed generation is
+			// produced through its own native candidate exit, which carries the
+			// captured bytes and prior evidence the activation stages. Only the
+			// strict format-1 path keeps the retained parser dispatch.
+			usedNativeCandidate := false
+			if declared != strictIndexFormat {
+				candidate, native, candidateErr := p.buildNativeCandidate(ctx, im, input, indexer)
+				if native {
+					usedNativeCandidate = true
+					if candidateErr != nil {
+						err = candidateErr
+					} else {
+						candidateCopy := candidate
+						result.nativeCandidate = &candidateCopy
+						output = candidate.Result
+					}
+				}
+			}
+			if !usedNativeCandidate {
+				output, err = parseCapturedIndexInput(ctx, indexer, input, declared)
+			}
 			// A refusal NOTHING ABOUT THIS BUILD CAN LIFT is not an empty store:
 			// the represented entries are stored as an incomplete capture, the
 			// refusal is recorded with the capture and reported once, and
@@ -1717,6 +1917,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				if code := permanentRefusalCode(im.session, err); code != ContentCaptureNoFailure {
 					if tolerant, tolerantErr := input.ParseTolerant(ctx, indexer); tolerantErr == nil {
 						result.partial, result.strictRefusal, result.refusalCode = true, err.Error(), code
+						if code == ContentCaptureStrictRefused {
+							var unrepresented *UnrepresentedRecordError
+							if errors.As(err, &unrepresented) {
+								result.refusedKind = &RecordKindRefusal{Harness: unrepresented.Harness, Kind: unrepresented.Kind}
+							}
+						}
 						// A session whose only gap is an omitted source record
 						// carries a placeholder entry in that record's place,
 						// so the tolerant projection still describes the whole
@@ -1736,17 +1942,86 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		}
 		input.transcript, input.tree = nil, nil
 	}
+	// Full local evidence needs valid payloads and capture-assigned coordinates.
+	// Public byte/depth budgets are checked later, at export/publication only.
+	if err == nil && parsed {
+		if v1, ok := output.(indexformat.V1); ok {
+			if outputRecordsItsOmissions(output) {
+				result.partial, result.omissionsRecorded = true, true
+				result.refusalCode = ContentCaptureSourceRecordsOmitted
+				result.strictRefusal = "oversized source records were omitted with positional placeholders"
+			}
+			var unknown []RetainedUnknown
+			unknown, err = retainedUnknownEntries(v1.Entries)
+			if err == nil && len(unknown) > 0 {
+				result.retainedUnknown = retainedUnknownCounts(unknown)
+				result.partial = true
+				if result.refusalCode == ContentCaptureSourceRecordsOmitted && result.omissionsRecorded {
+					// Mixed accounted case: the omission placeholders and the
+					// retained unknown evidence are both present. Preserve
+					// both facts internally with all counts; the stored code
+					// stays the existing omission code. Never overwrite one
+					// reason to erase the other.
+					if projected, projectErr := CollectRetainedUnknown(v1.Entries, im.session.Harness); projectErr == nil && len(projected) == len(unknown) {
+						result.unknownRecorded = true
+						result.strictRefusal = "oversized source records were omitted with positional placeholders; uninterpreted source data was retained with complete payload and source coordinates; interpretation is partial and outbound transfer limits apply"
+					} else {
+						result.strictRefusal += "; surviving unknown source data was retained privately, but its coordinates do not validate"
+					}
+				} else if result.refusalCode == ContentCaptureSourceRecordsOmitted && !result.omissionsRecorded {
+					result.strictRefusal += "; surviving unknown source data was retained privately, but the earlier source omission remains unaccounted"
+				} else {
+					result.refusalCode = ContentCaptureUnknownDataRetained
+					result.strictRefusal = "uninterpreted source data was retained locally; export and publication require an outbound evidence projection"
+					if projected, projectErr := CollectRetainedUnknown(v1.Entries, im.session.Harness); projectErr == nil && len(projected) == len(unknown) {
+						result.unknownRecorded = true
+						result.strictRefusal = "uninterpreted source data was retained with complete payload and source coordinates; interpretation is partial and outbound transfer limits apply"
+					}
+				}
+			}
+		}
+	}
 	// Only the strict format-1 capture path certifies complete content. A
 	// declared non-strict format is stored as declared, never as a full capture.
 	_, authoritative := indexer.(AuthoritativeTranscriptIndexer)
 	result.fullContent = authoritative && err == nil && parsed && declared == strictIndexFormat && !result.partial
+	// One final write decision owns V1 admission. The flags above remain as
+	// parser inputs and diagnostics, but the flush paths derive the store
+	// write from this assessment. An assessment error refuses the candidate
+	// before any counting or persistence: no parse failure becomes successful
+	// retained accounting.
+	if err == nil && parsed {
+		// The assessment certifies only parses by a certifying parser. A
+		// successful parse by a non-authoritative indexer is stored through
+		// the flag-derived capture below (uncertified preview, no refusal
+		// code): assessing it would stamp a strict refusal no strict parser
+		// ever raised, and the settled-refusal selector would then treat the
+		// session as permanently resolved and skip the worker re-read that
+		// heals parent-cache moves and changed-pair mirrors on later
+		// harvests. Genuine refusals still flow through the assessment via
+		// their Unaccounted flag and validated evidence.
+		if _, isV1 := output.(indexformat.V1); isV1 && result.nativeCandidate == nil && authoritative {
+			strictAuthoritative := authoritative && declared == strictIndexFormat
+			if assessment, assessErr := AssessCapture(V1CaptureFacts(
+				im.session.Harness, output, strictAuthoritative, im.session.ContentOmitted,
+			)); assessErr != nil {
+				err = assessErr
+			} else {
+				result.assessment = assessment
+				result.assessmentReady = true
+				// Candidate counts come only from validated selected evidence.
+				// They stay candidates until the store outcome confirms commit.
+				result.retainedUnknown = assessment.CandidateCounts()
+			}
+		}
+	}
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err == nil && parsed {
 		var version int
 		version, err = indexformat.VersionOf(output)
-		if err == nil && version != p.versionTargets()[im.session.Harness].IndexVersion {
-			err = fmt.Errorf("indexer result format %d does not match declared format %d for harness %s; no entries were replaced; correct the indexer declaration or concrete output", version, p.versionTargets()[im.session.Harness].IndexVersion, im.session.Harness)
+		if err == nil && version != declared {
+			err = fmt.Errorf("indexer result format %d does not match declared format %d for harness %s; no entries were replaced; correct the indexer declaration or concrete output", version, declared, im.session.Harness)
 		}
 	}
 	if err != nil {
@@ -1813,12 +2088,19 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	}
 	writes := make([]SessionEntryWrite, 0, len(results))
 	writePositions := make([]int, 0, len(results))
+	nativePositions := make([]int, 0)
 	nowMs := time.Now().UnixMilli()
 	for i, result := range results {
 		if result.output == nil || p.metricsStore == nil {
 			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
 			flush.logEntries[i] = result.logEntry
 			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
+			continue
+		}
+		if result.nativeCandidate != nil {
+			// Managed generations stage and activate their own files and rows;
+			// they never travel through the entry-replacement batch.
+			nativePositions = append(nativePositions, i)
 			continue
 		}
 		if result.input == nil {
@@ -1839,12 +2121,28 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		// certified-complete case AND the one incompleteness that still holds
 		// every entry, because a bounded preview may never be read whole,
 		// exported or published, and an omitted-records session must be.
+		// The assessment is the one final write decision for V1 captures;
+		// the flags above remain as parser inputs and diagnostics.
 		requireFullContent := result.fullContent
-		if result.fullContent {
+		if result.assessmentReady {
+			assessed, assessErr := result.assessment.ContentCapture(contentAuthorityFor(result), result.im.session.TranscriptOrigin, nowMs)
+			if assessErr != nil {
+				err := fmt.Errorf("%s: session %s assessment refused the store write; the stored index was preserved: %w", logPrefix, result.im.session.SessionID, assessErr)
+				p.reportIndexRefusal(result.im.session.SessionID, err)
+				errMsg := err.Error()
+				logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+				flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
+				flush.logEntries[i] = logEntry
+				flush.profileSessions[i] = p.makeIndexProfileSession(result, logEntry, 0)
+				continue
+			}
+			capture = assessed
+			requireFullContent = assessed.CaptureFormat == ContentCaptureFormatFull
+		} else if result.fullContent {
 			capture = SessionContentCaptureWrite{Status: ContentCaptureComplete, SourceAuthority: contentAuthorityFor(result), TranscriptOrigin: result.im.session.TranscriptOrigin, CaptureFormat: ContentCaptureFormatFull, CapturedAtMs: nowMs}
 		} else if result.partial {
 			format := ContentCaptureFormatPreviewOnly
-			if result.omissionsRecorded {
+			if result.omissionsRecorded || result.unknownRecorded {
 				format = ContentCaptureFormatFull
 				requireFullContent = true
 			}
@@ -1861,14 +2159,24 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			identity := result.input.artifactHash
 			artifactIdentity = &identity
 		}
+		target := p.sessionVersionTarget(result.input.session)
+		// Operator-initiated rebuilds (harvest index --force, Reindex) carry
+		// explicit intent through the last-good guard on the same principle as
+		// a format conversion: accidental preview-over-full stays refused
+		// while deliberate downgrade-then-restore proceeds.
+		writeMode := SessionEntryWriteReplaceAll
+		if p.config.Force || p.config.Reindex || outcome == IndexOutcomeReindexed {
+			writeMode = SessionEntryWriteExplicitRebuild
+		}
 		writes = append(writes, SessionEntryWrite{
 			CaptureRevision:    result.im.captureRevision,
+			Mode:               writeMode,
 			RequireFullContent: requireFullContent,
 			ContentCapture:     capture,
 			SessionID:          result.im.session.SessionID,
 			Result:             result.output,
-			IndexVersion:       p.versionTargets()[result.im.session.Harness].IndexVersion,
-			IndexerVersion:     p.versionTargets()[result.im.session.Harness].IndexerVersion,
+			IndexVersion:       target.IndexVersion,
+			IndexerVersion:     target.IndexerVersion,
 			IndexedAtMs:        nowMs,
 			ExpectedState:      result.input.expected,
 			IndexedInputHash:   &result.input.inputHash,
@@ -1924,6 +2232,13 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		flush.writeDuration = writeDuration
 	}
+	for _, position := range nativePositions {
+		indexed, logEntry, profileSession := p.activateNativeGenerationResult(ctx, results[position], outcome, logPrefix, writeLane)
+		flush.indexed[position] = indexed
+		flush.logEntries[position] = logEntry
+		flush.profileSessions[position] = profileSession
+		flush.writeDuration += profileSession.WriteDuration
+	}
 	for i, writeResult := range writeResults {
 		perSessionWriteDuration := writeDurations[i]
 		flush.writeStats.Add(writeResult.Stats)
@@ -1948,7 +2263,16 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		result.entryCount = writeResult.EntriesCount
 		logEntry := p.makeIndexLogEntry(result.im, outcome, result.entryCount, result.startedAt, nil, nil)
-		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true}
+		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true, retainedUnknown: result.retainedUnknown}
+		if len(result.retainedUnknown) > 0 {
+			remediation := "Keep the source capture; re-index with a position-aware adapter before exporting or publishing this session."
+			if result.unknownRecorded {
+				remediation = "Export within the public transfer limits, or publish to a receiver supporting retained_unknown_v1 within those limits; complete evidence remains stored locally and interpretation remains partial."
+			}
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "unknown_data_retained", Location: string(result.im.session.SessionID), Message: result.strictRefusal, Remediation: remediation})
+		} else if result.omissionsRecorded {
+			p.reportDiagnostic(permanentRefusalDiagnostic(result.im.session.SessionID, result.refusalCode, true, errors.New(result.strictRefusal)))
+		}
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
 	}
@@ -2345,7 +2669,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			freshness.PublicationReadiness = PublicationReady
 		}
 		status := ClassifyAgainstStore(session, freshness, p.config.StalenessThreshold)
-		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest {
+		if captured == nil && status == DiffUpdated && loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0 {
 			// Publication readiness is a repair hint, not change evidence.
 			// Before any capture it re-reads native input only for a session
 			// that has no retained artifact to hold its input: a legacy row
@@ -2354,6 +2678,15 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// its retained-first path: its clock, schema, cursor and captured
 			// evidence decide whether native input is read, and the ordinary
 			// index write binds publication once a capture exists.
+			//
+			// That binding needs a capture to bind. A row that never held a
+			// publication capture (a pre-capture legacy row, revision 0) cannot
+			// be settled from its retained pair: the retained metadata is not
+			// a source-proven capture and the index write records no lossy
+			// backfill from it, so the row would stay "needs ingest" on every
+			// harvest while the push error keeps promising that ingest repairs
+			// it. Only the native re-read can capture it, so the readiness
+			// trigger stands for such a row.
 			settled := loc
 			settled.PublicationReadiness = PublicationReady
 			if ClassifyAgainstStore(session, settled, p.config.StalenessThreshold) == DiffUnchanged {
@@ -2757,7 +3090,7 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 
 // processSession atomically writes the accepted capture and carries its bytes
 // and evidence into the existing store and streamed indexing path.
-func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) workerResult {
+func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, writeLane *storeWriteLane) workerResult {
 	session := entry.Session
 	result := SessionResult{
 		SessionID:  session.SessionID,
@@ -2826,7 +3159,11 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 		return fail(&adapterAcquisitionError{cause: err})
 	}
 	if captured.Session != nil {
+		// Preserve the operational edge across the capture update: the capture
+		// refreshes logical discovery facts, never the scheduling decision.
+		schedulingEdge := session.SchedulingParentID
 		session = *captured.Session
+		session.SchedulingParentID = schedulingEdge
 		result.ParentUUID = session.ParentUUID
 	}
 	if supportsSessionCapture(session) && !p.config.Reindex && !entry.pairRepair {
@@ -2878,10 +3215,19 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	}
 	hostSlug := meta.HostSlug
 
-	// Compute output paths.
+	// Compute output paths. The stable owned location follows the operational
+	// scheduling edge for Codex and OpenCode sessions: an admitted child with
+	// no operational parent installs as a root instead of nesting blindly
+	// under an absent logical parent. Every other harness keeps its existing
+	// parent-nested location. A later move is handled by the relocation path
+	// below, which never deletes the child-owned subtree.
 	outputDir := string(p.config.OutputDir)
 	parentID := ""
-	if session.ParentUUID != nil {
+	if IndependentAdmissionHarness(session.Harness) {
+		if session.SchedulingParentID != nil {
+			parentID = string(*session.SchedulingParentID)
+		}
+	} else if session.ParentUUID != nil {
 		parentID = string(*session.ParentUUID)
 	}
 	sessionDir := SessionDir(outputDir, string(hostSlug), string(session.SessionID), parentID)
@@ -3117,7 +3463,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry) wo
 	if err := p.fs.WriteFile(filepath.Join(tmpDir, metaFilename), metaJSON, defaults.PrivateFilePerm); err != nil {
 		return fail(errors.Join(fmt.Errorf("write metadata for %s: %w", session.SessionID, err), p.fs.RemoveAll(tmpDir)))
 	}
-	if err := p.replaceSessionDir(tmpDir, sessionDir, string(session.SessionID), metaFilename); err != nil {
+	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, string(session.SessionID), metaFilename, writeLane); err != nil {
 		return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
 	}
 	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
@@ -3337,8 +3683,11 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		SessionID:      wr.result.SessionID,
 		Harness:        wr.result.Harness,
 		ParentUUID:     parentUUID,
-		SourceFormat:   sourceFormat,
-		SourcePath:     sourcePath,
+		// The operational edge travels with the result so downstream stages
+		// never re-derive scheduling from the logical evidence.
+		SchedulingParentID: wr.schedulingParentID,
+		SourceFormat:       sourceFormat,
+		SourcePath:         sourcePath,
 		// Without this a directory-based harness indexes nothing on the drain-loop
 		// pass: the caller replaces SourcePath with the written copy's path, and a
 		// root derived from that points into the output tree. The stale-index sweep
@@ -3675,6 +4024,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	outcome IndexOutcome,
 	logPrefix string,
 	priorDownstream *streamedDownstreamResult,
+	refusedKinds []RecordKindRefusal,
 ) (*PipelineResult, error) {
 	prog := p.config.Progress
 
@@ -3684,8 +4034,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 	indexed := 0
 	successfullyIndexed := make([]SessionID, 0, len(priorIndexed)+len(indexSessions))
 	remainingSuccessfullyIndexed := make([]SessionID, 0, len(indexSessions))
+	var retainedUnknown []RetainedUnknownKindCount
 	for _, im := range priorIndexed {
 		if im.indexed {
+			retainedUnknown = append(retainedUnknown, im.retainedUnknown...)
 			indexed++
 			successfullyIndexed = append(successfullyIndexed, im.session.SessionID)
 		}
@@ -3701,9 +4053,11 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	if p.indexers != nil && p.metricsStore != nil {
 		indexProfileStart := time.Now()
-		batchIndexed, batchLogs := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		batchIndexed, batchLogs, batchRefused := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		refusedKinds = append(refusedKinds, batchRefused...)
 		for i, result := range batchIndexed {
 			if result.indexed {
+				retainedUnknown = append(retainedUnknown, result.retainedUnknown...)
 				indexed++
 				successfullyIndexed = append(successfullyIndexed, result.session.SessionID)
 				remainingSuccessfullyIndexed = append(remainingSuccessfullyIndexed, result.session.SessionID)
@@ -3922,6 +4276,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	pipelineResult.Summary.RebuiltFromFiles = p.rebuiltFromFiles
 	pipelineResult.Summary.RebuildSkipped = p.rebuildStale
+	pipelineResult.Summary.RefusedRecordKinds = AggregateRecordKindRefusals(refusedKinds)
+	pipelineResult.Summary.RetainedUnknownKinds = aggregateRetainedUnknownCounts(retainedUnknown)
 	pipelineResult.IndexCoverage = p.resolveIndexCoverage(ctx, indexLogEntries, logPrefix)
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
@@ -3978,15 +4334,16 @@ func (p *Pipeline) makeIndexLogEntry(im indexedMeta, outcome IndexOutcome, entri
 	if or := string(im.session.OriginalRoot); or != "" {
 		originalRoot = &or
 	}
+	target := p.sessionVersionTarget(im.session)
 	var indexVersion *int
-	if declared := p.versionTargets()[im.session.Harness].IndexVersion; declared > 0 {
+	if declared := target.IndexVersion; declared > 0 {
 		indexVersion = &declared
 	}
 	return IndexLogEntry{
 		SessionID:      im.session.SessionID,
 		Harness:        im.session.Harness,
 		Outcome:        outcome,
-		IndexerVersion: p.versionTargets()[im.session.Harness].IndexerVersion,
+		IndexerVersion: target.IndexerVersion,
 		IndexVersion:   indexVersion,
 		EntriesCount:   entriesCount,
 		SourcePath:     sourcePath,
@@ -4572,20 +4929,38 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		inBatch[sourceSession.SessionID] = true
 	}
 
-	// Identify root vs child entries for the extract batch. A parent outside
-	// the batch is committed for staging order before the workers start, so a
-	// child whose parent is already stored can be drained; without it the
-	// child's committed pair waits forever on a parent that never drains.
+	// Derive the operational scheduling edge for the maintenance batch. The
+	// logical ParentUUID is retained; missing, unselected, and cyclic parents
+	// yield no edge so every admitted entry stays drainable.
+	{
+		batch := make([]DiffEntry, 0, len(entryByID))
+		for _, e := range entryByID {
+			batch = append(batch, e)
+		}
+		batch = ApplySchedulingParents(batch, p.storedParentSet(ctx, batch))
+		for _, e := range batch {
+			entryByID[e.Session.SessionID] = e
+		}
+	}
+
+	// Identify root vs child entries for the extract batch using only the
+	// operational edge. A parent outside the batch is committed for staging
+	// order before the workers start, so a child whose parent is already
+	// stored can be drained; without it the child's committed pair waits
+	// forever on a parent that never drains.
 	var rootEntries []DiffEntry
 	externalParents := make(map[SessionID]struct{})
 	for _, e := range entryByID {
-		if e.Session.ParentUUID != nil {
-			pid := *e.Session.ParentUUID
-			if inBatch[pid] {
-				childrenOf[pid] = append(childrenOf[pid], e.Session.SessionID)
+		if parent := OperationalParentID(e.Session); parent != nil {
+			if inBatch[*parent] {
+				childrenOf[*parent] = append(childrenOf[*parent], e.Session.SessionID)
 				continue // child: will be processed by its root's goroutine
 			}
-			externalParents[pid] = struct{}{}
+		}
+		if e.Session.ParentUUID != nil {
+			if _, ok := inBatch[*e.Session.ParentUUID]; !ok {
+				externalParents[*e.Session.ParentUUID] = struct{}{}
+			}
 		}
 		rootEntries = append(rootEntries, e)
 	}
@@ -4596,6 +4971,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var indexLogEntries []IndexLogEntry
 	var drainIndexed []indexedMeta
 	var drainIndexLogEntries []IndexLogEntry
+	var drainRefusedKinds []RecordKindRefusal
 	extractTotal := len(entryByID) // all extractable sessions (roots + children)
 
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: extractTotal + len(fallbackTargets)})
@@ -4635,7 +5011,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			extractProfileStart := time.Now()
 			runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
-				wr := p.processSession(ctx, entry)
+				wr := p.processSession(ctx, entry, reindexWriteLane)
+				wr.schedulingParentID = OperationalParentID(entry.Session)
+				wr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
 				emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 				staging.Add(wr)
@@ -4645,7 +5023,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 					childID := queue[0]
 					queue = queue[1:]
 					childEntry := entryByID[childID]
-					cwr := p.processSession(ctx, childEntry)
+					cwr := p.processSession(ctx, childEntry, reindexWriteLane)
+					cwr.schedulingParentID = OperationalParentID(childEntry.Session)
+					cwr.schedulingResolved = true
 					extractDoneAtomic.Add(1)
 					emitAdvance(prog, StageExtract, 1, extractTotal+len(fallbackTargets))
 					staging.Add(cwr)
@@ -4681,7 +5061,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			defer reindexWg.Done()
 			defer close(reindexDownstreamCh)
 			indexProfileStart := time.Now()
-			drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex", reindexDownstreamCh, reindexWriteLane)
+			drainIndexed, drainIndexLogEntries, drainRefusedKinds = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex", reindexDownstreamCh, reindexWriteLane)
 			p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), extractTotal)
 		}()
 
@@ -4726,7 +5106,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		p.recordIndexProfileStage(StageExtract, fallbackExtractProfileStart, len(fallbackTargets), len(fallbackTargets))
 
 		// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream)
+		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", &reindexDownstream, drainRefusedKinds)
 	}
 
 	// No extractable sessions — all are fallback. Process fallback sessions directly.
@@ -4757,7 +5137,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var storeErr error
 
 	// Steps 3e-end: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
-	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil)
+	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(append(indexLogEntries, drainIndexLogEntries...), p.contentRecoveryLogEntries()...), IndexOutcomeReindexed, "reindex", nil, nil)
 }
 
 // forcedNativeRefreshUsable decides whether harvest index --force re-reads a

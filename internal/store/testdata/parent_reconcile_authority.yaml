@@ -1,0 +1,54 @@
+# Reverse logical-target reconciliation authority matrix.
+#
+# Every case stores the child first with its legacy publication-metadata parent
+# while the target is absent, then optionally activates a managed generation
+# carrying one relationship record, then stores the harvest target. The real
+# reverse lookup runs for that target and the real cache reconciliation applies
+# its result, so the case proves whether the legacy snapshot could resurrect a
+# parent the active generation cleared, marked unknown or conflicting, or
+# pointed at another target. A session with active relationship authority must
+# never be healed from its legacy snapshot.
+#
+# Tokens: legacyParent/authorityTarget/expectParentCache name one of the ids
+# below or are empty for none; authorityState is empty (no active generation) or
+# one relationship target state; harvestTarget names the id made available.
+child: 22222222-2222-4222-8222-222222222222
+legacy: 11111111-1111-4111-8111-111111111111
+alternate: 33333333-3333-4333-8333-333333333333
+cases:
+  - name: legacy-only-child-reconciles
+    legacyParent: legacy
+    harvestTarget: legacy
+    expectParentCache: legacy
+    expectUpdates: 1
+  - name: active-explicit-none-does-not-resurrect-legacy
+    legacyParent: legacy
+    authorityState: explicit_none
+    harvestTarget: legacy
+    expectParentCache: null
+    expectUpdates: 0
+  - name: active-unknown-does-not-resurrect-legacy
+    legacyParent: legacy
+    authorityState: unknown
+    harvestTarget: legacy
+    expectParentCache: null
+    expectUpdates: 0
+  - name: active-conflicting-does-not-resurrect-legacy
+    legacyParent: legacy
+    authorityState: conflicting_current_native_evidence
+    harvestTarget: legacy
+    expectParentCache: null
+    expectUpdates: 0
+  - name: active-different-target-does-not-resurrect-legacy
+    legacyParent: legacy
+    authorityState: target_known
+    authorityTarget: alternate
+    harvestTarget: legacy
+    expectParentCache: null
+    expectUpdates: 0
+  - name: active-target-known-reconciles
+    authorityState: target_known
+    authorityTarget: legacy
+    harvestTarget: legacy
+    expectParentCache: legacy
+    expectUpdates: 1

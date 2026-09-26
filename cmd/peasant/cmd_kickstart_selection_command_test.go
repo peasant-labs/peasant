@@ -450,7 +450,7 @@ func seedSelectionCommandStoredEvidence(t *testing.T, dataHome string, listings 
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create selection command data directory: %v", err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open selection command store: %v", err)
 	}

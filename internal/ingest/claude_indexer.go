@@ -59,9 +59,10 @@ const (
 
 // ClaudeIndexer parses Claude Code JSONL transcripts into SessionEntry slices.
 type ClaudeIndexer struct {
-	fs          FileSystem
-	fullDepth   bool
-	fullContent bool
+	retainUnknown bool
+	fs            FileSystem
+	fullDepth     bool
+	fullContent   bool
 	// maxRecordBytes is the per-record read limit. Zero means the
 	// production limit; a test injects a small one so it can prove the
 	// over-limit path without building a record of production size.
@@ -155,6 +156,7 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	var traversal unknownJSONLTraversal
 	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
 	var entries []schema.SessionEntry
@@ -177,6 +179,23 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			continue
+		}
+		var unknown []RetainedUnknown
+		if idx.retainUnknown {
+			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, raw, scanner.Line(), &traversal)
+			if err != nil {
+				return nil, err
+			}
+			if whole {
+				carrier, err := RetainedUnknownEntry(sessionID, entryIndex, records[0])
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, carrier)
+				entryIndex++
+				continue
+			}
+			trimmed, unknown = filtered, records
 		}
 
 		var line claudeIndexLine
@@ -205,6 +224,9 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			// Malformed line — skip silently.
 			entryIndex++
 			continue
+		}
+		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
+			return nil, err
 		}
 		entries = append(entries, entry)
 		parentIndex := entryIndex
@@ -538,6 +560,28 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 			p = truncateString(preview.String(), defaults.ContentPreviewLimit)
 		}
 		entry.ContentPreview = &p
+	}
+
+	// Control records carry harness state rather than conversation content.
+	// Retain their provider kind and payload, and surface a short preview so the
+	// record stays visible in the transcript. Keeping an existing preview
+	// preserves any represented content, except a compaction boundary whose
+	// summary is the record's whole point.
+	if partType, extra, controlPreview := claudeControlRecordFields(raw, line); partType != nil {
+		entry.PartType = partType
+		if extra != nil {
+			entry.Extra = extra
+		}
+		if controlPreview != nil && (entry.ContentPreview == nil || *partType == "compact-boundary") {
+			// A generated control preview obeys the same bound as every other
+			// preview. The full-content path keeps it whole for export and
+			// publication, exactly as it does for conversation content.
+			p := *controlPreview
+			if !fullContent {
+				p = truncateString(p, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &p
+		}
 	}
 
 	// Tokens from usage.

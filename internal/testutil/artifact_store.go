@@ -9,6 +9,12 @@ import (
 
 var _ ingest.ArtifactMirrorStore = (*StubSessionStore)(nil)
 
+// This metadata-only double has no indexed input proof to invalidate.
+func (s *StubSessionStore) PrepareArtifactInstall(ctx context.Context, sid ingest.SessionID) error {
+	_, err := ingest.NewSessionID(string(sid))
+	return errors.Join(ctx.Err(), err)
+}
+
 // MirrorArtifacts is the pipeline's atomic persistence dependency in memory
 // fixtures. Real transaction, rollback and cursor behavior is tested in Store.
 func (s *StubSessionStore) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactMirrorRequest) []ingest.ArtifactMirrorResult {

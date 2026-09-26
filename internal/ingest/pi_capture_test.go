@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -26,6 +27,7 @@ type piCaptureCase struct {
 	Reject      bool   `yaml:"reject"`
 	Incomplete  bool   `yaml:"incomplete"`
 	InvalidUTF8 bool   `yaml:"invalid_utf8"`
+	Unknown     bool   `yaml:"unknown"`
 }
 
 // Only acquisition timing is replaced: discovery and capture both read real files.
@@ -65,7 +67,7 @@ func assertStoredCaptureRefusedNonfatally(t *testing.T, result *ingest.PipelineR
 		t.Fatalf("refused stored session missing from results: %+v", result.Sessions)
 	}
 	for _, diagnostic := range result.Diagnostics {
-		if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, string(sid)) && strings.Contains(diagnostic.Message, "preserved") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+		if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Location+diagnostic.Message, string(sid)) && strings.Contains(diagnostic.Message, "preserved") && diagnostic.Location != "" && diagnostic.Remediation != "" {
 			return
 		}
 	}
@@ -78,25 +80,10 @@ func TestPiCapturedAdmission(t *testing.T) {
 		OtherSessionID string          `yaml:"other_session_id"`
 		Initial        string          `yaml:"initial"`
 		ValidAppend    string          `yaml:"valid_append"`
+		RequiredNames  []string        `yaml:"requiredNames"`
 		Cases          []piCaptureCase `yaml:"cases"`
 	}
-	if err := testutil.DecodeFixtureYAML(piCaptureYAML, &corpus); err != nil {
-		t.Fatal(err)
-	}
-	names := make(map[string]bool)
-	for _, c := range corpus.Cases {
-		if c.Name == "" || names[c.Name] {
-			t.Fatal("empty or duplicate capture case")
-		}
-		names[c.Name] = true
-	}
-	if err := testutil.RequireFixtureNames("pi_capture.yaml", "cases", []string{
-		"malformed-final-newline", "malformed-final-no-newline", "malformed-before-incomplete-tail",
-		"incomplete-before-blank-final", "incomplete-before-whitespace-final", "duplicate-complete", "duplicate-incomplete",
-		"null-complete", "unknown-type", "dangling-parent", "duplicate-entry-id", "invalid-utf8",
-		"incomplete-final", "incomplete-final-newline", "valid-append", "valid-blank-lines",
-		"invalid-utf8-incomplete", "invalid-surrogate-incomplete",
-	}, names); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(piCaptureYAML, &corpus); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range corpus.Cases {
@@ -209,6 +196,17 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 		t.Fatal(err)
 	}
 	beforeFiles := artifacts()
+	var beforeExport []byte
+	if seed {
+		detail, err := export.ExportSession(t.Context(), db, filesystem, sid.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		beforeExport, err = json.Marshal(detail)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if seed && (len(before.SourceFingerprint) == 0 || len(beforeFiles) == 0 || len(beforeEntries) != 1) {
 		t.Fatal("vacuous seed")
 	}
@@ -254,9 +252,27 @@ func testPiCapture(t *testing.T, c piCaptureCase, id, otherID, initial, validApp
 		if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeEntries, entries) || !reflect.DeepEqual(beforeFiles, artifacts()) {
 			t.Fatal("rejected capture changed persisted state or managed artifacts")
 		}
+		if seed {
+			detail, err := export.ExportSession(t.Context(), db, filesystem, sid.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(detail)
+			if err != nil || !bytes.Equal(beforeExport, encoded) {
+				t.Fatal("rejected source changed prior export")
+			}
+		}
 		return
 	}
-	if result.Summary.Errors != 0 || result.Summary.Indexed != 2 || len(entries) != 2 {
+	wantEntries := 2
+	if c.Unknown {
+		wantEntries++
+		retained, err := ingest.RetainedUnknownOf(entries[len(entries)-1])
+		if err != nil || len(retained) != 1 || retained[0].Kind != "future" {
+			t.Fatalf("unknown acquired record lost: %v %+v", err, retained)
+		}
+	}
+	if result.Summary.Errors != 0 || result.Summary.Indexed != 2 || len(entries) != wantEntries {
 		t.Fatalf("valid capture: %+v entries=%d", result.Summary, len(entries))
 	}
 	expected := acquired

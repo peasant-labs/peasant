@@ -27,6 +27,19 @@ var e2eAssertedTestsManifest []byte
 //go:embed testdata/workflows/release_validate_rpm.yaml
 var releaseValidateRPMFixtureBytes []byte
 
+const (
+	// routedRunnerExpression is the runs-on a routed reusable workflow uses to
+	// place an x86_64 job on the runner that its determine-runner job selects.
+	routedRunnerExpression = "${{ fromJson(needs.determine-runner.outputs.runner) }}"
+	// runnerRoutingSecret is read by the shared runner-router reusable workflow
+	// that every routed workflow calls from its determine-runner job. Secrets do
+	// not cross a reusable-workflow call unless the caller passes them
+	// explicitly, so each call maps this secret to the router's input.
+	runnerRoutingSecret = "${{ secrets.RUNNER_STATUS_TOKEN }}"
+	// localWorkflowPrefix marks a call to a reusable workflow in this repository.
+	localWorkflowPrefix = "./.github/workflows/"
+)
+
 type releaseValidateRPMFixture struct {
 	PrepareExit   int                              `yaml:"prepare_exit"`
 	MutationCases []releaseValidateRPMMutationCase `yaml:"mutation_cases"`
@@ -52,6 +65,9 @@ type e2eWorkflowContractFixture struct {
 		AssertedTests            nonEmptyStrings          `yaml:"asserted_tests"`
 		CleanupRequiredStatuses  nonEmptyStrings          `yaml:"cleanup_required_statuses"`
 		CleanupForbiddenStatuses []workflowForbiddenValue `yaml:"cleanup_forbidden_statuses"`
+		DriverRunner             string                   `yaml:"driver_runner"`
+		DriverForbiddenRunner    string                   `yaml:"driver_forbidden_runner_substring"`
+		DriverForbiddenRouter    string                   `yaml:"driver_forbidden_router"`
 	} `yaml:"e2e"`
 	Release struct {
 		ParityStep        string                 `yaml:"parity_step"`
@@ -79,14 +95,33 @@ type e2eWorkflowContractFixture struct {
 		CheckoutFetchTags      string                   `yaml:"checkout_fetch_tags"`
 	} `yaml:"release_guard"`
 	ReusableCallers []reusableWorkflowCallerExpectation `yaml:"reusable_callers"`
+	Router          struct {
+		Workflow        string          `yaml:"workflow"`
+		Ref             string          `yaml:"ref"`
+		SecretKey       string          `yaml:"secret_key"`
+		RoutedWorkflows nonEmptyStrings `yaml:"routed_workflows"`
+	} `yaml:"router"`
 	ReleaseValidate struct {
-		Workflow          string          `yaml:"workflow"`
-		RequiredTriggers  nonEmptyStrings `yaml:"required_triggers"`
-		ForbiddenTriggers nonEmptyStrings `yaml:"forbidden_triggers"`
+		Workflow                string          `yaml:"workflow"`
+		RequiredTriggers        nonEmptyStrings `yaml:"required_triggers"`
+		ForbiddenTriggers       nonEmptyStrings `yaml:"forbidden_triggers"`
+		SnapshotJob             string          `yaml:"snapshot_job"`
+		SnapshotRunner          string          `yaml:"snapshot_runner"`
+		SnapshotForbiddenRouter string          `yaml:"snapshot_forbidden_router"`
 	} `yaml:"release_validate"`
 	TestsWorkflow struct {
-		Triggers      nonEmptyStrings `yaml:"triggers"`
-		RequiredPaths nonEmptyStrings `yaml:"required_paths"`
+		Triggers          nonEmptyStrings `yaml:"triggers"`
+		RequiredPaths     nonEmptyStrings `yaml:"required_paths"`
+		PostMergeEvidence struct {
+			Job                 string                   `yaml:"job"`
+			JobIfCondition      string                   `yaml:"job_if_condition"`
+			RequiredPermissions []workflowEnvExpectation `yaml:"required_permissions"`
+			Output              string                   `yaml:"output"`
+			Step                string                   `yaml:"step"`
+			StepID              string                   `yaml:"step_id"`
+			Command             string                   `yaml:"command"`
+			CheckNeeds          string                   `yaml:"check_needs"`
+		} `yaml:"post_merge_evidence"`
 	} `yaml:"tests_workflow"`
 }
 
@@ -111,10 +146,75 @@ type workflowEnvExpectation struct {
 	Value string `yaml:"value"`
 }
 
+// workflowNeeds accepts either a scalar or a sequence; the caller compares the
+// values as an exact set.
+type workflowNeeds []string
+
+func (needs *workflowNeeds) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		var single string
+		if err := node.Decode(&single); err != nil {
+			return err
+		}
+		if strings.TrimSpace(single) == "" {
+			return fmt.Errorf("needs must be non-empty")
+		}
+		*needs = []string{single}
+		return nil
+	}
+	var decoded []string
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	for i, value := range decoded {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("needs item %d must be non-empty", i)
+		}
+	}
+	*needs = decoded
+	return nil
+}
+
+func workflowNeedsValues(node *yaml.Node) []string {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		return []string{node.Value}
+	}
+	values := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		values = append(values, item.Value)
+	}
+	return values
+}
+
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	counts := make(map[string]int, len(got))
+	for _, value := range got {
+		counts[value]++
+	}
+	for _, value := range want {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 type workflowJobPermissionsExpectation struct {
 	Job         string                   `yaml:"job"`
 	Uses        string                   `yaml:"uses"`
-	Needs       string                   `yaml:"needs"`
+	Needs       workflowNeeds            `yaml:"needs"`
 	IfContains  nonEmptyStrings          `yaml:"if_contains"`
 	Permissions []workflowEnvExpectation `yaml:"permissions"`
 }
@@ -173,6 +273,8 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.E2E.DriverStep == "" || fixture.E2E.DriverEnv.Key == "" || fixture.E2E.DriverEnv.Value == "" ||
 		len(fixture.E2E.DriverContains) != 3 ||
 		len(fixture.E2E.CleanupRequiredStatuses) != 2 || len(fixture.E2E.CleanupForbiddenStatuses) != 3 ||
+		fixture.E2E.DriverRunner == "" || fixture.E2E.DriverForbiddenRunner == "" ||
+		fixture.E2E.DriverForbiddenRouter == "" ||
 		fixture.Release.ParityStep == "" || fixture.Release.ParityRunContains == "" ||
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
@@ -181,8 +283,19 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		len(fixture.ReleaseGuard.RequiredJobPermissions) != 1 || len(fixture.ReleaseGuard.RequiredJobEnv) != 1 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
-		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
-		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
+		len(fixture.ReusableCallers) != 2 ||
+		fixture.Router.Workflow == "" || fixture.Router.Ref == "" || fixture.Router.SecretKey == "" || len(fixture.Router.RoutedWorkflows) == 0 ||
+		fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
+		fixture.ReleaseValidate.SnapshotJob == "" || fixture.ReleaseValidate.SnapshotRunner == "" || fixture.ReleaseValidate.SnapshotForbiddenRouter == "" ||
+		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 ||
+		fixture.TestsWorkflow.PostMergeEvidence.Job == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.JobIfCondition == "" ||
+		len(fixture.TestsWorkflow.PostMergeEvidence.RequiredPermissions) != 2 ||
+		fixture.TestsWorkflow.PostMergeEvidence.Output == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.Step == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.StepID == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.Command == "" ||
+		fixture.TestsWorkflow.PostMergeEvidence.CheckNeeds == "" {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(e2eAssertedTestsManifest, "asserted E2E tests")
@@ -203,7 +316,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		seenCallers[caller.Workflow] = struct{}{}
 		seenJobs := make(map[string]struct{}, len(caller.Jobs))
 		for jobIndex, job := range caller.Jobs {
-			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) != 1 {
+			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) == 0 {
 				t.Fatalf("e2e: reusable caller fixture %d job %d is incomplete: %+v", callerIndex, jobIndex, job)
 			}
 			if _, exists := seenJobs[job.Job]; exists {
@@ -217,7 +330,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 
 func TestReleaseE2EWorkflowContract(t *testing.T) {
 	assertReleaseE2EWorkflowContract(t)
-	assertProductionWorkflowReusableJobsHaveNoSecrets(t)
+	assertReusableWorkflowCallerSecrets(t)
 }
 
 func TestReleaseArtifactWorkflowsRequireRealDashboard(t *testing.T) {
@@ -289,7 +402,8 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 		}
 		actualReusableJobs := 0
 		for i := 0; i+1 < len(jobs.Content); i += 2 {
-			if yamlMappingValue(jobs.Content[i+1], "uses") != nil {
+			uses := yamlMappingValue(jobs.Content[i+1], "uses")
+			if uses != nil && strings.HasPrefix(uses.Value, localWorkflowPrefix) {
 				actualReusableJobs++
 			}
 		}
@@ -305,14 +419,10 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 			if uses.Value != expectation.Uses {
 				t.Fatalf("%s: reusable job %q uses %q, want %q", caller.Workflow, expectation.Job, uses.Value, expectation.Uses)
 			}
-			if expectation.Needs != "" {
-				needs := yamlMappingValue(job, "needs")
-				gotNeeds := "<nil>"
-				if needs != nil {
-					gotNeeds = needs.Value
-				}
-				if needs == nil || needs.Value != expectation.Needs {
-					t.Fatalf("%s: reusable job %q needs %q, want %q", caller.Workflow, expectation.Job, gotNeeds, expectation.Needs)
+			if len(expectation.Needs) > 0 {
+				got := workflowNeedsValues(yamlMappingValue(job, "needs"))
+				if !sameStringSet(got, expectation.Needs) {
+					t.Fatalf("%s: reusable job %q needs %v, want exactly %v", caller.Workflow, expectation.Job, got, expectation.Needs)
 				}
 			}
 			if len(expectation.IfContains) > 0 {
@@ -329,6 +439,66 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 			assertYAMLMappingExact(t, yamlMappingValue(job, "permissions"), expectation.Permissions, caller.Workflow+" reusable job "+expectation.Job+" permissions")
 		}
 	}
+}
+
+// TestRoutedWorkflowsCallTheSharedRouter pins every routed workflow to the
+// published reusable router: the inline gh-api router must be deleted, the call
+// must pin the tag, the routing secret must be mapped explicitly, and the job
+// must grant the permissions the router workflow declares. A reusable-workflow
+// call can only maintain or reduce the caller's permissions, so a workflow with
+// empty top-level permissions must grant `contents: read` on the calling job or
+// GitHub rejects the whole workflow graph at startup (release.yml did exactly
+// that before this assertion existed).
+func TestRoutedWorkflowsCallTheSharedRouter(t *testing.T) {
+	fixture := loadE2EWorkflowContractFixture(t)
+	wantUses := fixture.Router.Workflow + "@" + fixture.Router.Ref
+	for _, relativePath := range fixture.Router.RoutedWorkflows {
+		doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), relativePath))
+		job := yamlMappingValue(yamlMappingValue(doc, "jobs"), "determine-runner")
+		if job == nil {
+			t.Fatalf("%s: must define jobs.determine-runner", relativePath)
+		}
+		uses := yamlMappingValue(job, "uses")
+		if uses == nil || uses.Value != wantUses {
+			t.Fatalf("%s: jobs.determine-runner.uses = %v, want %q", relativePath, uses, wantUses)
+		}
+		token := yamlMappingValue(yamlMappingValue(job, "secrets"), fixture.Router.SecretKey)
+		if token == nil || token.Value != runnerRoutingSecret {
+			t.Fatalf("%s: jobs.determine-runner must map %s: %s", relativePath, fixture.Router.SecretKey, runnerRoutingSecret)
+		}
+		for _, forbidden := range []string{"steps", "outputs", "runs-on"} {
+			if yamlMappingValue(job, forbidden) != nil {
+				t.Fatalf("%s: jobs.determine-runner must not define %s; the inline router must be deleted", relativePath, forbidden)
+			}
+		}
+		assertJobCanCallTheRouter(t, relativePath, doc, job)
+	}
+}
+
+// assertJobCanCallTheRouter checks the permission grant a reusable-workflow call
+// needs. The router declares `contents: read`; a call may not elevate, so when
+// the workflow's top-level permissions do not already include it, the calling
+// job must grant it explicitly. `permissions: {}` means the workflow grants
+// nothing by default and every job opts in on its own.
+func assertJobCanCallTheRouter(t *testing.T, relativePath string, doc *yaml.Node, job *yaml.Node) {
+	t.Helper()
+	if mappingGrantsContentsRead(yamlMappingValue(job, "permissions")) {
+		return
+	}
+	if mappingGrantsContentsRead(yamlMappingValue(doc, "permissions")) {
+		return
+	}
+	t.Fatalf("%s: jobs.determine-runner must grant `contents: read`; the called router workflow declares it and a call may not elevate permissions (the workflow's top-level permissions do not grant it)", relativePath)
+}
+
+// mappingGrantsContentsRead reports whether a permissions mapping grants the
+// read scope on contents.
+func mappingGrantsContentsRead(permissions *yaml.Node) bool {
+	if permissions == nil || permissions.Kind != yaml.MappingNode {
+		return false
+	}
+	value := yamlMappingValue(permissions, "contents")
+	return value != nil && value.Value == "read"
 }
 
 func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
@@ -351,6 +521,39 @@ func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
 	}
 }
 
+// TestReleaseValidateSnapshotPinsTheAmd64Runner pins the snapshot producer's
+// runner. The self-hosted container pool keeps a runner's workspace between
+// jobs, and an earlier container run leaves root-owned dist/ that goreleaser's
+// --clean cannot unlink (release PR run 35268401677), so the producer is pinned
+// directly to the amd64 Blacksmith runner and must not route through
+// determine-runner. The install jobs keep the router; that job must stay
+// defined. Expectations live in testdata/workflows/e2e_contract.yaml.
+func TestReleaseValidateSnapshotPinsTheAmd64Runner(t *testing.T) {
+	fixture := loadE2EWorkflowContractFixture(t)
+	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseValidate.Workflow))
+	jobs := yamlMappingValue(doc, "jobs")
+	job := yamlMappingValue(jobs, fixture.ReleaseValidate.SnapshotJob)
+	if job == nil {
+		t.Fatalf("release-validate: workflow must define the %q job", fixture.ReleaseValidate.SnapshotJob)
+	}
+	runsOn := yamlMappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Value != fixture.ReleaseValidate.SnapshotRunner {
+		got := "<missing>"
+		if runsOn != nil {
+			got = runsOn.Value
+		}
+		t.Fatalf("release-validate: jobs.%s runs-on = %s, want the pinned amd64 runner %q", fixture.ReleaseValidate.SnapshotJob, got, fixture.ReleaseValidate.SnapshotRunner)
+	}
+	for _, need := range workflowNeedsValues(yamlMappingValue(job, "needs")) {
+		if need == fixture.ReleaseValidate.SnapshotForbiddenRouter {
+			t.Fatalf("release-validate: jobs.%s must not depend on %q; the pool workspace holds root-owned dist/", fixture.ReleaseValidate.SnapshotJob, need)
+		}
+	}
+	if yamlMappingValue(jobs, fixture.ReleaseValidate.SnapshotForbiddenRouter) == nil {
+		t.Fatalf("release-validate: the %q router must stay defined for the install jobs that run on the pool", fixture.ReleaseValidate.SnapshotForbiddenRouter)
+	}
+}
+
 func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
 	fixture := loadReleaseValidateRPMFixture(t)
 	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixtureWorkflowReleaseValidate))
@@ -369,9 +572,9 @@ func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
 	for _, entry := range matrix.Content {
 		image := yamlMappingValue(entry, "image")
 		switch {
-		case image != nil && strings.HasPrefix(image.Value, "fedora@"):
+		case image != nil && strings.HasPrefix(image.Value, "quay.io/fedora/fedora@"):
 			fedora = entry
-		case image != nil && strings.HasPrefix(image.Value, "opensuse/leap@"):
+		case image != nil && strings.HasPrefix(image.Value, "registry.opensuse.org/opensuse/leap@"):
 			openSUSE = entry
 		}
 	}
@@ -691,7 +894,10 @@ func TestE2EWorkflowContract(t *testing.T) {
 	}
 	assertStepBefore(t, steps, fixture.E2E.ParityStep, fixture.E2E.DriverStep)
 	assertStepBefore(t, steps, "Clean up stale e2e podman containers", fixture.E2E.DriverStep)
-	asserted := workflowStepRun(t, steps, "Assert asserted e2e tests ran and passed")
+	// The coverage assertions run in the SAME step as the driver: the runner
+	// does not share files written by one step with a later step, so a separate
+	// assert step could not read the captured log.
+	asserted := driver
 	for _, testName := range fixture.E2E.AssertedTests {
 		if !strings.Contains(asserted, "--- SKIP: "+testName) {
 			t.Fatalf("e2e: assertion step must fail when %s skips", testName)
@@ -703,8 +909,45 @@ func TestE2EWorkflowContract(t *testing.T) {
 	if !strings.Contains(asserted, "no tests to run") {
 		t.Fatal("e2e: assertion step must fail on no-tests output")
 	}
+	assertE2EWorkflowPinsThePodmanDriverRunner(t, doc, fixture)
 	assertWorkflowVillageRefsMatch(t, doc, fixture.ExpectedVillageRef)
 	assertTestsWorkflowTracksE2EChanges(t, fixture)
+	assertTestsWorkflowPostMergeEvidence(t, fixture)
+}
+
+// assertE2EWorkflowPinsThePodmanDriverRunner pins the warm-stack driver's runner.
+// The harness provisions an amd64-only Village stack and needs rootless podman,
+// which the self-hosted container pool cannot provide: a pool landing leaves the
+// harness t.Skip()ing and the fail-closed assertion failing with no coverage
+// (release PR run 35268401677). The driver therefore runs directly on the amd64
+// Blacksmith runner, has no route through determine-runner, and is never pinned
+// to an arm64 label. Expectations live in testdata/workflows/e2e_contract.yaml.
+func assertE2EWorkflowPinsThePodmanDriverRunner(t *testing.T, doc *yaml.Node, fixture e2eWorkflowContractFixture) {
+	t.Helper()
+	jobs := yamlMappingValue(doc, "jobs")
+	job := yamlMappingValue(jobs, "e2e")
+	if job == nil {
+		t.Fatal("e2e: workflow must define jobs.e2e")
+	}
+	runsOn := yamlMappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Value != fixture.E2E.DriverRunner {
+		got := "<missing>"
+		if runsOn != nil {
+			got = runsOn.Value
+		}
+		t.Fatalf("e2e: jobs.e2e runs-on = %s, want the pinned amd64 runner %q", got, fixture.E2E.DriverRunner)
+	}
+	if strings.Contains(runsOn.Value, fixture.E2E.DriverForbiddenRunner) {
+		t.Fatalf("e2e: jobs.e2e runs-on = %q must not match %q; the warm-stack harness skips on an arm64 runner", runsOn.Value, fixture.E2E.DriverForbiddenRunner)
+	}
+	for _, need := range workflowNeedsValues(yamlMappingValue(job, "needs")) {
+		if need == fixture.E2E.DriverForbiddenRouter {
+			t.Fatalf("e2e: jobs.e2e must not depend on %q; the podman driver cannot run on the self-hosted container pool", need)
+		}
+	}
+	if yamlMappingValue(jobs, fixture.E2E.DriverForbiddenRouter) != nil {
+		t.Fatalf("e2e: workflow must not define a %q router; the podman driver runs directly on %q", fixture.E2E.DriverForbiddenRouter, fixture.E2E.DriverRunner)
+	}
 }
 
 func assertReleaseE2EWorkflowContract(t *testing.T) {
@@ -739,12 +982,12 @@ func assertReleaseE2EWorkflowContract(t *testing.T) {
 		t.Fatalf("release-e2e: jobs.%s must not have an if condition; it must run whenever release.yml calls it", defaults.ReleaseE2EWorkflowJob)
 	}
 	runsOn := yamlMappingValue(job, "runs-on")
-	if runsOn == nil || runsOn.Value != "blacksmith-4vcpu-ubuntu-2404" {
+	if runsOn == nil || runsOn.Value != routedRunnerExpression {
 		got := "<missing>"
 		if runsOn != nil {
 			got = runsOn.Value
 		}
-		t.Fatalf("release-e2e: jobs.%s runs-on = %s, want blacksmith-4vcpu-ubuntu-2404 for Arch amd64 coverage", defaults.ReleaseE2EWorkflowJob, got)
+		t.Fatalf("release-e2e: jobs.%s runs-on = %s, want %s so the amd64-only warm-stack driver runs on the routed runner", defaults.ReleaseE2EWorkflowJob, got, routedRunnerExpression)
 	}
 	steps := yamlMappingValue(job, "steps")
 	if steps == nil || steps.Kind != yaml.SequenceNode {
@@ -804,6 +1047,57 @@ func assertTestsWorkflowTracksE2EChanges(t *testing.T, fixture e2eWorkflowContra
 				t.Fatalf("e2e: tests workflow on.%s.paths missing %q", trigger, want)
 			}
 		}
+	}
+}
+
+// assertTestsWorkflowPostMergeEvidence pins the post-merge probe: the job runs
+// only on pushes, reads the checks and pull request APIs, publishes the `skip`
+// output from the tool step, and the `check` job gates on that output while
+// still depending on the probe job.
+func assertTestsWorkflowPostMergeEvidence(t *testing.T, fixture e2eWorkflowContractFixture) {
+	t.Helper()
+	expect := fixture.TestsWorkflow.PostMergeEvidence
+	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "tests.yml")
+	doc := readWorkflowDoc(t, path)
+	jobs := yamlMappingValue(doc, "jobs")
+	probe := yamlMappingValue(jobs, expect.Job)
+	if probe == nil {
+		t.Fatalf("e2e: tests workflow has no %q job", expect.Job)
+	}
+	if got := yamlMappingValue(probe, "if"); got == nil || !strings.Contains(got.Value, expect.JobIfCondition) {
+		t.Fatalf("e2e: tests workflow job %s if = %v, want it to contain %q", expect.Job, got, expect.JobIfCondition)
+	}
+	permissions := yamlMappingValue(probe, "permissions")
+	for _, want := range expect.RequiredPermissions {
+		if got := yamlMappingValue(permissions, want.Key); got == nil || got.Value != want.Value {
+			t.Fatalf("e2e: tests workflow job %s permissions.%s = %v, want %q", expect.Job, want.Key, got, want.Value)
+		}
+	}
+	if got := yamlMappingValue(yamlMappingValue(probe, "outputs"), expect.Output); got == nil || !strings.Contains(got.Value, "steps."+expect.StepID+".outputs") {
+		t.Fatalf("e2e: tests workflow job %s outputs.%s = %v, want it to reference steps.%s.outputs", expect.Job, expect.Output, got, expect.StepID)
+	}
+	steps := yamlMappingValue(probe, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatalf("e2e: tests workflow job %s must define a steps sequence", expect.Job)
+	}
+	if run := workflowStepRun(t, steps.Content, expect.Step); !strings.Contains(run, expect.Command) {
+		t.Fatalf("e2e: tests workflow step %q run does not invoke %q", expect.Step, expect.Command)
+	}
+	check := yamlMappingValue(jobs, "check")
+	if check == nil {
+		t.Fatal("e2e: tests workflow has no check job")
+	}
+	needFound := false
+	for _, need := range workflowNeedsValues(yamlMappingValue(check, "needs")) {
+		if need == expect.CheckNeeds {
+			needFound = true
+		}
+	}
+	if !needFound {
+		t.Fatalf("e2e: tests workflow check job must need %q", expect.CheckNeeds)
+	}
+	if got := yamlMappingValue(check, "if"); got == nil || !strings.Contains(got.Value, "needs."+expect.Job+".outputs."+expect.Output) {
+		t.Fatalf("e2e: tests workflow check job if = %v, want it to gate on needs.%s.outputs.%s", got, expect.Job, expect.Output)
 	}
 }
 
@@ -893,19 +1187,51 @@ func yamlSequenceContains(node *yaml.Node, want string) bool {
 	return false
 }
 
-func assertProductionWorkflowReusableJobsHaveNoSecrets(t *testing.T) {
+func assertReusableWorkflowCallerSecrets(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "release.yml")
-	doc := readWorkflowDoc(t, path)
-	jobs := yamlMappingValue(doc, "jobs")
-	e2eJob := yamlMappingValue(jobs, "e2e")
-	releaseE2EJob := yamlMappingValue(jobs, defaults.ReleaseE2EWorkflowJob)
-	if e2eJob == nil || releaseE2EJob == nil {
-		t.Fatal("release: workflow must define reusable jobs e2e and release-e2e")
+	fixture := loadE2EWorkflowContractFixture(t)
+	for _, caller := range fixture.ReusableCallers {
+		jobs := yamlMappingValue(readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), caller.Workflow)), "jobs")
+		for _, expectation := range caller.Jobs {
+			job := yamlMappingValue(jobs, expectation.Job)
+			if job == nil {
+				t.Fatalf("%s: workflow must define reusable job %q", caller.Workflow, expectation.Job)
+			}
+			secrets := yamlMappingValue(job, "secrets")
+			if calledWorkflowRoutesRunners(t, fixture, expectation) {
+				if secrets == nil || secrets.Kind != yaml.ScalarNode || secrets.Value != "inherit" {
+					t.Fatalf("%s: reusable job %q must pass `secrets: inherit`; %s routes runners through the shared router, which reads %s", caller.Workflow, expectation.Job, expectation.Uses, runnerRoutingSecret)
+				}
+				continue
+			}
+			if secrets != nil {
+				t.Fatalf("%s: reusable job %q must not declare a secrets mapping or scalar; %s does not route runners through the shared router", caller.Workflow, expectation.Job, expectation.Uses)
+			}
+		}
 	}
-	if yamlMappingValue(e2eJob, "secrets") != nil || yamlMappingValue(releaseE2EJob, "secrets") != nil {
-		t.Fatal("release: reusable jobs e2e and release-e2e must not declare a secrets mapping or scalar; they run without inherited credentials")
+}
+
+// calledWorkflowRoutesRunners reports whether the reusable workflow that a
+// caller job invokes defines a determine-runner job that calls the shared
+// runner-router reusable workflow and maps the routing secret explicitly. Only
+// those callers may pass `secrets: inherit`.
+func calledWorkflowRoutesRunners(t *testing.T, fixture e2eWorkflowContractFixture, expectation workflowJobPermissionsExpectation) bool {
+	t.Helper()
+	if !strings.HasPrefix(expectation.Uses, localWorkflowPrefix) {
+		t.Fatalf("reusable job %q uses %q, which is not a local reusable workflow", expectation.Job, expectation.Uses)
 	}
+	path := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", strings.TrimPrefix(expectation.Uses, localWorkflowPrefix))
+	determineRunner := yamlMappingValue(yamlMappingValue(readWorkflowDoc(t, path), "jobs"), "determine-runner")
+	if determineRunner == nil {
+		return false
+	}
+	wantUses := fixture.Router.Workflow + "@" + fixture.Router.Ref
+	uses := yamlMappingValue(determineRunner, "uses")
+	if uses == nil || uses.Value != wantUses {
+		t.Fatalf("%s: jobs.determine-runner.uses = %v, want the shared router %q; the inline router must be deleted", path, uses, wantUses)
+	}
+	token := yamlMappingValue(yamlMappingValue(determineRunner, "secrets"), fixture.Router.SecretKey)
+	return token != nil && token.Value == runnerRoutingSecret
 }
 
 func e2eWorkflowSteps(t *testing.T, doc *yaml.Node) []*yaml.Node {

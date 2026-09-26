@@ -1,0 +1,228 @@
+# Offline publication-capability scan and fresh receiver negotiation.
+#
+# Every case drives the REAL shared publish service (internal/push Pipeline.Run)
+# or the REAL offline scan (push.ScanPublication + push.CapabilityShortfall).
+# `transport` names where a fresh advertisement comes from:
+#   stub               - a receiver double that advertises `advertisement`
+#   unavailable        - the transport fails on ANY network call (offline scan)
+#   null-advertisement - a real Village client against a server that answers JSON
+#                        null, which the contract rejects as malformed
+#
+# A payload that requires a capability is either uploaded whole or refused
+# whole. No case may upload a body with evidence removed.
+cases:
+  - name: offline_scan_derives_graph_requirement_with_no_network
+    arm: pipeline
+    payload: graph
+    dryRun: true
+    transport: unavailable
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: false
+    wantNetworkCalls: 0
+
+  - name: offline_scan_plain_payload_requires_nothing
+    arm: pipeline
+    payload: plain
+    dryRun: true
+    transport: unavailable
+    wantRequired: []
+    wantUploads: 0
+    wantError: false
+    wantNetworkCalls: 0
+
+  - name: fresh_supported_negotiation_uploads_graph_payload
+    arm: pipeline
+    payload: graph
+    transport: stub
+    advertisement:
+      - session_graph_provenance_v1
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 1
+    wantError: false
+    wantNetworkCalls: 1
+    wantSavedPublications: 1
+    wantAttempts: 0
+
+  # The preserved fallback: a store without the durable snapshot surface (here a
+  # bundle double) still publishes the entries-built envelope. The graph token is
+  # derived from the turn provenance alone, and no snapshot-derived session
+  # member appears.
+  - name: store_without_generation_support_publishes_legacy_envelope
+    arm: pipeline
+    payload: graph
+    transport: stub
+    advertisement:
+      - session_graph_provenance_v1
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 1
+    wantError: false
+    wantNetworkCalls: 1
+    wantSavedPublications: 1
+    wantLegacyEnvelope: true
+
+  - name: support_changed_after_scan_to_unsupported_refuses
+    arm: pipeline
+    payload: graph
+    scanFirst: true
+    transport: stub
+    advertisement: []
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: true
+    wantNetworkCalls: 1
+    wantSavedPublications: 0
+    wantAttempts: 0
+
+  - name: omitted_advertisement_refuses_graph_payload
+    arm: pipeline
+    payload: graph
+    transport: stub
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: true
+    wantNetworkCalls: 1
+    wantSavedPublications: 0
+    wantAttempts: 0
+
+  - name: future_revision_token_does_not_satisfy_v1
+    arm: pipeline
+    payload: graph
+    transport: stub
+    advertisement:
+      - session_graph_provenance_v2
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: true
+    wantNetworkCalls: 1
+    wantSavedPublications: 0
+    wantAttempts: 0
+
+  - name: unknown_token_alone_does_not_satisfy_v1
+    arm: pipeline
+    payload: graph
+    transport: stub
+    advertisement:
+      - future_evidence_v1
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: true
+    wantNetworkCalls: 1
+
+  - name: unknown_extra_token_with_v1_uploads
+    arm: pipeline
+    payload: graph
+    transport: stub
+    advertisement:
+      - future_evidence_v1
+      - session_graph_provenance_v1
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 1
+    wantError: false
+    wantNetworkCalls: 1
+    wantSavedPublications: 1
+
+  - name: unavailable_preflight_refuses_graph_payload
+    arm: pipeline
+    payload: graph
+    transport: unavailable
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: true
+    wantNetworkCalls: 1
+    wantSavedPublications: 0
+    wantAttempts: 0
+
+  - name: unavailable_preflight_keeps_plain_payload_compatible
+    arm: pipeline
+    payload: plain
+    transport: unavailable
+    wantRequired: []
+    wantUploads: 1
+    wantError: false
+    wantNetworkCalls: 1
+    wantSavedPublications: 1
+
+  - name: plain_payload_with_empty_advertisement_uploads
+    arm: pipeline
+    payload: plain
+    transport: stub
+    advertisement: []
+    wantRequired: []
+    wantUploads: 1
+    wantError: false
+    wantNetworkCalls: 1
+    wantSavedPublications: 1
+
+  - name: null_advertisement_refuses_graph_payload
+    arm: pipeline
+    payload: graph
+    transport: null-advertisement
+    wantRequired:
+      - session_graph_provenance_v1
+    wantUploads: 0
+    wantError: true
+    wantNetworkCalls: 1
+    wantSavedPublications: 0
+    wantAttempts: 0
+
+  - name: count_only_requires_graph_token
+    arm: preflight
+    payload: count-only
+    advertisement: []
+    wantRequired:
+      - session_graph_provenance_v1
+    wantMissing:
+      - session_graph_provenance_v1
+
+  - name: root_only_requires_graph_token
+    arm: preflight
+    payload: root-only
+    advertisement: []
+    wantRequired:
+      - session_graph_provenance_v1
+    wantMissing:
+      - session_graph_provenance_v1
+
+  - name: purpose_only_requires_graph_token
+    arm: preflight
+    payload: purpose-only
+    advertisement: []
+    wantRequired:
+      - session_graph_provenance_v1
+    wantMissing:
+      - session_graph_provenance_v1
+
+  - name: provenance_only_requires_graph_token
+    arm: preflight
+    payload: provenance
+    advertisement: []
+    wantRequired:
+      - session_graph_provenance_v1
+    wantMissing:
+      - session_graph_provenance_v1
+
+  - name: source_ref_only_requires_no_token
+    arm: preflight
+    payload: source-ref-only
+    advertisement: []
+    wantRequired: []
+    wantMissing: []
+
+  - name: count_only_supported_has_no_shortfall
+    arm: preflight
+    payload: count-only
+    advertisement:
+      - session_graph_provenance_v1
+    wantRequired:
+      - session_graph_provenance_v1
+    wantMissing: []

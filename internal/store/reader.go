@@ -268,6 +268,53 @@ func (s *Store) AllSessions(ctx context.Context) ([]SessionRow, error) {
 	return rows, nil
 }
 
+// SessionsByIDs returns the stored rows for exactly the named session
+// identifiers, bounded to that identifier set by a parameterized IN query. It
+// applies NEITHER selection scope NOR origin scope: its callers already hold
+// the identifiers (a deep link or a relationship target) and are not browsing.
+// Identifiers that name no stored row are omitted; the caller decides how to
+// report an unresolved target. The whole-library AllSessions scan is
+// deliberately not used here, so resolving at most a couple of link targets
+// never materializes the entire stored library. It shares scanSessionRow with
+// the list path, so a row's projection cannot drift between the two.
+func (s *Store) SessionsByIDs(ctx context.Context, sessionIDs []string) ([]SessionRow, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: sessions by ids take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	// Read through the same base projection the list path uses, so both paths
+	// see one shape of a session rather than two that can disagree. Batch the
+	// IN lists to stay below SQLite's bound-variable limit.
+	rows := make([]SessionRow, 0, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		end := min(start+indexFormatReadBatchSize, len(sessionIDs))
+		selected := sessionIDs[start:end]
+		placeholders := make([]string, len(selected))
+		args := make([]any, len(selected))
+		for i, id := range selected {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		query := sqlAllSessions + ` WHERE s.session_id IN (` + strings.Join(placeholders, ", ") + `)`
+		err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				rows = append(rows, scanSessionRow(stmt))
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: sessions by ids query: %w", err)
+		}
+	}
+	return rows, nil
+}
+
 // ChildSessionsForParent returns child (subagent) sessions for a given parent session ID.
 func (s *Store) ChildSessionsForParent(ctx context.Context, parentID string) ([]ChildSessionRow, error) {
 	conn, err := s.pool.Take(ctx)
@@ -978,6 +1025,67 @@ WHERE role = 'user' AND depth = 0
 		})
 		if err != nil {
 			return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		}
+	}
+	return result, nil
+}
+
+// LeadingUserMessagesBulk returns at most perSession leading depth-zero user
+// previews per session, in entry_index order. Sessions without user entries are
+// omitted; NULL previews are empty elements, not missing records. Each element
+// is truncated to SessionPreviewMaxChars runes, like FirstUserMessage.
+func (s *Store) LeadingUserMessagesBulk(ctx context.Context, sessionIDs []string, perSession int) (_ map[string][]string, retErr error) {
+	if perSession < 1 {
+		return nil, fmt.Errorf("store: LeadingUserMessagesBulk cannot read leading previews with perSession=%d: a non-positive cap would discard all evidence while reporting success; no previews were read; pass a per-session cap of at least 1", perSession)
+	}
+	if len(sessionIDs) == 0 {
+		return map[string][]string{}, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: LeadingUserMessagesBulk take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, sessionIDs); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		placeholders := make([]string, len(selectedIDs))
+		args := make([]any, len(selectedIDs), len(selectedIDs)+1)
+		for i, id := range selectedIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		args = append(args, perSession)
+		q := `SELECT session_id, content_preview, rn FROM (
+  SELECT session_id, content_preview,
+    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY entry_index ASC) AS rn
+  FROM session_entries
+  WHERE session_id IN (` + strings.Join(placeholders, ", ") + `) AND role = 'user' AND depth = 0
+) WHERE rn <= ? ORDER BY session_id, rn`
+		err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				sid := stmt.ColumnText(0)
+				// Repeated requested IDs in later batches must not duplicate records.
+				if stmt.ColumnInt(2) == 1 {
+					result[sid] = nil
+				}
+				var preview string
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					preview = stmt.ColumnText(1)
+				}
+				result[sid] = append(result[sid], TruncateToRunes(preview, defaults.SessionPreviewMaxChars))
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: LeadingUserMessagesBulk query: %w", err)
 		}
 	}
 	return result, nil

@@ -4,6 +4,9 @@
 package sessionvisibility
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -55,8 +58,9 @@ type Candidate struct {
 
 // Policy is an immutable, validated discovery projection.
 type Policy struct {
-	mode    config.SelectionMode
-	matcher ingest.SelectionMatcher
+	mode     config.SelectionMode
+	matcher  ingest.SelectionMatcher
+	revision string
 }
 
 // New validates a persisted selection and builds its immutable matcher.
@@ -68,11 +72,36 @@ func New(selection config.SelectionConfig) (Policy, error) {
 		)
 	}
 
-	return Policy{mode: selection.Mode, matcher: config.CompileSelectionMatcher(selection)}, nil
+	return Policy{mode: selection.Mode, matcher: config.CompileSelectionMatcher(selection), revision: selectionRevision(selection)}, nil
 }
 
 // All returns an explicit all-data policy for tests and non-configured tools.
-func All() Policy { return Policy{mode: config.SelectionModeAll} }
+func All() Policy {
+	return Policy{mode: config.SelectionModeAll, revision: selectionRevision(config.SelectionConfig{Mode: config.SelectionModeAll})}
+}
+
+// Revision returns a stable digest of the persisted selection this policy was
+// built from. Discovery readers record it beside a list so a later read can
+// detect that the selection changed underneath it and refuse rather than
+// silently serving a different visible set. An uninitialized policy has no
+// revision to compare and returns the empty string.
+func (p Policy) Revision() string { return p.revision }
+
+// selectionRevision hashes the persisted selection deterministically. The JSON
+// encoder sorts map keys, so two selections that differ only in harness-map
+// iteration order hash identically while any real change (mode, sessions,
+// projects, branches, exclusions) changes the digest.
+func selectionRevision(selection config.SelectionConfig) string {
+	encoded, err := json.Marshal(selection)
+	if err != nil {
+		// The selection is composed of strings, slices and maps, so encoding
+		// cannot fail in practice. An unavailable revision is safer than a
+		// guessed one: readers treat it as unverifiable and refuse to replay.
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
 
 // Active reports whether the policy is narrowing discovery (mode=selected),
 // as opposed to exposing everything (mode=all). Callers use this to explain

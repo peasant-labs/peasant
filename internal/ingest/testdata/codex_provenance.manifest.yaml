@@ -1,0 +1,24 @@
+requiredNames:
+  - aligned-user-context-media-unknown
+  - typed-context-kinds
+  - context-kind-modality-conflict
+  - unusable-kind-vector
+  - history-envelope-provenance
+  - checkpoint-metadata-alignment
+  - exact-pasted-wrapper-three-ways
+  - guardian-user-text
+  - generic-child-user-text-unknown
+  - media-only-action-answer-framing
+  - native-section4-count
+  - inherited-copied-prefix-retained
+  - inherited-multi-segment-retained
+  - candidate-refusal-keeps-private-location-safe
+  - metadata-mutation-barrier
+  - graph-current-parent-supersedes-projection
+  - graph-nested-parent-fallback
+  - graph-conflicting-current-parents-clear-target
+  - graph-explicit-none-clears-cache
+  - graph-retained-known-without-current
+  - graph-context-from-independent-anchor
+  - graph-purpose-variants
+  - graph-no-evidence-omitted

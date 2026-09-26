@@ -145,9 +145,14 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	var analyticsStore *store.Store
 	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+	generationOptions, generationErr := generationStoreOptions(cfg.Output.BasePath)
+	if generationErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot configure managed generation reads: %v\n", generationErr)
+		generationOptions = nil
+	}
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot create data directory %s: %v\n", dataDir, err)
-	} else if db, err := store.Open(dbPath); err != nil {
+	} else if db, err := store.Open(dbPath, generationOptions...); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot open analytics store %s: %v\n", dbPath, err)
 	} else {
 		dbCloser = db.Close

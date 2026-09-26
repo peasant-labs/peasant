@@ -136,8 +136,8 @@ func TestPushCmd_ABudgetSpentLocallyDoesNotBlameTheVillage(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ran out of its 1ms budget",
-		"before any village request was made",
-		"The village was never contacted",
+		"before the upload sent anything",
+		"the village is not where this budget went",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error must state %q; got: %v", want, err)

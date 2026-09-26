@@ -1,4 +1,4 @@
-expected_village_ref: 830cbcbe3cd00613d04bd8f6a2ae9f1db955d503
+expected_village_ref: 4d48936be9be8e8c52ef2c04eaa5fcc6369ff82a
 e2e:
   required_triggers:
     - push
@@ -45,6 +45,15 @@ e2e:
       reason: a newly created sibling stack may still be starting
     - value: status=running
       reason: a running sibling stack must never be removed
+  # The warm-stack driver is pinned directly to the amd64 Blacksmith runner, not
+  # routed through determine-runner: rootless podman and the disposable Village
+  # stack do not come up inside the self-hosted pool containers, so a pool
+  # landing leaves the harness t.Skip()ing and the gate failing with no coverage.
+  # The harness provisions an amd64-only Village stack, so the label must never
+  # be an arm64 one.
+  driver_runner: blacksmith-4vcpu-ubuntu-2404
+  driver_forbidden_runner_substring: "-arm"
+  driver_forbidden_router: determine-runner
 release:
   parity_step: Verify schema module pin parity
   parity_run_contains: make e2e-schema-parity
@@ -125,29 +134,66 @@ reusable_callers:
     jobs:
       - job: tests
         uses: ./.github/workflows/tests.yml
+        needs: [validate]
+        if_contains:
+          - startsWith(github.event.pull_request.title, 'release(')
+          - contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+          - github.event.label.name == 'full-gate'
         permissions:
           - key: contents
             value: read
+          - key: checks
+            value: read
+          - key: pull-requests
+            value: read
       - job: e2e
         uses: ./.github/workflows/e2e.yml
+        needs: [validate, changes]
+        if_contains:
+          - startsWith(github.event.pull_request.title, 'release(')
+          - contains(fromJSON('["opened","reopened"]'), github.event.action)
+          - needs.changes.outputs.e2e != 'false'
+          - needs.changes.result != 'success'
+          - needs.validate.result == 'success'
+          - github.event.label.name == 'full-gate'
         permissions:
           - key: contents
             value: read
       - job: release-validate
         uses: ./.github/workflows/release-validate.yml
-        needs: validate
+        needs: [validate, changes]
         if_contains:
           - startsWith(github.event.pull_request.title, 'release(')
-          - contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+          - contains(fromJSON('["opened","reopened"]'), github.event.action)
+          - needs.changes.outputs.release_validate != 'false'
+          - needs.changes.result != 'success'
+          - needs.validate.result == 'success'
+          - github.event.label.name == 'full-gate'
         permissions:
           - key: contents
             value: read
+router:
+  workflow: peasant-labs/infra/.github/workflows/runner-router.yml
+  ref: runner-router-v1
+  secret_key: RUNNER_STATUS_TOKEN
+  routed_workflows:
+    - .github/workflows/tests.yml
+    - .github/workflows/release.yml
+    - .github/workflows/release-validate.yml
+    - .github/workflows/release-e2e.yml
 release_validate:
   workflow: .github/workflows/release-validate.yml
   required_triggers:
     - workflow_call
   forbidden_triggers:
     - pull_request
+  # The snapshot producer is pinned directly to the amd64 Blacksmith runner, not
+  # routed through determine-runner: the pool keeps a runner's workspace between
+  # jobs and an earlier container run leaves root-owned dist/ that goreleaser's
+  # --clean cannot unlink. The install jobs still route through the router.
+  snapshot_job: snapshot
+  snapshot_runner: blacksmith-4vcpu-ubuntu-2404
+  snapshot_forbidden_router: determine-runner
 tests_workflow:
   triggers:
     - pull_request
@@ -155,3 +201,16 @@ tests_workflow:
   required_paths:
     - .github/workflows/**
     - .github/release-guard.policy.yml
+  post_merge_evidence:
+    job: post-merge-evidence
+    job_if_condition: github.event_name == 'push'
+    required_permissions:
+      - key: checks
+        value: read
+      - key: pull-requests
+        value: read
+    output: skip
+    step: Prove the merged tree already passed the checks
+    step_id: evidence
+    command: scripts/post-merge-evidence
+    check_needs: post-merge-evidence

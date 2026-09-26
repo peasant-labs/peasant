@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useChannel } from "@/contexts/WebSocketContext";
 import { discoveryErrorMessage } from "@/lib/selectionGuidance";
 import { DiscoveryErrorCode, discoveryErrorCode } from "@/lib/api/errors";
@@ -18,13 +18,10 @@ import {
   projectListState,
 } from "@/components/picker/SelectionRecoveryPanel";
 import { ExplainerToggle, useExplainer } from "@/components/Explainer";
-import { Skeleton, SkeletonList } from "@/lib/skeleton";
+import { Skeleton } from "@/lib/skeleton";
 import type { SessionsPayload, SessionSummary } from "@/types/messages";
-import type { ReviewListPayload } from "@peasant-labs/schema";
-import { cachedProjectSummaries, fetchProjectSummaries, fetchReviewChanges, type DecodedProjectSummariesPayload } from "@/lib/api/map";
+import { cachedProjectSummaries, fetchProjectSummaries, type DecodedProjectSummariesPayload } from "@/lib/api/map";
 import { displayProject } from "@/lib/quality/utils";
-import { parseProjectHash } from "@/lib/navigation/projectRoutes";
-import { ChangeGraph } from "@/app/review/[[...segments]]/ChangeGraph";
 import { formatRelative } from "@/app/review/[[...segments]]/format";
 import {
   StatGrid,
@@ -33,10 +30,10 @@ import {
   TeachingEmptyState,
   type TileSpec,
 } from "@/lib/ft-ui";
-import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
+import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp, List } from "lucide-react";
 import { AllSessions } from "@/components/sessions/AllSessions";
+import { GroupedSessionsSection } from "@/components/sessions/GroupedSessionsSection";
 import { useSessionTitles } from "@/hooks/useSessionTitles";
-import { UNASSIGNED_PROJECT } from "@/app/review/[[...segments]]/sessions";
 
 const CHANNELS: ["sessions"] = ["sessions"];
 
@@ -48,14 +45,12 @@ const CHANNELS: ["sessions"] = ["sessions"];
 // falling back to sessions-channel grouping (stats unavailable) while the
 // fetch loads or fails. A row click lands on /sessions/{projectHash} — that
 // project's session list (the shared ProjectPicker, destination="sessions").
-// Single-project installs skip the picker and embed that project's Changes
-// list directly. The Map lives at /map now.
+// Every install renders this one shape — including a single-project install.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Summary stats (E1) — aggregate across all projects, built from picker rows.
 // ---------------------------------------------------------------------------
-
 interface SummaryStats {
   projects: number;
   sessions: number;
@@ -89,71 +84,6 @@ function summaryStats(rows: PickerRow[], totalSessions: number): SummaryStats {
     }
   }
   return { projects: rows.length, sessions: totalSessions, recorded, total, hasCoverage, open, hasOpen, lastWorkMs };
-}
-
-// ---------------------------------------------------------------------------
-// Single-project installs — skip the picker, embed the Changes graph directly
-// (the same ChangeGraph the /review surface renders).
-// ---------------------------------------------------------------------------
-
-function SingleProjectChanges({ row }: { row: PickerRow }) {
-  const [payload, setPayload] = useState<ReviewListPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const projectHash = row.hash ? parseProjectHash(row.hash) : null;
-
-  useEffect(() => {
-    if (!projectHash) return;
-    let cancelled = false;
-    setPayload(null);
-    setError(null);
-    fetchReviewChanges(projectHash)
-      .then((p) => {
-        if (!cancelled) setPayload(p);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectHash]);
-
-  let body: ReactNode;
-  if (!row.hash) {
-    body = (
-      <div className="border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-danger">
-        No project hash is recorded for {displayProject(row.name)} — the server
-        may predate this surface, or the project has not been ingested yet.
-      </div>
-    );
-  } else if (!projectHash) {
-    body = <div role="alert">This project has a malformed identity. Refresh project discovery before opening its changes. No changes request was sent.</div>;
-  } else if (error) {
-    body = (
-      <div className="border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] text-danger">
-        Couldn&rsquo;t load the changes: {error}
-      </div>
-    );
-  } else if (!payload) {
-    // Same shimmer geometry as the /review list skeleton.
-    body = <SkeletonList rows={4} label="Loading changes" />;
-  } else {
-    body = <ChangeGraph projectHash={projectHash} projectName={row.name} payload={payload} />;
-  }
-
-  return (
-    // Same fairtrade bare-`section` neutralization as AllSessions: without it
-    // this single-project view is capped at --maxw and centred inside its
-    // flex-column parent instead of filling it. See the note in
-    // components/sessions/AllSessions.tsx for the mechanism.
-    <section
-      className="flex flex-col gap-3 w-full max-w-none mx-0 px-0"
-      data-tour="changes-list"
-    >
-      <h2 className="text-sm font-medium text-ink">{displayProject(row.name)}</h2>
-      {body}
-    </section>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +139,51 @@ function SelectionNotice({
             Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Flat all-sessions disclosure.
+//
+// The grouped list replaced the old flat table on Home, and with it the filter
+// over session identity fields (short id, harness, project) and the 25-row
+// top-level pager. Those are real flows, so they stay REACHABLE: a collapsed
+// disclosure mounts the unchanged AllSessions table over the same session set,
+// beside the grouped list rather than instead of it. The grouped list keeps its
+// own per-group disclosure/paging state; this table keeps the flat filter and
+// pager exactly as they were, and it is never widened by a helper membership.
+// ---------------------------------------------------------------------------
+
+function AllSessionsDisclosure({
+  sessions,
+  titles,
+}: {
+  sessions: SessionSummary[];
+  titles?: ReadonlyMap<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  if (sessions.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2" data-flat-sessions-disclosure="true">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="inline-flex w-fit items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
+      >
+        <List size={13} aria-hidden />
+        <span className="tabular-nums">filter and page through every session</span>
+        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+      </button>
+      {open && (
+        <AllSessions
+          sessions={sessions}
+          titles={titles}
+          title="every session"
+          subtitle="every ingested session across projects, filterable and paged."
+        />
       )}
     </div>
   );
@@ -318,35 +293,28 @@ export default function HomePage() {
     [summaries, sessions, sessionsError, summariesSelectionFailed, selectionRecovery],
   );
 
-  // Sessions the All Sessions table is allowed to render.
+  // Sessions the grouped REST list may render.
   //
-  // VISIBILITY IS DERIVED FROM `rows`, never from the sessions channel directly.
-  // `rows` already encodes the whole visibility policy — it empties on a
-  // discovery error, on a failed selection, and on selection recovery, and it
-  // carries only the projects a working kickstart selection permits. The
-  // sessions WS payload is NOT filtered by that selection, so listing it raw
-  // would surface projects and session identities the picker is deliberately
-  // withholding (regression covered by page.test.tsx's forbiddenIdentities).
-  // Intersecting with the visible project set means the table can never expose a
-  // project the picker is hiding, in any of those states.
-  const visibleProjectNames = useMemo(() => new Set(rows.map((r) => r.name)), [rows]);
-  const visibleSessions = useMemo(
-    () => sessions.filter((s) => visibleProjectNames.has(s.project ?? UNASSIGNED_PROJECT)),
-    [sessions, visibleProjectNames],
-  );
-
+  // VISIBILITY IS DERIVED FROM THE SERVER ROUTE, never from the sessions
+  // channel directly. `/api/v1/sessions?view=grouped` applies the SAME
+  // discovery/selection predicate the flat route applies, so the list can never
+  // surface a project or session identity the picker is withholding. A
+  // saved-selection failure stops the grouped section entirely (fail closed),
+  // and a selection-recovery state keeps the recovery panel as the only body.
   const totalSessions =
     sessionsError || summariesSelectionFailed || selectionRecovery
       ? 0
       : sessions.length > 0
       ? sessions.length
       : rows.reduce((n, r) => n + r.sessions, 0);
-  const singleProject = rows.length === 1 ? rows[0] : null;
   const stats = useMemo(() => summaryStats(rows, totalSessions), [rows, totalSessions]);
 
   // Nothing has resolved yet: summary fetch still in flight AND no sessions
   // message has arrived. Show a skeleton, not a teach/empty state.
   const loading = !summariesSettled && sessionsData === undefined;
+
+  const groupedSectionVisible =
+    !loading && !sessionsError && !summariesSelectionFailed && !selectionRecovery;
 
   // Pre-format coverage percentage for the KPI tile.
   const coveragePct =
@@ -463,15 +431,15 @@ export default function HomePage() {
         </p>
       )}
 
-      {/* KPI grid — aggregate stats across all projects (picker view only).
+      {/* KPI grid — aggregate stats across all projects.
           StatGrid replaces the hand-rolled SummaryCard grid: responsive auto-fit
           columns, mono eyebrow labels, tabular display numbers, optional sub lines. */}
-      {!loading && rows.length > 0 && !singleProject && (
+      {!loading && rows.length > 0 && (
         <StatGrid tiles={kpiTiles} />
       )}
 
       {/* Explain a screen of "—": the per-project stats couldn't load. */}
-      {summariesFailed && !singleProject && rows.length > 0 && (
+      {summariesFailed && rows.length > 0 && (
         <p className="text-xs text-ink-3">
           Per-project stats couldn&rsquo;t load, so coverage and unmerged-branch
           counts show &ldquo;—&rdquo;. Session counts and last-work are still accurate.
@@ -482,7 +450,7 @@ export default function HomePage() {
           loading       → skeleton rows (DataState's built-in shimmer)
           disconnected  → calm lost-connection panel (not an empty state)
           empty         → TeachingEmptyState — what to run and why
-          data present  → picker or single-project changes view */}
+          data present  → the project picker */}
       <DataState
         loading={loading}
         status={wsStatus}
@@ -500,24 +468,30 @@ export default function HomePage() {
         }
         skeletonRows={4}
       >
-        {singleProject ? (
-          // Keyed by project so a change of the single project resets the
-          // embedded list's fetch state via a remount.
-          <SingleProjectChanges key={singleProject.name} row={singleProject} />
-        ) : (
-          // statsPending until the summary fetch settles → the coverage +
-          // unmerged cells shimmer instead of popping empty→value.
-          <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
-        )}
+        {/* statsPending until the summary fetch settles → the coverage +
+            unmerged cells shimmer instead of popping empty→value. */}
+        <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
       </DataState>
 
-      {/* Every ingested session, flat and cross-project, beneath the picker —
-          the pre-release archive's Projects page shape. Rows open the session
-          viewer. Rendered outside DataState because it has its own empty rule
-          (it returns null with no sessions) and must not replace the picker's
-          teach/empty state. */}
-      {!loading && !sessionsError && visibleSessions.length > 0 && (
-        <AllSessions sessions={visibleSessions} titles={sessionTitles} />
+      {/* Every ingested session, grouped by its saved helper threads, beneath
+          the picker. The list and its counts come from the SAME authorized,
+          selected route set, so grouping is server-driven rather than a
+          client-side cosmetic fold. Rendered outside DataState because it has
+          its own empty rule and must not replace the picker's teach/empty
+          state. */}
+      {groupedSectionVisible && (
+        <GroupedSessionsSection
+          variant="sessions"
+          invalidationKey={sessionsData}
+          titles={sessionTitles}
+          heading="all sessions"
+        />
+      )}
+
+      {/* The pre-existing cross-project filter and 25-row pager stay reachable
+          here, beside the grouped list. See AllSessionsDisclosure above. */}
+      {groupedSectionVisible && (
+        <AllSessionsDisclosure sessions={sessions} titles={sessionTitles} />
       )}
     </div>
   );

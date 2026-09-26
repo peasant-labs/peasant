@@ -295,7 +295,6 @@ cases:
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"future","id":"a","parentId":null}
-    reject: true
   - name: header-only
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","parentSession":"/synthetic/private-fork.jsonl"}

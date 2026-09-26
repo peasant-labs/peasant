@@ -7,11 +7,161 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.7.0-rc1] - 2026-09-16
+
+### Added
+- Native repair activation through the harvester registry: a harness whose
+  effective target is a managed generation is built, staged, and activated
+  through the store instead of replacing bare entries, so repaired sessions keep
+  their captured content and prior evidence; a store that cannot persist a
+  managed generation keeps the retained baseline (#426).
+- The generation activation records the publication-capture agreement in the
+  same transaction as the managed-generation install, so a session repaired from
+  a stale index is publishable immediately. An uncertifiable provenance kind
+  records nothing and leaves stored provenance unchanged; an unchanged capture
+  never moves; a changed capture advances its revision once; a disagreement
+  refuses the activation (#429).
+- Published payloads carry durable session provenance — relationships and their
+  public anchors, the root session, the purpose, the input-submission count
+  (including a measured zero), and retained earlier history — through the
+  snapshot-first publish path, with the consent overlay and the metadata mirrors
+  the receiver requires (#428).
+- Mounted session navigation on the new detail surface: a stored context link
+  opens the exact stored target, current-parent links navigate, and the retained
+  earlier-history disclosure restores on Back, reload, and copied links without
+  moving the stream position (#432).
+- Grouped local browse and share: grouped local session lists on the home
+  picker, grouped search and share flows, and a share chooser that selects
+  explicit helper members (#426).
+- `peasant push` scans payloads offline and negotiates receiver capabilities
+  freshly before publishing (#426).
+- The web app includes an inspect and feedback tool, development-gated and
+  app-local (#422).
+
+### Changed
+- The durable session detail no longer carries the read-only navigation field;
+  the viewer receives it as an adapter option, so sessions with relationships
+  cook correctly (#432).
+- The projects home no longer embeds the change graph (#425).
+- Release tooling: the release-PR gate re-runs only with a clear delta and
+  passing evidence (#419); partial re-runs of a failed release are documented
+  (#416); the release gate no longer runs the race detector (#414); x86_64 and
+  architecture-neutral CI jobs run on the self-hosted runner pool (#424).
+- The `changes` visual regression baselines were re-blessed (#427).
+- The schema contract module is re-pinned to v0.22.0 and the full-stack e2e gate
+  provisions the matching Village revision, so the release gate exercises
+  provenance publication against a receiver that advertises the session-graph
+  capability.
+
 ### Fixed
-- Revert the ingest-time branch reachability filter so a rewritten branch does
-  not discard still-discoverable historical commits before ledger insertion.
-  Commit detection again uses the timestamp, author, and transcript heuristics;
-  these can still over-attribute nearby commits (#333).
+- Published payloads derive the metadata publication mirrors — the
+  input-submission count and the graph identity (root session, purpose,
+  relationships) — from the same active generation snapshot as the durable
+  detail; previously the metadata part could omit or diverge from those values,
+  so a receiver could refuse an otherwise valid publish with a mirror
+  disagreement (#433).
+- Pi publications keep their recorded duration when publishing through the
+  snapshot path; previously the duration was emitted as zero (#428).
+
+## [0.6.0] - 2026-09-14
+
+### Added
+- `peasant sessions list` accepts `--session <id>`, and its JSON output carries
+  `projectHash`, so harness integrations such as the `/peasant` Claude Code
+  plugin can record the current session and open its transcript deep link
+  (#345).
+- Pi Coding Agent sessions are discovered, indexed, redacted, exported, and
+  published through the existing harvest and push paths (#329).
+- Kickstart local import animates a progress bar for every stage, shows live
+  per-stage timings and estimates, and quits on `q` or Ctrl+C (#303).
+- `peasant village push` offers opt-in stage profiling and redaction metrics
+  through `--profile-output` and `--profile-trace` (#315).
+- Harvest reports measured index coverage, including sessions that indexed
+  nothing and sessions that failed but kept prior entries, in the summary and
+  JSON output (#394).
+- Claude Code control records such as attachments, compaction boundaries,
+  permission-mode changes, agent settings, PR links, cost snapshots, and titles
+  are represented with their payloads instead of refused, so those sessions
+  certify for export and publication (#411).
+- Codex sessions keep their native content provenance and session hierarchy:
+  block origin, actor, and ownership come from native evidence, and root,
+  parent, and helper relationships are preserved instead of inferred from
+  wrapper text (#401).
+- Skill and slash-command invocations recorded at ingest are emitted on the
+  wire as the turn's `Command` in session detail, export, and push (#362).
+
+### Changed
+- Each harness carries its own adapter, indexer, and index-format version, so
+  a change to one harness re-indexes only that harness. Claude Code sessions
+  re-index once after this upgrade (#343, #411).
+- SQLite is the source of truth for saved sessions and publication metadata.
+  Complete recorded text, tool inputs and outputs, and structured metadata
+  persist in the database, and push, dry-run, wizard previews, and Share no
+  longer need generated `metadata.json` files (#337, #338, #343).
+- Active sessions are ingested by default, and repeated runs compare captured
+  source evidence so unchanged sessions are skipped (#331).
+- Explicit republication of a changed session updates the same Village
+  transcript through its receipt without `--force` (#331).
+- Publication eligibility validation is explicit at each consumer: the push
+  pipeline, the wizard preview, and the Share redaction scan (#344).
+- Transcript records up to 256 MiB are read whole; larger records are omitted
+  with a diagnostic and a stored placeholder, and served detail stays under the
+  contract cap (#343).
+
+### Fixed
+- Historical commit admission is preserved: the ingest-time branch
+  reachability filter was reverted so a rewritten branch does not discard
+  still-discoverable commits before ledger insertion (#334).
+- OpenCode v2 and mixed v1/v2 stores ingest again, with native message
+  decoding and live-session discovery across both layouts (#310).
+- Harvest cancellation stops in-flight ingest and diff work, and harvest and
+  kickstart share one progress model (#316).
+- Kickstart shows filesystem paths for remote-less projects, drops the empty
+  branch level for branchless projects, and unblocks selection there. Branch
+  re-selection no longer narrows an unrestricted harness (#378, #391).
+- Forced rebuilds no longer refuse intact sessions on a false checksum
+  mismatch; transcript and metadata are read as one validated pair (#395).
+- `--dry-run` opens the analytics database read-only instead of loading the
+  whole file into memory (#406).
+- Sessions stored before publication captures existed, including every
+  session a v0.5.0 database holds, are captured again by an ordinary `peasant
+  ingest` and can publish. The harvest previously settled such a session from
+  its retained transcript pair, which cannot bind a capture, so `push` kept
+  asking for an ingest that changed nothing (#413).
+
+### Database
+- Store migrations V50 through V61: captured-source fingerprints and
+  source-proven capture provenance (V50, V51; #331, #337), durable prose
+  separated from bounded previews (V52; #338), Pi harness admission (V53;
+  #329), index representation, adapter output, input proofs, annotation
+  retirement, and the closed `capture_format` column (V54 through V59; #343),
+  and the managed-generation catalog with reverse logical-target indexes (V60,
+  V61; #401).
+
+### Build
+- Release archives, `.deb`, `.rpm`, and the AUR PKGBUILD ship
+  `THIRD_PARTY_NOTICES`, and CI guards dependency licenses (#366).
+- Final releases publish the Homebrew cask to `peasant-labs/homebrew-tap`,
+  verified by a macOS cask smoke job (#354).
+- The Homebrew cask clears the download quarantine attribute through
+  Homebrew's declarative `postflight_steps` stanza, which current `brew style`
+  requires in place of a `postflight` block (#413).
+
+### Tests
+- End-to-end runs reap orphaned test containers whose owner process has exited
+  and enforce a local memory cap (#331, #347).
+- The Pi round-trip e2e test compiles against the schema v0.20.0 entry-ref
+  type (#413).
+
+### CI
+- The release e2e gates check out the Village peer at a revision that pins the
+  same schema contract, v0.20.0 (#413).
+- The full-stack e2e pulls MinIO from Quay by digest, since the Docker Hub
+  image is no longer served (#413).
+
+### Dependencies
+- Contract pins: schema `v0.20.0` (Village API 0.18.0, Local API 0.13.0,
+  Types 0.20.0), redact `v0.1.6`, fairtrade `0.0.19` (#329, #361, #392).
 
 ## [0.5.0] - 2026-09-01
 
@@ -267,6 +417,8 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
+[0.6.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0
 [0.5.0-rc3]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc3
 [0.5.0-rc2]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc2

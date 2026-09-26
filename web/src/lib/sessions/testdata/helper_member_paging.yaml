@@ -1,0 +1,103 @@
+# Host-owned paging for one expanded helper group. The window arithmetic is the
+# only place a page, a page size and a server total meet, so every page/limit/
+# total combination the footer can render is pinned here as one case.
+cases:
+  - name: first-page-of-many
+    operation: window
+    paging: {page: 1, limit: 2, total: 5}
+    expected: {start: 0, end: 2, pageCount: 3, hasPrevious: false, hasNext: true}
+
+  - name: middle-page
+    operation: window
+    paging: {page: 2, limit: 2, total: 5}
+    expected: {start: 2, end: 4, pageCount: 3, hasPrevious: true, hasNext: true}
+
+  - name: last-partial-page
+    operation: window
+    paging: {page: 3, limit: 2, total: 5}
+    expected: {start: 4, end: 5, pageCount: 3, hasPrevious: true, hasNext: false}
+
+  - name: exact-multiple-final-page
+    operation: window
+    paging: {page: 2, limit: 2, total: 4}
+    expected: {start: 2, end: 4, pageCount: 2, hasPrevious: true, hasNext: false}
+
+  - name: clamped-past-last-page
+    operation: window
+    paging: {page: 9, limit: 2, total: 5}
+    expected: {start: 4, end: 5, pageCount: 3, hasPrevious: true, hasNext: false}
+
+  - name: empty-scope-window
+    operation: window
+    paging: {page: 1, limit: 20, total: 0}
+    expected: {start: 0, end: 0, pageCount: 1, hasPrevious: false, hasNext: false}
+
+  - name: single-short-page
+    operation: window
+    paging: {page: 1, limit: 20, total: 3}
+    expected: {start: 0, end: 3, pageCount: 1, hasPrevious: false, hasNext: false}
+
+  - name: page-size-one
+    operation: window
+    paging: {page: 3, limit: 1, total: 3}
+    expected: {start: 2, end: 3, pageCount: 3, hasPrevious: true, hasNext: false}
+
+  - name: first-page-default-limit
+    operation: firstPage
+    limit: 20
+    expected: {page: 1, limit: 20, total: 0}
+
+  - name: first-page-custom-limit
+    operation: firstPage
+    limit: 1
+    expected: {page: 1, limit: 1, total: 0}
+
+  - name: goto-next-page
+    operation: gotoPage
+    paging: {page: 1, limit: 2, total: 5}
+    page: 2
+    expected: {page: 2, limit: 2, total: 5}
+
+  - name: goto-page-preserves-limit-and-total
+    operation: gotoPage
+    paging: {page: 3, limit: 1, total: 9}
+    page: 1
+    expected: {page: 1, limit: 1, total: 9}
+
+  - name: with-total-records-served-page
+    operation: withTotal
+    paging: {page: 1, limit: 2, total: 0}
+    served: {page: 1, total: 5}
+    expected: {page: 1, limit: 2, total: 5}
+
+  - name: with-total-follows-server-lower-page
+    operation: withTotal
+    paging: {page: 3, limit: 2, total: 6}
+    served: {page: 2, total: 4}
+    expected: {page: 2, limit: 2, total: 4}
+
+  - name: window-rejects-zero-page
+    operation: window
+    paging: {page: 0, limit: 2, total: 5}
+    expectError: true
+
+  - name: window-rejects-zero-limit
+    operation: window
+    paging: {page: 1, limit: 0, total: 5}
+    expectError: true
+
+  - name: window-rejects-fractional-page
+    operation: window
+    paging: {page: 1.5, limit: 2, total: 5}
+    expectError: true
+
+  - name: goto-page-rejects-nonexistent-page
+    operation: gotoPage
+    paging: {page: 1, limit: 2, total: 5}
+    page: 0
+    expectError: true
+
+  - name: first-page-rejects-zero-limit
+    operation: firstPage
+    limit: 0
+    expectError: true

@@ -3,16 +3,16 @@ requiredNames:
   - future-stored-adapter-missing-sidecar
   - future-stored-adapter-changed-source
   - future-stored-adapter-retained-index
-  - db v9 remains unchanged
+  - db v9 without a capture rereads native input once
   - file v9 remains unchanged without a database
   - db v8 requires native refresh
   - file v8 requires native refresh
   - db v9 native update still refreshes
   - file v9 native update still refreshes
-  - v10 known producer remains unchanged
+  - v10 known producer without a capture rereads native input once
   - retained v9 index does not reread native input
   - forced retained v9 index does not reread native input
-  - stale retained v9 index does not reread native input
+  - stale pre-capture v9 row rereads native input once
   - future schema force preserves file and store
   - future schema file force preserves files
   - future schema index refuses
@@ -31,7 +31,7 @@ requiredNames:
   - forced output lookup failure preserves files
   - forced nested host lookup failure preserves files
   - stale unreadable metadata cannot fall back to source info
-  - stale unreadable transcript lookup cannot fall back to source info
+  - stale unreadable transcript index cannot fall back to source info
   - actually missing metadata remains recoverable
   - older corrupt metadata remains recoverable
   - transient metadata I/O failure preserves file and store
@@ -312,10 +312,13 @@ cases:
     database: true
     stale: true
     faultOperation: metadata-read
-  - name: stale unreadable transcript lookup cannot fall back to source info
+  # The retained transcript is inspected on the index path; an ordinary
+  # harvest of a pre-capture row reads native input instead (see below).
+  - name: stale unreadable transcript index cannot fall back to source info
     schemaVersion: 9
     database: true
     stale: true
+    reindex: true
     faultOperation: transcript-stat
   - name: actually missing metadata remains recoverable
     schemaVersion: 9
@@ -354,10 +357,18 @@ cases:
     reindex: true
     force: true
     wantIndexed: 1
-  - name: db v9 remains unchanged
+  # A row that has never held a publication capture (revision 0) cannot be
+  # settled from its retained pair: the pair indexes content, but a capture
+  # needs the current metadata schema and source-proven evidence that only a
+  # native read supplies, so the ordinary harvest reads native input once and
+  # captures the row. This is the upgrade path for every database written
+  # before publication captures existed; a captured row is not re-read.
+  - name: db v9 without a capture rereads native input once
     schemaVersion: 9
     database: true
     reconciled: true
+    wantExtract: 1
+    wantIndexed: 1
   - name: file v9 remains unchanged without a database
     schemaVersion: 9
   - name: db v8 requires native refresh
@@ -378,11 +389,13 @@ cases:
     schemaVersion: 9
     sourceChanged: true
     wantExtract: 1
-  - name: v10 known producer remains unchanged
+  - name: v10 known producer without a capture rereads native input once
     schemaVersion: 10
     adapterVersion: 1
     database: true
     reconciled: true
+    wantExtract: 1
+    wantIndexed: 1
   - name: retained v9 index does not reread native input
     schemaVersion: 9
     database: true
@@ -395,15 +408,16 @@ cases:
     reindex: true
     force: true
     wantIndexed: 1
-  # A stale legacy row with a saved pair and no recorded artifact hash is
-  # indexed from that pair on an ordinary harvest. The database still selects
-  # the session and no tree is walked; the index write establishes the pair
-  # identity from the pair it parsed, so the row settles instead of being
-  # re-selected forever.
-  - name: stale retained v9 index does not reread native input
+  # A stale legacy row with a saved pair and no publication capture is read
+  # from native input once on an ordinary harvest: the pair can rebuild the
+  # index (see the two `harvest index` cases above), but only a native read
+  # can capture the row, and a row left without a capture would be selected
+  # by its readiness on every harvest while never becoming publishable.
+  - name: stale pre-capture v9 row rereads native input once
     schemaVersion: 9
     database: true
     stale: true
+    wantExtract: 1
     wantIndexed: 1
   - name: future schema force preserves file and store
     schemaVersion: 999

@@ -1,0 +1,77 @@
+slots:
+  - {name: v01-initial-schema, slot: 1, needle: "CREATE TABLE projects ("}
+  - {name: v02-session-entries, slot: 2, needle: "CREATE TABLE session_entries ("}
+  - {name: v03-ingest-log, slot: 3, needle: "CREATE TABLE IF NOT EXISTS ingest_log ("}
+  - {name: v04-pushed-at, slot: 4, needle: "ALTER TABLE sessions ADD COLUMN pushed_at INTEGER;"}
+  - {name: v05-entry-extensions, slot: 5, needle: "CREATE TABLE session_entries_ext ("}
+  - {name: v06-models, slot: 6, needle: "CREATE TABLE models ("}
+  - {name: v07-input-cost, slot: 7, needle: "ALTER TABLE session_metrics ADD COLUMN cost_input_usd REAL;"}
+  - {name: v08-daily-project-summary, slot: 8, needle: "CREATE TABLE daily_summary_by_project ("}
+  - {name: v09-session-tags, slot: 9, needle: "ALTER TABLE sessions ADD COLUMN tags TEXT;"}
+  - {name: v10-index-version, slot: 10, needle: "ALTER TABLE sessions ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0;"}
+  - {name: v11-tool-call-id, slot: 11, needle: "ALTER TABLE session_entries RENAME COLUMN tool_use_id TO tool_call_id;"}
+  - {name: v12-session-commits, slot: 12, needle: "CREATE TABLE session_commits ("}
+  - {name: v13-annotation-type-status, slot: 13, needle: "CREATE INDEX idx_anntype_status ON annotation_types(status);"}
+  - {name: v14-annotations-rebuild, slot: 14, needle: "ALTER TABLE annotations RENAME TO _annotations_v13;"}
+  - {name: v15-web-human-kind, slot: 15, needle: "'human', 'human-web', 'Web Dashboard User'"}
+  - {name: v16-target-kinds, slot: 16, needle: "CREATE TABLE target_kinds ("}
+  - {name: v17-scale-kinds, slot: 17, needle: "CREATE TABLE scale_kinds ("}
+  - {name: v18-frustration-classifier, slot: 18, needle: "Frustration Signal Classifier"}
+  - {name: v19-resolution-evidence, slot: 19, needle: "Entry-level resolution evidence annotations support the session-level outcome classification"}
+  - {name: v20-annotation-approval, slot: 20, needle: "quality.annotation_approval"}
+  - {name: v21-pending-annotations, slot: 21, needle: "CREATE TABLE IF NOT EXISTS pending_annotations ("}
+  - {name: v22-session-files, slot: 22, needle: "CREATE TABLE IF NOT EXISTS session_files ("}
+  - {name: v23-host-slugs-v2, slot: 23, needle: "CREATE TABLE host_slugs_v2 ("}
+  - {name: v24-session-commands, slot: 24, needle: "CREATE TABLE session_commands ("}
+  - {name: v25-research-annotations, slot: 25, needle: "Research-specific annotation types for transcript analysis studies"}
+  - {name: v26-entry-part-type, slot: 26, needle: "ALTER TABLE session_entries ADD COLUMN part_type TEXT;"}
+  - {name: v27-process-outcomes, slot: 27, needle: '["bad_handoff","bad_output","bad_process"]'}
+  - {name: v28-lessons, slot: 28, needle: "CREATE TABLE lessons ("}
+  - {name: v29-lessons-v2, slot: 29, needle: "CREATE TABLE lessons_v2 ("}
+  - {name: v30-memory-injection-log, slot: 30, needle: "CREATE TABLE memory_injection_log ("}
+  - {name: v31-lesson-dedup, slot: 31, needle: "CREATE TABLE lessons_dedup ("}
+  - {name: v32-lesson-sources, slot: 32, needle: "CREATE TABLE lesson_sources ("}
+  - {name: v33-sessions-snapshot, slot: 33, needle: "CREATE TABLE sessions_v33 AS SELECT * FROM sessions;"}
+  - {name: v34-pulled-transcripts, slot: 34, needle: "CREATE TABLE pulled_transcripts ("}
+  - {name: v35-entry-search, slot: 35, needle: "CREATE VIRTUAL TABLE session_entries_fts USING fts5("}
+  - {name: v36-custom-label, slot: 36, needle: "user.custom_label"}
+  - {name: v37-session-license, slot: 37, needle: "ALTER TABLE sessions ADD COLUMN license_id"}
+  - {name: v38-pulled-license, slot: 38, needle: "ALTER TABLE pulled_transcripts ADD COLUMN license_id"}
+  - {name: v39-turn-outcome, slot: 39, needle: "quality.turn_outcome"}
+  - {name: v40-session-commit-associations, slot: 40, needle: "CREATE TABLE session_commit_associations ("}
+  - {name: v41-annotation-target-associations, slot: 41, needle: "CREATE TABLE annotation_target_associations ("}
+  - {name: v42-sessions-rebuild, slot: 42, needle: "CREATE TABLE sessions_v42 AS SELECT * FROM sessions;"}
+  - {name: v43-session-publications, slot: 43, needle: "CREATE TABLE session_publications ("}
+  - {name: v44-claude-evidence, slot: 44, needle: "CREATE TABLE claude_transcript_evidence ("}
+  - {name: v45-opencode-change-cursor, slot: 45, needle: "CREATE TABLE opencode_session_seq_cursor ("}
+  - {name: v46-session-origin, slot: 46, needle: "ADD COLUMN session_origin"}
+  - {name: v47-session-entries-hash, slot: 47, needle: "ALTER TABLE sessions ADD COLUMN session_entries_hash TEXT CHECK ("}
+  - {name: v48-annotation-run-state, slot: 48, needle: "CREATE TABLE annotation_run_state ("}
+  - {name: v49-annotation-target-anchors, slot: 49, needle: "CREATE TABLE annotation_target_anchors ("}
+  - {name: v50-source-fingerprint, slot: 50, needle: "ALTER TABLE sessions ADD COLUMN source_fingerprint BLOB"}
+  - {name: v51-session-cwd, slot: 51, needle: "ALTER TABLE sessions ADD COLUMN session_cwd TEXT;"}
+  - {name: v52-full-content, slot: 52, needle: "CREATE TABLE session_entry_full_content ("}
+  - {name: v53-harness-menu, slot: 53, needle: "CREATE TABLE sessions_v50 AS SELECT * FROM sessions;"}
+  - {name: v54-index-format-version, slot: 54, needle: "ALTER TABLE sessions ADD COLUMN index_format_version INTEGER CHECK (index_format_version > 0);"}
+  - {name: v55-adapter-version, slot: 55, needle: "ALTER TABLE sessions ADD COLUMN adapter_version INTEGER CHECK (adapter_version > 0);"}
+  - {name: v56-indexed-input-hash, slot: 56, needle: "ALTER TABLE sessions ADD COLUMN indexed_input_hash TEXT CHECK ("}
+  - {name: v57-metrics-input-hash, slot: 57, needle: "ALTER TABLE session_metrics ADD COLUMN input_hash TEXT CHECK ("}
+  - {name: v58-retired-annotations, slot: 58, needle: "ALTER TABLE annotations ADD COLUMN retired_at INTEGER;"}
+  - {name: v59-content-captures-rebuild, slot: 59, needle: "CREATE TABLE session_content_captures_v58 AS SELECT * FROM session_content_captures;"}
+  - {name: v60-active-generation, slot: 60, needle: "ALTER TABLE sessions ADD COLUMN active_generation_id TEXT;"}
+  - {name: v61-publication-parent-index, slot: 61, needle: "CREATE INDEX idx_session_publication_parent_uuid"}
+guards:
+  - name: deleted-required-slot
+    operation: delete-required-slot
+    targetSlot: 45
+    expectedFragments: ["v45-opencode-change-cursor", "missing required case"]
+  - name: shared-needle
+    operation: replace-needle
+    targetSlot: 46
+    replacementNeedle: session_origin
+    expectedFragments: ["session_origin", "expects slot 46", "matches migration slots"]
+    expectedSlots: [46, 51, 53]
+  - name: uncovered-appended-slot
+    operation: append-uncovered-slot
+    appendedScript: "SELECT 1;"
+    expectedFragments: ["has no named identity fixture", "requiredNames"]

@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -23,17 +24,19 @@ import (
 var indexerCompletionData []byte
 
 type indexerCompletionFixture struct {
-	Name            string         `yaml:"name"`
-	Harness         ingest.Harness `yaml:"harness"`
-	Input           string         `yaml:"input"`
-	Missing         bool           `yaml:"missing"`
-	Error           bool           `yaml:"error"`
-	Entries         int            `yaml:"entries"`
-	LegacyEntries   *int           `yaml:"legacyEntries"`
-	LongContent     bool           `yaml:"longContent"`
-	Oversized       bool           `yaml:"oversized"`
-	OversizedRecord string         `yaml:"oversizedRecord"`
-	PartialRead     bool           `yaml:"partialRead"`
+	Retained        []completionUnknownExpectation `yaml:"retained"`
+	VisibleTexts    []string                       `yaml:"visibleTexts"`
+	Name            string                         `yaml:"name"`
+	Harness         ingest.Harness                 `yaml:"harness"`
+	Input           string                         `yaml:"input"`
+	Missing         bool                           `yaml:"missing"`
+	Error           bool                           `yaml:"error"`
+	Entries         int                            `yaml:"entries"`
+	LegacyEntries   *int                           `yaml:"legacyEntries"`
+	LongContent     bool                           `yaml:"longContent"`
+	Oversized       bool                           `yaml:"oversized"`
+	OversizedRecord string                         `yaml:"oversizedRecord"`
+	PartialRead     bool                           `yaml:"partialRead"`
 }
 
 type completionPartialReadFS struct{ ingest.FileSystem }
@@ -70,10 +73,8 @@ func loadIndexerCompletionFixtures(t *testing.T) []indexerCompletionFixture {
 		}
 		names[fixture.Name] = true
 	}
-	for _, name := range fixtures.RequiredNames {
-		if !names[name] {
-			t.Fatalf("required completion fixture %q missing", name)
-		}
+	if err := testutil.RequireFixtureNames("indexer completion", "case", fixtures.RequiredNames, names); err != nil {
+		t.Fatal(err)
 	}
 	return fixtures.Cases
 }
@@ -89,7 +90,7 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
 			session := ingest.DiscoveredSession{SessionID: schema.SessionID(testutil.TestSessionUUID), Harness: fixture.Harness, SourcePath: "/synthetic/transcript.jsonl"}
-			data := []byte(fixture.Input)
+			data := []byte(expandCompletionOpaquePayload(fixture.Input))
 			if fixture.LongContent {
 				data = []byte(strings.ReplaceAll(fixture.Input, "LONG_CONTENT", strings.Repeat("x", defaults.ContentPreviewLimit+50)))
 			}
@@ -125,6 +126,9 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 				}
 			} else {
 				assertCompletionEntries(t, result, err, fixture.Entries)
+				if len(fixture.Retained) > 0 {
+					assertCompletionUnknown(t, result.(indexformat.V1).Entries, fixture.Retained, fixture.VisibleTexts)
+				}
 			}
 			if !fixture.Missing && !fixture.PartialRead {
 				fromBytes, bytesErr := strict.IndexTranscriptBytesResult(context.Background(), session, data)
@@ -141,6 +145,33 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 				if legacyErr != nil || len(legacy) != *fixture.LegacyEntries {
 					t.Fatalf("legacy tolerance changed: entries=%d error=%v", len(legacy), legacyErr)
 				}
+				legacyBytes, legacyBytesErr := indexer.IndexTranscriptBytes(context.Background(), session, data)
+				if legacyBytesErr != nil || !reflect.DeepEqual(legacy, legacyBytes) {
+					t.Fatalf("compatibility file/bytes outcomes differ: %v", legacyBytesErr)
+				}
+				if len(fixture.Retained) > 0 {
+					assertCompletionUnknown(t, legacy, fixture.Retained, fixture.VisibleTexts)
+				}
+				if fixture.Error && fixture.VisibleTexts != nil {
+					turns := transcript.EntriesToTurns(legacy)
+					if len(turns) != len(fixture.VisibleTexts) {
+						t.Fatal("compatibility preview lost known siblings")
+					}
+					for i, text := range fixture.VisibleTexts {
+						if turns[i].Content != text {
+							t.Fatal("compatibility preview changed known conversation")
+						}
+					}
+				}
+				if fixture.Harness == ingest.HarnessCodex && fixture.Error {
+					capture := indexer.(ingest.AuthoritativeTranscriptIndexer)
+					if got, err := capture.IndexTranscriptForCapture(context.Background(), session); err == nil || len(got.Entries) != 0 {
+						t.Fatal("compatibility tolerance leaked into authoritative file capture")
+					}
+					if got, err := capture.IndexTranscriptBytesForCapture(context.Background(), session, data); err == nil || len(got.Entries) != 0 {
+						t.Fatal("compatibility tolerance leaked into authoritative byte capture")
+					}
+				}
 			}
 			if !fixture.Error {
 				fullOptions := registryOptions
@@ -148,6 +179,9 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 				full := ingest.NewIndexerRegistry(fs, fullOptions)[fixture.Harness].(ingest.VersionedTranscriptIndexer)
 				fullResult, fullErr := full.IndexTranscriptResult(context.Background(), session)
 				assertCompletionEntries(t, fullResult, fullErr, fixture.Entries)
+				if len(fixture.Retained) > 0 {
+					assertCompletionUnknown(t, fullResult.(indexformat.V1).Entries, fixture.Retained, fixture.VisibleTexts)
+				}
 				boundedEntries := result.(indexformat.V1).Entries
 				fullEntries := fullResult.(indexformat.V1).Entries
 				if fixture.LongContent && (boundedEntries[0].ContentPreview == nil || fullEntries[0].ContentPreview == nil || len(*boundedEntries[0].ContentPreview) != defaults.ContentPreviewLimit || len(*fullEntries[0].ContentPreview) <= defaults.ContentPreviewLimit) {
@@ -179,6 +213,72 @@ func assertCompletionEntries(t *testing.T, result indexformat.Result, err error,
 	output, ok := result.(indexformat.V1)
 	if !ok || len(output.Entries) != count {
 		t.Fatalf("result=%#v, want V1 with %d entries", result, count)
+	}
+}
+
+type completionUnknownExpectation struct {
+	Namespace   string `yaml:"namespace"`
+	Kind        string `yaml:"kind"`
+	Payload     string `yaml:"payload"`
+	Line        int    `yaml:"line"`
+	RecordIndex int64  `yaml:"recordIndex"`
+	Position    int64  `yaml:"position"`
+	Pointer     string `yaml:"pointer"`
+}
+
+func expandCompletionOpaquePayload(value string) string {
+	return strings.ReplaceAll(value, "OPAQUE_BODY", strings.Repeat("synthetic-opaque-", 1024))
+}
+
+// Verify the durable evidence and the real public fold independently of entry
+// cardinality: an extra row is useful only when it preserves the source payload
+// and position while remaining absent from the understood conversation.
+func assertCompletionUnknown(t *testing.T, entries []schema.SessionEntry, expected []completionUnknownExpectation, visibleTexts []string) {
+	t.Helper()
+	var retained []ingest.RetainedUnknown
+	for _, entry := range entries {
+		records, err := ingest.RetainedUnknownOf(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) > 0 && !ingest.IsRetainedUnknownCarrier(entry) {
+			t.Fatal("whole unknown record became a conversation row")
+		}
+		retained = append(retained, records...)
+	}
+	if len(retained) != len(expected) {
+		t.Fatalf("retained occurrences=%d, want %d", len(retained), len(expected))
+	}
+	projection, err := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: ingest.HarnessCodex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := transcript.SessionToDetailValidatedWithProjection(&ingest.Session{ID: entries[0].SessionID, Harness: ingest.HarnessCodex}, projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Diagnostics == nil || !detail.Diagnostics.Partial || len(detail.RetainedUnknown) != len(expected) {
+		t.Fatal("public projection did not retain partial evidence")
+	}
+	for i, want := range expected {
+		got := retained[i]
+		public := got.Position.Public
+		payload := expandCompletionOpaquePayload(want.Payload)
+		if got.Harness != ingest.HarnessCodex || got.Namespace != want.Namespace || got.Kind != want.Kind || string(got.Payload) != payload || got.Position.Line != want.Line || got.Position.JSONPointer != want.Pointer || public == nil || public.SourceRef == "" || strings.Contains(public.SourceRef, "/") || public.RecordIndex != want.RecordIndex || public.Position != want.Position {
+			t.Fatalf("retained source identity, lexical payload, or coordinates differ at %d", i)
+		}
+		wire := detail.RetainedUnknown[i]
+		if wire.SourceRef != public.SourceRef || wire.RecordIndex != want.RecordIndex || wire.Position != want.Position || wire.Pointer != want.Pointer || wire.Namespace != want.Namespace || wire.Kind != want.Kind || wire.Payload != payload {
+			t.Fatalf("outbound evidence differs at %d", i)
+		}
+	}
+	if len(projection.Turns) != len(visibleTexts) {
+		t.Fatalf("visible turns=%d, want %d; opaque carriers must stay hidden", len(projection.Turns), len(visibleTexts))
+	}
+	for i, text := range visibleTexts {
+		if projection.Turns[i].Content != text || projection.Turns[i].Role != schema.RoleUser {
+			t.Fatalf("known conversation changed at turn %d", i)
+		}
 	}
 }
 

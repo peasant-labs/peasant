@@ -29,6 +29,10 @@ import (
 type syncHandler struct {
 	store  *store.Store
 	config *config.Config
+	// scopeIssuer mints the opaque member scope a rendered sync helper group
+	// carries. The server owns the bounded scope cache; the sync route only
+	// consumes the issuer seam so its members replay the sync predicate.
+	scopeIssuer groupedScopeIssuer
 
 	// Ingest state (protected by mu).
 	mu             sync.Mutex
@@ -68,6 +72,22 @@ type syncSessionResponse struct {
 }
 
 func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request) {
+	// view is opt-in, exactly as on the sessions route. Omission preserves the
+	// exact legacy flat envelope; only the published grouped value selects the
+	// grouped sync payload, and any other value is refused rather than served
+	// as flat under a name the caller did not ask for.
+	view := r.URL.Query().Get("view")
+	if view != "" && view != groupedViewValue {
+		writeAPIError(w, http.StatusBadRequest,
+			fmt.Sprintf("Sync sessions could not be listed because query field \"view\" is %q in internal/api.handleSyncSessions. No sessions were returned, because an unpublished view value cannot be served safely. Omit view for the flat sync list or use view=%s, then retry.", view, groupedViewValue),
+			"grouped_view_unknown")
+		return
+	}
+	if view == groupedViewValue {
+		h.serveGroupedSyncSessions(w, r)
+		return
+	}
+
 	var reader syncSessionReader
 	if h.store != nil {
 		reader = h.store
@@ -91,33 +111,15 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 		return
 	}
 
-	ctx := r.Context()
-
-	// Get all pushable sessions (with pushed_at info).
-	sessions, err := db.AllPushableSessions(ctx)
+	entries, err := loadSyncEntries(r.Context(), db)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"query sessions: %s"}`, err), http.StatusInternalServerError)
 		return
 	}
 
-	// Get held-back sessions (missing metrics).
-	heldMap := make(map[string]bool)
-	held, heldErr := db.SessionsWithoutMetrics(ctx)
-	if heldErr == nil {
-		for _, session := range held {
-			heldMap[session.SessionID] = true
-		}
-	}
-
-	// Map to response with sync status.
-	metadata, metadataErr := push.LoadPublicationMetadata(ctx, db, sessions)
-	result := make([]syncSessionResponse, 0, len(sessions))
-	for _, s := range sessions {
-		input := metadata[s.SessionID]
-		if metadataErr != nil || !push.PublicationMetadataReady(input) {
-			heldMap[s.SessionID] = true
-		}
-		status := computeSyncStatus(s, heldMap, input.Readiness)
+	result := make([]syncSessionResponse, 0, len(entries))
+	for _, entry := range entries {
+		s := entry.row
 		result = append(result, syncSessionResponse{
 			ID:          s.SessionID,
 			Harness:     s.ModelHarness,
@@ -129,7 +131,7 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 			TotalTokens: s.TokensTotal,
 			TurnCount:   s.TurnCount,
 			Model:       s.ModelID,
-			SyncStatus:  status,
+			SyncStatus:  entry.status,
 		})
 	}
 
@@ -457,7 +459,7 @@ func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr st
 }
 
 func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
-	input, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
+	input, detail, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
 		return "", err
 	}
@@ -477,19 +479,25 @@ func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string
 	if _, err := push.BuildTranscriptContentValidated(&input.Metadata, redacted, defaults.PublishSchemaVersion, fields, input.SessionOrigin); err != nil {
 		return "", err
 	}
+	// The review scan must see the exact bytes the publish will carry, so it
+	// builds the same envelope through the shared durable-first builder and
+	// derives the same capability requirements the upload gate will enforce.
+	content, err := push.BuildPublishTranscriptContent(detail, &input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
+	if err != nil {
+		return "", err
+	}
 	metadata, err := push.MapMetadata(push.MapOptions{Meta: &input.Metadata, Metrics: input.Quality, Entries: input.Entries, Associations: input.Associations, Fields: fields.Resolve()})
 	if err != nil {
 		return "", err
 	}
-	content, err := push.BuildTranscriptContentValidated(&input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
+	if _, err := push.ScanPublication(content); err != nil {
+		return "", err
+	}
+	data, err := push.PublicationReviewText(content, redactor)
 	if err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(content)
-	if err != nil {
-		return "", err
-	}
-	return string(metadata) + "\n" + string(data), nil
+	return string(metadata) + "\n" + data, nil
 }
 
 // buildReplacementLookup builds a map from rule ID to replacement string.

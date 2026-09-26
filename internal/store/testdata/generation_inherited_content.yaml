@@ -1,0 +1,19 @@
+# Retained inherited evidence oracle. A generation can hold immutable content
+# for a context segment it captures but never emits as a main or earlier entry.
+# Activation must succeed, the blob and alias must survive reopening, and
+# WithSessionSnapshot must still read the generation: the snapshot display
+# content map carries only emitted refs while the inherited record and its blob
+# stay in the generation catalog for retention. `with_alias` toggles the
+# retained native alias over the same inherited ref.
+session:
+  id: "88888888-8888-4888-8888-888888888888"
+  harness: claude-code
+generation:
+  id: gen_inherited_g1
+  inherited_ref: e_inherited_retained
+  inherited_text: "inherited context retained outside the emitted display map"
+cases:
+  - name: inherited-content-retained-display-filtered
+    with_alias: false
+  - name: inherited-content-and-alias-retained-display-filtered
+    with_alias: true

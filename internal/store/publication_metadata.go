@@ -43,26 +43,12 @@ func validateCaptureMetadata(m *schema.UnifiedMetadata, kind ingest.CWDProvenanc
 	if _, err := ingest.NewCWDProvenanceKind(string(kind)); err != nil {
 		return err
 	}
-	if kind == ingest.CWDNotRecovered {
-		return publicationRepairError("source has not been inspected")
-	}
-	if (kind == ingest.CWDSourceExact) != (m.CWD != "") {
-		return publicationRepairError("CWD and its source provenance disagree")
-	}
-	if m.SchemaVersion != ingest.CurrentSchemaVersion {
-		return publicationRepairError("unsupported metadata schema")
-	}
-	if _, err := schema.NewSessionID(string(m.SessionID)); err != nil {
-		return publicationRepairError("invalid metadata session identity")
-	}
-	if _, err := schema.NewProjectHash(string(m.Project.Hash)); err != nil {
-		return publicationRepairError("invalid metadata project identity")
-	}
-	if _, err := schema.NewTranscriptContentHash(m.ContentHash); err != nil {
-		return publicationRepairError("invalid captured content digest")
-	}
-	if m.MetadataHash != schema.ComputeMetadataHash(m) {
-		return publicationRepairError("metadata integrity digest does not match snapshot")
+	// The capture rule is defined once, in the ingest pipeline, and enforced on
+	// this side by the same function: the pipeline only ever offers a snapshot
+	// the rule accepts, so a refusal here is a genuine disagreement rather than
+	// a snapshot the caller could not certify.
+	if err := ingest.ValidatePublicationCaptureSnapshot(m, kind); err != nil {
+		return publicationRepairError(err.Error())
 	}
 	return nil
 }
@@ -84,24 +70,48 @@ func validatePublicationCapture(entry ingest.StoreEntry) error {
 // before publishing its capture revision. Receipts are not changed by ingest.
 // The shared host dimension retains its first remote spelling; compare remote
 // identity like ingest does, without discarding the capture's source spelling.
+//
+// Independently admitted Codex/OpenCode orphans store a nil FK cache while
+// their managed metadata keeps the logical ParentUUID. A stored empty parent
+// with a logical parent that names no stored session is the valid orphan
+// state, not a mismatch; the old read origin and relationships remain
+// canonical and are never inferred from the nil.
 func validateStoredPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) error {
 	m := entry.Metadata
-	return sqlitex.ExecuteTransient(conn, `SELECT s.project_hash, COALESCE(s.parent_id,''), h.host_slug, COALESCE(h.git_remote,'')
+	var storedParent, storedProject, storedSlug, storedRemote string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT s.project_hash, COALESCE(s.parent_id,''), h.host_slug, COALESCE(h.git_remote,'')
 FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(m.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
-			parent, remote := "", ""
-			if m.ParentUUID != nil {
-				parent = string(*m.ParentUUID)
-			}
-			if m.Git.Remote != nil {
-				remote = *m.Git.Remote
-			}
-			if stmt.ColumnText(0) != string(m.Project.Hash) || stmt.ColumnText(1) != parent || stmt.ColumnText(2) != string(m.HostSlug) || ingest.NormalizeRemoteForMatch(stmt.ColumnText(3)) != ingest.NormalizeRemoteForMatch(remote) {
-				return publicationRepairError("captured metadata disagrees with stored attribution")
-			}
+			storedProject, storedParent, storedSlug, storedRemote = stmt.ColumnText(0), stmt.ColumnText(1), stmt.ColumnText(2), stmt.ColumnText(3)
 			return nil
 		},
-	})
+	}); err != nil {
+		return err
+	}
+	parent, remote := "", ""
+	if m.ParentUUID != nil {
+		parent = string(*m.ParentUUID)
+	}
+	if m.Git.Remote != nil {
+		remote = *m.Git.Remote
+	}
+	if storedProject == string(m.Project.Hash) && storedSlug == string(m.HostSlug) && ingest.NormalizeRemoteForMatch(storedRemote) == ingest.NormalizeRemoteForMatch(remote) {
+		if storedParent == parent {
+			return nil
+		}
+		// For an independently admitted child the FK cache is nullable
+		// availability, not the durable relation. Missing, unselected,
+		// unavailable, self-parent, cyclic and failed targets all resolve to a
+		// nil cache while the managed metadata keeps the logical ParentUUID, so
+		// an empty stored cache with a named logical parent is the valid
+		// orphan state. A populated cache that disagrees is still a mismatch
+		// that holds publication, and the old read origin and relationships
+		// remain canonical rather than being inferred from the nil.
+		if storedParent == "" && parent != "" && ingest.IndependentAdmissionHarness(m.ModelHarness) {
+			return nil
+		}
+	}
+	return publicationRepairError("captured metadata disagrees with stored attribution")
 }
 
 // publicationCaptureSnapshot is the capture state as it stood BEFORE a session
@@ -163,6 +173,39 @@ func (snapshot publicationCaptureSnapshot) unchangedCapture(entry ingest.StoreEn
 		snapshot.MetadataHash == m.MetadataHash && snapshot.ContentHash == m.ContentHash &&
 		snapshot.SchemaVersion == m.SchemaVersion && snapshot.CWD == m.CWD &&
 		snapshot.CWDProvenance == string(entry.CWDProvenance)
+}
+
+// persistActivationPublicationCapture records the certified publication-capture
+// agreement for one index write in the caller's transaction and reports whether
+// a capture was recorded. A kind the caller could not certify is not a capture:
+// it records nothing, so the ingest proceeds and the stored provenance is left
+// exactly as it was. Any other disagreement refuses the whole write, so a
+// half-bound state is never committed.
+func persistActivationPublicationCapture(conn *sqlite.Conn, sessionID ingest.SessionID, capture *ingest.PublicationCaptureWrite) (int64, bool, error) {
+	kind := capture.CWDProvenance
+	if kind == "" || kind == ingest.CWDNotRecovered {
+		return 0, false, nil
+	}
+	entry := ingest.StoreEntry{
+		Metadata:      &capture.Metadata,
+		CWDProvenance: kind,
+		Session:       ingest.DiscoveredSession{SessionID: sessionID},
+	}
+	if err := validatePublicationCapture(entry); err != nil {
+		return 0, false, err
+	}
+	if err := validateStoredPublicationCapture(conn, entry); err != nil {
+		return 0, false, err
+	}
+	prior, err := readPublicationCaptureSnapshot(conn, sessionID)
+	if err != nil {
+		return 0, false, err
+	}
+	revision, err := persistPublicationCapture(conn, entry, prior)
+	if err != nil {
+		return 0, false, err
+	}
+	return revision, true, nil
 }
 
 func persistPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry, prior publicationCaptureSnapshot) (int64, error) {
@@ -251,7 +294,10 @@ func stampPublicationIndex(conn *sqlite.Conn, id ingest.SessionID, revision int6
 	return sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_publication_capture_revision=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{revision, string(id)}})
 }
 
-// LoadPublicationInput takes one deferred read transaction. Every constituent
+// LoadPublicationInput reads recorded capture evidence for ingest/repair and
+// diagnostics. Publication consumers use WithCommittedPublicationInput instead,
+// which includes the current generation's derived facts. This capture-only read
+// takes one deferred read transaction. Every constituent
 // reader uses this same connection, including extension rows and current metrics.
 // Missing/unsupported captures return needs_ingest. Corrupt or conflicting
 // evidence returns an error, never an approximation or a filesystem fallback.
@@ -262,14 +308,21 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 		return bundle, err
 	}
 	defer s.pool.Put(conn)
+	end := sqlitex.Transaction(conn)
+	defer end(&err)
+	return s.loadPublicationInputOnConn(ctx, conn, id)
+}
+
+// loadPublicationInputOnConn reads capture evidence and content on the caller's
+// transaction, so the committed-generation reader can include them in its read.
+func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+	bundle.Readiness = ingest.PublicationNeedsIngest
 	defer func() {
 		if err != nil {
 			bundle.Readiness = ingest.PublicationNeedsIngest
 			bundle.Entries = nil
 		}
 	}()
-	end := sqlitex.Transaction(conn)
-	defer end(&err)
 	found := false
 	err = sqlitex.ExecuteTransient(conn, publicationMetadataSelect+` WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {

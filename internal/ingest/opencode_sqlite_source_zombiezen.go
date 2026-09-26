@@ -33,6 +33,8 @@ const (
 	openCodeCurrentSessionsAfterStatement    = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
 	openCodeCurrentMessagesFirstStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+	openCodeCurrentMessagesBeforeStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq < ?2 ORDER BY seq LIMIT ?3"
+	openCodeCurrentMessagesBoundedStatement  = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
 	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 	// The payload-size probes count one session's payload-bearing rows and sum
 	// their data length. LENGTH() computes from the record header, so a probe
@@ -1283,10 +1285,15 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 		}
 		return nil
 	}
-	if request.After == nil {
+	switch {
+	case request.After == nil && request.Before == nil:
 		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessagesFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, decode)
-	} else {
+	case request.After == nil:
+		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessagesBeforeStatement, []any{request.SessionID.value, request.Before.value, request.PageSize.value + 1}, decode)
+	case request.Before == nil:
 		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessagesAfterStatement, []any{request.SessionID.value, request.After.sequence.value, request.PageSize.value + 1}, decode)
+	default:
+		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessagesBoundedStatement, []any{request.SessionID.value, request.After.sequence.value, request.Before.value, request.PageSize.value + 1}, decode)
 	}
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeCurrentPage{}, s.sourceReadError(lease.ctx, "read bounded current session_message page", err, "session_message(id, session_id, type, time_created, time_updated, data, seq)", "supported current session_message")
@@ -1457,6 +1464,9 @@ func validateCurrentPageRequest(request OpenCodeCurrentPageRequest) error {
 	}
 	if request.After != nil && request.After.sequence.value < 0 {
 		return fmt.Errorf("validate OpenCode current page cursor failed before source access: seq %d is negative, so keyset continuation cannot preserve the non-negative source contract; construct the cursor from NewOpenCodeCurrentSeq", request.After.sequence.value)
+	}
+	if request.Before != nil && request.Before.value < 0 {
+		return fmt.Errorf("validate OpenCode current page bound failed before source access: seq %d is negative, so the exclusive bound cannot preserve the non-negative source contract; construct the bound from NewOpenCodeCurrentSeq", request.Before.value)
 	}
 	return nil
 }

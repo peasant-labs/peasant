@@ -65,6 +65,16 @@ const (
 	// tries again. An upload that genuinely needs longer — a large first push —
 	// is a one-time manual run, which the generated hook's header says.
 	DefaultUploadBudget = 5 * time.Second
+
+	// LookupBudgetShare is the fraction of the whole upload budget a stalled
+	// waiting-prompt-request lookup may cost.
+	//
+	// The lookup runs in front of every upload — see the push command — and the
+	// hook runs the same command, so its own bound is felt on every commit. It
+	// does not draw on the budget, but it must not cost the commit anything like
+	// it either, and that relationship belongs beside the budget rather than in
+	// the command that spends it.
+	LookupBudgetShare = 4
 )
 
 // ManualMarkerPrefix opens the by-hand snippet. It is deliberately different
@@ -249,8 +259,9 @@ func CommandPrefix(binding Binding) string {
 //
 // --quiet is always included: a hook fires on every commit or push, and the
 // default summary would print several lines into an otherwise ordinary git
-// command. --quiet still prints errors and one final result line, so a failure
-// is never hidden.
+// command. --quiet still prints errors, a waiting prompt request, and one final
+// result line, so neither a failure nor a reviewer's request for the prompts
+// behind a pull request is hidden.
 //
 // --timeout is always included for the same reason: git must not be held up by a
 // village that stopped answering. See DefaultUploadBudget.

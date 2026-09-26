@@ -1,0 +1,199 @@
+# Cases for the post-merge evidence proof.
+#
+# Every case describes the API facts for one pushed commit: the pull requests
+# the commit is associated with (`pulls`), the commit trees (`trees`, keyed by
+# SHA), and the check runs on the pull request head (`check_runs`). `api_error`
+# forces one lookup to fail. `want_skip` is the decision `prove` must return;
+# `want_reason` is an optional substring that a false decision must explain.
+cases:
+  - name: squash-merge-of-green-pr-skips
+    pulls:
+      - number: 433
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: success, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: true
+
+  - name: release-pr-called-copy-skips
+    pulls:
+      - number: 433
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: skipped, started_at: "2026-09-18T20:16:04Z", app: github-actions}
+      - {name: "tests (release PR) / make check", conclusion: cancelled, started_at: "2026-09-18T20:16:40Z", app: github-actions}
+      - {name: "tests (release PR) / make check", conclusion: success, started_at: "2026-09-18T20:16:54Z", app: github-actions}
+    want_skip: true
+
+  - name: direct-push-runs
+    pulls: []
+    trees: {squash: tree-a}
+    want_skip: false
+    want_reason: "no merged pull request"
+
+  - name: unmerged-pull-request-runs
+    pulls:
+      - number: 500
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    want_skip: false
+    want_reason: "no merged pull request"
+
+  - name: merge-commit-mismatch-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: other-merge
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    want_skip: false
+    want_reason: "no merged pull request"
+
+  - name: two-merged-pull-requests-run
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+      - number: 501
+        merged_at: "2026-09-18T20:31:00Z"
+        merge_commit_sha: squash
+        head_sha: prhead-two
+    trees: {squash: tree-a, prhead: tree-a, prhead-two: tree-a}
+    want_skip: false
+    want_reason: "2 merged pull requests"
+
+  - name: moved-base-tree-mismatch-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-after-move, prhead: tree-before-move}
+    want_skip: false
+    want_reason: "differs from the pull request head tree"
+
+  - name: earlier-failure-then-success-skips
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: failure, started_at: "2026-09-18T19:00:00Z", app: github-actions}
+      - {name: make check, conclusion: success, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: true
+
+  - name: later-failure-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: success, started_at: "2026-09-18T19:00:00Z", app: github-actions}
+      - {name: make check, conclusion: failure, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: false
+    want_reason: 'the latest "make check" attempt is "failure"'
+
+  - name: cancelled-check-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: cancelled, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: false
+    want_reason: 'the latest "make check" attempt is "cancelled"'
+
+  - name: skipped-check-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: skipped, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: false
+    want_reason: 'the latest "make check" attempt is "skipped"'
+
+  - name: missing-check-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: other job, conclusion: success, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: false
+    want_reason: 'no "make check" check run'
+
+  - name: foreign-producer-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: success, started_at: "2026-09-18T20:00:00Z", app: some-app}
+    want_skip: false
+
+  - name: unparseable-start-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: success, started_at: "", app: github-actions}
+    want_skip: false
+
+  - name: conflicting-start-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    check_runs:
+      - {name: make check, conclusion: success, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+      - {name: make check, conclusion: failure, started_at: "2026-09-18T20:00:00Z", app: github-actions}
+    want_skip: false
+
+  - name: pulls-api-error-runs
+    api_error: pulls
+    want_skip: false
+
+  - name: tree-api-error-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    api_error: tree
+    want_skip: false
+
+  - name: runs-api-error-runs
+    pulls:
+      - number: 500
+        merged_at: "2026-09-18T20:30:33Z"
+        merge_commit_sha: squash
+        head_sha: prhead
+    trees: {squash: tree-a, prhead: tree-a}
+    api_error: runs
+    want_skip: false

@@ -1,0 +1,84 @@
+required_names:
+  - parity_order_and_omission
+  - truncation_of_every_unicode_preview
+  - per_session_cap
+  - textless_records_keep_their_position
+  - empty_ids
+  - zero_cap_refused
+  - negative_cap_refused
+  - repeated_ids_across_batches
+cases:
+  - name: parity_order_and_omission
+    cap: 8
+    ids: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444"]
+    sessions:
+      - id: "11111111-1111-1111-1111-111111111111"
+        entries:
+          - {index: 4, role: user, preview: second}
+          - {index: 0, role: assistant, preview: excluded}
+          - {index: 2, role: user, depth: 1, preview: nested}
+          - {index: 3, role: user, preview: first}
+      - id: "22222222-2222-2222-2222-222222222222"
+        entries:
+          - {index: 0, role: user, preview: other}
+      - id: "33333333-3333-3333-3333-333333333333"
+    want:
+      "11111111-1111-1111-1111-111111111111": [first, second]
+      "22222222-2222-2222-2222-222222222222": [other]
+  - name: truncation_of_every_unicode_preview
+    cap: 8
+    ids: ["11111111-1111-1111-1111-111111111111"]
+    sessions:
+      - id: "11111111-1111-1111-1111-111111111111"
+        entries:
+          - {index: 0, role: user, preview: "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界extra"}
+          - {index: 1, role: user, preview: "abcdefghijklmnopqrstuvwxyz0123456789ABCDextra"}
+    want:
+      "11111111-1111-1111-1111-111111111111": ["界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界", "abcdefghijklmnopqrstuvwxyz0123456789ABCD"]
+  - name: per_session_cap
+    cap: 2
+    ids: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+    sessions:
+      - id: "11111111-1111-1111-1111-111111111111"
+        entries:
+          - {index: 0, role: user, preview: first}
+          - {index: 1, role: user, preview: second}
+          - {index: 2, role: user, preview: outside}
+      - id: "22222222-2222-2222-2222-222222222222"
+        entries:
+          - {index: 0, role: user, preview: other}
+    want:
+      "11111111-1111-1111-1111-111111111111": [first, second]
+      "22222222-2222-2222-2222-222222222222": [other]
+  - name: textless_records_keep_their_position
+    cap: 8
+    ids: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+    sessions:
+      - id: "11111111-1111-1111-1111-111111111111"
+        entries:
+          - {index: 0, role: user, preview: null}
+          - {index: 1, role: user, preview: ""}
+          - {index: 2, role: user, preview: third}
+    want:
+      "11111111-1111-1111-1111-111111111111": ["", "", third]
+  - name: empty_ids
+    cap: 8
+    ids: []
+    want: {}
+  - name: zero_cap_refused
+    cap: 0
+    error_contains: "pass a per-session cap of at least 1"
+  - name: negative_cap_refused
+    cap: -1
+    error_contains: "pass a per-session cap of at least 1"
+  - name: repeated_ids_across_batches
+    cap: 2
+    repeat_ids: 257
+    ids: ["11111111-1111-1111-1111-111111111111"]
+    sessions:
+      - id: "11111111-1111-1111-1111-111111111111"
+        entries:
+          - {index: 0, role: user, preview: first}
+          - {index: 1, role: user, preview: second}
+    want:
+      "11111111-1111-1111-1111-111111111111": [first, second]

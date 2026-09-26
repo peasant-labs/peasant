@@ -162,10 +162,14 @@ type OpenCodeCurrentSessionPage struct {
 }
 
 // OpenCodeCurrentPageRequest requests one bounded page for one current session.
+// Before, when present, is an exclusive native sequence bound: the page carries
+// only rows whose seq is strictly less than it. A fork read uses it to acquire
+// exactly the checked capture prefix instead of the parent's whole suffix.
 type OpenCodeCurrentPageRequest struct {
 	SessionID OpenCodeCurrentSessionID
 	PageSize  OpenCodeCurrentPageSize
 	After     *OpenCodeCurrentCursor
+	Before    *OpenCodeCurrentSeq
 }
 
 // OpenCodeCurrentMessageRow is one detached row from the materialized current projection.

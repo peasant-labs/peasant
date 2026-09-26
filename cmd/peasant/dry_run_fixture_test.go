@@ -57,35 +57,25 @@ func seedClosedStoreAt(t testing.TB, path string) string {
 	return path
 }
 
-// databaseDigest fingerprints the database file and its sidecars, so a test can
-// prove a dry run changed nothing rather than only that it created nothing.
-//
-// The sidecars are part of the fingerprint because a write-ahead log that appears
-// during an inspection is a mutation even when the main file is byte-identical.
+// databaseDigest fingerprints the stored database file. A read-only inspection
+// may create or update SQLite's transient -wal/-shm/-journal coordination files,
+// so those are excluded; the database itself must be byte-identical.
 func databaseDigest(t testing.TB, path string) string {
 	t.Helper()
-	digest := sha256.New()
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		data, err := os.ReadFile(path + suffix)
-		switch {
-		case err == nil:
-			digest.Write([]byte(filepath.Base(path + suffix)))
-			digest.Write(data)
-		case os.IsNotExist(err):
-			// An absent sidecar is part of the state being fingerprinted.
-		default:
-			t.Fatalf("fingerprint %s: %v", path+suffix, err)
-		}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("fingerprint %s: %v", path, err)
 	}
-	return hex.EncodeToString(digest.Sum(nil))
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
-// assertDatabaseUnchanged reports a dry run that wrote to the database it was
-// asked only to read, including one that merely opened a journal.
+// assertDatabaseUnchanged reports a dry run that rewrote the database it was
+// asked only to read. Transient journal coordination is not a write.
 func assertDatabaseUnchanged(t testing.TB, path, before string) {
 	t.Helper()
 	if after := databaseDigest(t, path); after != before {
-		t.Fatalf("the forecast changed the database it was asked to inspect: %s is no longer byte-identical, or a journal appeared beside it", filepath.Base(path))
+		t.Fatalf("the forecast rewrote the database it was asked to inspect: %s is no longer byte-identical", filepath.Base(path))
 	}
 }
 

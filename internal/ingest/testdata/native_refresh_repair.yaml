@@ -1,0 +1,55 @@
+# Native repair maintenance oracle. Each case drives the REAL Pipeline with
+# injected harvester targets over real temporary managed files and a real
+# SQLite store. Native sources are sanitized synthetic rollouts, never private
+# user data.
+requiredNames:
+  - codex_stale_v1_maintenance_repair
+  - codex_failed_capture_retains_last_good
+  - codex_future_state_refused
+  - codex_unrelated_harness_unchanged
+  - opencode_stale_v1_native_activation
+cases:
+  - name: codex_stale_v1_maintenance_repair
+    harness: codex
+    scenario: maintenance_repair
+    sessionId: 1a1a1a1a-1111-4111-8111-1a1a1a1a1a1a
+    storedIndexerVersion: 16
+    source: |
+      {"type":"session_meta","payload":{"id":"1a1a1a1a-1111-4111-8111-1a1a1a1a1a1a","history_mode":"paginated","thread_source":"user"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"repair the stale projection"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"projection repaired"}]}}
+  - name: codex_failed_capture_retains_last_good
+    harness: codex
+    scenario: failed_capture
+    sessionId: 2b2b2b2b-2222-4222-8222-2b2b2b2b2b2b
+    storedIndexerVersion: 16
+    source: |
+      {"type":"session_meta","payload":{"id":"2b2b2b2b-2222-4222-8222-2b2b2b2b2b2b","history_mode":"paginated","thread_source":"user"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"stale input must survive"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"stale answer must survive"}]}}
+  - name: codex_future_state_refused
+    harness: codex
+    scenario: future_state
+    sessionId: 3c3c3c3c-3333-4333-8333-3c3c3c3c3c3c
+    storedIndexerVersion: 16
+    storedIndexFormat: 3
+    source: |
+      {"type":"session_meta","payload":{"id":"3c3c3c3c-3333-4333-8333-3c3c3c3c3c3c","history_mode":"paginated","thread_source":"user"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"future representation must be preserved"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+  - name: codex_unrelated_harness_unchanged
+    harness: codex
+    scenario: unrelated_harness
+    sessionId: 4d4d4d4d-4444-4444-8444-4d4d4d4d4d4d
+    storedIndexerVersion: 16
+    source: |
+      {"type":"session_meta","payload":{"id":"4d4d4d4d-4444-4444-8444-4d4d4d4d4d4d","history_mode":"paginated","thread_source":"user"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"codex session to repair"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}
+      {"type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"codex session repaired"}]}}
+    unrelatedSessionId: 5e5e5e5e-5555-4555-8555-5e5e5e5e5e5e
+    unrelatedTranscript: |
+      {"type":"user","message":{"role":"user","content":"claude session must not change"}}
+  - name: opencode_stale_v1_native_activation
+    harness: opencode
+    scenario: opencode_native_activation
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    nativeSource: native-current-rows

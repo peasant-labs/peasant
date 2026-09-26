@@ -1,0 +1,5 @@
+requiredNames:
+  - mirrors-change-between-generations
+  - missing-parent-preserved
+  - absent-input-count-preserved
+  - zero-input-count-measured

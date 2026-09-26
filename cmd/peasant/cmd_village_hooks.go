@@ -21,7 +21,7 @@ A managed hook runs '` + githooks.CommandLine(githooks.Binding{}) + ` --reposito
 for the repository git is acting on, and nothing else. Explicit path overrides
 supplied during installation are included in that same displayed and executed
 command. --quiet keeps an ordinary commit or push from filling with push output;
-errors and a final result line are still printed. --non-interactive answers the
+errors, a waiting prompt request, and a final result line are still printed. --non-interactive answers the
 public-visibility confirmation on your behalf. Hooks honor the configured
 push.visibility. Peasant publishes content and, when needed, follows it with an
 owner visibility update to converge the configured private or public state. If

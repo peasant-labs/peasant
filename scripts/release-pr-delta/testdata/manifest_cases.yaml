@@ -1,0 +1,87 @@
+# Malformed and valid gate manifests for parseGates. Each case carries a full
+# manifest body as a string.
+cases:
+  - name: valid
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns:
+            - '\.go$'
+          children:
+            - name: job
+      # end
+    want_error: false
+
+  - name: unknown-field
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          pattern:
+            - '\.go$'
+          children:
+            - name: job
+    want_error: true
+
+  - name: empty-patterns
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns: []
+          children:
+            - name: job
+    want_error: true
+
+  - name: duplicate-gate-key
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns:
+            - '\.go$'
+          children:
+            - name: job
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns:
+            - '\.go$'
+          children:
+            - name: job
+    want_error: true
+
+  - name: duplicate-child
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns:
+            - '\.go$'
+          children:
+            - name: job
+            - name: job
+    want_error: true
+
+  - name: no-required-child
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns:
+            - '\.go$'
+          children:
+            - name: job
+              optional: true
+    want_error: true
+
+  - name: empty-child-name
+    yaml: |
+      gates:
+        - key: e2e
+          prefix: "e2e (release PR) / "
+          patterns:
+            - '\.go$'
+          children:
+            - name: ""
+    want_error: true

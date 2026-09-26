@@ -349,8 +349,9 @@ Prerequisites:
 - **podman** on `PATH` (the harness `t.Skip`s with guidance if absent);
 - a **village checkout** providing `./cmd/server` + `./cmd/village-setup-demo` (a
   separate Go module, run as subprocess binaries);
-- network access to pull the `postgres` and `minio/minio` images (S3 operations
-  use the in-process minio-go client).
+- network access to pull the `quay.io/peasant-labs/postgres` and
+  `quay.io/minio/minio` images (S3 operations use the in-process minio-go
+  client).
 
 Environment overrides:
 - `VILLAGE_REPO` — village checkout (auto-discovered sibling checkout, or set

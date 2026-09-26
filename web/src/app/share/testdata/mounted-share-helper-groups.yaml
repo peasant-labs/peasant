@@ -1,0 +1,88 @@
+# Mounted helper-group chooser segment for the /share production path.
+#
+# Deletion protection is a required-NAME manifest, never a bare count: `role`
+# names every row, `requiredNames` must equal the set of declared roles exactly,
+# and the typed loader rejects a missing, renamed or duplicated role. Roles:
+#
+#   owner-with-helpers        an ordinary owner row that anchors saved helpers.
+#   second-owner-with-helpers another owner, so a second independent group/paging
+#                             state can be exercised without touching the first.
+#   nested-helper-owner       an owner whose member itself anchors a nested group.
+#   eligible-member           a contributable helper member.
+#   ineligible-member         a held helper member (rendered, not contributable).
+#   other-member              a sibling of the eligible member.
+#   second-group-member       page one of the second owner's paged group.
+#   page-two-member           page two of the second owner's paged group.
+#   nested-owner-member       the member that anchors the nested group.
+#   nested-member             the helper inside the nested group.
+#   helper-only-context       a helper-only result with no visible owner row.
+#   context-member            the helper member behind the helper-only context.
+requiredNames:
+  - owner-with-helpers
+  - second-owner-with-helpers
+  - nested-helper-owner
+  - eligible-member
+  - ineligible-member
+  - other-member
+  - second-group-member
+  - page-two-member
+  - nested-owner-member
+  - nested-member
+  - helper-only-context
+  - context-member
+paging:
+  hg_owner2: 1
+owners:
+  - role: owner-with-helpers
+    id: owner-1
+    project: alpha
+    projectHash: hash-alpha
+    startTime: '2026-08-12T09:00:00Z'
+    preview: owner one
+    syncStatus: new
+    groups:
+      - { groupId: hg_owner1, helperThreadCount: 3, memberScope: scope-owner1 }
+  - role: second-owner-with-helpers
+    id: owner-2
+    project: alpha
+    projectHash: hash-alpha
+    startTime: '2026-08-12T08:00:00Z'
+    preview: owner two
+    syncStatus: new
+    groups:
+      - { groupId: hg_owner2, helperThreadCount: 2, memberScope: scope-owner2 }
+  - role: nested-helper-owner
+    id: owner-nested
+    project: beta
+    projectHash: hash-beta
+    startTime: '2026-08-12T07:00:00Z'
+    preview: owner nested
+    syncStatus: new
+    groups:
+      - { groupId: hg_nested_owner, helperThreadCount: 1, memberScope: scope-nested-owner }
+members:
+  - { role: eligible-member, groupId: hg_owner1, id: eligible-member, preview: eligible helper, turnCount: 1, syncStatus: new }
+  - { role: other-member, groupId: hg_owner1, id: other-member, preview: other helper, turnCount: 1, syncStatus: new }
+  - { role: ineligible-member, groupId: hg_owner1, id: ineligible-member, preview: held helper, turnCount: 1, syncStatus: held }
+  - { role: second-group-member, groupId: hg_owner2, id: second-group-member, preview: second helper, turnCount: 1, syncStatus: new }
+  - { role: page-two-member, groupId: hg_owner2, id: page-two-member, preview: page two helper, turnCount: 1, syncStatus: new }
+  - role: nested-owner-member
+    groupId: hg_nested_owner
+    id: nested-owner-member
+    preview: nested owner helper
+    turnCount: 1
+    syncStatus: new
+    helperGroups:
+      - { groupId: hg_nested_child, helperThreadCount: 1, memberScope: scope-nested-child }
+  - { role: nested-member, groupId: hg_nested_child, id: nested-member, preview: nested helper, turnCount: 1, syncStatus: new }
+contexts:
+  - role: helper-only-context
+    groupId: hg_context1
+    ownerStatus: known_unavailable
+    helperGroups:
+      - { groupId: hg_context1, helperThreadCount: 1, memberScope: scope-context1 }
+#
+# A helper-only grouped result names no ordinary owner row: the chooser must
+# render it honestly without inventing an owner title or an owner selection.
+contextMembers:
+  - { role: context-member, groupId: hg_context1, id: context-member, preview: context helper, turnCount: 1, syncStatus: new }

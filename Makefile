@@ -91,7 +91,10 @@ check: fmt lint
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml
 	# One pass over every package. The race detector (GORACE_FLAG) is on by
 	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
-	go test $(GORACE_FLAG) ./...
+	# The explicit timeout outlives Go's 10m default so a slow package gets the
+	# job's own budget instead of a mid-suite panic. cmd/peasant and internal/api
+	# exceed 10m when the race detector runs; local runs default to RACE=1.
+	go test -timeout=30m $(GORACE_FLAG) ./...
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
 .PHONY: check-harvester-versions

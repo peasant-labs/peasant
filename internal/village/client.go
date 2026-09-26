@@ -77,6 +77,11 @@ const schemaVersionEndpoint = "/api/v1/schema/version"
 // content-hash manifest, which is the server-authoritative skip-gate source.
 const annotationManifestEndpoint = "/api/v1/annotations/manifest"
 
+// promptRequestsEndpoint is the village API path for the caller's waiting
+// prompt requests: pull requests the caller authored whose prompt attachment is
+// still waiting for transcripts from their machine.
+const promptRequestsEndpoint = "/api/v1/users/me/prompt-requests"
+
 // VillageClient uploads legacy and authoritative transcript requests to the
 // Peasant village via multipart/form-data POST.
 type VillageClient struct {
@@ -91,9 +96,10 @@ type VillageClient struct {
 
 // NewVillageClient creates a VillageClient targeting the given base URL with the
 // provided API key. If httpClient is nil, a client backed by a shared pooled
-// transport sized to DefaultPoolSize is built (see newPooledHTTPClient); pass
-// a non-nil httpClient to inject one (tests). To size the pool to a specific
-// upload concurrency, use NewVillageClientWithConcurrency.
+// transport sized to DefaultPoolSize is built (see NewPooledHTTPClient); pass
+// a non-nil httpClient to inject one (tests) or to SHARE one, which is what the
+// CLI does: the waiting-request lookup and the upload are handed the same
+// pooled client, so a hook-triggered push opens one set of connections.
 func NewVillageClient(baseURL, apiKey string, httpClient *http.Client) *VillageClient {
 	if httpClient == nil {
 		httpClient = newPooledHTTPClient(baseURL, DefaultPoolSize)
@@ -105,18 +111,15 @@ func NewVillageClient(baseURL, apiKey string, httpClient *http.Client) *VillageC
 	}
 }
 
-// NewVillageClientWithConcurrency creates a VillageClient whose shared transport
-// is sized to `concurrency`: MaxIdleConnsPerHost and
-// MaxConnsPerHost both equal concurrency, so reruns reuse pooled connections
-// (no fresh TLS handshake per upload) and in-flight uploads are not throttled
-// below the requested parallelism. This is the constructor the CLI uses with the
-// resolved --concurrency value.
-func NewVillageClientWithConcurrency(baseURL, apiKey string, concurrency int) *VillageClient {
-	return &VillageClient{
-		baseURL:    baseURL,
-		apiKey:     apiKey,
-		httpClient: newPooledHTTPClient(baseURL, concurrency),
-	}
+// NewPooledHTTPClient builds the pooled HTTP client the CLI shares between the
+// waiting-request lookup and the upload: MaxIdleConnsPerHost and
+// MaxConnsPerHost both equal poolSize, so reruns reuse pooled connections (no
+// fresh TLS handshake per upload) and in-flight uploads are not throttled below
+// the requested parallelism. The caller chooses poolSize — the CLI passes the
+// concurrency a push resolves to when nothing overrides it — and passes the
+// result to NewVillageClient.
+func NewPooledHTTPClient(baseURL string, poolSize int) *http.Client {
+	return newPooledHTTPClient(baseURL, poolSize)
 }
 
 // SetRequestObserver registers a callback invoked immediately before each
@@ -440,6 +443,50 @@ func (c *VillageClient) GetAnnotationManifest(ctx context.Context) (*schema.Anno
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		profileResponseFailure(ctx, operationAnnotationManifest)
 		return nil, statusCode, fmt.Errorf("decode annotation manifest response: %w", err)
+	}
+
+	return &result, statusCode, nil
+}
+
+// GetPromptRequests fetches the caller's waiting prompt requests: the pull
+// requests they authored whose prompt attachment is still waiting for
+// transcripts from this machine. It returns the decoded response, the HTTP
+// status code, and any error.
+//
+// It is a read, and it is never a precondition for a push. The caller reports
+// what it returns and otherwise proceeds exactly as if the lookup had not
+// happened, on every outcome.
+//
+// It deliberately does NOT go through c.do. This lookup is not a stage of the
+// push pipeline: profiling it as one would put a convenience read inside the
+// upload's timing, and counting it as a push-side HTTP attempt would tell the
+// run's request observer that a push reached the village when the lookup — which
+// cannot affect the push — was all that did. It goes through the shared client
+// the way the pull side's reads do. The cost is that this one request is absent
+// from --timing and --profile-output.
+func (c *VillageClient) GetPromptRequests(ctx context.Context) (*schema.VillagePromptRequestsResponse, int, error) {
+	endpoint := c.baseURL + promptRequestsEndpoint
+	httpReq, err := c.newAuthedGet(ctx, endpoint)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create prompt requests request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("execute prompt requests request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	statusCode := resp.StatusCode
+
+	if statusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
+	}
+
+	var result schema.VillagePromptRequestsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, statusCode, fmt.Errorf("decode prompt requests response: %w", err)
 	}
 
 	return &result, statusCode, nil

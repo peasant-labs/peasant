@@ -42,6 +42,10 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 
 const CHROME = process.env.CHROME_PATH
 const URL = process.env.PEASANT_URL || 'http://localhost:3000/dev/visual-harness'
+// The app mounts a dev-only inspect + feedback tool. Captures hold it off with the same
+// ?fb=off switch the design-system demo's own capture scripts use, so a capture shows the
+// surface under test rather than the tool chrome.
+const feedbackOff = (url) => url + (url.includes('?') ? '&' : '?') + 'fb=off'
 const theme = process.argv[2] || 'dark'
 const out = process.argv[3] || `/tmp/peasant-${theme}`
 mkdirSync(out, { recursive: true })
@@ -55,7 +59,7 @@ await applyDeterminism(page) // reduced-motion + frozen clock/PRNG (set BEFORE g
 const errs = []
 page.on('console', (m) => { if (m.type() === 'error' && !/favicon|404|hydrat/.test(m.text())) errs.push(m.text()) })
 page.on('pageerror', (e) => errs.push('pageerr: ' + e.message))
-await page.goto(URL, { waitUntil: 'networkidle0' })
+await page.goto(feedbackOff(URL), { waitUntil: 'networkidle0' })
 await new Promise((r) => setTimeout(r, 900))
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))

@@ -211,12 +211,12 @@ func contentRenderPhase(t *testing.T, opts harnessOptions, stack harnessStack, a
 
 // assertContentRendersViaPayload is the shared integration point. It GETs
 // the village content endpoint with a Bearer key and asserts the migrate-on-read
-// contract: 200; a bare schema.SessionDetailPayload (turns preserved); NEGATIVE no
-// top-level "kind" (proving it is the bare payload, not a TranscriptContent
-// envelope, and not the legacy fallback). The per-case EXPECTED-SHAPE checks (exact
-// turns, structural role+content floor, snippet-on-role, and rich ToolCalls +
-// HasThinking) are declared via `want` and applied by assertContentShape. Every
-// assertion routes through check()/fatalActionable(opts).
+// contract: 200; the canonical TranscriptContent envelope wrapping the durable
+// schema.SessionDetailPayload (turns preserved under "sessionDetail"), not the
+// legacy fallback. The per-case EXPECTED-SHAPE checks (exact turns, structural
+// role+content floor, snippet-on-role, and rich ToolCalls + HasThinking) are
+// declared via `want` and applied by assertContentShape. Every assertion routes
+// through check()/fatalActionable(opts).
 func assertContentRendersViaPayload(t *testing.T, opts harnessOptions, villageURL, apiKey, transcriptID string, want expectedContentShape) {
 	t.Helper()
 
@@ -256,29 +256,28 @@ func assertContentRendersViaPayload(t *testing.T, opts harnessOptions, villageUR
 		return
 	}
 
-	// (d) NEGATIVE: no top-level "kind" key. A bare SessionDetailPayload has no
-	// "kind" field; only a TranscriptContent envelope does (json:"kind"). Decode to
-	// a generic map FIRST so we assert on the raw served shape, not a lossy struct
-	// unmarshal (which would silently drop a stray "kind").
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
+	// (d) the canonical served shape is the TranscriptContent envelope
+	// (schema.SchemaTranscriptContent): a top-level "kind" plus the durable
+	// payload under "sessionDetail". Assert that shape on the raw bytes, then
+	// unwrap the payload for the turn assertions.
+	var envelope struct {
+		Kind          string                       `json:"kind"`
+		SessionDetail *schema.SessionDetailPayload `json:"sessionDetail"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
 		check(t, opts, false,
-			"content round-trip body for %s is not a JSON object: %v\nbody: %s", transcriptID, err, body)
+			"content round-trip body for %s is not a TranscriptContent envelope: %v\nbody: %s", transcriptID, err, body)
 		return
 	}
-	_, hasKind := raw["kind"]
-	check(t, opts, !hasKind,
-		"content round-trip body for %s has a top-level \"kind\" key — it is a TranscriptContent envelope, not a bare SessionDetailPayload (migrate-on-read did not render the payload)\nbody: %s",
-		transcriptID, body)
+	check(t, opts, envelope.Kind != "" && envelope.SessionDetail != nil,
+		"content round-trip body for %s is not the canonical TranscriptContent envelope (kind=%q sessionDetail=%t); migrate-on-read did not render the payload\nbody: %s",
+		transcriptID, envelope.Kind, envelope.SessionDetail != nil, body)
+	if envelope.SessionDetail == nil {
+		return
+	}
 
-	// (b) unmarshals to schema.SessionDetailPayload.
-	var payload schema.SessionDetailPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
-		check(t, opts, false,
-			"content round-trip body for %s does not unmarshal to schema.SessionDetailPayload: %v\nbody: %s",
-			transcriptID, err, body)
-		return
-	}
+	// (b) the unwrapped durable payload.
+	payload := *envelope.SessionDetail
 
 	// (c) len(Turns) > 0.
 	turnsNonEmpty := len(payload.Turns) > 0

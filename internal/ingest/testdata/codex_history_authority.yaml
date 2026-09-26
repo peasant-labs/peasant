@@ -1,0 +1,354 @@
+cases:
+  - name: single-detached-candidate
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-11111111-1111-4111-8111-111111111111.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"hello"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    sessionID: 11111111-1111-4111-8111-111111111111
+    expected:
+      kind: detached_file
+      stableThreadID: 11111111-1111-4111-8111-111111111111
+      mode: paginated
+      completeness: complete
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+
+  - name: single-detached-flat-directory
+    files:
+      rollout-flat-22222222-2222-4222-8222-222222222222.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","history_mode":"legacy"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"flat hello"}]}}
+    sessionFile: rollout-flat-22222222-2222-4222-8222-222222222222.jsonl
+    sessionID: 22222222-2222-4222-8222-222222222222
+    expected:
+      kind: detached_file
+      stableThreadID: 22222222-2222-4222-8222-222222222222
+      mode: legacy
+      completeness: complete
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+
+  - name: native-current-versus-stale
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-33333333-3333-4333-8333-333333333333.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"33333333-3333-4333-8333-333333333333","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u-old","content":[{"type":"input_text","text":"stale incarnation"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-33333333-3333-4333-8333-333333333333.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"33333333-3333-4333-8333-333333333333","history_mode":"paginated"}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u-new","content":[{"type":"input_text","text":"current incarnation"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-33333333-3333-4333-8333-333333333333.jsonl
+    sessionID: 33333333-3333-4333-8333-333333333333
+    nativePointerDatabase: state_5.sqlite
+    nativePointerRows:
+      - id: 33333333-3333-4333-8333-333333333333
+        rolloutPath: sessions/2024/01/03/rollout-2024-01-03T00-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        historyMode: paginated
+    expected:
+      kind: native_current_pointer
+      stableThreadID: 33333333-3333-4333-8333-333333333333
+      mode: paginated
+      completeness: complete
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+      nodes:
+        - ref: e_1
+          itemID: u-new
+          ownership: own
+          hasPayload: true
+
+  - name: native-missing-current-old-present
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-44444444-4444-4444-8444-444444444444.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"44444444-4444-4444-8444-444444444444","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u-old","content":[{"type":"input_text","text":"old rollout, never a fallback"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-44444444-4444-4444-8444-444444444444.jsonl
+    sessionID: 44444444-4444-4444-8444-444444444444
+    nativePointerDatabase: state_5.sqlite
+    nativePointerRows:
+      - id: 44444444-4444-4444-8444-444444444444
+        rolloutPath: sessions/2024/01/03/rollout-2024-01-03T00-00-00-44444444-4444-4444-8444-444444444444.jsonl
+        historyMode: paginated
+    expectError: codex_current_missing
+
+  - name: native-detached-fallback-no-row
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-55555555-5555-4555-8555-555555555555.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"55555555-5555-4555-8555-555555555555","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u-own","content":[{"type":"input_text","text":"detached fallback"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-55555555-5555-4555-8555-555555555555.jsonl
+    sessionID: 55555555-5555-4555-8555-555555555555
+    nativePointerDatabase: state_5.sqlite
+    nativePointerRows:
+      - id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        rolloutPath: sessions/2024/01/02/rollout-2024-01-02T00-00-00-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+        historyMode: legacy
+    expected:
+      kind: detached_file
+      stableThreadID: 55555555-5555-4555-8555-555555555555
+      mode: paginated
+      completeness: complete
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+
+  - name: missing-current-file-no-document
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"unrelated"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-66666666-6666-4666-8666-666666666666.jsonl
+    sessionID: 66666666-6666-4666-8666-666666666666
+    expectError: codex_current_missing
+
+  - name: conflicting-detached-candidates
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-77777777-7777-4777-8777-777777777777.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u-a","content":[{"type":"input_text","text":"candidate a"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-77777777-7777-4777-8777-777777777777.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"77777777-7777-4777-8777-777777777777","history_mode":"paginated"}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"u-b","content":[{"type":"input_text","text":"candidate b"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-77777777-7777-4777-8777-777777777777.jsonl
+    sessionID: 77777777-7777-4777-8777-777777777777
+    expectError: codex_authority_conflict
+
+  - name: copied-boundary-native-S
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-88888888-8888-4888-8888-888888888888.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"88888888-8888-4888-8888-888888888888","history_mode":"paginated","forked_from_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","subagent_history_start_ordinal":2}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"c1","content":[{"type":"input_text","text":"copied one"}]}}
+        {"timestamp":"2024-01-02T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u2","content":[{"type":"input_text","text":"own two"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-88888888-8888-4888-8888-888888888888.jsonl
+    sessionID: 88888888-8888-4888-8888-888888888888
+    expected:
+      kind: detached_file
+      stableThreadID: 88888888-8888-4888-8888-888888888888
+      mode: paginated
+      completeness: complete
+      inheritedRefs: [e_1]
+      mainRefs: [e_2]
+      earlierRefs: []
+      nodes:
+        - ref: e_1
+          itemID: c1
+          ordinal: 1
+          ownership: inherited
+          hasPayload: true
+        - ref: e_2
+          itemID: u2
+          ordinal: 2
+          ownership: own
+          hasPayload: true
+
+  - name: reference-history-native-siblings
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"p1","content":[{"type":"input_text","text":"parent one"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-99999999-9999-4999-8999-999999999999.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"99999999-9999-4999-8999-999999999999","history_mode":"paginated","history":[{"thread_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","kind":"through","completed":true,"mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"child own"}]}}
+    sessionFile: sessions/2024/01/03/rollout-2024-01-03T00-00-00-99999999-9999-4999-8999-999999999999.jsonl
+    sessionID: 99999999-9999-4999-8999-999999999999
+    expected:
+      kind: detached_file
+      stableThreadID: 99999999-9999-4999-8999-999999999999
+      mode: paginated
+      completeness: complete
+      inheritedRefs: [e_1]
+      mainRefs: [e_2]
+      earlierRefs: []
+      segments:
+        - ordinal: 0
+          inclusion: inherited
+          coordinateKind: codex_reference_range
+          start: 0
+          endExclusive: 2
+          refs: [e_1]
+        - ordinal: 1
+          inclusion: same_thread_surviving_own
+          coordinateKind: codex_ordinal_range
+          start: 0
+          endExclusive: 2
+          refs: [e_2]
+
+  - name: history-base-native-sibling
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","history_mode":"legacy"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"p1","content":[{"type":"input_text","text":"base one"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-cccccccc-cccc-4ccc-8ccc-cccccccccccc.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","history_mode":"legacy","parent_thread_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","history_base":{"thread_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"child own"}]}}
+    sessionFile: sessions/2024/01/03/rollout-2024-01-03T00-00-00-cccccccc-cccc-4ccc-8ccc-cccccccccccc.jsonl
+    sessionID: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+    expected:
+      kind: detached_file
+      stableThreadID: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+      mode: legacy
+      completeness: complete
+      inheritedRefs: [e_1]
+      mainRefs: [e_2]
+      earlierRefs: []
+
+  - name: malformed-history-envelope-incomplete
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","history_mode":"paginated","history":"oops"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"current alone"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl
+    sessionID: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+    expected:
+      kind: detached_file
+      stableThreadID: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+      diagnostics: [codex_history_envelope_malformed]
+
+  - name: native-ambiguous-referenced-dependency
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","history_mode":"paginated"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"amb-a","content":[{"type":"input_text","text":"ambiguous candidate a"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","history_mode":"paginated"}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"amb-b","content":[{"type":"input_text","text":"ambiguous candidate b"}]}}
+      sessions/2024/01/04/rollout-2024-01-04T00-00-00-ffffffff-ffff-4fff-8fff-ffffffffffff.jsonl: |
+        {"timestamp":"2024-01-04T00:00:00Z","type":"session_meta","payload":{"id":"ffffffff-ffff-4fff-8fff-ffffffffffff","history_mode":"paginated","history":[{"thread_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-04T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"child own"}]}}
+    sessionFile: sessions/2024/01/04/rollout-2024-01-04T00-00-00-ffffffff-ffff-4fff-8fff-ffffffffffff.jsonl
+    sessionID: ffffffff-ffff-4fff-8fff-ffffffffffff
+    expected:
+      kind: detached_file
+      stableThreadID: ffffffff-ffff-4fff-8fff-ffffffffffff
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+      diagnostics: [codex_reference_ambiguous, codex_reference_unavailable]
+
+  - name: native-cycle-self-reference
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-10101010-1010-4010-8010-101010101010.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"10101010-1010-4010-8010-101010101010","history_mode":"paginated","history":[{"thread_id":"10101010-1010-4010-8010-101010101010","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"self cycle own"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-10101010-1010-4010-8010-101010101010.jsonl
+    sessionID: 10101010-1010-4010-8010-101010101010
+    expected:
+      kind: detached_file
+      stableThreadID: 10101010-1010-4010-8010-101010101010
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+      diagnostics: [codex_reference_cycle]
+
+  - name: native-nested-cycle-incomplete
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-20202020-2020-4020-8020-202020202020.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"20202020-2020-4020-8020-202020202020","history_mode":"paginated","history":[{"thread_id":"30303030-3030-4030-8030-303030303030","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"cycle-a","content":[{"type":"input_text","text":"cycle a"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-30303030-3030-4030-8030-303030303030.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"30303030-3030-4030-8030-303030303030","history_mode":"paginated","history":[{"thread_id":"20202020-2020-4020-8020-202020202020","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"cycle-b","content":[{"type":"input_text","text":"cycle b"}]}}
+      sessions/2024/01/04/rollout-2024-01-04T00-00-00-40404040-4040-4040-8040-404040404040.jsonl: |
+        {"timestamp":"2024-01-04T00:00:00Z","type":"session_meta","payload":{"id":"40404040-4040-4040-8040-404040404040","history_mode":"paginated","history":[{"thread_id":"30303030-3030-4030-8030-303030303030","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-04T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"nested cycle own"}]}}
+    sessionFile: sessions/2024/01/04/rollout-2024-01-04T00-00-00-40404040-4040-4040-8040-404040404040.jsonl
+    sessionID: 40404040-4040-4040-8040-404040404040
+    expected:
+      kind: detached_file
+      stableThreadID: 40404040-4040-4040-8040-404040404040
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_2]
+      inheritedRefs: [e_1]
+      earlierRefs: []
+      diagnostics: [codex_reference_cycle]
+
+  - name: native-nested-malformed-incomplete
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-21212121-2121-4121-8121-212121212121.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"21212121-2121-4121-8121-212121212121","history_mode":"paginated","history":"malformed-envelope"}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"malformed-a","content":[{"type":"input_text","text":"recursively referenced malformed history"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-31313131-3131-4131-8131-313131313131.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"31313131-3131-4131-8131-313131313131","history_mode":"paginated","history":[{"thread_id":"21212121-2121-4121-8121-212121212121","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"nested malformed own"}]}}
+    sessionFile: sessions/2024/01/03/rollout-2024-01-03T00-00-00-31313131-3131-4131-8131-313131313131.jsonl
+    sessionID: 31313131-3131-4131-8131-313131313131
+    expected:
+      kind: detached_file
+      stableThreadID: 31313131-3131-4131-8131-313131313131
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_2]
+      inheritedRefs: [e_1]
+      earlierRefs: []
+      diagnostics: [codex_history_envelope_malformed]
+
+  - name: native-depth-bounded-incomplete
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-50505050-5050-4050-8050-505050505050.jsonl: |
+        {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"50505050-5050-4050-8050-505050505050","history_mode":"paginated","history":[{"thread_id":"d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"depth-own","content":[{"type":"input_text","text":"depth chain own"}]}}
+      sessions/2024/01/03/rollout-2024-01-03T00-00-00-d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1.jsonl: |
+        {"timestamp":"2024-01-03T00:00:00Z","type":"session_meta","payload":{"id":"d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1","history_mode":"paginated","history":[{"thread_id":"d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/04/rollout-2024-01-04T00-00-00-d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2.jsonl: |
+        {"timestamp":"2024-01-04T00:00:00Z","type":"session_meta","payload":{"id":"d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2","history_mode":"paginated","history":[{"thread_id":"d3d3d3d3-d3d3-43d3-83d3-d3d3d3d3d3d3","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/05/rollout-2024-01-05T00-00-00-d3d3d3d3-d3d3-43d3-83d3-d3d3d3d3d3d3.jsonl: |
+        {"timestamp":"2024-01-05T00:00:00Z","type":"session_meta","payload":{"id":"d3d3d3d3-d3d3-43d3-83d3-d3d3d3d3d3d3","history_mode":"paginated","history":[{"thread_id":"d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/06/rollout-2024-01-06T00-00-00-d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4.jsonl: |
+        {"timestamp":"2024-01-06T00:00:00Z","type":"session_meta","payload":{"id":"d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4","history_mode":"paginated","history":[{"thread_id":"d5d5d5d5-d5d5-45d5-85d5-d5d5d5d5d5d5","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/07/rollout-2024-01-07T00-00-00-d5d5d5d5-d5d5-45d5-85d5-d5d5d5d5d5d5.jsonl: |
+        {"timestamp":"2024-01-07T00:00:00Z","type":"session_meta","payload":{"id":"d5d5d5d5-d5d5-45d5-85d5-d5d5d5d5d5d5","history_mode":"paginated","history":[{"thread_id":"d6d6d6d6-d6d6-46d6-86d6-d6d6d6d6d6d6","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/08/rollout-2024-01-08T00-00-00-d6d6d6d6-d6d6-46d6-86d6-d6d6d6d6d6d6.jsonl: |
+        {"timestamp":"2024-01-08T00:00:00Z","type":"session_meta","payload":{"id":"d6d6d6d6-d6d6-46d6-86d6-d6d6d6d6d6d6","history_mode":"paginated","history":[{"thread_id":"d7d7d7d7-d7d7-47d7-87d7-d7d7d7d7d7d7","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/09/rollout-2024-01-09T00-00-00-d7d7d7d7-d7d7-47d7-87d7-d7d7d7d7d7d7.jsonl: |
+        {"timestamp":"2024-01-09T00:00:00Z","type":"session_meta","payload":{"id":"d7d7d7d7-d7d7-47d7-87d7-d7d7d7d7d7d7","history_mode":"paginated","history":[{"thread_id":"d8d8d8d8-d8d8-48d8-88d8-d8d8d8d8d8d8","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+      sessions/2024/01/10/rollout-2024-01-10T00-00-00-d8d8d8d8-d8d8-48d8-88d8-d8d8d8d8d8d8.jsonl: |
+        {"timestamp":"2024-01-10T00:00:00Z","type":"session_meta","payload":{"id":"d8d8d8d8-d8d8-48d8-88d8-d8d8d8d8d8d8","history_mode":"paginated","history":[{"thread_id":"depth-missing","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-03T00:00:01Z","type":"turn_context","payload":{"model":"sample-model"}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-50505050-5050-4050-8050-505050505050.jsonl
+    sessionID: 50505050-5050-4050-8050-505050505050
+    expected:
+      kind: detached_file
+      stableThreadID: 50505050-5050-4050-8050-505050505050
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+      diagnostics: [codex_reference_depth_exceeded]
+
+  - name: native-segment-budget-bounded-incomplete
+    files:
+      sessions/2024/01/02/rollout-2024-01-02T00-00-00-60606060-6060-4060-8060-606060606060.jsonl: |
+        {"timestamp":"2024-01-02T23:00:00Z","type":"session_meta","payload":{"id":"60606060-6060-4060-8060-606060606060","history_mode":"paginated","history":[{"thread_id":"seg-00","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-01","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-02","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-03","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-04","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-05","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-06","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-07","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-08","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-09","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-10","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-11","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-12","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-13","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-14","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-15","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-16","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-17","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-18","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-19","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-20","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-21","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-22","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-23","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-24","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-25","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-26","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-27","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-28","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-29","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-30","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-31","mode":"paginated","start":0,"end_exclusive":2},{"thread_id":"seg-32","mode":"paginated","start":0,"end_exclusive":2}]}}
+        {"timestamp":"2024-01-02T23:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"own1","content":[{"type":"input_text","text":"segment budget own"}]}}
+    sessionFile: sessions/2024/01/02/rollout-2024-01-02T00-00-00-60606060-6060-4060-8060-606060606060.jsonl
+    sessionID: 60606060-6060-4060-8060-606060606060
+    expected:
+      kind: detached_file
+      stableThreadID: 60606060-6060-4060-8060-606060606060
+      mode: paginated
+      completeness: incomplete_new
+      mainRefs: [e_1]
+      inheritedRefs: []
+      earlierRefs: []
+      diagnostics: [codex_reference_segments_bounded, codex_reference_unavailable]

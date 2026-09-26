@@ -48,7 +48,7 @@ func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
 // a repair completes in one harvest and the next unchanged harvest does no
 // parser work.
 func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
-	target := p.versionTargets()[input.session.Harness]
+	target := p.sessionVersionTarget(input.session)
 	expected := input.expected
 	return p.config.Force ||
 		expected.IndexerVersion < target.IndexerVersion ||
@@ -117,7 +117,7 @@ func (loc SessionLocation) permanentRefusalSettled(target HarvesterVersions) boo
 // that predates content capture, are both PENDING work rather than settled:
 // they have simply never been tried by a build that could certify them.
 func permanentCaptureRefusal(code ContentCaptureFailureCode) bool {
-	return code == ContentCaptureStrictRefused || code == ContentCaptureSourceRecordsOmitted
+	return code == ContentCaptureStrictRefused || code == ContentCaptureSourceRecordsOmitted || code == ContentCaptureUnknownDataRetained
 }
 
 // certifiesContent reports whether this build's indexer for the harness can
@@ -145,9 +145,10 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	// Selection is database-first: it decides from the stored index state and
 	// never opens the pair. The pair is read only when a chosen target is
 	// indexed. A pair whose bytes changed through the write path had its
-	// indexed_input_hash NULLed by the mirror, so the hash-absent case IS the
-	// changed-pair case here. A hand-edited or torn pair on an otherwise
-	// settled row leaves no database signal and is not found by this scan: it
+	// indexed_input_hash cleared before installation (and kept NULL by the
+	// mirror), so process interruption selects it even before mirror commit.
+	// Hand edits or older unmarked damage on a settled row leave no database
+	// signal and are not found by this scan: that damage
 	// is reported as damaged on the next pair read (harvest index --all, the
 	// content stage, or peasant redact), through the pair hash check.
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
@@ -158,27 +159,29 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	if stateErr != nil {
 		return true
 	}
-	return p.stateNeedsIndexWork(state)
+	return p.stateNeedsIndexWork(state, p.sessionVersionTarget(target.session))
 }
 
 // stateNeedsIndexWork decides from stored SQL state alone whether a session has
 // pending indexer work, reading no file. It is the database-first half of
 // capturedInputNeedsWork: it drops the input-hash comparison and the
 // publication byte proof, both of which need the pair. A changed pair reaches
-// this predicate as a NULL indexed_input_hash, because the write path's mirror
-// NULLs the hash when the pair changes; a revision left unbound is selected so
+// this predicate as a NULL indexed_input_hash, because the write path clears
+// the proof before installation and the mirror preserves it; a revision left unbound is selected so
 // the ordinary index write can bind it; and a stored producer or index format
 // newer than this build is selected so the shared parse path reports the
 // refusal once. A session with no stored pair identity is selected so the
-// index path can establish it.
-func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState) bool {
+// index path can establish it. The caller supplies the session's effective
+// target, so a session with no readable native snapshot compares against the
+// retained baseline instead of being selected forever against the native
+// override.
+func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target HarvesterVersions) bool {
 	if state == nil || state.ArtifactHash == nil {
 		return true
 	}
 	if p.checkIndexProducer(state) != nil {
 		return true
 	}
-	target := p.versionTargets()[state.Harness]
 	return p.config.Force ||
 		state.IndexerVersion < target.IndexerVersion ||
 		state.IndexedInputHash == nil ||

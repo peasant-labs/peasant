@@ -1,0 +1,54 @@
+cases:
+  - name: missing-native-source-refusal-keeps-private-location-safe
+    sessionID: "11111111-1111-4111-8111-111111111111"
+    generationID: gen-exit-missing-source
+    sourceFileName: PRIVATE_PATH_SENTINEL.jsonl
+    privatePathSentinel: PRIVATE_PATH_SENTINEL
+    missingSource: true
+    expected:
+      operation: CodexIndexer.IndexTranscriptResult
+      harness: codex
+      sessionID: "11111111-1111-4111-8111-111111111111"
+      effectContains: no candidate was emitted
+
+  - name: noncanonical-native-identity-refusal-keeps-private-value-safe
+    sessionID: "22222222-2222-4222-8222-222222222222"
+    generationID: gen-exit-identity
+    sourceFileName: PRIVATE_PATH_SENTINEL.jsonl
+    privatePathSentinel: PRIVATE_PATH_SENTINEL
+    privateIdentitySentinel: PRIVATE_IDENTITY_SENTINEL
+    source: |
+      {"type":"session_meta","payload":{"id":"/synthetic/private/PRIVATE_IDENTITY_SENTINEL/rollout.jsonl","thread_source":"user"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"hello"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}
+    expected:
+      operation: CodexIndexer.extractCandidateMetadata
+      harness: codex
+      sessionID: "22222222-2222-4222-8222-222222222222"
+      effectContains: no candidate was emitted
+
+  - name: noncanonical-session-reference-reports-unidentified
+    sessionID: /synthetic/private/PRIVATE_SESSION_SENTINEL
+    generationID: gen-exit-session
+    sourceFileName: PRIVATE_PATH_SENTINEL.jsonl
+    privatePathSentinel: PRIVATE_PATH_SENTINEL
+    privateSessionSentinel: PRIVATE_SESSION_SENTINEL
+    missingSource: true
+    expected:
+      operation: CodexIndexer.IndexTranscriptResult
+      harness: codex
+      sessionID: unidentified
+      effectContains: no candidate was emitted
+
+  - name: dependency-refusal-keeps-private-cause-safe
+    sessionID: "33333333-3333-4333-8333-333333333333"
+    generationID: gen-exit-dependency
+    sourceFileName: PRIVATE_PATH_SENTINEL.jsonl
+    privatePathSentinel: PRIVATE_PATH_SENTINEL
+    privateDependencySentinel: PRIVATE_DEPENDENCY_SENTINEL
+    priorFailure: true
+    missingSource: true
+    expected:
+      operation: CodexIndexer.IndexTranscriptResult
+      harness: codex
+      sessionID: "33333333-3333-4333-8333-333333333333"
+      effectContains: no candidate was emitted

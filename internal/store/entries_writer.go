@@ -103,6 +103,7 @@ type sessionEntryWriteOutcome struct {
 func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry) (err error) {
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 		SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+		Mode: ingest.SessionEntryWriteExplicitRebuild,
 	}})
 	return results[0].Err
 }
@@ -182,7 +183,9 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	// A forced retained-content repair replaces the projection, but still uses
 	// the same proven metadata/index revision as a content-only backfill. Resolve
 	// it inside this savepoint before replacement can invalidate the old proof.
-	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+	// An explicit rebuild carries the same repair semantics as an ordinary
+	// replace when it certifies full snapshot authority.
+	if (write.Mode == ingest.SessionEntryWriteReplaceAll || write.Mode == ingest.SessionEntryWriteExplicitRebuild || write.Mode == "") && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
 		var err error
 		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
 		if err != nil {
@@ -194,6 +197,21 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	// Record the certified publication-capture agreement in this same
+	// transaction, BEFORE the binding stamp: the revision it allocates (or
+	// restores) is the one this write must bind to. The compare-and-swap above
+	// deliberately ran first, against the state the caller captured, so the
+	// capture this write records cannot invalidate the caller's precondition.
+	if write.PublicationCapture != nil {
+		revision, recorded, captureErr := persistActivationPublicationCapture(conn, write.SessionID, write.PublicationCapture)
+		if captureErr != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, captureErr, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+		if recorded {
+			write.CaptureRevision = revision
+		}
 	}
 	if state.IndexVersion != nil && *state.IndexVersion != write.IndexVersion {
 		if err := s.indexFormats[*state.IndexVersion].Delete(ctx, conn, write.SessionID); err != nil {

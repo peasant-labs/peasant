@@ -20,6 +20,11 @@ type CapturedIndexInput struct {
 	// publication capture saw.
 	published    bool
 	metadataPath string
+	// metadata is the recorded managed metadata this input was captured from.
+	// The activation lane records it as the publication-capture snapshot: it is
+	// the session's recorded metadata agreement, which the installed generation
+	// indexes. It is nil only for an input built without a managed artifact.
+	metadata *UnifiedMetadata
 	// metadataData carries the committed metadata bytes when this run wrote them,
 	// so the write-time identity check reads no file. Nil means read from disk.
 	metadataData []byte
@@ -141,7 +146,7 @@ func CaptureIndexInput(ctx context.Context, indexer TranscriptIndexer, session D
 	if indexer == nil || session.SessionID != artifact.Metadata.SessionID || session.Harness != artifact.Metadata.ModelHarness {
 		return nil, fmt.Errorf("capture index input: parser/session does not match the managed artifact; retain stored previews and reconcile before retrying")
 	}
-	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: artifact.Transcript}
+	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: artifact.Transcript, metadata: &artifact.Metadata}
 	input.session.SourceFormat = artifact.Metadata.Source.Format
 	input.session.ParentUUID = artifact.Metadata.ParentUUID
 	if session.Harness == HarnessOpenCode {
@@ -239,6 +244,22 @@ func (input *CapturedIndexInput) ParseForFormat(ctx context.Context, indexer Tra
 // what it does not. Its result is a bounded projection only: it is stored as
 // an incomplete capture and never certified as complete content.
 func (input *CapturedIndexInput) ParseTolerant(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
+	// A legacy omission without a positional placeholder still cannot be
+	// certified. Keep any surviving unknown evidence when storing its preview.
+	switch idx := indexer.(type) {
+	case *ClaudeIndexer:
+		copy := *idx
+		copy.retainUnknown, copy.fullContent, copy.fullDepth = true, true, true
+		indexer = &copy
+	case *CursorIndexer:
+		copy := *idx
+		copy.retainUnknown, copy.fullContent, copy.fullDepth = true, true, true
+		indexer = &copy
+	case *StrikeIndexer:
+		copy := *idx
+		copy.retainUnknown, copy.fullContent = true, true
+		indexer = &copy
+	}
 	if input.kind == TranscriptSourceDirectory {
 		native, ok := indexer.(openCodeInputIndexer)
 		if !ok {

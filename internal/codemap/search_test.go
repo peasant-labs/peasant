@@ -2,9 +2,11 @@ package codemap_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 )
@@ -258,6 +260,51 @@ func TestSearch_UniqueMultiBlockTextSurvives(t *testing.T) {
 		t.Fatalf("Search alpha: %v", err)
 	} else if len(got.Results) != 1 {
 		t.Errorf("'alpha' (echoed 1st block) = %d results, want 1: %+v", len(got.Results), got.Results)
+	}
+}
+
+// TestSearchRankedWindowWalkMatchesTheWholeRankedStream proves the seam the
+// grouped local search iterator reads: consecutive ranked windows of one query
+// reconstruct exactly the ordered stream a single Search call returns, so a
+// caller that applies its own eligibility to successive windows never skips or
+// repeats a match. A window outside the flat route's bound and a negative offset
+// are refused instead of silently served.
+func TestSearchRankedWindowWalkMatchesTheWholeRankedStream(t *testing.T) {
+	t.Parallel()
+	svc, _ := newFixtureService(t, fxStubRepo())
+	ctx := context.Background()
+
+	whole, err := svc.Search(ctx, "pipeline", codemap.SearchMaxLimit)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(whole.Results) < 2 {
+		t.Fatalf("fixture 'pipeline' matches = %d, want >= 2 to page", len(whole.Results))
+	}
+
+	walked := make([]schema.SearchResult, 0, len(whole.Results))
+	for offset := 0; ; offset++ {
+		if offset > len(whole.Results) {
+			t.Fatalf("ranked window walk did not terminate after %d matches", len(whole.Results))
+		}
+		window, err := svc.SearchRankedWindow(ctx, "pipeline", 1, offset)
+		if err != nil {
+			t.Fatalf("SearchRankedWindow(offset=%d): %v", offset, err)
+		}
+		if len(window.Results) == 0 {
+			break
+		}
+		walked = append(walked, window.Results...)
+	}
+	if !reflect.DeepEqual(walked, whole.Results) {
+		t.Fatalf("windowed ranked stream = %+v, want %+v", walked, whole.Results)
+	}
+
+	if _, err := svc.SearchRankedWindow(ctx, "pipeline", codemap.SearchMaxLimit+1, 0); err == nil {
+		t.Fatal("oversized ranked window was served, want a refusal")
+	}
+	if _, err := svc.SearchRankedWindow(ctx, "pipeline", 1, -1); err == nil {
+		t.Fatal("negative ranked offset was served, want a refusal")
 	}
 }
 

@@ -9,17 +9,31 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VILLAGE_REF: 830cbcbe3cd00613d04bd8f6a2ae9f1db955d503
+  VILLAGE_REF: 4d48936be9be8e8c52ef2c04eaa5fcc6369ff82a
 
 permissions:
   contents: read
 
 jobs:
+  # Route the single warm-stack driver to the self-hosted container pool
+  # (rootless podman on the desktop; labels self-hosted/container), with a
+  # Blacksmith amd64 fallback when no pool runner is online. Routing comes from
+  # the shared runner-router reusable workflow.
+  determine-runner:
+    uses: peasant-labs/infra/.github/workflows/runner-router.yml@runner-router-v1
+    with:
+      fallback: '["blacksmith-4vcpu-ubuntu-2404"]'
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+
   release-e2e:
     name: release e2e (installed packages)
     # Arch's official warm-stack image is amd64-only, so the single warm-stack
-    # driver runs on the amd64 Blacksmith runner.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # driver runs on the self-hosted amd64 container pool, with the Blacksmith
+    # amd64 runner as fallback. The pool image ships podman, which the driver
+    # drives against the host socket.
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 90
     steps:
       - name: Checkout peasant

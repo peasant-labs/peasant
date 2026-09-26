@@ -1,0 +1,22 @@
+requiredNames:
+  - retained_record_above_public_limit
+  - managed_record_above_public_limit
+  - managed_earlier_record_above_public_limit
+cases:
+  - name: retained_record_above_public_limit
+    native: false
+    paddingBytes: 8388700
+  - name: managed_record_above_public_limit
+    native: true
+    paddingBytes: 8388700
+  - name: managed_earlier_record_above_public_limit
+    native: true
+    earlier: true
+    paddingBytes: 8388700
+payload: '{ "type":"future", "n":9007199254740993, "padding":"BODY" }'
+source: |
+  {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"SESSION_ID","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","history_mode":"legacy"}}
+  {"type":"turn_context","payload":{"model":"gpt-5"}}
+  {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"opening"}]}}
+  UNKNOWN
+  {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"closing"}]}}

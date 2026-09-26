@@ -251,7 +251,7 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bundle, err := push.LoadPublicationInput(ctx, db, omittedRecordsSessionID)
+			bundle, _, err := push.LoadPublicationInput(ctx, db, omittedRecordsSessionID)
 			if err != nil {
 				t.Fatalf("load the publication input the push command reads: %v", err)
 			}

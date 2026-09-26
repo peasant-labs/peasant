@@ -1,0 +1,5 @@
+requiredNames:
+  - activation-private-title-ref-refused-without-echo
+  - installed-candidate-private-content-refused-without-echo
+  - recovery-private-content-refused-without-echo
+  - recovery-invalid-title-ref-refused-without-echo

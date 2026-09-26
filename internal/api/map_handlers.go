@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -273,7 +274,7 @@ func (s *Server) handleReviewDiff(w http.ResponseWriter, r *http.Request) {
 // integer. The provider applies the documented maximum clamp to valid oversized
 // values. There is no codemap sentinel for search, so any provider error → 500.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	request, ok := s.exactRequestGuard(w, r, exactRequestSpec{operation: "search", provider: true, query: map[string]bool{"q": true, "limit": false}})
+	request, ok := s.exactRequestGuard(w, r, exactRequestSpec{operation: "search", provider: true, query: map[string]bool{"q": true, "limit": false, "view": false}})
 	if !ok {
 		return
 	}
@@ -296,6 +297,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		limit = n
+	}
+
+	// view is opt-in. Omission preserves the exact legacy search payload; only
+	// the published grouped value selects the grouped response.
+	view := request.query.Get("view")
+	if view != "" && view != groupedViewValue {
+		writeAPIError(w, http.StatusBadRequest,
+			fmt.Sprintf("Search could not run because query field \"view\" is %q in internal/api.handleSearch. No results were returned, because an unpublished view value cannot be served safely. Omit view for the flat search or use view=%s, then retry.", view, groupedViewValue),
+			"grouped_view_unknown")
+		return
+	}
+	if view == groupedViewValue {
+		s.serveGroupedSearch(w, r, query, limit)
+		return
 	}
 
 	payload, err := s.cfg.Provider.Search(r.Context(), query, limit)

@@ -46,6 +46,7 @@ requiredNames:
   - codex-null
   - codex-unrecognized-object
   - codex-wrong-response
+  - codex-invalid-known-between-valid-preview
   - codex-unknown-only
   - codex-mixed-future
   - codex-mixed-future-opaque-fields
@@ -172,18 +173,42 @@ cases:
   - {name: codex-null, harness: codex, input: 'null', error: true, legacyEntries: 0}
   - {name: codex-unrecognized-object, harness: codex, input: '{}', error: true, legacyEntries: 0}
   - {name: codex-wrong-response, harness: codex, input: '{"type":"response_item","payload":{"type":"message","content":42}}', error: true, legacyEntries: 0}
-  - {name: codex-unknown-only, harness: codex, input: '{"type":"response_item","payload":{"type":"future-response"}}', error: true, legacyEntries: 0}
+  - name: codex-invalid-known-between-valid-preview
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"before"}]}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":42}]}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"after"}]}}
+    error: true
+    legacyEntries: 2
+    visibleTexts: [before, after]
+  - name: codex-unknown-only
+    harness: codex
+    input: '{"type":"response_item","payload":{"type":"future-response"}}'
+    entries: 1
+    legacyEntries: 1
+    visibleTexts: []
+    retained:
+      - {namespace: response_item, kind: future-response, payload: '{"type":"future-response"}', line: 1, recordIndex: 0, position: 1, pointer: /payload}
   - name: codex-mixed-future
     harness: codex
     input: |
       {"type":"response_item","payload":{"type":"future-response"}}
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
-    entries: 1
+    entries: 2
+    legacyEntries: 2
+    visibleTexts: [hello]
+    retained:
+      - {namespace: response_item, kind: future-response, payload: '{"type":"future-response"}', line: 1, recordIndex: 0, position: 1, pointer: /payload}
   - {name: codex-missing-source, harness: codex, missing: true, error: true}
   - name: codex-mixed-future-opaque-fields
     harness: codex
     input: |
-      {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
+      {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque","body":"OPAQUE_BODY","integer":9007199254740993,"decimal":1.2300e+06}}}
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
-    entries: 1
+    entries: 2
+    legacyEntries: 2
+    visibleTexts: [hello]
+    retained:
+      - {namespace: response_item, kind: future-response, payload: '{"type":"future-response","content":{"future":"opaque","body":"OPAQUE_BODY","integer":9007199254740993,"decimal":1.2300e+06}}', line: 1, recordIndex: 0, position: 1, pointer: /payload}
   - {name: codex-long-content-parity, harness: codex, input: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"LONG_CONTENT"}]}}', longContent: true, entries: 1}

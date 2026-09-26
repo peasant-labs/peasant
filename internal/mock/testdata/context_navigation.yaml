@@ -1,0 +1,197 @@
+# Canonical mounted current-parent navigation fixture.
+#
+# Four stored sessions in one project give the mounted viewer a real
+# context_from source and a real started_by parent, both stored and both
+# resolved by the local authorized read, plus one child whose started_by target
+# is no longer stored so an honest unavailable reference stays readable. The
+# child additionally carries a retained earlier-history partition so the
+# disclosure state can be restored on Back. The child's five main records come
+# from one input submission, so the served detail separates inputSubmissionCount
+# from turnCount.
+#
+# The Go mock provider and the real-binary visual harness both read this one
+# file, so a route, link target, or label can never drift between them.
+project:
+  hash: eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b
+  name: fortuna
+child:
+  id: sess_contextchild
+  project: fortuna
+  harness: claude-code
+  model: claude-sonnet-4
+  startTime: 2026-08-02T09:00:00Z
+  endTime: 2026-08-02T09:12:00Z
+  durationMins: 12
+  totalTokens: 1540
+  tokensIn: 1180
+  tokensOut: 360
+  turnCount: 5
+  toolCallCount: 0
+  inputSubmissionCount: 1
+  turns:
+    - index: 0
+      role: user
+      entryType: text
+      depth: 0
+      ref: e_contextchild_0
+      content: >-
+        Split the durable detail read out of the legacy content overlay so a
+        stored session keeps its captured generation even after the native
+        source changes on disk.
+      timestamp: 2026-08-02T09:00:00Z
+    - index: 1
+      role: assistant
+      entryType: text
+      depth: 0
+      ref: e_contextchild_1
+      content: >-
+        The read path now hydrates every tool argument and result from the
+        immutable managed blob before folding, so the projection never reparses
+        the mutable native source.
+      timestamp: 2026-08-02T09:03:00Z
+    - index: 2
+      role: user
+      entryType: text
+      depth: 0
+      ref: e_contextchild_2
+      content: >-
+        Keep the earlier retained partition separate from the current turn list
+        and never let it contribute to the input or turn counts.
+      timestamp: 2026-08-02T09:06:00Z
+    - index: 3
+      role: assistant
+      entryType: text
+      depth: 0
+      ref: e_contextchild_3
+      content: >-
+        The earlier partition folds independently, stays collapsed by default,
+        and expands locally without fetching the parent session.
+      timestamp: 2026-08-02T09:09:00Z
+    - index: 4
+      role: user
+      entryType: text
+      depth: 0
+      ref: e_contextchild_4
+      content: >-
+        Reserve the graph provenance work for the publication slice and keep
+        this read slice's navigation honest for an unavailable target.
+      timestamp: 2026-08-02T09:12:00Z
+  earlierHistory:
+    - state: uncertain_migrated
+      turns:
+        - index: 0
+          role: user
+          entryType: text
+          depth: 0
+          ref: e_contextchild_earlier_0
+          content: >-
+            The pre-boundary question whose original ownership evidence was
+            lost during the migration.
+          timestamp: 2026-08-01T21:00:00Z
+        - index: 1
+          role: assistant
+          entryType: text
+          depth: 0
+          ref: e_contextchild_earlier_1
+          content: >-
+            The pre-boundary answer, retained verbatim and labelled as uncertain
+            ownership rather than deleted.
+          timestamp: 2026-08-01T21:04:00Z
+  relationships:
+    - kind: context_from
+      targetState: target_known
+      targetLocalId: sess_contextsource
+      evidence: native_typed
+    - kind: started_by
+      targetState: target_known
+      targetLocalId: sess_contextparent
+      evidence: native_typed
+source:
+  id: sess_contextsource
+  project: fortuna
+  harness: claude-code
+  model: claude-sonnet-4
+  startTime: 2026-08-01T20:30:00Z
+  endTime: 2026-08-01T20:50:00Z
+  durationMins: 20
+  totalTokens: 640
+  tokensIn: 500
+  tokensOut: 140
+  turnCount: 2
+  toolCallCount: 0
+  turns:
+    - index: 0
+      role: user
+      entryType: text
+      depth: 0
+      ref: e_contextsource_0
+      content: Summarize the current managed-generation content model.
+      timestamp: 2026-08-01T20:30:00Z
+    - index: 1
+      role: assistant
+      entryType: text
+      depth: 0
+      ref: e_contextsource_1
+      content: The captured generation owns immutable per-entry content blobs.
+      timestamp: 2026-08-01T20:50:00Z
+parent:
+  id: sess_contextparent
+  project: fortuna
+  harness: claude-code
+  model: claude-sonnet-4
+  startTime: 2026-08-02T08:00:00Z
+  endTime: 2026-08-02T08:40:00Z
+  durationMins: 40
+  totalTokens: 980
+  tokensIn: 760
+  tokensOut: 220
+  turnCount: 2
+  toolCallCount: 0
+  turns:
+    - index: 0
+      role: user
+      entryType: text
+      depth: 0
+      ref: e_contextparent_0
+      content: Plan the durable read boundary for the local detail view.
+      timestamp: 2026-08-02T08:00:00Z
+    - index: 1
+      role: assistant
+      entryType: text
+      depth: 0
+      ref: e_contextparent_1
+      content: One validated projection serves the socket, the HTTP read, and export.
+      timestamp: 2026-08-02T08:40:00Z
+unresolved:
+  id: sess_contextunresolved
+  project: fortuna
+  harness: claude-code
+  model: claude-sonnet-4
+  startTime: 2026-08-02T07:00:00Z
+  endTime: 2026-08-02T07:05:00Z
+  durationMins: 5
+  totalTokens: 410
+  tokensIn: 320
+  tokensOut: 90
+  turnCount: 1
+  toolCallCount: 0
+  turns:
+    - index: 0
+      role: user
+      entryType: text
+      depth: 0
+      ref: e_contextunresolved_0
+      content: >-
+        This child still reads when the parent it names is no longer stored, so
+        the header renders an honest unavailable reference instead of a link.
+      timestamp: 2026-08-02T07:00:00Z
+  relationships:
+    - kind: started_by
+      targetState: target_known
+      targetLocalId: sess_contextabsenttarget
+      evidence: native_typed
+expected:
+  contextLabel: context inherited from
+  starterLabel: started by
+  starterLinkAction: open current session
+  earlierSummary: uncertain ownership

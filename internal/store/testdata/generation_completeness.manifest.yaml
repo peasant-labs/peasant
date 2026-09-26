@@ -1,0 +1,6 @@
+requiredNames:
+  - first-incomplete-allowed
+  - complete-replaces-incomplete-allowed
+  - incomplete-replaces-complete-refused
+  - incomplete-stamps-unset
+  - complete-stamps-recorded

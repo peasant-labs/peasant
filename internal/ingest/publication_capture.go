@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 
@@ -124,4 +125,39 @@ func publicationCWDProvenance(meta *UnifiedMetadata, session DiscoveredSession) 
 		return CWDSourceAbsent
 	}
 	return CWDSourceAbsent
+}
+
+// ValidatePublicationCaptureSnapshot reports why a recorded metadata snapshot
+// and a working-directory provenance kind do not form a publication-capture
+// agreement. It is the ONE rule the store enforces when it records a capture and
+// the pipeline applies before it certifies one, so a caller never supplies a
+// snapshot the store must refuse. A nil return means the snapshot is a capture;
+// any error names the reason it is not, and the caller must record nothing and
+// leave the stored provenance exactly as it was.
+func ValidatePublicationCaptureSnapshot(m *schema.UnifiedMetadata, kind CWDProvenanceKind) error {
+	if _, err := NewCWDProvenanceKind(string(kind)); err != nil {
+		return err
+	}
+	if kind == CWDNotRecovered {
+		return errors.New("source has not been inspected")
+	}
+	if (kind == CWDSourceExact) != (m.CWD != "") {
+		return errors.New("CWD and its source provenance disagree")
+	}
+	if m.SchemaVersion != CurrentSchemaVersion {
+		return errors.New("unsupported metadata schema")
+	}
+	if _, err := schema.NewSessionID(string(m.SessionID)); err != nil {
+		return errors.New("invalid metadata session identity")
+	}
+	if _, err := schema.NewProjectHash(string(m.Project.Hash)); err != nil {
+		return errors.New("invalid metadata project identity")
+	}
+	if _, err := schema.NewTranscriptContentHash(m.ContentHash); err != nil {
+		return errors.New("invalid captured content digest")
+	}
+	if m.MetadataHash != schema.ComputeMetadataHash(m) {
+		return errors.New("metadata integrity digest does not match snapshot")
+	}
+	return nil
 }

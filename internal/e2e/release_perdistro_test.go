@@ -92,40 +92,43 @@ func TestReleasePerDistro(t *testing.T) {
 	}
 }
 
+// The images come from the project's Quay mirrors or from the distribution's
+// own registry. None are pulled from Docker Hub, whose anonymous pull limits
+// the shared pool address would otherwise consume.
 func releaseE2EDistros() []releaseDistro {
 	return []releaseDistro{
 		{
 			name:            "ubuntu-22.04",
 			mode:            releaseE2EFullStack,
-			image:           "docker.io/library/ubuntu:22.04",
+			image:           "quay.io/peasant-labs/ubuntu:22.04",
 			artifactPattern: "peasant_*_linux_amd64.deb",
 			install:         installDeb,
 		},
 		{
 			name:            "ubuntu-24.04",
 			mode:            releaseE2EFullStack,
-			image:           "docker.io/library/ubuntu:24.04",
+			image:           "quay.io/peasant-labs/ubuntu:24.04",
 			artifactPattern: "peasant_*_linux_amd64.deb",
 			install:         installDeb,
 		},
 		{
 			name:            "fedora-latest",
 			mode:            releaseE2EFullStack,
-			image:           "docker.io/library/fedora:latest",
+			image:           "quay.io/fedora/fedora:latest",
 			artifactPattern: "peasant_*_linux_amd64.rpm",
 			install:         installFedoraRPM,
 		},
 		{
 			name:            "opensuse-leap",
 			mode:            releaseE2EFullStack,
-			image:           "docker.io/opensuse/leap:latest",
+			image:           "registry.opensuse.org/opensuse/leap:latest",
 			artifactPattern: "peasant_*_linux_amd64.rpm",
 			install:         installOpenSUSERPM,
 		},
 		{
 			name:            "archlinux-base-devel",
 			mode:            releaseE2EFullStack,
-			image:           "docker.io/library/archlinux:base-devel",
+			image:           "quay.io/archlinux/archlinux:base-devel",
 			artifactPattern: "peasant_*_linux_amd64.tar.gz",
 			install:         installTarBinary,
 		},

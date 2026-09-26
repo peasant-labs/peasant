@@ -92,7 +92,9 @@ func openDB(cmd *cobra.Command) (*store.Store, func(), error) {
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		return nil, func() {}, fmt.Errorf("create data directory: %w", err)
 	}
-	db, err := store.Open(dbPath, store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))
+	db, err := store.Open(dbPath,
+		store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()),
+		store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)
 	}

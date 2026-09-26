@@ -385,7 +385,7 @@ func TestOpenCodeCurrentSQLiteEntersMountedProductionThroughManagedProjection(t 
 	}
 
 	databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
-	localStore, err := store.Open(databasePath, store.WithPoolSize(1))
+	localStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open mounted harvest store: %v", err)
 	}

@@ -1,0 +1,14 @@
+requiredNames:
+  - session-symlink-preserves-external-sentinel
+  - generations-symlink-preserves-external-sentinel
+  - unrelated-file-preserved-on-cleanup
+  - lock-namespace-confined
+  - empty-manifest-preserves-sentinel
+  - malformed-manifest-preserves-sentinel
+  - unknown-manifest-preserves-sentinel
+  - mismatched-manifest-preserves-sentinel
+  - foreign-session-symlink-preserves-sentinel
+  - relative-generations-ancestor-matching-owner-preserves-sentinel
+  - relative-generations-ancestor-foreign-owner-preserves-sentinel
+  - private-identity-manifest-refused-without-echo
+  - private-content-path-manifest-refused-without-echo

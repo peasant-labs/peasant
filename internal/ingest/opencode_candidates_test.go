@@ -1231,16 +1231,23 @@ func openCodeBuildTopologyProduction(t testing.TB) (string, []string) {
 		t.Fatal("resolve OpenCode build-topology guard location")
 	}
 	sourceDirectory := filepath.Dir(currentFile)
-	production, err := ingestProductionFiles(sourceDirectory)
+	production, release, err := prepareOpenCodeBuildTopologyProduction(sourceDirectory)
 	if err != nil {
 		t.Fatalf("discover production files for build-topology copies: %v", err)
 	}
+	// Registered before any case, so every case directory is removed before
+	// ownership of the source directory is released.
+	t.Cleanup(func() {
+		if releaseErr := release(); releaseErr != nil {
+			t.Errorf("release build-topology startup ownership after the case cleanups: %v", releaseErr)
+		}
+	})
 	return sourceDirectory, production
 }
 
 func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture, sourceDirectory string, production []string, fixtureCase openCodeBuildTopologyCase) error {
 	t.Helper()
-	directory, err := os.MkdirTemp(sourceDirectory, ".sqlite-topology-")
+	directory, err := os.MkdirTemp(sourceDirectory, openCodeBuildTopologyDirectoryPrefix)
 	if err != nil {
 		return fmt.Errorf("create isolated package for build-topology case %q: %w", fixtureCase.Name, err)
 	}
@@ -1257,6 +1264,9 @@ func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture
 		if writeErr := os.WriteFile(filepath.Join(directory, filepath.Base(filename)), data, 0o600); writeErr != nil {
 			return fmt.Errorf("copy production source %q into build-topology package: %w", filename, writeErr)
 		}
+	}
+	if err := copyGoEmbedAssets(sourceDirectory, directory, production); err != nil {
+		return err
 	}
 	for _, source := range fixtureCase.Sources {
 		data, sourceErr := openCodeBuildTopologySourceText(source)
@@ -1353,6 +1363,52 @@ func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture
 	}
 	if fixtureCase.ExpectedOutcome == openCodeBuildTopologyForbidden && !forbiddenObserved {
 		return fmt.Errorf("build-topology required forbidden-call behavior was not observed")
+	}
+	return nil
+}
+
+// copyGoEmbedAssets carries the non-Go assets production sources embed into
+// the isolated build-topology package. A copied source with a go:embed
+// directive names files outside the Go file inventory, so without their
+// copies the isolated package cannot list or type-check.
+func copyGoEmbedAssets(sourceDirectory, directory string, filenames []string) error {
+	for _, filename := range filenames {
+		data, readErr := os.ReadFile(filename)
+		if readErr != nil {
+			return fmt.Errorf("read production source %q for embed inventory: %w", filename, readErr)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "//go:embed") {
+				continue
+			}
+			patterns := strings.Fields(strings.TrimSpace(strings.TrimPrefix(trimmed, "//go:embed")))
+			if len(patterns) == 0 {
+				return fmt.Errorf("production source %q carries an empty go:embed directive", filename)
+			}
+			for _, pattern := range patterns {
+				matches, globErr := filepath.Glob(filepath.Join(sourceDirectory, pattern))
+				if globErr != nil {
+					return fmt.Errorf("resolve go:embed pattern %q from %q: %w", pattern, filename, globErr)
+				}
+				if len(matches) == 0 {
+					return fmt.Errorf("go:embed pattern %q from %q matches no file; the isolated package cannot list", pattern, filename)
+				}
+				for _, match := range matches {
+					info, statErr := os.Stat(match)
+					if statErr != nil || !info.Mode().IsRegular() {
+						return fmt.Errorf("go:embed match %q from %q is not a regular file", match, filename)
+					}
+					asset, readErr := os.ReadFile(match)
+					if readErr != nil {
+						return fmt.Errorf("read go:embed asset %q for build-topology copy: %w", match, readErr)
+					}
+					if writeErr := os.WriteFile(filepath.Join(directory, filepath.Base(match)), asset, 0o600); writeErr != nil {
+						return fmt.Errorf("copy go:embed asset %q into build-topology package: %w", match, writeErr)
+					}
+				}
+			}
+		}
 	}
 	return nil
 }

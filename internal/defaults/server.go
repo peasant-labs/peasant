@@ -33,6 +33,11 @@ const (
 	RouteConfigMock         Route = "/api/v1/config/mock"
 	RouteConfigCapabilities Route = "/api/v1/config/capabilities"
 	RouteSessions           Route = "/api/v1/sessions"
+	// RouteSessionDetail is the flat additive single-session read: the durable
+	// detail fields stay at the JSON root and authorized current-target
+	// relationshipNavigation is added beside them. It is a read projection, not
+	// a publication body, so it never carries navigation into published content.
+	RouteSessionDetail Route = "/api/v1/sessions/{id}"
 	// RouteSessionSummaries resolves links: it returns summaries for an explicit
 	// set of session identifiers named in ?ids=, applying neither origin scope
 	// nor selection scope. A sibling RESOURCE rather than a path under

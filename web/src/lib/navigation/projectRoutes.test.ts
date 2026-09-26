@@ -43,9 +43,9 @@ const cases = loadFixture(source);
 
 describe('project route fixture contract', () => {
   it('is strict, complete, and non-vacuous', () => {
-    expect(() => loadFixture(source.replace('expectedCaseCount: 28', 'expectedCaseCount: 27'))).toThrow(/exactly 28/);
+    expect(() => loadFixture(source.replace('expectedCaseCount: 30', 'expectedCaseCount: 29'))).toThrow(/exactly 30/);
     expect(() => loadFixture(source.replace('canonical map round trip', 'renamed map behavior'))).toThrow(/missing required semantic branch/);
-    expect(() => loadFixture(source.replace('expectedCaseCount: 28', 'unknown: true\nexpectedCaseCount: 28'))).toThrow(/fields/);
+    expect(() => loadFixture(source.replace('expectedCaseCount: 30', 'unknown: true\nexpectedCaseCount: 30'))).toThrow(/fields/);
     expect(() => loadFixture(`${source}\n---\n{}`)).toThrow();
   });
 });
@@ -73,6 +73,7 @@ describe.each(cases)('$name', (fixture) => {
           originNode: 'src/api.ts',
           originBranch: null,
           returnLocation: null,
+          earlierHistoryOpen: [],
         });
         expect(hash && query && transcriptHref(hash, fixture.sessionId, {
           turn: query.turn ?? undefined,
@@ -83,6 +84,27 @@ describe.each(cases)('$name', (fixture) => {
         })).toBe(fixture.expected);
         break;
       }
+      case 'transcript-history': {
+        const query = parseTranscriptRouteQuery(fixture.search);
+        expect(query).toEqual({
+          turn: 3,
+          scope: null,
+          scopeVal: '',
+          origin: null,
+          originNode: null,
+          originBranch: null,
+          returnLocation: null,
+          earlierHistoryOpen: ['earlier-0', 'earlier-1'],
+        });
+        expect(hash && query && transcriptHref(hash, fixture.sessionId, {
+          turn: query.turn ?? undefined,
+          earlierHistoryOpen: query.earlierHistoryOpen,
+        })).toBe(fixture.expected);
+        break;
+      }
+      case 'transcript-query-reject':
+        expect(parseTranscriptRouteQuery(fixture.search)).toBeNull();
+        break;
       case 'legacy': {
         const route = fixture.pathname.startsWith('/review')
           ? parseReviewRoute(fixture.pathname)

@@ -27,6 +27,13 @@ sessions:
     projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     preview: "Wire retry handling into the queue worker"
     outcome: resolved
+    # A collapsed owner-anchored helper group: the chooser renders the canonical
+    # fairtrade group chip under this owner, and its members stay folded until
+    # the viewer opens it.
+    helperGroups:
+      - groupId: hg_visual_owner1
+        helperThreadCount: 2
+        memberScope: scope_visual_owner1
   - id: sess-visual-search-002
     harness: opencode
     startTime: "2026-02-23T14:30:00Z"
@@ -81,3 +88,23 @@ discovery:
     repositoryLocationId: rl-engine-docs
     branch: docs/worker-guide
     selectionStatus: unselected
+# Scoped helper-member pages, keyed by the opaque scope the group expansion
+# replays. The first member anchors a further nested group, so the mounted
+# chooser's recursive disclosure and its independent paging can be captured.
+helperMembers:
+  scope_visual_owner1:
+    - id: sess-visual-helper-001
+      preview: "helper that anchors a nested review"
+      turnCount: 4
+      syncStatus: new
+      helperGroups:
+        - { groupId: hg_visual_child1, helperThreadCount: 1, memberScope: scope_visual_child1 }
+    - id: sess-visual-helper-002
+      preview: "held helper, not contributable"
+      turnCount: 2
+      syncStatus: held
+  scope_visual_child1:
+    - id: sess-visual-helper-003
+      preview: "nested helper review"
+      turnCount: 1
+      syncStatus: new

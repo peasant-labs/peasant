@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ShareWizardClient } from '@/app/share/ShareWizardClient';
+import { buildGroupedSyncResponse } from '@/app/share/testdata/grouped-sync';
 import type { Redaction } from '@/types/messages';
 import * as redactionsApi from '@/lib/share/redactions';
 import { DEFAULT_REDACTION_LEVEL } from '@/lib/share/redactions';
 import {
-  REDACTION_STEP_DISCOVERY_PAYLOAD,
   REDACTION_STEP_FAILURE_EXPECTATIONS,
   REDACTION_STEP_MATCH,
   REDACTION_STEP_SCAN_FAILURE,
@@ -57,12 +57,24 @@ describe('ShareWizardClient redaction flow', () => {
           json: async () => ({ items: [{ sessionId: REDACTION_STEP_SESSION.id, locationLabel: 'workspace', repositoryLocationId: 'rl_workspace', branch: 'main', selectionStatus: 'selected' }] }),
         };
       }
-      if (!url.endsWith('/api/v1/sessions')) {
+      if (!url.includes('/api/v1/sync/sessions')) {
         throw new Error(`unexpected fetch in mounted redaction-flow test: ${url}`);
       }
       return {
         ok: true,
-        json: async () => REDACTION_STEP_DISCOVERY_PAYLOAD,
+        json: async () => buildGroupedSyncResponse([
+          {
+            id: REDACTION_STEP_SESSION.id,
+            harness: REDACTION_STEP_SESSION.provider,
+            startTime: REDACTION_STEP_SESSION.startTime,
+            durationMins: REDACTION_STEP_SESSION.durationMins,
+            totalTokens: REDACTION_STEP_SESSION.totalTokens,
+            turnCount: REDACTION_STEP_SESSION.turnCount,
+            project: REDACTION_STEP_SESSION.projectName,
+            projectHash: REDACTION_STEP_SESSION.projectHash,
+            preview: REDACTION_STEP_SESSION.preview,
+          },
+        ]),
       };
     }));
   });

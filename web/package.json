@@ -22,7 +22,9 @@
     "probe:selection-recovery": "node scripts/visual/selection-recovery-probe.mjs",
     "visual:search-share:self-test": "node scripts/visual/search-share-visual.mjs --self-test",
     "visual:search-share": "node scripts/visual/search-share-visual.mjs",
+    "visual:grouped-local": "node scripts/visual/grouped-list-visual.mjs",
     "visual:share-geometry": "node scripts/visual/share-geometry.mjs",
+    "visual:context-navigation": "node scripts/visual/context-navigation-shoot.mjs",
     "shoot:peasant": "node scripts/visual/peasant-shoot.mjs",
     "shoot:changes": "node scripts/visual/changes-shoot.mjs",
     "boot:peasant": "node scripts/visual/boot-peasant.mjs",
@@ -34,7 +36,7 @@
     "shell:gate": "pnpm boot:shell && pnpm sxs:shell"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.19",
+    "@peasant-labs/fairtrade": "0.0.20",
     "@peasant-labs/schema": "0.20.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",

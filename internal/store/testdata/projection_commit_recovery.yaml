@@ -1,0 +1,57 @@
+# Crash-seam oracle for the immutable V2 activation protocol. Each named case
+# interrupts the real activation at one durable boundary and asserts exactly G1
+# (the prior generation) or G2 (the new generation) is visible, that no success
+# is stamped before the activation commit, and that recovery or retry settles on
+# G2 with the same generation identity. `seam` names the boundary; `visible`
+# names the generation a reader must see immediately after the interruption;
+# `recovery` names how G2 is completed (`recover` reconciles the pending intent,
+# `retry` re-runs activation after the fault clears).
+session:
+  id: "11111111-1111-4111-8111-111111111111"
+  harness: claude-code
+generation:
+  complete_id: gen_g1
+  failed_id: gen_g2
+  # Content longer than the preview limit by more than 1024 characters, so a
+  # bounded preview cannot be mistaken for the committed full content.
+  long_text_padding: 4096
+cases:
+  - name: before-temporary-fsync
+    seam: before-temp-fsync
+    visible: g1
+    recovery: retry
+  - name: after-fsync-before-rename
+    seam: after-fsync-before-rename
+    visible: g1
+    recovery: retry
+  - name: after-rename-before-db
+    seam: after-rename-before-db
+    visible: g1
+    recovery: recover
+  - name: during-activation-transaction
+    seam: during-activation-transaction
+    visible: g1
+    recovery: recover
+  - name: after-db-before-metadata
+    seam: after-db-before-metadata
+    visible: g2
+    recovery: recover
+  - name: after-metadata-before-intent-clear
+    seam: after-metadata-before-intent-clear
+    visible: g2
+    recovery: recover
+  # A rejected or corrupted durable envelope must not be replayed: after the
+  # staged candidate is renamed into place, change ONLY the persisted intent's
+  # candidate binding. Recovery must refuse the mismatched binding, leaving the
+  # last-good generation and its success stamps unchanged and the candidate and
+  # intent retained for a verified retry.
+  - name: mismatched-durable-intent-digest-refused
+    seam: after-rename-before-db
+    visible: g1
+    recovery: mismatched-digest
+# A committed generation whose content blob is damaged after the commit must be
+# refused with an actionable managed-recovery error, never served as partial or
+# empty content.
+corrupt_artifact:
+  name: corrupt-artifact
+  entry_ref: e_u1

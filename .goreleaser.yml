@@ -61,6 +61,10 @@ snapshot:
 release:
   # rc tags (vX.Y.Z-rcN) publish as GitHub prereleases; finals as full releases.
   prerelease: auto
+  # Re-runs must recover a partial publish: keep the existing release notes and
+  # replace assets that a re-run uploads again. See docs/release-runbook.md §5.
+  mode: keep-existing
+  replace_existing_artifacts: true
 
 nfpms:
   - id: packages
@@ -165,10 +169,19 @@ homebrew_casks:
     # per-arch url/sha256 stanzas when both darwin archives exist.
     hooks:
       post:
-        # Single modifier-if line keeps the GENERATED cask brew-style-clean:
-        # a block-if with a one-line body trips Style/IfUnlessModifier, a
-        # two-line system_command trips Layout/ArgumentAlignment at
-        # goreleaser's nesting depth, and a kept final newline (|) trips
-        # Layout/EmptyLinesAroundBlockBody.
+        # Homebrew's declarative install-steps DSL: the patched release tool
+        # emits this body inside `postflight_steps do … end` (legacy
+        # `postflight` blocks fail `brew style`, Cask/InstallSteps). A steps
+        # block may only contain step calls with literal arguments, so the
+        # quarantine attribute is cleared with the `run` step under an
+        # `on_macos` scope. Cask steps resolve relative paths against
+        # staged_path, so `chdir: "."` runs inside the staged directory; a
+        # `{{staged_path}}` token cannot be used because goreleaser templates
+        # the rendered cask and would reject it. `xattr -dr` exits 0 when the
+        # attribute is absent, so the default `must_succeed: true` is correct.
+        # The kept final newline (|) would trip
+        # Layout/EmptyLinesAroundBlockBody, hence |-.
         install: |-
-          system_command("/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/peasant"]) if OS.mac?
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "peasant"], chdir: "."
+          end

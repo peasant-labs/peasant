@@ -1,0 +1,41 @@
+# Loader-mutation cases for the mounted helper-group corpus. Each case names one
+# mutation that MUST make the typed loader reject the document; a lexicographic
+# required-NAME manifest keeps the set exact (no bare counts), and the loader
+# validates the closed operation set and each operation's required fields.
+requiredNames:
+  - empty-manifest
+  - removed-role
+  - renamed-role
+  - invalid-sync-status
+  - invalid-owner-status
+  - duplicate-role
+  - unknown-root-key
+cases:
+  - name: empty-manifest
+    operation: set-required-names
+    value: []
+  - name: removed-role
+    operation: remove-required-name
+    role: eligible-member
+  - name: renamed-role
+    operation: rename-corpus-role
+    from: eligible-member
+    to: eligible-member-renamed
+  - name: invalid-sync-status
+    operation: set-member-field
+    role: eligible-member
+    field: syncStatus
+    value: archived
+  - name: invalid-owner-status
+    operation: set-context-field
+    role: helper-only-context
+    field: ownerStatus
+    value: retired
+  - name: duplicate-role
+    operation: rename-corpus-role
+    from: other-member
+    to: eligible-member
+  - name: unknown-root-key
+    operation: set-root-field
+    field: extra
+    value: true

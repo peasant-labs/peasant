@@ -66,9 +66,15 @@ type storedBackfillRow struct {
 	// AtCurrentRuleVersion puts the row above the version line before the pass
 	// runs, so the pass must not list it at all.
 	AtCurrentRuleVersion bool `yaml:"at_current_rule_version"`
+	// AtPriorRuleVersion puts the row one version below the current rule so the
+	// pass must list it and reclassify it under the new rule.
+	AtPriorRuleVersion bool `yaml:"at_prior_rule_version"`
 	// FirstUserMessage is the indexed first user entry, which is the last
 	// surviving content evidence once the transcript is gone.
-	FirstUserMessage string `yaml:"first_user_message"`
+	FirstUserMessage *string `yaml:"first_user_message"`
+	// UserMessages preserves the order of a stored leading run. Use either
+	// this field or FirstUserMessage, never both.
+	UserMessages []string `yaml:"user_messages,omitempty"`
 }
 
 type storedBackfillExpectation struct {
@@ -136,6 +142,12 @@ func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 		}
 		stored := make(map[string]bool, len(tc.Rows))
 		for _, row := range tc.Rows {
+			if row.AtCurrentRuleVersion && row.AtPriorRuleVersion {
+				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q cannot be both at the current and prior rule version", tc.Name, row.SessionID)
+			}
+			if row.FirstUserMessage != nil && row.UserMessages != nil {
+				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q sets both first_user_message and user_messages during fixture loading; the stored record sequence is ambiguous, so no world can be seeded; use only one of these fields", tc.Name, row.SessionID)
+			}
 			if row.SessionID == "" || row.SourcePath == "" {
 				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q holds a row with no session id or no source path", tc.Name)
 			}
@@ -158,6 +170,25 @@ func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 		return storedBackfillFixture{}, err
 	}
 	return fixture, nil
+}
+
+func TestLoadStoredBackfillFixturesRejectsAmbiguousMessages(t *testing.T) {
+	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Even an explicitly empty first message conflicts with the ordered run.
+	empty := ""
+	fixture.Cases[0].Rows[0].FirstUserMessage = &empty
+	data, err := yaml.Marshal(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadStoredBackfillFixtures(data)
+	if err == nil || !strings.Contains(err.Error(), fixture.Cases[0].Name) ||
+		!strings.Contains(err.Error(), "sets both first_user_message and user_messages") {
+		t.Fatalf("ambiguous message fields must name the case and both fields: %v", err)
+	}
 }
 
 // storedBackfillWorld is one fixture case realised: a real local store holding
@@ -224,24 +255,27 @@ func newStoredBackfillWorld(t *testing.T, tc storedBackfillCase) storedBackfillW
 	}
 
 	for _, row := range tc.Rows {
-		if row.FirstUserMessage == "" {
+		messages := row.UserMessages
+		if row.FirstUserMessage != nil {
+			messages = []string{*row.FirstUserMessage}
+		}
+		if len(messages) == 0 {
 			continue
 		}
 		sid, err := ingest.NewSessionID(row.SessionID)
 		if err != nil {
 			t.Fatalf("NewSessionID(%q): %v", row.SessionID, err)
 		}
-		preview := row.FirstUserMessage
-		if err := database.IndexSessionEntries(ctx, sid, []schema.SessionEntry{{
-			SessionID:      sid,
-			EntryIndex:     0,
-			Harness:        storedBackfillHarness(row),
-			EntryType:      schema.EntryTypeText,
-			Role:           schema.RoleUser,
-			ContentPreview: &preview,
-			Depth:          0,
-		}}); err != nil {
-			t.Fatalf("index the stored first user message for %q: %v", row.SessionID, err)
+		entries := make([]schema.SessionEntry, 0, len(messages))
+		for i, preview := range messages {
+			entries = append(entries, schema.SessionEntry{
+				SessionID: sid, EntryIndex: i,
+				Harness: storedBackfillHarness(row), EntryType: schema.EntryTypeText,
+				Role: schema.RoleUser, ContentPreview: &preview, Depth: 0,
+			})
+		}
+		if err := database.IndexSessionEntries(ctx, sid, entries); err != nil {
+			t.Fatalf("index the stored user messages for %q: %v", row.SessionID, err)
 		}
 	}
 
@@ -264,18 +298,25 @@ func newStoredBackfillWorld(t *testing.T, tc storedBackfillCase) storedBackfillW
 		}
 	}
 
-	// Put the already-judged rows above the version line, through the same
-	// production update the pass itself uses.
+	// Put the already-judged rows above or one version below the current line,
+	// through the same production update the pass itself uses.
 	for _, row := range tc.Rows {
-		if !row.AtCurrentRuleVersion {
+		if !row.AtCurrentRuleVersion && !row.AtPriorRuleVersion {
 			continue
 		}
 		sid, err := ingest.NewSessionID(row.SessionID)
 		if err != nil {
 			t.Fatalf("NewSessionID(%q): %v", row.SessionID, err)
 		}
-		if err := database.UpdateOriginState(ctx, sid, storedBackfillStoredOrigin(row), storedBackfillRuleVersion); err != nil {
-			t.Fatalf("put %q above the version line: %v", row.SessionID, err)
+		version := storedBackfillRuleVersion
+		if row.AtPriorRuleVersion {
+			version--
+			if version < 1 {
+				t.Fatalf("row %q requests a prior rule version below the supported watermark", row.SessionID)
+			}
+		}
+		if err := database.UpdateOriginState(ctx, sid, storedBackfillStoredOrigin(row), version); err != nil {
+			t.Fatalf("put %q at origin version %d: %v", row.SessionID, version, err)
 		}
 	}
 
@@ -531,8 +572,8 @@ func TestResolveStoredOriginsLeavesEveryRowRetryableWhenNoTranscriptSurvives(t *
 						id, row.StoredOrigin)
 				}
 				if row.StoredOrigin == sessionorigin.Agent.String() {
-					t.Errorf("session %q resolved agent without its transcript; the structured markers are unrecoverable, "+
-						"so a degraded row may only ever reach a person's session or unknown", id)
+					t.Errorf("session %q resolved agent without agent-authored markup in its stored records; "+
+						"the missing transcript's structured markers cannot be reconstructed", id)
 				}
 			}
 		})

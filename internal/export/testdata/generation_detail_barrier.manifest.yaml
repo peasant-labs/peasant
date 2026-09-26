@@ -1,0 +1,8 @@
+# Required-NAME manifest for the captured-generation export boundary corpus.
+# Membership is asserted by required-name presence, so a listed case can only be
+# deleted by removing it from this manifest on purpose. A count is deliberately
+# not asserted: counts churn on every added case and protect nothing.
+requiredNames:
+  - held_generation_survives_activation_and_cleanup
+  - same_length_corruption_refused
+  - native_source_deleted_keeps_captured_bytes

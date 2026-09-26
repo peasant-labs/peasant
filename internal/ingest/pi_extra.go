@@ -27,14 +27,15 @@ const (
 // not a block. Only the owning row carries Usage or Metadata; siblings must not
 // repeat them. The shared projection resolves metadata attachments.
 type PiExtra struct {
-	Kind        PiExtraKind                   `json:"kind"`
-	Harness     schema.Harness                `json:"harness"`
-	SourceRef   string                        `json:"sourceRef,omitempty"`
-	Usage       *schema.UsageDetail           `json:"usage,omitempty"`
-	Metadata    []schema.NativeMetadataRecord `json:"metadata,omitempty"`
-	ModelID     schema.ObservedModelID        `json:"model_id,omitempty"`
-	Namespace   *string                       `json:"namespace,omitempty"`
-	SessionName *string                       `json:"sessionName,omitempty"`
+	Kind            PiExtraKind                   `json:"kind"`
+	Harness         schema.Harness                `json:"harness"`
+	SourceRef       string                        `json:"sourceRef,omitempty"`
+	Usage           *schema.UsageDetail           `json:"usage,omitempty"`
+	Metadata        []schema.NativeMetadataRecord `json:"metadata,omitempty"`
+	ModelID         schema.ObservedModelID        `json:"model_id,omitempty"`
+	Namespace       *string                       `json:"namespace,omitempty"`
+	SessionName     *string                       `json:"sessionName,omitempty"`
+	RetainedUnknown []RetainedUnknown             `json:"retainedUnknown,omitempty"`
 }
 
 // PiPublicRef domain-separates irreversible references. Never publish native IDs.
@@ -79,7 +80,9 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 		return value, false, nil
 	}
 	raw := []byte(*extra)
-	if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/metadata/*/data"}}); err != nil {
+	// Source limits already apply before retention; redaction and JSON escaping
+	// can expand retained bytes. Never impose a smaller private payload budget.
+	if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: max(len(raw), 8<<20), MaxDocumentDepth: 136, OpaqueMetadataPointers: []string{"/metadata/*/data"}}); err != nil {
 		return value, false, piEvidenceError(err)
 	}
 	var marker struct {
@@ -92,6 +95,20 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	if marker.Harness != string(schema.HarnessPi) && !bytes.HasPrefix([]byte(marker.Kind), []byte("pi.")) {
 		return value, false, nil
 	}
+	// Only the unknown subtree gets the native source budget. Keep the
+	// established size/depth limits on typed Pi usage and metadata evidence.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return value, true, piEvidenceError(err)
+	}
+	delete(fields, retainedUnknownKey)
+	typed, err := json.Marshal(fields)
+	if err != nil {
+		return value, true, piEvidenceError(err)
+	}
+	if err := schema.ScanRawJSONDocument(typed, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64, OpaqueMetadataPointers: []string{"/metadata/*/data"}}); err != nil {
+		return value, true, piEvidenceError(err)
+	}
 	if err := validatePiTypedPresence(raw, ""); err != nil {
 		return value, true, piEvidenceError(err)
 	}
@@ -102,6 +119,15 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	}
 	if value.Harness != schema.HarnessPi {
 		return value, true, piEvidenceError(fmt.Errorf("carrier harness must be pi"))
+	}
+	unknown, err := RetainedUnknownOf(schema.SessionEntry{Extra: extra})
+	if err != nil {
+		return value, true, piEvidenceError(err)
+	}
+	for _, record := range unknown {
+		if record.Harness != HarnessPi || !validPiRef(value.SourceRef) || string(record.Position.SourceEntryRef) != value.SourceRef {
+			return value, true, piEvidenceError(fmt.Errorf("retained evidence must name its Pi owning source"))
+		}
 	}
 	switch value.Kind {
 	case PiExtraState, PiExtraUsage, PiExtraNativeMetadata, PiExtraCarrier:
@@ -201,6 +227,11 @@ func PiUsageFromRaw(sessionID, nativeID string, scope schema.UsageScope, raw jso
 		if err := schema.ScanRawJSONDocument(raw, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64}); err != nil {
 			return usage, piEvidenceError(err)
 		}
+		var err error
+		raw, err = piKnownUsageFields(raw)
+		if err != nil {
+			return usage, piEvidenceError(err)
+		}
 		if err := validatePiTypedPresence(raw, "usage"); err != nil {
 			return usage, piEvidenceError(err)
 		}
@@ -271,6 +302,9 @@ func validatePiTypedPresence(raw json.RawMessage, path string) error {
 			return err
 		}
 		for key, value := range fields {
+			if key == "payload" && strings.HasPrefix(path, "/retainedUnknown/") {
+				continue // arbitrary JSON; validated by RetainedUnknownOf, not typed Pi metadata
+			}
 			if key == "data" && strings.Contains(path, "metadata/") {
 				continue
 			}

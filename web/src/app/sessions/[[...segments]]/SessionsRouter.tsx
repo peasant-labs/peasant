@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { AllSessions } from '@/components/sessions/AllSessions';
+import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
 import { useSessionTitles } from '@/hooks/useSessionTitles';
 import { SkeletonList } from '@/lib/skeleton';
 import { TeachingEmptyState } from '@/lib/ft-ui';
@@ -16,10 +17,13 @@ import type { SessionsPayload, SessionSummary } from '@/types/messages';
 /**
  * `/sessions/{projectHash}` — every ingested session for one project.
  *
- * This is where a project row on the Home picker leads. It restores the
- * pre-release archive's project-detail behaviour (its ProjectDetailClient
- * filtered the sessions channel by project and rendered the session table)
- * using the same table Home renders, scoped to one project.
+ * This is where a project row on the Home picker leads. It renders the SAME
+ * server-grouped list Home renders, scoped to this project: the project hash
+ * rides the grouped REST route so the server applies the project predicate to
+ * the ordinary rows, the counts and every issued helper-member scope. Sorting
+ * and grouping are therefore server-driven and cannot disagree with the counts,
+ * and a saved helper expands from an originating scope that already excludes
+ * other projects.
  *
  * Its own route rather than `/projects/{hash}`: that path deliberately redirects
  * to the code map, and the map is capability-gated, so on a default server it is
@@ -28,6 +32,11 @@ import type { SessionsPayload, SessionSummary } from '@/types/messages';
  * The project is read from the PATH, not a query string — `useSearchParams`
  * would force a Suspense boundary under `output: 'export'` (see the /review
  * page), and there is nothing to gain from a query here.
+ *
+ * The WebSocket sessions channel is NOT the list source: it supplies the
+ * project display name for the heading and an invalidation signal, so a live
+ * update refetches the grouped REST read instead of re-deriving the list on the
+ * client. The flat route stays untouched for its existing consumers.
  */
 
 const CHANNELS: ['sessions'] = ['sessions'];
@@ -50,6 +59,13 @@ export function SessionsRouter() {
   const pathname = usePathname();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  // A server that does not yet apply the grouped project filter refuses the
+  // scoped read (see assertGroupedProjectScope). Rather than show a broken
+  // route, fall back to the flat project list, which is exactly what this
+  // route served before the grouped mount. Once the scoped read succeeds, the
+  // grouped list is the only body.
+  const [groupedScopeUnavailable, setGroupedScopeUnavailable] = useState(false);
+  const handleScopeUnavailable = useCallback(() => setGroupedScopeUnavailable(true), []);
   const { data, error } = useChannel<SessionsPayload>(CHANNELS);
   const sessionTitles = useSessionTitles();
 
@@ -127,21 +143,48 @@ export function SessionsRouter() {
           the three branches rendered and the page went blank under the heading. */}
       {!error && data === undefined && <SkeletonList rows={5} label="Loading sessions" />}
 
-      {!error && data !== undefined && scoped.length === 0 && (
-        <TeachingEmptyState
-          title="no sessions recorded for this project yet"
-          body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
-          command="peasant ingest"
+      {/* The project-scoped grouped list. It renders exactly the server's items
+          and counts for THIS project; when the project has no sessions the
+          section shows the ingest teaching state it owns. A project scope the
+          server did not apply is refused (see assertGroupedProjectScope) rather
+          than showing another project's sessions, and this route then falls
+          back to the flat project list below. */}
+      {!error && data !== undefined && !groupedScopeUnavailable && (
+        <GroupedSessionsSection
+          variant="sessions"
+          projectHash={projectHash}
+          invalidationKey={data}
+          titles={sessionTitles}
+          heading="sessions"
+          onScopeUnavailable={handleScopeUnavailable}
+          emptyState={
+            <TeachingEmptyState
+              title="no sessions recorded for this project yet"
+              body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
+              command="peasant ingest"
+            />
+          }
         />
       )}
 
-      {scoped.length > 0 && (
-        <AllSessions
-          sessions={scoped}
-          titles={sessionTitles}
-          title="sessions"
-          subtitle="ingested session transcripts for this project."
-        />
+      {/* Fallback body for a server that cannot scope the grouped read. This is
+          the project list this route served before the grouped mount: the same
+          table Home uses, filtered to the project from the sessions channel. */}
+      {!error && data !== undefined && groupedScopeUnavailable && (
+        scoped.length > 0 ? (
+          <AllSessions
+            sessions={scoped}
+            titles={sessionTitles}
+            title="sessions"
+            subtitle="ingested session transcripts for this project."
+          />
+        ) : (
+          <TeachingEmptyState
+            title="no sessions recorded for this project yet"
+            body="run the command below in your terminal to scan this computer for ai coding conversations and index what it finds."
+            command="peasant ingest"
+          />
+        )
       )}
     </div>
   );

@@ -5,21 +5,36 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/schema"
 )
 
-// LoadPublicationInput reads a coherent database capture. Callers must explicitly
-// validate its publication eligibility with ValidatePublicationInput before use.
-// Recovery belongs to normal ingest, never to a publication-time file fallback.
-func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputReader, rawID string) (ingest.PublicationInputBundle, error) {
+// LoadPublicationInput is the default input for review and upload.
+// The store composes capture evidence with current-generation facts in one
+// snapshot; this layer hydrates that same generation before releasing its lock.
+// A legacy input returns a nil detail. A managed error never falls back to a
+// different source. No blob reads are needed after this function returns.
+func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputReader, rawID string) (input ingest.PublicationInputBundle, detail *schema.SessionDetailPayload, err error) {
 	id, err := ingest.NewSessionID(rawID)
 	if err != nil {
-		return ingest.PublicationInputBundle{}, fmt.Errorf("load publication input: %w", err)
+		return input, nil, fmt.Errorf("load committed publication input: %w", err)
 	}
-	input, err := reader.LoadPublicationInput(ctx, id)
+	err = reader.WithCommittedPublicationInput(ctx, id, func(captured ingest.PublicationInputBundle) error {
+		input = captured
+		if captured.Readiness != ingest.PublicationReady || captured.Generation == nil {
+			return nil
+		}
+		var hydrateErr error
+		detail, hydrateErr = transcript.SnapshotToDetailValidated(ctx, *captured.Generation, reader)
+		return hydrateErr
+	})
 	if err != nil {
-		return ingest.PublicationInputBundle{}, fmt.Errorf("load publication input from peasant.db before publication: %w; nothing uploaded; run peasant ingest and retry", err)
+		return ingest.PublicationInputBundle{}, nil, fmt.Errorf("load publication input from peasant.db before publication: %w; nothing uploaded; run peasant ingest and retry", err)
 	}
-	return input, nil
+	// The fully hydrated detail is the owned result. Do not expose a snapshot
+	// whose protected blob lifetime ended when the callback returned.
+	input.Generation = nil
+	return input, detail, nil
 }
 
 // ValidatePublicationInput checks the publication policy shared by upload,
@@ -27,7 +42,7 @@ func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputRea
 func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
 	if input.Readiness != ingest.PublicationReady {
 		return fmt.Errorf("load publication input from peasant.db: %w; metadata and indexed entries are not a verified capture; nothing uploaded; "+
-			"the one incompleteness that may still be published is a capture whose only gap is oversized source records that ingest omitted, which travels with its placeholders and its partial diagnostics; "+
+			"incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; "+
 			"run peasant ingest with the retained source available and retry", ErrMetadataMissing)
 	}
 	if input.Metadata.Model == "" {

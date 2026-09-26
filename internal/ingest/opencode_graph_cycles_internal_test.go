@@ -132,9 +132,15 @@ func TestOpenCodeIndexerGraphLinksAreDeterministicAndKeepDepthContract(t *testin
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			messages := openCodeGraphCycleMessages(t, testCase.Messages)
-			first := indexer.indexSemanticMessages(sessionID, messages)
+			first, err := indexer.indexSemanticMessages(sessionID, messages)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for run := 1; run < fixture.RepeatRuns; run++ {
-				again := indexer.indexSemanticMessages(sessionID, messages)
+				again, err := indexer.indexSemanticMessages(sessionID, messages)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if !reflect.DeepEqual(first, again) {
 					t.Fatalf("run %d produced a different graph:\nfirst=%s\nagain=%s", run, describeOpenCodeGraph(first), describeOpenCodeGraph(again))
 				}

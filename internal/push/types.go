@@ -29,9 +29,12 @@ type PipelineConfig struct {
 	JSONOutput bool
 	// Verbose requests per-session detail rows.
 	Verbose bool
-	// Quiet suppresses everything except errors and the final result line. A
-	// git hook runs with it, so a degraded-but-recoverable notice must not print
-	// into an ordinary commit or push.
+	// Quiet suppresses everything except errors, a waiting prompt request, and
+	// the final result line. A git hook runs with it, so a degraded-but-
+	// recoverable notice must not print into an ordinary commit or push; a
+	// waiting prompt request is not a notice about the run, it is the reason the
+	// author is being reached at all, and the command prints it rather than the
+	// pipeline.
 	Quiet bool
 	// FilterSessionIDs, when non-nil, restricts the push to only these session IDs.
 	// Set by the push wizard after user confirmation.
@@ -125,6 +128,13 @@ type SessionPushResult struct {
 	Status    PushStatus
 	// Error is non-nil when Status == PushStatusError.
 	Error error
+	// RequiredCapabilities is the exact receiver capability inventory the
+	// session's durable payload requires, derived locally by the offline scan.
+	// It is populated on every path that reaches the scan — a dry-run forecast,
+	// a successful upload, and a capability refusal — so a caller can report what
+	// a receiver must advertise before any negotiation and can explain a refusal
+	// in terms of the payload. It is never a statement about a receiver's support.
+	RequiredCapabilities []schema.ContentCapability
 }
 
 // PushResult is the aggregate outcome of a complete push run.

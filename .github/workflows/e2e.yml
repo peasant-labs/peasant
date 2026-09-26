@@ -9,7 +9,10 @@ name: E2E
 # refs/tags/v* push), and on-demand. It does NOT run on ordinary feature PRs or
 # on post-merge pushes to develop/main -- an integration run on every merge is
 # more than the CI budget allows. The pull_request trigger below still evaluates
-# so the check appears (as skipped) on feature PRs.
+# so the check appears (as skipped) on feature PRs. On release PRs the standalone
+# run's job skips and the release-pr.yml-called copy is the single authority
+# (inside a called reusable workflow github.workflow is the caller's name), so
+# the suite executes at most once per push.
 on:
   pull_request:
     branches: [develop]
@@ -32,12 +35,29 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# Cancel superseded runs on the same ref to save minutes. Scoped by the workflow
+# name because the release-pr.yml-called copy runs with the caller's github
+# context; a shared group would let the two copies cancel each other. On a
+# release PR the group is also scoped to the head SHA, so a stale labeled run
+# cannot cancel the current head's gate.
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
   cancel-in-progress: true
 
 env:
-  VILLAGE_REF: 830cbcbe3cd00613d04bd8f6a2ae9f1db955d503
+  # The disposable Village checkout the harness provisions. Two invariants ride
+  # on this pin, both fail-closed:
+  #   1. Its backend/go.mod must require the same github.com/peasant-labs/schema
+  #      module as this repo's go.mod — `make e2e-schema-parity` enforces it
+  #      before any container starts, and the harness re-asserts it.
+  #   2. Its server must advertise every content capability the release emits
+  #      (today including session_graph_provenance_v1, gated behind the
+  #      provenance preservation proof). A Village ref that predates an
+  #      advertised capability leaves the enriched fixture sessions refused and
+  #      the fail-closed assertion in this workflow turns that into a red gate.
+  # Bump this ref and the schema module pin together; keep release-e2e.yml and
+  # internal/e2e/testdata/workflows/e2e_contract.yaml in lockstep.
+  VILLAGE_REF: 4d48936be9be8e8c52ef2c04eaa5fcc6369ff82a
 
 permissions:
   contents: read
@@ -45,13 +65,26 @@ permissions:
 jobs:
   e2e:
     name: full-stack push e2e (podman)
-    # Release only: a release PR (title starts with "release(", via release-pr.yml
-    # or the pull_request trigger), a release tag (release.yml calls this workflow
-    # on a refs/tags/v* push), or an on-demand dispatch. Ordinary feature PRs and
-    # post-merge pushes to develop/main evaluate this to false and skip. Skipped
-    # rather than absent, so a required-check config stays satisfied.
-    if: startsWith(github.event.pull_request.title, 'release(') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    # Release only: a release PR (title starts with "release(", reached through
+    # release-pr.yml's call — the standalone copy skips so the suite runs once),
+    # a release tag (release.yml calls this workflow on a refs/tags/v* push), or
+    # an on-demand dispatch. Ordinary feature PRs and post-merge pushes to
+    # develop/main evaluate this to false and skip. Skipped rather than absent,
+    # so a required-check config stays satisfied.
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.pull_request.title, 'release(') &&
+       github.workflow == 'Release PR')
+    # This job is deliberately NOT routed through the determine-runner pool
+    # selector the other x86_64 jobs use. The self-hosted container pool cannot
+    # host it: rootless podman and the disposable Village stack do not come up
+    # inside those pool containers, so a pool landing leaves the harness
+    # t.Skip()ing and the assertion step below failing with no coverage
+    # (release PR run 35268401677, runner desktop-container-1). The warm stack
+    # is amd64-only, so the label is the amd64 Blacksmith runner and must never
+    # be an arm64 one.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - name: Checkout peasant
@@ -75,11 +108,12 @@ jobs:
           VILLAGE_REPO: ${{ github.workspace }}/_village
         run: make e2e-schema-parity
 
-      # Pin/assert the CI podman version for local<->CI parity. ubuntu-24.04 ships
-      # podman 4.9.x (apt). The stderr object-count regression and the
-      # status=dead filter break are both 4.9.x-shaped, and local podman 5.x does
-      # NOT reproduce them — so a runner-image bump that changes podman must fail
-      # loudly here and force a lockstep update of docs/e2e.md's local repro.
+      # Pin/assert the CI podman version for local<->CI parity. The pinned amd64
+      # Blacksmith runner ships podman 4.9.x (apt on ubuntu-24.04). The stderr
+      # object-count regression and the status=dead filter break are both
+      # 4.9.x-shaped, and local podman 5.x does NOT reproduce them — so a
+      # runner-image bump that changes podman must fail loudly here and force a
+      # lockstep update of docs/e2e.md's local repro.
       - name: Verify and pin podman version (local<->CI parity)
         env:
           EXPECTED_PODMAN_MAJOR_MINOR: "4.9"
@@ -129,57 +163,48 @@ jobs:
         env:
           VILLAGE_REPO: ${{ github.workspace }}/_village
         run: |
+          set +e
           set -o pipefail
-          E2E_MEMORY_MODE=external make e2e E2E_TEST_FLAGS=-v 2>&1 | tee /tmp/e2e.log
-
-      # The harness t.Skip()s (podman/village/image-pull issues) rather than
-      # failing — which would pass the job with NO real coverage. Fail loudly
-      # unless the asserted e2e produced a positive PASS line, so a misconfigured
-      # runner or empty test match is visible.
-      - name: Assert asserted e2e tests ran and passed
-        if: always()
-        run: |
-          if grep -qi 'no tests to run' /tmp/e2e.log; then
-            echo "::error::go test reported no tests to run; asserted e2e tests did not execute."
-            exit 1
+          log="$GITHUB_WORKSPACE/e2e.log"
+          E2E_MEMORY_MODE=external make e2e E2E_TEST_FLAGS=-v 2>&1 | tee "$log"
+          test_status=${PIPESTATUS[0]}
+          echo "captured e2e log tail:"; tail -5 "$log" || true
+          assert_status=0
+          fail() { echo "::error::$1"; assert_status=1; }
+          if grep -qi 'no tests to run' "$log"; then
+            fail "go test reported no tests to run; asserted e2e tests did not execute."
           fi
-          if grep -qE '^--- SKIP: TestSkipGateE2E' /tmp/e2e.log; then
-            echo "::error::TestSkipGateE2E was SKIPPED — podman/village/network setup is incomplete; no e2e coverage ran."
-            exit 1
+          if grep -qE '^--- SKIP: TestSkipGateE2E' "$log"; then
+            fail "TestSkipGateE2E was SKIPPED — podman/village/network setup is incomplete; no e2e coverage ran."
           fi
-          if ! grep -qE '^--- PASS: TestSkipGateE2E' /tmp/e2e.log; then
-            echo "::error::TestSkipGateE2E did not produce a positive PASS line; no asserted e2e coverage was proven."
-            exit 1
+          if ! grep -qE '^--- PASS: TestSkipGateE2E' "$log"; then
+            fail "TestSkipGateE2E did not produce a positive PASS line; no asserted e2e coverage was proven."
           fi
-          if grep -qE '^--- SKIP: TestPullRoundTripE2E' /tmp/e2e.log; then
-            echo "::error::TestPullRoundTripE2E was SKIPPED — pull regression coverage did not run."
-            exit 1
+          if grep -qE '^--- SKIP: TestPullRoundTripE2E' "$log"; then
+            fail "TestPullRoundTripE2E was SKIPPED — pull regression coverage did not run."
           fi
-          if ! grep -qE '^--- PASS: TestPullRoundTripE2E' /tmp/e2e.log; then
-            echo "::error::TestPullRoundTripE2E did not produce a positive PASS line; pull regression coverage was not proven."
-            exit 1
+          if ! grep -qE '^--- PASS: TestPullRoundTripE2E' "$log"; then
+            fail "TestPullRoundTripE2E did not produce a positive PASS line; pull regression coverage was not proven."
           fi
-          if grep -qE '^--- SKIP: TestHarnessRefreshE2E' /tmp/e2e.log; then
-            echo "::error::TestHarnessRefreshE2E was SKIPPED — warm-stack refresh coverage did not run."
-            exit 1
+          if grep -qE '^--- SKIP: TestHarnessRefreshE2E' "$log"; then
+            fail "TestHarnessRefreshE2E was SKIPPED — warm-stack refresh coverage did not run."
           fi
-          if ! grep -qE '^--- PASS: TestHarnessRefreshE2E' /tmp/e2e.log; then
-            echo "::error::TestHarnessRefreshE2E did not produce a positive PASS line; refresh regression coverage was not proven."
-            exit 1
+          if ! grep -qE '^--- PASS: TestHarnessRefreshE2E' "$log"; then
+            fail "TestHarnessRefreshE2E did not produce a positive PASS line; refresh regression coverage was not proven."
           fi
-          if grep -qE '^--- SKIP: TestPublicationConvergenceE2E' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPublicationConvergenceE2E' /tmp/e2e.log; then
-            echo "::error::TestPublicationConvergenceE2E did not run and pass."
-            exit 1
+          if grep -qE '^--- SKIP: TestPublicationConvergenceE2E' "$log" || ! grep -qE '^--- PASS: TestPublicationConvergenceE2E' "$log"; then
+            fail "TestPublicationConvergenceE2E did not run and pass."
           fi
-          if grep -qE '^--- SKIP: TestPiRoundTripE2E' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPiRoundTripE2E' /tmp/e2e.log; then
-            echo "::error::TestPiRoundTripE2E did not run and pass; check the disposable Village stack and matching schema pins, then rerun native Pi preservation."
-            exit 1
+          if grep -qE '^--- SKIP: TestPiRoundTripE2E' "$log" || ! grep -qE '^--- PASS: TestPiRoundTripE2E' "$log"; then
+            fail "TestPiRoundTripE2E did not run and pass; check the disposable Village stack and matching schema pins, then rerun native Pi preservation."
           fi
-          if grep -qE '^--- SKIP: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' /tmp/e2e.log; then
-            echo "::error::joined post-commit publication evidence did not run and pass."
-            exit 1
+          if grep -qE '^--- SKIP: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' "$log" || ! grep -qE '^--- PASS: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' "$log"; then
+            fail "joined post-commit publication evidence did not run and pass."
           fi
-          if grep -qE '^--- SKIP: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' /tmp/e2e.log; then
-            echo "::error::joined pre-push refusal evidence did not run and pass."
-            exit 1
+          if grep -qE '^--- SKIP: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' "$log" || ! grep -qE '^--- PASS: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' "$log"; then
+            fail "joined pre-push refusal evidence did not run and pass."
           fi
+          if [ "$test_status" -ne 0 ]; then
+            exit "$test_status"
+          fi
+          exit "$assert_status"

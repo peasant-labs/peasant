@@ -1,0 +1,33 @@
+# Completeness transition oracle: incomplete_new is the first-discovery
+# exception and never replaces a complete last-good generation. Success and
+# indexed-at stamps stay unset for incomplete candidates so maintenance stays
+# required. The same guard runs transactionally for activation, recovery and
+# direct format writes.
+session:
+  id: "55555555-5555-4555-8555-555555555555"
+  harness: claude-code
+generation:
+  complete_id: gen_complete_g1
+  incomplete_id: gen_incomplete_g2
+  second_complete_id: gen_complete_g3
+cases:
+  - name: first-incomplete-allowed
+    candidate: incomplete
+    prior: none
+    allowed: true
+  - name: complete-replaces-incomplete-allowed
+    candidate: complete
+    prior: incomplete
+    allowed: true
+  - name: incomplete-replaces-complete-refused
+    candidate: incomplete
+    prior: complete
+    allowed: false
+  - name: incomplete-stamps-unset
+    candidate: incomplete
+    prior: none
+    allowed: true
+  - name: complete-stamps-recorded
+    candidate: complete
+    prior: none
+    allowed: true

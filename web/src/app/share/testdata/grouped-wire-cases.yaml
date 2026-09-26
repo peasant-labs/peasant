@@ -1,0 +1,33 @@
+# Wire-decode controls for the /share chooser. Each case mutates ONE valid
+# grouped payload into a contract violation and must make the canonical schema
+# decoder stop the surface; the manifest is required-NAME, never a count, and
+# the typed loader validates the closed base set and each mutation's shape.
+requiredNames:
+  - list-missing-total
+  - list-unknown-arm
+  - list-helper-group-missing-purpose
+  - members-missing-total
+  - members-context-arm
+cases:
+  - name: list-missing-total
+    base: list
+    drop:
+      - totalItems
+  - name: list-unknown-arm
+    base: list
+    set:
+      - { path: 'items[0].kind', value: mystery }
+  - name: list-helper-group-missing-purpose
+    base: list
+    drop:
+      - 'items[0].helperGroups[0].purpose'
+  - name: members-missing-total
+    base: members
+    drop:
+      - total
+  - name: members-context-arm
+    base: members
+    drop:
+      - 'members[0].transcript'
+    set:
+      - { path: 'members[0].kind', value: context_container }
