@@ -425,6 +425,7 @@ func countProgressFocusProbes(rows []progressFixture) map[progressFocusProbe]int
 }
 
 func TestProgressCompletionFixturePinsExactCounts(t *testing.T) {
+	t.Parallel()
 	document := loadProgressCompletionDocument(t)
 	rowMutation := document
 	rowMutation.ExpectedProgressCount--
@@ -615,6 +616,7 @@ func newProgressProgram(
 }
 
 func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadProgressCompletionDocument(t).Progress {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
@@ -665,6 +667,7 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 }
 
 func TestHarvestAndKickstartProgressParity(t *testing.T) {
+	t.Parallel()
 	document := loadProgressCompletionDocument(t)
 	cases := append(append([]progressFixture(nil), document.Progress...), document.Timing...)
 	for _, row := range cases {
@@ -699,6 +702,7 @@ func TestHarvestAndKickstartProgressParity(t *testing.T) {
 }
 
 func TestIngestProgressChildMessageContract(t *testing.T) {
+	t.Parallel()
 	document := loadProgressCompletionDocument(t)
 	for _, row := range document.ChildMessages {
 		t.Run(row.Name, func(t *testing.T) {
@@ -825,6 +829,7 @@ func progressMatrixLines(view string) []string {
 }
 
 func TestProgramProgressShowsSharedIngestAnimationBeforeProgressEvents(t *testing.T) {
+	t.Parallel()
 	clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
 	progress := &fixtureProgressSource{}
 	var tick func(time.Time) tea.Msg
@@ -933,6 +938,7 @@ func runAttemptCommandsOnce(program kickstart.Program, command tea.Cmd) (kicksta
 }
 
 func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadProgressCompletionDocument(t).Completion {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
@@ -1109,6 +1115,7 @@ func exactRenderedLineIndex(lines []string, want string) int {
 }
 
 func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	loaded := config.BaseConfig()
 	if err := config.SaveAtomic(path, loaded); err != nil {

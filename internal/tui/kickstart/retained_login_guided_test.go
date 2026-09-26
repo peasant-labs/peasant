@@ -154,6 +154,7 @@ func loadRetainedLoginDocument(t *testing.T) retainedLoginDocument {
 }
 
 func TestRetainedLoginFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), retainedLoginData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeRetainedLoginDocument(mutated); err == nil {
 		t.Fatal("retained login fixture accepted an unknown field")
@@ -161,6 +162,7 @@ func TestRetainedLoginFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestRetainedLoginFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), retainedLoginData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeRetainedLoginDocument(mutated); err == nil {
 		t.Fatal("retained login fixture accepted a trailing document")
@@ -168,6 +170,7 @@ func TestRetainedLoginFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestRetainedLoginFixtureEnforcesExactRowCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedRetainedLoginCases))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedRetainedLoginCases+1))
 	mutated := bytes.Replace(retainedLoginData, declared, changed, 1)
@@ -377,6 +380,7 @@ func assertRetainedView(t *testing.T, row retainedLoginCase, view string) {
 }
 
 func TestVisibilityLoginRetainsMountedSelectionStateAndAsyncDelivery(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadRetainedLoginDocument(t).Cases {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

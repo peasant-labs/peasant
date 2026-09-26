@@ -361,6 +361,7 @@ func assertFramingAroundField(t *testing.T, row guidedFramingRow, view string) {
 }
 
 func TestGuidedFramingFixture(t *testing.T) {
+	t.Parallel()
 	doc := loadGuidedFramingDoc(t)
 	for _, row := range doc.Rows {
 		row := row
@@ -463,6 +464,7 @@ func TestGuidedFramingFixture(t *testing.T) {
 }
 
 func TestGuidedLifecycleFixture(t *testing.T) {
+	t.Parallel()
 	doc := loadGuidedLifecycleDoc(t)
 	for _, row := range doc.Rows {
 		row := row
@@ -539,6 +541,7 @@ func TestGuidedLifecycleFixture(t *testing.T) {
 }
 
 func TestProgramDependenciesExposeNoPublicationAuthority(t *testing.T) {
+	t.Parallel()
 	doc := loadGuidedLifecycleDoc(t)
 	typ := reflect.TypeOf(kickstart.ProgramDeps{})
 	for index := 0; index < typ.NumField(); index++ {

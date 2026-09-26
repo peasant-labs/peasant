@@ -196,6 +196,7 @@ func assertSingleSelectionSearchBar(t *testing.T, view string) {
 }
 
 func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionAffordances(t)
 	for _, c := range doc.Cases {
 		c := c
@@ -260,6 +261,7 @@ func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionAffordanceData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeSelectionAffordances(mutated); err == nil {
 		t.Fatal("selection affordance fixture accepted an unknown field")
@@ -267,6 +269,7 @@ func TestSelectionAffordanceFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionAffordanceData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeSelectionAffordances(mutated); err == nil {
 		t.Fatal("selection affordance fixture accepted a trailing document")
@@ -274,6 +277,7 @@ func TestSelectionAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureEnforcesRowCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionAffordanceCaseCount))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionAffordanceCaseCount+1))
 	mutated := bytes.Replace(selectionAffordanceData, declared, changed, 1)

@@ -189,6 +189,7 @@ func (r fixturePrivacyRedactor) RedactText(input string) string {
 }
 
 func TestPrivacyExampleAdapterFailsClosedThroughMountedFlow(t *testing.T) {
+	t.Parallel()
 	document := loadPrivacyAdapterFixture(t)
 	for _, row := range document.Failures {
 		row := row

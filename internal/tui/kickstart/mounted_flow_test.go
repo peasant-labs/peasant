@@ -302,6 +302,7 @@ var _ kit.TreeSource = (*mountedRecordingTreeSource)(nil)
 // observes the forest returned by the production scanner, which receives the
 // production physical-path resolver and real temporary filesystem state.
 func TestMountedKickstartFlowUsesPhysicalSelectionEvidence(t *testing.T) {
+	t.Parallel()
 	document := loadMountedFlowDocument(t)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

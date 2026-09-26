@@ -219,6 +219,7 @@ func containingMountedLine(view, text string) int {
 }
 
 func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testing.T) {
+	t.Parallel()
 	document := loadGuidedPresentationDocument(t)
 	for _, row := range document.Cases {
 		row := row
@@ -310,6 +311,7 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 }
 
 func TestGuidedPresentationFixtureRejectsMissingCanonicalSection(t *testing.T) {
+	t.Parallel()
 	mutated := mutateGuidedPresentationFixture(t, guidedPresentationFixtureData, []byte("expectedSectionCount: 6"), []byte("expectedSectionCount: 5"))
 	mutated = mutateGuidedPresentationFixture(t, mutated, []byte("  - key: retention\n    heading: how long claude code keeps its transcripts\n    control: '( ) 30 days'\n    intro: choose how long claude code keeps its source transcript files.\n"), nil)
 	if _, err := decodeGuidedPresentationDocument(mutated); err == nil {
@@ -318,6 +320,7 @@ func TestGuidedPresentationFixtureRejectsMissingCanonicalSection(t *testing.T) {
 }
 
 func TestGuidedPresentationFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), guidedPresentationFixtureData...), []byte("\nunknownField: true\n")...)
 	if bytes.Equal(mutated, guidedPresentationFixtureData) {
 		t.Fatal("guided-presentation unknown-field mutation did not alter the fixture")
@@ -328,6 +331,7 @@ func TestGuidedPresentationFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestGuidedPresentationFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), guidedPresentationFixtureData...), []byte("\n---\n{}\n")...)
 	if bytes.Equal(mutated, guidedPresentationFixtureData) {
 		t.Fatal("guided-presentation trailing-document mutation did not alter the fixture")

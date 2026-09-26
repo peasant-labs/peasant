@@ -105,6 +105,7 @@ func loadVisibilityOverlayDocument(t *testing.T) visibilityOverlayDocument {
 }
 
 func TestVisibilityOverlayFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), visibilityOverlayData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeVisibilityOverlayDocument(mutated); err == nil {
 		t.Fatal("visibility overlay fixture accepted an unknown field")
@@ -112,6 +113,7 @@ func TestVisibilityOverlayFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestVisibilityOverlayFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), visibilityOverlayData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeVisibilityOverlayDocument(mutated); err == nil {
 		t.Fatal("visibility overlay fixture accepted a trailing document")
@@ -119,6 +121,7 @@ func TestVisibilityOverlayFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestVisibilityOverlayFixturePinsCounts(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedVisibilityOverlayCases))
 	mutated := bytes.Replace(visibilityOverlayData, declared,
 		[]byte(fmt.Sprintf("expectedCaseCount: %d", expectedVisibilityOverlayCases-1)), 1)
@@ -162,6 +165,7 @@ func advanceRetainedProgramToLicense(t *testing.T, program kickstart.Program, wa
 }
 
 func TestVisibilityDetourYieldsToFlowOwnedOverlays(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadVisibilityOverlayDocument(t).Cases {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

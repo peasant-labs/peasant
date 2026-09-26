@@ -138,6 +138,7 @@ func bulletLines(view string) []string {
 // rather than clipped or left as one long unwrapped line. It also golden-pins
 // the full rendered screen so a human reviewer can see the structured result.
 func TestOAuthPromptRender_Structure(t *testing.T) {
+	t.Parallel()
 	doc := loadOAuthPromptRenderDoc(t)
 	for _, c := range doc.Cases {
 		c := c
@@ -180,6 +181,7 @@ func TestOAuthPromptRender_Structure(t *testing.T) {
 }
 
 func TestOAuthPromptRenderFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), oauthPromptRenderData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeOAuthPromptRenderDoc(mutated); err == nil {
 		t.Fatal("oauth prompt render fixture accepted an unknown field")
@@ -187,6 +189,7 @@ func TestOAuthPromptRenderFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestOAuthPromptRenderFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), oauthPromptRenderData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeOAuthPromptRenderDoc(mutated); err == nil {
 		t.Fatal("oauth prompt render fixture accepted a trailing document")
@@ -194,6 +197,7 @@ func TestOAuthPromptRenderFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestOAuthPromptRenderFixturePinsCaseCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedOAuthPromptRenderCaseCount))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedOAuthPromptRenderCaseCount+1))
 	mutated := bytes.Replace(oauthPromptRenderData, declared, changed, 1)
@@ -210,6 +214,7 @@ func TestOAuthPromptRenderFixturePinsCaseCount(t *testing.T) {
 // prose block with literal newlines baked into the source string, which is the
 // exact defect peasant#138 reports.
 func TestOAuthPromptFacts_NoHardWrapBlock(t *testing.T) {
+	t.Parallel()
 	for _, facts := range [][]string{
 		kickstart.VillageContextBulletsForTest(),
 		kickstart.VisibilityContextBulletsForTest(),

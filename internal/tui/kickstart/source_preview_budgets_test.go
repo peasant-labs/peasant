@@ -84,6 +84,7 @@ func loadSourcePreviewBudgetDocument(t *testing.T) sourcePreviewBudgetDocument {
 // inspecting SourceTurns fields or overriding any budget. Run cases serially
 // because each deliberately exceeds two continuation budgets.
 func TestSourceTurns_DefaultBudgetsAreSharedAcrossOrigins(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadSourcePreviewBudgetDocument(t).Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			if c.InitialBytes != defaults.TranscriptInitialReadBytes || c.BodyBytes != defaults.TranscriptContinuationReadBytes || c.ContinuationBytes != defaults.TranscriptContinuationReadBytes {

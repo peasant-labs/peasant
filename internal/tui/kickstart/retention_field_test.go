@@ -71,6 +71,7 @@ func retentionSectionWhen(t *testing.T, reg settings.Registry, d *settings.Draft
 // TestRegistry_RetentionGating proves the Claude retention section is offered
 // only when Claude Code sessions were discovered.
 func TestRegistry_RetentionGating(t *testing.T) {
+	t.Parallel()
 	doc := loadRetentionGatingDoc(t)
 	for _, c := range doc.Cases {
 		c := c
