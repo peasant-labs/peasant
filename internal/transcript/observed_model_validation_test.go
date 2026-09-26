@@ -62,6 +62,7 @@ func loadModelProducerValidationFixture(t *testing.T) modelProducerValidationFix
 }
 
 func TestValidateObservedModelEvidenceFixture(t *testing.T) {
+	t.Parallel()
 	fixture := loadModelProducerValidationFixture(t)
 	for index, fixtureCase := range fixture.Cases {
 		fixtureCase := fixtureCase

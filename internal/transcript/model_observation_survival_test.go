@@ -87,6 +87,7 @@ func loadModelObservationSurvivalFixture(t *testing.T) modelObservationSurvivalF
 }
 
 func TestModelObservationSurvivalFixtureGuards(t *testing.T) {
+	t.Parallel()
 	loadModelObservationSurvivalFixture(t)
 	manifest, err := testutil.DecodeSemanticManifest(modelObservationSurvivalManifestYAML, "model-observation survival")
 	if err != nil {
@@ -109,6 +110,7 @@ func TestModelObservationSurvivalFixtureGuards(t *testing.T) {
 }
 
 func TestEntriesToTurns_PreservesModelObservationBoundaries(t *testing.T) {
+	t.Parallel()
 	results := runModelObservationSurvivalFixture(loadModelObservationSurvivalFixture(t))
 	assertModelObservationSurvivalResults(t, results)
 }

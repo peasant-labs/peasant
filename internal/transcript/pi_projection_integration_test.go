@@ -71,6 +71,7 @@ type piProjectionCase struct {
 }
 
 func TestPiProjectionSQLiteOutbound(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Cases         []piProjectionCase `yaml:"cases"`
 		InvalidExtras []struct {
