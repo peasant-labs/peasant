@@ -81,6 +81,7 @@ func loadJSONLRecordReaderFixtures(t *testing.T) jsonlRecordReaderFixtures {
 }
 
 func TestJSONLRecordScannerReadsEveryRecordShape(t *testing.T) {
+	t.Parallel()
 	fixtures := loadJSONLRecordReaderFixtures(t)
 
 	for _, fixture := range fixtures.Cases {
@@ -137,6 +138,7 @@ func TestJSONLRecordScannerReadsEveryRecordShape(t *testing.T) {
 // TestJSONLRecordScannerRefusesUnusableLimit pins the actionable refusal for a
 // limit that would omit every record.
 func TestJSONLRecordScannerRefusesUnusableLimit(t *testing.T) {
+	t.Parallel()
 	scanner := newJSONLRecordScanner([]byte("{}\n"), 0)
 	if scanner.Scan() {
 		t.Fatal("a zero record limit yielded a record")
@@ -155,6 +157,7 @@ func TestJSONLRecordScannerRefusesUnusableLimit(t *testing.T) {
 // TestJSONLRecordScannerYieldsAStandInAsAnOmission pins that a stand-in line
 // never reaches a harness parser and is reported at the position it holds.
 func TestJSONLRecordScannerYieldsAStandInAsAnOmission(t *testing.T) {
+	t.Parallel()
 	record, err := NewOmittedRecord(OmittedRecordTooLarge, 2, 4097, 4096)
 	if err != nil {
 		t.Fatal(err)

@@ -410,7 +410,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close() })
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithAnalyzer(metricspkg.NewEngine(database)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: indexer}))
+	pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithAnalyzer(metricspkg.NewEngine(database)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: indexer}))
 	if err != nil {
 		t.Fatal(err)
 	}

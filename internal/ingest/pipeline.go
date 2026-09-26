@@ -327,6 +327,14 @@ type Pipeline struct {
 	// size and without mutating anything global.
 	maxJSONLRecordBytes int
 
+	// arenaSizeBytes is the staging-arena capacity (in bytes) for this
+	// pipeline's runs. Zero, the production value, keeps the environment
+	// default: the EnvArenaSizeBytes override when it parses as a positive
+	// integer, else DefaultArenaSizeBytes. A caller that must bound memory or
+	// exercise the arena-full path injects a size here instead of mutating the
+	// process environment for every test in the binary.
+	arenaSizeBytes int64
+
 	// originResolve and originResolveErr hold what the stored-origin pass did
 	// this run. They live on the pipeline rather than in Run because the report
 	// is assembled by a helper the reindex path shares, where the pass does not
@@ -473,6 +481,16 @@ func WithIndexers(idx map[Harness]TranscriptIndexer) PipelineOption {
 // and the indexers decide what they will certify.
 func WithMaxJSONLRecordBytes(limit int) PipelineOption {
 	return func(p *Pipeline) { p.maxJSONLRecordBytes = limit }
+}
+
+// WithArenaSizeBytes sets the staging-arena capacity (in bytes) for this
+// pipeline's runs. Zero, the production value, keeps the environment default:
+// the EnvArenaSizeBytes override when it parses as a positive integer, else
+// DefaultArenaSizeBytes. A test injects a small arena here instead of setting
+// the process environment, which would serialize every other test in the
+// binary that must also observe the same value.
+func WithArenaSizeBytes(size int64) PipelineOption {
+	return func(p *Pipeline) { p.arenaSizeBytes = size }
 }
 
 // WithMetricsStore injects a MetricsStore for session_entries persistence.
@@ -1035,9 +1053,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	workers := parallelWorkers(p.config)
 
 	// StagingBuffer holds completed workerResults until their parent is DB-committed.
-	// Capacity = number of sessions to process; arena defaults to 2 GiB, overridable
-	// via EnvArenaSizeBytes (tests set a few MiB — see resolveArenaSizeBytes).
-	staging := NewStagingBuffer(len(toProcessEntries)+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
+	// Capacity = number of sessions to process; the arena is the EnvArenaSizeBytes
+	// override when set, else 2 GiB (WithArenaSizeBytes injects a size directly).
+	staging := NewStagingBuffer(len(toProcessEntries)+1, p.stagingArenaSize())
 	for parentID := range externalParents {
 		// The parent is outside this batch, so DB insertion is the authority on
 		// whether it already exists. Mark it committed only for staging order.
@@ -4979,7 +4997,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	workers := parallelWorkers(p.config)
 
 	if len(rootEntries) > 0 {
-		staging := NewStagingBuffer(extractTotal+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
+		staging := NewStagingBuffer(extractTotal+1, p.stagingArenaSize())
 		for parentID := range externalParents {
 			// The parent is outside this batch; DB insertion already stored it,
 			// so staging commits it for ordering only.

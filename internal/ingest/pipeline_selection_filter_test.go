@@ -107,6 +107,7 @@ func loadPipelineSelectionFilterFixture(t *testing.T) pipelineSelectionFilterDoc
 }
 
 func TestPipelineSelectionFilterFixtureRejectsSemanticMutation(t *testing.T) {
+	t.Parallel()
 	mutated := bytes.Replace(
 		pipelineSelectionFilterYAML,
 		[]byte("name: dry_run_uses_exact_child_deny"),
@@ -119,6 +120,7 @@ func TestPipelineSelectionFilterFixtureRejectsSemanticMutation(t *testing.T) {
 }
 
 func TestPipeline_SessionFilterExactChildDenialAndDryRunUseSharedPass(t *testing.T) {
+	t.Parallel()
 	for _, testCase := range loadPipelineSelectionFilterFixture(t).Cases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -167,7 +169,7 @@ func TestPipeline_SessionFilterExactChildDenialAndDryRunUseSharedPass(t *testing
 					return excluded[session.SessionID]
 				}
 			})
-			pipeline, err := ingest.NewPipeline(
+			pipeline, err := newTestPipeline(
 				mfs,
 				testutil.DefaultGitResolver(),
 				map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(sessions, metadata)},

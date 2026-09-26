@@ -19,6 +19,7 @@ import (
 var unknownLocalIntegrityYAML []byte
 
 func TestUnknownLocalIntegrity(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {

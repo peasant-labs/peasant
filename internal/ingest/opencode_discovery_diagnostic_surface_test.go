@@ -65,7 +65,7 @@ func TestPipelineSurfacesOpenCodeDiscoveryFailure(t *testing.T) {
 		Parallelism: 1,
 		DryRun:      true,
 	}
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: factory}, config)
+	pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: factory}, config)
 	if err != nil {
 		t.Fatalf("construct pipeline: %v", err)
 	}

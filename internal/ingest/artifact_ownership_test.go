@@ -88,7 +88,7 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 			config := makePipelineConfig(output)
 			config.StalenessThreshold = 0
 			filesystem := &ingest.OSFileSystem{}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -135,7 +135,7 @@ func TestPipelineParentPublicationPreservesUnownedFiles(t *testing.T) {
 			if !row.HideChild {
 				adapter.Sessions = append(adapter.Sessions, child)
 			}
-			pipeline, err = ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
+			pipeline, err = newTestPipeline(filesystem, testutil.DefaultGitResolver(), registry, config)
 			if err != nil {
 				t.Fatal(err)
 			}

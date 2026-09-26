@@ -418,7 +418,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 				return filtered[string(s.SessionID)]
 			}
 		}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(reconcileStore), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db),
 			ingest.WithIndexers(indexers))
 		if err != nil {

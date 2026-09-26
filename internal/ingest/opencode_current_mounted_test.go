@@ -453,7 +453,7 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			gitAnalyzer := &testutil.StubGitDiffAnalyzer{CommitInfos: []ingest.CommitInfo{{Hash: "0123456789abcdef0123456789abcdef01234567", AuthorEmail: testutil.TestEmail, Message: "synthetic commit"}}}
 			config := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}
 			fixtureStore := newPipelineFixtureStore(t, store, metrics)
-			pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, config,
+			pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, config,
 				ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore),
 				ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)),
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}),
@@ -580,7 +580,7 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			sourceOpenCount = 0
 			sourceOpenMu.Unlock()
 			reindexer := &mountedCurrentIndexerRecorder{TranscriptIndexer: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}
-			reindex, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: reindexer}))
+			reindex, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: reindexer}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -672,7 +672,7 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			metrics := testutil.NewStubMetricsStore()
 			config := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}
 			fixtureStore := newPipelineFixtureStore(t, store, metrics)
-			pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
+			pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -708,7 +708,7 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 			expectedConfig := config
 			expectedConfig.OutputDir = expectedOutput
 			expectedFixtureStore := newPipelineFixtureStore(t, expectedStore, expectedMetrics)
-			expectedPipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, expectedConfig, ingest.WithStore(expectedFixtureStore), ingest.WithMetricsStore(expectedFixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(expectedFixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
+			expectedPipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, expectedConfig, ingest.WithStore(expectedFixtureStore), ingest.WithMetricsStore(expectedFixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(expectedFixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true), ingest.WithOpenCodeFullContent(true))}))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -32,6 +32,7 @@ import (
 var unknownLocalBudgetYAML []byte
 
 func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Payload       string   `yaml:"payload"`
@@ -61,6 +62,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			fs := &ingest.OSFileSystem{}
 			// Use ordinary word-separated source text rather than a multi-megabyte
@@ -110,7 +112,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			cfg.Force = true
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{ingest.HarnessCodex: {Enabled: true, Paths: []ingest.ResolvedPath{sourcePath}}}
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{sid: true}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 			if err != nil {
 				t.Fatal(err)
 			}

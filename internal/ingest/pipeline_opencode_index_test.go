@@ -76,7 +76,7 @@ func TestPipeline_OpenCodeSessionsAreIndexedOnFreshIngest(t *testing.T) {
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
 		defaults.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{session.OriginalRoot}},
 	}
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 		// The REAL indexer, not a stub: a stub would have returned entries from a
 		// map regardless of which root the pipeline handed it, which is exactly the
 		// blindness that let this ship.

@@ -23,6 +23,7 @@ import (
 var captureBackfillFixtureData []byte
 
 func TestRetainedContentBackfill(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
@@ -165,7 +166,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 			cfg.Reindex = true
 			cfg.Force = fixture.Force
 			adapters := map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -264,6 +265,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 // nowhere but the content stage: reverting the content-stage hash compare makes
 // this go silent.
 func TestContentStageDetectsTornPair(t *testing.T) {
+	t.Parallel()
 	t.Run("content_stage_detects_torn_pair", func(t *testing.T) {
 		ctx := context.Background()
 		fs := testutil.NewMemFS()
@@ -344,7 +346,7 @@ func TestContentStageDetectsTornPair(t *testing.T) {
 		cfg := makePipelineConfig(testOutputDir)
 		cfg.Reindex = true // a plain reindex: the write path never reads a present row's pair here.
 		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 			ingest.WithStore(database), ingest.WithMetricsStore(database))
 		if err != nil {

@@ -201,7 +201,7 @@ func ingestOneSessionAtMaximum(t *testing.T, slug string, redactor ingest.TextRe
 		OutputDir:          ingest.ResolvedPath(outputDir),
 		StalenessThreshold: 5 * time.Minute,
 	}
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg,
+	pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg,
 		ingest.WithRedactor(redactor), ingest.WithStore(database))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)

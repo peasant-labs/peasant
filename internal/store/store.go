@@ -27,9 +27,12 @@ const DefaultPoolSize = 10
 // connection's first Take. The migration-state check runs once per Open, not
 // once per connection. The test suite opens hundreds of stores but takes only
 // one or two connections from each, so it sets this low to avoid opening
-// DefaultPoolSize connections every time. Mirrors the village backend's
+// DefaultPoolSize connections every time. It is a consistency knob, not a
+// performance milestone: a measurement of 400 golden Opens put the
+// one-connection default within about 1% of the ten-connection pool — a
+// negligible share of the suite's CPU. Mirrors the village backend's
 // POOL_MAX_CONNS env knob. An explicit WithPoolSize option takes precedence
-// over this.
+// over this environment default.
 const EnvPoolSize = "PEASANT_DB_POOL_SIZE"
 
 // resolvePoolSize picks the pool size: an explicit WithPoolSize option wins,

@@ -20,6 +20,7 @@ import (
 var publicationCaptureChildYAML []byte
 
 func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Cases []struct {
 			Name     string `yaml:"name"`
@@ -78,7 +79,7 @@ func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
 				ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}},
 			}}
 			run := func() *ingest.PipelineResult {
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 					ingest.WithSalt(database.InstallationSalt()), ingest.WithStore(database), ingest.WithMetricsStore(database),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs)}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {

@@ -199,6 +199,7 @@ func buildCoverageV2(t *testing.T, sid schema.SessionID, genID, completeness str
 }
 
 func TestNativeCoverageMatrix(t *testing.T) {
+	t.Parallel()
 	doc := loadNativeCoverage(t)
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {

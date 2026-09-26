@@ -99,7 +99,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex, cfg.Force, cfg.DryRun, cfg.Harness = fixture.Reindex, fixture.Force, fixture.DryRun, fixture.Scope
 			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithHarvesterVersions(versions))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithHarvesterVersions(versions))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -119,7 +119,7 @@ func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem
 	t.Helper()
 	cfg := makePipelineConfig(outputDir)
 	versions := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
-	pipeline, err := ingest.NewPipeline(
+	pipeline, err := newTestPipeline(
 		fs,
 		testutil.DefaultGitResolver(),
 		ingest.DefaultAdapterRegistry,
@@ -204,7 +204,7 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	defer func() { _ = db.Close() }()
 	seedOpenCodeRepairSession(t, db, tc.SessionID, sid)
 
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	metadata := schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessOpenCode}
 	first := buildOpenCodeRepairCandidate(t, adapter, source.Path, tc.SessionID, sid, metadata, "gen-open-repair-1", ingest.NewProjectionPriorState())
 	if _, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{

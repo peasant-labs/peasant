@@ -75,7 +75,7 @@ func TestCanonicalOpenCodeParentsEmittedBeforeChildren(t *testing.T) {
 		DryRun:        true,
 		SessionFilter: selectedRoots,
 	}
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config)
+	pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, config)
 	if err != nil {
 		t.Fatal(err)
 	}

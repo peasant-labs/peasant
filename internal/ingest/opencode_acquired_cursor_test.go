@@ -146,7 +146,7 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			t.Cleanup(func() { _ = database.Close() })
 			staleDiscovery := &discoveredCursorAdapter{OpenCodeAdapter: adapter, session: *selected}
 			registry := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return staleDiscovery }}
-			pipeline, err := ingest.NewPipeline(filesystem, git, registry, config, ingest.WithStore(database))
+			pipeline, err := newTestPipeline(filesystem, git, registry, config, ingest.WithStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +175,7 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			applyAcquiredCursorSetup(t, source, row.Change)
 			beforeSource := testfixture.SnapshotSource(t, source)
 			config.Force = true
-			pipeline, err = ingest.NewPipeline(filesystem, git, registry, config, ingest.WithStore(database))
+			pipeline, err = newTestPipeline(filesystem, git, registry, config, ingest.WithStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}

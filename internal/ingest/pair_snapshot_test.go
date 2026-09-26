@@ -72,7 +72,7 @@ func TestFallbackRunIndexesValidatedGeneration(t *testing.T) {
 	}
 	config := makePipelineConfig(testOutputDir)
 	config.Force = true
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config,
+	pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, config,
 		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),
 		ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 	if err != nil {
@@ -216,7 +216,7 @@ func TestTornPairRefusesAndChangesNothing(t *testing.T) {
 	}
 	config := makePipelineConfig(testOutputDir)
 	config.Reindex = true
-	pipeline, err := ingest.NewPipeline(memfs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{
+	pipeline, err := newTestPipeline(memfs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 	}, config,
 		ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database),

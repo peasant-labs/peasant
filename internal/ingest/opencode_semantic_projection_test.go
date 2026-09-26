@@ -489,7 +489,7 @@ func TestOpenCodeThreeSourceSemanticProjectionParity(t *testing.T) {
 					t.Fatalf("managed current projection leaked forbidden marker %q", marker)
 				}
 			}
-			adapter := NewOpenCodeAdapter(&OSFileSystem{}, semanticNoGit{}, salt.Salt{})
+			adapter := NewOpenCodeAdapter(&OSFileSystem{}, semanticNoGit{}, salt.Salt{}, WithOpenCodeEnvironment(fixedOpenCodeAdapterEnvironment{}))
 			legacySession.CWD, currentSession.CWD = "/synthetic/parity", "/synthetic/parity"
 			legacyMetadata, err := adapter.metadataFromManagedProjection(t.Context(), legacySession, legacyProjection)
 			if err != nil {

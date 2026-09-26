@@ -98,7 +98,7 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 
 	ingestConfig := makePipelineConfig(testOutputDir)
 	ingestConfig.Sources = sources
-	pipeline, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, ingestConfig,
+	pipeline, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), adapters, ingestConfig,
 		indexers, ingest.WithStore(database), ingest.WithMetricsStore(database))
 	if err != nil {
 		t.Fatalf("build the ingest pipeline: %v", err)
@@ -122,7 +122,7 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 	reindexConfig.Sources = sources
 	reindexConfig.Reindex = true
 	reindexConfig.Force = true
-	reindexer, err := ingest.NewPipeline(mfs, testutil.DefaultGitResolver(), adapters, reindexConfig,
+	reindexer, err := newTestPipeline(mfs, testutil.DefaultGitResolver(), adapters, reindexConfig,
 		indexers, ingest.WithStore(database), ingest.WithMetricsStore(database))
 	if err != nil {
 		t.Fatalf("build the reindex pipeline: %v", err)

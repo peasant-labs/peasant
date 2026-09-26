@@ -18,6 +18,7 @@ import (
 var piDiscoveryYAML []byte
 
 func TestPiDiscoveryLocationsAndCandidates(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {

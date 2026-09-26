@@ -250,7 +250,7 @@ func runOpenCodeFlowIncomplete(t *testing.T, source testfixture.MaterializedSour
 func runOpenCodeFlowBoundedFork(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
 	seedOpenCodeFlowForkParent(t, source, row)
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	bounded := openCodeFlowFork(row.BoundedFork)
 	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, row.SessionID, ingest.OpenCodeSnapshotOptions{Fork: bounded})
 	if err != nil {
@@ -276,7 +276,7 @@ func runOpenCodeFlowBoundedFork(t *testing.T, source testfixture.MaterializedSou
 
 func runOpenCodeFlowDigest(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	baseline, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, row.SessionID, ingest.OpenCodeSnapshotOptions{})
 	if err != nil {
 		t.Fatalf("SnapshotOpenCodeProvenance: %v", err)
@@ -349,7 +349,7 @@ func runOpenCodeFlowDependencyRefusal(t *testing.T, source testfixture.Materiali
 
 func runOpenCodeFlowMissingSource(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	missing := filepath.Join(filepath.Dir(source.Path), row.Sentinel+".db")
 	_, err := adapter.SnapshotOpenCodeProvenance(context.Background(), missing, row.SessionID, ingest.OpenCodeSnapshotOptions{})
 	if err == nil {
@@ -363,7 +363,7 @@ func runOpenCodeFlowMissingSource(t *testing.T, source testfixture.MaterializedS
 // returned refusal must stay free of the private locator.
 func runOpenCodeFlowUnreadableSource(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	directory := filepath.Join(filepath.Dir(source.Path), row.Sentinel+".dir")
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatalf("create unreadable-source locator: %v", err)
@@ -393,7 +393,7 @@ func runOpenCodeFlowLargeRow(t *testing.T, source testfixture.MaterializedSource
 	applyOpenCodeFlowRowsReplacing(t, source, row.SessionID, []ocFlowRow{{
 		ID: "msg_large_row", Type: "user", Seq: 0, TimeCreated: 1000, TimeUpdated: 1000, Data: string(payload),
 	}})
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	snapshot, err := adapter.SnapshotOpenCodeProvenance(context.Background(), source.Path, row.SessionID, ingest.OpenCodeSnapshotOptions{})
 	if err != nil {
 		t.Fatalf("large-row snapshot: %v", err)
@@ -483,7 +483,7 @@ func openCodeFlowFork(spec *ocFlowFork) *ingest.OpenCodeForkProof {
 }
 
 func openCodeFlowProvenanceConfig(source testfixture.MaterializedSource, sessionID string, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.OpenCodeProvenanceIndexerConfig {
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	return ingest.OpenCodeProvenanceIndexerConfig{
 		Enabled: true,
 		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {

@@ -149,7 +149,7 @@ func TestUnknownSourceToPublication(t *testing.T) {
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{c.Harness: {Enabled: true, Paths: []ingest.ResolvedPath{path}}}
 			cfg.Force = true
 			run := func() *ingest.PipelineResult {
-				p, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{c.Harness: factory}, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+				p, err := newTestPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{c.Harness: factory}, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -307,10 +307,10 @@ func assertUnknownPublicDetail(t *testing.T, c unknownPublicSourceCase, expected
 // TestUnknownSourceDuplicateMemberRefuses pins that stored evidence with
 // duplicate owned members cannot be certified: the strict codec rejects it
 // before any index replacement, prior export bytes stay byte-identical, and
-// no retained counts are reported. Unblocked by the SLICE-1 strict codec;
-// exercised here through a real store write and export (not the validator
+// no retained counts are reported. Unblocked by the strict retained-evidence
+// codec; exercised here through a real store write and export (not the validator
 // helper alone). Known-record duplicate admission at the source seam remains
-// slice-2 authoritative-admission scope and is not asserted here.
+// authoritative-admission scope and is not asserted here.
 func TestUnknownSourceDuplicateMemberRefuses(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

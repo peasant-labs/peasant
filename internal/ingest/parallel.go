@@ -443,10 +443,11 @@ func (q *SessionEntryQueue) Close() {
 const DefaultArenaSizeBytes = 2 * 1024 * 1024 * 1024 // 2 GiB
 
 // EnvArenaSizeBytes overrides the staging-arena size (in bytes) for a pipeline
-// run. A positive integer wins; otherwise DefaultArenaSizeBytes is used. Tests
-// set a small arena (a few MiB — fixtures are tiny) so each pipeline run does
-// not allocate the full 2 GiB slab; under the race detector that slab is the
-// dominant test-memory cost. Mirrors EnvPoolSize.
+// run. A positive integer wins; otherwise DefaultArenaSizeBytes is used.
+// WithArenaSizeBytes takes precedence over this environment default, mirroring
+// how WithPoolSize takes precedence over EnvPoolSize. Tests inject a small
+// arena through that option (fixtures are tiny) rather than setting the
+// environment for the whole test binary.
 const EnvArenaSizeBytes = "PEASANT_INGEST_ARENA_BYTES"
 
 // resolveArenaSizeBytes returns the EnvArenaSizeBytes override if it parses as a
@@ -458,6 +459,17 @@ func resolveArenaSizeBytes(def int64) int64 {
 		}
 	}
 	return def
+}
+
+// stagingArenaSize resolves this pipeline's staging-arena capacity: an explicit
+// WithArenaSizeBytes option wins; otherwise the EnvArenaSizeBytes override,
+// else DefaultArenaSizeBytes. Production passes no option, so the environment
+// remains the default at the composition root.
+func (p *Pipeline) stagingArenaSize() int64 {
+	if p.arenaSizeBytes > 0 {
+		return p.arenaSizeBytes
+	}
+	return resolveArenaSizeBytes(DefaultArenaSizeBytes)
 }
 
 // DefaultMaxDrainBatch is the maximum number of entries returned by a single

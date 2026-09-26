@@ -68,6 +68,7 @@ func loadOpenCodePayloadSizeDoc(t *testing.T) openCodePayloadSizeDoc {
 // would load. The probe drives the preview's decision to bound itself, so a
 // probe that disagreed with the paged read would bound the wrong sessions.
 func TestOpenCodeSessionPayloadSizeMatchesThePagedRows(t *testing.T) {
+	t.Parallel()
 	doc := loadOpenCodePayloadSizeDoc(t)
 	for _, testCase := range doc.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
