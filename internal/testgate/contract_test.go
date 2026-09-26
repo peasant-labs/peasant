@@ -75,21 +75,23 @@ type contractMutationFile struct {
 // compiles against the contract also stands in this map.
 func frozenShapes() map[string]reflect.Type {
 	return map[string]reflect.Type{
-		"testgate.Record":        reflect.TypeOf(Record{}),
-		"testgate.Invocation":    reflect.TypeOf(Invocation{}),
-		"testgate.Runner":        reflect.TypeOf(Runner{}),
-		"testgate.RunResult":     reflect.TypeOf(RunResult{}),
-		"testgate.Report":        reflect.TypeOf(Report{}),
-		"testgate.PassReport":    reflect.TypeOf(PassReport{}),
-		"testgate.Calibration":   reflect.TypeOf(Calibration{}),
-		"testgate.ReportRecord":  reflect.TypeOf(ReportRecord{}),
-		"testgate.ReportTest":    reflect.TypeOf(ReportTest{}),
-		"testgate.ReportFinding": reflect.TypeOf(ReportFinding{}),
-		"testgate.Cost":          reflect.TypeOf(Cost{}),
-		"testgate.Entry":         reflect.TypeOf(Entry{}),
-		"testgate.Registry":      reflect.TypeOf(Registry{}),
-		"testgate.Budget":        reflect.TypeOf(Budget{}),
-		"testgate.Finding":       reflect.TypeOf(Finding{}),
+		"testgate.Record":          reflect.TypeOf(Record{}),
+		"testgate.Invocation":      reflect.TypeOf(Invocation{}),
+		"testgate.Runner":          reflect.TypeOf(Runner{}),
+		"testgate.RunResult":       reflect.TypeOf(RunResult{}),
+		"testgate.Report":          reflect.TypeOf(Report{}),
+		"testgate.PassReport":      reflect.TypeOf(PassReport{}),
+		"testgate.Calibration":     reflect.TypeOf(Calibration{}),
+		"testgate.ReportRecord":    reflect.TypeOf(ReportRecord{}),
+		"testgate.ReportTest":      reflect.TypeOf(ReportTest{}),
+		"testgate.ReportFinding":   reflect.TypeOf(ReportFinding{}),
+		"testgate.ClassRow":        reflect.TypeOf(ClassRow{}),
+		"testgate.StepMeasurement": reflect.TypeOf(StepMeasurement{}),
+		"testgate.Cost":            reflect.TypeOf(Cost{}),
+		"testgate.Entry":           reflect.TypeOf(Entry{}),
+		"testgate.Registry":        reflect.TypeOf(Registry{}),
+		"testgate.Budget":          reflect.TypeOf(Budget{}),
+		"testgate.Finding":         reflect.TypeOf(Finding{}),
 	}
 }
 
