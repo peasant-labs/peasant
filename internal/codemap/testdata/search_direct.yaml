@@ -1,0 +1,108 @@
+cases:
+  - name: valid_uuid_session_id
+    classification: must-pass
+    provenance: {source: requirement, ref: search-direct-session-id}
+    mutation: {description: a complete lowercase UUID classifies as a session id}
+    input:
+      query: 11111111-1111-1111-1111-111111111111
+    expected:
+      kind: session
+
+  - name: valid_ses_prefixed_session_id
+    classification: must-pass
+    provenance: {source: requirement, ref: search-direct-session-id}
+    mutation: {description: a complete ses_-prefixed id classifies as a session id}
+    input:
+      query: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expected:
+      kind: session
+
+  - name: valid_project_hash
+    classification: must-pass
+    provenance: {source: requirement, ref: search-direct-project-hash}
+    mutation: {description: a complete 64-character lowercase hex digest classifies as a project hash}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
+    expected:
+      kind: project
+
+  - name: near_miss_63_hex_characters
+    classification: must-pass
+    provenance: {source: boundary, ref: search-direct-exact-shape-only}
+    mutation: {description: shorten the digest by one character so the hash constructor rejects it}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567
+    expected:
+      kind: none
+
+  - name: near_miss_65_hex_characters
+    classification: must-pass
+    provenance: {source: boundary, ref: search-direct-exact-shape-only}
+    mutation: {description: lengthen the digest by one character so the hash constructor rejects it}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567890
+    expected:
+      kind: none
+
+  - name: near_miss_ses_bare_prefix
+    classification: must-pass
+    provenance: {source: boundary, ref: search-direct-exact-shape-only}
+    mutation: {description: strip the ses_ body so the session constructor rejects the bare prefix}
+    input:
+      query: ses_
+    expected:
+      kind: none
+
+  - name: near_miss_sess_bare_prefix
+    classification: must-pass
+    provenance: {source: boundary, ref: search-direct-exact-shape-only}
+    mutation: {description: strip the sess_ body so the session constructor rejects the bare prefix}
+    input:
+      query: sess_
+    expected:
+      kind: none
+
+  - name: near_miss_uppercase_uuid
+    classification: must-pass
+    provenance: {source: boundary, ref: search-direct-exact-shape-only}
+    mutation: {description: uppercase a valid UUID so the lowercase session grammar rejects it}
+    input:
+      query: ABCDEF12-1111-1111-1111-111111111111
+    expected:
+      kind: none
+
+  - name: near_miss_uppercase_project_hash
+    classification: must-pass
+    provenance: {source: boundary, ref: search-direct-exact-shape-only}
+    mutation: {description: uppercase a valid digest so the lowercase hash grammar rejects it}
+    input:
+      query: ABCDEF1234ABCDEF1234ABCDEF1234ABCDEF1234ABCDEF1234ABCDEF12345678
+    expected:
+      kind: none
+
+  - name: plain_content_query
+    classification: must-pass
+    provenance: {source: requirement, ref: search-direct-fall-through}
+    mutation: {description: an ordinary multi-word query carries no id shape and stays on the FTS path}
+    input:
+      query: ingest pipeline
+    expected:
+      kind: none
+
+  - name: id_with_surrounding_whitespace
+    classification: must-pass
+    provenance: {source: requirement, ref: search-direct-session-id}
+    mutation: {description: pad a valid UUID with whitespace so trimming still yields a session id}
+    input:
+      query: "  11111111-1111-1111-1111-111111111111  "
+    expected:
+      kind: session
+
+  - name: id_embedded_in_phrase
+    classification: must-pass
+    provenance: {source: requirement, ref: search-direct-exact-shape-only}
+    mutation: {description: append a second token to a valid UUID so only an exact id matches}
+    input:
+      query: 11111111-1111-1111-1111-111111111111 extra
+    expected:
+      kind: none

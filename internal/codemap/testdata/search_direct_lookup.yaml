@@ -1,0 +1,227 @@
+cases:
+  - name: uuid_direct_hit
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-exact-session-id}
+    mutation: {description: "query the exact UUID of a stored session and expect it as the sole result"}
+    input:
+      query: 11111111-1111-1111-1111-111111111111
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "Add caching to the ingest pipeline"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
+  - name: ses_direct_hit
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-exact-session-id}
+    mutation: {description: "query the exact ses_-prefixed id of a stored session and expect it as the sole result"}
+    input:
+      query: ses_3cd91f52effeXd3QAJ54jOyzv5
+      limit: 20
+      sessions:
+        - {id: ses_3cd91f52effeXd3QAJ54jOyzv5, content: "opencode session notes on retry loops"}
+    expected:
+      session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
+  - name: uuid_with_surrounding_spaces_direct_hit
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-scope-trim-then-classify}
+    mutation: {description: "pad a stored UUID with surrounding whitespace and expect the trimmed id to resolve"}
+    input:
+      query: "  11111111-1111-1111-1111-111111111111  "
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "Add caching to the ingest pipeline"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
+  - name: project_hash_direct_hit
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-exact-project-hash}
+    mutation: {description: "query the exact 64-hex project hash and expect the newest session of that project as the sole result"}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "older session about caching"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "newer session about retry loops"}
+    expected:
+      session_ids: [22222222-2222-2222-2222-222222222222]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
+  - name: uuid_short_circuits_fts
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-no-fts-on-id}
+    mutation: {description: "give the queried session no indexed entries while a decoy session quotes the id, so only the direct path can return the queried session"}
+    input:
+      query: 33333333-3333-3333-3333-333333333333
+      limit: 20
+      sessions:
+        - {id: 44444444-4444-4444-4444-444444444444, content: "discusses 33333333-3333-3333-3333-333333333333 at length"}
+        - {id: 33333333-3333-3333-3333-333333333333, content: ""}
+    expected:
+      session_ids: [33333333-3333-3333-3333-333333333333]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
+  - name: project_hash_short_circuits_fts
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-no-fts-on-id}
+    mutation: {description: "leave the newest session entry-less while an older decoy quotes the hash, so only the direct path can return the newest session"}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "older session quoting abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: ""}
+    expected:
+      session_ids: [22222222-2222-2222-2222-222222222222]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+      snippets: [""]
+
+  - name: unknown_uuid_returns_empty
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-unknown-id-empty-not-error}
+    mutation: {description: "query a well-formed UUID that names no stored session and expect an empty non-null result set"}
+    input:
+      query: 99999999-9999-9999-9999-999999999999
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "unrelated cached pipeline work"}
+    expected:
+      session_ids: []
+      project_hashes: []
+      entry_indexes: []
+      roles: []
+      snippets: []
+
+  - name: unknown_hash_returns_empty
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-unknown-id-empty-not-error}
+    mutation: {description: "query a well-formed 64-hex hash that names no stored project and expect an empty non-null result set"}
+    input:
+      query: "0000000000000000000000000000000000000000000000000000000000000000"
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "unrelated cached pipeline work"}
+    expected:
+      session_ids: []
+      project_hashes: []
+      entry_indexes: []
+      roles: []
+      snippets: []
+
+  - name: near_miss_short_hex_falls_through
+    classification: must-pass
+    provenance: {source: boundary, ref: peasant-labs/peasant#350-acceptance-near-miss-63-hex}
+    mutation: {description: "query the test hash with its final nibble removed (63 hex chars) over content quoting it, and expect the FTS content match to survive"}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "notes quoting abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234567 verbatim"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+
+  - name: near_miss_bare_ses_prefix_falls_through
+    classification: must-pass
+    provenance: {source: boundary, ref: peasant-labs/peasant#350-acceptance-near-miss-ses-prefix-no-body}
+    mutation: {description: "query a bare ses_ prefix over content quoting it, and expect the FTS content match to survive"}
+    input:
+      query: ses_
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "the ses_ prefix marks opencode sessions"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+
+  - name: near_miss_uppercase_uuid_falls_through
+    classification: must-pass
+    provenance: {source: boundary, ref: peasant-labs/peasant#350-scope-lowercase-canonical-ids}
+    mutation: {description: "query an uppercase UUID over content quoting its lowercase form, and expect the case-folding FTS match rather than an empty direct lookup"}
+    input:
+      query: AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "session aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee is archived"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0]
+      roles: [user]
+
+  - name: plain_content_query_unchanged
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-acceptance-fallthrough-unchanged}
+    mutation: {description: "run an ordinary content query over two matching sessions and expect the ranked FTS stream unchanged"}
+    input:
+      query: harbor
+      limit: 20
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "harbor harbor harbor late shipment"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "harbor lights"}
+    expected:
+      session_ids: [11111111-1111-1111-1111-111111111111, 22222222-2222-2222-2222-222222222222]
+      project_hashes: [abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678, abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678]
+      entry_indexes: [0, 0]
+      roles: [user, user]
+
+  - name: direct_hit_second_window_exhausted
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-ranked-window-termination}
+    mutation: {description: "read the second ranked window of an id query and expect exhaustion so window walkers terminate"}
+    input:
+      query: 11111111-1111-1111-1111-111111111111
+      limit: 20
+      offset: 1
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "Add caching to the ingest pipeline"}
+    expected:
+      session_ids: []
+      project_hashes: []
+      entry_indexes: []
+      roles: []
+      snippets: []
+
+  - name: project_hit_second_window_exhausted
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-labs/peasant#350-ranked-window-termination}
+    mutation: {description: "read the second ranked window of a project-hash query and expect exhaustion so window walkers terminate"}
+    input:
+      query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
+      limit: 20
+      offset: 1
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "older session about caching"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "newer session about retry loops"}
+    expected:
+      session_ids: []
+      project_hashes: []
+      entry_indexes: []
+      roles: []
+      snippets: []
