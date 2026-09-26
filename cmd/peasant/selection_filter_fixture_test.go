@@ -380,6 +380,7 @@ func (r *countingGitResolver) Branch(ctx context.Context, dir string) (string, e
 }
 
 func TestBuildSelectionFilter_Fixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadSelectionFilterFixtures(t).Cases {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -505,6 +506,7 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 // under-reports, or a summary that names the wrong number, tells them less than
 // the truth about their own data.
 func TestSelectionConflictNotice_CapsTheListAndSaysHowManyItHeldBack(t *testing.T) {
+	t.Parallel()
 	fixtures := loadSelectionFilterFixtures(t)
 	overflow := fixtures.Overflow
 
@@ -564,6 +566,7 @@ func TestSelectionConflictNotice_CapsTheListAndSaysHowManyItHeldBack(t *testing.
 // config file written by the production writer. Asserting only on the recorder
 // leaves the notice reachable in tests while unreachable for the user.
 func TestHarvestCmd_ReportsWithheldSelectionConflict(t *testing.T) {
+	t.Parallel()
 	fixture := loadSelectionFilterFixtures(t).MountedConflict
 	dir := t.TempDir()
 	sourceDir := initConflictedSourceRepo(t, fixture)

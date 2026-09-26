@@ -116,6 +116,7 @@ func TestWriteFileAtomicFailureLeavesTargetUntouched(t *testing.T) {
 // failure boundary: no target file appears and stdout carries no export line.
 // The warning goes to stderr and the command reports the failure.
 func TestExportSessionsFailureLeavesTargetUntouchedAndStdoutSilent(t *testing.T) {
+	t.Parallel()
 	outDir := t.TempDir()
 	cmd := buildExportSessionsCommand()
 	if err := cmd.Flags().Set("session", "00000000-0000-0000-0000-000000000000"); err != nil {

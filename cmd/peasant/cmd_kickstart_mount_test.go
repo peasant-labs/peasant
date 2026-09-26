@@ -60,6 +60,7 @@ type mountRetentionSeedFixture struct {
 }
 
 func TestKickstartPreview_ImportedEmptySessionShowsRawSource(t *testing.T) {
+	t.Parallel()
 	dataHome := t.TempDir()
 	sourcePath := filepath.Join(t.TempDir(), "snapshot.jsonl")
 	source := []byte(`{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}` + "\n")
@@ -143,6 +144,7 @@ func loadMountContractDocument(t *testing.T) mountContractDocument {
 // radio option proves the mounted Working value equals the fixture; the clean
 // receipt proves the same accessor sees an equal Baseline before any edit.
 func TestRunKickstartFlowPairsRetentionBeforeMount(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadMountContractDocument(t).RetentionSeeds {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

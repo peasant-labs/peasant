@@ -230,6 +230,7 @@ func validPushStageErrorSource(source pushStageErrorSource) bool {
 }
 
 func TestPushStageOrderingFixtures_RejectMissingAnnotationTotal(t *testing.T) {
+	t.Parallel()
 	annotationTotalField := []byte("annotation_total: 1")
 	if !bytes.Contains(pushStageOrderingYAML, annotationTotalField) {
 		t.Fatal("push stage ordering fixture no longer contains the association_success annotation_total row to omit")
@@ -253,6 +254,7 @@ func TestPushStageOrderingFixtures_RejectMissingAnnotationTotal(t *testing.T) {
 }
 
 func TestPushStageOrderingFixtures_RejectNegativeAnnotationTotal(t *testing.T) {
+	t.Parallel()
 	annotationTotalField := []byte("annotation_total: 1")
 	negativeAnnotationTotalField := []byte("annotation_total: -1")
 	if !bytes.Contains(pushStageOrderingYAML, annotationTotalField) {

@@ -26,6 +26,7 @@ import (
 const doorSecret = "sk-ant-api03-CLIDOORKEY000000000000x"
 
 func TestStoredSessionEntriesPublishedPreviewUsesFullCapture(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	const sessionID = "cccc3333-cccc-4ccc-8ccc-cccccccccccc"
 	seedUploadableSession(t, dir, sessionID)

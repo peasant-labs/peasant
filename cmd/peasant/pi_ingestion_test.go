@@ -83,6 +83,7 @@ func loadPiCommonModesFixture(t *testing.T) piCommonModesFixture {
 }
 
 func TestPiHarvestCommonModes(t *testing.T) {
+	t.Parallel()
 	fixture := loadPiCommonModesFixture(t)
 	seen := make(map[string]bool)
 	for _, tc := range fixture.Cases {

@@ -586,6 +586,7 @@ func selectedKickstartGateEditorProjects(roots []*kit.TreeNode) int {
 }
 
 func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
+	t.Parallel()
 	document := loadKickstartCommitGateDocument(t)
 	for _, testCase := range document.Cases {
 		testCase := testCase

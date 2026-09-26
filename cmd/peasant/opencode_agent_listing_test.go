@@ -13,6 +13,7 @@ import (
 // so a subagent session such as "reviewer-openai" shows its agent the way a
 // Claude teammate does. Clearing the listing's Agent assignment fails this case.
 func TestOpenCodeAgentLabelReachesKickstartListing(t *testing.T) {
+	t.Parallel()
 	materialized := testfixture.MaterializeByName(t, "extended-attribution")
 	root := filepath.Dir(materialized.Path)
 	git := newMountedOpenCodeGitResolver()

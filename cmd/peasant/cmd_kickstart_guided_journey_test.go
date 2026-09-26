@@ -122,6 +122,7 @@ func mountedAcceptedCompletionPreambleLines() []string {
 }
 
 func TestMountedJourneyFixtureRejectsKeywordPreservingPreambleMutations(t *testing.T) {
+	t.Parallel()
 	for _, mutation := range loadMountedJourneyDocument(t).PreambleMutations {
 		mutation := mutation
 		t.Run(mutation.Name, func(t *testing.T) {
@@ -138,6 +139,7 @@ func TestMountedJourneyFixtureRejectsKeywordPreservingPreambleMutations(t *testi
 }
 
 func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadMountedJourneyDocument(t).Rows {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

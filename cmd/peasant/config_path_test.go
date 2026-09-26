@@ -78,6 +78,7 @@ func (f configPathFixture) resolutionInput() configPathInput {
 }
 
 func TestBuildKickstartCommand_ResolvesMountedConfigPath(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigPathFixtures(t).Cases {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {

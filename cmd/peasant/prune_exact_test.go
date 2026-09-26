@@ -200,6 +200,7 @@ func openTestTerminal(t *testing.T) (master, terminal *os.File) {
 // line that precedes an irreversible delete — so it has to be observed on the
 // command, not on a plan a test builds for itself.
 func TestPruneCmd_ConsentCountEqualsDeletedCount(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	seedPruneTestSessions(t, dir)
 
@@ -295,6 +296,7 @@ func (w *signalWriter) String() string {
 // is exactly where a real user leaves that window open, so that is where the
 // test opens it.
 func TestPruneCmd_PlanIsFrozenAcrossTheConsentWindow(t *testing.T) {
+	t.Parallel()
 	window := loadPruneExactFixtures(t).ConsentWindow
 	dir := t.TempDir()
 	seedPruneTestSessions(t, dir)
@@ -436,6 +438,7 @@ func insertPruneSession(t *testing.T, dir string, entry pruneExactEntry) {
 // TestPruneCmd_DeclinedConsentDeletesNothing is the other half: the same mounted
 // path, an answer that is not "y", and nothing removed.
 func TestPruneCmd_DeclinedConsentDeletesNothing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	seedPruneTestSessions(t, dir)
 

@@ -395,6 +395,7 @@ func (o kickstartStoredGateOutcome) valid() bool {
 }
 
 func TestKickstartStoredGateFixtureRejectsUnknownStoreStateKey(t *testing.T) {
+	t.Parallel()
 	mutated := bytes.Replace(kickstartStoredGateFixture, []byte("storeState:"), []byte("storeStatus:"), 1)
 	if bytes.Equal(mutated, kickstartStoredGateFixture) {
 		t.Fatal("stored gate fixture has no storeState key to mutate")
@@ -584,6 +585,7 @@ func kickstartStoredGateListings(testCase kickstartStoredGateCase, paths map[str
 }
 
 func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
+	t.Parallel()
 	document := loadKickstartStoredGateDocument(t)
 	for _, testCase := range document.Cases {
 		testCase := testCase

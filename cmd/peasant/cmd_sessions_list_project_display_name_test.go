@@ -34,6 +34,7 @@ const expectedProjectDisplayNameCaseCount = 5
 // favors brevity over the picker's full path) — that is the one deliberate,
 // documented difference.
 func TestProjectDisplayName_UsesSharedFormatter(t *testing.T) {
+	t.Parallel()
 	corpus, err := testcase.LoadCorpus[projectDisplayNameInput, projectDisplayNameExpected](projectDisplayNameYAML)
 	if err != nil {
 		t.Fatalf("load project display name fixture: %v", err)

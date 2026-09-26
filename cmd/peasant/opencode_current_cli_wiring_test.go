@@ -62,6 +62,7 @@ func loadCurrentSQLiteCLIWiringDocument(t testing.TB) currentSQLiteCLIWiringDocu
 }
 
 func TestCurrentOpenCodeSQLiteNormalCLIAdapterWiring(t *testing.T) {
+	t.Parallel()
 	for _, testCase := range loadCurrentSQLiteCLIWiringDocument(t).Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
