@@ -17,15 +17,15 @@ entries:
   - { name: "cmd/peasant.TestBuildKickstartCommand_ResolvesMountedConfigPath", destination: retained-in-place }
   - { name: "cmd/peasant.TestBuildPruneFilter_DateParsing", destination: retained-in-place }
   - { name: "cmd/peasant.TestBuildPushWizardSessions_SelectionAware", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_AutoIngestNewBranches", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_BranchFilter", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ExplicitSessionID", destination: retained-in-place }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_AutoIngestNewBranches", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_BranchFilter", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ExplicitSessionID", destination: "followup:plabs-7v7gun" }
   - { name: "cmd/peasant.TestBuildSelectionFilter_Fixtures", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByName", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderImportAll", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderNotInSelection", destination: retained-in-place }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByName", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderImportAll", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderNotInSelection", destination: "followup:plabs-7v7gun" }
   - { name: "cmd/peasant.TestBuildSourceConfigs_DisabledProvider", destination: retained-in-place }
   - { name: "cmd/peasant.TestBuildSourceConfigs_EnabledBothProviders", destination: retained-in-place }
   - { name: "cmd/peasant.TestCLI_AnnotateCreateAndList", destination: retained-in-place }
@@ -1809,8 +1809,8 @@ entries:
   - { name: "internal/ingest.TestPipeline_RetainedUnknownKindsReachSummary", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaV8_DerivedAtNilWithoutStore", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaV8_DerivedAtPopulated", destination: retained-in-place }
-  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffFallsBackToFile", destination: retained-in-place }
-  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffUsesDBIngestedMs", destination: retained-in-place }
+  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffFallsBackToFile", destination: "followup:plabs-l4efgy" }
+  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffUsesDBIngestedMs", destination: "followup:plabs-l4efgy" }
   - { name: "internal/ingest.TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaV8_V7MetadataParses", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaVersionUpgrade_DiffUpdated", destination: retained-in-place }
