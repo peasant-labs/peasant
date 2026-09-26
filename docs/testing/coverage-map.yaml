@@ -489,14 +489,14 @@ entries:
   - { name: "cmd/peasant.TestSessionsCmd_TagSubcommandExists", destination: retained-in-place }
   - { name: "cmd/peasant.TestSessionsCmd_TagSubcommandsExist", destination: retained-in-place }
   - { name: "cmd/peasant.TestSourceHarnessFlagMounted", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_Basic", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_MissingSession", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_NoEntries", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_UnicodeSafe", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_All", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Limit", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Provider", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_SessionID", destination: retained-in-place }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_Basic", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_MissingSession", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_NoEntries", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_UnicodeSafe", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_All", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Limit", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Provider", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_SessionID", destination: "moved:internal/store/sessions_list_filter_test.go" }
   - { name: "cmd/peasant.TestStoredSessionEntriesPublishedPreviewUsesFullCapture", destination: retained-in-place }
   - { name: "cmd/peasant.TestStoredSessionEntriesShowsAvailableContent", destination: retained-in-place }
   - { name: "cmd/peasant.TestStrikeIngestCommandAddsChildAfterParentSourceDisappears", destination: retained-in-place }
