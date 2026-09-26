@@ -12,11 +12,9 @@ import (
 
 const (
 	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite"
-	// openCodeCurrentProjectionVersion is version 2: a control record now
-	// carries the typed control field and no fabricated part. The shared minimum
-	// readable version stays 1, so a previously persisted version 1 current
-	// projection, which never held a control record, still decodes.
-	openCodeCurrentProjectionVersion = 2
+	// Version 3 adds redacted opaque evidence to normalized messages. The
+	// shared readable floor stays 1, including older control-free projections.
+	openCodeCurrentProjectionVersion = 3
 	openCodeCurrentMaterializePage   = 128
 )
 
@@ -242,9 +240,10 @@ func (registry *openCodeCurrentIdentityRegistry) add(id, kind string) error {
 // the caller skips and counts rather than a fatal decode failure.
 var errOpenCodeSkipControlRow = errors.New("skip newer OpenCode control row")
 
+// Native objects may add fields; managed projection envelopes use their separate
+// strict whitelist decoder. Known field types and variant invariants stay checked.
 func decodeOpenCodeCurrentJSON(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
@@ -435,6 +434,7 @@ func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLi
 	// governs. includedRows and includedBytes are what reached the projection: a
 	// control row is read and paid for but never shown.
 	var readBytes, includedBytes, includedRows int64
+	var traversalPosition int64
 	truncated := false
 rowLoop:
 	for {
@@ -458,7 +458,12 @@ rowLoop:
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
 				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "registering stable identities", err)
 			}
-			message, err := normalizeOpenCodeCurrentRow(row, &registry)
+			position := openCodeUnknownPosition(sessionID.String(), "current", row.ID.String(), includedRows, traversalPosition, "")
+			if seq := row.Seq.Value(); seq > 0 {
+				position.Sequence = int(seq)
+			}
+			traversalPosition += openCodeCurrentTraversalSize([]byte(row.Data))
+			message, err := normalizeOpenCodeCurrentRowAt(row, &registry, position)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
 				// Compatibility may omit future vocabulary, but the retained
 				// projection must never certify those missing rows as complete.
@@ -470,6 +475,9 @@ rowLoop:
 			}
 			if err != nil {
 				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+			}
+			for _, evidence := range message.RetainedUnknown {
+				unknownControlTypes[evidence.Kind]++
 			}
 			projection.Messages = append(projection.Messages, message)
 			includedRows++
@@ -503,6 +511,10 @@ func currentNormalizationError(row OpenCodeCurrentMessageRow, operation string, 
 }
 
 func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry) (openCodeLegacyProjectionMessage, error) {
+	return normalizeOpenCodeCurrentRowAt(row, registry, UnknownSourcePosition{SourceID: row.ID.String()})
+}
+
+func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry, position UnknownSourcePosition) (openCodeLegacyProjectionMessage, error) {
 	message := openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Parts: []openCodeLegacyProjectionPart{}}
 	appendPart := func(id string, created int64, data any) error {
 		if id != "" {
@@ -570,6 +582,16 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			return message, fmt.Errorf("upstream message type %q conflicts with SQLite row type %q", rowType, row.Type.String())
 		}
 	}
+	prepared, unknown, prepareErr := prepareOpenCodeCurrent(row.Type.String(), data, position)
+	if prepareErr != nil {
+		return message, prepareErr
+	}
+	message.RetainedUnknown = unknown
+	if prepared == nil {
+		message.Data = json.RawMessage(`{"role":"system"}`)
+		return message, nil
+	}
+	data = prepared
 	var err error
 	data, err = normalizeOpenCodeV2StructuralRow(row, data, envelope)
 	if err != nil {

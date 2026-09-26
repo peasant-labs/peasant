@@ -12,7 +12,10 @@ required_members:
   - strict_capture_refused
   - source_records_omitted
   - legacy_preview_only
+  - unknown_data_retained
 members:
+  - value: unknown_data_retained
+    permanent: true
   # No failure was recorded. Not a steady state: nothing has tried to certify
   # this capture yet.
   - value: ""

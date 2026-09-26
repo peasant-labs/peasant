@@ -409,7 +409,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
 		_, pi := evidence[e.EntryIndex]
-		if suppress[e.EntryIndex] || ingest.IsPiCarrier(e) || (pi && e.Depth > 0 && e.ParentIndex != nil && (e.EntryType == schema.EntryTypeThinking || e.EntryType == schema.EntryTypeText)) {
+		if suppress[e.EntryIndex] || ingest.IsPiCarrier(e) || ingest.IsRetainedUnknownCarrier(e) || (pi && e.Depth > 0 && e.ParentIndex != nil && (e.EntryType == schema.EntryTypeThinking || e.EntryType == schema.EntryTypeText)) {
 			continue
 		}
 
@@ -718,6 +718,8 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 
 	detail := &schema.SessionDetailPayload{
 		NativeMetadata:       s.NativeMetadata,
+		RetainedUnknown:      s.RetainedUnknown,
+		Diagnostics:          s.Diagnostics,
 		ID:                   string(s.ID),
 		Harness:              s.Harness,
 		StartTime:            s.StartTime.UTC(),
@@ -744,6 +746,9 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		ParentSessionID:      s.ParentSessionID,
 		InputSubmissionCount: s.InputSubmissionCount,
 		EarlierHistory:       earlierHistoryToDetail(s.EarlierHistory),
+	}
+	if len(detail.RetainedUnknown) > 0 {
+		detail.Diagnostics = &schema.InterpretationDiagnostics{Partial: true}
 	}
 	// Every served detail leaves this one producer bounded for display. A stored
 	// record may be far larger than the contract's document policy allows the

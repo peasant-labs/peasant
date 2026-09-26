@@ -1266,6 +1266,25 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	return enc.Encode(out)
 }
 
+// printRecordKindsReport prints this run's retained and refused observations.
+// Retention counts occurrences and affected sessions separately; a retained
+// payload is never printed in the report.
+func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount, retained []ingest.RetainedUnknownKindCount) {
+	if len(refused) == 0 && len(retained) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "record kinds:")
+	for _, row := range retained {
+		fmt.Fprintf(w, "  retained, uninterpreted: %s/%s/%s: occurrences: %d; affected sessions: %d\n", row.Harness, row.Namespace, row.Kind, row.Occurrences, row.Sessions)
+	}
+	for _, row := range refused {
+		fmt.Fprintf(w, "  refused: %s/%s x%d\n", string(row.Harness), row.Kind, row.Count)
+	}
+	if len(refused) > 0 {
+		fmt.Fprintln(w, "  These captures stay incomplete; export and publication refuse them until a build represents the kinds.")
+	}
+}
+
 // printSummary outputs the human-readable pipeline summary.
 //
 // Default (no --verbose): path header + summary line + changed/error rows with provider and output path.
@@ -1337,6 +1356,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 			fmt.Fprintf(w, "  %s: adapter_version=%d indexer_version=%d index_version=%d\n", harness, versions.AdapterVersion, versions.IndexerVersion, versions.IndexVersion)
 		}
 	}
+	printRecordKindsReport(w, s.RefusedRecordKinds, s.RetainedUnknownKinds)
 	// The coverage breakdown replaces the bare attempt count whenever the
 	// run measured it. Each sentence is omitted at its own zero: a run
 	// whose failures all kept their entries says nothing about empty

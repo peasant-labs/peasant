@@ -493,11 +493,11 @@ func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string
 	if _, err := push.ScanPublication(content); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(content)
+	data, err := push.PublicationReviewText(content, redactor)
 	if err != nil {
 		return "", err
 	}
-	return string(metadata) + "\n" + string(data), nil
+	return string(metadata) + "\n" + data, nil
 }
 
 // buildReplacementLookup builds a map from rule ID to replacement string.

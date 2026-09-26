@@ -70,7 +70,7 @@ func activateTargetDetailGeneration(t *testing.T, s *store.Store, sid schema.Ses
 		SourceEvidenceDigest: strings.Repeat("a", 64),
 		TitleRefs:            []schema.SourceEntryRef{ref},
 	}
-	if err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
+	if _, err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     indexformat.V2{Generation: generation},
 		Blobs:          map[schema.SourceEntryRef][]byte{ref: []byte(text)},
 		IndexerVersion: 1,

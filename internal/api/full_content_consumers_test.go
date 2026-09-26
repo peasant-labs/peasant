@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -35,6 +36,7 @@ type fullConsumerFixture struct {
 	Name, Damage, Prefix, Tail, Secret, PII string
 	Harness, Source                         string
 	NativeSource, SessionID                 string
+	RetainedPayload, KnownSibling           string
 	ToolFile                                string
 	Backfill                                bool
 	// Previewable marks a session whose capture is merely UNFINISHED. Its
@@ -144,7 +146,12 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 				testutil.SeedReadyPublication(t, db, &input.Metadata, entries)
 			}
 			switch fixture.Damage {
-			case "none", "source-omitted":
+			case "none", "retained-no-model":
+			case "source-omitted":
+				written := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureSourceRecordsOmitted, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly}}})
+				if len(written) != 1 || written[0].Err != nil {
+					t.Fatalf("seed unaccounted omission: %+v", written)
+				}
 			case "incomplete":
 				if err := db.IndexSessionEntries(t.Context(), sid, entries); err != nil {
 					t.Fatal(err)
@@ -240,7 +247,17 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			if (detailErr != nil) != previewRefused {
 				t.Fatalf("mounted previewer outcome=%v, want refused=%t", detailErr, previewRefused)
 			}
-			if strictRefused {
+			if fixture.Damage == "retained-no-model" {
+				if exportErr != nil || detail.Diagnostics == nil || !detail.Diagnostics.Partial || len(detail.RetainedUnknown) != 1 || detail.RetainedUnknown[0].Payload != fixture.RetainedPayload {
+					t.Fatalf("retained source did not survive partial export: %v", exportErr)
+				}
+				if len(detail.Turns) != 1 || detail.Turns[0].Content != fixture.KnownSibling || detail.Model != "" {
+					t.Fatal("known sibling lost or model invented")
+				}
+				if scan.Code == http.StatusOK || len(parts) != 0 || !strings.Contains(scan.Body.String(), fixture.WantRemedy) || !strings.Contains(response.Body.String(), fixture.WantRemedy) {
+					t.Fatal("publication was not refused specifically for absent source model")
+				}
+			} else if strictRefused {
 				if exportErr == nil || scan.Code == http.StatusOK || len(parts) != 0 {
 					t.Fatalf("uncertified capture escaped: export=%v scan=%d uploads=%d", exportErr, scan.Code, len(parts))
 				}

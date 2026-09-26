@@ -228,8 +228,9 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	// An incomplete managed generation never carries a successful producer
 	// stamp: positive caller-supplied indexer revisions remain available only
 	// to complete candidates. Incomplete writes leave success and indexed-at
-	// unset so maintenance stays required.
-	if v2, ok := write.Result.(indexformat.V2); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
+	// unset so maintenance stays required. Both V2 spellings are guarded; a
+	// nil *V2 carries no generation and is not a managed write.
+	if v2, ok := asV2Value(write.Result); ok && v2.Generation.Completeness == indexformat.GenerationCompletenessIncompleteNew {
 		if write.IndexerVersion > 0 || write.IndexedAtMs != 0 || write.IndexedInputHash != nil {
 			return nil, nil, fmt.Errorf("store: incomplete generation for session %s claims producer revision %d; replacement was refused and the prior generation is preserved; incomplete_new leaves success and indexed-at unset", write.SessionID, write.IndexerVersion)
 		}

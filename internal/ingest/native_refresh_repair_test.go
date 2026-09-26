@@ -207,7 +207,7 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	metadata := schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessOpenCode}
 	first := buildOpenCodeRepairCandidate(t, adapter, source.Path, tc.SessionID, sid, metadata, "gen-open-repair-1", ingest.NewProjectionPriorState())
-	if err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+	if _, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
 		Generation:     first.Result,
 		Blobs:          first.Blobs,
 		PriorEvidence:  first.PriorEvidence,

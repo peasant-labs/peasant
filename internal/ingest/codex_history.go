@@ -164,6 +164,8 @@ const (
 // history-envelope metadata recorded beside the payload; together they let the
 // native provenance classifier work without reopening the mutable source.
 type CodexCapturedNode struct {
+	// RetainedUnknown carries opaque evidence, independently of a native ordinal.
+	RetainedUnknown  []RetainedUnknown
 	NativeKey        string
 	Ref              schema.SourceEntryRef
 	SegmentOrdinal   int

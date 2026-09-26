@@ -14,7 +14,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
+	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // stubDetailReader serves one canned snapshot through the production
@@ -149,6 +153,240 @@ func TestDetailPayloadSnapshotWiring(t *testing.T) {
 	if legacyCalls != 2 {
 		t.Fatalf("unsupported reader must use the legacy path, got %d legacy calls", legacyCalls)
 	}
+}
+
+func TestDetailPayloadPreviewSplit(t *testing.T) {
+	// Preview-only completeness serves an explicit bounded preview from the
+	// same valid snapshot, never a managed-to-legacy fallback. Corruption
+	// fails closed with no preview and no legacy.
+	sessionID := schema.SessionID("45454545-4545-4545-4545-454545454548")
+	harness := schema.HarnessCodex
+	bounded := "bounded preview prose"
+	previewEntries := []schema.SessionEntry{
+		{SessionID: sessionID, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &bounded},
+	}
+	previewSnapshot := indexformat.ReadSnapshot{
+		Session: schema.SessionDetailPayload{
+			ID: sessionID.String(), Harness: harness, TurnCount: 1,
+			Purpose: schema.SessionPurposeInteraction,
+		},
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: 1, SessionID: sessionID, ModelHarness: harness,
+			Stats:   schema.SessionStats{TurnCount: 1},
+			Purpose: schema.SessionPurposeInteraction,
+		},
+		GenerationID: "g-preview",
+		Completeness: indexformat.GenerationCompletenessIncompleteNew,
+		IndexVersion: 2,
+		Main:         indexformat.Partition{Entries: previewEntries},
+	}
+	previewCalls := 0
+	previewLegacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+		previewCalls++
+		return &schema.SessionDetailPayload{ID: "legacy"}, nil
+	}
+	preview, err := api.DetailPayloadWithReader(context.Background(), stubDetailReader{snapshot: previewSnapshot, supported: true}, stubDetailResolver{}, string(sessionID), previewLegacy)
+	if err != nil {
+		t.Fatalf("preview-only completeness must serve a bounded preview: %v", err)
+	}
+	if previewCalls != 0 {
+		t.Fatal("preview-only completeness must not fall back to legacy content")
+	}
+	if preview.Diagnostics == nil || !preview.Diagnostics.Partial {
+		t.Fatalf("preview must carry partial diagnostics: %+v", preview.Diagnostics)
+	}
+	if len(preview.Turns) != 1 || preview.Turns[0].Content != bounded {
+		t.Fatalf("preview turns = %+v, want bounded preview prose", preview.Turns)
+	}
+
+	corruptEntries := []schema.SessionEntry{
+		{SessionID: sessionID, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &bounded},
+		{SessionID: sessionID, EntryIndex: 0, Harness: harness, EntryType: schema.EntryTypeText, Role: schema.RoleAssistant, ContentPreview: &bounded},
+	}
+	corruptSnapshot := previewSnapshot
+	corruptSnapshot.GenerationID = "g-corrupt"
+	corruptSnapshot.Main = indexformat.Partition{Entries: corruptEntries}
+	corruptCalls := 0
+	corruptLegacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+		corruptCalls++
+		return &schema.SessionDetailPayload{ID: "legacy"}, nil
+	}
+	if _, err := api.DetailPayloadWithReader(context.Background(), stubDetailReader{snapshot: corruptSnapshot, supported: true}, stubDetailResolver{}, string(sessionID), corruptLegacy); err == nil {
+		t.Fatal("corrupt preview evidence must fail the detail read")
+	}
+	if corruptCalls != 0 {
+		t.Fatal("corrupt preview evidence must never fall back to legacy content")
+	}
+}
+
+// seedMountedSession inserts the retained session row a generation activation
+// needs into a copy of the golden database.
+func seedMountedSession(t *testing.T, dbPath, sid string) {
+	t.Helper()
+	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	exec := func(query string, args ...any) {
+		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT OR IGNORE INTO host_slugs(opaque_id, host_slug) VALUES('host-mnt','host-mnt')`)
+	exec(`INSERT OR IGNORE INTO projects(project_hash, canonical_cwd, canonical_remote) VALUES('proj-mnt','/tmp/mnt','github.com/mnt/mnt')`)
+	exec(`INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, schema_version) VALUES(?, 'claude-code','model-mnt','host-mnt','proj-mnt',1,2,3,'/tmp/mnt/source.jsonl','jsonl',11)`, sid)
+}
+
+// mountedV2 builds a minimal self-contained V2 candidate: text entries with
+// content previews and source refs, content records for each ref, and blobs
+// carrying the same prose the entries preview.
+func mountedV2(t *testing.T, sid schema.SessionID, genID, completeness string, texts []string) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+	t.Helper()
+	entries := make([]schema.SessionEntry, 0, len(texts))
+	content := make([]indexformat.ContentRecord, 0, len(texts))
+	blobs := make(map[schema.SourceEntryRef][]byte, len(texts))
+	roles := []schema.Role{schema.RoleUser, schema.RoleAssistant}
+	refs := []schema.SourceEntryRef{"e_mnt_u", "e_mnt_a"}
+	for i, text := range texts {
+		ref := refs[i%len(refs)]
+		preview := text
+		role := roles[i%len(roles)]
+		entries = append(entries, schema.SessionEntry{
+			SessionID: sid, EntryIndex: i, Harness: schema.Harness("claude-code"),
+			Role: role, EntryType: schema.EntryTypeText,
+			ContentPreview: &preview, SourceEntryRef: ref,
+		})
+		content = append(content, indexformat.ContentRecord{Ref: ref})
+		blobs[ref] = []byte(text)
+	}
+	var inputCount *int64
+	if indexformat.GenerationCompleteness(completeness) == indexformat.GenerationCompletenessComplete {
+		c := int64(1)
+		inputCount = &c
+	}
+	generation := indexformat.Generation{
+		ID:           genID,
+		Completeness: indexformat.GenerationCompleteness(completeness),
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion,
+			SessionID:     sid,
+			ModelHarness:  schema.Harness("claude-code"),
+			Stats:         schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: inputCount},
+		},
+		Main:                 indexformat.Partition{Entries: entries},
+		Content:              content,
+		SourceEvidenceDigest: "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+		TitleRefs:            []schema.SourceEntryRef{entries[0].SourceEntryRef},
+	}
+	return indexformat.V2{Generation: generation}, blobs
+}
+
+// activateMountedCandidate assesses and activates one V2 candidate through the
+// real store, returning the committed generation identifier.
+func activateMountedCandidate(t *testing.T, db *store.Store, sid schema.SessionID, genID, completeness string, texts []string) {
+	t.Helper()
+	v2, blobs := mountedV2(t, sid, genID, completeness, texts)
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.Harness("claude-code"), Result: v2,
+		Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+	})
+	if err != nil {
+		t.Fatalf("mounted assessment: %v", err)
+	}
+	capture, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1)
+	if err != nil {
+		t.Fatalf("mounted capture: %v", err)
+	}
+	outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+		Generation: v2, Blobs: blobs,
+		IndexerVersion: 1, IndexedAtMs: 1, ContentCapture: capture,
+	})
+	if err != nil || outcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("mounted activation: outcome=%+v err=%v", outcome, err)
+	}
+}
+
+// TestDetailPayloadWithReaderRealStore rounds one complete and one preview-only
+// generation through the real store into the mounted DetailPayloadWithReader
+// path: the complete generation serves hydrated full turns, the preview-only
+// generation serves the explicit bounded preview with partial diagnostics, and
+// neither consults the legacy callback.
+func TestDetailPayloadWithReaderRealStore(t *testing.T) {
+	ctx := context.Background()
+	completeID := "45454545-4545-4545-4545-454545454550"
+	previewID := "45454545-4545-4545-4545-454545454551"
+
+	openMountedStore := func(t *testing.T, sid string) *store.Store {
+		t.Helper()
+		dbPath := storetest.CopyGoldenDB(t)
+		seedMountedSession(t, dbPath, sid)
+		root := filepath.Join(t.TempDir(), "artifacts")
+		artifacts, err := store.NewOSGenerationArtifactStore(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		locks, err := store.NewFileSessionLocker(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locks))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db
+	}
+
+	t.Run("complete", func(t *testing.T) {
+		db := openMountedStore(t, completeID)
+		sid := schema.SessionID(completeID)
+		activateMountedCandidate(t, db, sid, "gen-mnt-complete", "complete",
+			[]string{"mounted full prose one", "mounted full prose two"})
+		legacyCalls := 0
+		legacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+			legacyCalls++
+			return &schema.SessionDetailPayload{ID: "legacy"}, nil
+		}
+		payload, err := api.DetailPayloadWithReader(ctx, db, db, completeID, legacy)
+		if err != nil {
+			t.Fatalf("mounted complete detail: %v", err)
+		}
+		if legacyCalls != 0 {
+			t.Fatal("mounted complete detail must not consult the legacy callback")
+		}
+		if len(payload.Turns) != 2 || payload.Turns[0].Content != "mounted full prose one" || payload.Turns[1].Content != "mounted full prose two" {
+			t.Fatalf("mounted complete turns = %+v, want hydrated full prose", payload.Turns)
+		}
+		if payload.Diagnostics != nil && payload.Diagnostics.Partial {
+			t.Fatalf("mounted complete detail must not carry partial diagnostics: %+v", payload.Diagnostics)
+		}
+	})
+
+	t.Run("preview", func(t *testing.T) {
+		db := openMountedStore(t, previewID)
+		sid := schema.SessionID(previewID)
+		activateMountedCandidate(t, db, sid, "gen-mnt-preview", "incomplete_new",
+			[]string{"mounted preview prose"})
+		legacyCalls := 0
+		legacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+			legacyCalls++
+			return &schema.SessionDetailPayload{ID: "legacy"}, nil
+		}
+		payload, err := api.DetailPayloadWithReader(ctx, db, db, previewID, legacy)
+		if err != nil {
+			t.Fatalf("mounted preview detail: %v", err)
+		}
+		if legacyCalls != 0 {
+			t.Fatal("mounted preview detail must not fall back to legacy content")
+		}
+		if payload.Diagnostics == nil || !payload.Diagnostics.Partial {
+			t.Fatalf("mounted preview must carry partial diagnostics: %+v", payload.Diagnostics)
+		}
+		if len(payload.Turns) != 1 || payload.Turns[0].Content != "mounted preview prose" {
+			t.Fatalf("mounted preview turns = %+v, want bounded preview prose", payload.Turns)
+		}
+	})
 }
 
 // stubLinkProvider exercises the non-store subscription path: it offers exactly

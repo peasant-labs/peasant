@@ -22,9 +22,11 @@ var (
 // persists the opaque prior document, installs the generation, counts and
 // pointer in ONE transaction, repairs the exported metadata and clears the
 // intent. It reuses the same expected-state compare and success-stamp rules as
-// every other managed activation.
-func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) error {
-	return s.ActivateGeneration(ctx, GenerationActivation{
+// every other managed activation. The outcome carries the lock-derived
+// disposition for per-invocation counting; a post-commit repair failure
+// returns a GenerationRepairPendingError with committed authority.
+func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
+	outcome, err := s.ActivateGeneration(ctx, GenerationActivation{
 		Generation:       activation.Generation,
 		Blobs:            activation.Blobs,
 		PriorEvidence:    activation.PriorEvidence,
@@ -35,8 +37,10 @@ func (s *Store) ActivateNativeGeneration(ctx context.Context, activation ingest.
 		CaptureRevision:  activation.CaptureRevision,
 		IndexedInputHash: activation.IndexedInputHash,
 		ArtifactIdentity: activation.ArtifactIdentity,
+		ExplicitRebuild:  activation.ExplicitRebuild,
 		Capture:          activation.Capture,
 	})
+	return outcome, err
 }
 
 // ReadNativeGenerationPrior loads the active generation's reusable evidence for

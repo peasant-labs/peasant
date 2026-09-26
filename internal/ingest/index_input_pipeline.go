@@ -244,6 +244,22 @@ func (input *CapturedIndexInput) ParseForFormat(ctx context.Context, indexer Tra
 // what it does not. Its result is a bounded projection only: it is stored as
 // an incomplete capture and never certified as complete content.
 func (input *CapturedIndexInput) ParseTolerant(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
+	// A legacy omission without a positional placeholder still cannot be
+	// certified. Keep any surviving unknown evidence when storing its preview.
+	switch idx := indexer.(type) {
+	case *ClaudeIndexer:
+		copy := *idx
+		copy.retainUnknown, copy.fullContent, copy.fullDepth = true, true, true
+		indexer = &copy
+	case *CursorIndexer:
+		copy := *idx
+		copy.retainUnknown, copy.fullContent, copy.fullDepth = true, true, true
+		indexer = &copy
+	case *StrikeIndexer:
+		copy := *idx
+		copy.retainUnknown, copy.fullContent = true, true
+		indexer = &copy
+	}
 	if input.kind == TranscriptSourceDirectory {
 		native, ok := indexer.(openCodeInputIndexer)
 		if !ok {

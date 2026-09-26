@@ -319,6 +319,11 @@ type CodexCandidateInput struct {
 // source is never reopened: every byte the classifier reads comes from the
 // capture.
 func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
+	for _, diagnostic := range input.History.Diagnostics {
+		if diagnostic.ErrorType == "codex_record_malformed" || diagnostic.ErrorType == "codex_item_body_malformed" {
+			return CodexCandidate{}, fmt.Errorf("build Codex candidate: complete native record is malformed; prior generation remains unchanged; restore intact source and retry")
+		}
+	}
 	if input.History.StableThreadID == "" {
 		return CodexCandidate{}, fmt.Errorf("ingest.BuildCodexCandidate: the captured history carries no stable thread identity; the candidate cannot be addressed; capture the native history before projecting it")
 	}
@@ -374,6 +379,9 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 	}
 	result, content, err := BuildV2WithContent(capture, allocator)
 	if err != nil {
+		return CodexCandidate{}, err
+	}
+	if err := attachCodexUnknown(&result, input.History.Nodes); err != nil {
 		return CodexCandidate{}, err
 	}
 	return CodexCandidate{

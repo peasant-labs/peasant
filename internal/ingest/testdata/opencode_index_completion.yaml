@@ -83,4 +83,4 @@ cases:
   - name: managed-legacy-unknown-part-tolerated
     origin: legacy
     managed: '{"format":"peasant.opencode.legacy-sqlite","version":2,"session_id":"SESSION_ID","messages":[{"id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"role":"user","content":"inline"},"parts":[{"id":"part_1","message_id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"type":"future-note","text":"retained note"}},{"id":"part_2","message_id":"msg_1","session_id":"SESSION_ID","time_created":1,"time_updated":2,"data":{"type":"future-empty"}}]}]}'
-    entries: 2
+    entries: 1

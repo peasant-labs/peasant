@@ -86,9 +86,10 @@ type openCodeSemanticJSONPart struct {
 }
 
 type openCodeSemanticNegativeCase struct {
-	Name          string                       `yaml:"name"`
-	Rows          []openCodeSemanticCurrentRow `yaml:"rows"`
-	ErrorContains string                       `yaml:"error_contains"`
+	RetainedUnknown int                          `yaml:"retained_unknown"`
+	Name            string                       `yaml:"name"`
+	Rows            []openCodeSemanticCurrentRow `yaml:"rows"`
+	ErrorContains   string                       `yaml:"error_contains"`
 }
 
 type openCodeSemanticCurrentRow struct {
@@ -166,7 +167,7 @@ func loadOpenCodeSemanticFixture(data []byte) (openCodeSemanticFixture, error) {
 		}
 	}
 	for _, negative := range fixture.NegativeCases {
-		if len(negative.Rows) == 0 || negative.ErrorContains == "" {
+		if len(negative.Rows) == 0 || (negative.ErrorContains == "") == (negative.RetainedUnknown == 0) {
 			return fixture, fmt.Errorf("validate OpenCode semantic parity negative %q: rows and error substring are required", negative.Name)
 		}
 		for _, row := range negative.Rows {
@@ -802,7 +803,20 @@ func TestOpenCodeCurrentNormalizationRejectsStrictNegativeCases(t *testing.T) {
 	for _, testCase := range fixture.NegativeCases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
-			_, _, err := readOpenCodeCurrentProjection(t.Context(), semanticNegativeSource{rows: semanticCurrentRows(t, testCase.Rows)}, sessionID, pageSize)
+			projection, _, err := readOpenCodeCurrentProjection(t.Context(), semanticNegativeSource{rows: semanticCurrentRows(t, testCase.Rows)}, sessionID, pageSize)
+			if testCase.RetainedUnknown > 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				count := 0
+				for _, message := range projection.Messages {
+					count += len(message.RetainedUnknown)
+				}
+				if count != testCase.RetainedUnknown {
+					t.Fatalf("retained occurrences = %d, want %d", count, testCase.RetainedUnknown)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), testCase.ErrorContains) {
 				t.Fatalf("error=%v want substring %q", err, testCase.ErrorContains)
 			}

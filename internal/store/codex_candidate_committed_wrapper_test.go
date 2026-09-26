@@ -138,7 +138,7 @@ func TestCodexCommittedWrapperDetailKeepsLiteralBodies(t *testing.T) {
 	s := openGenerationStoreAt(t, dir)
 	defer func() { _ = s.Close() }()
 	seedGenerationSession(t, s, fixture.Session.ID)
-	if err := s.ActivateGeneration(context.Background(), GenerationActivation{
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
 		Generation:     candidate.V2,
 		Blobs:          candidate.Content,
 		IndexerVersion: 1,

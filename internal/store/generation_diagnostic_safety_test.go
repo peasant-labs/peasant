@@ -157,7 +157,7 @@ func TestGenerationDiagnosticSafety(t *testing.T) {
 				if err := os.WriteFile(manifestPath, data, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				recoveryErr := s.RecoverGenerationActivation(context.Background(), id)
+				_, recoveryErr := s.RecoverGenerationActivation(context.Background(), id)
 				assertPrivateDetailRefused(t, recoveryErr, fixture.PrivateIdentity, "recovery")
 				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
 				retained, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CandidateID)
@@ -184,7 +184,7 @@ func TestGenerationDiagnosticSafety(t *testing.T) {
 				if err := activateTestGeneration(t, s, candidate, candidateBlobs); err == nil {
 					t.Fatal("activation of a candidate with a private title ref succeeded; it must be refused")
 				}
-				replayErr := s.RecoverGenerationActivation(context.Background(), id)
+				_, replayErr := s.RecoverGenerationActivation(context.Background(), id)
 				assertPrivateDetailRefused(t, replayErr, fixture.PrivateIdentity, "recovery replay")
 				assertLastGoodRetained(t, s, id, before, fixture.Generation.CompleteID)
 			default:

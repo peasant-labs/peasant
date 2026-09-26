@@ -450,12 +450,13 @@ func buildBarrierGeneration(t *testing.T, sid schema.SessionID, spec barrierGene
 
 func activateBarrierGeneration(t *testing.T, s *store.Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) error {
 	t.Helper()
-	return s.ActivateGeneration(context.Background(), store.GenerationActivation{
+	_, err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     v2,
 		Blobs:          blobs,
 		IndexerVersion: 1,
 		IndexedAtMs:    1,
 	})
+	return err
 }
 
 func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {

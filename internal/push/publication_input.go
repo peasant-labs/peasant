@@ -42,7 +42,7 @@ func LoadPublicationInput(ctx context.Context, reader ingest.PublicationInputRea
 func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
 	if input.Readiness != ingest.PublicationReady {
 		return fmt.Errorf("load publication input from peasant.db: %w; metadata and indexed entries are not a verified capture; nothing uploaded; "+
-			"the one incompleteness that may still be published is a capture whose only gap is oversized source records that ingest omitted, which travels with its placeholders and its partial diagnostics; "+
+			"incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; "+
 			"run peasant ingest with the retained source available and retry", ErrMetadataMissing)
 	}
 	if input.Metadata.Model == "" {

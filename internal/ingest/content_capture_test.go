@@ -43,6 +43,7 @@ func (a *captureFixtureAdapter) MaterializeTranscript(ctx context.Context, s ing
 }
 
 type captureFixture struct {
+	Unknown        bool           `yaml:"unknown"`
 	Text           string         `yaml:"text"`
 	Contains       bool           `yaml:"contains"`
 	ToolOutput     bool           `yaml:"tool_output"`
@@ -152,6 +153,12 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if fixture.Unknown {
+					if len(result.RetainedUnknown) == 0 {
+						t.Fatal("unknown payload was not retained")
+					}
+					return
+				}
 				if fixture.Control {
 					// Control records carry no conversation text; their entry
 					// shape is asserted by TestClaudeControlRecordEntryShape.
@@ -188,7 +195,7 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 
 func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 	for _, fixture := range loadCaptureFixtures(t) {
-		if fixture.Reject || fixture.Control {
+		if fixture.Reject || fixture.Control || fixture.Unknown {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -348,7 +355,7 @@ func TestOpenCodeCapturePreservesPreviewAnchors(t *testing.T) {
 	}
 }
 
-func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
+func TestNativeOpenCodeUnknownSurvivesManagedProjection(t *testing.T) {
 	native := testfixture.MaterializeByName(t, "current-unknown-conversation-omission")
 	root, err := ingest.NewResolvedPath(filepath.Dir(native.Path))
 	if err != nil {
@@ -366,9 +373,9 @@ func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
 	}
 	data := materialized.Data
 	idx := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
-	// The artifact alone must refuse certification, even without its sidecar.
-	if _, err := idx.IndexTranscriptBytesForCapture(t.Context(), session, data); err == nil {
-		t.Fatal("native omitted row certified from bytes")
+	// Evidence survives the artifact without depending on a sidecar diagnostic.
+	if capture, err := idx.IndexTranscriptBytesForCapture(t.Context(), session, data); err != nil || len(capture.RetainedUnknown) == 0 {
+		t.Fatalf("native unknown row not retained from bytes: %+v %v", capture, err)
 	}
 	path := filepath.Join(t.TempDir(), "retained.json")
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -378,8 +385,8 @@ func TestNativeOpenCodeOmissionSurvivesManagedProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := idx.IndexTranscriptForCapture(t.Context(), session); err == nil {
-		t.Fatal("native omitted row certified from retained file")
+	if capture, err := idx.IndexTranscriptForCapture(t.Context(), session); err != nil || len(capture.RetainedUnknown) == 0 {
+		t.Fatalf("native unknown row not retained from file: %+v %v", capture, err)
 	}
 }
 

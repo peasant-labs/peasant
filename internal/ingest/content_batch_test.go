@@ -329,7 +329,7 @@ func TestFullContentWriteBatchBudgetGroupsByBytes(t *testing.T) {
 				}
 				metas = append(metas, meta)
 			}
-			indexed, logs := pipeline.indexBatch(ctx, metas, IndexOutcomeIndexed, "budget test")
+			indexed, logs, _ := pipeline.indexBatch(ctx, metas, IndexOutcomeIndexed, "budget test")
 			if len(indexed) != len(metas) || len(logs) != len(metas) {
 				t.Fatalf("the grouping lost a session: indexed=%d logs=%d for %d sessions", len(indexed), len(logs), len(metas))
 			}

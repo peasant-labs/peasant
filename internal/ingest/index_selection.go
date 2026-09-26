@@ -117,7 +117,7 @@ func (loc SessionLocation) permanentRefusalSettled(target HarvesterVersions) boo
 // that predates content capture, are both PENDING work rather than settled:
 // they have simply never been tried by a build that could certify them.
 func permanentCaptureRefusal(code ContentCaptureFailureCode) bool {
-	return code == ContentCaptureStrictRefused || code == ContentCaptureSourceRecordsOmitted
+	return code == ContentCaptureStrictRefused || code == ContentCaptureSourceRecordsOmitted || code == ContentCaptureUnknownDataRetained
 }
 
 // certifiesContent reports whether this build's indexer for the harness can

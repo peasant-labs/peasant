@@ -204,7 +204,7 @@ func TestIndexBatch_UsesStoreBatchWriterAndProfilesWriteShape(t *testing.T) {
 	}
 
 	prepareIndexParallelInputs(t, pipeline, metas)
-	indexed, logs := pipeline.indexBatch(context.Background(), metas, IndexOutcomeIndexed, "test")
+	indexed, logs, _ := pipeline.indexBatch(context.Background(), metas, IndexOutcomeIndexed, "test")
 	if len(indexed) != len(metas) {
 		t.Fatalf("indexed result count = %d, want %d", len(indexed), len(metas))
 	}

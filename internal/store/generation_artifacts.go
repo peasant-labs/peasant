@@ -37,6 +37,10 @@ type GenerationIntent struct {
 	IndexerVersion  int   `json:"indexerVersion,omitempty"`
 	IndexedAtMs     int64 `json:"indexedAtMs,omitempty"`
 	CaptureRevision int64 `json:"captureRevision,omitempty"`
+	// ExplicitRebuild preserves an operator-initiated rebuild across crash
+	// recovery so the replay honors the same last-good exemption the original
+	// activation requested.
+	ExplicitRebuild bool `json:"explicitRebuild,omitempty"`
 
 	ExpectedState    *ingest.SessionIndexState         `json:"expectedState,omitempty"`
 	ContentCapture   ingest.SessionContentCaptureWrite `json:"contentCapture"`

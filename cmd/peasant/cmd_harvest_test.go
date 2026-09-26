@@ -1953,3 +1953,58 @@ func runHarvestNoTestConfig(t *testing.T, args ...string) string {
 	}
 	return buf.String()
 }
+
+func TestPrintSummary_RecordKindsRefused(t *testing.T) {
+	t.Parallel()
+	result := &ingest.PipelineResult{
+		Summary: ingest.PipelineSummary{
+			New: 1,
+			RefusedRecordKinds: []ingest.RecordKindRefusalCount{
+				{Harness: ingest.HarnessCodex, Kind: "world_state", Count: 2},
+			},
+		},
+		Duration: 100 * time.Millisecond,
+		Sessions: []ingest.SessionResult{
+			{SessionID: "session-abc123", Harness: ingest.HarnessCodex, Status: ingest.DiffNew},
+		},
+	}
+	sources := map[ingest.Harness]ingest.SourceConfig{}
+
+	var buf bytes.Buffer
+	printSummary(&buf, result, false, false, "/output", "", sources, 0)
+	output := buf.String()
+
+	if !strings.Contains(output, "refused: codex/world_state x2") {
+		t.Errorf("summary should name the refused kind with its count; got:\n%s", output)
+	}
+	if strings.Contains(output, "not visualized") {
+		t.Errorf("summary must not report visualization state; got:\n%s", output)
+	}
+}
+
+func TestPrintJSON_RecordKindsRoundTrip(t *testing.T) {
+	t.Parallel()
+	result := &ingest.PipelineResult{
+		Summary: ingest.PipelineSummary{
+			RefusedRecordKinds: []ingest.RecordKindRefusalCount{
+				{Harness: ingest.HarnessStrike, Kind: "child.started", Count: 1},
+			},
+		},
+		Duration: 100 * time.Millisecond,
+	}
+
+	var buf bytes.Buffer
+	if err := printJSON(&buf, result); err != nil {
+		t.Fatalf("printJSON: %v", err)
+	}
+	if bytes.Contains(buf.Bytes(), []byte("trackedNotVisualized")) {
+		t.Fatal("JSON harvest report must not carry visualization state")
+	}
+	var decoded jsonPipelineResult
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode JSON output: %v", err)
+	}
+	if len(decoded.Summary.RefusedRecordKinds) != 1 || decoded.Summary.RefusedRecordKinds[0].Kind != "child.started" {
+		t.Errorf("JSON summary refused kinds = %+v, want one child.started row", decoded.Summary.RefusedRecordKinds)
+	}
+}

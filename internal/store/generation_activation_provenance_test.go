@@ -261,7 +261,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 				activation.Capture = &ingest.PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 			}
 
-			activateErr := s.ActivateNativeGeneration(context.Background(), activation)
+			_, activateErr := s.ActivateNativeGeneration(context.Background(), activation)
 			if tc.WantRefused {
 				if activateErr == nil {
 					t.Fatal("activation with a publication capture that disagrees with the stored session was accepted; want refusal")
@@ -362,11 +362,11 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	}
 
 	installRecoveryFault(t, s, "after-rename-before-db")
-	if err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
+	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
 		t.Fatal("activation across the staging seam succeeded; the crash must interrupt it")
 	}
 	clearRecoveryFault(t, s, "after-rename-before-db")
-	if err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
+	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
 		t.Fatalf("recover interrupted activation: %v", err)
 	}
 

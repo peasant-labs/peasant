@@ -14,6 +14,8 @@ import (
 // holding them can still be certified complete.
 //
 // The artifact- prefix family is matched by prefix, not enumerated.
+const claudeArtifactControlPrefix = "artifact-"
+
 var claudeControlRecordTypes = map[string]bool{
 	"agent-setting":      true,
 	"permission-mode":    true,
@@ -61,10 +63,24 @@ const claudeControlPayloadLimit = 8192
 // isClaudeControlRecordType reports whether a record type names a control
 // record this build represents.
 func isClaudeControlRecordType(recordType string) bool {
-	if strings.HasPrefix(recordType, "artifact-") {
+	if strings.HasPrefix(recordType, claudeArtifactControlPrefix) {
 		return true
 	}
 	return claudeControlRecordTypes[recordType]
+}
+
+// claudeControlKindLabels names every provider kind this build retains as a
+// control entry: the closed control map, the artifact- prefix family, and the
+// compact_boundary system subtype (named by its wire form; the retained
+// partType label is compact-boundary). The vocabulary completeness check
+// compares this census with the declaration.
+func claudeControlKindLabels() []string {
+	labels := make([]string, 0, len(claudeControlRecordTypes)+2)
+	for kind := range claudeControlRecordTypes {
+		labels = append(labels, kind)
+	}
+	labels = append(labels, claudeArtifactControlPrefix, "compact_boundary")
+	return labels
 }
 
 // claudeControlRecordKind returns the provider kind label for a control record

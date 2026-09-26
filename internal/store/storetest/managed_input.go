@@ -166,7 +166,7 @@ func SeedGenerationPublication(t *testing.T, db *store.Store, meta *schema.Unifi
 		t.Fatalf("seed generation publication session row: %v", err)
 	}
 	revision := revisions[meta.SessionID]
-	if err := db.ActivateGeneration(ctx, store.GenerationActivation{
+	if _, err := db.ActivateGeneration(ctx, store.GenerationActivation{
 		Generation:      generation,
 		Blobs:           blobs,
 		IndexerVersion:  1,

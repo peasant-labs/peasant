@@ -276,7 +276,7 @@ func TestCodexCommittedWrapperPayloadKeepsLiteralBodies(t *testing.T) {
 	dir := t.TempDir()
 	s := openCodexCommittedPayloadStore(t, dir)
 	storetest.SeedSession(t, s, fixture.Session.ID)
-	if err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
+	if _, err := s.ActivateGeneration(context.Background(), store.GenerationActivation{
 		Generation:     candidate.V2,
 		Blobs:          candidate.Content,
 		IndexerVersion: 1,

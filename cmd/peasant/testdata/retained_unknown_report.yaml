@@ -1,0 +1,15 @@
+cases:
+  - name: occurrences_are_not_sessions
+    harness: claude-code
+    namespace: content_block
+    kind: future
+    occurrences: 4
+    sessions: 2
+    expected: 'retained, uninterpreted: claude-code/content_block/future: occurrences: 4; affected sessions: 2'
+  - name: all_fallback_run_reports_observation
+    harness: pi
+    namespace: entry
+    kind: future
+    occurrences: 3
+    sessions: 1
+    expected: 'retained, uninterpreted: pi/entry/future: occurrences: 3; affected sessions: 1'
