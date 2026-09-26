@@ -1,0 +1,34 @@
+# Frozen budget/env contract cases for scripts/testgate.
+#
+# budget precedence: budget.yaml (when present) > TEST_BUDGET (seconds) > none.
+# CHECK_START_NS: a positive Unix-ns integer; empty or malformed is "unset".
+# budget verdict: an absent budget never fails; L > 4 is INCONCLUSIVE and does
+# not fail; otherwise combined_wall / L over the budget fails, under it passes.
+# required_names is a deletion-protection manifest.
+required_names:
+  - budget-file-wins
+  - budget-env-fallback
+  - budget-none
+  - check-start-valid
+  - check-start-unset
+  - check-start-malformed
+  - verdict-no-budget
+  - verdict-inconclusive
+  - verdict-over-budget
+  - verdict-within-budget
+
+budget_cases:
+  - { name: budget-file-wins,   file_seconds: 120, env_seconds: 90, want_present: true,  want_seconds: 120, want_basis: "reference-machine wall" }
+  - { name: budget-env-fallback, file_seconds: 0,  env_seconds: 90, want_present: true,  want_seconds: 90,  want_basis: "TEST_BUDGET" }
+  - { name: budget-none,        file_seconds: 0,   env_seconds: 0,  want_present: false }
+
+check_start_cases:
+  - { name: check-start-valid,     value: "1700000000000000000", want_present: true }
+  - { name: check-start-unset,     value: "",                    want_present: false }
+  - { name: check-start-malformed, value: "not-a-number",        want_present: false }
+
+budget_verdict_cases:
+  - { name: verdict-no-budget,    present: false, cal_l: 1.0, wall_ms: 999999, seconds: 1,   want_fail: false }
+  - { name: verdict-inconclusive, present: true,  cal_l: 5.0, wall_ms: 999999, seconds: 1,   want_fail: false }
+  - { name: verdict-over-budget,  present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, want_fail: true }
+  - { name: verdict-within-budget, present: true, cal_l: 1.0, wall_ms: 50000,  seconds: 100, want_fail: false }

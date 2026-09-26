@@ -1,0 +1,35 @@
+# Frozen CLI contract for scripts/testgate.
+#
+# The usage text IS the human-facing contract: subcommands, flags, and exit
+# codes. Each check asserts an exact substring of the real usage() output; the
+# mutation cases prove the checker is not vacuous. required_names is a
+# deletion-protection manifest.
+required_names:
+  - plan-subcommand
+  - run-subcommand
+  - registry-flag
+  - out-flag
+  - concurrency-flag
+  - race-flag
+  - exit-pass
+  - exit-fail
+  - exit-usage
+  - mutated-subcommand
+  - mutated-exit-code
+
+checks:
+  - { name: plan-subcommand,  contains: "testgate plan" }
+  - { name: run-subcommand,   contains: "testgate run" }
+  - { name: registry-flag,    contains: "-registry PATH" }
+  - { name: out-flag,         contains: "-out DIR" }
+  - { name: concurrency-flag, contains: "-p N" }
+  - { name: race-flag,        contains: "-race" }
+  - { name: exit-pass,        contains: "0  the gate passed" }
+  - { name: exit-fail,        contains: "1  a test failed, the screen failed, or an invocation errored" }
+  - { name: exit-usage,       contains: "2  usage, registry, or plan error" }
+
+# A mutation replaces one check's expected substring with text that is not in
+# usage(); the checker must report the check as missing.
+mutations:
+  - { name: mutated-subcommand, check: plan-subcommand, contains: "testgate planx" }
+  - { name: mutated-exit-code,  check: exit-usage,      contains: "2  never happens" }

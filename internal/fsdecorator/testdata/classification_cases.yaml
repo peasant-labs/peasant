@@ -1,0 +1,96 @@
+# Negative and positive cases for the decorator-classification validator.
+# Each case is a whole classification document with one deliberate defect, or a
+# valid control; the fixture test asserts the validator's verdict.
+# required_names keeps a case from being deleted silently.
+required_names:
+  - valid-classification
+  - none-with-rationale
+  - duplicate-type
+  - unknown-capability
+  - empty-rationale
+  - missing-where
+  - wrong-version
+
+cases:
+  - name: valid-classification
+    version: 1
+    want_error: ""
+    entries:
+      - type: gatedPairFS
+        package: internal/ingest
+        white_box: false
+        capability: gated
+        where: internal/ingest/pair_concurrency_test.go:18
+        rationale: holds the writer inside the install window
+
+  - name: none-with-rationale
+    version: 1
+    want_error: ""
+    entries:
+      - type: emptyProgressFS
+        package: internal/ingest
+        white_box: true
+        capability: none
+        where: internal/ingest/pipeline_progress_test.go:516
+        rationale: no capability needed; the decorator is deleted
+
+  - name: duplicate-type
+    version: 1
+    want_error: "duplicate classification"
+    entries:
+      - type: gatedPairFS
+        package: internal/ingest
+        white_box: false
+        capability: gated
+        where: internal/ingest/pair_concurrency_test.go:18
+        rationale: first
+      - type: gatedPairFS
+        package: internal/ingest
+        white_box: false
+        capability: gated
+        where: internal/ingest/pair_concurrency_test.go:18
+        rationale: second
+
+  - name: unknown-capability
+    version: 1
+    want_error: "unknown capability"
+    entries:
+      - type: weirdFS
+        package: internal/ingest
+        white_box: true
+        capability: teleport
+        where: internal/ingest/weird_test.go:1
+        rationale: not a capability
+
+  - name: empty-rationale
+    version: 1
+    want_error: "rationale is required"
+    entries:
+      - type: refusingFS
+        package: internal/ingest
+        white_box: false
+        capability: counting
+        where: internal/ingest/origin_backfill_test.go:205
+        rationale: ""
+
+  - name: missing-where
+    version: 1
+    want_error: "where (file:line) is required"
+    entries:
+      - type: refusingFS
+        package: internal/ingest
+        white_box: false
+        capability: counting
+        where: ""
+        rationale: where is required
+
+  - name: wrong-version
+    version: 2
+    want_error: "version = 2"
+    entries:
+      - type: refusingFS
+        package: internal/ingest
+        white_box: false
+        capability: counting
+        where: internal/ingest/origin_backfill_test.go:205
+        rationale: still classified

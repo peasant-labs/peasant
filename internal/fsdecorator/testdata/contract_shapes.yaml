@@ -1,0 +1,110 @@
+# Frozen shapes for the test filesystem decorator contract.
+#
+# The interface declarations and their exact method signatures are the contract
+# both owners implement; the struct shapes are the classification schema. See
+# internal/fsdecorator/fsdecorator.go for the ownership and import-cycle rule.
+#
+# `type`/`sig` strings are the exact reflect.Type.String() values. Interface
+# methods are listed in the order reflect reports them (lexicographic).
+required_names:
+  - fsdecorator.Gate
+  - fsdecorator.Bound
+  - fsdecorator.ClassificationEntry
+  - fsdecorator.Classification
+  - fsdecorator.FileSystem
+  - fsdecorator.GatedFS
+  - fsdecorator.BoundedFS
+  - fsdecorator.AllOps
+  - fsdecorator.AllCapabilities
+
+shapes:
+  - name: fsdecorator.Gate
+    fields:
+      - { name: Op,   type: fsdecorator.Op, tag: 'yaml:"op"' }
+      - { name: Path, type: string, tag: 'yaml:"path"' }
+
+  - name: fsdecorator.Bound
+    fields:
+      - { name: Op,       type: fsdecorator.Op, tag: 'yaml:"op"' }
+      - { name: Path,     type: string, tag: 'yaml:"path"' }
+      - { name: MaxCalls, type: int64, tag: 'yaml:"max_calls"' }
+      - { name: MaxBytes, type: int64, tag: 'yaml:"max_bytes"' }
+
+  - name: fsdecorator.ClassificationEntry
+    fields:
+      - { name: Type,       type: string, tag: 'yaml:"type"' }
+      - { name: Package,    type: string, tag: 'yaml:"package"' }
+      - { name: WhiteBox,   type: bool, tag: 'yaml:"white_box"' }
+      - { name: Capability, type: fsdecorator.Capability, tag: 'yaml:"capability"' }
+      - { name: Where,      type: string, tag: 'yaml:"where"' }
+      - { name: Rationale,  type: string, tag: 'yaml:"rationale"' }
+
+  - name: fsdecorator.Classification
+    fields:
+      - { name: Version, type: int, tag: 'yaml:"version"' }
+      - { name: Entries, type: "[]fsdecorator.ClassificationEntry", tag: 'yaml:"entries"' }
+
+enums:
+  - name: fsdecorator.AllOps
+    members:
+      - ReadFile
+      - WriteFile
+      - MkdirAll
+      - Stat
+      - Lstat
+      - WalkDir
+      - Rename
+      - ReadDir
+      - Remove
+      - RemoveAll
+      - CopyFile
+  - name: fsdecorator.AllCapabilities
+    members: [counting, gated, bounded, none]
+
+interfaces:
+  - name: fsdecorator.FileSystem
+    methods:
+      - { name: CopyFile,  sig: "func(string, string, fs.FileMode) error" }
+      - { name: Lstat,     sig: "func(string) (fs.FileInfo, error)" }
+      - { name: MkdirAll,  sig: "func(string, fs.FileMode) error" }
+      - { name: ReadDir,   sig: "func(string) ([]fs.DirEntry, error)" }
+      - { name: ReadFile,  sig: "func(string) ([]uint8, error)" }
+      - { name: Remove,    sig: "func(string) error" }
+      - { name: RemoveAll, sig: "func(string) error" }
+      - { name: Rename,    sig: "func(string, string) error" }
+      - { name: Stat,      sig: "func(string) (fs.FileInfo, error)" }
+      - { name: WalkDir,   sig: "func(string, fs.WalkDirFunc) error" }
+      - { name: WriteFile, sig: "func(string, []uint8, fs.FileMode) error" }
+
+  - name: fsdecorator.GatedFS
+    methods:
+      - { name: Arm,       sig: "func(fsdecorator.Gate)" }
+      - { name: CopyFile,  sig: "func(string, string, fs.FileMode) error" }
+      - { name: Lstat,     sig: "func(string) (fs.FileInfo, error)" }
+      - { name: MkdirAll,  sig: "func(string, fs.FileMode) error" }
+      - { name: Reached,   sig: "func() <-chan struct {}" }
+      - { name: ReadDir,   sig: "func(string) ([]fs.DirEntry, error)" }
+      - { name: ReadFile,  sig: "func(string) ([]uint8, error)" }
+      - { name: Release,   sig: "func()" }
+      - { name: Remove,    sig: "func(string) error" }
+      - { name: RemoveAll, sig: "func(string) error" }
+      - { name: Rename,    sig: "func(string, string) error" }
+      - { name: Stat,      sig: "func(string) (fs.FileInfo, error)" }
+      - { name: WalkDir,   sig: "func(string, fs.WalkDirFunc) error" }
+      - { name: WriteFile, sig: "func(string, []uint8, fs.FileMode) error" }
+
+  - name: fsdecorator.BoundedFS
+    methods:
+      - { name: CopyFile,  sig: "func(string, string, fs.FileMode) error" }
+      - { name: Limit,     sig: "func(fsdecorator.Bound)" }
+      - { name: Lstat,     sig: "func(string) (fs.FileInfo, error)" }
+      - { name: MkdirAll,  sig: "func(string, fs.FileMode) error" }
+      - { name: ReadDir,   sig: "func(string) ([]fs.DirEntry, error)" }
+      - { name: ReadFile,  sig: "func(string) ([]uint8, error)" }
+      - { name: ReadOnly,  sig: "func()" }
+      - { name: Remove,    sig: "func(string) error" }
+      - { name: RemoveAll, sig: "func(string) error" }
+      - { name: Rename,    sig: "func(string, string) error" }
+      - { name: Stat,      sig: "func(string) (fs.FileInfo, error)" }
+      - { name: WalkDir,   sig: "func(string, fs.WalkDirFunc) error" }
+      - { name: WriteFile, sig: "func(string, []uint8, fs.FileMode) error" }

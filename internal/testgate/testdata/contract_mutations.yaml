@@ -1,0 +1,57 @@
+# Shape-mutation cases for the gate contract freeze.
+#
+# Each case mutates the FROZEN EXPECTATION (never the source) and asserts the
+# comparator in contract_test.go reports a mismatch against the real type. This
+# proves the comparator is sensitive to that mutation axis, so a real rename,
+# removal, retype, retag, or reorder in the source cannot pass unnoticed.
+#
+# required_names keeps a mutation case from being deleted silently.
+required_names:
+  - rename-field
+  - drop-field
+  - retype-field
+  - retag-json
+  - retag-yaml
+  - reorder-fields
+  - drop-enum-member
+  - reorder-enum-members
+
+mutations:
+  - name: rename-field
+    target: testgate.Record
+    op: rename
+    field: Unit
+    to: Package
+  - name: drop-field
+    target: testgate.Report
+    op: drop
+    field: PreTestWallMS
+  - name: retype-field
+    target: testgate.Report
+    op: retype
+    field: CombinedWallMS
+    to: string
+  - name: retag-json
+    target: testgate.ReportRecord
+    op: retag
+    field: WallMS
+    value: 'json:"wall"'
+  - name: retag-yaml
+    target: testgate.Entry
+    op: retag
+    field: Evidence
+    value: 'yaml:"source"'
+  - name: reorder-fields
+    target: testgate.Record
+    op: reorder
+    field: Unit
+    with: System
+  - name: drop-enum-member
+    target: testgate.RegistryClasses
+    op: drop
+    field: toolchain
+  - name: reorder-enum-members
+    target: testgate.RegistryClasses
+    op: reorder
+    field: single-threaded-bytes
+    with: toolchain
