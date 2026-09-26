@@ -336,6 +336,22 @@ func runOneBatch(ctx context.Context, cfg BatchProfileConfig, batch Batch) (Batc
 	_ = os.MkdirAll(batchDir, 0o755)
 	streamPath := filepath.Join(cfg.OutDir, fmt.Sprintf("batch-%02d.json", batch.Index))
 	errPath := filepath.Join(cfg.OutDir, fmt.Sprintf("batch-%02d.err", batch.Index))
+
+	// A profiling flag makes `go test` write the test binary into its working
+	// directory (verified against go1.26.5: -outputdir does not move it). Run a
+	// profiled batch from a private directory inside the module — an absolute
+	// package directory still resolves from there — and remove it afterwards, so
+	// the source tree never collects a stray *.test binary.
+	pkgPath := cfg.Package
+	runDir := cfg.Root
+	if cfg.Profiles.Enabled() {
+		if dir, err := os.MkdirTemp(cfg.Root, ".testgate-profile-"); err == nil {
+			runDir = dir
+			defer os.RemoveAll(dir)
+			pkgPath = filepath.Join(cfg.Root, filepath.FromSlash(strings.TrimPrefix(cfg.Package, "./")))
+		}
+	}
+
 	args := []string{"test", "-json", "-count=1", "-timeout", cfg.Timeout.String(),
 		"-outputdir", batchDir}
 	if cfg.Parallel > 0 {
@@ -364,11 +380,11 @@ func runOneBatch(ctx context.Context, cfg BatchProfileConfig, batch Batch) (Batc
 			args = append(args, "-trace", br.Trace)
 		}
 	}
-	args = append(args, "-run", runRegexLiteral(batch.Tests), cfg.Package)
+	args = append(args, "-run", runRegexLiteral(batch.Tests), pkgPath)
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, cfg.GoBin, args...)
-	cmd.Dir = cfg.Root
+	cmd.Dir = runDir
 	cmd.Env = cfg.Env
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

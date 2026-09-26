@@ -25,6 +25,7 @@ type profileOptions struct {
 	cpuTop   int
 	pretest  bool
 	profiles bool
+	trace    bool
 	race     bool
 }
 
@@ -141,9 +142,12 @@ func runPackageProfile(opts profileOptions) int {
 			Block: opts.profiles,
 			Mutex: opts.profiles,
 			CPU:   opts.profiles,
-			Trace: opts.profiles,
+			Trace: opts.trace,
 		},
 		Env: os.Environ(),
+	}
+	if opts.trace && opts.profiles {
+		fmt.Fprintln(os.Stderr, "testgate: note: -trace perturbs the block profile; read block.out from a -profiles run without -trace")
 	}
 	ctx := context.Background()
 	res, err := testgate.RunBatchProfile(ctx, cfg)

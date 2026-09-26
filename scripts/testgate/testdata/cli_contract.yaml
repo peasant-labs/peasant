@@ -17,6 +17,7 @@ required_names:
   - parallel-flag
   - pretest-flag
   - profiles-flag
+  - trace-flag
   - exit-pass
   - exit-fail
   - exit-usage
@@ -36,6 +37,7 @@ checks:
   - { name: parallel-flag,      contains: "-parallel N" }
   - { name: pretest-flag,       contains: "-pretest" }
   - { name: profiles-flag,      contains: "-profiles" }
+  - { name: trace-flag,         contains: "-trace" }
   - { name: exit-pass,          contains: "0  the gate passed" }
   - { name: exit-fail,          contains: "1  a test failed, the screen failed, or an invocation errored" }
   - { name: exit-usage,         contains: "2  usage, registry, or plan error" }
