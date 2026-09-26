@@ -390,16 +390,79 @@ func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefus
 	return out
 }
 
-// Markdown renders the registry as the generated per-kind table owned by
-// docs/record-kinds.md. Harness sections sort by name; kinds keep file order.
-func (r RecordKindRegistry) Markdown() string {
-	var out strings.Builder
+// sortedHarnesses is the canonical harness order for every generated view.
+func (r RecordKindRegistry) sortedHarnesses() []Harness {
 	harnesses := make([]Harness, 0, len(r.Harnesses))
 	for harness := range r.Harnesses {
 		harnesses = append(harnesses, harness)
 	}
 	sort.Slice(harnesses, func(i, j int) bool { return string(harnesses[i]) < string(harnesses[j]) })
-	for _, harness := range harnesses {
+	return harnesses
+}
+
+// statusRowCounts counts the declared rows per status across every harness.
+func (r RecordKindRegistry) statusRowCounts() map[RecordKindStatus]int {
+	counts := make(map[RecordKindStatus]int, len(recordKindStatusClosedSet))
+	for _, harness := range r.sortedHarnesses() {
+		for _, kind := range r.Harnesses[harness].Kinds {
+			counts[kind.Status]++
+		}
+	}
+	return counts
+}
+
+// fallbackStatuses names the dispositions the unseen-valid-kind fallback lowers
+// to, in closed-set order. validate() requires one retained-evidence fallback in
+// every section, so a valid registry yields exactly one.
+func (r RecordKindRegistry) fallbackStatuses() []RecordKindStatus {
+	fallbacks := make(map[RecordKindStatus]bool, len(recordKindStatusClosedSet))
+	for _, harness := range r.sortedHarnesses() {
+		if status := r.Harnesses[harness].Fallback.Status; status != "" {
+			fallbacks[status] = true
+		}
+	}
+	var statuses []RecordKindStatus
+	for _, status := range recordKindStatusClosedSet {
+		if fallbacks[status] {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses
+}
+
+// statusProse describes the status closed set from the closed-set table and this
+// registry's own rows. What each status means, how many rows carry it, and
+// whether it is the open fallback are all read from the registry, so the text
+// cannot contradict a future declared status.
+func (r RecordKindRegistry) statusProse() string {
+	counts := r.statusRowCounts()
+	fallbacks := make(map[RecordKindStatus]bool, len(recordKindStatusClosedSet))
+	for _, status := range r.fallbackStatuses() {
+		fallbacks[status] = true
+	}
+	entries := make([]string, 0, len(recordKindStatusClosedSet))
+	for _, status := range recordKindStatusClosedSet {
+		note, ok := recordKindStatusNotes[status]
+		if !ok {
+			note = "no documented meaning; add one to recordKindStatusNotes"
+		}
+		entry := fmt.Sprintf("**%s** (%s) — %d rows", status, note, counts[status])
+		if counts[status] == 0 {
+			entry += ", declared by no kind in this build"
+		}
+		if fallbacks[status] {
+			entry += ", and the unseen-valid-kind fallback of every harness"
+		}
+		entries = append(entries, entry)
+	}
+	return strings.Join(entries, "; ") + "."
+}
+
+// Markdown renders the registry as the generated per-kind table owned by
+// docs/record-kinds.md. Harness sections sort by name; kinds keep file order.
+func (r RecordKindRegistry) Markdown() string {
+	var out strings.Builder
+	for _, harness := range r.sortedHarnesses() {
 		section := r.Harnesses[harness]
 		fmt.Fprintf(&out, "## %s (adapter %d, indexer %d)\n\n", string(harness), section.AdapterVersion, section.IndexerVersion)
 		fmt.Fprintf(&out, "Baseline index format: %d.\n\n", section.IndexVersion)
