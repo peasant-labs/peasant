@@ -152,8 +152,15 @@ func LoadRecordKindRegistry() (RecordKindRegistry, error) {
 }
 
 func generateRecordKindRegistry() (RecordKindRegistry, error) {
+	return generateRecordKindRegistryFrom(allRecordKindVocabularies())
+}
+
+// generateRecordKindRegistryFrom lowers the given adapter vocabularies. The
+// production path passes the registered vocabularies; a mutation fixture
+// passes a changed candidate to observe what the declarations alone decide.
+func generateRecordKindRegistryFrom(vocabularies []recordKindAdapterVocabulary) (RecordKindRegistry, error) {
 	registry := RecordKindRegistry{Version: recordKindsFormatVersion, Harnesses: make(map[Harness]RecordKindHarness, len(DefaultAdapterRegistry))}
-	for _, vocabulary := range allRecordKindVocabularies() {
+	for _, vocabulary := range vocabularies {
 		versions, ok := HarvesterVersionRegistry[vocabulary.Harness]
 		if !ok {
 			return RecordKindRegistry{}, fmt.Errorf("record-kind registry: harness %q has no harvester versions; register its parser targets before generating", vocabulary.Harness)

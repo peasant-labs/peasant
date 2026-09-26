@@ -1,0 +1,109 @@
+# Census of the production-owned Codex native event_msg declaration. The
+# membership cases pin the exact closed sets the replay dispatches and the
+# candidate boundary admits; the dispatch cases witness what each declared arm
+# does through the real production entry point.
+required_names:
+  - dispatch census membership
+  - candidate admission census membership
+  - declared events are admitted
+  - undeclared event retains opaque evidence
+  - usage mirror dispatches nothing
+  - user mirror dispatches nothing
+  - agent mirror dispatches nothing
+  - reasoning mirror dispatches nothing
+  - item start pends its identity
+  - opened turn completion is balanced
+  - opened task completion is balanced
+  - turn completion without an open turn is unbalanced
+  - task completion without an open turn is unbalanced
+  - aborted turn is reported
+  - paginated rollback is reported
+  - legacy rollback beyond history is reported
+  - unrecognized item variant is reported
+  - undeclared event dispatches nothing
+cases:
+  - name: dispatch census membership
+    census: dispatch
+    want:
+      - agent_message
+      - agent_reasoning
+      - item_completed
+      - item_started
+      - task_complete
+      - task_started
+      - thread_rolled_back
+      - token_count
+      - turn_aborted
+      - turn_complete
+      - turn_started
+      - user_message
+  - name: candidate admission census membership
+    census: native-only
+    want:
+      - item_completed
+      - item_started
+      - thread_rolled_back
+      - turn_complete
+      - turn_started
+  - name: declared events are admitted
+    admission: declared
+  - name: undeclared event retains opaque evidence
+    admission: undeclared
+    event: future_native_event
+  - name: usage mirror dispatches nothing
+    event: token_count
+    want_diagnostics: []
+  - name: user mirror dispatches nothing
+    event: user_message
+    want_diagnostics: []
+  - name: agent mirror dispatches nothing
+    event: agent_message
+    want_diagnostics: []
+  - name: reasoning mirror dispatches nothing
+    event: agent_reasoning
+    want_diagnostics: []
+  - name: item start pends its identity
+    event: item_started
+    payload: {id: "item-1"}
+    want_diagnostics: []
+    want_pending: [item-1]
+  - name: opened turn completion is balanced
+    events:
+      - {event: turn_started, payload: {turn_id: "turn-1"}}
+      - {event: turn_complete, payload: {turn_id: "turn-1"}}
+    want_diagnostics: []
+  - name: opened task completion is balanced
+    events:
+      - {event: task_started, payload: {turn_id: "turn-2"}}
+      - {event: task_complete, payload: {turn_id: "turn-2"}}
+    want_diagnostics: []
+  - name: turn completion without an open turn is unbalanced
+    event: turn_complete
+    payload: {turn_id: "turn-1"}
+    want_diagnostics: [codex_lifecycle_unbalanced]
+  - name: task completion without an open turn is unbalanced
+    event: task_complete
+    payload: {turn_id: "turn-1"}
+    want_diagnostics: [codex_lifecycle_unbalanced]
+  - name: aborted turn is reported
+    event: turn_aborted
+    payload: {turn_id: "turn-1"}
+    want_diagnostics: [codex_turn_aborted]
+  - name: paginated rollback is reported
+    event: thread_rolled_back
+    payload: {num_turns: 1}
+    mode: paginated
+    want_diagnostics: [codex_paginated_rollback_anomaly]
+  - name: legacy rollback beyond history is reported
+    event: thread_rolled_back
+    payload: {num_turns: 1}
+    mode: legacy
+    want_diagnostics: [codex_rollback_beyond_history]
+  - name: unrecognized item variant is reported
+    event: item_completed
+    payload: {item: {type: "FutureItem", id: "item-1", content: "future"}}
+    want_diagnostics: [codex_item_variant_unknown]
+    want_pending: [item-1]
+  - name: undeclared event dispatches nothing
+    event: future_native_event
+    want_diagnostics: []
