@@ -170,7 +170,7 @@ jobs:
     name: make check
     # The probe governs only the push runs; a skipped or failed probe runs the
     # gate, and the release-PR guard stays intact for every event.
-    needs: post-merge-evidence
+    needs: [determine-runner, post-merge-evidence]
     if: >-
       !cancelled() &&
       (needs.post-merge-evidence.result != 'success' ||
@@ -178,19 +178,35 @@ jobs:
       (github.event_name != 'pull_request' ||
        !startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
+    # Routed to the x86_64 pool. `make check` needs only the Go toolchain, a C
+    # compiler for `go vet`/cgo, and the ast-grep binary; it does not need the
+    # Nix devShell. The pool hands a lone job the whole 24-core pool budget
+    # (hosts/desktop/configuration.nix: pool cpuQuota 2400%, per-runner
+    # cpuWeight with no quota), against 2 vCPU on the arm64 Blacksmith runner.
+    #
     # The race detector is disabled on this gate for now: the release race suite
-    # does not fit the 30-minute budget even on 4 vCPU. cmd/peasant alone is an
-    # 18-minute race run and the full suite needs ~40 minutes, so the gate runs
-    # the suite without the detector. Re-enable by restoring the release-only
-    # predicate that used to live here --
+    # does not fit the 30-minute budget. cmd/peasant alone is an 18-minute race
+    # run and the full suite needs ~40 minutes, so the gate runs the suite
+    # without the detector. Re-enable by restoring the release-only predicate
+    # that used to live here --
     #   (startsWith(github.event.pull_request.title, 'release(') ||
     #    startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
     #    && '1' || '0'
     # -- once the test-performance work in #389 lands. Local `make check` keeps
     # RACE=1 (the Makefile default); see CONTRIBUTING.md.
+    # TMPDIR=/tmp is load-bearing on the pool, not a workaround. The pool
+    # exports its work dir as TMPDIR and that dir lives under the desktop user's
+    # home (~/.local/share/github-runner-containers/work/...), so every test temp
+    # path matches redact's built-in `unix_home_path` rule instead of the xdg_*
+    # rules the fixtures assert. The same check on Blacksmith sees
+    # /home/runner/work/_temp/... and classifies differently, so the metrics
+    # assertions were runner-shaped. /tmp keeps the harness paths out of any
+    # home directory, so the rule distribution is the same on every runner.
+    # fairtrade's ci.yml sets the same thing for the same class of reason.
     env:
       RACE: '0'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+      TMPDIR: /tmp
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30  # fail fast instead of wedging if the run hangs
     steps:
       - name: Checkout repository
@@ -198,8 +214,23 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # `make check` shells out to `ast-grep scan`. The devShell supplied it;
+      # the pool image does not, and it ships no unzip or python3 for the GitHub
+      # release zip, so install the prebuilt npm binary (glibc, linux-x64-gnu).
+      # Version pinned to the devShell's ast-grep so the rules keep their
+      # semantics; the scan itself stays the Makefile's, unchanged.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+
+      - name: Install ast-grep
+        run: npm install --global @ast-grep/cli@0.43.0
 
       # Cache the Go build + module dirs (the dominant cost is the `go test -race`
       # suite). The old DeterminateSystems/magic-nix-cache-action was REMOVED: it
@@ -216,7 +247,56 @@ jobs:
 
       # RACE comes from the job-level env above.
       - name: make check
-        run: nix develop -c make check RACE=${{ env.RACE }}
+        run: make check RACE=${{ env.RACE }}
+
+  # arm64 lane. `check` moved to the x86_64 pool, so arm64 signal would otherwise
+  # disappear from CI entirely. This keeps it on a subset rather than the whole
+  # suite: the full suite on both architectures doubles the Blacksmith bill the
+  # pool migration exists to cut, and the packages below are the ones that ship
+  # in the binary and carry the real architecture risk.
+  #
+  #   cmd/peasant   - the shipped CLI entry point
+  #   internal/ingest - the parser/hot path, also exercised by the harvester
+  #                     guard and the CGO=0 job
+  #
+  # Widen this list deliberately: a package added here is an arm64 gate on every
+  # PR. Narrowing it trades arm64 coverage for cost, so the tradeoff belongs in
+  # the PR description, not silently in this list.
+  check-arm64:
+    name: make check (arm64 subset)
+    needs: determine-runner
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' ||
+       !startsWith(github.event.pull_request.title, 'release(') ||
+       github.workflow == 'Release PR')
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    env:
+      RACE: '0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      - name: Cache Go build + modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-arm64-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: make web-stub
+        run: nix develop -c make web-stub
+
+      - name: arm64 subset
+        run: nix develop -c go test -timeout=30m ./cmd/peasant/... ./internal/ingest/...
 
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
@@ -288,7 +368,10 @@ jobs:
        github.event_name == 'workflow_dispatch') &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Routed to the x86_64 pool: this job is pure Go (build, test, `git archive`)
+    # and needs no Nix devShell.
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -296,8 +379,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
 
       - name: Cache Go build + modules
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -315,15 +400,13 @@ jobs:
       # index.html stub when one is absent. Belt-and-suspenders in case `make
       # clean` ever runs first.
       - name: Stub web/out embed
-        run: nix develop -c make web-stub
+        run: make web-stub
 
       - name: CGO=0 build + targeted tests
         run: |
-          nix develop -c bash -c '
-            set -euo pipefail
-            CGO_ENABLED=0 go build ./...
-            CGO_ENABLED=0 go test ./internal/config/ ./internal/ingest/ ./internal/e2e/
-          '
+          set -euo pipefail
+          CGO_ENABLED=0 go build ./...
+          CGO_ENABLED=0 go test ./internal/config/ ./internal/ingest/ ./internal/e2e/
 
       # Module-zip proxy gate. A Go module
       # zip (what `go install module@version` fetches) contains ONLY git-tracked
@@ -337,21 +420,14 @@ jobs:
       # web/out stub above does not leak into the test.
       - name: Module-zip go-install proxy (git archive HEAD -> build)
         run: |
-          # shellcheck disable=SC2016
-          # The script is single-quoted ON PURPOSE: $tmp / $(mktemp) must expand
-          # in the INNER `bash -c`, not the outer run shell. Single quotes pass it
-          # through literally. SC2016 ("expressions don't expand in single
-          # quotes") is therefore a false positive here.
-          nix develop -c bash -c '
-            set -euo pipefail
-            tmp="$(mktemp -d)"
-            trap "rm -rf \"$tmp\"" EXIT
-            git archive --format=tar HEAD | tar -x -C "$tmp"
-            cd "$tmp"
-            test -f web/out/.gitkeep || { echo "FAIL: web/out/.gitkeep not in HEAD (go:embed will break go install)"; exit 1; }
-            CGO_ENABLED=0 go build -buildvcs=false ./cmd/peasant
-            echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
-          '
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$tmp"
+          cd "$tmp"
+          test -f web/out/.gitkeep || { echo "FAIL: web/out/.gitkeep not in HEAD (go:embed will break go install)"; exit 1; }
+          CGO_ENABLED=0 go build -buildvcs=false ./cmd/peasant
+          echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
 
   # Dependency-license gate. Two invariants on the third-party Go modules
   # compiled into the binary:
