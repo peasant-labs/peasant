@@ -249,7 +249,10 @@ func (s *Service) ChangeDiff(ctx context.Context, projectHash schema.ProjectHash
 }
 
 // Search runs a global full-text search over recorded (redacted) message
-// entries. query is raw user input; it is sanitized into an
+// entries, with one exception: a query that is a complete, well-formed
+// session id (UUID or ses_-prefixed) or project hash (64 hex) short-circuits
+// to a direct by-id or by-hash lookup and never touches the FTS index.
+// query is raw user input; it is sanitized into an
 // FTS5 MATCH string (whitespace tokens, each quoted, implicit AND) so arbitrary
 // input — FTS5 operators, colons, unbalanced quotes — never errors. A query
 // shorter than searchMinQueryLen (after trimming) returns an empty payload
@@ -296,12 +299,16 @@ func (s *Service) SearchRankedWindow(ctx context.Context, query string, window, 
 }
 
 // searchRankedWindow is the shared implementation behind Search and
-// SearchRankedWindow: sanitize, read one ranked page, and shape the payload.
+// SearchRankedWindow: classify a raw id or hash ahead of the FTS path, then
+// sanitize, read one ranked page, and shape the payload.
 func (s *Service) searchRankedWindow(ctx context.Context, query string, limit, offset int) (*schema.SearchPayload, error) {
 	payload := schema.NewSearchPayload(query)
 
 	if len(strings.TrimSpace(query)) < searchMinQueryLen {
 		return payload, nil
+	}
+	if kind, id, hash := classifyDirectLookup(query); kind != directLookupNone {
+		return s.directLookup(ctx, payload, kind, id, hash, offset)
 	}
 	match := sanitizeFTSQuery(query)
 	if match == "" {

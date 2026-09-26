@@ -1,0 +1,15 @@
+requiredNames:
+  - uuid_direct_hit
+  - ses_direct_hit
+  - uuid_with_surrounding_spaces_direct_hit
+  - project_hash_direct_hit
+  - uuid_short_circuits_fts
+  - project_hash_short_circuits_fts
+  - unknown_uuid_returns_empty
+  - unknown_hash_returns_empty
+  - near_miss_short_hex_falls_through
+  - near_miss_bare_ses_prefix_falls_through
+  - near_miss_uppercase_uuid_falls_through
+  - plain_content_query_unchanged
+  - direct_hit_second_window_exhausted
+  - project_hit_second_window_exhausted
