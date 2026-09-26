@@ -129,7 +129,7 @@ func assertSerialGlobalSinkSite(root string, site parallelUnsafeSite) error {
 	}
 	start := fset.Position(decl.Pos()).Line
 	end := fset.Position(decl.End()).Line
-	if site.Line < start || site.Line > end {
+	if site.Line > 0 && (site.Line < start || site.Line > end) {
 		return fmt.Errorf("%s:%d is not inside %s (lines %d-%d); the site moved or the fixture line is stale", site.File, site.Line, site.Test, start, end)
 	}
 

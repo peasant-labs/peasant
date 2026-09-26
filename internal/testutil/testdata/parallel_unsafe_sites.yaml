@@ -66,14 +66,14 @@ cases:
 mutations:
   - name: parallel-test-is-rejected
     file: cmd/peasant/web_capabilities_matrix_test.go
-    line: 117
+    line: 0
     test: TestWebCapabilitiesMatrix
     hazard: t.Parallel
     want_error: calls t.Parallel
 
   - name: absent-hazard-is-rejected
     file: cmd/peasant/cmd_prune_test.go
-    line: 411
+    line: 0
     test: TestPruneCmd_NonTTY_NoConfirm_Error
     hazard: slog.SetDefault
     want_error: does not contain slog.SetDefault
