@@ -1,0 +1,56 @@
+# Shard-plan cases for scripts/testshard. Each case is a computed partition
+# input: a test list with per-test wall, env-bound flag, and serial flag, plus
+# the requested shard count. The test asserts the produced shards are an exact
+# partition (every test appears once), every shard is non-empty, and each
+# shard's -run regex matches exactly its own tests. `mutations` name corruption
+# cases that the audit must reject.
+required_names:
+  - balanced-two
+  - uneven-lpt
+  - single-shard
+  - zero-wall-defaults
+  - one-env-bound-heavy-shard
+
+mutations:
+  - duplicated-test
+  - dropped-test
+  - empty-shard
+
+cases:
+  - name: balanced-two
+    shards: 2
+    tests:
+      - { name: TestAlpha, wall_ms: 10, serial: true }
+      - { name: TestBeta, wall_ms: 10 }
+      - { name: TestGamma, wall_ms: 10, serial: true }
+      - { name: TestDelta, wall_ms: 10 }
+
+  - name: uneven-lpt
+    shards: 3
+    tests:
+      - { name: TestHeavy, wall_ms: 900, serial: true }
+      - { name: TestMediumA, wall_ms: 400 }
+      - { name: TestMediumB, wall_ms: 400 }
+      - { name: TestLightA, wall_ms: 100 }
+      - { name: TestLightB, wall_ms: 100, serial: true }
+      - { name: TestLightC, wall_ms: 100 }
+
+  - name: single-shard
+    shards: 1
+    tests:
+      - { name: TestOnly, wall_ms: 250, env_bound: true, serial: true }
+
+  - name: zero-wall-defaults
+    shards: 4
+    tests:
+      - { name: TestUnmeasuredA }
+      - { name: TestUnmeasuredB }
+      - { name: TestUnmeasuredC }
+      - { name: TestUnmeasuredD }
+
+  - name: one-env-bound-heavy-shard
+    shards: 2
+    tests:
+      - { name: TestEnvBoundHeavy, wall_ms: 500, env_bound: true, serial: true }
+      - { name: TestParallelA, wall_ms: 50 }
+      - { name: TestParallelB, wall_ms: 50 }
