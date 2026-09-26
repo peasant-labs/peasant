@@ -28,12 +28,14 @@ import (
 //go:embed testdata/authoritative-receipt-mismatches.yaml
 var authoritativeReceiptMismatchYAML []byte
 
+//go:embed testdata/authoritative-receipt-mismatches.manifest.yaml
+var authoritativeReceiptMismatchManifestYAML []byte
+
 var _ push.PipelineStore = (*testutil.StubPushStore)(nil)
 var _ push.PipelineStore = (*storepkg.Store)(nil)
 
 type authoritativeReceiptMismatchDocument struct {
-	ExpectedCaseCount int                                `yaml:"expectedCaseCount"`
-	Cases             []authoritativeReceiptMismatchCase `yaml:"cases"`
+	Cases []authoritativeReceiptMismatchCase `yaml:"cases"`
 }
 type authoritativeReceiptMismatchCase struct {
 	Name            string `yaml:"name"`
@@ -55,15 +57,21 @@ func loadAuthoritativeReceiptMismatchCases(t *testing.T) []authoritativeReceiptM
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("receipt mismatch corpus must have exact EOF: %v", err)
 	}
-	if doc.ExpectedCaseCount != 3 || len(doc.Cases) != doc.ExpectedCaseCount {
-		t.Fatalf("receipt mismatch rows=%d declared=%d", len(doc.Cases), doc.ExpectedCaseCount)
+	manifest, err := testutil.DecodeRequiredNamesManifest(authoritativeReceiptMismatchManifestYAML, "receipt mismatch")
+	if err != nil {
+		t.Fatal(err)
 	}
+	names := make([]string, 0, len(doc.Cases))
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
 		if c.Name == "" || c.Replacement == "" || len(c.Replacement) != 64 || c.ErrorContains == "" || seen[c.Name] || (c.Mismatch != "content" && c.Mismatch != "fingerprint" && c.Mismatch != "parent-fingerprint") || (c.Mismatch == "parent-fingerprint" && c.ParentSessionID == "") {
 			t.Fatalf("invalid receipt mismatch row: %+v", c)
 		}
 		seen[c.Name] = true
+		names = append(names, c.Name)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "receipt mismatch"); err != nil {
+		t.Fatal(err)
 	}
 	return doc.Cases
 }
