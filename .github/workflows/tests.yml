@@ -194,8 +194,18 @@ jobs:
     #    && '1' || '0'
     # -- once the test-performance work in #389 lands. Local `make check` keeps
     # RACE=1 (the Makefile default); see CONTRIBUTING.md.
+    # TMPDIR=/tmp is load-bearing on the pool, not a workaround. The pool
+    # exports its work dir as TMPDIR and that dir lives under the desktop user's
+    # home (~/.local/share/github-runner-containers/work/...), so every test temp
+    # path matches redact's built-in `unix_home_path` rule instead of the xdg_*
+    # rules the fixtures assert. The same check on Blacksmith sees
+    # /home/runner/work/_temp/... and classifies differently, so the metrics
+    # assertions were runner-shaped. /tmp keeps the harness paths out of any
+    # home directory, so the rule distribution is the same on every runner.
+    # fairtrade's ci.yml sets the same thing for the same class of reason.
     env:
       RACE: '0'
+      TMPDIR: /tmp
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30  # fail fast instead of wedging if the run hangs
     steps:

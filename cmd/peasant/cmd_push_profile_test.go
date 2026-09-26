@@ -143,6 +143,35 @@ func loadPushProfileFixtures(t *testing.T) pushProfileFixtures {
 	return fixtures
 }
 
+// unwritableParent returns a directory the push command must refuse to write a
+// profile into, whatever uid the test runs as.
+//
+// The production check is a real os.CreateTemp probe in the destination's parent
+// (see validateProfileDestination in cmd_push.go), so the fixture has to hand it
+// a parent that genuinely rejects a new file. A 0o500 directory is not enough:
+// root ignores the write bit, and the self-hosted container pool runs the agent
+// as container-root, so that fixture passed on Blacksmith and failed on the pool
+// while the surrounding cases were unaffected.
+//
+// A kernel pseudo-filesystem rejects file creation for every uid, root included,
+// so it keeps the branch exercisable on a root-runner container. Where none
+// exists (darwin), fall back to permission bits, which still enforce for the
+// non-root local developer the fixture is aimed at.
+func unwritableParent(t *testing.T, dir string) string {
+	t.Helper()
+	for _, candidate := range []string{"/proc", "/sys"} {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	parent := filepath.Join(dir, "read-only")
+	if err := os.Mkdir(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+	return parent
+}
+
 func TestPushCmd_Profile(t *testing.T) {
 	fixtures := loadPushProfileFixtures(t)
 	for _, c := range fixtures.Cases {
@@ -592,12 +621,7 @@ func TestPushCmd_ProfileInvalidPaths(t *testing.T) {
 				}
 				args = append(args, "--profile-trace", filepath.Join(alias, "profile.json"))
 			case "unwritable-parent":
-				parent := filepath.Join(dir, "read-only")
-				if err := os.Mkdir(parent, 0o500); err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
-				args[1] = filepath.Join(parent, "profile.json")
+				args[1] = filepath.Join(unwritableParent(t, dir), "profile.json")
 			case "no-credentials":
 				args = append(args, "--profile-trace", filepath.Join(dir, "trace.jsonl"))
 			case "symlink", "hardlink":
