@@ -58,8 +58,6 @@ type selectionStateExpected struct {
 	VisibleSessionCount int  `yaml:"visible_session_count"`
 }
 
-const selectionStateExpectedCaseCount = 9
-
 // selectionStatePathResolver treats the fixture's clean absolute paths as
 // already-resolved physical identities. Production uses
 // ingest.NewPhysicalPathResolver; this seam keeps store-backed fixture cases
@@ -79,7 +77,7 @@ func (selectionStatePathResolver) Resolve(dir string) (ingest.ClonePath, error) 
 // TestSelectionStateFixtureGuards can drive it directly with mutated bytes —
 // same split as project_resolution_test.go's decode/load pair.
 func decodeSelectionStateCorpus(data []byte) (testcase.Corpus[selectionStateInput, selectionStateExpected], error) {
-	manifest, err := testutil.DecodeSemanticManifest(selectionStateManifestYAML, "selection state")
+	manifest, err := testutil.DecodeRequiredNamesManifest(selectionStateManifestYAML, "selection state")
 	if err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, err
 	}
@@ -99,9 +97,9 @@ func decodeSelectionStateCorpus(data []byte) (testcase.Corpus[selectionStateInpu
 	}
 	// EXACT-manifest guard (mirrors project_resolution_manifest.yaml): a
 	// count-preserving swap that silently drops a real case and adds a
-	// filler with a different name is invisible to assert.RequireMin alone,
-	// but not to a manifest that independently names every required case.
-	if err := testutil.ValidateSemanticNames(manifest, names, "selection state"); err != nil {
+	// filler with a different name is invisible to any bare count, but not to
+	// a manifest that independently names every required case.
+	if err := testutil.ValidateRequiredNames(manifest, names, "selection state"); err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, err
 	}
 	return corpus, nil
@@ -113,7 +111,6 @@ func loadSelectionStateCorpus(t *testing.T) testcase.Corpus[selectionStateInput,
 	if err != nil {
 		t.Fatalf("load selection state fixture: %v", err)
 	}
-	assert.RequireMin(t, corpus, selectionStateExpectedCaseCount)
 	assert.RequireValid(t, corpus)
 	return corpus
 }
@@ -134,9 +131,9 @@ func TestSelectionStateFixtureGuards(t *testing.T) {
 	if _, err := decodeSelectionStateCorpus(trailing); err == nil {
 		t.Fatal("expected a trailing-document mutation to be rejected")
 	}
-	unknownManifestField := bytes.Replace(selectionStateManifestYAML, []byte("expectedCaseCount:"), []byte("unexpected: true\nexpectedCaseCount:"), 1)
-	if _, err := testutil.DecodeSemanticManifest(unknownManifestField, "selection state"); err == nil {
-		t.Fatal("expected an unknown-field manifest mutation to be rejected")
+	unknownManifestField := bytes.Replace(selectionStateManifestYAML, []byte("requiredNames:"), []byte("expectedCaseCount: 9\nrequiredNames:"), 1)
+	if _, err := testutil.DecodeRequiredNamesManifest(unknownManifestField, "selection state"); err == nil {
+		t.Fatal("expected a stray count field in the name-only manifest to be rejected")
 	}
 }
 
