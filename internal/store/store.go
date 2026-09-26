@@ -22,12 +22,14 @@ import (
 // many too, but the cost is amortized over the process lifetime.
 const DefaultPoolSize = 10
 
-// EnvPoolSize overrides the pool size. Each Open creates PoolSize connections
-// up front, and every connection re-parses the schema + runs the PRAGMAs — so
-// the test suite (which needs a single connection per Open across hundreds of
-// Opens) sets this to "1" to avoid opening DefaultPoolSize connections each
-// time. Mirrors the village backend's POOL_MAX_CONNS env knob. An explicit
-// WithPoolSize option takes precedence over this.
+// EnvPoolSize overrides the pool size. Each Open eagerly opens PoolSize
+// connections up front; the PRAGMAs run lazily, once per connection, on that
+// connection's first Take. The migration-state check runs once per Open, not
+// once per connection. The test suite opens hundreds of stores but takes only
+// one or two connections from each, so it sets this low to avoid opening
+// DefaultPoolSize connections every time. Mirrors the village backend's
+// POOL_MAX_CONNS env knob. An explicit WithPoolSize option takes precedence
+// over this.
 const EnvPoolSize = "PEASANT_DB_POOL_SIZE"
 
 // resolvePoolSize picks the pool size: an explicit WithPoolSize option wins,
@@ -314,10 +316,11 @@ func WithSkipMigrations() OpenOption {
 	return func(o *openOptions) { o.skipMigrations = true }
 }
 
-// WithPoolSize sets the SQLite connection-pool size for this Open. Use 1 for
-// single-threaded callers (e.g. tests, one-shot CLI commands) to avoid opening
-// DefaultPoolSize connections — each of which re-parses the schema and runs the
-// PRAGMAs. A value <= 0 falls back to the EnvPoolSize override / DefaultPoolSize.
+// WithPoolSize sets the SQLite connection-pool size for this Open. Use a small
+// value for callers that open many stores (e.g. tests, one-shot CLI commands)
+// to avoid eagerly opening DefaultPoolSize connections — only the connections
+// actually taken run their PRAGMAs. A value <= 0 falls back to the EnvPoolSize
+// override / DefaultPoolSize.
 func WithPoolSize(n int) OpenOption {
 	return func(o *openOptions) { o.poolSize = n }
 }
