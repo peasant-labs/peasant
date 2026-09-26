@@ -35,7 +35,9 @@ func TestRecordKindSurfaceCarriesNoVisualizationState(t *testing.T) {
 		}
 		for i := range value.NumField() {
 			field := value.Type().Field(i)
-			for _, name := range []string{field.Name, field.Tag.Get("yaml"), field.Tag.Get("json")} {
+			// The whole tag is scanned rather than one key at a time, so a
+			// serialized name is caught whichever tag namespace carries it.
+			for _, name := range []string{field.Name, string(field.Tag)} {
 				lowered := strings.ToLower(name)
 				for _, token := range recordKindConsumerScopeTokens {
 					if strings.Contains(lowered, token) {
