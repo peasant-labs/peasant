@@ -211,6 +211,12 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		return 2
 	}
 
+	budgetSeconds, budgetBasis, budgetPresent, err := resolveBudget(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testgate: %v\n", err)
+		return 2
+	}
+
 	checkStart, haveCheckStart := checkStartNS()
 	testStart := time.Now()
 	if haveCheckStart {
@@ -234,6 +240,7 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	ctx := context.Background()
 	streams := map[testgate.PassMode]map[string][]teststream.Record{}
 	walls := map[testgate.PassMode]time.Duration{}
+	var raceRecords, noRaceRecords []testgate.Record
 	var invocationErrors []string
 
 	if race {
@@ -253,8 +260,10 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		walls[testgate.ModeNoRace] = resB.Walls[testgate.ModeNoRace]
 		invocationErrors = append(invocationErrors, resA.Errors...)
 		invocationErrors = append(invocationErrors, resB.Errors...)
-		printRecords("race", resA.Records[testgate.ModeRace])
-		printRecords("no-race", resB.Records[testgate.ModeNoRace])
+		raceRecords = resA.Records[testgate.ModeRace]
+		noRaceRecords = resB.Records[testgate.ModeNoRace]
+		printRecords("race", raceRecords)
+		printRecords("no-race", noRaceRecords)
 	} else {
 		res, err := runner.Run(ctx, plan, testgate.ModeNoRace, false)
 		if err != nil {
@@ -264,7 +273,8 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		streams[testgate.ModeNoRace] = res.Streams[testgate.ModeNoRace]
 		walls[testgate.ModeNoRace] = res.Walls[testgate.ModeNoRace]
 		invocationErrors = append(invocationErrors, res.Errors...)
-		printRecords("no-race (single pass)", res.Records[testgate.ModeNoRace])
+		noRaceRecords = res.Records[testgate.ModeNoRace]
+		printRecords("no-race (single pass)", noRaceRecords)
 	}
 	testWall := time.Since(testStart)
 
@@ -289,7 +299,7 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	}
 	fmt.Printf("calibration L:          %.3f\n", calL)
 	printControls(concurrency, race)
-	printBudget(calL, testWall)
+	budgetFail := printBudget(calL, testWall, budgetSeconds, budgetBasis, budgetPresent)
 
 	fmt.Println()
 	fmt.Println("=== screen ===")
@@ -316,13 +326,98 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		}
 	}
 
+	report := testgate.Report{
+		SchemaVersion:    1,
+		Module:           plan.ModulePath,
+		Race:             race,
+		Concurrency:      concurrency,
+		GOMAXPROCS:       runtime.GOMAXPROCS(0),
+		ListWallMS:       plan.ListWall.Milliseconds(),
+		CombinedWallMS:   testWall.Milliseconds(),
+		Calibration:      testgate.Calibration{L: calL, ProbeMS: calRaw.Milliseconds(), ReferenceMS: testgate.CalibrationReferenceNS / int64(time.Millisecond), Inconclusive: calL > 4},
+		Records:          append(append([]testgate.ReportRecord{}, reportRecords(raceRecords)...), reportRecords(noRaceRecords)...),
+		Findings:         reportFindings(findings),
+		FailedTests:      reportTests(failed),
+		InvocationErrors: invocationErrors,
+	}
+	if haveCheckStart {
+		report.PreTestWallMS = testStart.Sub(checkStart).Milliseconds()
+	}
+	if race {
+		report.PassA = passReport("race", plan, testgate.ModeRace, walls[testgate.ModeRace], race)
+		report.PassB = passReport("no-race", plan, testgate.ModeNoRace, walls[testgate.ModeNoRace], race)
+	} else {
+		report.PassB = passReport("no-race (single pass)", plan, testgate.ModeNoRace, walls[testgate.ModeNoRace], race)
+	}
+	reportPath := filepath.Join(outDir, "report.json")
+	if err := testgate.WriteReport(reportPath, report); err != nil {
+		fmt.Fprintf(os.Stderr, "testgate: write report: %v\n", err)
+		return 2
+	}
+
 	fmt.Printf("\ntestgate: streams under %s\n", outDir)
-	if len(failed) > 0 || testgate.Fails(findings) || len(invocationErrors) > 0 {
+	fmt.Printf("testgate: report %s\n", reportPath)
+	if len(failed) > 0 || testgate.Fails(findings) || len(invocationErrors) > 0 || budgetFail {
 		fmt.Println("testgate: FAIL")
 		return 1
 	}
 	fmt.Println("testgate: PASS")
 	return 0
+}
+
+func reportRecords(records []testgate.Record) []testgate.ReportRecord {
+	out := make([]testgate.ReportRecord, 0, len(records))
+	for _, r := range records {
+		out = append(out, testgate.ReportRecord{
+			Unit:     r.Unit,
+			Class:    string(r.Class),
+			Pass:     r.Pass.String(),
+			WallMS:   r.Wall.Milliseconds(),
+			UserMS:   r.User.Milliseconds(),
+			SystemMS: r.System.Milliseconds(),
+		})
+	}
+	return out
+}
+
+func reportFindings(findings []testgate.Finding) []testgate.ReportFinding {
+	out := make([]testgate.ReportFinding, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, testgate.ReportFinding{
+			Rule: f.Rule, Severity: f.Severity.String(), What: f.What, Why: f.Why,
+			Where: f.Where, When: f.When, Means: f.Means, Fix: f.Fix,
+		})
+	}
+	return out
+}
+
+func reportTests(records []teststream.Record) []testgate.ReportTest {
+	out := make([]testgate.ReportTest, 0, len(records))
+	for _, r := range records {
+		out = append(out, testgate.ReportTest{Package: r.Package, Test: r.Test})
+	}
+	return out
+}
+
+// passReport counts the packages and tests a pass ran.
+func passReport(name string, plan *testgate.Plan, mode testgate.PassMode, wall time.Duration, race bool) *testgate.PassReport {
+	pkgs, tests := 0, 0
+	for _, p := range plan.Packages {
+		var n int
+		switch {
+		case mode == testgate.ModeRace:
+			n = len(p.RaceTests)
+		case race:
+			n = len(p.NoRaceTests)
+		default:
+			n = len(p.Tests)
+		}
+		if n > 0 {
+			pkgs++
+			tests += n
+		}
+	}
+	return &testgate.PassReport{Name: name, WallMS: wall.Milliseconds(), Packages: pkgs, Tests: tests}
 }
 
 func printRecords(label string, records []testgate.Record) {
@@ -347,18 +442,49 @@ func printControls(concurrency int, race bool) {
 	}
 }
 
-func printBudget(calL float64, testWall time.Duration) {
-	raw := budgetFromEnv()
-	if raw <= 0 {
+// printBudget reports the budget line and returns whether the gate should fail
+// on a budget miss. A miss fails closed, except that L > 4 is INCONCLUSIVE
+// (loud, exit 0) because a loaded box cannot be quoted against a reference
+// budget.
+func printBudget(calL float64, testWall time.Duration, seconds int, basis string, present bool) bool {
+	if !present {
 		fmt.Println("budget:                 none committed (a later commit pins the reference value); raw walls only")
-		return
+		return false
+	}
+	tag := ""
+	if basis != "" {
+		tag = " (" + basis + ")"
 	}
 	if calL > 4 {
-		fmt.Printf("budget:                 %ds reference; INCONCLUSIVE under load (L=%.3f), not failed\n", raw, calL)
-		return
+		fmt.Printf("budget:                 %ds reference%s; INCONCLUSIVE under load (L=%.3f), not failed\n", seconds, tag, calL)
+		return false
 	}
 	normalized := time.Duration(float64(testWall) / calL)
-	fmt.Printf("budget:                 %ds reference; normalized test wall %s (%s / L)\n", raw, round(normalized), round(testWall))
+	verdict := "PASS"
+	fail := false
+	if normalized > time.Duration(seconds)*time.Second {
+		verdict = "FAIL"
+		fail = true
+	}
+	fmt.Printf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> %s\n", seconds, tag, round(normalized), round(testWall), verdict)
+	return fail
+}
+
+// resolveBudget reads budget.yaml, then TEST_BUDGET, then reports no budget.
+// A malformed budget fixture is an error so a bad value cannot silently disable
+// the check.
+func resolveBudget(root string) (int, string, bool, error) {
+	b, found, err := testgate.LoadBudget(filepath.Join(root, "budget.yaml"))
+	if err != nil {
+		return 0, "", false, err
+	}
+	if found {
+		return b.Seconds, b.Basis, true, nil
+	}
+	if n := budgetFromEnv(); n > 0 {
+		return n, "TEST_BUDGET", true, nil
+	}
+	return 0, "", false, nil
 }
 
 func budgetFromEnv() int {
