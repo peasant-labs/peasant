@@ -17,15 +17,15 @@ entries:
   - { name: "cmd/peasant.TestBuildKickstartCommand_ResolvesMountedConfigPath", destination: retained-in-place }
   - { name: "cmd/peasant.TestBuildPruneFilter_DateParsing", destination: retained-in-place }
   - { name: "cmd/peasant.TestBuildPushWizardSessions_SelectionAware", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_AutoIngestNewBranches", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_BranchFilter", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ExplicitSessionID", destination: retained-in-place }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_AutoIngestNewBranches", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_BranchFilter", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ExplicitSessionID", destination: "followup:plabs-7v7gun" }
   - { name: "cmd/peasant.TestBuildSelectionFilter_Fixtures", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByName", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderImportAll", destination: retained-in-place }
-  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderNotInSelection", destination: retained-in-place }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProjectMatchByName", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderImportAll", destination: "followup:plabs-7v7gun" }
+  - { name: "cmd/peasant.TestBuildSelectionFilter_ProviderNotInSelection", destination: "followup:plabs-7v7gun" }
   - { name: "cmd/peasant.TestBuildSourceConfigs_DisabledProvider", destination: retained-in-place }
   - { name: "cmd/peasant.TestBuildSourceConfigs_EnabledBothProviders", destination: retained-in-place }
   - { name: "cmd/peasant.TestCLI_AnnotateCreateAndList", destination: retained-in-place }
@@ -308,7 +308,7 @@ entries:
   - { name: "cmd/peasant.TestProgressModelSuccessClears", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRendererCancellationAcknowledgment", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRendererFailureCancelsOperation", destination: retained-in-place }
-  - { name: "cmd/peasant.TestProgressRendererUsesGentleFrameRate", destination: retained-in-place }
+  - { name: "cmd/peasant.TestProgressRendererUsesGentleFrameRate", destination: "deleted:progress-program-fps-tuning-constant" }
   - { name: "cmd/peasant.TestProgressRenderer_IsTTY_NonFileWriter", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRenderer_Run_NonTTY", destination: retained-in-place }
   - { name: "cmd/peasant.TestProgressRenderer_Run_TTY_StartStop", destination: retained-in-place }
@@ -489,14 +489,14 @@ entries:
   - { name: "cmd/peasant.TestSessionsCmd_TagSubcommandExists", destination: retained-in-place }
   - { name: "cmd/peasant.TestSessionsCmd_TagSubcommandsExist", destination: retained-in-place }
   - { name: "cmd/peasant.TestSourceHarnessFlagMounted", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_Basic", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_MissingSession", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_NoEntries", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_FirstUserMessage_UnicodeSafe", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_All", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Limit", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Provider", destination: retained-in-place }
-  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_SessionID", destination: retained-in-place }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_Basic", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_MissingSession", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_NoEntries", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_FirstUserMessage_UnicodeSafe", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_All", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Limit", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_Provider", destination: "moved:internal/store/sessions_list_filter_test.go" }
+  - { name: "cmd/peasant.TestStore_ListSessionsFiltered_SessionID", destination: "moved:internal/store/sessions_list_filter_test.go" }
   - { name: "cmd/peasant.TestStoredSessionEntriesPublishedPreviewUsesFullCapture", destination: retained-in-place }
   - { name: "cmd/peasant.TestStoredSessionEntriesShowsAvailableContent", destination: retained-in-place }
   - { name: "cmd/peasant.TestStrikeIngestCommandAddsChildAfterParentSourceDisappears", destination: retained-in-place }
@@ -1380,7 +1380,7 @@ entries:
   - { name: "internal/ingest.TestCursorIndexer_UserQueryTagStripped", destination: retained-in-place }
   - { name: "internal/ingest.TestCursorSegmentVariants", destination: retained-in-place }
   - { name: "internal/ingest.TestDecodeClaudeSlug", destination: retained-in-place }
-  - { name: "internal/ingest.TestDecodeClaudeSlug_ParityWithLegacyInlineDecoder", destination: retained-in-place }
+  - { name: "internal/ingest.TestDecodeClaudeSlug_ParityWithLegacyInlineDecoder", destination: "deleted:claude-slug-parity-subset" }
   - { name: "internal/ingest.TestDecodeCursorSlug", destination: retained-in-place }
   - { name: "internal/ingest.TestDecodeCursorWorkspace", destination: retained-in-place }
   - { name: "internal/ingest.TestDeferredOpenCodeSourceCloseReleasesConnectionUnderCancelledContext", destination: retained-in-place }
@@ -1699,10 +1699,10 @@ entries:
   - { name: "internal/ingest.TestPhysicalPathResolver_UsesPhysicalDirectoryIdentity", destination: retained-in-place }
   - { name: "internal/ingest.TestPiCapturedAdmission", destination: retained-in-place }
   - { name: "internal/ingest.TestPiDiscoveryLocationsAndCandidates", destination: retained-in-place }
-  - { name: "internal/ingest.TestPiFixtureModelExpectationValidation", destination: retained-in-place }
-  - { name: "internal/ingest.TestPiNativeRegistryProjection", destination: retained-in-place }
+  - { name: "internal/ingest.TestPiFixtureModelExpectationValidation", destination: "moved:cmd/peasant/pi_native_integration_test.go" }
+  - { name: "internal/ingest.TestPiNativeRegistryProjection", destination: "moved:cmd/peasant/pi_native_integration_test.go" }
   - { name: "internal/ingest.TestPiReadPlacesRecordsAfterAStandInByTheBytesItRead", destination: retained-in-place }
-  - { name: "internal/ingest.TestPiSanitizedNativeRecording", destination: retained-in-place }
+  - { name: "internal/ingest.TestPiSanitizedNativeRecording", destination: "moved:cmd/peasant/pi_native_integration_test.go" }
   - { name: "internal/ingest.TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses", destination: retained-in-place }
   - { name: "internal/ingest.TestPiUnknownCarrierValidation", destination: retained-in-place }
   - { name: "internal/ingest.TestPiUnknownOriginalPayloadOracle", destination: retained-in-place }
@@ -1809,8 +1809,8 @@ entries:
   - { name: "internal/ingest.TestPipeline_RetainedUnknownKindsReachSummary", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaV8_DerivedAtNilWithoutStore", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaV8_DerivedAtPopulated", destination: retained-in-place }
-  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffFallsBackToFile", destination: retained-in-place }
-  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffUsesDBIngestedMs", destination: retained-in-place }
+  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffFallsBackToFile", destination: "followup:plabs-l4efgy" }
+  - { name: "internal/ingest.TestPipeline_SchemaV8_DiffUsesDBIngestedMs", destination: "followup:plabs-l4efgy" }
   - { name: "internal/ingest.TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaV8_V7MetadataParses", destination: retained-in-place }
   - { name: "internal/ingest.TestPipeline_SchemaVersionUpgrade_DiffUpdated", destination: retained-in-place }
