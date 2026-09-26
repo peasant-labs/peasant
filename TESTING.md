@@ -286,8 +286,12 @@ production **2 GiB** arena (`DefaultArenaSizeBytes`). With `t.Parallel` at
 `internal/ingest` `TestMain`s. The API test binary applies the same override for
 its mounted ingest paths, and E2E TestMain supplies it to the harness and CLI
 children. Result: `cmd/peasant -race` 2173–6267 MB →
-**240 MB**, `ingest` 6185 → **274 MB**; full `make check -race` runs ~26s and
-fits a **2-vcpu** runner (so the per-PR job stays a plain `make check`, no split).
+**240 MB**, `ingest` 6185 → **274 MB**. The memory result stands; the time claim
+that followed it did not. A re-measured full `make check -race` on a 32-thread
+box is **26m23.8s** for the race pass alone, plus **30.4s** for the no-race pass
+and **14.6s** of pre-test steps (calibration L=0.96) — not the ~26s once stated
+here, which was stale by roughly 60×. Whether a 2-vcpu runner can hold the
+per-PR job is a separate CI question and is not settled by this paragraph.
 
 ### How memory was profiled (different tools than time)
 
