@@ -1,7 +1,8 @@
 // Package storetest provides test helpers that use a pre-migrated "golden"
-// SQLite database to avoid paying the full migration cost (~371ms) in every
-// parallel test. The golden DB is shared by active tests and removed when the
-// last user of that shared template finishes.
+// SQLite database so a parallel test pays only a file copy and a connection
+// open instead of re-running the migration-state check. The golden DB is shared
+// by active tests and removed when the last user of that shared template
+// finishes.
 package storetest
 
 import (

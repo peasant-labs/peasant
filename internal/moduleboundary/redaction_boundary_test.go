@@ -410,9 +410,12 @@ func TestRedactionScannerHoldsALineAtTheRecordLimit(t *testing.T) {
 // ingested at all and its secrets never reached the redactor.
 //
 // Cost: the record has to be over the retired 10 MiB limit for the case to
-// mean anything, and redacting that much takes about half a second normally
-// and about six minutes under the race detector. The size is not negotiable,
-// so this is the price of proving the outcome on the real engine.
+// mean anything, and redacting that much takes about 24 seconds normally
+// (23.80 s as the minimum of five runs; 23.80-25.71 s spread). The race
+// detector adds roughly an order of magnitude: 346.7 s in an isolated run and
+// 438.6 s in an earlier, busier one, i.e. about 15-18x depending on machine
+// load. The size is not negotiable, so this is the price of proving the
+// outcome on the real engine.
 func TestRedactionEngineHandlesRecordOverTheOldLimit(t *testing.T) {
 	const oldScannerLimit = 10 << 20
 	const secret = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"

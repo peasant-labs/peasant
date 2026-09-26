@@ -63,6 +63,14 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
   `package ingest` test can import it without an import cycle; do not move the
   declaration into `internal/testutil`. `fsdecorator.FileSystem` mirrors
   `ingest.FileSystem`, and a contract test keeps them identical.
+- The decorators have two owners. `internal/testutil` owns the non-white-box
+  decorators. The white-box `internal/ingest/fsfault_test.go` owns the decorators
+  that need the package's unexported internals. Neither owner declares the shared
+  contract; both implement it.
+- The coverage map that records each moved, deleted, retained, or deferred test
+  name — its `Inventory` and `CoverageMap` schema, the closed destination set,
+  and the validators — lives in `internal/coveragemap`. `TESTING.md` describes
+  the map and the decorator owners.
 
 ## Types and boundaries
 
