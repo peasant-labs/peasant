@@ -127,6 +127,7 @@ func loadJourneyFixtures(raw []byte) ([]journeyFixture, error) {
 }
 
 func TestJourneyResultContract(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadJourneyFixtures(journeyContractYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +153,7 @@ func TestJourneyResultContract(t *testing.T) {
 }
 
 func TestJourneyFixtureStrictnessAndMutation(t *testing.T) {
+	t.Parallel()
 	if _, err := loadJourneyFixtures(append(journeyContractYAML, []byte("\n---\n{}\n")...)); err == nil {
 		t.Fatal("loader accepted a second YAML document")
 	}
@@ -172,6 +174,7 @@ func TestJourneyFixtureStrictnessAndMutation(t *testing.T) {
 }
 
 func TestPersistedReceiptRequiresCompleteAuthoritativeState(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadJourneyFixtures(journeyContractYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -194,6 +197,7 @@ func TestPersistedReceiptRequiresCompleteAuthoritativeState(t *testing.T) {
 }
 
 func TestJourneyRunnerUsesOneCancellationBoundary(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	runner := ftue.JourneyRunnerFunc(func(runCtx context.Context, _ ftue.JourneyRequest) (ftue.JourneyResult, error) {
@@ -205,6 +209,7 @@ func TestJourneyRunnerUsesOneCancellationBoundary(t *testing.T) {
 }
 
 func TestOrderedJourneyRunnerRejectsFailedStageClaims(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadJourneyFixtures(journeyContractYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +233,7 @@ func TestOrderedJourneyRunnerRejectsFailedStageClaims(t *testing.T) {
 }
 
 func TestOrderedJourneyRunnerResumesAtFailedWork(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadJourneyRetryFixtures(journeyRetryYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -275,6 +281,7 @@ func TestOrderedJourneyRunnerResumesAtFailedWork(t *testing.T) {
 }
 
 func TestOrderedJourneyRunnerClassifiesOperationCancellation(t *testing.T) {
+	t.Parallel()
 	prior := []ftue.PersistedEffect{{Stage: ftue.StageConfig, Status: ftue.StatusPersisted}}
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
@@ -298,6 +305,7 @@ func TestOrderedJourneyRunnerClassifiesOperationCancellation(t *testing.T) {
 }
 
 func TestOrderedJourneyRunnerPreservesTargetWithoutDurableIdentity(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
 		ftue.StageIngest: func(context.Context, ftue.JourneyRequest) ([]ftue.PersistedEffect, []ftue.RetryTarget, error) {
@@ -316,6 +324,7 @@ func TestOrderedJourneyRunnerPreservesTargetWithoutDurableIdentity(t *testing.T)
 }
 
 func TestOrderedJourneyRunnerAdvancesFullyCompletedCancelledStage(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
 		ftue.StagePublication: func(context.Context, ftue.JourneyRequest) ([]ftue.PersistedEffect, []ftue.RetryTarget, error) {
@@ -337,6 +346,7 @@ func TestOrderedJourneyRunnerAdvancesFullyCompletedCancelledStage(t *testing.T) 
 }
 
 func TestOrderedJourneyRunnerSubtractsDurableHookEvidenceOnCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	target := ftue.RetryTarget{Stage: ftue.StageHooks, Repository: "/tmp/repository", Events: []githooks.Event{githooks.EventPostCommit, githooks.EventPrePush}}
 	runner := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
@@ -359,6 +369,7 @@ func TestOrderedJourneyRunnerSubtractsDurableHookEvidenceOnCancellation(t *testi
 }
 
 func TestOrderedJourneyRunnerResumesPartialIngestAcrossBothFlows(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	first := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
 		ftue.StageIngest: func(context.Context, ftue.JourneyRequest) ([]ftue.PersistedEffect, []ftue.RetryTarget, error) {
@@ -378,6 +389,7 @@ func TestOrderedJourneyRunnerResumesPartialIngestAcrossBothFlows(t *testing.T) {
 }
 
 func TestOrderedJourneyRunnerResumesPartialPublicationAcrossBothFlows(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	first := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
 		ftue.StagePublication: func(context.Context, ftue.JourneyRequest) ([]ftue.PersistedEffect, []ftue.RetryTarget, error) {
@@ -397,6 +409,7 @@ func TestOrderedJourneyRunnerResumesPartialPublicationAcrossBothFlows(t *testing
 }
 
 func TestOrderedJourneyRunnerResumesHookByConsentIdentity(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	target := ftue.RetryTarget{Stage: ftue.StageHooks, Repository: "relative/repository", Events: []githooks.Event{githooks.EventPostCommit, githooks.EventPrePush}}
 	first := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
@@ -425,6 +438,7 @@ func TestOrderedJourneyRunnerResumesHookByConsentIdentity(t *testing.T) {
 }
 
 func TestOrderedJourneyRunnerPreservesRetryOnOperationFailure(t *testing.T) {
+	t.Parallel()
 	target := ftue.RetryTarget{Stage: ftue.StagePublication, SessionIDs: []string{"session-pending"}}
 	runner := ftue.OrderedJourneyRunner{Operations: map[ftue.ExecutionStage]ftue.StageOperation{
 		ftue.StagePublication: func(context.Context, ftue.JourneyRequest) ([]ftue.PersistedEffect, []ftue.RetryTarget, error) {

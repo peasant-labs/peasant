@@ -415,6 +415,7 @@ func loadGroupRowFixtures(t *testing.T) groupRowFixtures {
 // The deeper rows are then opened through the production key handler, so every
 // row this test reads is a row the wizard drew for a state a user can reach.
 func TestWizardGroupRows_DisclosesConflictInTheDrawnFrame(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadGroupRowFixtures(t).Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			selection := fixture.selection()
