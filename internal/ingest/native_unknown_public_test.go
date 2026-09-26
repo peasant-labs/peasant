@@ -116,6 +116,7 @@ func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context
 var _ ingest.NativeGenerationActivator = (*nativeUnknownFailingStore)(nil)
 
 func TestNativeUnknownSourceToPublication(t *testing.T) {
+	t.Parallel()
 	doc := loadNativeUnknownPublic(t)
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {

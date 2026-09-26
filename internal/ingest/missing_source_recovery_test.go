@@ -87,10 +87,12 @@ func loadMissingSourceRecoveryFixture(t *testing.T) missingSourceRecoveryFixture
 }
 
 func TestMissingSourceRecoveryFixtureGuards(t *testing.T) {
+	t.Parallel()
 	loadMissingSourceRecoveryFixture(t)
 }
 
 func TestPipeline_AutoDetectMissingSourcesKeepsExistingEntriesStale(t *testing.T) {
+	t.Parallel()
 	fixture := loadMissingSourceRecoveryFixture(t)
 	for _, fixtureCase := range fixture.Cases {
 		fixtureCase := fixtureCase

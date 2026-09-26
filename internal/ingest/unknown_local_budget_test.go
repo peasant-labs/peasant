@@ -32,6 +32,7 @@ import (
 var unknownLocalBudgetYAML []byte
 
 func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Payload       string   `yaml:"payload"`
@@ -61,6 +62,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			fs := &ingest.OSFileSystem{}
 			// Use ordinary word-separated source text rather than a multi-megabyte
