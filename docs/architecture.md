@@ -10,10 +10,13 @@ This page shows how the parts of Peasant connect. It goes from the high level to
 6. [Call sequences](#call-sequences): the same flows at the level of functions and files.
 7. [Package map](#package-map): the role of each package under `internal/` and `cmd/`.
 
-The static and dynamic diagrams use the C4 model in the ASCII notation of
-[`.claude/skills/c4-model`](../.claude/skills/c4-model/SKILL.md). Every `c4` block passes
-`python3 .claude/skills/c4-model/scripts/c4-lint.py docs/architecture.md`. The call sequences
-are plain lifeline diagrams. They are not C4 diagrams and the lint does not check them.
+All diagrams are Mermaid, so GitHub renders them in place. The structural views follow the C4
+model vocabulary of [`.claude/skills/c4-model`](../.claude/skills/c4-model/SKILL.md) and
+are drawn as Mermaid flowcharts: each box names its element, its C4 type in square brackets,
+and a short description, and a dashed outline marks a boundary. Every arrow is one relationship,
+read as "source, label (technology), target". The dynamic views and the call sequences are
+Mermaid sequence diagrams. Colors follow the C4 convention: dark blue for people, blue for
+Peasant's own elements, and grey for external systems.
 
 The libraries `github.com/peasant-labs/schema`, `github.com/peasant-labs/redact`, and
 `@peasant-labs/fairtrade` are not containers. They show as technology text or in the package
@@ -57,56 +60,29 @@ Relationships:
 | peasant | models.dev | syncs model prices | HTTPS | `peasant models sync` |
 | peasant | GitHub Releases | downloads upgrades | HTTPS | `peasant upgrade` |
 
-```c4
-System Context diagram: peasant
+```mermaid
+flowchart TB
+  dev["<b>developer</b><br/>[Person]<br/>Works with AI coding agents<br/>and reviews the sessions."]:::person
+  peasant["<b>peasant</b><br/>[Software System]<br/>Harvests, indexes, shows, and<br/>publishes agent sessions."]:::system
+  stores["<b>agent session stores</b><br/>[Software System, external]<br/>Claude Code, Codex, Cursor,<br/>OpenCode, Pi, and Strike."]:::external
+  git["<b>git repository</b><br/>[Software System, external]<br/>The project repository<br/>of the developer."]:::external
+  village["<b>village</b><br/>[Software System, external]<br/>Registry and commons for<br/>published transcripts."]:::external
+  models["<b>models.dev</b><br/>[Software System, external]<br/>Public catalog of model<br/>prices and limits."]:::external
+  releases["<b>GitHub Releases</b><br/>[Software System, external]<br/>Hosts the peasant<br/>release archives."]:::external
 
-+----------------------------+
-| developer                  |
-| [Person]                   |
-| Works with AI coding       |
-| agents and reviews them.   |
-+----------------------------+
-        | runs commands and opens the local web app (terminal, browser)
-        v
-+----------------------------+                                       +-----------------------------+
-| peasant                    |                                       | agent session stores        |
-| [Software System]          |-- reads sessions (JSONL, SQLite) ---->| [Software System, external] |
-| Harvests local agent       |                                       | Claude Code, Codex, Cursor, |
-| sessions, indexes them,    |                                       | OpenCode, Pi, and Strike.   |
-| shows them in a local      |                                       +-----------------------------+
-| web app, and publishes     |
-| the sessions that the      |                                       +-----------------------------+
-| developer selects.         |                                       | git repository              |
-|                            |-- reads commits, sets hooks (git) --->| [Software System, external] |
-|                            |<-- runs the upload hook (shell) ------| The project repository      |
-|                            |                                       | of the developer.           |
-|                            |                                       +-----------------------------+
-|                            |
-|                            |                                       +-----------------------------+
-|                            |                                       | village                     |
-|                            |-- publishes and pulls (HTTPS) ------->| [Software System, external] |
-|                            |                                       | Registry and commons for    |
-|                            |                                       | published transcripts.      |
-|                            |                                       +-----------------------------+
-|                            |
-|                            |                                       +-----------------------------+
-|                            |                                       | models.dev                  |
-|                            |-- syncs model prices (HTTPS) -------->| [Software System, external] |
-|                            |                                       | Public catalog of model     |
-|                            |                                       | prices and limits.          |
-|                            |                                       +-----------------------------+
-|                            |
-|                            |                                       +-----------------------------+
-|                            |                                       | GitHub Releases             |
-|                            |-- downloads upgrades (HTTPS) -------->| [Software System, external] |
-|                            |                                       | Hosts the peasant release   |
-|                            |                                       | archives.                   |
-+----------------------------+                                       +-----------------------------+
+  dev -->|"runs commands and opens the local web app<br/>(terminal, browser)"| peasant
+  peasant -->|"reads sessions<br/>(JSONL, SQLite)"| stores
+  peasant -->|"reads commits, sets hooks<br/>(git CLI)"| git
+  git -->|"runs the upload hook<br/>(shell)"| peasant
+  peasant -->|"publishes and pulls<br/>(HTTPS)"| village
+  peasant -->|"syncs model prices<br/>(HTTPS)"| models
+  peasant -->|"downloads upgrades<br/>(HTTPS)"| releases
 
-Key:
-  Solid box = element. Double-line box = boundary. [Type] = C4 abstraction.
-  "external" = outside the scope of this diagram. Arrow = one relationship, read as
-  "source, label (technology), target".
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
 ## Containers
@@ -142,63 +118,39 @@ Relationships:
 | peasant binary | git repository | reads the log and sets hooks | git CLI |
 | peasant binary | village | publishes and pulls | HTTPS, JSON, multipart |
 
-```c4
-Container diagram: peasant
+```mermaid
+flowchart TB
+  dev["<b>developer</b><br/>[Person]<br/>Works with AI coding agents<br/>and reviews the sessions."]:::person
 
-   +----------------------------+
-   | developer                  |
-   | [Person]                   |-- runs peasant commands (terminal) -----------+
-   | Works with AI coding       |                                               |
-   | agents and reviews them.   |                                               |
-   +----------------------------+                                               |
-                              | opens localhost:8690                            |
-                              | (browser)                                       |
-+== peasant [Software System] |=================================================|==================+
-|                             v                                                 v                  |
-|  +----------------------------+                                 +-----------------------------+  |
-|  | peasant web app            |                                 | peasant binary              |  |
-|  | [Container: Next.js 15]    |-- calls the API (HTTP, WS) ---->| [Container: Go]             |  |
-|  | Static SPA. Renders        |                                 | One static binary. CLI      |  |
-|  | transcripts with           |                                 | commands harvest, index,    |  |
-|  | fairtrade. Hosts /share.   |                                 | publish, and pull. Under    |  |
-|  +----------------------------+                                 | web start, it serves        |  |
-|                                                                 | REST, WebSocket, and the    |  |
-|  +----------------------------+                                 | embedded web app.           |  |
-|  | analytics database         |                                 |                             |  |
-|  | [Container: SQLite]        |<-- reads and writes (SQL) ------|                             |  |
-|  | peasant.db: sessions,      |                                 |                             |  |
-|  | entries, commits, pubs.    |                                 |                             |  |
-|  +----------------------------+                                 |                             |  |
-|                                                                 |                             |  |
-|  +----------------------------+                                 |                             |  |
-|  | sync tree                  |                                 |                             |  |
-|  | [Container: JSONL files]   |<-- writes and reads (files) ----|                             |  |
-|  | peasant-sync: saved        |                                 |                             |  |
-|  | transcript copies.         |                                 |                             |  |
-|  +----------------------------+                                 |                             |  |
-|                                                                 |                             |  |
-|  +----------------------------+                                 |                             |  |
-|  | settings files             |                                 |                             |  |
-|  | [Container: YAML, JSON]    |<-- reads, writes (YAML, JSON) --|                             |  |
-|  | config.yaml, credentials.  |                                 |                             |  |
-|  +----------------------------+                                 +-----------------------------+  |
-|                                                                   |   |           |              |
-+===================================================================|===|===========|==============+
-          +-- reads session files and rows (JSONL, SQLite) ---------+   |           | publishes
-          |                                                             |           | and pulls
-          |                         +-- reads log, sets hooks (git) ----+           | (HTTPS, JSON)
-          |                         |                                               |
-          v                         v                                               v
-+-----------------------------+   +-----------------------------+   +-----------------------------+
-| agent session stores        |   | git repository              |   | village                     |
-| [Software System, external] |   | [Software System, external] |   | [Software System, external] |
-| Local harness stores.       |   | The project repository.     |   | Transcript registry.        |
-+-----------------------------+   +-----------------------------+   +-----------------------------+
+  subgraph peasant["peasant [Software System]"]
+    web["<b>peasant web app</b><br/>[Container: Next.js 15]<br/>Static SPA. Renders transcripts<br/>with fairtrade. Hosts /share."]:::container
+    bin["<b>peasant binary</b><br/>[Container: Go]<br/>CLI commands. Under web start,<br/>serves REST, WebSocket, and the SPA."]:::container
+    db[("<b>analytics database</b><br/>[Container: SQLite]<br/>peasant.db: sessions, entries,<br/>commits, publications, pulls.")]:::container
+    sync[("<b>sync tree</b><br/>[Container: JSONL files]<br/>peasant-sync transcript copies<br/>and village-pulls downloads.")]:::container
+    settings[("<b>settings files</b><br/>[Container: YAML, JSON]<br/>config.yaml and<br/>credentials.json.")]:::container
+  end
 
-Key:
-  Solid box = element. Double-line box = boundary. [Type] = C4 abstraction.
-  "external" = outside the scope of this diagram. Arrow = one relationship, read as
-  "source, label (technology), target".
+  stores["<b>agent session stores</b><br/>[Software System, external]<br/>Local harness stores."]:::external
+  git["<b>git repository</b><br/>[Software System, external]<br/>The project repository."]:::external
+  village["<b>village</b><br/>[Software System, external]<br/>Transcript registry."]:::external
+
+  dev -->|"opens localhost:8690<br/>(browser)"| web
+  dev -->|"runs peasant commands<br/>(terminal)"| bin
+  web -->|"calls the API<br/>(HTTP REST, WebSocket)"| bin
+  bin -->|"reads and writes<br/>(SQL)"| db
+  bin -->|"writes and reads<br/>(files)"| sync
+  bin -->|"reads and writes<br/>(YAML, JSON)"| settings
+  bin -->|"reads session files and rows<br/>(JSONL, SQLite)"| stores
+  bin -->|"reads the log, sets hooks<br/>(git CLI)"| git
+  bin -->|"publishes and pulls<br/>(HTTPS, JSON, multipart)"| village
+
+  style peasant fill:none,stroke:#444,stroke-dasharray:6 4
+
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
 ## Components
@@ -220,63 +172,38 @@ one central lowering in `record_kinds_lowering.go` decides the stored entry shap
 | harness adapters | `internal/ingest` | `SourceAdapter`, `TranscriptIndexer`, and vocabulary per harness. |
 | store | `internal/store` | SQLite schema, migrations, readers, and writers. |
 
-```c4
-Component diagram: peasant binary, harvest path
+```mermaid
+flowchart TB
+  dev["<b>developer</b><br/>[Person]"]:::person
 
-   +----------------------------+
-   | developer                  |
-   | [Person]                   |
-   +----------------------------+
-          | runs peasant harvest (terminal)
-          |
-+=========|========================== peasant binary [Container: Go] ==============================+
-|         v                                                                                        |
-|  +----------------------------+                                 +-----------------------------+  |
-|  | cli                        |                                 | config                      |  |
-|  | [Component: Go, Cobra]     |-- loads settings (Go call) ---->| [Component: Go package]     |  |
-|  | cmd/peasant: runHarvest    |                                 | internal/config: settings,  |  |
-|  | builds the pipeline.       |                                 | selection matcher.          |  |
-|  +----------------------------+                                 +-----------------------------+  |
-|         | runs Pipeline.Run (Go call)                                                            |
-|         |                                                                                        |
-|         v                                                                                        |
-|  +----------------------------+                                 +-----------------------------+  |
-|  | ingest pipeline            |                                 | harness adapters            |  |
-|  | [Component: Go package]    |-- parses sessions (Go call) --->| [Component: Go package]     |  |
-|  | internal/ingest: discover, |                                 | Adapter, indexer, and       |  |
-|  | diff, filter, write,       |                                 | vocabulary for each         |  |
-|  | mirror, index, compute.    |                                 | harness.                    |  |
-|  |                            |                                 +-----------------------------+  |
-|  |                            |                                               |                  |
-|  |                            |                                               |                  |
-|  |                            |                                               | reads files      |
-|  |                            |-- writes copies (files) --+                   | and rows         |
-|  |                            |                           |                   | (JSONL,          |
-|  |                            |                           |                   | SQLite)          |
-|  +----------------------------+                           |                   |                  |
-|         | mirrors and indexes (Go call)                   |                   |                  |
-|         |                                                 |                   |                  |
-|         v                                                 |                   |                  |
-|  +----------------------------+                           |                   |                  |
-|  | store                      |                           |                   |                  |
-|  | [Component: Go package]    |                           |                   |                  |
-|  | internal/store: SQLite     |                           |                   |                  |
-|  | schema and queries.        |                           |                   |                  |
-|  +----------------------------+                           |                   |                  |
-|         |                                                 |                   |                  |
-+=========|=================================================|===================|==================+
-          | reads and writes                                |                   |
-          | (SQL, sqlite)                                   |                   |
-          v                                                 v                   v
-+-----------------------------+   +-----------------------------+   +-----------------------------+
-| analytics database          |   | sync tree                   |   | agent session stores        |
-| [Container: SQLite]         |   | [Container: JSONL files]    |   | [Software System, external] |
-+-----------------------------+   +-----------------------------+   +-----------------------------+
+  subgraph binary["peasant binary [Container: Go]"]
+    cli["<b>cli</b><br/>[Component: Go, Cobra]<br/>cmd/peasant: runHarvest<br/>builds the pipeline."]:::component
+    config["<b>config</b><br/>[Component: Go package]<br/>internal/config: settings<br/>and SelectionMatcher."]:::component
+    pipeline["<b>ingest pipeline</b><br/>[Component: Go package]<br/>internal/ingest: discover, diff,<br/>filter, write, mirror, index, compute."]:::component
+    adapters["<b>harness adapters</b><br/>[Component: Go package]<br/>Adapter, indexer, and<br/>vocabulary for each harness."]:::component
+    store["<b>store</b><br/>[Component: Go package]<br/>internal/store: SQLite<br/>schema and queries."]:::component
+  end
 
-Key:
-  Solid box = element. Double-line box = boundary. [Type] = C4 abstraction.
-  "external" = outside the scope of this diagram. Arrow = one relationship, read as
-  "source, label (technology), target".
+  db[("<b>analytics database</b><br/>[Container: SQLite]")]:::container
+  sync[("<b>sync tree</b><br/>[Container: JSONL files]")]:::container
+  stores["<b>agent session stores</b><br/>[Software System, external]"]:::external
+
+  dev -->|"runs peasant harvest<br/>(terminal)"| cli
+  cli -->|"loads settings<br/>(Go call)"| config
+  cli -->|"runs Pipeline.Run<br/>(Go call)"| pipeline
+  pipeline -->|"discovers and parses sessions<br/>(Go call)"| adapters
+  adapters -->|"reads files and rows<br/>(JSONL, SQLite)"| stores
+  pipeline -->|"writes transcript copies<br/>(files)"| sync
+  pipeline -->|"mirrors and indexes<br/>(Go call)"| store
+  store -->|"reads and writes<br/>(SQL)"| db
+
+  style binary fill:none,stroke:#444,stroke-dasharray:6 4
+
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
 ### Serve and publish path
@@ -291,7 +218,8 @@ and session detail. The REST routes serve lists, the code map, review, annotatio
 | api | `internal/api` | `Server`, `Hub`, `StoreDataProvider`, `spaHandler`, sync handler. |
 | transcript | `internal/transcript` | `EntriesToTurns`, `SessionToDetail`, snapshot detail builders. |
 | push | `internal/push` | Target selection, preflight, re-redaction, mapping, upload, receipts. |
-| village client | `internal/village`, `internal/auth` | Village HTTP client and the loopback OAuth login. |
+| village client | `internal/village` | Village HTTP client for publish, pull, and schema negotiation. |
+| auth | `internal/auth` | Loopback OAuth login and `credentials.json`. |
 | store | `internal/store` | Same component as on the harvest path. |
 
 The canonical detail path is `store` entries, then `transcript.EntriesToTurns`, then
@@ -299,64 +227,42 @@ The canonical detail path is `store` entries, then `transcript.EntriesToTurns`, 
 over it. Sessions indexed into a managed generation take the snapshot branch,
 `transcript.BuildSnapshotDetailBytes`, which produces the same `SessionDetailPayload`.
 
-```c4
-Component diagram: peasant binary, serve and publish path
+```mermaid
+flowchart TB
+  web["<b>peasant web app</b><br/>[Container: Next.js 15]"]:::container
 
-   +----------------------------+
-   | peasant web app            |
-   | [Container: Next.js 15]    |
-   +----------------------------+
-          | calls REST and
-          | WebSocket (HTTP, WS)
-          |
-+=========|========================== peasant binary [Container: Go] ==============================+
-|         v                                                                                        |
-|  +----------------------------+                                 +-----------------------------+  |
-|  | api                        |                                 | transcript                  |  |
-|  | [Component: Go package]    |-- builds detail (Go call) ----->| [Component: Go package]     |  |
-|  | internal/api: routes,      |                                 | Builds turns and the        |  |
-|  | WebSocket hub, SPA         |                                 | session detail payload.     |  |
-|  | handler, sync handler.     |                                 +-----------------------------+  |
-|  |                            |                                                                  |
-|  |                            |                                                                  |
-|  |                            |                                 +-----------------------------+  |
-|  |                            |                                 | push                        |  |
-|  |                            |-- runs publish (Go call) ------>| [Component: Go package]     |  |
-|  |                            |                                 | internal/push: redacts,     |  |
-|  |                            |                                 | maps, and uploads the       |  |
-|  |                            |                                 | selected sessions.          |  |
-|  |                            |                                 |                             |  |
-|  +----------------------------+                                 |                             |  |
-|         | reads sessions (Go call)                              |                             |  |
-|         |                                                       |                             |  |
-|         v                                                       |                             |  |
-|  +----------------------------+                                 |                             |  |
-|  | store                      |                                 |                             |  |
-|  | [Component: Go package]    |<-- reads rows (Go call) --------|                             |  |
-|  | internal/store: SQLite     |                                 +-----------------------------+  |
-|  | schema and queries.        |                                               | uploads          |
-|  +----------------------------+                                               | (Go call)        |
-|         |                                                                     v                  |
-|         | reads and writes                                      +-----------------------------+  |
-|         | (SQL, sqlite)                                         | village client              |  |
-|         |                                                       | [Component: Go package]     |  |
-|         |                                                       | internal/village and        |  |
-|         |                                                       | internal/auth.              |  |
-|         |                                                       +-----------------------------+  |
-|         |                                                                     |                  |
-+=========|=====================================================================|==================+
-          |                                                                     | sends requests
-          |                                                                     | (HTTPS, JSON)
-          v                                                                     v
-+-----------------------------+                                     +-----------------------------+
-| analytics database          |                                     | village                     |
-| [Container: SQLite]         |                                     | [Software System, external] |
-+-----------------------------+                                     +-----------------------------+
+  subgraph binary["peasant binary [Container: Go]"]
+    api["<b>api</b><br/>[Component: Go package]<br/>internal/api: routes, WebSocket hub,<br/>SPA handler, sync handler."]:::component
+    transcript["<b>transcript</b><br/>[Component: Go package]<br/>Builds turns and the<br/>session detail payload."]:::component
+    push["<b>push</b><br/>[Component: Go package]<br/>internal/push: redacts, maps,<br/>and uploads selected sessions."]:::component
+    vclient["<b>village client</b><br/>[Component: Go package]<br/>internal/village:<br/>Village HTTP client."]:::component
+    auth["<b>auth</b><br/>[Component: Go package]<br/>internal/auth: loopback<br/>OAuth login."]:::component
+    store["<b>store</b><br/>[Component: Go package]<br/>internal/store: SQLite<br/>schema and queries."]:::component
+  end
 
-Key:
-  Solid box = element. Double-line box = boundary. [Type] = C4 abstraction.
-  "external" = outside the scope of this diagram. Arrow = one relationship, read as
-  "source, label (technology), target".
+  db[("<b>analytics database</b><br/>[Container: SQLite]")]:::container
+  settings[("<b>settings files</b><br/>[Container: YAML, JSON]")]:::container
+  village["<b>village</b><br/>[Software System, external]"]:::external
+
+  web -->|"calls REST and WebSocket<br/>(HTTP, WS)"| api
+  api -->|"reads sessions<br/>(Go call)"| store
+  api -->|"builds session detail<br/>(Go call)"| transcript
+  api -->|"runs the publish pipeline<br/>(Go call)"| push
+  api -->|"loads credentials, starts login<br/>(Go call)"| auth
+  push -->|"reads publication input, saves receipts<br/>(Go call)"| store
+  push -->|"uploads<br/>(Go call)"| vclient
+  auth -->|"reads and writes credentials.json<br/>(file)"| settings
+  auth -->|"exchanges the login code<br/>(HTTPS)"| village
+  vclient -->|"sends requests<br/>(HTTPS, JSON, multipart)"| village
+  store -->|"reads and writes<br/>(SQL)"| db
+
+  style binary fill:none,stroke:#444,stroke-dasharray:6 4
+
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
 ### Web app
@@ -374,57 +280,34 @@ from `@peasant-labs/fairtrade/ui` and `/graph`. Peasant only adapts local data t
 | `/map/...` | `web/src/app/map/` | REST `/api/v1/map/*`, capability gated |
 | `/analytics` | `web/src/app/analytics/` | WS `quality`, rendered by fairtrade analytics |
 
-```c4
-Component diagram: peasant web app
+```mermaid
+flowchart TB
+  dev["<b>developer</b><br/>[Person]"]:::person
 
-   +----------------------------+
-   | developer                  |
-   | [Person]                   |-- publishes sessions (browser) ---------------+
-   +----------------------------+                                               |
-          | browses sessions (browser)                                          |
-          |                                                                     |
-+=========|========================== peasant web app [Container: Next.js 15] ==|==================+
-|         |                                                                     |                  |
-|         v                                                                     v                  |
-|  +----------------------------+                                 +-----------------------------+  |
-|  | section pages              |                                 | share wizard                |  |
-|  | [Component: React]         |                                 | [Component: React]          |  |
-|  | Home, session viewer,      |                                 | ShareWizardClient: select,  |  |
-|  | analytics, review, map.    |                                 | labels, redact, submit.     |  |
-|  | Renders with fairtrade.    |                                 +-----------------------------+  |
-|  |                            |                                                                  |
-|  |                            |                                                       | scans,   |
-|  |                            |                                                       | pushes   |
-|  |                            |-- fetches lists (call) ---------------+               | (call)   |
-|  |                            |                                       |               |          |
-|  |                            |                                       |               |          |
-|  +----------------------------+                                       v               v          |
-|         | subscribes (React hook)                               +-----------------------------+  |
-|         v                                                       | REST clients                |  |
-|  +----------------------------+                                 | [Component: TypeScript]     |  |
-|  | channel store              |                                 | lib/api fetch helpers.      |  |
-|  | [Component: TypeScript]    |                                 +-----------------------------+  |
-|  | WebSocketContext: one      |                                               |                  |
-|  | socket, topic cache.       |                                               |                  |
-|  +----------------------------+                                               |                  |
-|         |                                                                     |                  |
-|         |                                                                     |                  |
-|         | subscribes to                                                       | calls /api/v1    |
-|         | topics (WebSocket)                                                  | (HTTP, JSON)     |
-|         |                                                                     |                  |
-|         |                                                                     |                  |
-+=========|=====================================================================|==================+
-          |                                                                     |
-          v                                                                     v
-   +--------------------------------------------------------------------------------------------+
-   | peasant binary                                                                             |
-   | [Container: Go]                                                                            |
-   +--------------------------------------------------------------------------------------------+
+  subgraph webapp["peasant web app [Container: Next.js 15]"]
+    pages["<b>section pages</b><br/>[Component: React]<br/>Home, session viewer, analytics,<br/>review, map. Renders with fairtrade."]:::component
+    share["<b>share wizard</b><br/>[Component: React]<br/>ShareWizardClient: select,<br/>labels, redact, submit."]:::component
+    channel["<b>channel store</b><br/>[Component: TypeScript]<br/>WebSocketContext: one socket,<br/>cached topic data."]:::component
+    rest["<b>REST clients</b><br/>[Component: TypeScript]<br/>lib/api fetch helpers."]:::component
+  end
 
-Key:
-  Solid box = element. Double-line box = boundary. [Type] = C4 abstraction.
-  "external" = outside the scope of this diagram. Arrow = one relationship, read as
-  "source, label (technology), target".
+  bin["<b>peasant binary</b><br/>[Container: Go]"]:::container
+
+  dev -->|"browses sessions<br/>(browser)"| pages
+  dev -->|"publishes sessions<br/>(browser)"| share
+  pages -->|"subscribes to topics<br/>(React hook)"| channel
+  pages -->|"fetches summaries, map, review<br/>(function call)"| rest
+  share -->|"lists, scans, pushes<br/>(function call)"| rest
+  channel -->|"subscribes on /api/v1/ws<br/>(WebSocket)"| bin
+  rest -->|"calls /api/v1<br/>(HTTP, JSON)"| bin
+
+  style webapp fill:none,stroke:#444,stroke-dasharray:6 4
+
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
 ## Deployment
@@ -434,83 +317,64 @@ Everything runs on the developer workstation. Paths follow XDG: the data dir is
 `$XDG_CONFIG_HOME/peasant` (default `~/.config/peasant`). The `--data-dir` and `--config-dir`
 flags override them.
 
-```c4
-Deployment diagram: peasant, developer workstation
+```mermaid
+flowchart TB
+  subgraph workstation["developer workstation [Deployment Node: Linux, macOS, or WSL]"]
+    subgraph browser["web browser [Deployment Node: browser]"]
+      web["<b>peasant web app</b><br/>[Container: Next.js 15]"]:::container
+    end
+    subgraph process["peasant [Deployment Node: OS process]"]
+      bin["<b>peasant binary</b><br/>[Container: Go]"]:::container
+    end
+    subgraph datadir["data dir [Deployment Node: XDG_DATA_HOME/peasant]"]
+      db[("<b>analytics database</b><br/>[Container: SQLite]<br/>peasant.db")]:::container
+      sync[("<b>sync tree</b><br/>[Container: JSONL files]<br/>peasant-sync, village-pulls")]:::container
+    end
+    subgraph configdir["config dir [Deployment Node: XDG_CONFIG_HOME/peasant]"]
+      settings[("<b>settings files</b><br/>[Container: YAML, JSON]<br/>config.yaml, credentials.json")]:::container
+    end
+  end
 
-+== developer workstation [Deployment Node: Linux, macOS, or WSL] =================================+
-|                                                                                                  |
-| +== web browser [Deployment Node: browser] ==+   +== peasant [Deployment Node: OS process] ====+ |
-| |                                            |   |                                             | |
-| |  +-------------------------+               |   |     +-------------------------+             | |
-| |  | peasant web app         |-- calls (HTTP, WS) ---->| peasant binary          |             | |
-| |  | [Container: Next.js 15] |               |   |     | [Container: Go]         |             | |
-| |  +-------------------------+               |   |     +-------------------------+             | |
-| |                                            |   |        |         |                          | |
-| +============================================+   +========|=========|==========================+ |
-|                        +-- reads, writes (files) ---------+         | reads, writes (files)      |
-|                        v                                            v                            |
-| +== config dir [Deployment Node: XDG path] ==+   +== data dir [Deployment Node: XDG path] =====+ |
-| |                                            |   |                                             | |
-| |  +-------------------------+               |   |     +----------------------------+          | |
-| |  | settings files          |               |   |     | analytics database         |          | |
-| |  | [Container: YAML, JSON] |               |   |     | [Container: SQLite]        |          | |
-| |  | config.yaml, creds.     |               |   |     | peasant.db file.           |          | |
-| |  +-------------------------+               |   |     +----------------------------+          | |
-| |                                            |   |                                             | |
-| +============================================+   |     +----------------------------+          | |
-|                                                  |     | sync tree                  |          | |
-|                                                  |     | [Container: JSONL files]   |          | |
-|                                                  |     | peasant-sync, pulls.       |          | |
-|                                                  |     +----------------------------+          | |
-|                                                  |                                             | |
-|                                                  +=============================================+ |
-|                                                                                                  |
-+==================================================================================================+
+  village["<b>village</b><br/>[Software System, external]"]:::external
 
-Key:
-  Double-line box = deployment node, nested where one runs inside another. Solid box = one
-  container instance. [Type] = C4 abstraction. Arrow = one relationship, read as
-  "source, label (technology), target".
+  web -->|"calls the API on port 8690<br/>(HTTP, WebSocket)"| bin
+  bin -->|"reads and writes<br/>(SQL)"| db
+  bin -->|"reads and writes<br/>(files)"| sync
+  bin -->|"reads and writes<br/>(files)"| settings
+  bin -->|"publishes and pulls<br/>(HTTPS)"| village
+
+  style workstation fill:none,stroke:#444,stroke-dasharray:6 4
+  style browser fill:none,stroke:#444,stroke-dasharray:6 4
+  style process fill:none,stroke:#444,stroke-dasharray:6 4
+  style datadir fill:none,stroke:#444,stroke-dasharray:6 4
+  style configdir fill:none,stroke:#444,stroke-dasharray:6 4
+
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
 ## Dynamic views
 
 ### Harvest local agent sessions
 
-```c4
-Dynamic diagram: harvest local agent sessions
-
-   +----------------------+
-   | developer            |
-   | [Person]             |
-   +----------------------+
-          | 1. runs peasant harvest (terminal)
-          |
-          v
-   +----------------------+                                          +-----------------------------+
-   | peasant binary       |                                          | settings files              |
-   | [Container: Go]      |-- 2. loads the selection (YAML) -------->| [Container: YAML, JSON]     |
-   |                      |                                          +-----------------------------+
-   |                      |
-   |                      |                                          +-----------------------------+
-   |                      |                                          | agent session stores        |
-   |                      |-- 3. reads sessions (JSONL, SQLite) ---->| [Software System, external] |
-   |                      |                                          +-----------------------------+
-   |                      |
-   |                      |                                          +-----------------------------+
-   |                      |                                          | sync tree                   |
-   |                      |-- 4. writes transcript copies (files) -->| [Container: JSONL files]    |
-   |                      |                                          +-----------------------------+
-   |                      |
-   |                      |                                          +-----------------------------+
-   |                      |-- 5. mirrors sessions, commits (SQL) --->| analytics database          |
-   |                      |-- 6. indexes entries, metrics (SQL) ---->| [Container: SQLite]         |
-   |                      |                                          |                             |
-   +----------------------+                                          +-----------------------------+
-
-Key:
-  Solid box = element. [Type] = C4 abstraction. Numbered arrow = one interaction, in order.
-  Read as "source, N. label (technology), target".
+```mermaid
+sequenceDiagram
+  autonumber
+  actor dev as developer
+  participant bin as peasant binary (Go)
+  participant settings as settings files
+  participant stores as agent session stores
+  participant sync as sync tree
+  participant db as analytics database
+  dev->>bin: runs peasant harvest (terminal)
+  bin->>settings: loads the selection (YAML)
+  bin->>stores: discovers and reads sessions (JSONL, SQLite)
+  bin->>sync: writes transcript copies (files)
+  bin->>db: mirrors sessions and commits (SQL)
+  bin->>db: indexes entries and metrics (SQL)
 ```
 
 ### Open a session in the local web app
@@ -518,41 +382,20 @@ Key:
 `peasant web start` forks a `--foreground` child that runs the server, waits for
 `/api/v1/health`, and opens the browser. `--no-browser` skips step 2.
 
-```c4
-Dynamic diagram: open a session in the local web app
-
-   +-------------------------+
-   | developer               |
-   | [Person]                |-- 1. runs peasant web start (terminal) --------------+
-   +-------------------------+                                                      |
-          | 4. opens a session page (browser)                                       |
-          |                                                                         |
-          |                                                                         |
-          v                                                                         v
-   +-------------------------+                                       +-----------------------------+
-   | peasant web app         |                                       | peasant binary              |
-   | [Container: Next.js 15] |<-- 2. opens the app URL (launcher) ---| [Container: Go]             |
-   |                         |                                       |                             |
-   |                         |-- 3. loads the embedded SPA (HTTP) -->|                             |
-   |                         |                                       |                             |
-   |                         |-- 5. subscribes to the detail (WS) -->|                             |
-   |                         |                                       |                             |
-   |                         |                                       |                             |
-   |                         |<-- 7. sends the detail payload (WS) --|                             |
-   |                         |                                       |                             |
-   +-------------------------+                                       +-----------------------------+
-                                                                          | 6. reads entries
-                                                                          | (SQL)
-                                                                          |
-                                                                          v
-                                                                     +-----------------------------+
-                                                                     | analytics database          |
-                                                                     | [Container: SQLite]         |
-                                                                     +-----------------------------+
-
-Key:
-  Solid box = element. [Type] = C4 abstraction. Numbered arrow = one interaction, in order.
-  Read as "source, N. label (technology), target".
+```mermaid
+sequenceDiagram
+  autonumber
+  actor dev as developer
+  participant web as peasant web app (browser)
+  participant bin as peasant binary (Go)
+  participant db as analytics database
+  dev->>bin: runs peasant web start (terminal)
+  bin->>web: opens the app URL (OS launcher)
+  web->>bin: loads the embedded SPA (HTTP)
+  dev->>web: opens a session page (browser)
+  web->>bin: subscribes to session_detail (WebSocket)
+  bin->>db: reads entries (SQL)
+  bin-->>web: sends SessionDetailReadPayload (WebSocket)
 ```
 
 ### Publish sessions with /share
@@ -562,58 +405,26 @@ The wizard steps are select, labels, redact, and submit. The scan result is cach
 example a bounded preview. A capture whose only gap is an over-limit record with a placeholder
 entry is ready and publishes with `diagnostics.partial` set.
 
-```c4
-Dynamic diagram: publish sessions with /share
-
-   +-------------------------+
-   | developer               |
-   | [Person]                |
-   +-------------------------+
-        | 1. opens /share (browser)
-        | 3. selects sessions and a level (browser)
-        | 6. confirms the review and consents (browser)
-        v
-   +-------------------------+                                       +-----------------------------+
-   | peasant web app         |                                       | peasant binary              |
-   | [Container: Next.js 15] |-- 2. lists sessions (HTTP) ---------->| [Container: Go]             |
-   |                         |                                       |                             |
-   |                         |                                       |                             |
-   |                         |-- 4. requests the scan (HTTP) ------->|                             |
-   |                         |                                       |                             |
-   |                         |                                       |                             |
-   |                         |-- 7. requests the push (HTTP) ------->|                             |
-   |                         |                                       |                             |
-   |                         |                                       |                             |
-   +-------------------------+                                       |                             |
-                                                                     |                             |
-                                                                     |                             |
-                                                                     |                             |
-                                                                     |                             |
-   +-------------------------+                                       |                             |
-   | analytics database      |                                       |                             |
-   | [Container: SQLite]     |<-- 5. reads publication input (SQL) --|                             |
-   |                         |                                       |                             |
-   |                         |                                       |                             |
-   |                         |<-- 11. saves the receipt (SQL) -------|                             |
-   |                         |                                       |                             |
-   +-------------------------+                                       |                             |
-                                                                     |                             |
-   +-------------------------+                                       |                             |
-   | settings files          |<-- 8. loads credentials.json (file) --|                             |
-   | [Container: YAML, JSON] |                                       +-----------------------------+
-   +-------------------------+                                              | 9. checks the schema
-                                                                            | version (HTTPS)
-                                                                            | 10. publishes each
-                                                                            | session (HTTPS)
-                                                                            v
-                                                                     +-----------------------------+
-                                                                     | village                     |
-                                                                     | [Software System, external] |
-                                                                     +-----------------------------+
-
-Key:
-  Solid box = element. [Type] = C4 abstraction. Numbered arrow = one interaction, in order.
-  Read as "source, N. label (technology), target".
+```mermaid
+sequenceDiagram
+  autonumber
+  actor dev as developer
+  participant web as peasant web app (browser)
+  participant bin as peasant binary (Go)
+  participant db as analytics database
+  participant settings as settings files
+  participant village as village
+  dev->>web: opens /share (browser)
+  web->>bin: lists pushable sessions (HTTP)
+  dev->>web: selects sessions and a redaction level
+  web->>bin: requests the redaction scan (HTTP)
+  bin->>db: reads publication input (SQL)
+  dev->>web: confirms the review and consents
+  web->>bin: requests the push (HTTP)
+  bin->>settings: loads credentials.json (file)
+  bin->>village: checks the schema version (HTTPS)
+  bin->>village: publishes each session (HTTPS, multipart)
+  bin->>db: saves the publication receipt (SQL)
 ```
 
 ### Upload from a git hook
@@ -621,88 +432,46 @@ Key:
 The hook exists only after `peasant village hooks install --event post-commit` or
 `--event pre-push`. The hook always exits 0, so a Village failure never blocks git.
 
-```c4
-Dynamic diagram: upload from a git hook
-
-   +----------------------+
-   | developer            |
-   | [Person]             |
-   +----------------------+
-          | 1. commits or pushes (git)
-          |
-          v
-   +-----------------------------+
-   | git repository              |
-   | [Software System, external] |
-   +-----------------------------+
-          | 2. runs peasant village push from the hook (git hook, shell)
-          |
-          v
-   +----------------------+                                          +-----------------------------+
-   | peasant binary       |                                          | village                     |
-   | [Container: Go]      |-- 3. reads PR prompt requests (HTTPS) -->| [Software System, external] |
-   |                      |                                          |                             |
-   |                      |-- 5. publishes each session (HTTPS) ---->|                             |
-   |                      |                                          |                             |
-   |                      |                                          +-----------------------------+
-   |                      |
-   |                      |                                          +-----------------------------+
-   |                      |                                          | analytics database          |
-   |                      |-- 4. reads pushable sessions (SQL) ----->| [Container: SQLite]         |
-   |                      |                                          |                             |
-   |                      |-- 6. saves the receipt (SQL) ----------->|                             |
-   |                      |                                          |                             |
-   |                      |                                          +-----------------------------+
-   +----------------------+
-
-Key:
-  Solid box = element. [Type] = C4 abstraction. Numbered arrow = one interaction, in order.
-  Read as "source, N. label (technology), target".
+```mermaid
+sequenceDiagram
+  autonumber
+  actor dev as developer
+  participant git as git repository
+  participant bin as peasant binary (Go)
+  participant db as analytics database
+  participant village as village
+  dev->>git: commits or pushes (git)
+  git->>bin: runs peasant village push from the hook (shell)
+  bin->>village: reads waiting PR prompt requests (HTTPS)
+  bin->>db: reads pushable sessions (SQL)
+  bin->>village: publishes each session (HTTPS)
+  bin->>db: saves the publication receipt (SQL)
 ```
 
 ### Log in to Village
 
 Village runs the GitHub sign-in in the browser. Peasant never calls the GitHub API for login.
+Steps 2 and 3 happen in the developer's browser.
 
-```c4
-Dynamic diagram: log in to Village
-
-   +----------------------+
-   | developer            |
-   | [Person]             |-- 3. signs in with GitHub (browser) --------------------+
-   +----------------------+                                                         |
-          | 1. runs peasant village login (terminal)                                |
-          |                                                                         |
-          |                                                                         |
-          v                                                                         v
-   +----------------------+                                          +-----------------------------+
-   | peasant binary       |                                          | village                     |
-   | [Container: Go]      |-- 2. opens the login page (browser) ---->| [Software System, external] |
-   |                      |                                          |                             |
-   |                      |<-- 4. redirects to the callback (HTTP) --|                             |
-   |                      |                                          |                             |
-   |                      |-- 5. exchanges the code (HTTPS) -------->|                             |
-   |                      |                                          |                             |
-   |                      |                                          +-----------------------------+
-   |                      |
-   +----------------------+
-          | 6. saves credentials.json (file, mode 0600)
-          |
-          v
-   +-------------------------+
-   | settings files          |
-   | [Container: YAML, JSON] |
-   +-------------------------+
-
-Key:
-  Solid box = element. [Type] = C4 abstraction. Numbered arrow = one interaction, in order.
-  Read as "source, N. label (technology), target".
+```mermaid
+sequenceDiagram
+  autonumber
+  actor dev as developer
+  participant bin as peasant binary (Go)
+  participant village as village
+  participant settings as settings files
+  dev->>bin: runs peasant village login (terminal)
+  bin->>village: opens the login page (browser)
+  dev->>village: signs in with GitHub (browser)
+  village->>bin: redirects to the 127.0.0.1 callback (HTTP)
+  bin->>village: exchanges the code for an API key (HTTPS)
+  bin->>settings: saves credentials.json (file, mode 0600)
 ```
 
 ## Call sequences
 
-Solid arrows (`--->`) are calls. Dotted arrows (`<...`) are returns. `--+` and `<-+` mark a
-step inside one participant. A dashed row names a pipeline stage.
+Solid arrows are calls. Dashed arrows are returns. An arrow from a participant to itself is a
+step inside that participant. A note across all participants names a pipeline stage.
 
 ### Harvest pipeline
 
@@ -710,77 +479,61 @@ Entry: `cmd/peasant/cmd_harvest.go`. Pipeline: `internal/ingest/pipeline.go`. Th
 point is the SQLite commit, not the file write. A record over `defaults.MaxJSONLRecordBytes`
 (256 MiB) becomes a stand-in line before the write and a placeholder entry at index time.
 
-```text
- cmd/peasant    ingest.Pipeline    SourceAdapter    peasant-sync         Indexer        store.Store
-      |                |                 |                |                 |                |
-      |--+ runHarvest: loadRunConfig, buildSourceConfigs  |                 |                |
-      |<-+             |                 |                |                 |                |
-      | store.Open (migrations, install salt)             |                 |                |
-      |------------------------------------------------------------------------------------->|
-      | NewPipeline(WithStore, WithIndexers, ...).Run     |                 |                |
-      |--------------->|                 |                |                 |                |
----- DISCOVER, PREPARE, DIFF, FILTER ---------------------------------------------------------
-      |                | Discover() for each enabled harness                |                |
-      |                |---------------->|                |                 |                |
-      |                | []DiscoveredSession              |                 |                |
-      |                |<................|                |                 |                |
-      |                |--+ diff vs stored state; SelectionMatcher          |                |
-      |                |<-+              |                |                 |                |
----- EXTRACT and WRITE (worker pool) ---------------------------------------------------------
-      |                | processSession: capture source bytes               |                |
-      |                |---------------->|                |                 |                |
-      |                |--+ filterOversizedJSONLRecords (> 256 MiB)         |                |
-      |                |<-+              |                |                 |                |
-      |                | write transcript + metadata (rename)               |                |
-      |                |--------------------------------->|                 |                |
-      |                |--+ LayeredDetection (--detect-commits)             |                |
-      |                |<-+              |                |                 |                |
----- DB INSERT (drain loop) ------------------------------------------------------------------
-      |                | mirrorDrainedBatch: MirrorArtifacts                |                |
-      |                |-------------------------------------------------------------------->|
----- INDEX (parser pool, one serial writer) --------------------------------------------------
-      |                | parseIndexMeta, IndexTranscript  |                 |                |
-      |                |--------------------------------------------------->|                |
-      |                | entries via Outcome lowering     |                 |                |
-      |                |<...................................................|                |
-      |                | IndexSessionEntries              |                 |                |
-      |                |-------------------------------------------------------------------->|
----- COMPUTE, ANNOTATE, CLEANUP, REPORT, AUDIT -----------------------------------------------
-      |                | indexComputeAndFinalize: metrics, ingest_log       |                |
-      |                |-------------------------------------------------------------------->|
-      | PipelineResult |                 |                |                 |                |
-      |<...............|                 |                |                 |                |
+```mermaid
+sequenceDiagram
+  participant cli as cmd/peasant
+  participant pipe as ingest.Pipeline
+  participant ad as SourceAdapter
+  participant sync as peasant-sync
+  participant idx as TranscriptIndexer
+  participant st as store.Store
+  cli->>cli: runHarvest: loadRunConfig, buildSourceConfigs
+  cli->>st: store.Open (migrations, install salt)
+  cli->>pipe: NewPipeline(WithStore, WithIndexers, ...).Run
+  Note over cli,st: DISCOVER, PREPARE, DIFF, FILTER
+  pipe->>ad: Discover() for each enabled harness
+  ad-->>pipe: []DiscoveredSession
+  pipe->>pipe: diff against stored state, apply SelectionMatcher
+  Note over cli,st: EXTRACT and WRITE (worker pool)
+  pipe->>ad: processSession: capture source bytes
+  pipe->>pipe: filterOversizedJSONLRecords (over 256 MiB)
+  pipe->>sync: write transcript and metadata (rename)
+  pipe->>pipe: LayeredDetection (--detect-commits)
+  Note over cli,st: DB INSERT (drain loop)
+  pipe->>st: mirrorDrainedBatch: MirrorArtifacts
+  Note over cli,st: INDEX (parser pool, one serial writer)
+  pipe->>idx: parseIndexMeta, IndexTranscript
+  idx->>idx: record kind to Outcome to central lowering
+  idx-->>pipe: entries and omission placeholders
+  pipe->>st: IndexSessionEntries
+  Note over cli,st: COMPUTE, ANNOTATE, CLEANUP, REPORT, AUDIT
+  pipe->>st: indexComputeAndFinalize: metrics, ingest_log
+  pipe-->>cli: PipelineResult
 ```
 
 ### Local server start
 
 Entry: `cmd/peasant/cmd_web.go`. Server: `internal/api/server.go`.
 
-```text
- developer        CLI parent     CLI --foreground       store          api.Server          browser
-     |                 |                 |                |                 |                 |
-     | peasant web start                 |                |                 |                 |
-     |---------------->|                 |                |                 |                 |
-     |                 | runWebBackground: fork --foreground                |                 |
-     |                 |---------------->|                |                 |                 |
-     |                 |                 |--+ runWebForeground: config.Load |                 |
-     |                 |                 |<-+             |                 |                 |
-     |                 |                 | store.Open     |                 |                 |
-     |                 |                 |--------------->|                 |                 |
-     |                 |                 |--+ NewStoreDataProvider, NewHub  |                 |
-     |                 |                 |<-+             |                 |                 |
-     |                 |                 | NewServer(embedded web/out).Listen                 |
-     |                 |                 |--------------------------------->|                 |
-     |                 | poll GET /api/v1/health          |                 |                 |
-     |                 |--------------------------------------------------->|                 |
-     |                 | 200 OK          |                |                 |                 |
-     |                 |<...................................................|                 |
-     |                 | browser.Open(localhost:8690)     |                 |                 |
-     |                 |--------------------------------------------------------------------->|
-     |                 |                 |                |                 | GET / (spaHandler)
-     |                 |                 |                |                 |<----------------|
-     |                 |                 |                |                 | SPA assets      |
-     |                 |                 |                |                 |................>|
+```mermaid
+sequenceDiagram
+  actor dev as developer
+  participant parent as CLI parent
+  participant child as CLI --foreground
+  participant st as store
+  participant srv as api.Server
+  participant br as browser
+  dev->>parent: peasant web start
+  parent->>child: runWebBackground: fork --foreground
+  child->>child: runWebForeground: config.Load
+  child->>st: store.Open
+  child->>child: NewStoreDataProvider, NewProgressiveProvider, NewHub
+  child->>srv: NewServer(embedded web/out).Listen
+  parent->>srv: poll GET /api/v1/health
+  srv-->>parent: 200 OK
+  parent->>br: browser.Open(http://localhost:8690)
+  br->>srv: GET / (spaHandler)
+  srv-->>br: embedded Next.js static export
 ```
 
 ### Session detail over WebSocket
@@ -788,33 +541,26 @@ Entry: `cmd/peasant/cmd_web.go`. Server: `internal/api/server.go`.
 Client: `web/src/contexts/WebSocketContext.tsx`. Server: `internal/api/websocket.go`,
 `internal/api/detail_navigation.go`, `internal/api/snapshot_detail.go`.
 
-```text
- SessionDetailV2 WebSocketContext     api.Hub       DataProvider     transcript          store
-        |                |               |                |               |                |
-        | useChannel(sessionDetail(id))  |                |               |                |
-        |--------------->|               |                |               |                |
-        |                | WS subscribe session_detail    |               |                |
-        |                |-------------->|                |               |                |
-        |                |               |--+ sendSnapshots               |                |
-        |                |               |<-+             |               |                |
-        |                |               | SessionDetailReadForProvider   |                |
-        |                |               |--------------->|               |                |
-        |                |               |                | read snapshot or entries       |
-        |                |               |                |------------------------------->|
-        |                |               |                | stored entries|                |
-        |                |               |                |<...............................|
-        |                |               |                | BuildSnapshotDetailBytes       |
-        |                |               |                |-------------->|                |
-        |                |               |                | SessionDetailPayload           |
-        |                |               |                |<..............|                |
-        |                |               |                |--+ DecorateDetailReadPayload   |
-        |                |               |                |<-+            |                |
-        |                |               | SessionDetailReadPayload       |                |
-        |                |               |<...............|               |                |
-        |                | WS session_detail message      |               |                |
-        |                |<..............|                |               |                |
-        | adaptTranscript: fairtrade viewer               |               |                |
-        |<...............|               |                |               |                |
+```mermaid
+sequenceDiagram
+  participant view as SessionDetailV2
+  participant ws as WebSocketContext
+  participant hub as api.Hub
+  participant prov as DataProvider
+  participant tr as transcript
+  participant st as store
+  view->>ws: useChannel(subscribe.sessionDetail(id))
+  ws->>hub: WS subscribe, topic session_detail
+  hub->>hub: sendSnapshots
+  hub->>prov: SessionDetailReadForProvider
+  prov->>st: read generation snapshot or stored entries
+  st-->>prov: stored entries
+  prov->>tr: BuildSnapshotDetailBytes or SessionToDetailValidated
+  tr-->>prov: SessionDetailPayload
+  prov->>prov: DecorateDetailReadPayload (relationship navigation)
+  prov-->>hub: SessionDetailReadPayload
+  hub-->>ws: WS session_detail message
+  ws-->>view: adaptTranscript, fairtrade TranscriptViewer
 ```
 
 ### /share scan and publish
@@ -822,50 +568,35 @@ Client: `web/src/contexts/WebSocketContext.tsx`. Server: `internal/api/websocket
 Client: `web/src/app/share/`. Server: `internal/api/sync_handler.go`, `internal/push/`,
 `internal/village/`.
 
-```text
- ShareWizard          sync handler          push.Pipeline       village client          Village API
-      |                     |                     |                    |                     |
----- select step -----------------------------------------------------------------------------
-      | GET /api/v1/sync/sessions                 |                    |                     |
-      |-------------------->|                     |                    |                     |
-      | pushable sessions   |                     |                    |                     |
-      |<....................|                     |                    |                     |
----- redact step, cached by level and session ------------------------------------------------
-      | GET /api/v1/sync/redactions               |                    |                     |
-      |-------------------->|                     |                    |                     |
-      |                     | LoadPublicationInput|                    |                     |
-      |                     |-------------------->|                    |                     |
-      |                     |--+ redact.NewRedactor(level).Detect      |                     |
-      |                     |<-+                  |                    |                     |
-      | findings by category|                     |                    |                     |
-      |<....................|                     |                    |                     |
----- submit step -----------------------------------------------------------------------------
-      | POST /api/v1/sync/push                    |                    |                     |
-      |-------------------->|                     |                    |                     |
-      |                     |--+ LoadCredentials, NewVillageClient     |                     |
-      |                     |<-+                  |                    |                     |
-      |                     | NewPipeline(...).Run|                    |                     |
-      |                     |-------------------->|                    |                     |
-      |                     |                     |--+ getTargetSessions, preflight          |
-      |                     |                     |<-+                 |                     |
-      |                     |                     | negotiate: GetSchemaVersion              |
-      |                     |                     |------------------->|                     |
-      |                     |                     |                    | GET /schema/version |
-      |                     |                     |                    |-------------------->|
-      |                     |                     |--+ pushSession: re-redact, map           |
-      |                     |                     |<-+                 |                     |
-      |                     |                     | PublishAuthoritative                     |
-      |                     |                     |------------------->|                     |
-      |                     |                     |                    | POST /transcripts/publish
-      |                     |                     |                    |-------------------->|
-      |                     |                     |                    | publish receipt     |
-      |                     |                     |                    |<....................|
-      |                     |                     |--+ UpdateOwner if needed, SavePublication|
-      |                     |                     |<-+                 |                     |
-      |                     |                     | PushAnnotationsSelected                  |
-      |                     |                     |------------------->|                     |
-      | push result         |                     |                    |                     |
-      |<....................|                     |                    |                     |
+```mermaid
+sequenceDiagram
+  participant wiz as ShareWizardClient
+  participant sh as api sync handler
+  participant push as push.Pipeline
+  participant vc as village client
+  participant vapi as Village API
+  Note over wiz,vapi: select step
+  wiz->>sh: GET /api/v1/sync/sessions?view=grouped
+  sh-->>wiz: pushable sessions
+  Note over wiz,vapi: redact step, cached by level and session
+  wiz->>sh: GET /api/v1/sync/redactions?session_id and level
+  sh->>push: LoadPublicationInput
+  sh->>sh: redact.NewRedactor(level).Detect
+  sh-->>wiz: findings grouped by category
+  Note over wiz,vapi: submit step
+  wiz->>sh: POST /api/v1/sync/push
+  sh->>sh: auth.LoadCredentials, village.NewVillageClient
+  sh->>push: push.NewPipeline(...).Run
+  push->>push: getTargetSessions, preflight (ValidatePublicationInput)
+  push->>vc: negotiate: GetSchemaVersion
+  vc->>vapi: GET /api/v1/schema/version
+  push->>push: pushSession: re-redact, map to AuthoritativePublishRequest
+  push->>vc: PublishAuthoritative
+  vc->>vapi: POST /api/v1/transcripts/publish (multipart)
+  vapi-->>vc: AuthoritativePublishResponse
+  push->>push: UpdateOwner if needed, SavePublication, push_log
+  push->>vc: PushAnnotationsSelected
+  sh-->>wiz: push result
 ```
 
 ### Village login
@@ -873,62 +604,49 @@ Client: `web/src/app/share/`. Server: `internal/api/sync_handler.go`, `internal/
 `internal/auth/login.go` and `internal/auth/server.go`. The callback port is
 `defaults.LoginCallbackPort` (17249) and falls back to an ephemeral port.
 
-```text
-  developer             cmd login           internal/auth           browser             Village API
-      |                     |                     |                    |                     |
-      | peasant village login                     |                    |                     |
-      |-------------------->|                     |                    |                     |
-      |                     | LoginFrom(village URL)                   |                     |
-      |                     |-------------------->|                    |                     |
-      |                     |                     |--+ startListener 127.0.0.1:17249, state  |
-      |                     |                     |<-+                 |                     |
-      |                     |                     | open /api/v1/auth/cli/login              |
-      |                     |                     |------------------->|                     |
-      |                     |                     |                    | GitHub OAuth        |
-      |                     |                     |                    |-------------------->|
-      |                     |                     |                    | 302 to loopback     |
-      |                     |                     |                    |<....................|
-      |                     |                     | GET /callback?code&state                 |
-      |                     |                     |<-------------------|                     |
-      |                     |                     |--+ handleCallback: check state           |
-      |                     |                     |<-+                 |                     |
-      |                     |                     | exchangeCode: POST /api/v1/auth/cli/exchange
-      |                     |                     |----------------------------------------->|
-      |                     |                     | api key, key id, username                |
-      |                     |                     |<.........................................|
-      |                     |                     |--+ SaveCredentialsFrom (0600)            |
-      |                     |                     |<-+                 |                     |
-      | logged in           |                     |                    |                     |
-      |<....................|                     |                    |                     |
+```mermaid
+sequenceDiagram
+  actor dev as developer
+  participant cmd as cmd login
+  participant auth as internal/auth
+  participant br as browser
+  participant vapi as Village API
+  dev->>cmd: peasant village login
+  cmd->>auth: LoginFrom(village URL)
+  auth->>auth: startListener on 127.0.0.1:17249, new state
+  auth->>br: open /api/v1/auth/cli/login?port and state
+  br->>vapi: GET login, GitHub OAuth in the browser
+  vapi-->>br: redirect to the loopback callback
+  br->>auth: GET /callback?code and state
+  auth->>auth: handleCallback: check state
+  auth->>vapi: exchangeCode: POST /api/v1/auth/cli/exchange
+  vapi-->>auth: api key, key id, username
+  auth->>auth: SaveCredentialsFrom: credentials.json (0600)
+  cmd-->>dev: logged in
 ```
 
 ### Git hook upload
 
 `internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it.
 
-```text
-     git          hook script    cmd village push   push.Pipeline         store         Village API
-      |                |                 |                |                 |                |
-      | post-commit or pre-push          |                |                 |                |
-      |--------------->|                 |                |                 |                |
-      |                | village push --non-interactive --quiet             |                |
-      |                |---------------->|                |                 |                |
-      |                |                 | reportWaitingPromptRequests      |                |
-      |                |                 |-------------------------------------------------->|
-      |                |                 |--+ load config, credentials, redactor             |
-      |                |                 |<-+             |                 |                |
-      |                |                 | runPushStages: Pipeline.Run      |                |
-      |                |                 |--------------->|                 |                |
-      |                |                 |                | QueryPushCandidates (repo scope) |
-      |                |                 |                |---------------->|                |
-      |                |                 |                | negotiate, PublishAuthoritative  |
-      |                |                 |                |--------------------------------->|
-      |                |                 |                | SavePublication, push_log        |
-      |                |                 |                |---------------->|                |
-      |                | warnings only   |                |                 |                |
-      |                |<................|                |                 |                |
-      | exit 0, git never blocked        |                |                 |                |
-      |<...............|                 |                |                 |                |
+```mermaid
+sequenceDiagram
+  participant git as git
+  participant hook as hook script
+  participant cmd as cmd village push
+  participant push as push.Pipeline
+  participant st as store
+  participant vapi as Village API
+  git->>hook: post-commit or pre-push
+  hook->>cmd: peasant village push --non-interactive --quiet --timeout
+  cmd->>vapi: reportWaitingPromptRequests: GET /api/v1/users/me/prompt-requests
+  cmd->>cmd: load config, credentials, redactor
+  cmd->>push: runPushStages: Pipeline.Run
+  push->>st: QueryPushCandidates (repository scope, selection)
+  push->>vapi: negotiate, PublishAuthoritative for each session
+  push->>st: SavePublication, push_log
+  cmd-->>hook: warnings only
+  hook-->>git: exit 0, git is never blocked
 ```
 
 ### Pull a transcript
@@ -936,33 +654,26 @@ Client: `web/src/app/share/`. Server: `internal/api/sync_handler.go`, `internal/
 `internal/pull/pipeline.go`. Pulled transcripts go to their own tables and never enter
 `sessions`, so they are never push candidates.
 
-```text
- cmd pull        pull.Pipeline    village client     Village API      village-pulls         store
-     |                 |                 |                |                 |                 |
-     | PullTranscript(ref)               |                |                 |                 |
-     |---------------->|                 |                |                 |                 |
-     |                 | NegotiatePull   |                |                 |                 |
-     |                 |---------------->|                |                 |                 |
-     |                 |                 | GET /api/v1/schema/version       |                 |
-     |                 |                 |--------------->|                 |                 |
-     |                 | GetPullTranscript                |                 |                 |
-     |                 |---------------->|                |                 |                 |
-     |                 |                 | GET /api/v1/pull/transcripts/ID  |                 |
-     |                 |                 |--------------->|                 |                 |
-     |                 | GetPullTranscriptContent         |                 |                 |
-     |                 |---------------->|                |                 |                 |
-     |                 |                 | GET .../content, If-None-Match   |                 |
-     |                 |                 |--------------->|                 |                 |
-     |                 |                 | blob or 304    |                 |                 |
-     |                 |                 |<...............|                 |                 |
-     |                 | GetPullTranscriptAnnotations     |                 |                 |
-     |                 |---------------->|                |                 |                 |
-     |                 | write files, pull-manifest.json  |                 |                 |
-     |                 |--------------------------------------------------->|                 |
-     |                 | CommitPull (pulled_* tables)     |                 |                 |
-     |                 |--------------------------------------------------------------------->|
-     | PullResult      |                 |                |                 |                 |
-     |<................|                 |                |                 |                 |
+```mermaid
+sequenceDiagram
+  participant cmd as cmd pull
+  participant pull as pull.Pipeline
+  participant vc as village client
+  participant vapi as Village API
+  participant fs as village-pulls
+  participant st as store
+  cmd->>pull: PullTranscript(ref)
+  pull->>vc: NegotiatePull
+  vc->>vapi: GET /api/v1/schema/version
+  pull->>vc: GetPullTranscript
+  vc->>vapi: GET /api/v1/pull/transcripts/ID
+  pull->>vc: GetPullTranscriptContent
+  vc->>vapi: GET .../content with If-None-Match
+  vapi-->>vc: blob or 304
+  pull->>vc: GetPullTranscriptAnnotations
+  pull->>fs: write files and pull-manifest.json
+  pull->>st: CommitPull (pulled_transcripts, pulled_annotations)
+  pull-->>cmd: PullResult
 ```
 
 ### Kickstart
@@ -970,27 +681,23 @@ Client: `web/src/app/share/`. Server: `internal/api/sync_handler.go`, `internal/
 `cmd/peasant/cmd_kickstart.go` and `internal/tui/kickstart`. The single `Draft.Commit` is the
 only write of `config.SelectionConfig`. Kickstart never publishes.
 
-```text
-    developer      cmd kickstart     adapters          Program     settings.Draft   ingest.Pipeline
-        |                |               |                |               |                |
-        | peasant kickstart              |                |               |                |
-        |--------------->|               |                |               |                |
-        |                | ftueDiscover: Discover()       |               |                |
-        |                |-------------->|                |               |                |
-        |                | inventory, session listings    |               |                |
-        |                |<..............|                |               |                |
-        |                | runKickstartFlow: NewProgram   |               |                |
-        |                |------------------------------->|               |                |
-        | PhaseOAuth: connect or stay local               |               |                |
-        |------------------------------------------------>|               |                |
-        | PhaseFlow: selection, license, retention        |               |                |
-        |------------------------------------------------>|               |                |
-        |                |               |                | Draft.Commit: config.SaveAtomic|
-        |                |               |                |-------------->|                |
-        |                |               |                | PhaseIngest: local harvest     |
-        |                |               |                |------------------------------->|
-        | PhaseDone: next steps, no publish               |               |                |
-        |<................................................|               |                |
+```mermaid
+sequenceDiagram
+  actor dev as developer
+  participant cmd as cmd kickstart
+  participant ad as adapters
+  participant prog as kickstart.Program
+  participant draft as settings.Draft
+  participant pipe as ingest.Pipeline
+  dev->>cmd: peasant kickstart
+  cmd->>ad: ftueDiscover: Discover() for each harness
+  ad-->>cmd: inventory and session listings
+  cmd->>prog: runKickstartFlow: NewProgram
+  dev->>prog: PhaseOAuth: connect or stay local
+  dev->>prog: PhaseFlow: selection, publication, license, retention
+  prog->>draft: Draft.Commit: config.SaveAtomic (SelectionConfig)
+  prog->>pipe: PhaseIngest: local harvest with progress
+  prog-->>dev: PhaseDone: next steps, no publish
 ```
 
 ## Package map
