@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -79,12 +80,14 @@ func TestSyncEndpointsRejectInvalidCustomPatternsBeforeSideEffects(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(defaults.EnvXDGConfigHome.String(), t.TempDir())
 	for _, fixture := range fixtures {
 		t.Run(fixture.Name, func(t *testing.T) {
+			t.Parallel()
+			hs := newTestXDGHomes(t)
 			cfg := config.BaseConfig()
+			cfg.Output.BasePath = filepath.Join(hs.Data, "peasant-sync")
 			cfg.Redaction.CustomPatterns = []config.CustomPattern{fixture.Pattern}
-			handler := &syncHandler{config: cfg}
+			handler := hs.handler(nil, cfg)
 
 			previewRequest := httptest.NewRequest(http.MethodGet, "/api/v1/sync/redactions?session_id=11111111-1111-1111-1111-111111111111", nil)
 			previewResponse := httptest.NewRecorder()

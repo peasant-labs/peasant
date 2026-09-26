@@ -67,6 +67,14 @@ type ServerConfig struct {
 	// The server serves a transcript download from here, so a server started
 	// with --data-dir resolves the same tree the harvest wrote.
 	OutputDir string
+	// ConfigHome, DataHome, and StateHome override the XDG roots the sync
+	// handler resolves its config, data, and state paths under (the same
+	// overrides the --config-dir/--data-dir/--state-dir flags carry). Empty
+	// falls back to the process environment, so the composition root keeps the
+	// environment as the default and only tests inject explicit roots.
+	ConfigHome string
+	DataHome   string
+	StateHome  string
 }
 
 // Server is the HTTP server for the web dashboard.
@@ -182,6 +190,9 @@ func (s *Server) Listen(ctx context.Context) error {
 		store:       s.cfg.Store,
 		config:      s.cfg.Config,
 		scopeIssuer: s,
+		configHome:  s.cfg.ConfigHome,
+		dataHome:    s.cfg.DataHome,
+		stateHome:   s.cfg.StateHome,
 	}
 	// The grouped sync chooser view registers the exact sync predicate on the
 	// same member seam the sessions and search routes use, so expanding a sync
@@ -516,7 +527,7 @@ func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request)
 	// elsewhere is the download data-dir defect this handler fixes.
 	output := s.cfg.OutputDir
 	if output == "" {
-		output = filepath.Join(string(defaults.Data.DataDirPath), "peasant-sync")
+		output = filepath.Join(string(defaults.ResolveDataDirPathWith(s.cfg.DataHome)), "peasant-sync")
 	}
 	var sessionDir string
 	if parentID != "" {

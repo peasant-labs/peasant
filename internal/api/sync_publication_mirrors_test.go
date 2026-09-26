@@ -61,10 +61,12 @@ func loadSyncPublicationMirrorFixtures(t *testing.T) []syncPublicationMirrorCase
 func TestSyncReviewPublicationMirrors(t *testing.T) {
 	for _, c := range loadSyncPublicationMirrorFixtures(t) {
 		t.Run(c.Name, func(t *testing.T) {
-			t.Setenv(defaults.EnvXDGConfigHome.String(), t.TempDir())
+			t.Parallel()
+			hs := newTestXDGHomes(t)
 			db := seedSyncMirrorCase(t, c)
 			cfg := config.BaseConfig()
-			h := &syncHandler{store: db, config: cfg}
+			cfg.Output.BasePath = filepath.Join(hs.Data, "peasant-sync")
+			h := hs.handler(db, cfg)
 			raw, err := h.readReviewContent(t.Context(), testutil.TestSessionUUID, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -110,7 +112,7 @@ func TestSyncReviewPublicationMirrors(t *testing.T) {
 				Pattern: `"inputSubmissionCount":\s*[0-9]+`, Replacement: "<COUNT>",
 			}}
 			ctx, cancel := context.WithCancel(t.Context())
-			server := NewServer(ServerConfig{Port: 0, Store: db, Config: cfg})
+			server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg}))
 			if err := server.Listen(ctx); err != nil {
 				cancel()
 				t.Fatal(err)
