@@ -112,6 +112,7 @@ func newRef(t *testing.T) pull.TranscriptRef {
 // --- Happy path ---
 
 func TestPullTranscript_HappyPath(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	reader := happyReader()
 	st := &testutil.StubPullStore{}
@@ -253,6 +254,7 @@ func TestPullTranscript_HappyPath(t *testing.T) {
 // verifies an invalid association-target annotation is rejected after fetch but
 // before the pull pipeline writes files or commits its local DB projection.
 func TestPullTranscript_InvalidAssociationAnnotationStopsBeforeLocalMutation(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	reader := happyReader()
 	reader.Annotations = []schema.PullAnnotation{{
@@ -283,6 +285,7 @@ func TestPullTranscript_InvalidAssociationAnnotationStopsBeforeLocalMutation(t *
 }
 
 func TestPullTranscript_ByURL(t *testing.T) {
+	t.Parallel()
 	ref, err := pull.ParseTranscriptRef(testVillageURL + "/transcripts/" + testutil.TestTranscriptUUID)
 	if err != nil {
 		t.Fatalf("ParseTranscriptRef: %v", err)
@@ -310,6 +313,7 @@ func TestPullTranscript_ByURL(t *testing.T) {
 // --- Up-to-date paths ---
 
 func TestPullTranscript_UpToDate_HashMatch(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	clock := testutil.NewFixedClock()
@@ -344,6 +348,7 @@ func TestPullTranscript_UpToDate_HashMatch(t *testing.T) {
 }
 
 func TestPullTranscript_UpToDate_Via304(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	clock := testutil.NewFixedClock()
@@ -387,6 +392,7 @@ func TestPullTranscript_UpToDate_Via304(t *testing.T) {
 // hash as ServedBlobHash, the VERBATIM quoted token as ServedETag, the DB row's
 // ContentHash is RAW, and PullResult.ServedBlobHash is RAW.
 func TestPullTranscript_ETagHashSplit(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	ref := newRef(t)
@@ -434,6 +440,7 @@ func TestPullTranscript_ETagHashSplit(t *testing.T) {
 // --- DryRun (resolve→negotiate→fetch-meta→diff, then short-circuit) ---
 
 func TestPullTranscript_DryRun_WouldPull(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
@@ -481,6 +488,7 @@ func TestPullTranscript_DryRun_WouldPull(t *testing.T) {
 }
 
 func TestPullTranscript_DryRun_UpToDate(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	clock := testutil.NewFixedClock()
@@ -520,6 +528,7 @@ func TestPullTranscript_DryRun_UpToDate(t *testing.T) {
 // --- Force ---
 
 func TestPullTranscript_Force_BypassesDiff(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	clock := testutil.NewFixedClock()
@@ -554,6 +563,7 @@ func TestPullTranscript_Force_BypassesDiff(t *testing.T) {
 // --- Status mapping for village-contacting failures ---
 
 func TestPullTranscript_NotLoggedIn(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
@@ -579,6 +589,7 @@ func TestPullTranscript_NotLoggedIn(t *testing.T) {
 }
 
 func TestPullTranscript_NotFound(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
@@ -598,6 +609,7 @@ func TestPullTranscript_NotFound(t *testing.T) {
 }
 
 func TestPullTranscript_ContractError(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
@@ -622,6 +634,7 @@ func TestPullTranscript_ContractError(t *testing.T) {
 // --- Pre-WRITE failure ⇒ zero mutation ---
 
 func TestPullTranscript_PreWriteFailure_ZeroMutation(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	reader := happyReader()
@@ -649,6 +662,7 @@ func TestPullTranscript_PreWriteFailure_ZeroMutation(t *testing.T) {
 // --- DB-TX failure ⇒ compensating dir removal ---
 
 func TestPullTranscript_DBTxFailure_CompensatingRemoval(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{CommitErr: errors.New("db commit boom")}
 	reader := happyReader()
@@ -676,6 +690,7 @@ func TestPullTranscript_DBTxFailure_CompensatingRemoval(t *testing.T) {
 // --- DB-TX failure AND compensation failure ⇒ actionable orphan error ---
 
 func TestPullTranscript_CompensationFailure_NamesOrphan(t *testing.T) {
+	t.Parallel()
 	mem := testutil.NewMemFS()
 	wantDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, testutil.TestTranscriptUUID)
 
@@ -737,6 +752,7 @@ func assertZeroPullState(t *testing.T, mem *testutil.MemFS, pullDir, tmpDir stri
 // TestPullTranscript_StageFilesFailure_ZeroMutation: a WriteFile error during
 // staging must RemoveAll(tmpDir) and leave zero pullDir mutation + no commit.
 func TestPullTranscript_StageFilesFailure_ZeroMutation(t *testing.T) {
+	t.Parallel()
 	mem := testutil.NewMemFS()
 	fs := testutil.NewFailingFS(mem)
 	fs.WriteFileErr = errors.New("stage writefile boom")
@@ -761,6 +777,7 @@ func TestPullTranscript_StageFilesFailure_ZeroMutation(t *testing.T) {
 // TestPullTranscript_StageMkdirFailure_ZeroMutation: a MkdirAll error during
 // staging (cannot even create the temp dir) ⇒ error + zero mutation + no commit.
 func TestPullTranscript_StageMkdirFailure_ZeroMutation(t *testing.T) {
+	t.Parallel()
 	mem := testutil.NewMemFS()
 	fs := testutil.NewFailingFS(mem)
 	fs.MkdirAllErr = errors.New("stage mkdir boom")
@@ -785,6 +802,7 @@ func TestPullTranscript_StageMkdirFailure_ZeroMutation(t *testing.T) {
 // TestPullTranscript_StaleTempClearFailure: the pre-staging RemoveAll(tmpDir)
 // clear of a crashed prior run's temp dir fails ⇒ actionable error, no commit.
 func TestPullTranscript_StaleTempClearFailure(t *testing.T) {
+	t.Parallel()
 	mem := testutil.NewMemFS()
 	tmpDir := filepath.Join(testPullsRoot, testutil.TestVillageHost, defaults.TempDirPrefix+testutil.TestTranscriptUUID)
 	fs := testutil.NewFailingFS(mem)
@@ -813,6 +831,7 @@ func TestPullTranscript_StaleTempClearFailure(t *testing.T) {
 // TestPullTranscript_PreRenameClearFailure: on a re-pull, clearing the existing
 // pull dir BEFORE the publish move fails ⇒ error names the pull dir + tmp cleaned.
 func TestPullTranscript_PreRenameClearFailure(t *testing.T) {
+	t.Parallel()
 	mem := testutil.NewMemFS()
 	clock := testutil.NewFixedClock()
 	ref := newRef(t)
@@ -860,6 +879,7 @@ func TestPullTranscript_PreRenameClearFailure(t *testing.T) {
 // (the publish move) ⇒ RemoveAll(tmpDir)+RemoveAll(pullDir) cleanup + actionable
 // "atomic rename" error, zero mutation, no commit.
 func TestPullTranscript_RenameDirFailure_Cleanup(t *testing.T) {
+	t.Parallel()
 	mem := testutil.NewMemFS()
 	fs := testutil.NewFailingFS(mem)
 	fs.CopyFileErr = errors.New("rename copyfile boom")
@@ -887,6 +907,7 @@ func TestPullTranscript_RenameDirFailure_Cleanup(t *testing.T) {
 // --- Served-blob hash fallback when the village computes none ---
 
 func TestPullTranscript_NoServerHash_LocalRecompute(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	st := &testutil.StubPullStore{}
 	meta := happyMeta()

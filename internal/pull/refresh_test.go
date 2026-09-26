@@ -53,6 +53,7 @@ func ownTranscriptListing() *schema.PullListResponse {
 }
 
 func TestRefreshOwnAnnotations_ExcludesOwnAuthor(t *testing.T) {
+	t.Parallel()
 	reader := &testutil.StubVillageReader{
 		ListResponses: []*schema.PullListResponse{ownTranscriptListing()},
 		AnnotationsByID: map[schema.TranscriptID][]schema.PullAnnotation{
@@ -102,6 +103,7 @@ func TestRefreshOwnAnnotations_ExcludesOwnAuthor(t *testing.T) {
 // Real-store integration: refresh classifies created/updated/skipped exactly like
 // the push vocabulary (skipped = payload-identical) via the REAL store path.
 func TestRefreshOwnAnnotations_RealStore_CreatedThenSkipped(t *testing.T) {
+	t.Parallel()
 	st := storetest.Open(t)
 	reader := &testutil.StubVillageReader{
 		ListResponses: []*schema.PullListResponse{ownTranscriptListing()},
@@ -140,6 +142,7 @@ func TestRefreshOwnAnnotations_RealStore_CreatedThenSkipped(t *testing.T) {
 }
 
 func TestRefreshOwnAnnotations_BySession(t *testing.T) {
+	t.Parallel()
 	// Two own transcripts; --session narrows to the one whose LocalID matches.
 	listing := &schema.PullListResponse{
 		Transcripts: []schema.PullTranscriptInfo{
@@ -183,6 +186,7 @@ func TestRefreshOwnAnnotations_BySession(t *testing.T) {
 // error mid-enumeration aborts the refresh with the mapped status and performs NO
 // upsert (no phantom partial write). The enumerated count is still reported.
 func TestRefreshOwnAnnotations_AnnotationsFetchError(t *testing.T) {
+	t.Parallel()
 	reader := &testutil.StubVillageReader{
 		ListResponses:  []*schema.PullListResponse{ownTranscriptListing()},
 		AnnotationsErr: village.ErrPullNotFound, // mid-loop fetch failure (mapped status)
@@ -211,6 +215,7 @@ func TestRefreshOwnAnnotations_AnnotationsFetchError(t *testing.T) {
 // TestRefreshOwnAnnotations_UpsertError: an UpsertPulledAnnotations error surfaces
 // as PullStatusError with the persist-error message (StubPullStore.UpsertErr).
 func TestRefreshOwnAnnotations_UpsertError(t *testing.T) {
+	t.Parallel()
 	reader := &testutil.StubVillageReader{
 		ListResponses: []*schema.PullListResponse{ownTranscriptListing()},
 		AnnotationsByID: map[schema.TranscriptID][]schema.PullAnnotation{
@@ -245,6 +250,7 @@ func TestRefreshOwnAnnotations_UpsertError(t *testing.T) {
 // the listOwnTranscripts page loop — both own transcripts (across both pages) are
 // scanned, and ListCalls reflects exactly the page count (no over/under-fetch).
 func TestRefreshOwnAnnotations_MultiPage(t *testing.T) {
+	t.Parallel()
 	// refreshPageLimit (100) full-page entries on page 1, one entry on page 2.
 	const fullPage = 100
 	page1 := make([]schema.PullTranscriptInfo, fullPage)
@@ -290,6 +296,7 @@ func TestRefreshOwnAnnotations_MultiPage(t *testing.T) {
 // page limit terminates the loop via the len(page)<limit break (the second break
 // condition), distinct from the Total-based break above.
 func TestRefreshOwnAnnotations_ShortPageTermination(t *testing.T) {
+	t.Parallel()
 	// A single SHORT page (1 entry < refreshPageLimit) with Total=0 (unknown total)
 	// must terminate via len(resp.Transcripts) < limit, not loop forever.
 	reader := &testutil.StubVillageReader{
@@ -322,6 +329,7 @@ func TestRefreshOwnAnnotations_ShortPageTermination(t *testing.T) {
 }
 
 func TestRefreshOwnAnnotations_NotLoggedIn(t *testing.T) {
+	t.Parallel()
 	reader := &testutil.StubVillageReader{}
 	st := &testutil.StubPullStore{}
 	res, err := pull.NewPipeline(reader, testutil.NewMemFS(), st, testutil.NewFixedClock(), pull.Credentials{}, testPullsRoot).

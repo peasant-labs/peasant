@@ -17,6 +17,7 @@ import (
 // (marshal -> normalize -> byte-compare) to catch any drift between the struct's
 // JSON tags and the committed example.
 func TestPullManifest_Golden(t *testing.T) {
+	t.Parallel()
 	raw := schema.PullManifestExampleJSON
 
 	var m pull.PullManifest
