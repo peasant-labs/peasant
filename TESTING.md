@@ -98,6 +98,71 @@ Every count in a report must carry the exact command that produced it and the SH
 it was run at, or be explicitly labelled **"carried, not re-verified"**. No relayed
 number may be restated without re-running it.
 
+### Frozen contract
+
+The gate's exported shape is a frozen contract: the per-invocation record, the
+report document, the registry and budget schemas, the class and pre-test closed
+sets, the shared stream library path, and the CLI and environment surface.
+`internal/testgate/contract_test.go` and `internal/teststream/contract_test.go`
+pin the shapes against `testdata/contract_shapes.yaml`; the
+`contract_compile_test.go` files break the build on a rename, removal, or retype;
+and `scripts/testgate/main_test.go` pins the usage text, the exit codes, and the
+budget/env precedence. Each frozen axis carries a mutation case that must be
+detected, so the freeze is tested rather than asserted. Update the fixture only
+when a contract change is deliberate and the consumers are re-pinned.
+
+## Test-support filesystem decorators
+
+The suite's test filesystem decorators wrap an `ingest.FileSystem` to count and
+fault an operation, hold an operation, or bound it. The shared contract is
+declared once in `internal/fsdecorator`, a standard-library-only leaf package.
+
+- `CountingFS` (`internal/testutil/counting_fs.go`) is the path-keyed fault and
+  count capability.
+- `fsdecorator.GatedFS` is the blocking gate: `Arm` holds one operation on one
+  path, `Reached` closes when the held operation is entered, and `Release` lets it
+  proceed.
+- `fsdecorator.BoundedFS` is the bound and read-only case: `Limit` bounds one
+  operation on a path, `ReadOnly` refuses every mutating operation.
+
+`fsdecorator.FileSystem` mirrors `ingest.FileSystem`; a contract test asserts the
+two are identical, so a decorator held as `GatedFS` or `BoundedFS` is also an
+`ingest.FileSystem`.
+
+### Two owners, no import cycle
+
+`internal/testutil` imports `internal/ingest`, so a white-box `package ingest`
+test cannot import `internal/testutil` (that would be an import cycle). The
+decorators therefore have two owners:
+
+- `internal/testutil` implements the non-white-box decorators.
+- `internal/ingest/fsfault_test.go` (`package ingest`) implements the white-box
+  decorators, which need the package's unexported internals.
+
+Both import `internal/fsdecorator`, which imports nothing from `internal/ingest`,
+so the same capability can be implemented on either side. Because Go interfaces
+are structural, a decorator also satisfies the interface without naming it, and a
+consumer can take `fsdecorator.GatedFS`/`BoundedFS` and pass the value to
+production code that expects `ingest.FileSystem`.
+`internal/fsdecorator/testdata/classification_cases.yaml` records, per decorator
+type, its capability and whether it is white-box, so each migration's owner is
+explicit before any code moves.
+
+## Coverage map for the consolidation
+
+The consolidation records every moved, deleted, retained, or deferred name in a
+coverage map, closed against an inventory generated at the slice branch point:
+
+- `internal/coveragemap` declares `Inventory` and `CoverageMap`, the destination
+  closed set (`retained-in-place`, `moved:<file>`, `deleted:<rationale-ref>`,
+  `followup:<task-id>`), strict loaders, and the validators.
+- The inventory's `frozen_from` is the branch-point commit; the validator refuses
+  anything that is not a commit-shaped value, so a plan-time inventory is not
+  admissible.
+- Every inventory name appears in the map exactly once, a `moved` target must
+  exist, and a `deleted` or `followup` entry must name its rationale or task. An
+  entry is written by the slice that performs the move, in the same commit.
+
 ## Test performance: keeping `cmd/peasant` fast (and parallel)
 
 `cmd/peasant` is the CLI integration package — each test stands up SQLite + the
