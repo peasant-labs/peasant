@@ -1,19 +1,12 @@
 package ingest
 
 import (
-	"bytes"
-	_ "embed"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
-	"gopkg.in/yaml.v3"
 )
-
-//go:embed record_kinds.yaml
-var recordKindsYAML []byte
 
 // RecordKindStatus is the closed set of dispositions for one harness record
 // or part kind. It answers what the parser does with the kind.
@@ -145,15 +138,23 @@ type RecordKindRegistry struct {
 const recordKindsFormatVersion = 3
 
 // LoadRecordKindRegistry builds and validates the registry from adapter
-// vocabulary declarations. The embedded YAML is generated reporting output,
-// not a parser or interpretation source.
+// vocabulary declarations. The committed record_kinds.yaml is generated
+// reporting output compared against fresh codegen by the drift gate; it is not
+// a parser, interpretation, or runtime source.
 func LoadRecordKindRegistry() (RecordKindRegistry, error) {
 	return generateRecordKindRegistry()
 }
 
 func generateRecordKindRegistry() (RecordKindRegistry, error) {
+	return generateRecordKindRegistryFrom(allRecordKindVocabularies())
+}
+
+// generateRecordKindRegistryFrom lowers the given adapter vocabularies. The
+// production path passes the registered vocabularies; a mutation fixture
+// passes a changed candidate to observe what the declarations alone decide.
+func generateRecordKindRegistryFrom(vocabularies []recordKindAdapterVocabulary) (RecordKindRegistry, error) {
 	registry := RecordKindRegistry{Version: recordKindsFormatVersion, Harnesses: make(map[Harness]RecordKindHarness, len(DefaultAdapterRegistry))}
-	for _, vocabulary := range allRecordKindVocabularies() {
+	for _, vocabulary := range vocabularies {
 		versions, ok := HarvesterVersionRegistry[vocabulary.Harness]
 		if !ok {
 			return RecordKindRegistry{}, fmt.Errorf("record-kind registry: harness %q has no harvester versions; register its parser targets before generating", vocabulary.Harness)
@@ -180,44 +181,6 @@ func generateRecordKindRegistry() (RecordKindRegistry, error) {
 			section.Inventories = append(section.Inventories, inventory)
 		}
 		registry.Harnesses[vocabulary.Harness] = section
-	}
-	if err := registry.validate(); err != nil {
-		return RecordKindRegistry{}, err
-	}
-	return registry, nil
-}
-
-func decodeRecordKindRegistry(data []byte) (RecordKindRegistry, error) {
-	var registry RecordKindRegistry
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&registry); err != nil {
-		return RecordKindRegistry{}, fmt.Errorf("record-kind registry: decode: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return RecordKindRegistry{}, fmt.Errorf("record-kind registry: expected one YAML document; remove trailing content (decode: %v)", err)
-	}
-	for harness, section := range registry.Harnesses {
-		for _, inventory := range section.Inventories {
-			for _, kind := range inventory.Kinds {
-				kind.Context, kind.Namespace = inventory.Context, inventory.Namespace
-				if kind.Match == "" {
-					kind.Match = RecordKindLiteral
-				}
-				if kind.Source == "" {
-					var refs []string
-					for _, source := range inventory.Sources {
-						refs = append(refs, source.File+" "+source.Symbol)
-					}
-					kind.Source = strings.Join(refs, "; ")
-				}
-				bindDecodedRecordKindSemantics(&kind)
-				section.Kinds = append(section.Kinds, kind)
-			}
-		}
-		bindDecodedRecordKindSemantics(&section.Fallback)
-		registry.Harnesses[harness] = section
 	}
 	if err := registry.validate(); err != nil {
 		return RecordKindRegistry{}, err
@@ -434,16 +397,79 @@ func AggregateRecordKindRefusals(refusals []RecordKindRefusal) []RecordKindRefus
 	return out
 }
 
-// Markdown renders the registry as the generated per-kind table owned by
-// docs/record-kinds.md. Harness sections sort by name; kinds keep file order.
-func (r RecordKindRegistry) Markdown() string {
-	var out strings.Builder
+// sortedHarnesses is the canonical harness order for every generated view.
+func (r RecordKindRegistry) sortedHarnesses() []Harness {
 	harnesses := make([]Harness, 0, len(r.Harnesses))
 	for harness := range r.Harnesses {
 		harnesses = append(harnesses, harness)
 	}
 	sort.Slice(harnesses, func(i, j int) bool { return string(harnesses[i]) < string(harnesses[j]) })
-	for _, harness := range harnesses {
+	return harnesses
+}
+
+// statusRowCounts counts the declared rows per status across every harness.
+func (r RecordKindRegistry) statusRowCounts() map[RecordKindStatus]int {
+	counts := make(map[RecordKindStatus]int, len(recordKindStatusClosedSet))
+	for _, harness := range r.sortedHarnesses() {
+		for _, kind := range r.Harnesses[harness].Kinds {
+			counts[kind.Status]++
+		}
+	}
+	return counts
+}
+
+// fallbackStatuses names the dispositions the unseen-valid-kind fallback lowers
+// to, in closed-set order. validate() requires one retained-evidence fallback in
+// every section, so a valid registry yields exactly one.
+func (r RecordKindRegistry) fallbackStatuses() []RecordKindStatus {
+	fallbacks := make(map[RecordKindStatus]bool, len(recordKindStatusClosedSet))
+	for _, harness := range r.sortedHarnesses() {
+		if status := r.Harnesses[harness].Fallback.Status; status != "" {
+			fallbacks[status] = true
+		}
+	}
+	var statuses []RecordKindStatus
+	for _, status := range recordKindStatusClosedSet {
+		if fallbacks[status] {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses
+}
+
+// statusProse describes the status closed set from the closed-set table and this
+// registry's own rows. What each status means, how many rows carry it, and
+// whether it is the open fallback are all read from the registry, so the text
+// cannot contradict a future declared status.
+func (r RecordKindRegistry) statusProse() string {
+	counts := r.statusRowCounts()
+	fallbacks := make(map[RecordKindStatus]bool, len(recordKindStatusClosedSet))
+	for _, status := range r.fallbackStatuses() {
+		fallbacks[status] = true
+	}
+	entries := make([]string, 0, len(recordKindStatusClosedSet))
+	for _, status := range recordKindStatusClosedSet {
+		note, ok := recordKindStatusNotes[status]
+		if !ok {
+			note = "no documented meaning; add one to recordKindStatusNotes"
+		}
+		entry := fmt.Sprintf("**%s** (%s) — %d rows", status, note, counts[status])
+		if counts[status] == 0 {
+			entry += ", declared by no kind in this build"
+		}
+		if fallbacks[status] {
+			entry += ", and the unseen-valid-kind fallback of every harness"
+		}
+		entries = append(entries, entry)
+	}
+	return strings.Join(entries, "; ") + "."
+}
+
+// Markdown renders the registry as the generated per-kind table owned by
+// docs/record-kinds.md. Harness sections sort by name; kinds keep file order.
+func (r RecordKindRegistry) Markdown() string {
+	var out strings.Builder
+	for _, harness := range r.sortedHarnesses() {
 		section := r.Harnesses[harness]
 		fmt.Fprintf(&out, "## %s (adapter %d, indexer %d)\n\n", string(harness), section.AdapterVersion, section.IndexerVersion)
 		fmt.Fprintf(&out, "Baseline index format: %d.\n\n", section.IndexVersion)

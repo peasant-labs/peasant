@@ -15,11 +15,16 @@ remain errors, not successful unknown-kind captures.
   Pi uses format 1 even though its parser follows a native active graph.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
-- **Status** is represented (interpreted entries or owning-entry state),
-  tracked-only (stored non-conversation evidence), ignored-control (no row), or
-  retained-unknown (complete redacted evidence without interpretation). **Refused**
-  is reserved for a future explicit known-unsupported disposition; the current
-  lowering never emits it, and a valid undeclared name is never refused by default.
+- **Status** is the closed set below, listed with what this build declares.
+  **represented** (interpreted entries or owning-entry state) — 235 rows;
+  **tracked-only** (stored non-conversation evidence outside interpreted
+  transcript entries) — 6 rows; **ignored-control** (no row; the capture
+  accounts for the kind and can still certify complete) — 28 rows;
+  **retained-unknown** (complete redacted evidence without interpretation) — 0
+  rows, declared by no kind in this build, and the unseen-valid-kind fallback of
+  every harness; **refused** (an explicit known-unsupported disposition that
+  leaves the capture incomplete until a build represents the kind) — 0 rows,
+  declared by no kind in this build.
 - **Preview** means the mapping can populate a human-readable content preview,
   not that every instance has nonempty text. Tool arguments alone are not preview
   text.
@@ -37,11 +42,12 @@ remain errors, not successful unknown-kind captures.
 
 ## Reporting and verification
 
-Retained-unknown run rows count **occurrences** separately from affected
-**sessions** for each harness/namespace/kind after successful writes. Multiple
-unknown blocks in one session are multiple occurrences and one affected session.
-The legacy refusal API counts per-session refusal inputs; it does not enumerate
-all unknown occurrences and must not be used for retained-unknown accounting.
+Run rows of the retained-unknown disposition count **occurrences** separately
+from affected **sessions** for each harness/namespace/kind after successful
+writes. Multiple unknown blocks in one session are multiple occurrences and one
+affected session. The legacy refusal API counts per-session refusal inputs; it
+does not enumerate all unknown occurrences and must not be used for
+retained-unknown accounting.
 
 Vocabulary completeness compares declarations and production censuses in both
 directions without assuming a Go syntax shape. Behavioral fixtures separately
@@ -134,18 +140,18 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | envelope | `event_msg` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | envelope | `compacted` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
-| native-generation | event | `token_count` | literal | ignored-control | no | none | Metadata event; no conversation row. | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `user_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `agent_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `agent_reasoning` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `item_started` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `item_completed` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `turn_started` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `task_started` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `turn_complete` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `task_complete` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `thread_rolled_back` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
-| native-generation | event | `turn_aborted` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexReplayState.replayEventMessage; codex_unknown.go prepareCodexRecord; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `token_count` | literal | ignored-control | no | none | Metadata event; no conversation row. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `user_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `agent_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `agent_reasoning` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `item_started` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `item_completed` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `turn_started` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `task_started` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `turn_complete` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `task_complete` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `thread_rolled_back` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `turn_aborted` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | response_item | `message` | literal | represented | yes | session entries |  | `codex_history_replay.go codexResponseNativeType` |
 | native-generation | response_item | `agent_message` | literal | represented | yes | session entries |  | `codex_history_replay.go codexResponseNativeType` |
 | native-generation | response_item | `reasoning` | literal | represented | yes | session entries |  | `codex_history_replay.go codexResponseNativeType` |

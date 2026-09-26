@@ -15,23 +15,6 @@ import (
 
 const codexOpaqueBlock = "__peasant_retained_unknown__"
 
-func codexNativeEventMsgKinds() []string {
-	return []string{
-		"token_count",
-		"user_message",
-		"agent_message",
-		"agent_reasoning",
-		"item_started",
-		"item_completed",
-		"turn_started",
-		"task_started",
-		"turn_complete",
-		"task_complete",
-		"thread_rolled_back",
-		"turn_aborted",
-	}
-}
-
 // A compatibility preview may tolerate an unreadable source shape, but it must
 // never hide a failure to retain otherwise valid opaque evidence.
 type codexEvidenceRetentionError struct{ cause error }
@@ -100,11 +83,11 @@ func prepareCodexRecord(raw []byte, position UnknownSourcePosition, native bool)
 	if native {
 		if kind == codexTypeResponse {
 			_, known = codexResponseNativeType(variant)
-		} else {
-			switch variant {
-			case "item_started", "item_completed", "turn_started", "turn_complete", "thread_rolled_back":
-				known = true
-			}
+		} else if _, dispatched := codexNativeOnlyEventTypes[codexNativeEventType(variant)]; dispatched {
+			// The same declaration the replay dispatches through decides the
+			// candidate admission set, so an interpreted native event is never
+			// retained here as unknown.
+			known = true
 		}
 	}
 	if !known {

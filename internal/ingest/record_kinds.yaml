@@ -75,7 +75,12 @@ harnesses:
     adapter_version: 1
     indexer_version: 17
     index_version: 1
-    fallback: *fallback
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete raw JSON and source coordinates in retainedUnknown
+      reason: Retain uninterpreted evidence and mark partial interpretation.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
         namespace: role
@@ -83,7 +88,7 @@ harnesses:
           - {file: content_capture.go, symbol: captureRoleKinds}
           - {file: unknown_jsonl.go, symbol: cursorCaptureRoleKinds}
         kinds:
-          - {<<: *text, kind: user}
+          - &text {kind: user, status: represented, preview: yes, payload: session entries}
           - {<<: *text, kind: assistant}
           - {<<: *text, kind: system}
           - {<<: *text, kind: tool}
@@ -101,13 +106,18 @@ harnesses:
         kinds:
           - {<<: *text, kind: text}
           - {<<: *text, kind: thinking}
-          - {<<: *tool, kind: tool_use}
-          - {<<: *result, kind: tool_result}
+          - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments}
+          - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
   strike:
     adapter_version: 1
     indexer_version: 17
     index_version: 1
-    fallback: *fallback
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete raw JSON and source coordinates in retainedUnknown
+      reason: Retain uninterpreted evidence and mark partial interpretation.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
         namespace: record
@@ -116,10 +126,10 @@ harnesses:
           - {file: strike_indexer.go, symbol: StrikeIndexer.parseWithCompletion, switch: envelope.Type}
           - {file: content_capture.go, symbol: StrikeIndexer.IndexTranscriptBytesForCapture, switch: env.Type}
         kinds:
-          - {<<: *ignored, kind: session.started}
+          - &ignored {kind: session.started, status: ignored-control, preview: no, payload: none, reason: Entryless control; unexpected conversation content remains a validation error.}
           - {<<: *ignored, kind: session.titled}
           - {<<: *ignored, kind: model.selected}
-          - {<<: *text, kind: user.message}
+          - &text {kind: user.message, status: represented, preview: yes, payload: session entries}
           - &structural {kind: turn.started, status: represented, preview: no, payload: state on owning entry; no independent row}
           - {<<: *structural, kind: turn.completed}
           - {<<: *text, kind: assistant.text}
@@ -130,8 +140,8 @@ harnesses:
           - {<<: *text, kind: assistant.reasoning.delta}
           - {<<: *text, kind: reasoning.delta}
           - {<<: *text, kind: assistant.thinking.delta}
-          - {<<: *tool, kind: tool.begin}
-          - {<<: *result, kind: tool.output}
+          - &tool {kind: tool.begin, status: represented, preview: no, payload: tool name and arguments}
+          - &result {kind: tool.output, status: represented, preview: yes, payload: tool output}
           - {<<: *result, kind: tool.end}
           - {<<: *tool, kind: process.started}
           - {<<: *result, kind: process.output}
@@ -150,21 +160,26 @@ harnesses:
     adapter_version: 2
     indexer_version: 17
     index_version: 1
-    fallback: *fallback
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete raw JSON and source coordinates in retainedUnknown
+      reason: Retain uninterpreted evidence and mark partial interpretation.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
         namespace: entry
         sources:
           - {file: pi_source.go, symbol: piEntryType.UnmarshalJSON, switch: value}
         kinds:
-          - {<<: *ignored, kind: session, reason: Required v3 document header; no conversation row.}
-          - {<<: *text, kind: message, payload: PiExtra state and usage; role/block dependent content}
+          - {kind: session, status: ignored-control, preview: no, payload: none, reason: Required v3 document header; no conversation row.}
+          - {kind: message, status: represented, preview: yes, payload: PiExtra state and usage; role/block dependent content}
           - &carrier {kind: thinking_level_change, status: tracked-only, preview: no, payload: PiExtra state carrier}
           - {<<: *carrier, kind: model_change}
-          - {<<: *text, kind: compaction, payload: summary and PiExtra usage/native metadata}
-          - {<<: *text, kind: branch_summary, payload: summary and PiExtra usage/native metadata}
+          - {kind: compaction, status: represented, preview: yes, payload: summary and PiExtra usage/native metadata}
+          - {kind: branch_summary, status: represented, preview: yes, payload: summary and PiExtra usage/native metadata}
           - {<<: *carrier, kind: custom, payload: PiExtra native metadata}
-          - {<<: *text, kind: custom_message, payload: text/media and PiExtra native metadata}
+          - {kind: custom_message, status: represented, preview: yes, payload: text/media and PiExtra native metadata}
           - {<<: *carrier, kind: label}
           - {<<: *carrier, kind: session_info}
       - context: retained-format-1
@@ -172,9 +187,9 @@ harnesses:
         sources:
           - {file: pi_indexer.go, symbol: piMessageRole.UnmarshalJSON, switch: value}
         kinds:
-          - {<<: *text, kind: user}
+          - &text {kind: user, status: represented, preview: yes, payload: session entries}
           - {<<: *text, kind: assistant}
-          - {<<: *result, kind: toolResult}
+          - &result {kind: toolResult, status: represented, preview: yes, payload: tool output}
           - {<<: *text, kind: bashExecution, payload: shell parent and paired execute tool entries}
       - context: retained-format-1
         namespace: content_block
@@ -185,13 +200,18 @@ harnesses:
           - {<<: *text, kind: text}
           - {<<: *text, kind: thinking}
           - {<<: *text, kind: image, payload: textual media marker}
-          - {<<: *tool, kind: toolCall}
+          - &tool {kind: toolCall, status: represented, preview: no, payload: tool name and arguments}
   codex:
     adapter_version: 1
     indexer_version: 17
     index_version: 1
     native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
-    fallback: *fallback
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete raw JSON and source coordinates in retainedUnknown
+      reason: Retain uninterpreted evidence and mark partial interpretation.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
         namespace: envelope
@@ -199,9 +219,9 @@ harnesses:
           - {file: content_capture.go, symbol: codexStrictEnvelopeKinds}
           - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: env.Type}
         kinds:
-          - {<<: *ignored, kind: session_meta}
+          - &ignored {kind: session_meta, status: ignored-control, preview: no, payload: none, reason: Entryless control; unexpected conversation content remains a validation error.}
           - {<<: *ignored, kind: turn_context}
-          - {<<: *structural, kind: event_msg}
+          - &structural {kind: event_msg, status: represented, preview: no, payload: state on owning entry; no independent row}
           - {<<: *structural, kind: response_item}
       - context: retained-format-1
         namespace: event
@@ -222,11 +242,11 @@ harnesses:
           - {file: content_capture.go, symbol: codexStrictResponsePayloadKinds}
           - {file: content_capture.go, symbol: CodexIndexer.IndexTranscriptBytesForCapture, switch: payload.Type}
         kinds:
-          - {<<: *text, kind: message}
+          - &text {kind: message, status: represented, preview: yes, payload: session entries}
           - {<<: *text, kind: reasoning}
-          - {<<: *tool, kind: function_call}
+          - &tool {kind: function_call, status: represented, preview: no, payload: tool name and arguments}
           - {<<: *tool, kind: custom_tool_call}
-          - {<<: *result, kind: function_call_output}
+          - &result {kind: function_call_output, status: represented, preview: yes, payload: tool output}
           - {<<: *result, kind: custom_tool_call_output}
       - context: retained-format-1
         namespace: message_block
@@ -262,8 +282,9 @@ harnesses:
       - context: native-generation
         namespace: event
         sources:
-          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage, switch: payload.Type, complete: true}
-          - {file: codex_unknown.go, symbol: prepareCodexRecord, switch: variant}
+          - {file: codex_history_replay.go, symbol: codexNativeEventDispatch}
+          - {file: codex_history_replay.go, symbol: codexReplayState.replayEventMessage}
+          - {file: codex_history_replay.go, symbol: codexNativeOnlyEventTypes}
           - {file: content_capture.go, symbol: codexStrictEventMsgKinds}
         kinds:
           - {<<: *ignored, kind: token_count, reason: Metadata event; no conversation row.}
@@ -362,7 +383,7 @@ harnesses:
           - {<<: *text, kind: multi_agent.inter_agent_completion_message}
           - {<<: *text, kind: compaction.summary}
           - {<<: *text, kind: shell.user_command}
-          - &diagnostic {<<: *text, kind: images.resize_notice, payload: diagnostic text and provenance; no standalone submitted-input count without a media sibling}
+          - &diagnostic {kind: images.resize_notice, status: represented, preview: yes, payload: diagnostic text and provenance; no standalone submitted-input count without a media sibling}
           - {<<: *diagnostic, kind: images.preparation_error}
           - {<<: *diagnostic, kind: images.unsupported}
           - {<<: *diagnostic, kind: audio.unsupported}
@@ -415,7 +436,12 @@ harnesses:
     indexer_version: 17
     index_version: 1
     native_versions: {adapter_version: 3, indexer_version: 18, index_version: 2}
-    fallback: *fallback
+    fallback: &fallback
+      status: retained-unknown
+      preview: no
+      payload: complete raw JSON and source coordinates in retainedUnknown
+      reason: Retain uninterpreted evidence and mark partial interpretation.
+      source: internal/ingest/retained_unknown.go NewRetainedUnknown
     inventories:
       - context: retained-format-1
         namespace: part
@@ -423,15 +449,15 @@ harnesses:
           - {file: opencode_capture.go, symbol: openCodeCaptureControlKinds}
           - {file: opencode_indexer.go, symbol: knownOpenCodeSemanticPartKinds}
         kinds:
-          - {<<: *ignored, kind: step-start}
+          - &ignored {kind: step-start, status: ignored-control, preview: no, payload: none, reason: Entryless control; unexpected conversation content remains a validation error.}
           - {<<: *ignored, kind: step-finish}
           - {<<: *ignored, kind: snapshot}
           - {<<: *ignored, kind: patch}
-          - {<<: *text, kind: text}
+          - &text {kind: text, status: represented, preview: yes, payload: session entries}
           - {<<: *text, kind: reasoning}
-          - {<<: *tool, kind: tool}
+          - &tool {kind: tool, status: represented, preview: no, payload: tool name and arguments}
           - {<<: *tool, kind: tool_use}
-          - {<<: *result, kind: tool_result}
+          - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
           - {<<: *text, kind: compaction}
           - {<<: *text, kind: subtask}
           - {<<: *text, kind: agent}

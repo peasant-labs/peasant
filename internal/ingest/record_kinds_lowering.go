@@ -97,6 +97,44 @@ func structuralRecordKindProfile() recordKindProfile {
 	}
 }
 
+// recordKindAnchorShapes maps each shared generated-YAML anchor to the stored
+// shape it always carries. The table is built from the same profiles that lower
+// the rows, so it cannot drift from them. The generator declares an anchor on
+// the first row that matches the anchor's shape and writes a row overriding any
+// part of that shape in full: an anchor declared on an overriding row would
+// silently retag every later row of the same harness that merges it.
+var recordKindAnchorShapes = buildRecordKindAnchorShapes()
+
+func buildRecordKindAnchorShapes() map[string]RecordKind {
+	shapes := make(map[string]RecordKind)
+	record := func(profile recordKindProfile) {
+		if profile.Anchor == "" {
+			return
+		}
+		shapes[profile.Anchor] = RecordKind{
+			Status:  profile.Status,
+			Preview: profile.Preview,
+			Payload: profile.Payload,
+			Reason:  profile.Reason,
+		}
+	}
+	for _, profile := range recordKindOutcomeProfiles {
+		record(profile)
+	}
+	record(structuralRecordKindProfile())
+	record(piCarrierProfile(recordKindProfile{}))
+	record(codexNativeItemProfile(recordKindProfile{}))
+	record(codexMediaProfile(recordKindProfile{}))
+	record(codexDiagnosticProfile(recordKindProfile{}))
+	return shapes
+}
+
+// recordKindShapeMatches reports whether a lowered row carries exactly the shape
+// its shared anchor is defined to carry.
+func recordKindShapeMatches(kind, shape RecordKind) bool {
+	return kind.Status == shape.Status && kind.Preview == shape.Preview && kind.Payload == shape.Payload && kind.Reason == shape.Reason
+}
+
 func lowerRecordKindRule(rule recordKindRule) RecordKind {
 	profile := recordKindProfileFor(rule)
 	return RecordKind{
@@ -243,26 +281,6 @@ func isStructuralRecordKind(rule recordKindRule) bool {
 	}
 	return rule.Namespace == "record" && (rule.Kind == "turn.started" || rule.Kind == "turn.completed" || rule.Kind == "usage.reported") ||
 		rule.Context == RecordKindRetained && rule.Namespace == "envelope" && (rule.Kind == "event_msg" || rule.Kind == "response_item")
-}
-
-func bindDecodedRecordKindSemantics(kind *RecordKind) {
-	outcome := indexformat.OutcomeText
-	switch {
-	case kind.Status == RecordKindRetainedUnknown:
-		outcome = indexformat.OutcomeOpaque
-	case kind.Status == RecordKindIgnoredControl, kind.Status == RecordKindRefused, kind.Payload == "state on owning entry; no independent row":
-		outcome = indexformat.OutcomeIgnored
-	case kind.Status == RecordKindTrackedOnly, strings.HasPrefix(kind.Payload, "bounded control extra"), kind.Payload == "compactMetadata":
-		outcome = indexformat.OutcomeControl
-	case strings.HasPrefix(kind.Payload, "tool name and arguments"):
-		outcome = indexformat.OutcomeToolCall
-	case strings.HasPrefix(kind.Payload, "tool output"), strings.HasPrefix(kind.Payload, "structured tool output"):
-		outcome = indexformat.OutcomeToolResult
-	}
-	profile := recordKindOutcomeProfiles[outcome]
-	kind.Outcome = outcome
-	kind.EntryMode = profile.EntryMode
-	kind.Coordinates = profile.Coordinates
 }
 
 // recordKindSourceLabel is used only in generated report metadata. The

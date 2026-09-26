@@ -541,15 +541,7 @@ func replayCodexHistory(ctx context.Context, source CodexReadOnlySource, authori
 	current.descriptor.Coordinates = codexRangeCoordinates(current.records, indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindCodexOrdinalRange})
 	decoded = append(decoded, current)
 
-	state := &codexReplayState{
-		registry:       registry,
-		responseByItem: map[string]int{},
-		itemNodeByID:   map[string]int{},
-		eventOrdinal:   map[string]int64{},
-		seenKeys:       map[string]bool{},
-		openTurns:      map[string]int64{},
-		boundary:       &codexLegacyBoundaryReducer{pending: map[string]bool{}},
-	}
+	state := newCodexReplayState(registry)
 	for _, segment := range decoded {
 		if err := state.replaySegment(authority.StableThreadID, segment, mode); err != nil {
 			return CodexCapturedHistory{}, err
@@ -831,6 +823,21 @@ type codexReplayState struct {
 	incomplete bool
 }
 
+// newCodexReplayState is the one construction of the replay state. Every map an
+// arm writes to is allocated here, so no dispatch arm can meet a nil map and
+// the production wiring is the same wiring a focused test observes.
+func newCodexReplayState(registry *CodexRefRegistry) *codexReplayState {
+	return &codexReplayState{
+		registry:       registry,
+		responseByItem: map[string]int{},
+		itemNodeByID:   map[string]int{},
+		eventOrdinal:   map[string]int64{},
+		seenKeys:       map[string]bool{},
+		openTurns:      map[string]int64{},
+		boundary:       &codexLegacyBoundaryReducer{pending: map[string]bool{}},
+	}
+}
+
 // replaySegment reduces one decoded segment into the shared state. A segment
 // whose proof failed still replays its proven valid records under a clamped
 // bound; records past the proven checkpoint are never claimed.
@@ -1103,89 +1110,177 @@ func (state *codexReplayState) replayResponseItem(threadID string, segment codex
 	return nil
 }
 
+// codexNativeEventType names one native event_msg payload type the replay
+// interprets. The closed set is declared once, beside the dispatch that
+// consumes it, so a native event arm cannot exist in one place and be missing
+// from the production census the record-kind vocabulary reads.
+type codexNativeEventType string
+
+const (
+	codexNativeEventTokenCount       codexNativeEventType = "token_count"
+	codexNativeEventUserMessage      codexNativeEventType = "user_message"
+	codexNativeEventAgentMessage     codexNativeEventType = "agent_message"
+	codexNativeEventAgentReasoning   codexNativeEventType = "agent_reasoning"
+	codexNativeEventItemStarted      codexNativeEventType = "item_started"
+	codexNativeEventItemCompleted    codexNativeEventType = "item_completed"
+	codexNativeEventTurnStarted      codexNativeEventType = "turn_started"
+	codexNativeEventTaskStarted      codexNativeEventType = "task_started"
+	codexNativeEventTurnComplete     codexNativeEventType = "turn_complete"
+	codexNativeEventTaskComplete     codexNativeEventType = "task_complete"
+	codexNativeEventThreadRolledBack codexNativeEventType = "thread_rolled_back"
+	codexNativeEventTurnAborted      codexNativeEventType = "turn_aborted"
+)
+
+// codexNativeEventHandler is one arm of the native event_msg dispatch: the
+// receiver first, then the replay's own event-message arguments.
+type codexNativeEventHandler func(state *codexReplayState, threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error
+
+// codexNativeEventDispatch is the production-owned census of the native
+// event_msg payload types this build interprets. Adding or removing a native
+// event arm is adding or removing an entry here: replayEventMessage dispatches
+// through it, the candidate boundary admits the types it adds beyond the
+// retained-format list, and the record-kind vocabulary reads its keys, so a
+// new arm turns the vocabulary completeness test red until it is declared.
+var codexNativeEventDispatch = map[codexNativeEventType]codexNativeEventHandler{
+	codexNativeEventTokenCount:       (*codexReplayState).replayMirroredEvent,
+	codexNativeEventUserMessage:      (*codexReplayState).replayMirroredEvent,
+	codexNativeEventAgentMessage:     (*codexReplayState).replayMirroredEvent,
+	codexNativeEventAgentReasoning:   (*codexReplayState).replayMirroredEvent,
+	codexNativeEventItemStarted:      (*codexReplayState).replayItemStarted,
+	codexNativeEventItemCompleted:    (*codexReplayState).replayItemCompleted,
+	codexNativeEventTurnStarted:      (*codexReplayState).replayTurnOpened,
+	codexNativeEventTaskStarted:      (*codexReplayState).replayTurnOpened,
+	codexNativeEventTurnComplete:     (*codexReplayState).replayTurnCompleted,
+	codexNativeEventTaskComplete:     (*codexReplayState).replayTurnCompleted,
+	codexNativeEventThreadRolledBack: (*codexReplayState).replayThreadRolledBack,
+	codexNativeEventTurnAborted:      (*codexReplayState).replayTurnAborted,
+}
+
+// codexNativeOnlyEventTypes are the declared native event types the
+// retained-format strict list does not already carry. The candidate boundary
+// admits exactly this derived set, so the types the replay dispatches and the
+// types a candidate capture interprets cannot drift apart.
+var codexNativeOnlyEventTypes = codexNativeEventTypesOutsideStrict()
+
+// codexNativeEventTypesOutsideStrict derives the native event types the strict
+// retained-format list does not already recognize, read from the dispatch
+// declaration itself rather than from a second hand-written list.
+func codexNativeEventTypesOutsideStrict() map[codexNativeEventType]struct{} {
+	strict := codexStrictEventMsgKinds()
+	outside := make(map[codexNativeEventType]struct{}, len(codexNativeEventDispatch))
+	for kind := range codexNativeEventDispatch {
+		if !slices.Contains(strict, string(kind)) {
+			outside[kind] = struct{}{}
+		}
+	}
+	return outside
+}
+
 // replayEventMessage handles the event_msg variants that participate in the
 // native replay: canonical item lifecycle, turn lifecycle, pairing, turn
-// boundaries and legacy instruction rollback.
+// boundaries and legacy instruction rollback. The arm is read from
+// codexNativeEventDispatch by payload type; a type with no declared arm is not
+// interpreted here and stays retained opaque evidence.
 func (state *codexReplayState) replayEventMessage(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, mode CodexHistoryMode) error {
-	switch payload.Type {
-	case "token_count",
-		"user_message",
-		"agent_message",
-		"agent_reasoning":
-		// Usage belongs to metadata; these conversation events mirror response
-		// items and must not duplicate the native item stream.
-		return nil
-	case "item_started":
-		if payload.ID != "" {
-			state.boundary.pendUnopened(payload.ID)
-		}
-		return nil
-	case "item_completed":
-		return state.replayItemCompleted(threadID, segment, record, payload, ownership, mode)
-	case "turn_started", "task_started":
-		if payload.TurnID != "" {
-			state.openTurns[payload.TurnID] = record.Ordinal
-		}
-		return nil
-	case "turn_complete", "task_complete":
-		if payload.TurnID == "" {
-			return nil
-		}
-		if _, open := state.openTurns[payload.TurnID]; open {
-			delete(state.openTurns, payload.TurnID)
-			return nil
-		}
-		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-			ErrorType:   "codex_lifecycle_unbalanced",
-			Location:    codexRecordLocation(threadID, record),
-			Message:     "a native turn lifecycle event completes a turn that never started; the event was retained at its native position",
-			Remediation: "Investigate the native writer; the active history is unchanged.",
-		})
-		return nil
-	case "thread_rolled_back":
-		if mode != CodexHistoryModeLegacy {
-			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-				ErrorType:   "codex_paginated_rollback_anomaly",
-				Location:    codexRecordLocation(threadID, record),
-				Message:     "a raw rollback record appeared in a paginated rollout; the paginated projector applies no turn deletion",
-				Remediation: "Use the supported paginated revert path; the active history is unchanged and the legacy reducer was not run.",
-			})
-			return nil
-		}
-		if payload.NumTurns == nil || *payload.NumTurns <= 0 {
-			return nil
-		}
-		turns := int(*payload.NumTurns)
-		if turns > len(state.turns) {
-			state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-				ErrorType:   "codex_rollback_beyond_history",
-				Location:    codexRecordLocation(threadID, record),
-				Message:     fmt.Sprintf("a native rollback removes %d turns but only %d native instruction turns are open; every open turn was excluded and later appends survive", turns, len(state.turns)),
-				Remediation: "Investigate the native writer; the active history holds only the surviving prefix.",
-			})
-			turns = len(state.turns)
-		}
-		for _, turn := range state.turns[len(state.turns)-turns:] {
-			for _, index := range turn {
-				state.nodes[index].Ownership = CodexOwnershipReverted
-			}
-		}
-		state.turns = state.turns[:len(state.turns)-turns]
-		return nil
-	case "turn_aborted":
-		if payload.TurnID != "" {
-			delete(state.openTurns, payload.TurnID)
-		}
-		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
-			ErrorType:   "codex_turn_aborted",
-			Location:    codexRecordLocation(threadID, record),
-			Message:     "a native turn was aborted; its records are retained at their native position",
-			Remediation: "No action required; the abort is a native control event.",
-		})
-		return nil
-	default:
+	handler, declared := codexNativeEventDispatch[codexNativeEventType(payload.Type)]
+	if !declared {
 		return nil
 	}
+	return handler(state, threadID, segment, record, payload, ownership, mode)
+}
+
+// replayMirroredEvent handles the events whose content the native item stream
+// already represents. Usage belongs to metadata; these conversation events
+// mirror response items and must not duplicate the native item stream.
+func (state *codexReplayState) replayMirroredEvent(_ string, _ codexDecodedSegment, _ codexHistoryRecord, _ codexHistoryReplayPayload, _ CodexOwnership, _ CodexHistoryMode) error {
+	return nil
+}
+
+// replayItemStarted records that an item lifecycle opened an identity the
+// completion marker must still account for.
+func (state *codexReplayState) replayItemStarted(_ string, _ codexDecodedSegment, _ codexHistoryRecord, payload codexHistoryReplayPayload, _ CodexOwnership, _ CodexHistoryMode) error {
+	if payload.ID != "" {
+		state.boundary.pendUnopened(payload.ID)
+	}
+	return nil
+}
+
+// replayTurnOpened remembers the native ordinal a turn lifecycle opened at, so
+// its completion closes that turn instead of reporting an unbalanced lifecycle.
+func (state *codexReplayState) replayTurnOpened(_ string, _ codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, _ CodexOwnership, _ CodexHistoryMode) error {
+	if payload.TurnID != "" {
+		state.openTurns[payload.TurnID] = record.Ordinal
+	}
+	return nil
+}
+
+// replayTurnCompleted closes an open turn, or retains the completion at its
+// native position and reports the unbalanced lifecycle.
+func (state *codexReplayState) replayTurnCompleted(threadID string, _ codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, _ CodexOwnership, _ CodexHistoryMode) error {
+	if payload.TurnID == "" {
+		return nil
+	}
+	if _, open := state.openTurns[payload.TurnID]; open {
+		delete(state.openTurns, payload.TurnID)
+		return nil
+	}
+	state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+		ErrorType:   "codex_lifecycle_unbalanced",
+		Location:    codexRecordLocation(threadID, record),
+		Message:     "a native turn lifecycle event completes a turn that never started; the event was retained at its native position",
+		Remediation: "Investigate the native writer; the active history is unchanged.",
+	})
+	return nil
+}
+
+// replayThreadRolledBack reverts the trailing native instruction turns in a
+// legacy rollout. A paginated rollout applies no turn deletion and reports the
+// anomaly instead.
+func (state *codexReplayState) replayThreadRolledBack(threadID string, _ codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, _ CodexOwnership, mode CodexHistoryMode) error {
+	if mode != CodexHistoryModeLegacy {
+		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+			ErrorType:   "codex_paginated_rollback_anomaly",
+			Location:    codexRecordLocation(threadID, record),
+			Message:     "a raw rollback record appeared in a paginated rollout; the paginated projector applies no turn deletion",
+			Remediation: "Use the supported paginated revert path; the active history is unchanged and the legacy reducer was not run.",
+		})
+		return nil
+	}
+	if payload.NumTurns == nil || *payload.NumTurns <= 0 {
+		return nil
+	}
+	turns := int(*payload.NumTurns)
+	if turns > len(state.turns) {
+		state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+			ErrorType:   "codex_rollback_beyond_history",
+			Location:    codexRecordLocation(threadID, record),
+			Message:     fmt.Sprintf("a native rollback removes %d turns but only %d native instruction turns are open; every open turn was excluded and later appends survive", turns, len(state.turns)),
+			Remediation: "Investigate the native writer; the active history holds only the surviving prefix.",
+		})
+		turns = len(state.turns)
+	}
+	for _, turn := range state.turns[len(state.turns)-turns:] {
+		for _, index := range turn {
+			state.nodes[index].Ownership = CodexOwnershipReverted
+		}
+	}
+	state.turns = state.turns[:len(state.turns)-turns]
+	return nil
+}
+
+// replayTurnAborted closes the aborted turn and records the native control
+// event; the aborted records stay retained at their native positions.
+func (state *codexReplayState) replayTurnAborted(threadID string, _ codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, _ CodexOwnership, _ CodexHistoryMode) error {
+	if payload.TurnID != "" {
+		delete(state.openTurns, payload.TurnID)
+	}
+	state.diagnostics = append(state.diagnostics, DiagnosticEntry{
+		ErrorType:   "codex_turn_aborted",
+		Location:    codexRecordLocation(threadID, record),
+		Message:     "a native turn was aborted; its records are retained at their native position",
+		Remediation: "No action required; the abort is a native control event.",
+	})
+	return nil
 }
 
 // replayItemCompleted applies the canonical paginated item authority. An

@@ -120,6 +120,12 @@ recognized record, part, and content-block kinds.
   `go generate ./internal/ingest`; committed bytes must equal fresh codegen.
 - The exact per-adapter production-census and required-name tests are the drift gates. The former
   AST scanner is retired and must not be reintroduced.
+- Where the dispatch itself is a closed declaration, the census reads that declaration instead of a
+  second list. The Codex native `event_msg` types are the reference case: `codexNativeEventDispatch`
+  in `codex_history_replay.go` maps each `codexNativeEventType` to its replay arm, the candidate
+  boundary admits the types it adds beyond `codexStrictEventMsgKinds` through
+  `codexNativeOnlyEventTypes` derived from it, and `codex_vocabulary.go` reads its keys. Add an arm
+  there, never to a separate inventory list.
 - Rendering belongs to `internal/transcript` and Fairtrade. Do not add visualization state, renderer
   names, or viewer coverage to this registry.
 

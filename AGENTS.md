@@ -68,6 +68,12 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 - Keep dependencies injectable. Production wiring uses real dependencies. Tests may replace them.
 - Use atomic file operations for persisted data. Keep the existing XDG directory layout.
 
+Run the ast-grep rules of the repository when you change Go types or literals:
+
+```bash
+ast-grep scan --config sgconfig.yml .
+```
+
 ### Record-kind vocabulary
 
 - Each harness owns one co-located vocabulary declaration under `internal/ingest/*_vocabulary.go`. Those
@@ -86,12 +92,6 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
   retired AST scanner. After changing a vocabulary or its stored behavior, run `go generate
   ./internal/ingest`, the registry/docgen tests, and bump the relevant indexer version when settled
   sessions must be re-indexed.
-
-Run the ast-grep rules of the repository when you change Go types or literals:
-
-```bash
-ast-grep scan --config sgconfig.yml .
-```
 
 ## Data and contract invariants
 

@@ -113,9 +113,9 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 				if !strings.Contains(string(recordKindsYAML), row.Find) {
 					t.Fatal("mutation target not found")
 				}
-				_, result = decodeRecordKindRegistry([]byte(strings.Replace(string(recordKindsYAML), row.Find, row.Replace, 1)))
+				_, result = decodeEmbeddedRecordKindRegistry([]byte(strings.Replace(string(recordKindsYAML), row.Find, row.Replace, 1)))
 			case "trailing":
-				_, result = decodeRecordKindRegistry(append(append([]byte{}, recordKindsYAML...), []byte("\n---\nversion: 2\n")...))
+				_, result = decodeEmbeddedRecordKindRegistry(append(append([]byte{}, recordKindsYAML...), []byte("\n---\nversion: 2\n")...))
 			case "behavior", "mutate-status", "mutate-preview":
 				section := registry.Harnesses[row.Harness]
 				for i := range section.Kinds {
