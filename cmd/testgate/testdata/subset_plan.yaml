@@ -1,0 +1,35 @@
+# Fixture cases for a subset run's plan.
+#
+# A subset run scopes the registry to the packages the patterns resolved to
+# (`in_scope_import_paths`) before building the plan. A registry entry outside
+# that scope must not appear in the plan and must not be reported as missing; an
+# in-scope registered package that produced no listed tests (a build failure) is
+# still reported as missing. required_names is the deletion-protection manifest.
+required_names:
+  - subset-plan-covers-only-scope
+  - in-scope-build-failure-still-missing
+
+cases:
+  - name: subset-plan-covers-only-scope
+    module_path: example.com/m
+    in_scope_import_paths: [example.com/m/alpha, example.com/m/beta]
+    listed_tests:
+      example.com/m/alpha: [TestAlpha]
+    registry:
+      partition:
+        - { package: alpha, test: TestAlpha, class: single-threaded-bytes }
+        - { package: outside, test: TestOutside, class: single-threaded-bytes }
+    want_package_dirs: [alpha]
+    want_missing_registered: []
+
+  - name: in-scope-build-failure-still-missing
+    module_path: example.com/m
+    in_scope_import_paths: [example.com/m/alpha, example.com/m/broken]
+    listed_tests:
+      example.com/m/alpha: [TestAlpha]
+    registry:
+      partition:
+        - { package: alpha, test: TestAlpha, class: single-threaded-bytes }
+        - { package: broken, test: TestBroken, class: single-threaded-bytes }
+    want_package_dirs: [alpha]
+    want_missing_registered: [broken/TestBroken]

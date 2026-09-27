@@ -8,6 +8,10 @@
 // produced none is only reported. RACE=0 collapses to a single no-race pass but
 // still plans and screens.
 //
+// -pkgs narrows the run to a comma-separated set of package patterns (default
+// ./...). A narrower set is a subset run: it owes events only for the packages
+// it planned, and the whole-suite budget is not applicable to it.
+//
 // Usage:
 //
 //	cmd/testgate plan    print the run plan; run nothing
@@ -46,6 +50,7 @@ func main() {
 	outDir := fs.String("out", "", "directory for streams and profiles (default: $TESTGATE_OUT or .agents.local/testgate/<ts>)")
 	parallel := fs.Int("p", runtime.GOMAXPROCS(0), "packages to invoke concurrently (default: GOMAXPROCS)")
 	raceFlag := fs.Bool("race", os.Getenv("RACE") != "0", "run the race pass (default: $RACE != 0)")
+	pkgsFlag := fs.String("pkgs", "./...", "run/plan: comma-separated repo-relative package patterns (default: ./...)")
 	pkgFlag := fs.String("pkg", "", "profile: repo-relative package to profile (e.g. ./internal/ingest)")
 	batchesFlag := fs.Int("n", 0, "profile: concurrent batches (default: half the cores, a quarter under -race)")
 	parallelFlag := fs.Int("parallel", 1, "profile: per-batch -parallel; 0 leaves it unpinned (isolated run)")
@@ -87,13 +92,16 @@ func main() {
 		fatal(2, "registry is invalid", err)
 	}
 
+	patterns := parsePatterns(*pkgsFlag)
+	subset := !isFullSuite(patterns)
+
 	switch sub {
 	case "plan":
-		if err := runPlan(root, reg, *raceFlag); err != nil {
+		if err := runPlan(root, reg, *raceFlag, patterns, subset); err != nil {
 			fatal(2, "plan failed", err)
 		}
 	case "run":
-		code := runGate(root, reg, *outDir, *parallel, *raceFlag)
+		code := runGate(root, reg, *outDir, *parallel, *raceFlag, patterns, subset)
 		os.Exit(code)
 	case "profile":
 		goBin, err := exec.LookPath("go")
@@ -139,6 +147,10 @@ flags:
   -out DIR         stream output dir (default: .agents.local/testgate/<ts>)
   -p N             packages invoked concurrently (default: GOMAXPROCS)
   -race            run the race pass (default: $RACE != 0)
+  -pkgs PATTERNS   run/plan: comma-separated repo-relative package patterns
+                   (default: ./...); a narrower set is a SUBSET run, whose
+                   result is not a full-suite result and which reports the
+                   whole-suite budget as not applicable
   -pkg DIR         profile: repo-relative package to profile
   -n N             profile: concurrent batches
   -parallel N      profile: per-batch -parallel; 0 is unpinned (isolated run)
@@ -244,33 +256,95 @@ func defaultOutDir(root string) string {
 	return filepath.Join(root, ".agents.local", "testgate", time.Now().UTC().Format("20060102T150405Z"))
 }
 
-func buildPlan(root string, reg testgate.Registry) (*testgate.Plan, error) {
-	modulePath, err := testgate.ModulePath(root)
-	if err != nil {
-		return nil, err
+// parsePatterns splits the comma-separated -pkgs value and drops blanks. An
+// empty result means the whole module.
+func parsePatterns(raw string) []string {
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
 	}
-	tests, listWall, err := testgate.ListTests(root)
-	if err != nil {
-		return nil, err
+	if len(out) == 0 {
+		return []string{testgate.DefaultPackagePattern}
 	}
-	plan, err := testgate.BuildPlan(root, modulePath, tests, reg)
-	if err != nil {
-		return nil, err
-	}
-	plan.ListWall = listWall
-	return plan, nil
+	return out
 }
 
-func runPlan(root string, reg testgate.Registry, race bool) error {
-	plan, err := buildPlan(root, reg)
+// isFullSuite reports whether patterns name the whole module. Only the exact
+// whole-module pattern is a full-suite run; every narrower set is a subset run.
+func isFullSuite(patterns []string) bool {
+	return len(patterns) == 1 && patterns[0] == testgate.DefaultPackagePattern
+}
+
+// scopeRegistryForRun restricts the registry to the packages a subset run
+// actually requested. A full-suite run keeps the whole registry. It returns the
+// scoped registry, the module path, and the total repo package count (for the
+// subset header; 0 when the run is full).
+func scopeRegistryForRun(root string, reg testgate.Registry, patterns []string, subset bool) (testgate.Registry, string, int, error) {
+	modulePath, err := testgate.ModulePath(root)
+	if err != nil {
+		return testgate.Registry{}, "", 0, err
+	}
+	if !subset {
+		return reg, modulePath, 0, nil
+	}
+	inScope, err := testgate.ListPackages(root, patterns)
+	if err != nil {
+		return testgate.Registry{}, "", 0, err
+	}
+	dirs := map[string]bool{}
+	for _, ip := range inScope {
+		dirs[testgate.PackageDir(modulePath, ip)] = true
+	}
+	all, err := testgate.ListPackages(root, []string{testgate.DefaultPackagePattern})
+	if err != nil {
+		return testgate.Registry{}, "", 0, err
+	}
+	return testgate.ScopeRegistry(reg, dirs), modulePath, len(all), nil
+}
+
+// planForRun builds the run plan for the requested package patterns. A subset
+// run scopes the registry to the requested packages first, so a registered
+// package outside the subset is not held to the liveness rule. It returns the
+// plan and the total repo package count (0 when the run is full).
+func planForRun(root string, reg testgate.Registry, patterns []string, subset bool) (*testgate.Plan, int, error) {
+	scoped, modulePath, total, err := scopeRegistryForRun(root, reg, patterns, subset)
+	if err != nil {
+		return nil, 0, err
+	}
+	tests, listWall, err := testgate.ListTests(root, patterns)
+	if err != nil {
+		return nil, 0, err
+	}
+	plan, err := testgate.BuildPlan(root, modulePath, tests, scoped)
+	if err != nil {
+		return nil, 0, err
+	}
+	plan.ListWall = listWall
+	return plan, total, nil
+}
+
+func runPlan(root string, reg testgate.Registry, race bool, patterns []string, subset bool) error {
+	plan, total, err := planForRun(root, reg, patterns, subset)
 	if err != nil {
 		return err
+	}
+	if subset {
+		printSubsetHeader(patterns, len(plan.Packages), total)
 	}
 	printPlan(plan, race)
 	if len(plan.MissingRegistered) > 0 {
 		return fmt.Errorf("registered tests missing from go test -list: %s", strings.Join(plan.MissingRegistered, ", "))
 	}
 	return nil
+}
+
+// printSubsetHeader names the subset before any result, so a reader cannot
+// mistake a subset run for a full-suite gate result.
+func printSubsetHeader(patterns []string, planned, total int) {
+	fmt.Printf("testgate: SUBSET RUN — patterns: %s\n", strings.Join(patterns, ", "))
+	fmt.Printf("testgate: subset packages: %d of %d repo packages; NOT a full-suite gate result\n", planned, total)
 }
 
 func printPlan(plan *testgate.Plan, race bool) {
@@ -310,11 +384,14 @@ func printPlan(plan *testgate.Plan, race bool) {
 	}
 }
 
-func runGate(root string, reg testgate.Registry, outDir string, concurrency int, race bool) int {
-	plan, err := buildPlan(root, reg)
+func runGate(root string, reg testgate.Registry, outDir string, concurrency int, race bool, patterns []string, subset bool) int {
+	plan, totalPackages, err := planForRun(root, reg, patterns, subset)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "testgate: plan failed: %v\n", err)
 		return 2
+	}
+	if subset {
+		printSubsetHeader(patterns, len(plan.Packages), totalPackages)
 	}
 	fmt.Printf("testgate: plan %d packages, list-wall %s (recorded separately from the test wall)\n", len(plan.Packages), round(plan.ListWall))
 
@@ -446,7 +523,8 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	}
 	fmt.Printf("calibration L:          %.3f\n", calL)
 	printControls(concurrency, race)
-	budgetFail := printBudget(calL, testWall, budgetSeconds, budgetBasis, budgetPresent)
+	budgetText, budgetFail := budgetVerdict(subset, len(plan.Packages), totalPackages, calL, testWall, budgetSeconds, budgetBasis, budgetPresent)
+	fmt.Println(budgetText)
 
 	fmt.Println()
 	fmt.Println("=== screen ===")
@@ -623,22 +701,24 @@ func printControls(concurrency int, race bool) {
 	}
 }
 
-// printBudget reports the budget line and returns whether the gate should fail
-// on a budget miss. A miss fails closed, except that L > 4 is INCONCLUSIVE
+// budgetVerdict renders the budget line and returns whether the gate should
+// fail on a budget miss. A miss fails closed, except that L > 4 is INCONCLUSIVE
 // (loud, exit 0) because a loaded box cannot be quoted against a reference
-// budget.
-func printBudget(calL float64, testWall time.Duration, seconds int, basis string, present bool) bool {
+// budget. A subset run has no whole-suite budget: its line says so loudly and
+// never fails, because a subset wall is not comparable to the full-suite bar.
+func budgetVerdict(subset bool, planned, total int, calL float64, testWall time.Duration, seconds int, basis string, present bool) (string, bool) {
+	if subset {
+		return fmt.Sprintf("budget:                 not applicable (subset run: %d of %d packages)", planned, total), false
+	}
 	if !present {
-		fmt.Println("budget:                 none committed (a later commit pins the reference value); raw walls only")
-		return false
+		return "budget:                 none committed (a later commit pins the reference value); raw walls only", false
 	}
 	tag := ""
 	if basis != "" {
 		tag = " (" + basis + ")"
 	}
 	if calL > 4 {
-		fmt.Printf("budget:                 %ds reference%s; INCONCLUSIVE under load (L=%.3f), not failed\n", seconds, tag, calL)
-		return false
+		return fmt.Sprintf("budget:                 %ds reference%s; INCONCLUSIVE under load (L=%.3f), not failed", seconds, tag, calL), false
 	}
 	normalized := time.Duration(float64(testWall) / calL)
 	verdict := "PASS"
@@ -647,7 +727,14 @@ func printBudget(calL float64, testWall time.Duration, seconds int, basis string
 		verdict = "FAIL"
 		fail = true
 	}
-	fmt.Printf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> %s\n", seconds, tag, round(normalized), round(testWall), verdict)
+	return fmt.Sprintf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> %s", seconds, tag, round(normalized), round(testWall), verdict), fail
+}
+
+// printBudget prints the full-run budget line and returns whether the gate
+// should fail. It is the subset-free view of budgetVerdict.
+func printBudget(calL float64, testWall time.Duration, seconds int, basis string, present bool) bool {
+	line, fail := budgetVerdict(false, 0, 0, calL, testWall, seconds, basis, present)
+	fmt.Println(line)
 	return fail
 }
 

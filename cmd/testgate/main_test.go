@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/testkit/testgate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,6 +29,9 @@ var cliContractYAML []byte
 
 //go:embed testdata/env_contract.yaml
 var envContractYAML []byte
+
+//go:embed testdata/subset_plan.yaml
+var subsetPlanYAML []byte
 
 type cliCheck struct {
 	Name     string `yaml:"name"`
@@ -69,11 +74,40 @@ type budgetVerdictCase struct {
 	WantFail bool    `yaml:"want_fail"`
 }
 
+type budgetModeCase struct {
+	Name     string  `yaml:"name"`
+	Subset   bool    `yaml:"subset"`
+	Planned  int     `yaml:"planned"`
+	Total    int     `yaml:"total"`
+	Present  bool    `yaml:"present"`
+	CalL     float64 `yaml:"cal_l"`
+	WallMS   int64   `yaml:"wall_ms"`
+	Seconds  int     `yaml:"seconds"`
+	WantFail bool    `yaml:"want_fail"`
+	WantNote string  `yaml:"want_note"`
+}
+
 type envContractFile struct {
 	RequiredNames      []string            `yaml:"required_names"`
 	BudgetCases        []budgetCase        `yaml:"budget_cases"`
 	CheckStartCases    []checkStartCase    `yaml:"check_start_cases"`
 	BudgetVerdictCases []budgetVerdictCase `yaml:"budget_verdict_cases"`
+	BudgetModeCases    []budgetModeCase    `yaml:"budget_mode_cases"`
+}
+
+type subsetPlanCase struct {
+	Name                  string              `yaml:"name"`
+	ModulePath            string              `yaml:"module_path"`
+	InScopeImportPaths    []string            `yaml:"in_scope_import_paths"`
+	ListedTests           map[string][]string `yaml:"listed_tests"`
+	Registry              testgate.Registry   `yaml:"registry"`
+	WantPackageDirs       []string            `yaml:"want_package_dirs"`
+	WantMissingRegistered []string            `yaml:"want_missing_registered"`
+}
+
+type subsetPlanFile struct {
+	RequiredNames []string         `yaml:"required_names"`
+	Cases         []subsetPlanCase `yaml:"cases"`
 }
 
 func decodeContractFixture(data []byte, target any, source string) error {
@@ -144,12 +178,89 @@ func loadEnvContract(t *testing.T) envContractFile {
 	for _, c := range file.BudgetVerdictCases {
 		collect(c.Name)
 	}
+	for _, c := range file.BudgetModeCases {
+		collect(c.Name)
+	}
 	for _, want := range file.RequiredNames {
 		if !names[want] {
 			t.Fatalf("required env contract %q is missing from the fixture", want)
 		}
 	}
 	return file
+}
+
+func loadSubsetPlan(t *testing.T) subsetPlanFile {
+	t.Helper()
+	var file subsetPlanFile
+	if err := decodeContractFixture(subsetPlanYAML, &file, "subset plan fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if len(file.RequiredNames) == 0 {
+		t.Fatal("subset plan fixture declares no required_names manifest")
+	}
+	present := map[string]bool{}
+	for _, c := range file.Cases {
+		if c.Name == "" || present[c.Name] {
+			t.Fatalf("subset plan fixture has an empty or duplicate case %q", c.Name)
+		}
+		present[c.Name] = true
+	}
+	for _, want := range file.RequiredNames {
+		if !present[want] {
+			t.Fatalf("required subset plan case %q is missing from the fixture", want)
+		}
+	}
+	return file
+}
+
+// TestPlan_SubsetScoping proves a subset plan covers only the requested
+// packages: a registry entry outside the scope is absent from the plan and is
+// not reported missing, while an in-scope package that produced no listed tests
+// is still reported missing.
+func TestPlan_SubsetScoping(t *testing.T) {
+	file := loadSubsetPlan(t)
+	for _, tc := range file.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			dirs := map[string]bool{}
+			for _, ip := range tc.InScopeImportPaths {
+				dirs[testgate.PackageDir(tc.ModulePath, ip)] = true
+			}
+			scoped := testgate.ScopeRegistry(tc.Registry, dirs)
+			plan, err := testgate.BuildPlan("", tc.ModulePath, tc.ListedTests, scoped)
+			if err != nil {
+				t.Fatalf("BuildPlan: %v", err)
+			}
+			gotDirs := make([]string, 0, len(plan.Packages))
+			for _, p := range plan.Packages {
+				gotDirs = append(gotDirs, p.Dir)
+			}
+			sort.Strings(gotDirs)
+			wantDirs := append([]string(nil), tc.WantPackageDirs...)
+			sort.Strings(wantDirs)
+			if !slicesEqual(gotDirs, wantDirs) {
+				t.Fatalf("plan package dirs = %v, want %v", gotDirs, wantDirs)
+			}
+			gotMissing := append([]string(nil), plan.MissingRegistered...)
+			sort.Strings(gotMissing)
+			wantMissing := append([]string(nil), tc.WantMissingRegistered...)
+			sort.Strings(wantMissing)
+			if !slicesEqual(gotMissing, wantMissing) {
+				t.Fatalf("MissingRegistered = %v, want %v", gotMissing, wantMissing)
+			}
+		})
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // captureUsage runs the real usage() and returns what it wrote to stderr.
@@ -272,6 +383,23 @@ func TestBudget_VerdictSemantics(t *testing.T) {
 			fail := printBudget(tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, tc.Seconds, "fixture", tc.Present)
 			if fail != tc.WantFail {
 				t.Fatalf("printBudget fail = %v, want %v", fail, tc.WantFail)
+			}
+		})
+	}
+}
+
+// TestBudget_SubsetModeIsNotApplicable proves a subset run states the budget is
+// not applicable and never fails on it, while a full run keeps the verdict.
+func TestBudget_SubsetModeIsNotApplicable(t *testing.T) {
+	file := loadEnvContract(t)
+	for _, tc := range file.BudgetModeCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			line, fail := budgetVerdict(tc.Subset, tc.Planned, tc.Total, tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, tc.Seconds, "fixture", tc.Present)
+			if fail != tc.WantFail {
+				t.Fatalf("budgetVerdict fail = %v, want %v (line %q)", fail, tc.WantFail, line)
+			}
+			if !strings.Contains(line, tc.WantNote) {
+				t.Fatalf("budget line %q does not contain %q", line, tc.WantNote)
 			}
 		})
 	}
