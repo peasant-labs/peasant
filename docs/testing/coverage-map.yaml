@@ -3669,9 +3669,9 @@ entries:
   - { name: "scripts/test-timing.TestSummarizer_RanksSlowestTestFirst", destination: "moved:cmd/testgate/timing_test.go" }
   - { name: "scripts/test-timing.TestSummarizer_RejectsEmptyInput", destination: "moved:cmd/testgate/timing_test.go" }
   - { name: "scripts/test-timing.TestSummarizer_WarnsOnDominantTest", destination: "moved:cmd/testgate/timing_test.go" }
-  - { name: "scripts/testgate.TestBudget_ResolutionPrecedence", destination: retained-in-place }
-  - { name: "scripts/testgate.TestBudget_VerdictSemantics", destination: retained-in-place }
-  - { name: "scripts/testgate.TestCLI_ExitCodes", destination: retained-in-place }
-  - { name: "scripts/testgate.TestCLI_UsageMatchesFrozenContract", destination: retained-in-place }
-  - { name: "scripts/testgate.TestCLI_UsageMutationIsDetected", destination: retained-in-place }
-  - { name: "scripts/testgate.TestCheckStartNS_Contract", destination: retained-in-place }
+  - { name: "scripts/testgate.TestBudget_ResolutionPrecedence", destination: moved:cmd/testgate/main_test.go }
+  - { name: "scripts/testgate.TestBudget_VerdictSemantics", destination: moved:cmd/testgate/main_test.go }
+  - { name: "scripts/testgate.TestCLI_ExitCodes", destination: moved:cmd/testgate/main_test.go }
+  - { name: "scripts/testgate.TestCLI_UsageMatchesFrozenContract", destination: moved:cmd/testgate/main_test.go }
+  - { name: "scripts/testgate.TestCLI_UsageMutationIsDetected", destination: moved:cmd/testgate/main_test.go }
+  - { name: "scripts/testgate.TestCheckStartNS_Contract", destination: moved:cmd/testgate/main_test.go }
