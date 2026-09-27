@@ -31,6 +31,23 @@ and to prove that every test still runs exactly once across the passes.
   computes the plan and applies the screen. The gate computes the plan from
   `go test -list`, so `scripts/testgate plan` prints the plan and runs nothing.
 
+### Timing mode
+
+`scripts/testgate timing` summarizes an arbitrary `go test -json` stream with the
+gate's own stream library:
+
+```bash
+go test -race -json ./internal/ingest/... | go run ./scripts/testgate timing -top 40
+go run ./scripts/testgate timing -top 40 < ingest.json
+```
+
+It takes `-top N` (rows per section, default 25), `-family-re RE` (regroup by a
+capture-group regexp), `-no-families` (skip the per-family section), and
+`-warn-pct PCT` (mark tests over that share). With no file argument it reads
+stdin. The report and the gate's merged-pass report come from the same renderer,
+so a hand measurement and a gate measurement are the same measurement. A failing
+test exits non-zero.
+
 ### Admission — all four criteria
 
 A registry entry is admitted only when it carries:

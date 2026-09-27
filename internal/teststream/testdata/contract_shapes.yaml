@@ -1,7 +1,7 @@
 # Frozen shapes for the shared stream library.
 #
-# The parse/report core extracted from scripts/test-timing is consumed by the
-# gate and by scripts/test-timing. Its exported shape is a contract; see
+# The parse/report core is consumed by scripts/testgate: the gate's run mode and
+# its timing mode. Its exported shape is a contract; see
 # internal/testgate/testdata/contract_shapes.yaml for the same mechanism on the
 # gate side.
 required_names:

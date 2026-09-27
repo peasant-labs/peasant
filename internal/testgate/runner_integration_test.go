@@ -16,8 +16,8 @@ func TestRunner_TwoPassRecordsAndScreen(t *testing.T) {
 	root := testRepoRoot(t)
 	plan := &Plan{Packages: []PackagePlan{
 		{
-			ImportPath: "github.com/peasant-labs/peasant/scripts/test-timing",
-			Dir:        "scripts/test-timing",
+			ImportPath: "github.com/peasant-labs/peasant/scripts/testgate",
+			Dir:        "scripts/testgate",
 			Tests:      []string{"TestSummarizer_ExcludesSubtestsFromTotal", "TestSummarizer_RejectsEmptyInput"},
 			RaceTests:  []string{"TestSummarizer_ExcludesSubtestsFromTotal", "TestSummarizer_RejectsEmptyInput"},
 		},

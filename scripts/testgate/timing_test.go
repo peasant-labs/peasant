@@ -10,11 +10,11 @@ import (
 	"testing"
 )
 
-// The summarizer is a gate input, so its correctness is asserted against a
-// committed `go test -json` stream rather than an inline case table: the input
-// shape is the contract, and a real stream carries interleaved build output,
-// retried tests, skips, and nested subtests that a hand-written table would
-// omit.
+// The gate's timing mode is a gate input, so its correctness is asserted
+// against a committed `go test -json` stream rather than an inline case table:
+// the input shape is the contract, and a real stream carries interleaved build
+// output, retried tests, skips, and nested subtests that a hand-written table
+// would omit.
 //
 //go:embed testdata/stream.json
 var streamJSON []byte
@@ -32,23 +32,22 @@ func loadStream(t *testing.T) []byte {
 	return streamJSON
 }
 
-// buildBinary compiles the summarizer once so the tests exercise the real
-// command rather than the internal functions. The total and the family grouping
-// are the two things most likely to regress silently, and both are
-// user-visible output.
+// buildBinary compiles the gate once so the tests exercise the real command
+// rather than the internal functions. The total and the family grouping are the
+// two things most likely to regress silently, and both are user-visible output.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "test-timing")
+	bin := filepath.Join(t.TempDir(), "testgate")
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build summarizer: %v\n%s", err, out)
+		t.Fatalf("build testgate: %v\n%s", err, out)
 	}
 	return bin
 }
 
 func runSummarizer(t *testing.T, bin string, stdin []byte, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, append([]string{"timing"}, args...)...)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -61,7 +60,7 @@ func TestSummarizer_ExcludesSubtestsFromTotal(t *testing.T) {
 	bin := buildBinary(t)
 	out, err := runSummarizer(t, bin, loadStream(t))
 	if err != nil {
-		t.Fatalf("summarizer exited %v\n%s", err, out)
+		t.Fatalf("timing exited %v\n%s", err, out)
 	}
 
 	// The fixture holds 4 top-level tests (2.5s + 1.0s + 0.5s + 0.4s) whose two
@@ -135,5 +134,23 @@ func TestSummarizer_RejectsEmptyInput(t *testing.T) {
 	// regression pass unnoticed, so empty input must be a hard error.
 	if _, err := runSummarizer(t, bin, nil); err == nil {
 		t.Error("expected a non-zero exit on empty input")
+	}
+}
+
+// TestSummarizer_ReadsFileArgument pins the file-reading form of the mode: the
+// stream is read from the named file when one is given, so a saved gate stream
+// can be re-read without a pipe.
+func TestSummarizer_ReadsFileArgument(t *testing.T) {
+	bin := buildBinary(t)
+	path := filepath.Join(t.TempDir(), "stream.json")
+	if err := os.WriteFile(path, loadStream(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runSummarizer(t, bin, nil, path)
+	if err != nil {
+		t.Fatalf("timing exited %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "4 top-level tests, 2 subtests, 4.4s total") {
+		t.Errorf("expected the file stream to render, got:\n%s", out)
 	}
 }

@@ -8,6 +8,7 @@ required_names:
   - plan-subcommand
   - run-subcommand
   - profile-subcommand
+  - timing-subcommand
   - registry-flag
   - out-flag
   - concurrency-flag
@@ -18,16 +19,22 @@ required_names:
   - pretest-flag
   - profiles-flag
   - trace-flag
+  - timing-top-flag
+  - timing-family-re-flag
+  - timing-no-families-flag
+  - timing-warn-pct-flag
   - exit-pass
   - exit-fail
   - exit-usage
   - mutated-subcommand
+  - mutated-timing-subcommand
   - mutated-exit-code
 
 checks:
   - { name: plan-subcommand,    contains: "testgate plan" }
   - { name: run-subcommand,     contains: "testgate run" }
   - { name: profile-subcommand, contains: "testgate profile" }
+  - { name: timing-subcommand,  contains: "testgate timing" }
   - { name: registry-flag,      contains: "-registry PATH" }
   - { name: out-flag,           contains: "-out DIR" }
   - { name: concurrency-flag,   contains: "-p N" }
@@ -38,6 +45,10 @@ checks:
   - { name: pretest-flag,       contains: "-pretest" }
   - { name: profiles-flag,      contains: "-profiles" }
   - { name: trace-flag,         contains: "-trace" }
+  - { name: timing-top-flag,         contains: "-top N" }
+  - { name: timing-family-re-flag,   contains: "-family-re RE" }
+  - { name: timing-no-families-flag, contains: "-no-families" }
+  - { name: timing-warn-pct-flag,    contains: "-warn-pct PCT" }
   - { name: exit-pass,          contains: "0  the gate passed" }
   - { name: exit-fail,          contains: "1  a test failed, the screen failed, or an invocation errored" }
   - { name: exit-usage,         contains: "2  usage, registry, or plan error" }
@@ -45,5 +56,6 @@ checks:
 # A mutation replaces one check's expected substring with text that is not in
 # usage(); the checker must report the check as missing.
 mutations:
-  - { name: mutated-subcommand, check: plan-subcommand, contains: "testgate planx" }
-  - { name: mutated-exit-code,  check: exit-usage,      contains: "2  never happens" }
+  - { name: mutated-subcommand,         check: plan-subcommand,   contains: "testgate planx" }
+  - { name: mutated-timing-subcommand,  check: timing-subcommand, contains: "testgate timingx" }
+  - { name: mutated-exit-code,          check: exit-usage,        contains: "2  never happens" }

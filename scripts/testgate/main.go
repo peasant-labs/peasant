@@ -20,9 +20,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -52,7 +54,19 @@ func main() {
 	pretestFlag := fs.Bool("pretest", false, "profile: measure the five pre-test steps instead of a package")
 	profilesFlag := fs.Bool("profiles", false, "profile: write Class B block/mutex/cpu profiles per batch")
 	traceFlag := fs.Bool("trace", false, "profile: also write a runtime trace per batch (perturbs block.out)")
+	timingTop := fs.Int("top", 25, "timing: rows to print per section")
+	timingFamilyRe := fs.String("family-re", "", "timing: regexp with one capture group; overrides default family grouping")
+	timingNoFamilies := fs.Bool("no-families", false, "timing: skip the per-family section")
+	timingWarnPct := fs.Float64("warn-pct", 5, "timing: flag tests whose share of elapsed time exceeds this percentage")
 	_ = fs.Parse(os.Args[2:])
+
+	// timing is a stream-only frontend for an arbitrary `go test -json` input: it
+	// needs neither the repository root nor the registry, so dispatch it before
+	// that wiring and keep `... | testgate timing` usable from anywhere in the
+	// module.
+	if sub == "timing" {
+		os.Exit(runTiming(fs.Args(), *timingTop, *timingFamilyRe, *timingNoFamilies, *timingWarnPct))
+	}
 
 	root, err := findRepoRoot()
 	if err != nil {
@@ -117,6 +131,8 @@ usage:
   testgate plan [flags]     print the run plan; run nothing
   testgate run  [flags]     execute the plan and screen the result
   testgate profile [flags]  measure: batched LPT per-test profile, or -pretest
+  testgate timing [flags] [file]
+                            summarize a go test -json stream (stdin when no file)
 
 flags:
   -registry PATH   registry fixture (default: <repo>/no-race-partition.yaml)
@@ -130,6 +146,10 @@ flags:
   -profiles        profile: write Class B block/mutex/cpu profiles
   -trace           profile: also write a runtime trace (perturbs block.out)
   -pretest         profile: measure the five pre-test steps
+  -top N           timing: rows to print per section (default 25)
+  -family-re RE    timing: regexp with one capture group; overrides default family grouping
+  -no-families     timing: skip the per-family section
+  -warn-pct PCT    timing: flag tests whose share of elapsed time exceeds this percentage
 
 exit codes:
   0  the gate passed
@@ -141,6 +161,62 @@ exit codes:
 func fatal(code int, msg string, err error) {
 	fmt.Fprintf(os.Stderr, "testgate: %s\n  %v\n", msg, err)
 	os.Exit(code)
+}
+
+// runTiming summarizes a `go test -json` stream into the ranked per-test and
+// per-family report.
+//
+// It is the CLI half of the shared renderer in internal/teststream: the same
+// library that renders the gate's own merged passes renders an ad-hoc stream
+// here, so a measurement taken by hand and one taken by the gate are the same
+// report. A file argument is read in place of stdin. A failing test makes the
+// exit non-zero so the mode can gate directly.
+func runTiming(args []string, top int, familyRe string, noFamilies bool, warnPct float64) int {
+	var re *regexp.Regexp
+	if familyRe != "" {
+		var err error
+		re, err = regexp.Compile(familyRe)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testgate timing: bad -family-re: %v\n", err)
+			return 2
+		}
+	}
+
+	var in io.Reader = os.Stdin
+	if len(args) > 0 {
+		f, err := os.Open(args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testgate timing: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		in = f
+	}
+
+	records, err := teststream.ParseStream(in)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testgate timing: %v\n", err)
+		return 1
+	}
+	if len(records) == 0 {
+		fmt.Fprintln(os.Stderr, "testgate timing: no test events on input (did you pipe `go test -json`?)")
+		return 1
+	}
+	if err := teststream.Report(os.Stdout, records, teststream.ReportOptions{
+		Top:        top,
+		FamilyRe:   re,
+		NoFamilies: noFamilies,
+		WarnPct:    warnPct,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "testgate timing: %v\n", err)
+		return 1
+	}
+
+	for _, r := range teststream.Failing(records) {
+		fmt.Fprintf(os.Stderr, "testgate timing: FAILING TEST: %s (%s)\n", r.Test, r.Package)
+		return 1
+	}
+	return 0
 }
 
 // findRepoRoot walks up from the working directory to the go.mod root.
