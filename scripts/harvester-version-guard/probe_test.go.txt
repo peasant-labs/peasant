@@ -24,6 +24,31 @@ import (
 // certified, does not depend on the limit's value.
 const probeOversizedRecordLimit = 8192
 
+// guardCorpusDirs are the checkout-relative directories that hold the fixture
+// families the probe reads. A fixture moves with the test that owns it, so a
+// corpus lookup by name searches every directory and returns the first that
+// exists rather than assuming one location for both compared revisions.
+var guardCorpusDirs = []string{
+	"internal/ingest/testdata",
+	"cmd/peasant/testdata",
+	"internal/e2e/testdata",
+}
+
+// guardCorpusPath resolves one named corpus in a revision's checkout. name is a
+// path below the fixture directory and may include a nested directory. The
+// second result is false when no known directory holds the name; the caller
+// decides whether that means a missing required corpus or a corpus that
+// predates the fixture family.
+func guardCorpusPath(corpus, name string) (string, bool) {
+	for _, dir := range guardCorpusDirs {
+		path := filepath.Join(corpus, dir, name)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
 type versions struct{ AdapterVersion, IndexerVersion int }
 type guardSnapshot struct {
 	Versions map[string]versions
@@ -34,11 +59,12 @@ type guardSnapshot struct {
 func TestHarvesterGuardCapture(t *testing.T) {
 	corpus := os.Getenv("PEASANT_GUARD_CORPUS")
 	result := guardSnapshot{Versions: parserVersions(), Outputs: make(map[string]json.RawMessage)}
-	read := func(path string, target any) bool {
-		data, err := os.ReadFile(filepath.Join(corpus, path))
-		if os.IsNotExist(err) {
-			return false
-		} // Corpus may predate this fixture family.
+	read := func(name string, target any) bool {
+		path, ok := guardCorpusPath(corpus, name)
+		if !ok {
+			return false // Corpus may predate this fixture family.
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +149,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 	// Existing native E2E corpora exercise full adapter extraction and shared
 	// tool/entry helpers for Claude, Codex and Cursor; filenames are input IDs.
 	for _, harness := range []string{"claude", "codex", "cursor"} {
-		root := "internal/e2e/testdata/" + harness + "-fixture"
+		manifestName := harness + "-fixture/fixture-index.yaml"
 		var manifest struct {
 			Harness  ingest.Harness `yaml:"harness"`
 			Sessions []struct {
@@ -131,12 +157,20 @@ func TestHarvesterGuardCapture(t *testing.T) {
 				Path string `yaml:"path"`
 			} `yaml:"sessions"`
 		}
-		if !read(root+"/fixture-index.yaml", &manifest) {
-			t.Fatalf("required native corpus missing: %s", root)
+		manifestPath, ok := guardCorpusPath(corpus, manifestName)
+		if !ok {
+			t.Fatalf("required native corpus missing: internal/e2e/testdata/%s", manifestName)
+		}
+		manifestData, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(manifestData, &manifest); err != nil {
+			t.Fatal(err)
 		}
 		for _, row := range manifest.Sessions {
 			filesystem := testutil.NewMemFS()
-			data, err := os.ReadFile(filepath.Join(corpus, root, row.Path))
+			data, err := os.ReadFile(filepath.Join(filepath.Dir(manifestPath), row.Path))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +185,11 @@ func TestHarvesterGuardCapture(t *testing.T) {
 	}
 	filesystem := testutil.NewMemFS()
 	for _, suffix := range []string{"jsonl", "meta.json"} {
-		data, err := os.ReadFile(filepath.Join(corpus, "internal/ingest/testdata/strike_protocol."+suffix))
+		path, ok := guardCorpusPath(corpus, "strike_protocol."+suffix)
+		if !ok {
+			t.Fatalf("required strike corpus missing: strike_protocol.%s", suffix)
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +212,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			PartialRead bool           `yaml:"partialRead"`
 		} `yaml:"cases"`
 	}
-	if read("internal/ingest/testdata/indexer_completion.yaml", &completion) {
+	if read("indexer_completion.yaml", &completion) {
 		seen := make(map[string]bool)
 		for _, row := range completion.Cases {
 			guardName(t, seen, row.Name)
@@ -217,7 +255,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			Oversized bool   `yaml:"oversized"`
 		} `yaml:"cases"`
 	}
-	if read("internal/ingest/testdata/content_capture.yaml", &contentCapture) {
+	if read("content_capture.yaml", &contentCapture) {
 		for _, row := range contentCapture.Cases {
 			if !row.Control {
 				continue
@@ -254,7 +292,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			Origin      string            `yaml:"origin"`
 		} `yaml:"cases"`
 	}
-	if read("internal/ingest/testdata/opencode_index_completion.yaml", &openCode) {
+	if read("opencode_index_completion.yaml", &openCode) {
 		seen := make(map[string]bool)
 		for _, row := range openCode.Cases {
 			guardName(t, seen, row.Name)
@@ -306,7 +344,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			SourceFixture string `yaml:"source_fixture"`
 		} `yaml:"cases"`
 	}
-	if read("internal/ingest/testdata/opencode_native_rows.yaml", &native) {
+	if read("opencode_native_rows.yaml", &native) {
 		for _, row := range native.Cases {
 			nativeNames[row.SourceFixture] = true
 		}
@@ -411,16 +449,18 @@ func guardPiCorpus(t *testing.T, corpus string, registered map[string]versions, 
 		return
 	}
 	read := func(name string, target any) {
-		path := filepath.Join(corpus, "internal/ingest/testdata", name)
-		data, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
+		path, ok := guardCorpusPath(corpus, name)
+		if !ok {
 			// A new harness uses its first corpus even when the other corpus
 			// predates it. Existing historical cases are never replaced.
-			path = filepath.Join(os.Getenv("PEASANT_GUARD_FALLBACK_CORPUS"), "internal/ingest/testdata", name)
-			data, err = os.ReadFile(path)
+			path, ok = guardCorpusPath(os.Getenv("PEASANT_GUARD_FALLBACK_CORPUS"), name)
 		}
+		if !ok {
+			t.Fatalf("registered Pi requires native corpus %s", name)
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("registered Pi requires native corpus %s: %v", name, err)
+			t.Fatal(err)
 		}
 		if err := yaml.Unmarshal(data, target); err != nil {
 			t.Fatal(err)
