@@ -1,14 +1,9 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -56,17 +51,8 @@ const childCountScrollProjectLabel = "acme/tool"
 func loadChildCountScroll(t *testing.T) childCountScrollDocument {
 	t.Helper()
 	var doc childCountScrollDocument
-	dec := yaml.NewDecoder(bytes.NewReader(childCountScrollData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(childCountScrollData, &doc); err != nil {
 		t.Fatalf("decode testdata/child_count_scroll.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("child_count_scroll.yaml must hold exactly one document: %v", err)
 	}
 	present := make(map[string]bool, len(doc.Cases))
 	for _, c := range doc.Cases {

@@ -1,18 +1,15 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
@@ -55,15 +52,9 @@ type previewProgressiveDoc struct {
 
 func loadPreviewProgressive(t *testing.T) previewProgressiveDoc {
 	t.Helper()
-	dec := yaml.NewDecoder(bytes.NewReader(previewProgressiveData))
-	dec.KnownFields(true)
 	var doc previewProgressiveDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewProgressiveData, &doc); err != nil {
 		t.Fatalf("decode testdata/previewsplit_progressive.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("previewsplit_progressive.yaml must hold exactly one document")
 	}
 	if doc.Width <= 0 || doc.Height <= 1 {
 		t.Fatalf("fixture declares a %dx%d region; the pane needs a content row and a chrome row", doc.Width, doc.Height)

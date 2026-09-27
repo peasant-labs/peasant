@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pi_redaction_outbound.yaml
@@ -49,14 +47,8 @@ type piOutboundFixture struct {
 func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
 	t.Helper()
 	var f piOutboundFixture
-	d := yaml.NewDecoder(bytes.NewReader(piOutboundYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&f); err != nil {
+	if err := testutil.DecodeFixtureYAML(piOutboundYAML, &f); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing YAML: %v", err)
 	}
 	m, err := testutil.DecodeRequiredNamesManifest(piOutboundManifest, "Pi outbound")
 	if err != nil {

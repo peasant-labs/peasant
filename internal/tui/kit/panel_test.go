@@ -4,13 +4,11 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -110,17 +108,8 @@ type panelRenderDoc struct {
 
 func decodePanelRenderDoc(data []byte) (panelRenderDoc, error) {
 	var doc panelRenderDoc
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/panel_render.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("panel_render.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != requiredPanelCaseCount || len(doc.Cases) != requiredPanelCaseCount {
 		return doc, fmt.Errorf("panel render cases: declared=%d actual=%d required=%d",

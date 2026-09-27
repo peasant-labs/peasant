@@ -1,11 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/unknown_private_encoding.yaml
@@ -36,14 +33,8 @@ func TestUnknownPrivateEncoding(t *testing.T) {
 			Field         string `yaml:"field"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(unknownPrivateEncodingYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(unknownPrivateEncodingYAML, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("trailing fixture document: %v", err)
 	}
 	names := map[string]bool{}
 	var actualNames []string

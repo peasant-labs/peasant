@@ -1,15 +1,12 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
@@ -43,17 +40,8 @@ type previewPaneNavDoc struct {
 func loadPreviewPaneNav(t *testing.T) previewPaneNavDoc {
 	t.Helper()
 	var doc previewPaneNavDoc
-	dec := yaml.NewDecoder(bytes.NewReader(previewPaneNavData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewPaneNavData, &doc); err != nil {
 		t.Fatalf("decode testdata/previewsplit_pane_nav.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("previewsplit_pane_nav.yaml must hold exactly one document: %v", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))

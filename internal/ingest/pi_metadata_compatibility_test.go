@@ -1,19 +1,16 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pi_metadata_compatibility.yaml
@@ -33,14 +30,8 @@ func TestPiSchemaPinDoesNotInvalidateUnchangedHarnesses(t *testing.T) {
 			Refused bool   `yaml:"refused"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(piMetadataCompatibilityYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&f); err != nil {
+	if err := testutil.DecodeFixtureYAML(piMetadataCompatibilityYAML, &f); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing YAML: %v", err)
 	}
 	m, err := testutil.DecodeRequiredNamesManifest(piMetadataCompatibilityManifest, "metadata compatibility")
 	if err != nil {

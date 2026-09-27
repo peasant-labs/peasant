@@ -1,14 +1,10 @@
 package kickstart_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -59,17 +55,8 @@ type childCountDocument struct {
 func loadChildCounts(t *testing.T) childCountDocument {
 	t.Helper()
 	var doc childCountDocument
-	dec := yaml.NewDecoder(bytes.NewReader(childCountData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(childCountData, &doc); err != nil {
 		t.Fatalf("decode testdata/child_counts.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("child_counts.yaml must hold exactly one document: %v", err)
 	}
 	present := make(map[string]bool, len(doc.Cases))
 	for _, c := range doc.Cases {

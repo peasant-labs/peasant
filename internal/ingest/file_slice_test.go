@@ -3,17 +3,14 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/file_slice.yaml
@@ -41,15 +38,9 @@ type fileSliceDoc struct {
 
 func loadFileSliceDoc(t *testing.T) fileSliceDoc {
 	t.Helper()
-	dec := yaml.NewDecoder(bytes.NewReader(fileSliceData))
-	dec.KnownFields(true)
 	var doc fileSliceDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(fileSliceData, &doc); err != nil {
 		t.Fatalf("decode testdata/file_slice.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("file_slice.yaml must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("the file-slice fixture declares no required cases")

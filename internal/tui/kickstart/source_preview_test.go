@@ -1,20 +1,18 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -95,17 +93,8 @@ type sourcePreviewDoc struct {
 
 func decodeSourcePreview(data []byte) (sourcePreviewDoc, error) {
 	var doc sourcePreviewDoc
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/source_preview.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("source_preview.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedListingCount != expectedSourcePreviewListingCount || len(doc.Listings) != expectedSourcePreviewListingCount {
 		return doc, fmt.Errorf("source preview listings: declared=%d actual=%d required=%d",

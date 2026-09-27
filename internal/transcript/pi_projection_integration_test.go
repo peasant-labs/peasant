@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -25,7 +24,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -79,14 +77,8 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			Extra string `yaml:"extra"`
 		} `yaml:"invalid_extras"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(piProjectionYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(piProjectionYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing fixture document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(piProjectionManifest, "Pi projection")
 	if err != nil {

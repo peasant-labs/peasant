@@ -1,17 +1,14 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
@@ -51,15 +48,9 @@ type previewContinueDoc struct {
 
 func loadPreviewContinue(t *testing.T) previewContinueDoc {
 	t.Helper()
-	dec := yaml.NewDecoder(bytes.NewReader(previewContinueData))
-	dec.KnownFields(true)
 	var doc previewContinueDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewContinueData, &doc); err != nil {
 		t.Fatalf("decode testdata/previewsplit_continue.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("previewsplit_continue.yaml must hold exactly one document")
 	}
 	if doc.Width <= 0 || doc.Height <= 1 {
 		t.Fatalf("fixture declares a %dx%d region; the pane needs content rows and a chrome row", doc.Width, doc.Height)

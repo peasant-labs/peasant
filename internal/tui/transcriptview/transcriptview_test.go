@@ -1,18 +1,15 @@
 package transcriptview_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
 	"image/color"
-	"io"
 	"regexp"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -65,17 +62,8 @@ type transcriptDoc struct {
 func loadTranscriptDoc(t *testing.T) transcriptDoc {
 	t.Helper()
 	var doc transcriptDoc
-	dec := yaml.NewDecoder(bytes.NewReader(transcriptData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(transcriptData, &doc); err != nil {
 		t.Fatalf("decode testdata/transcripts.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("transcripts.yaml must hold exactly one document: %v", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))

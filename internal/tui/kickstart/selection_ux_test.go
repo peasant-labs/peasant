@@ -4,14 +4,12 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -46,17 +44,8 @@ type selectionUXDoc struct {
 
 func decodeSelectionUX(data []byte) (selectionUXDoc, error) {
 	var doc selectionUXDoc
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/selection_ux.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("selection_ux.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != expectedSelectionUXCaseCount || len(doc.Cases) != expectedSelectionUXCaseCount {
 		return doc, fmt.Errorf("selection ux cases: declared=%d actual=%d required=%d",
