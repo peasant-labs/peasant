@@ -5,10 +5,14 @@
 required_names:
   - unknown-class
   - empty-justification
-  - missing-evidence-file
+  - unresolvable-evidence
   - unparseable-evidence
   - evidence-outside-test-file
   - subprocess-without-build-flags
+  - class-is-not-subprocess
+  - unresolvable-exec-site
+  - missing-exec-fragment
+  - malformed-exec-site
   - protected-counter-example-moved-to-partition
   - duplicate-registration
   - missing-cost
@@ -20,7 +24,7 @@ cases:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: not-a-class
-        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
         justification: strict fixture decode
         cost: { wall_ms: 583, cpu_ms: 934 }
     want_error: "unknown class"
@@ -30,61 +34,117 @@ cases:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
         justification: ""
         cost: { wall_ms: 583, cpu_ms: 934 }
     want_error: "justification is empty"
 
-  - name: missing-evidence-file
+  # An evidence anchor that names no test in the package must fail, the same
+  # way a file that did not exist failed under the old file:line form.
+  - name: unresolvable-evidence
     partition:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: internal/moduleboundary/does_not_exist_test.go:1
+        evidence: '#TestNotDeclaredInThisPackage'
         justification: strict fixture decode
         cost: { wall_ms: 583, cpu_ms: 934 }
-    want_error: "evidence file"
+    want_error: "resolves to no test"
 
   - name: unparseable-evidence
     partition:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: "not-a-position"
+        evidence: "not-an-anchor"
         justification: strict fixture decode
         cost: { wall_ms: 583, cpu_ms: 934 }
-    want_error: "is not file:line"
+    want_error: 'is not #<testName>'
 
+  # A valid anchor, but one that resolves to a test declared in another file of
+  # the same package: the evidence must sit in the named test's own file.
   - name: evidence-outside-test-file
     partition:
       - package: internal/e2e
         test: TestPeasantBinSeamUnsetBuildsGoBinary
         class: single-threaded-bytes
-        evidence: internal/e2e/skipgate_seams.go:99
+        evidence: '#TestSchemaModuleParity'
         justification: not the test's own file
         cost: { wall_ms: 1, cpu_ms: 1 }
-    want_error: "is not inside the named test's file"
+    want_error: "outside the named test's file"
 
   - name: subprocess-without-build-flags
     partition:
       - package: internal/e2e
         test: TestPeasantBinSeamUnsetBuildsGoBinary
         class: subprocess
-        evidence: internal/e2e/skipgate_seams_test.go:53
+        evidence: '#TestPeasantBinSeamUnsetBuildsGoBinary'
         justification: the build IS the assertion
-        exec_command_site: internal/e2e/skipgate_seams.go:99
+        exec_command_site: 'internal/e2e/skipgate_seams.go#buildPeasant#exec.Command("go", "build"'
         cost: { wall_ms: 2773, cpu_ms: 4218 }
     want_error: "must declare build_flags"
+
+  # exec_command_site is meaningful only for a subprocess entry; setting it on
+  # any other class is a registry defect.
+  - name: class-is-not-subprocess
+    partition:
+      - package: internal/moduleboundary
+        test: TestRedactionBoundaryFixtureStrictDecoding
+        class: single-threaded-bytes
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
+        justification: pure byte work
+        exec_command_site: 'internal/e2e/skipgate_seams.go#buildPeasant#exec.Command("go", "build"'
+        cost: { wall_ms: 583, cpu_ms: 934 }
+    want_error: "exec_command_site is set but class"
+
+  # The anchor's function must exist in the named file.
+  - name: unresolvable-exec-site
+    partition:
+      - package: internal/e2e
+        test: TestPeasantBinSeamUnsetBuildsGoBinary
+        class: subprocess
+        evidence: '#TestPeasantBinSeamUnsetBuildsGoBinary'
+        justification: the build IS the assertion
+        build_flags: []
+        exec_command_site: 'internal/e2e/skipgate_seams.go#noSuchBuildFunction#exec.Command("go", "build"'
+        cost: { wall_ms: 2773, cpu_ms: 4218 }
+    want_error: "declares no function named"
+
+  # The function exists and holds an exec call, but no call carries the required
+  # fragment, so the reference no longer pins the intended build.
+  - name: missing-exec-fragment
+    partition:
+      - package: internal/e2e
+        test: TestPeasantBinSeamUnsetBuildsGoBinary
+        class: subprocess
+        evidence: '#TestPeasantBinSeamUnsetBuildsGoBinary'
+        justification: the build IS the assertion
+        build_flags: []
+        exec_command_site: 'internal/e2e/skipgate_seams.go#buildPeasant#no-such-fragment-in-this-call'
+        cost: { wall_ms: 2773, cpu_ms: 4218 }
+    want_error: "required fragment"
+
+  - name: malformed-exec-site
+    partition:
+      - package: internal/e2e
+        test: TestPeasantBinSeamUnsetBuildsGoBinary
+        class: subprocess
+        evidence: '#TestPeasantBinSeamUnsetBuildsGoBinary'
+        justification: the build IS the assertion
+        build_flags: []
+        exec_command_site: "not-an-anchor"
+        cost: { wall_ms: 2773, cpu_ms: 4218 }
+    want_error: "is not <file>#<funcName>#<fragment>"
 
   - name: protected-counter-example-moved-to-partition
     partition:
       - package: internal/ingest
         test: TestOpenCodeNativeCLI
         class: subprocess
-        evidence: internal/ingest/opencode_native_cli_test.go:80
+        evidence: '#TestOpenCodeNativeCLI'
         justification: the child is built with the race detector
         build_flags: ["-race=true"]
-        exec_command_site: internal/ingest/opencode_native_cli_test.go:80
+        exec_command_site: 'internal/ingest/opencode_native_cli_test.go#TestOpenCodeNativeCLI#exec.CommandContext(ctx, "go", "build", nativeCLIRaceFlag'
         cost: { wall_ms: 39216, cpu_ms: 53162 }
     want_error: "must be built without -race"
 
@@ -93,13 +153,13 @@ cases:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
         justification: strict fixture decode
         cost: { wall_ms: 583, cpu_ms: 934 }
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
         justification: strict fixture decode
         cost: { wall_ms: 583, cpu_ms: 934 }
     want_error: "duplicate registration"
@@ -109,7 +169,7 @@ cases:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
         justification: strict fixture decode
         cost: { wall_ms: 0, cpu_ms: 0 }
     want_error: "cost must record"
@@ -120,7 +180,7 @@ cases:
       - package: internal/moduleboundary
         test: TestRedactionBoundaryFixtureStrictDecoding
         class: single-threaded-bytes
-        evidence: internal/moduleboundary/redaction_boundary_test.go:117
+        evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
         justification: strict fixture decode
         cost: { wall_ms: 583, cpu_ms: 934 }
     want_error: "registry version"

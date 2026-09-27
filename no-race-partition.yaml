@@ -4,12 +4,14 @@
 # race pass; `protected` entries are pinned into the race pass and must never be
 # registered as partition members. Every entry carries:
 #   class            one of: single-threaded-bytes | subprocess | static-analysis | toolchain
-#   evidence         file:line inside the named test's file
+#   evidence         #<testName>, a test declared in the entry's package; the file is
+#                    implied by the package/test, so an unrelated edit cannot drift it
 #   justification    why the production path has no shared-memory concurrency subject
 #   cost             the observed wall/cpu pair from a committed measurement
 #   build_flags      (subprocess only) the child build flags, resolved against exec_command_site;
 #                    a partition child must not be built with -race
-#   exec_command_site (subprocess only) file:line of the exec.Command call
+#   exec_command_site (subprocess only) <file>#<funcName>#<fragment> locating the
+#                    exec.Command call inside the named function by a required source fragment
 #
 # The fixture test internal/testkit/testgate/registry_test.go validates every entry
 # against the tree. The registry records no baseline and compares nothing across
@@ -20,7 +22,7 @@ partition:
   - package: internal/moduleboundary
     test: TestRedactionModuleBoundary
     class: toolchain
-    evidence: internal/moduleboundary/redaction_boundary_test.go:65
+    evidence: '#TestRedactionModuleBoundary'
     justification: >-
       Reads the module graph through `go mod edit`/`go list -m` and walks the
       source tree for forbidden imports; the production path is the go tool and
@@ -30,7 +32,7 @@ partition:
   - package: internal/moduleboundary
     test: TestRedactionBoundaryFixtureStrictDecoding
     class: single-threaded-bytes
-    evidence: internal/moduleboundary/redaction_boundary_test.go:117
+    evidence: '#TestRedactionBoundaryFixtureStrictDecoding'
     justification: >-
       Strict-decodes the embedded boundary fixture in-process; pure byte work,
       no goroutines or shared state.
@@ -39,7 +41,7 @@ partition:
   - package: internal/moduleboundary
     test: TestRedactionScannerHoldsALineAtTheRecordLimit
     class: single-threaded-bytes
-    evidence: internal/moduleboundary/redaction_boundary_test.go:351
+    evidence: '#TestRedactionScannerHoldsALineAtTheRecordLimit'
     justification: >-
       Redacts one at-limit record through the pinned engine; single-threaded
       byte work on a private input.
@@ -48,7 +50,7 @@ partition:
   - package: internal/moduleboundary
     test: TestRedactionEngineHandlesRecordOverTheOldLimit
     class: single-threaded-bytes
-    evidence: internal/moduleboundary/redaction_boundary_test.go:416
+    evidence: '#TestRedactionEngineHandlesRecordOverTheOldLimit'
     justification: >-
       Redacts a record over the retired 10 MiB limit through the real engine.
       The size is the invariant, so it stays; the work is single-threaded bytes
@@ -58,19 +60,19 @@ partition:
   - package: internal/e2e
     test: TestPeasantBinSeamUnsetBuildsGoBinary
     class: subprocess
-    evidence: internal/e2e/skipgate_seams_test.go:53
+    evidence: '#TestPeasantBinSeamUnsetBuildsGoBinary'
     justification: >-
       The build IS the assertion: with PEASANT_BIN empty the seam must build the
       real CLI and run it. The production code runs in the `go build` child, so
       the race detector would instrument the child and change what is proven.
     build_flags: []
-    exec_command_site: internal/e2e/skipgate_seams.go:106
+    exec_command_site: 'internal/e2e/skipgate_seams.go#buildPeasant#exec.Command("go", "build"'
     cost: { wall_ms: 2773, cpu_ms: 4218 }
 
   - package: cmd/peasant
     test: TestWebCapabilitiesMatrix
     class: subprocess
-    evidence: cmd/peasant/web_capabilities_matrix_test.go:118
+    evidence: '#TestWebCapabilitiesMatrix'
     justification: >-
       Boots the real CLI built without the race detector for each matrix case and
       asserts the advertised capability set plus the mounted SPA routes. The
@@ -78,13 +80,13 @@ partition:
       body only drives HTTP and asserts tokens, so it has no shared-memory
       concurrency subject of its own.
     build_flags: ["-race=false"]
-    exec_command_site: cmd/peasant/web_capabilities_matrix_test.go:178
+    exec_command_site: 'cmd/peasant/web_capabilities_matrix_test.go#buildPeasantMatrixBinary#exec.Command("go", "build", "-race=false"'
     cost: { wall_ms: 21330, cpu_ms: 138425 }
 
   - package: internal/transcript
     test: TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback
     class: static-analysis
-    evidence: internal/transcript/snapshot_detail_lock_scope_test.go:46
+    evidence: '#TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback'
     justification: >-
       The deterministic source oracle for the snapshot-lock boundary: it parses
       production source and asserts where serialization lives. It reads bytes
@@ -95,12 +97,12 @@ protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
     class: subprocess
-    evidence: internal/ingest/opencode_native_cli_test.go:80
+    evidence: '#TestOpenCodeNativeCLI'
     justification: >-
       The pinned counter-example: its `go build` child is built with
       nativeCLIRaceFlag, which is `-race=true` under the `race` build tag, so it
       can never be a partition member — the child must carry the detector with
       the enclosing suite.
     build_flags: ["-race=true"]
-    exec_command_site: internal/ingest/opencode_native_cli_test.go:80
+    exec_command_site: 'internal/ingest/opencode_native_cli_test.go#TestOpenCodeNativeCLI#exec.CommandContext(ctx, "go", "build", nativeCLIRaceFlag'
     cost: { wall_ms: 39216, cpu_ms: 53162 }
