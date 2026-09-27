@@ -12,11 +12,11 @@ import (
 )
 
 // TestTranscriptBucketObjectCountMatchesKnownPuts is the focused regression for the
-// combined-output counter regression. It provisions ONLY MinIO (no Postgres/village), then:
+// combined-output counter regression. It provisions ONLY RustFS (no Postgres/village), then:
 //
 //   - asserts an empty bucket counts EXACTLY 0 — the symmetric guard against the
 //     original OVER-count (CI podman 4.9.3 stderr inflated an empty bucket to 8);
-//   - PUTs K known objects via the in-process minio-go client and asserts the count
+//   - PUTs K known objects via the in-process S3 client and asserts the count
 //     equals EXACTLY K — guarding BOTH the over-count AND an always-0 UNDER-count
 //     degenerate (wrong bucket / undrained channel) that an empty==0 check alone
 //     would falsely pass.
@@ -32,16 +32,16 @@ func TestTranscriptBucketObjectCountMatchesKnownPuts(t *testing.T) {
 	reapStaleE2EInfra(t)
 
 	bucket := uniqueName("transcripts")
-	endpoint := startEphemeralMinIO(t, bucket)
+	endpoint := startEphemeralRustFS(t, bucket)
 
 	// Empty bucket must count EXACTLY 0 — never the stderr-inflated over-count.
 	if got := transcriptBucketObjectCount(t, endpoint, bucket); got != 0 {
 		t.Fatalf("empty transcript bucket count = %d, want 0 (stderr/over-count regression)", got)
 	}
 
-	client, err := newMinioClient(endpoint)
+	client, err := newS3Client(endpoint)
 	if err != nil {
-		t.Fatalf("build minio client for %s: %v", endpoint, err)
+		t.Fatalf("build S3 client for %s: %v", endpoint, err)
 	}
 
 	// Representative transcript-like object layout (hostSlug/sessionId/file). The

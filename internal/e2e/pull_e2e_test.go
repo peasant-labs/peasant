@@ -1,7 +1,7 @@
 //go:build e2e
 
 // End-to-end pull round-trip + pollution gate. It REUSES the skip-gate harness's
-// provisioning machinery (podman Postgres + MinIO + the real village ./cmd/server
+// provisioning machinery (podman Postgres + RustFS + the real village ./cmd/server
 // + the real peasant CLI in throwaway XDG sandboxes) and adds a SECOND village
 // user (village_users.go) to drive the full pull surface end-to-end.
 //
@@ -91,13 +91,13 @@ func TestPullRoundTripE2E(t *testing.T) {
 	user2XDG, user2Dirs := makeSandbox(t, realStateDir, sandboxToken+1)
 
 	// Ephemeral infra — Postgres (with an open database/sql handle for in-DB SQL),
-	// MinIO, the real village server, user1 via setup-demo, user2 via the sibling
+	// RustFS, the real village server, user1 via setup-demo, user2 via the sibling
 	// mint. startEphemeralPostgres owns container cleanup; the parameterized seed
 	// helpers take the returned *sql.DB.
 	bucket := uniqueName("transcripts")
 	dsn, db := startEphemeralPostgres(t)
-	minioEndpoint := startEphemeralMinIO(t, bucket)
-	villageURL := startVillageServer(t, bins.server, dsn, minioEndpoint, bucket)
+	s3Endpoint := startEphemeralRustFS(t, bucket)
+	villageURL := startVillageServer(t, bins.server, dsn, s3Endpoint, bucket)
 
 	// user1 owns the published transcripts; capture its API key to drive the
 	// owner-authenticated seed steps (group-share + set-public) through the real

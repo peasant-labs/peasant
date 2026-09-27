@@ -15,7 +15,7 @@ func TestHarnessRefreshE2E(t *testing.T) {
 	bins := resolveVillageBinaries(t)
 	stack := provisionHarnessStack(t, bins)
 	if stack.external {
-		t.Skip("e2e: refresh regression requires the harness-owned Postgres, MinIO, and Village process; unset external-stack variables")
+		t.Skip("e2e: refresh regression requires the harness-owned Postgres, RustFS, and Village process; unset external-stack variables")
 	}
 
 	configHome := filepath.Join(t.TempDir(), "config")
@@ -30,7 +30,7 @@ func TestHarnessRefreshE2E(t *testing.T) {
 			what:  fmt.Sprintf("Village returned HTTP %d instead of 2xx; body=%s", status, body),
 			why:   "the valid pinned contract fixture was rejected before any reset occurred",
 			where: "internal/e2e/refresh_e2e_test.go TestHarnessRefreshE2E",
-			when:  "seeding non-empty Postgres and MinIO state before refresh",
+			when:  "seeding non-empty Postgres and RustFS state before refresh",
 			means: "the refresh regression has no valid non-empty control state",
 			fix:   "confirm the pinned Village fixtures, schema module, migrations, and demo API key agree before evaluating refresh",
 		})
@@ -46,15 +46,15 @@ func TestHarnessRefreshE2E(t *testing.T) {
 			fix:   "inspect the publish handler and database connection, then rerun with a freshly provisioned stack",
 		})
 	}
-	if got := transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket); got == 0 {
+	if got := transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket); got == 0 {
 		fatalActionable(t, actionableFailure{
 			title: "pre-refresh object seed missing",
-			what:  "the successful control publish left zero transcript objects in MinIO",
+			what:  "the successful control publish left zero transcript objects in the object store",
 			why:   "Village did not persist the contract fixture content in the harness-owned bucket",
 			where: "internal/e2e/refresh_e2e_test.go TestHarnessRefreshE2E",
 			when:  "checking the non-empty object-store precondition before refresh",
 			means: "object clearing cannot be proven by this run",
-			fix:   "inspect the publish storage path and MinIO configuration, then rerun with a freshly provisioned stack",
+			fix:   "inspect the publish storage path and object store configuration, then rerun with a freshly provisioned stack",
 		})
 	}
 
@@ -85,10 +85,10 @@ func TestHarnessRefreshE2E(t *testing.T) {
 			fix:   "inspect the restarted Village database configuration and publish transaction",
 		})
 	}
-	if got := transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket); got == 0 {
+	if got := transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket); got == 0 {
 		fatalActionable(t, actionableFailure{
 			title: "post-refresh object publish missing",
-			what:  "the post-refresh 2xx publish left zero transcript objects in MinIO",
+			what:  "the post-refresh 2xx publish left zero transcript objects in the object store",
 			why:   "the restarted Village did not persist the valid fixture content in object storage",
 			where: "internal/e2e/refresh_e2e_test.go TestHarnessRefreshE2E",
 			when:  "verifying object-store usability after warm-stack refresh",

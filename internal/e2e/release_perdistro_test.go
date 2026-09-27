@@ -239,7 +239,7 @@ func runPodman(t *testing.T, args ...string) string {
 func setExternalStackEnv(t *testing.T, stack harnessStack) {
 	t.Helper()
 	setenv(t, envDatabaseURL, stack.dsn)
-	setenv(t, envS3Endpoint, stack.minioEndpoint)
+	setenv(t, envS3Endpoint, stack.s3Endpoint)
 	setenv(t, envS3Bucket, stack.bucket)
 	setenv(t, envVillageURL, stack.villageURL)
 }
@@ -247,10 +247,10 @@ func setExternalStackEnv(t *testing.T, stack harnessStack) {
 func assertExternalStackEngaged(t *testing.T, stack harnessStack) {
 	t.Helper()
 	cfg, err := validateExternalStackConfig(externalStackConfig{
-		dsn:           stack.dsn,
-		minioEndpoint: stack.minioEndpoint,
-		bucket:        stack.bucket,
-		villageURL:    stack.villageURL,
+		dsn:        stack.dsn,
+		s3Endpoint: stack.s3Endpoint,
+		bucket:     stack.bucket,
+		villageURL: stack.villageURL,
 	})
 	if err != nil {
 		t.Fatalf("release-e2e: external-stack config rejected before distro run: %v", err)
@@ -266,7 +266,7 @@ func assertPushReachedWarmStack(t *testing.T, stack harnessStack, distro string)
 	if transcripts < ExpectedPushTranscriptCount {
 		t.Fatalf("release-e2e: %s push#1 did not reach the warm village stack: village transcripts = %d, want at least %d", distro, transcripts, ExpectedPushTranscriptCount)
 	}
-	objects := transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket)
+	objects := transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket)
 	if objects < ExpectedPushTranscriptCount {
 		t.Fatalf("release-e2e: %s push#1 did not write transcripts to the warm S3 bucket: objects = %d, want at least %d", distro, objects, ExpectedPushTranscriptCount)
 	}

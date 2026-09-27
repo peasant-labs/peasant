@@ -7,6 +7,12 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### CI
+- The full-stack e2e harness runs RustFS as its S3-compatible object store in
+  place of MinIO, pinned by digest to `ghcr.io/rustfs/rustfs`. MinIO's official
+  images were withdrawn from both Docker Hub and Quay, which failed the e2e
+  publication gate closed.
+
 ## [0.7.0-rc1] - 2026-09-16
 
 ### Added
