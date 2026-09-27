@@ -128,14 +128,15 @@ func containsUnpairedSurrogateEscape(raw string) bool {
 // the decode this probe exists to avoid or the global state it does not
 // accumulate; each is named here and asserted in
 // TestProjectRetainedUnknownPrecedence:
-//   - a payloadText whose decoded content the shared scanner refuses (invalid
-//     JSON syntax, unpaired escapes already excluded above, or depth beyond
-//     the local budget): measuring the decoded length cannot validate content
-//     without decoding;
-//   - a legacy raw payload value with invalid JSON syntax (depth beyond the
-//     payload budget is mirrored above and declines): measuring the raw
-//     extent cannot validate syntax without copying the value, which would
-//     materialize exactly what the refusal must not materialize;
+//   - a payloadText whose decoded content the shared scanner refuses
+//     (invalid JSON syntax, repeated object member names, unpaired escapes
+//     already excluded above, or depth beyond the local budget): measuring
+//     the decoded length cannot validate content without decoding;
+//   - a legacy raw payload value with invalid JSON syntax, including repeated
+//     object member names (depth beyond the payload budget is mirrored above
+//     and declines): measuring the raw extent cannot validate syntax without
+//     copying the value, which would materialize exactly what the refusal
+//     must not materialize;
 //   - cross-record ordering and pointer uniqueness, which the authoritative path
 //     decides over the coordinate-sorted record set while the probe walks each
 //     record once in stored order.

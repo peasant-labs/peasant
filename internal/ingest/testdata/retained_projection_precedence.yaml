@@ -50,7 +50,9 @@ requiredNames:
   - oversized_canonical_record_is_refused_for_size
   - oversized_raw_string_record_is_refused_for_size
   - oversized_malformed_payload_content_is_refused_for_size
+  - oversized_duplicate_key_payload_text_is_refused_for_size
   - oversized_raw_invalid_syntax_is_refused_for_size
+  - oversized_raw_duplicate_key_is_refused_for_size
   - oversized_duplicate_pointers_across_records_is_refused_for_size
   - oversized_non_monotonic_positions_across_records_is_refused_for_size
   - oversized_invalid_utf8_namespace_before_payload_keeps_integrity_refusal
@@ -80,6 +82,14 @@ requiredNames:
 #                        text is not valid JSON (the deliberate content change);
 #   {{OVER_RAW_INVALID}} a bracket-balanced but lexically invalid raw value over
 #                        the limit (the deliberate raw-syntax change);
+#   {{OVER_DUPLICATE_KEY}} a JSON string over the limit whose decoded text is
+#                        valid JSON with a repeated member name: the probe
+#                        measures the decoded length while the authoritative
+#                        path refuses the duplicate key (the deliberate
+#                        duplicate-key change for the modern encoding);
+#   {{OVER_RAW_DUPLICATE_KEY}} the same duplicate-key shape as a legacy raw
+#                        value over the limit, measured by extent (the
+#                        deliberate duplicate-key change for the raw encoding);
 #   {{OVER_DEEP_TEXT}}   a JSON string over the limit whose decoded text nests
 #                        10,001 arrays deep, one beyond the shared local depth
 #                        ceiling: the probe measures its decoded length while
@@ -260,8 +270,18 @@ precedenceCases:
     want: size
     authoritative: integrity
     deliberateSizePrecedence: true
+  - name: oversized_duplicate_key_payload_text_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DUPLICATE_KEY}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
   - name: oversized_raw_invalid_syntax_is_refused_for_size
     extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{OVER_RAW_INVALID}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_raw_duplicate_key_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{OVER_RAW_DUPLICATE_KEY}}}]}']
     want: size
     authoritative: integrity
     deliberateSizePrecedence: true

@@ -21,6 +21,13 @@ func oversizedPayload(size int) json.RawMessage {
 	return json.RawMessage(`"` + strings.Repeat("x", size-2) + `"`)
 }
 
+// retainedRefusalAllocationBound states the no-copy invariant shared by the
+// allocation proof and the boundary test: a transfer refusal allocates
+// nothing proportional to the payload. The observed deltas are about 1.2-1.5
+// KiB, so 1 MiB stays three orders of magnitude above the behavior while
+// catching a regression that copies even a fraction of a large payload.
+const retainedRefusalAllocationBound = 1 << 20
+
 func publicPosition(record int64) ingest.UnknownSourcePosition {
 	return ingest.UnknownSourcePosition{
 		Line:   int(record) + 1,
@@ -45,11 +52,18 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // the transfer refusal is decided from the stored bytes: an oversized payload
 // is refused without decoding or copying the payload itself. The allocated-byte
 // delta is measured for the refusal call alone, after the entry already exists
-// in memory, and asserted far below the payload size. A bound of payload/4 is
-// generous for allocator noise while still an order of magnitude below what
-// decoding the payload would allocate. The closed encoding set is driven by
-// the noMaterializationCases fixture, including the escaped-owned-string and
-// escaped-owned-key shapes that once lost the early refusal.
+// in memory, and asserted far below the payload size. Two bounds apply: the
+// payload/4 calibration bound from the probe-off mutation story, and the
+// 1 MiB constant bound that states the real invariant, that the refusal
+// allocates nothing proportional to the payload. The observed deltas are
+// about 1.2-1.5 KiB, so the constant bound stays three orders of magnitude
+// above the behavior while catching a regression that copies even a fraction
+// of a 64 MiB payload. The closed encoding set is driven by
+// the noMaterializationCases fixture, including the escaped-owned-string,
+// escaped-owned-key, and escaped-evidence-root-key shapes that once lost the
+// early refusal. Every encoding carries a JSON-valid payload, so with the
+// probe forced off each row reaches the projection-time size backstop and
+// fails on the allocation bound rather than on the refusal text.
 //
 // Calibration: forcing the in-place probe off makes this same 64 MiB payload
 // allocate ~3.5-3.8 GB depending on the encoding before the refusal, so the
@@ -58,9 +72,11 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // from this committed test alone, not from an unrecorded local measurement.
 func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *testing.T) {
 	const payloadBytes = 64 << 20
+	overDigits := `"` + strings.Repeat("1", payloadBytes-2) + `"`
 	rawLiteral := `"` + strings.Repeat("x", payloadBytes-2) + `"`
 	rawExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payload":` + rawLiteral + `}]}`
-	escapedKeyExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"pay\u006CoadText":` + rawLiteral + `}]}`
+	escapedKeyExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"pay\u006CoadText":` + overDigits + `}]}`
+	escapedRootKeyExtra := `{"retainedUnk\u006Eown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payloadText":` + overDigits + `}]}`
 	escapedRecord, err := ingest.NewRetainedUnknown(schema.HarnessCodex, "record", "future&more", publicPosition(0), oversizedPayload(payloadBytes))
 	if err != nil {
 		t.Fatal(err)
@@ -76,18 +92,23 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 	if !strings.Contains(*escapedKeyEntry.Extra, `\u006C`) {
 		t.Fatal("escapedKey entry does not carry an escaped owned key in its stored form, so it no longer covers the shape it names")
 	}
+	escapedRootKeyEntry := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &escapedRootKeyExtra}
+	if !strings.Contains(*escapedRootKeyEntry.Extra, `\u006Eown`) {
+		t.Fatal("escapedRootKey entry does not carry an escaped evidence root key in its stored form, so it no longer covers the shape it names")
+	}
 	fixtureCases := loadNoMaterializationCases(t)
 	entries := map[string]schema.SessionEntry{
-		"payloadText": carrierEntry(t, publicPosition(0), oversizedPayload(payloadBytes)),
-		"rawPayload":  {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &rawExtra},
-		"escapedKind": escapedEntry,
-		"escapedKey":  escapedKeyEntry,
+		"payloadText":    carrierEntry(t, publicPosition(0), oversizedPayload(payloadBytes)),
+		"rawPayload":     {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &rawExtra},
+		"escapedKind":    escapedEntry,
+		"escapedKey":     escapedKeyEntry,
+		"escapedRootKey": escapedRootKeyEntry,
 	}
 	for _, c := range fixtureCases {
 		t.Run(c.Name, func(t *testing.T) {
 			entry, ok := entries[c.Encoding]
 			if !ok {
-				t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, or escapedKind", c.Name, c.Encoding)
+				t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
 			}
 			var before, after runtime.MemStats
 			runtime.GC()
@@ -102,6 +123,9 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 			t.Logf("refusal allocated %d bytes for a %d-byte payload", delta, payloadBytes)
 			if bound := int64(payloadBytes / 4); delta >= bound {
 				t.Fatalf("refusal allocated %d bytes, not far below the %d-byte payload (bound %d)", delta, payloadBytes, bound)
+			}
+			if delta >= retainedRefusalAllocationBound {
+				t.Fatalf("refusal allocated %d bytes, above the %d-byte constant bound: the refusal must not copy the %d-byte payload", delta, retainedRefusalAllocationBound, payloadBytes)
 			}
 		})
 	}
@@ -143,9 +167,9 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 		}
 		names[c.Name] = true
 		switch c.Encoding {
-		case "payloadText", "rawPayload", "escapedKind", "escapedKey":
+		case "payloadText", "rawPayload", "escapedKind", "escapedKey", "escapedRootKey":
 		default:
-			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, or escapedKey", c.Name, c.Encoding)
+			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
 		}
 	}
 	for _, name := range raw.RequiredNames {
@@ -169,6 +193,71 @@ func TestProjectRetainedUnknownRefusalMessageStable(t *testing.T) {
 	}
 	if got, want := err.Error(), "export retained evidence: payload exceeds the published 8 MiB transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available"; got != want {
 		t.Fatalf("transfer refusal text changed:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestProjectRetainedUnknownAcceptsAtCapPayloads pins the strict boundary at
+// the published cap through the real entry: a payload of exactly 8 MiB is
+// accepted for both encodings, and one byte over is refused without
+// materializing. The probe unit pins the comparison at synthetic limits and
+// the constant is pinned to 8<<20; only this test composes the two at the
+// production call site, so a drift that passes limit-1 (refusing legitimate
+// at-cap records) fails here while the fixture rows stay green.
+func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
+	const capBytes = 8 << 20
+	// A payloadText value carries two quote bytes around its decoded text, so
+	// capBytes-2 content bytes decode to exactly the cap; a legacy raw value
+	// is measured by extent, so the same spelling is exactly the cap there.
+	textAtCap := `"` + strings.Repeat("1", capBytes-2) + `"`
+	textOneOver := `"` + strings.Repeat("1", capBytes-1) + `"`
+	rawAtCap := textAtCap
+	rawOneOver := textOneOver
+	rawExtra := func(payload string) string {
+		return `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":` + payload + `}]}`
+	}
+	atCapText := carrierEntry(t, publicPosition(0), json.RawMessage(textAtCap))
+	oneOverText := carrierEntry(t, publicPosition(0), json.RawMessage(textOneOver))
+	atCapRawExtra := rawExtra(rawAtCap)
+	oneOverRawExtra := rawExtra(rawOneOver)
+	atCapRaw := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &atCapRawExtra}
+	oneOverRaw := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &oneOverRawExtra}
+	for _, c := range []struct {
+		name  string
+		entry schema.SessionEntry
+	}{
+		{"payloadText", atCapText},
+		{"rawPayload", atCapRaw},
+	} {
+		t.Run(c.name+"/at_cap_accepted", func(t *testing.T) {
+			projected, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{c.entry}, schema.HarnessCodex)
+			if err != nil || len(projected) != 1 {
+				t.Fatalf("at-cap payload was not accepted: records=%d err=%v", len(projected), err)
+			}
+			if len(projected[0].Payload) != capBytes {
+				t.Fatalf("at-cap projected payload is %d bytes, want exactly %d", len(projected[0].Payload), capBytes)
+			}
+		})
+	}
+	for _, c := range []struct {
+		name  string
+		entry schema.SessionEntry
+	}{
+		{"payloadText", oneOverText},
+		{"rawPayload", oneOverRaw},
+	} {
+		t.Run(c.name+"/one_over_refused_early", func(t *testing.T) {
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{c.entry}, schema.HarnessCodex)
+			runtime.ReadMemStats(&after)
+			if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
+				t.Fatalf("one-over payload was not refused for size: %v", err)
+			}
+			if delta := int64(after.TotalAlloc - before.TotalAlloc); delta >= retainedRefusalAllocationBound {
+				t.Fatalf("one-over refusal allocated %d bytes, above the %d-byte bound", delta, retainedRefusalAllocationBound)
+			}
+		})
 	}
 }
 
@@ -278,11 +367,12 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 //
 // Three deliberate size precedences are asserted as the intended consequence of
 // refusing before materialization: a payloadText whose decoded content the
-// shared scanner refuses (invalid syntax or depth), a legacy raw payload value
-// with invalid JSON syntax (depth beyond the payload budget declines instead),
-// and cross-record ordering or pointer uniqueness, which the authoritative path
-// decides over the coordinate-sorted record set. Each size row also asserts
-// its authoritative outcome: canonical rows are accepted by
+// shared scanner refuses (invalid syntax, repeated object member names, or
+// depth), a legacy raw payload value with invalid JSON syntax, including
+// repeated object member names (depth beyond the payload budget declines
+// instead), and cross-record ordering or pointer uniqueness, which the
+// authoritative path decides over the coordinate-sorted record set. Each size
+// row also asserts its authoritative outcome: canonical rows are accepted by
 // CollectRetainedUnknown apart from size, deliberate rows carry an integrity
 // error there.
 // deliberateSizePrecedenceNames is the closed deliberate set named in the
@@ -293,7 +383,9 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 // every test still green.
 var deliberateSizePrecedenceNames = []string{
 	"oversized_malformed_payload_content_is_refused_for_size",
+	"oversized_duplicate_key_payload_text_is_refused_for_size",
 	"oversized_raw_invalid_syntax_is_refused_for_size",
+	"oversized_raw_duplicate_key_is_refused_for_size",
 	"oversized_duplicate_pointers_across_records_is_refused_for_size",
 	"oversized_non_monotonic_positions_across_records_is_refused_for_size",
 	"oversized_deep_payload_text_with_over_companion_is_refused_for_size",
@@ -327,10 +419,25 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 	over := `"` + strings.Repeat("1", fixtures.PayloadBytes-2) + `"`
 	overInvalid := `"` + strings.Repeat("x", fixtures.PayloadBytes-2) + `"`
 	overRawInvalid := `[` + strings.Repeat(",", fixtures.PayloadBytes-2) + `]`
+	// overDuplicateKey is a JSON string whose decoded text is valid JSON with
+	// a repeated member name over the limit: the probe measures the decoded
+	// length without validating content, while the authoritative path refuses
+	// the duplicate key for integrity. overRawDuplicateKey is the same shape
+	// as a legacy raw value, measured by extent. Both decoded forms are
+	// exactly payloadBytes long, matching the other over-limit tokens.
+	dupStoredPrefix := `{\"a\":1,\"a\":2,\"p\":\"`
+	dupDecodedPrefix := `{"a":1,"a":2,"p":"`
+	dupDigits := strings.Repeat("1", fixtures.PayloadBytes-len(dupDecodedPrefix)-2)
+	dupDecoded := dupDecodedPrefix + dupDigits + `"}`
+	overDuplicateKey := `"` + dupStoredPrefix + dupDigits + `\"}` + `"`
+	overRawDuplicateKey := dupDecoded
 	deep := strings.Repeat("[", 12001) + strings.Repeat("]", 12001)
 	overDeepText := `"` + strings.Repeat("[", overDeepPayloadTextDepth) + strings.Repeat("1", fixtures.PayloadBytes) + strings.Repeat("]", overDeepPayloadTextDepth) + `"`
 	if len(over) != fixtures.PayloadBytes {
 		t.Fatalf("built over-limit literal is %d bytes, want payloadBytes %d", len(over), fixtures.PayloadBytes)
+	}
+	if len(dupDecoded) != fixtures.PayloadBytes || len(overRawDuplicateKey) != fixtures.PayloadBytes {
+		t.Fatalf("built duplicate-key literals are %d/%d bytes, want payloadBytes %d", len(dupDecoded), len(overRawDuplicateKey), fixtures.PayloadBytes)
 	}
 	if len(overDeepText) != fixtures.PayloadBytes+2*overDeepPayloadTextDepth+2 {
 		t.Fatalf("built over-limit deep text is %d bytes, want payloadBytes %d plus %d brackets and 2 quotes", len(overDeepText), fixtures.PayloadBytes, 2*overDeepPayloadTextDepth)
@@ -350,6 +457,8 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 				extra := strings.ReplaceAll(template, "{{OVER}}", over)
 				extra = strings.ReplaceAll(extra, "{{OVER_INVALID}}", overInvalid)
 				extra = strings.ReplaceAll(extra, "{{OVER_RAW_INVALID}}", overRawInvalid)
+				extra = strings.ReplaceAll(extra, "{{OVER_DUPLICATE_KEY}}", overDuplicateKey)
+				extra = strings.ReplaceAll(extra, "{{OVER_RAW_DUPLICATE_KEY}}", overRawDuplicateKey)
 				extra = strings.ReplaceAll(extra, "{{OVER_DEEP_TEXT}}", overDeepText)
 				extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
 				extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)

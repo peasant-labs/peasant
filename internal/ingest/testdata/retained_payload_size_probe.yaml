@@ -13,6 +13,7 @@ requiredNames:
   - raw_extent_array
   - raw_extent_number
   - raw_extent_true
+  - raw_extent_nested_object
   - probe_payload_text_over_limit
   - probe_payload_text_under_limit
   - probe_payload_text_escapes_over_limit
@@ -98,10 +99,23 @@ requiredNames:
   - probe_escaped_case_alias_root_key
   - probe_deep_raw_payload_9997_declined
   - probe_deep_extension_10000_declined
+  - probe_raw_object_string_brace_over_limit
+  - probe_raw_nested_object_over_limit
+  - probe_raw_surrogate_pair_over_limit
+  - probe_source_id_locator_over_limit
+  - probe_source_entry_ref_locator_over_limit
+  - probe_sequence_locator_over_limit
+  - probe_deep_raw_payload_9996_accepted
+  - probe_deep_extension_9999_accepted
+  - probe_escaped_evidence_root_key_over_limit
+  - probe_undecodable_escaped_envelope_key
+  - probe_truncated_escaped_envelope_key
+  - probe_undecodable_escaped_root_key
   - no_materialization_payload_text
   - no_materialization_raw_payload
   - no_materialization_escaped_kind
   - no_materialization_escaped_key
+  - no_materialization_escaped_root_key
 
 # probeHarness is the export harness the probe cases are asked for unless the
 # case overrides it. The probe requires the envelope harness to name a known
@@ -131,6 +145,7 @@ rawExtentCases:
   - { name: raw_extent_array, value: '[1,2,3,4,5,6,7,8,9]', want: 19 }
   - { name: raw_extent_number, value: '123456789', want: 9 }
   - { name: raw_extent_true, value: 'true', want: 4 }
+  - { name: raw_extent_nested_object, value: '{"a":{"b":1}}', want: 13 }
 
 # probeCases drive storedRetainedExtraExceedsTransferLimit over one stored Extra
 # root string. `limit` is the transfer limit the case exercises; a small value
@@ -150,8 +165,13 @@ rawExtentCases:
 # 0xFF byte (invalid UTF-8, which YAML cannot spell literally), {{DEEP}} is a
 # 12,001-deep raw array, {{DEEP9997}} is a 9,997-deep raw array at the probe's
 # conservative raw-payload floor (declined by the probe, accepted by the
-# decoder), and {{DEEP10000}} is a 10,000-deep raw array for the extension
-# budget boundary (declined by the probe, refused by the decoder). The
+# decoder), {{DEEP9996}} is a 9,996-deep raw array exactly at the probe's
+# raw-payload budget (accepted by both), {{DEEP9999}} is a 9,999-deep raw
+# array exactly at the extension budget (accepted by both), and {{DEEP10000}}
+# is a 10,000-deep raw array for the extension budget boundary (declined by
+# the probe, refused by the decoder). The depth spellings are expanded from
+# the probe's budget constants in the test, so they move with the constants
+# instead of going stale. The
 # measureCases unpaired-surrogate rows pin the measurement helper only; the
 # probe declines those shapes via its whole-document pre-scan, pinned by the
 # probe_lone_surrogate rows below. Deliberate size-precedence shapes (invalid
@@ -566,14 +586,69 @@ probeCases:
     wantOver: false
     declined: true
     decoderRefuses: true
+  - name: probe_raw_object_string_brace_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{"k":"x}x"}}]}'
+    wantOver: true
+  - name: probe_raw_nested_object_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{"a":{"b":"1111111111"}}}]}'
+    wantOver: true
+  - name: probe_raw_surrogate_pair_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":"\uD83D\uDE00"}]}'
+    wantOver: true
+  - name: probe_source_id_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"sourceId":"s1","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_source_entry_ref_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"sourceEntryRef":"SOURCE","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_sequence_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"sequence":3,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_deep_raw_payload_9996_accepted
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP9996}}}]}'
+    wantOver: true
+  - name: probe_deep_extension_9999_accepted
+    limit: 8
+    extra: '{"other":{{DEEP9999}},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"}]}'
+    wantOver: false
+  - name: probe_escaped_evidence_root_key_over_limit
+    limit: 8
+    extra: '{"retainedUnk\u006Eown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_undecodable_escaped_envelope_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\uZZloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_truncated_escaped_envelope_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\u12":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_undecodable_escaped_root_key
+    limit: 8
+    extra: '{"retainedUnk\uZZown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
 
 # noMaterializationCases drive the allocation proof in
 # TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing: each
 # name is a required closed set over the stored encodings, including the
-# escaped-owned-string shape and the escaped-owned-key shape that once lost
-# the early refusal.
+# escaped-owned-string shape, the escaped-owned-key shape, and the escaped
+# evidence-root-key shape that once lost the early refusal.
 noMaterializationCases:
   - { name: no_materialization_payload_text, encoding: payloadText }
   - { name: no_materialization_raw_payload, encoding: rawPayload }
   - { name: no_materialization_escaped_kind, encoding: escapedKind }
   - { name: no_materialization_escaped_key, encoding: escapedKey }
+  - { name: no_materialization_escaped_root_key, encoding: escapedRootKey }

@@ -56,19 +56,32 @@ type retainedPayloadSizeProbeFixtures struct {
 
 // expandProbeTokens replaces fixture tokens that YAML cannot spell literally:
 // {{FF}} is one raw 0xFF byte (invalid UTF-8), {{DEEP}} is a 12,001-deep raw
-// array for the depth-budget row, {{DEEP9997}} is a 9,997-deep raw array at the
-// probe's conservative raw-payload floor, and {{DEEP10000}} is a 10,000-deep
-// raw array for the extension budget boundary.
+// array for the depth-budget row, {{DEEP9997}} is one past the probe's
+// raw-payload budget (declined by the probe, accepted by the decoder),
+// {{DEEP9996}} is exactly the probe's raw-payload budget (accepted by both),
+// {{DEEP9999}} is exactly the extension budget (accepted by both), and
+// {{DEEP10000}} is one past the extension budget (declined by the probe,
+// refused by the decoder). The depths derive from retainedRawPayloadDepthBudget
+// and strictRetainedExtensionDepth, so the boundary rows move with the
+// constants instead of going stale when the shared depth constant changes.
 func expandProbeTokens(extra string) string {
 	if strings.Contains(extra, "{{FF}}") {
 		extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
 	}
 	if strings.Contains(extra, "{{DEEP9997}}") {
-		deep := strings.Repeat("[", 9997) + strings.Repeat("]", 9997)
+		deep := strings.Repeat("[", retainedRawPayloadDepthBudget+1) + strings.Repeat("]", retainedRawPayloadDepthBudget+1)
 		extra = strings.ReplaceAll(extra, "{{DEEP9997}}", deep)
 	}
+	if strings.Contains(extra, "{{DEEP9996}}") {
+		deep := strings.Repeat("[", retainedRawPayloadDepthBudget) + strings.Repeat("]", retainedRawPayloadDepthBudget)
+		extra = strings.ReplaceAll(extra, "{{DEEP9996}}", deep)
+	}
+	if strings.Contains(extra, "{{DEEP9999}}") {
+		deep := strings.Repeat("[", strictRetainedExtensionDepth) + strings.Repeat("]", strictRetainedExtensionDepth)
+		extra = strings.ReplaceAll(extra, "{{DEEP9999}}", deep)
+	}
 	if strings.Contains(extra, "{{DEEP10000}}") {
-		deep := strings.Repeat("[", 10000) + strings.Repeat("]", 10000)
+		deep := strings.Repeat("[", strictRetainedExtensionDepth+1) + strings.Repeat("]", strictRetainedExtensionDepth+1)
 		extra = strings.ReplaceAll(extra, "{{DEEP10000}}", deep)
 	}
 	if strings.Contains(extra, "{{DEEP}}") {
@@ -133,9 +146,9 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 		}
 		names[c.Name] = true
 		switch c.Encoding {
-		case "payloadText", "rawPayload", "escapedKind", "escapedKey":
+		case "payloadText", "rawPayload", "escapedKind", "escapedKey", "escapedRootKey":
 		default:
-			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, or escapedKey", c.Name, c.Encoding)
+			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
 		}
 	}
 	for _, name := range fixtures.RequiredNames {
