@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 func TestConsumer_ParsesAStream(t *testing.T) {

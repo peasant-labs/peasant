@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 // PassMode selects the two-pass split.

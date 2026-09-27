@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 // The batched profiler removes cross-test CPU-queueing from per-test cost. A

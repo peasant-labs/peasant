@@ -2,7 +2,7 @@
 #
 # The destination enum and the two document shapes are what the downstream
 # relocation slices append to and what the coverage-map guard validates. See
-# internal/coveragemap/coveragemap.go for the re-freeze rule.
+# internal/testkit/coveragemap/coveragemap.go for the re-freeze rule.
 required_names:
   - coveragemap.Destination
   - coveragemap.InventoryName

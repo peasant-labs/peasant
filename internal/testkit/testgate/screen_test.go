@@ -3,7 +3,7 @@ package testgate
 import (
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 func screenPlan() *Plan {

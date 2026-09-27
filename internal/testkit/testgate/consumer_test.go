@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/testgate"
+	"github.com/peasant-labs/peasant/internal/testkit/testgate"
 )
 
 func TestConsumer_UsesExportedRecordAndReport(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 // TestRunner_TwoPassRecordsAndScreen exercises the real runner path on two

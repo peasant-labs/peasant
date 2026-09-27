@@ -11,7 +11,7 @@
 #                    a partition child must not be built with -race
 #   exec_command_site (subprocess only) file:line of the exec.Command call
 #
-# The fixture test internal/testgate/registry_test.go validates every entry
+# The fixture test internal/testkit/testgate/registry_test.go validates every entry
 # against the tree. The registry records no baseline and compares nothing across
 # time; it is the admission record for the partition only.
 version: 1

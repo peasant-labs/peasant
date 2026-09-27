@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 // Severity separates a screen finding that fails the gate from one that is

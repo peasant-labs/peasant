@@ -62,7 +62,7 @@ A registry entry is admitted only when it carries:
    `go build` child uses `nativeCLIRaceFlag`, which is `-race=true` under the
    `race` build tag.
 
-`internal/testgate/registry_test.go` validates the committed registry against the
+`internal/testkit/testgate/registry_test.go` validates the committed registry against the
 tree and runs named negative cases from `testdata/registry_cases.yaml`; moving the
 counter-example into `partition` fails the test.
 
@@ -146,7 +146,7 @@ number may be restated without re-running it.
 The gate's exported shape is a frozen contract: the per-invocation record, the
 report document, the registry and budget schemas, the class and pre-test closed
 sets, the shared stream library path, and the CLI and environment surface.
-`internal/testgate/contract_test.go` and `internal/teststream/contract_test.go`
+`internal/testkit/testgate/contract_test.go` and `internal/testkit/teststream/contract_test.go`
 pin the shapes against `testdata/contract_shapes.yaml`; the
 `contract_compile_test.go` files break the build on a rename, removal, or retype;
 and `cmd/testgate/main_test.go` pins the usage text, the exit codes, and the
@@ -158,7 +158,7 @@ when a contract change is deliberate and the consumers are re-pinned.
 
 The suite's test filesystem decorators wrap an `ingest.FileSystem` to count and
 fault an operation, hold an operation, or bound it. The shared contract is
-declared once in `internal/fsdecorator`, a standard-library-only leaf package.
+declared once in `internal/testkit/fsdecorator`, a standard-library-only leaf package.
 
 - `CountingFS` (`internal/testutil/counting_fs.go`) is the path-keyed fault and
   count capability.
@@ -182,12 +182,12 @@ decorators therefore have two owners:
 - `internal/ingest/fsfault_test.go` (`package ingest`) implements the white-box
   decorators, which need the package's unexported internals.
 
-Both import `internal/fsdecorator`, which imports nothing from `internal/ingest`,
+Both import `internal/testkit/fsdecorator`, which imports nothing from `internal/ingest`,
 so the same capability can be implemented on either side. Because Go interfaces
 are structural, a decorator also satisfies the interface without naming it, and a
 consumer can take `fsdecorator.GatedFS`/`BoundedFS` and pass the value to
 production code that expects `ingest.FileSystem`.
-`internal/fsdecorator/testdata/decorator_classification.yaml` records, per
+`internal/testkit/fsdecorator/testdata/decorator_classification.yaml` records, per
 decorator type, its capability, owner, and declaring file:line, so each
 migration's owner is explicit before any code moves; a test asserts every entry
 resolves to a real declaration and the required-name manifest matches both ways.
@@ -197,7 +197,7 @@ resolves to a real declaration and the required-name manifest matches both ways.
 The consolidation records every moved, deleted, retained, or deferred name in a
 coverage map, closed against an inventory generated at the slice branch point:
 
-- `internal/coveragemap` declares `Inventory` and `CoverageMap`, the destination
+- `internal/testkit/coveragemap` declares `Inventory` and `CoverageMap`, the destination
   closed set (`retained-in-place`, `moved:<file>`, `deleted:<rationale-ref>`,
   `followup:<task-id>`), strict loaders, and the validators.
 - The inventory's `frozen_from` is the branch-point commit; the validator refuses

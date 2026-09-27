@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/coveragemap"
+	"github.com/peasant-labs/peasant/internal/testkit/coveragemap"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
