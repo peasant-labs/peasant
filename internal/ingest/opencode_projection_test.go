@@ -14,17 +14,245 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	metricspkg "github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+//go:embed testdata/opencode_projection_cap.yaml
+var openCodeProjectionCapData []byte
+
+const capProjectionPath = "/synthetic/store/opencode-managed-projection.json"
+
+// openCodeSQLiteFileHeader is the first bytes of every SQLite database. It is
+// how the provider's own file announces itself, and the only thing a reader
+// needs in order to refuse it.
+const openCodeSQLiteFileHeader = "SQLite format 3\x00"
+
+// projectionOutcome is what a reader owes one file at the managed-projection
+// path. There are two answers: read it, or refuse it for being the provider's
+// database. Size is not one of them, which is the whole point of this corpus.
+type projectionOutcome string
+
+const (
+	// projectionRead: the reader proceeds to read the file, whatever its size.
+	projectionRead projectionOutcome = "read"
+	// projectionRefusedAsDatabase: the file holds the provider's database and
+	// is refused without being read into memory.
+	projectionRefusedAsDatabase projectionOutcome = "refused-as-provider-database"
+)
+
+// openCodeProjectionCapCase sizes one synthetic projection file relative to the
+// preview bound and states what the readers owe it.
+type openCodeProjectionCapCase struct {
+	Name            string            `yaml:"name"`
+	Origin          string            `yaml:"origin"`
+	OffsetFromBound int64             `yaml:"offset_from_bound"`
+	SQLiteHeader    bool              `yaml:"sqlite_header"`
+	Outcome         projectionOutcome `yaml:"outcome"`
+}
+
+func (c openCodeProjectionCapCase) size() int64 {
+	return int64(defaults.OpenCodeManagedProjectionMaxBytes) + c.OffsetFromBound
+}
+
+func (c openCodeProjectionCapCase) transcriptOrigin(t *testing.T) ingest.TranscriptOrigin {
+	t.Helper()
+	switch c.Origin {
+	case "opencode-legacy-sqlite":
+		return ingest.TranscriptOriginOpenCodeLegacySQLite
+	case "opencode-current-sqlite":
+		return ingest.TranscriptOriginOpenCodeCurrentSQLite
+	default:
+		t.Fatalf("cap fixture case %q has an unsupported origin %q", c.Name, c.Origin)
+		return ingest.TranscriptOriginFile
+	}
+}
+
+type openCodeProjectionCapDoc struct {
+	RequiredCases []string                    `yaml:"required_cases"`
+	Cases         []openCodeProjectionCapCase `yaml:"cases"`
+}
+
+func loadOpenCodeProjectionCapDoc(t *testing.T) []openCodeProjectionCapCase {
+	t.Helper()
+	var doc openCodeProjectionCapDoc
+	if err := testutil.DecodeFixtureYAML(openCodeProjectionCapData, &doc); err != nil {
+		t.Fatalf("decode projection cap fixture: %v", err)
+	}
+	if len(doc.RequiredCases) == 0 {
+		t.Fatal("projection cap fixture declares no required cases")
+	}
+	seen := make(map[string]struct{}, len(doc.Cases))
+	readsPastTheBound, refuses := false, false
+	for _, c := range doc.Cases {
+		if c.Name == "" || c.Origin == "" {
+			t.Fatalf("projection cap fixture has an incomplete case: %+v", c)
+		}
+		if _, dup := seen[c.Name]; dup {
+			t.Fatalf("projection cap fixture has a duplicate case name %q", c.Name)
+		}
+		seen[c.Name] = struct{}{}
+		switch c.Outcome {
+		case projectionRead:
+			if c.SQLiteHeader {
+				t.Fatalf("case %q holds a database header but expects to be read; a database must never be read into memory", c.Name)
+			}
+			if c.OffsetFromBound > 0 {
+				readsPastTheBound = true
+			}
+		case projectionRefusedAsDatabase:
+			if !c.SQLiteHeader {
+				t.Fatalf("case %q expects the provider-database refusal without holding a database header, so it would be refused for some other reason", c.Name)
+			}
+			refuses = true
+		default:
+			t.Fatalf("case %q states the unknown outcome %q; a reader either reads the file or refuses it as the provider's database", c.Name, c.Outcome)
+		}
+	}
+	if !readsPastTheBound {
+		t.Fatal("no case sizes a projection past the preview bound and requires it to be read; without one, a reinstated size gate would keep this corpus green while long sessions failed")
+	}
+	if !refuses {
+		t.Fatal("no case presents the provider's database; without one, deleting the defence entirely would keep this corpus green")
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("projection cap fixture is missing required case %q", name)
+		}
+	}
+	return doc.Cases
+}
+
+// sizedFileInfo reports a chosen size for one synthetic path, so this corpus
+// can present a very large file without writing one.
+type sizedFileInfo struct{ size int64 }
+
+func (i sizedFileInfo) Name() string       { return "opencode-managed-projection.json" }
+func (i sizedFileInfo) Size() int64        { return i.size }
+func (i sizedFileInfo) Mode() os.FileMode  { return 0o600 }
+func (i sizedFileInfo) ModTime() time.Time { return time.Unix(0, 0) }
+func (i sizedFileInfo) IsDir() bool        { return false }
+func (i sizedFileInfo) Sys() any           { return nil }
+
+// countingCapFileSystem presents one synthetic projection: a chosen size, a
+// chosen first-bytes header, and a counter for every WHOLE read of it. Reads
+// return a sentinel error, so no real projection bytes are needed; a case
+// asserts on whether the whole file was read, not on decode.
+type countingCapFileSystem struct {
+	*ingest.OSFileSystem
+	size   int64
+	header string
+	reads  int
+}
+
+var _ ingest.FileSystem = (*countingCapFileSystem)(nil)
+
+var errCapReadAttempted = errors.New("synthetic projection read attempted")
+
+func (fsys *countingCapFileSystem) Stat(path string) (os.FileInfo, error) {
+	if path == capProjectionPath {
+		return sizedFileInfo{size: fsys.size}, nil
+	}
+	return fsys.OSFileSystem.Stat(path)
+}
+
+func (fsys *countingCapFileSystem) ReadFile(path string) ([]byte, error) {
+	if path == capProjectionPath {
+		fsys.reads++
+		return nil, errCapReadAttempted
+	}
+	return fsys.OSFileSystem.ReadFile(path)
+}
+
+// ReadFileHeader serves the synthetic first bytes WITHOUT counting a read: the
+// point of the capability is that identifying the file never loads it.
+func (fsys *countingCapFileSystem) ReadFileHeader(path string, limit int) ([]byte, error) {
+	if path != capProjectionPath {
+		return fsys.OSFileSystem.ReadFileHeader(path, limit)
+	}
+	header := fsys.header
+	if len(header) > limit {
+		header = header[:limit]
+	}
+	return []byte(header), nil
+}
+
+// TestOpenCodeProjectionReadersRefuseTheProviderDatabaseNotLargeSessions pins
+// what decides whether a managed projection is read. A long session's
+// projection is large and must be read, so no size may refuse it; the
+// provider's own database must be refused, and identified from its first bytes
+// so that it is never loaded. Both readers, the indexer and the capture, follow
+// the one rule.
+func TestOpenCodeProjectionReadersRefuseTheProviderDatabaseNotLargeSessions(t *testing.T) {
+	t.Parallel()
+	for _, c := range loadOpenCodeProjectionCapDoc(t) {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			session := ingest.DiscoveredSession{
+				SessionID:        ingest.SessionID("ses_3cd91f52effeXd3QAJ54jOyzv5"),
+				Harness:          ingest.HarnessOpenCode,
+				SourcePath:       ingest.ResolvedPath(capProjectionPath),
+				TranscriptOrigin: c.transcriptOrigin(t),
+			}
+			for _, reader := range []struct {
+				name string
+				run  func(ingest.FileSystem) error
+			}{
+				{"index", func(filesystem ingest.FileSystem) error {
+					_, err := ingest.NewOpenCodeIndexer(filesystem).IndexTranscript(context.Background(), session)
+					return err
+				}},
+				{"capture", func(filesystem ingest.FileSystem) error {
+					_, err := ingest.NewOpenCodeIndexer(filesystem).IndexTranscriptForCapture(context.Background(), session)
+					return err
+				}},
+			} {
+				t.Run(reader.name, func(t *testing.T) {
+					header := ""
+					if c.SQLiteHeader {
+						header = openCodeSQLiteFileHeader
+					}
+					fsys := &countingCapFileSystem{OSFileSystem: &ingest.OSFileSystem{}, size: c.size(), header: header}
+					err := reader.run(fsys)
+					if err == nil {
+						t.Fatal("the reader returned no error; either the sentinel read error or the provider-database refusal was expected")
+					}
+					if c.Outcome == projectionRead {
+						if !errors.Is(err, errCapReadAttempted) {
+							t.Fatalf("a projection of %d bytes was not read: %v; a long session's projection is legitimately large and refusing it loses the whole session", c.size(), err)
+						}
+						if fsys.reads != 1 {
+							t.Fatalf("the projection was read %d times, want exactly 1", fsys.reads)
+						}
+						return
+					}
+					if errors.Is(err, errCapReadAttempted) {
+						t.Fatal("the provider's database was read into memory; it must be refused from its first bytes alone")
+					}
+					if fsys.reads != 0 {
+						t.Fatalf("the provider's database was read %d times; identifying it must never load it", fsys.reads)
+					}
+					for _, want := range []string{capProjectionPath, string(session.SessionID), "rerun harvest"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Fatalf("the refusal must name %q so the user can act on it; got %q", want, err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
 
 const (
 	expectedCurrentMountedCases     = 1
@@ -757,4 +985,338 @@ func mustMountedSessionID(t testing.TB, raw string) ingest.SessionID {
 		t.Fatal(err)
 	}
 	return sessionID
+}
+
+//go:embed testdata/opencode_double_encoded_text.yaml
+var openCodeDoubleEncodedTextData []byte
+
+// openCodeDoubleEncodedTextCase is one stored text value and the text the
+// indexer must produce for it.
+type openCodeDoubleEncodedTextCase struct {
+	Name   string `yaml:"name"`
+	Stored string `yaml:"stored"`
+	Unwrap bool   `yaml:"unwrap"`
+	Want   string `yaml:"want"`
+}
+
+type openCodeDoubleEncodedTextDoc struct {
+	RequiredCases []string                        `yaml:"required_cases"`
+	Cases         []openCodeDoubleEncodedTextCase `yaml:"cases"`
+}
+
+func loadOpenCodeDoubleEncodedTextDoc(t *testing.T) openCodeDoubleEncodedTextDoc {
+	t.Helper()
+	var doc openCodeDoubleEncodedTextDoc
+	if err := testutil.DecodeFixtureYAML(openCodeDoubleEncodedTextData, &doc); err != nil {
+		t.Fatalf("decode double-encoded text fixture: %v", err)
+	}
+	if len(doc.RequiredCases) == 0 {
+		t.Fatal("double-encoded text fixture declares no required cases")
+	}
+	present := make(map[string]struct{}, len(doc.Cases))
+	for _, testCase := range doc.Cases {
+		if testCase.Name == "" || testCase.Stored == "" || testCase.Want == "" {
+			t.Fatalf("double-encoded text fixture has an incomplete case: %+v", testCase)
+		}
+		if testCase.Unwrap == (testCase.Stored == testCase.Want) {
+			t.Fatalf("double-encoded text case %q declares unwrap=%v but its stored and wanted text %s; the case would pass whatever the code does",
+				testCase.Name, testCase.Unwrap, map[bool]string{true: "are equal", false: "differ"}[testCase.Stored == testCase.Want])
+		}
+		if _, duplicate := present[testCase.Name]; duplicate {
+			t.Fatalf("double-encoded text fixture has a duplicate case name %q", testCase.Name)
+		}
+		present[testCase.Name] = struct{}{}
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := present[name]; !ok {
+			t.Fatalf("double-encoded text fixture is missing required case %q", name)
+		}
+	}
+	return doc
+}
+
+// managedProjectionWithPartText builds the managed legacy projection bytes for
+// one user message carrying one text part with the given text. It is the same
+// artifact the materializer writes, so the assertion runs over the production
+// indexing path rather than over the helper alone.
+func managedProjectionWithPartText(t *testing.T, sessionID, text string) []byte {
+	t.Helper()
+	partData, err := json.Marshal(map[string]any{"id": "prt_double_encoded", "type": "text", "text": text})
+	if err != nil {
+		t.Fatalf("encode synthetic part: %v", err)
+	}
+	messageData, err := json.Marshal(map[string]any{"id": "msg_double_encoded", "role": "user", "time": map[string]any{"created": 1}})
+	if err != nil {
+		t.Fatalf("encode synthetic message: %v", err)
+	}
+	projection, err := json.Marshal(map[string]any{
+		"format":     "peasant.opencode.legacy-sqlite",
+		"version":    2,
+		"session_id": sessionID,
+		"messages": []any{map[string]any{
+			"id": "msg_double_encoded", "session_id": sessionID, "time_created": 1, "time_updated": 1,
+			"data": json.RawMessage(messageData),
+			"parts": []any{map[string]any{
+				"id": "prt_double_encoded", "message_id": "msg_double_encoded", "session_id": sessionID,
+				"time_created": 1, "time_updated": 1, "data": json.RawMessage(partData),
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("encode synthetic projection: %v", err)
+	}
+	return projection
+}
+
+// TestOpenCodeIndexer_UnwrapsDoubleEncodedPromptText proves the indexer decodes
+// a text value that is itself one JSON string literal, and leaves every other
+// value alone. Indexing is where the unwrap belongs, so the preview, the stored
+// transcript, and a push all carry the same text.
+func TestOpenCodeIndexer_UnwrapsDoubleEncodedPromptText(t *testing.T) {
+	t.Parallel()
+	doc := loadOpenCodeDoubleEncodedTextDoc(t)
+	for _, testCase := range doc.Cases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			sessionID, err := ingest.NewSessionID("ses_3cd91f52effeXd3QAJ54jOyzv5")
+			if err != nil {
+				t.Fatalf("build session identifier: %v", err)
+			}
+			session := ingest.DiscoveredSession{
+				SessionID:        sessionID,
+				Harness:          ingest.HarnessOpenCode,
+				SourcePath:       ingest.ResolvedPath("/synthetic/opencode.db"),
+				SourceFormat:     ingest.SourceFormatJSON,
+				TranscriptOrigin: ingest.TranscriptOriginOpenCodeLegacySQLite,
+			}
+			indexer, ok := ingest.NewIndexerRegistry(&ingest.OSFileSystem{}, ingest.IndexerRegistryOptions{FullContent: true})[ingest.HarnessOpenCode]
+			if !ok {
+				t.Fatal("the registry holds no OpenCode indexer")
+			}
+			data := managedProjectionWithPartText(t, string(sessionID), testCase.Stored)
+			entries, err := indexer.IndexTranscriptBytes(t.Context(), session, data)
+			if err != nil {
+				t.Fatalf("index the synthetic managed projection: %v", err)
+			}
+			preview := firstIndexedContent(t, entries)
+			if preview != testCase.Want {
+				t.Errorf("indexed content = %q, want %q (stored %q)", preview, testCase.Want, testCase.Stored)
+			}
+		})
+	}
+}
+
+func firstIndexedContent(t *testing.T, entries []schema.SessionEntry) string {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.ContentPreview != nil && *entry.ContentPreview != "" {
+			return *entry.ContentPreview
+		}
+	}
+	t.Fatal("the indexed projection carried no content")
+	return ""
+}
+
+//go:embed testdata/opencode_tool_turn_rendering.yaml
+var openCodeToolTurnRenderingData []byte
+
+// openCodeToolCallExpectation is one folded tool call as a reader sees it.
+type openCodeToolCallExpectation struct {
+	Name   string `yaml:"name"`
+	Input  string `yaml:"input"`
+	Output string `yaml:"output"`
+}
+
+// openCodeTurnExpectation is one rendered turn of the folded message.
+type openCodeTurnExpectation struct {
+	Role      string                        `yaml:"role"`
+	EntryType string                        `yaml:"entry_type"`
+	Content   string                        `yaml:"content"`
+	Tools     []openCodeToolCallExpectation `yaml:"tools"`
+}
+
+type openCodeToolTurnRenderingCase struct {
+	Name                 string                    `yaml:"name"`
+	Role                 string                    `yaml:"role"`
+	Parts                []string                  `yaml:"parts"`
+	ContentRenderedOnce  string                    `yaml:"content_rendered_once"`
+	WantMessageEntryType string                    `yaml:"want_message_entry_type"`
+	WantMessageRole      string                    `yaml:"want_message_role"`
+	WantTurns            []openCodeTurnExpectation `yaml:"want_turns"`
+}
+
+type openCodeToolTurnRenderingDoc struct {
+	RequiredCases []string                        `yaml:"required_cases"`
+	Cases         []openCodeToolTurnRenderingCase `yaml:"cases"`
+}
+
+func loadOpenCodeToolTurnRenderingDoc(t *testing.T) openCodeToolTurnRenderingDoc {
+	t.Helper()
+	var doc openCodeToolTurnRenderingDoc
+	if err := testutil.DecodeFixtureYAML(openCodeToolTurnRenderingData, &doc); err != nil {
+		t.Fatalf("decode tool-turn rendering fixture: %v", err)
+	}
+	if len(doc.RequiredCases) == 0 {
+		t.Fatal("tool-turn rendering fixture declares no required cases")
+	}
+	present := make(map[string]struct{}, len(doc.Cases))
+	for _, testCase := range doc.Cases {
+		if testCase.Name == "" || testCase.Role == "" || testCase.WantMessageEntryType == "" || testCase.WantMessageRole == "" || len(testCase.Parts) == 0 || len(testCase.WantTurns) == 0 {
+			t.Fatalf("tool-turn rendering fixture has an incomplete case: %+v", testCase)
+		}
+		for _, part := range testCase.Parts {
+			if !json.Valid([]byte(part)) {
+				t.Fatalf("tool-turn rendering case %q holds a part that is not valid JSON: %s", testCase.Name, part)
+			}
+		}
+		if _, duplicate := present[testCase.Name]; duplicate {
+			t.Fatalf("tool-turn rendering fixture has a duplicate case name %q", testCase.Name)
+		}
+		present[testCase.Name] = struct{}{}
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := present[name]; !ok {
+			t.Fatalf("tool-turn rendering fixture is missing required case %q", name)
+		}
+	}
+	return doc
+}
+
+// managedProjectionWithParts builds the managed legacy projection bytes for one
+// message carrying the given stored part rows. It is the artifact the
+// materializer writes, so the assertion runs the production indexing and fold
+// path rather than a helper's shortcut.
+func managedProjectionWithParts(t *testing.T, sessionID, role string, parts []string) []byte {
+	t.Helper()
+	messageData, err := json.Marshal(map[string]any{"id": "msg_render", "role": role, "time": map[string]any{"created": 1}})
+	if err != nil {
+		t.Fatalf("encode synthetic message: %v", err)
+	}
+	rows := make([]any, 0, len(parts))
+	for index, part := range parts {
+		var identity struct {
+			ID string `json:"id"`
+		}
+		if unmarshalErr := json.Unmarshal([]byte(part), &identity); unmarshalErr != nil {
+			t.Fatalf("read the identity of synthetic part %d: %v", index, unmarshalErr)
+		}
+		rows = append(rows, map[string]any{
+			"id": identity.ID, "message_id": "msg_render", "session_id": sessionID,
+			"time_created": int64(index + 1), "time_updated": int64(index + 1),
+			"data": json.RawMessage(part),
+		})
+	}
+	projection, err := json.Marshal(map[string]any{
+		"format":     "peasant.opencode.legacy-sqlite",
+		"version":    2,
+		"session_id": sessionID,
+		"messages": []any{map[string]any{
+			"id": "msg_render", "session_id": sessionID, "time_created": 1, "time_updated": 1,
+			"data":  json.RawMessage(messageData),
+			"parts": rows,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("encode synthetic projection: %v", err)
+	}
+	return projection
+}
+
+// TestOpenCodeToolTurnRendering proves that one OpenCode message folds to the
+// turns a reader sees: a tool turn names its tool and carries the tool's own
+// output, and a message's prose renders exactly once.
+//
+// Mutation proof, one guard per defect. Dropping the "tool" fallback in
+// openCodeSemanticToolName makes tool-name-comes-from-the-tool-field fail with
+// an empty name. Dropping State.Output from the output precedence makes
+// tool-output-comes-from-state-output and output-wins-over-result-error-and-content
+// fail with an empty or aliased output. Restoring the RoleUser condition on the
+// duplicate text-part drop makes a-trailing-assistant-text-part-renders-once
+// fail with the report on two turns. Counting "reasoning" as a tool part in
+// inspectOpenCodeSemanticParts makes a-reasoning-part-does-not-make-a-tool-turn
+// fail with a tool_use turn. Dropping the Synthetic read from
+// inspectOpenCodeSemanticParts makes the synthetic-task-result cases fail with
+// the injected result still standing as a user turn.
+func TestOpenCodeToolTurnRendering(t *testing.T) {
+	t.Parallel()
+	doc := loadOpenCodeToolTurnRenderingDoc(t)
+	for _, testCase := range doc.Cases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			sessionID, err := ingest.NewSessionID("ses_3cd91f52effeXd3QAJ54jOyzv5")
+			if err != nil {
+				t.Fatalf("build session identifier: %v", err)
+			}
+			session := ingest.DiscoveredSession{
+				SessionID:        sessionID,
+				Harness:          ingest.HarnessOpenCode,
+				SourcePath:       ingest.ResolvedPath("/synthetic/opencode.db"),
+				SourceFormat:     ingest.SourceFormatJSON,
+				TranscriptOrigin: ingest.TranscriptOriginOpenCodeLegacySQLite,
+			}
+			indexer, ok := ingest.NewIndexerRegistry(&ingest.OSFileSystem{}, ingest.IndexerRegistryOptions{FullContent: true})[ingest.HarnessOpenCode]
+			if !ok {
+				t.Fatal("the registry holds no OpenCode indexer")
+			}
+			data := managedProjectionWithParts(t, string(sessionID), testCase.Role, testCase.Parts)
+			entries, err := indexer.IndexTranscriptBytes(t.Context(), session, data)
+			if err != nil {
+				t.Fatalf("index the synthetic managed projection: %v", err)
+			}
+			if len(entries) == 0 {
+				t.Fatal("the indexed projection carried no entries")
+			}
+			if string(entries[0].EntryType) != testCase.WantMessageEntryType {
+				t.Errorf("message entry type = %q, want %q", entries[0].EntryType, testCase.WantMessageEntryType)
+			}
+			if string(entries[0].Role) != testCase.WantMessageRole {
+				t.Errorf("message role = %q, want %q", entries[0].Role, testCase.WantMessageRole)
+			}
+			turns := transcript.EntriesToTurns(entries)
+			if len(turns) != len(testCase.WantTurns) {
+				for index, turn := range turns {
+					t.Logf("turn[%d] role=%s type=%s tools=%d content=%q", index, turn.Role, turn.EntryType, len(turn.ToolCalls), turn.Content)
+				}
+				t.Fatalf("turn count = %d, want %d", len(turns), len(testCase.WantTurns))
+			}
+			for index, want := range testCase.WantTurns {
+				got := turns[index]
+				if string(got.Role) != want.Role {
+					t.Errorf("turn[%d] role = %q, want %q", index, got.Role, want.Role)
+				}
+				if string(got.EntryType) != want.EntryType {
+					t.Errorf("turn[%d] entry type = %q, want %q", index, got.EntryType, want.EntryType)
+				}
+				if got.Content != want.Content {
+					t.Errorf("turn[%d] content = %q, want %q", index, got.Content, want.Content)
+				}
+				if len(got.ToolCalls) != len(want.Tools) {
+					t.Fatalf("turn[%d] tool call count = %d, want %d", index, len(got.ToolCalls), len(want.Tools))
+				}
+				for callIndex, wantCall := range want.Tools {
+					gotCall := got.ToolCalls[callIndex]
+					if gotCall.Name != wantCall.Name {
+						t.Errorf("turn[%d] tool[%d] name = %q, want %q", index, callIndex, gotCall.Name, wantCall.Name)
+					}
+					if gotCall.Arguments != wantCall.Input {
+						t.Errorf("turn[%d] tool[%d] input = %q, want %q", index, callIndex, gotCall.Arguments, wantCall.Input)
+					}
+					if gotCall.Result != wantCall.Output {
+						t.Errorf("turn[%d] tool[%d] output = %q, want %q", index, callIndex, gotCall.Result, wantCall.Output)
+					}
+				}
+			}
+			if testCase.ContentRenderedOnce != "" {
+				rendered := 0
+				for _, turn := range turns {
+					if strings.Contains(turn.Content, testCase.ContentRenderedOnce) {
+						rendered++
+					}
+				}
+				if rendered != 1 {
+					t.Errorf("content %q renders on %d turns, want exactly 1", testCase.ContentRenderedOnce, rendered)
+				}
+			}
+		})
+	}
 }
