@@ -84,7 +84,7 @@ cases:
         evidence: internal/ingest/opencode_native_cli_test.go:80
         justification: the child is built with the race detector
         build_flags: ["-race=true"]
-        exec_command_site: internal/ingest/opencode_native_cli_test.go:88
+        exec_command_site: internal/ingest/opencode_native_cli_test.go:80
         cost: { wall_ms: 39216, cpu_ms: 53162 }
     want_error: "must be built without -race"
 
