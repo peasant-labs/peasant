@@ -4,8 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -59,14 +56,8 @@ type nativeCoverageDocument struct {
 func loadNativeCoverage(t *testing.T) nativeCoverageDocument {
 	t.Helper()
 	var doc nativeCoverageDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(nativeCoverageYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(nativeCoverageYAML, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("trailing fixture document")
 	}
 	names := map[string]bool{}
 	var actual []string

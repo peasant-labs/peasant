@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_history_projection.yaml
@@ -136,15 +134,9 @@ type codexHistoryProjectionFixture struct {
 }
 
 func decodeCodexHistoryProjectionFixture(data []byte) (codexHistoryProjectionFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture codexHistoryProjectionFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return codexHistoryProjectionFixture{}, fmt.Errorf("decode codex history projection fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return codexHistoryProjectionFixture{}, fmt.Errorf("codex history projection fixture must contain exactly one YAML document: %v", err)
 	}
 	for _, c := range fixture.Cases {
 		if strings.TrimSpace(c.Name) == "" {

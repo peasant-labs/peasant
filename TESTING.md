@@ -146,9 +146,10 @@ so the same capability can be implemented on either side. Because Go interfaces
 are structural, a decorator also satisfies the interface without naming it, and a
 consumer can take `fsdecorator.GatedFS`/`BoundedFS` and pass the value to
 production code that expects `ingest.FileSystem`.
-`internal/fsdecorator/testdata/classification_cases.yaml` records, per decorator
-type, its capability and whether it is white-box, so each migration's owner is
-explicit before any code moves.
+`internal/fsdecorator/testdata/decorator_classification.yaml` records, per
+decorator type, its capability, owner, and declaring file:line, so each
+migration's owner is explicit before any code moves; a test asserts every entry
+resolves to a real declaration and the required-name manifest matches both ways.
 
 ## Coverage map for the consolidation
 

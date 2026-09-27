@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/direct_link_selection.yaml
@@ -72,14 +69,8 @@ type directLinkSelectionRow struct {
 
 func decodeDirectLinkSelection(source []byte) (directLinkSelectionFixture, error) {
 	var fixture directLinkSelectionFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode direct-link selection fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, fmt.Errorf("direct-link selection fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixture.DeclaredRows != directLinkSelectionRowCount || len(fixture.Rows) != directLinkSelectionRowCount {
 		return fixture, fmt.Errorf("direct-link selection fixture row count mismatch: declared=%d actual=%d required=%d", fixture.DeclaredRows, len(fixture.Rows), directLinkSelectionRowCount)

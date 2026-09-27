@@ -1,16 +1,13 @@
 package theme_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
 	"image/color"
-	"io"
 	"reflect"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
@@ -31,17 +28,8 @@ type stylesRenderCase struct {
 
 func loadStylesRenderFixture(data []byte) (stylesRenderDocument, error) {
 	var doc stylesRenderDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/styles_render.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("testdata/styles_render.yaml must hold exactly one YAML document: %w", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		return doc, fmt.Errorf(

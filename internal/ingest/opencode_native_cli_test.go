@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,9 +17,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/opencode_native_cli.yaml
@@ -47,14 +45,8 @@ func loadNativeCLIFixtures(t *testing.T) []nativeCLICase {
 		RequiredCases []string        `yaml:"required_cases"`
 		Cases         []nativeCLICase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(nativeCLIYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(nativeCLIYAML, &fixture); err != nil {
 		t.Fatalf("load native CLI fixtures: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("load native CLI fixtures: expected exactly one YAML document, got %v", err)
 	}
 	names := make(map[string]bool)
 	for _, c := range fixture.Cases {

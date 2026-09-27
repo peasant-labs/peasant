@@ -1,15 +1,10 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -48,15 +43,9 @@ type fileSlicePreviewDoc struct {
 
 func loadFileSlicePreviewDoc(t *testing.T) fileSlicePreviewDoc {
 	t.Helper()
-	dec := yaml.NewDecoder(bytes.NewReader(fileSlicePreviewData))
-	dec.KnownFields(true)
 	var doc fileSlicePreviewDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(fileSlicePreviewData, &doc); err != nil {
 		t.Fatalf("decode testdata/file_slice_preview.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("file_slice_preview.yaml must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("the file-slice fixture declares no required cases")

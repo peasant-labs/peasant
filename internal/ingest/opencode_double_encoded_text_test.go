@@ -1,16 +1,12 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
 
@@ -33,15 +29,9 @@ type openCodeDoubleEncodedTextDoc struct {
 
 func loadOpenCodeDoubleEncodedTextDoc(t *testing.T) openCodeDoubleEncodedTextDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeDoubleEncodedTextData))
-	decoder.KnownFields(true)
 	var doc openCodeDoubleEncodedTextDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeDoubleEncodedTextData, &doc); err != nil {
 		t.Fatalf("decode double-encoded text fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("double-encoded text fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("double-encoded text fixture declares no required cases")

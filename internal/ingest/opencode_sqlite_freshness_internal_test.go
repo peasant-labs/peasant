@@ -5,12 +5,9 @@ import (
 	_ "embed"
 	"errors"
 	"io"
-	"io/fs"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -90,44 +87,8 @@ func loadOpenCodeSQLiteFreshnessDocument(data []byte) (openCodeSQLiteFreshnessDo
 	return document, nil
 }
 
-type openCodeSQLiteFreshnessFS struct {
-	FileSystem
-	databasePath string
-	testCase     openCodeSQLiteFreshnessCase
-	statPaths    []string
-}
-
-func (filesystem *openCodeSQLiteFreshnessFS) Stat(path string) (os.FileInfo, error) {
-	filesystem.statPaths = append(filesystem.statPaths, path)
-	switch path {
-	case filesystem.databasePath:
-		return openCodeSQLiteFreshnessInfo{modified: time.UnixMilli(filesystem.testCase.DatabaseMTimeMs), size: 4096}, nil
-	case filesystem.databasePath + "-wal":
-		switch filesystem.testCase.WALState {
-		case openCodeSQLiteWALPresent:
-			return openCodeSQLiteFreshnessInfo{modified: time.UnixMilli(filesystem.testCase.WALMTimeMs), size: filesystem.testCase.WALSizeBytes}, nil
-		case openCodeSQLiteWALMissing:
-			return nil, fs.ErrNotExist
-		case openCodeSQLiteWALError:
-			return nil, errors.New("synthetic WAL stat denial")
-		}
-	case filesystem.databasePath + "-shm":
-		return openCodeSQLiteFreshnessInfo{modified: time.UnixMilli(filesystem.testCase.SHMMTimeMs), size: 4096}, nil
-	}
-	return nil, fs.ErrNotExist
-}
-
-type openCodeSQLiteFreshnessInfo struct {
-	modified time.Time
-	size     int64
-}
-
-func (info openCodeSQLiteFreshnessInfo) Name() string       { return "synthetic" }
-func (info openCodeSQLiteFreshnessInfo) Size() int64        { return info.size }
-func (info openCodeSQLiteFreshnessInfo) Mode() os.FileMode  { return 0o600 }
-func (info openCodeSQLiteFreshnessInfo) ModTime() time.Time { return info.modified }
-func (info openCodeSQLiteFreshnessInfo) IsDir() bool        { return false }
-func (info openCodeSQLiteFreshnessInfo) Sys() any           { return nil }
+// openCodeSQLiteFreshnessFS and openCodeSQLiteFreshnessInfo live in
+// fsfault_test.go (Owner B).
 
 func TestLegacySQLiteContentModTimeUsesDatabaseAndWALOnly(t *testing.T) {
 	document, err := loadOpenCodeSQLiteFreshnessDocument(openCodeSQLiteFreshnessYAML)

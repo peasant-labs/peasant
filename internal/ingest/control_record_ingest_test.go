@@ -1,11 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/control_record_ingest.yaml
@@ -44,14 +41,8 @@ func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
 		Required []string                  `yaml:"required_names"`
 		Cases    []controlRecordIngestCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(controlRecordIngestYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(controlRecordIngestYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing fixture document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range document.Cases {

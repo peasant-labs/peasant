@@ -31,7 +31,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 )
 
@@ -389,15 +388,9 @@ func (environment syntheticOpenCodeEnvironment) LookupEnv(key string) (string, b
 
 func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeCandidateFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture openCodeCandidateFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeCandidateFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode OpenCode candidate fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("decode OpenCode candidate fixture: expected exactly one YAML document: %v", err)
 	}
 	adapterCaseNames := make(map[string]struct{}, len(fixture.AdapterDiscoveryCases))
 	for _, testCase := range fixture.AdapterDiscoveryCases {

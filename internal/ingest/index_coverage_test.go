@@ -6,12 +6,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/index_coverage_compute.yaml
@@ -45,17 +44,8 @@ var indexCoverageComputeKinds = map[string]bool{
 
 func loadIndexCoverageComputeFixture(data []byte) (indexCoverageComputeDocument, error) {
 	var document indexCoverageComputeDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("%s: decode typed fields: %w", indexCoverageComputeFixturePath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = errors.New("found another YAML document")
-		}
-		return document, fmt.Errorf("%s: exactly one YAML document is allowed: %w", indexCoverageComputeFixturePath, err)
 	}
 	if len(document.Cases) == 0 {
 		return document, fmt.Errorf("%s: the fixture holds no cases", indexCoverageComputeFixturePath)

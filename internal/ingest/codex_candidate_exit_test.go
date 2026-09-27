@@ -8,12 +8,9 @@ package ingest_test
 // operation and effect categories do.
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +19,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_candidate_exit.yaml
@@ -57,15 +53,9 @@ type codexCandidateExitFixtureDoc struct {
 
 func loadCodexCandidateExitFixture(t *testing.T) codexCandidateExitFixtureDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(codexCandidateExitYAML))
-	decoder.KnownFields(true)
 	var fixture codexCandidateExitFixtureDoc
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexCandidateExitYAML, &fixture); err != nil {
 		t.Fatalf("decode codex candidate exit fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("codex candidate exit fixture must contain exactly one YAML document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(codexCandidateExitManifestYAML, "codex candidate exit")
 	if err != nil {

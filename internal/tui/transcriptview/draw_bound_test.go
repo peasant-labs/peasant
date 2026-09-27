@@ -1,17 +1,13 @@
 package transcriptview_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/peasant/internal/tui/transcriptview"
 )
@@ -40,15 +36,9 @@ type drawBoundDoc struct {
 
 func loadDrawBoundDoc(t *testing.T) drawBoundDoc {
 	t.Helper()
-	dec := yaml.NewDecoder(bytes.NewReader(drawBoundData))
-	dec.KnownFields(true)
 	var doc drawBoundDoc
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(drawBoundData, &doc); err != nil {
 		t.Fatalf("decode testdata/draw_bound.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("draw_bound.yaml must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("the draw-bound fixture declares no required cases")

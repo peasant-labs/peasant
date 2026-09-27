@@ -27,7 +27,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/profile_push/cases.yaml
@@ -84,14 +83,8 @@ func loadPushProfileFixtures(t *testing.T) []pushProfileCase {
 	var doc struct {
 		Cases []pushProfileCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(pushProfileCases))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(pushProfileCases, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(pushProfileManifest, "push profiles")
 	if err != nil {

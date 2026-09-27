@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"testing"
 
@@ -23,7 +21,6 @@ import (
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	"github.com/peasant-labs/schema/testcase/assert"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/selection_state.yaml
@@ -81,15 +78,9 @@ func decodeSelectionStateCorpus(data []byte) (testcase.Corpus[selectionStateInpu
 	if err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, err
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var corpus testcase.Corpus[selectionStateInput, selectionStateExpected]
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &corpus); err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, fmt.Errorf("decode selection state fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, fmt.Errorf("selection state fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make([]string, 0, len(corpus.Cases))
 	for _, c := range corpus.Cases {

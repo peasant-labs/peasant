@@ -6,15 +6,14 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/journey_contract.yaml
@@ -42,15 +41,9 @@ type journeyRetryFixture struct {
 }
 
 func loadJourneyRetryFixtures(raw []byte) ([]journeyRetryFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
 	var document journeyRetryDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(raw, &document); err != nil {
 		return nil, fmt.Errorf("decode journey retry fixture: %w", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("journey retry fixture must contain exactly one YAML document")
 	}
 	if document.DeclaredRows != len(document.Cases) || document.DeclaredRows < 4 {
 		return nil, fmt.Errorf("journey retry fixture row count is not guarded")
@@ -96,15 +89,9 @@ type journeyFixture struct {
 }
 
 func loadJourneyFixtures(raw []byte) ([]journeyFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
 	var document journeyFixtureDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(raw, &document); err != nil {
 		return nil, fmt.Errorf("decode journey contract fixture: %w", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("journey contract fixture must contain exactly one YAML document")
 	}
 	if document.DeclaredRows != len(document.Cases) || document.DeclaredRows < 7 {
 		return nil, fmt.Errorf("journey contract row count = declared %d actual %d; need at least 7", document.DeclaredRows, len(document.Cases))

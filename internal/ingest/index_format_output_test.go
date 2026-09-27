@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -94,14 +92,8 @@ func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
 		RequiredNames []string                `yaml:"requiredNames"`
 		Cases         []indexFormatOutputCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexFormatOutputYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexFormatOutputYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("index output fixture needs one document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {

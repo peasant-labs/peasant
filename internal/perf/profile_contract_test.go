@@ -13,7 +13,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/profile_contract/*.yaml
@@ -179,9 +178,7 @@ func loadBehaviorFixture(t *testing.T) contractBehaviorFixture {
 		t.Fatalf("read behavior fixture: %v", err)
 	}
 	var fixture contractBehaviorFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		t.Fatalf("decode behavior fixture: %v", err)
 	}
 	return fixture

@@ -1,17 +1,14 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/discovery_candidate_matching.yaml
@@ -62,15 +59,9 @@ const (
 
 func loadDiscoveryCandidateFixtures(t *testing.T) discoveryCandidateFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(discoveryCandidateFixtureYAML))
-	decoder.KnownFields(true)
 	var fixtures discoveryCandidateFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(discoveryCandidateFixtureYAML, &fixtures); err != nil {
 		t.Fatalf("decode discovery candidate fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("discovery candidate fixture must contain exactly one YAML document: %v", err)
 	}
 	const expectedMatchRows = 25
 	const expectedParityRows = 8

@@ -1,10 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"io"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -48,14 +46,8 @@ type refusalChurnFixture struct {
 func loadRefusalChurnFixture(t *testing.T) refusalChurnFixture {
 	t.Helper()
 	var fixture refusalChurnFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(refusalChurnYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(refusalChurnYAML, &fixture); err != nil {
 		t.Fatalf("decode the refusal churn fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("the refusal churn fixture must hold exactly one YAML document: %v", err)
 	}
 	if len(fixture.Required) == 0 {
 		t.Fatal("refusal churn fixture declares no required cases")

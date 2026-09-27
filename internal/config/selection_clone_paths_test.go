@@ -3,9 +3,7 @@ package config_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,15 +35,9 @@ type selectionClonePathFixture struct {
 
 func loadSelectionClonePathFixtures(t *testing.T) selectionClonePathFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(selectionClonePathFixtureYAML))
-	decoder.KnownFields(true)
 	var fixtures selectionClonePathFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(selectionClonePathFixtureYAML, &fixtures); err != nil {
 		t.Fatalf("decode clone-path configuration fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("clone-path configuration fixture must contain exactly one YAML document: %v", err)
 	}
 	seen := make(map[string]struct{}, len(fixtures.Cases))
 	names := make([]string, 0, len(fixtures.Cases))
@@ -137,15 +129,9 @@ func allSelectionProjects(selection config.SelectionConfig) []config.ProjectSele
 }
 
 func decodeSelectionStrict(data []byte) (config.SelectionConfig, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var selection config.SelectionConfig
-	if err := decoder.Decode(&selection); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &selection); err != nil {
 		return config.SelectionConfig{}, fmt.Errorf("decode selection: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return config.SelectionConfig{}, fmt.Errorf("selection must contain exactly one YAML document: %v", err)
 	}
 	return selection, nil
 }

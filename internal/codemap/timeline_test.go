@@ -6,15 +6,14 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/timeline_bindings.yaml
@@ -35,14 +34,8 @@ type timelineBindingsFixture struct {
 
 func decodeTimelineBindingsFixture(data []byte) (timelineBindingsFixture, error) {
 	var fixture timelineBindingsFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return timelineBindingsFixture{}, fmt.Errorf("decode timeline binding fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return timelineBindingsFixture{}, fmt.Errorf("timeline binding fixture must contain exactly one YAML document: %v", err)
 	}
 	if len(fixture.Cases) == 0 {
 		return timelineBindingsFixture{}, errors.New("timeline binding fixture cases is empty; add at least one authoritative relationship case")

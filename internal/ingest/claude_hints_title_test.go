@@ -1,18 +1,14 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/claude_hints_title.yaml
@@ -38,15 +34,9 @@ type claudeHintsTitleCase struct {
 
 func loadClaudeHintsTitleFixtures(t *testing.T) claudeHintsTitleFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeHintsTitleYAML))
-	decoder.KnownFields(true)
 	var fixtures claudeHintsTitleFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(claudeHintsTitleYAML, &fixtures); err != nil {
 		t.Fatalf("decode Claude display-title fixtures: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude display-title fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixtures.DeclaredRows != claudeHintsTitleRows || len(fixtures.Cases) != claudeHintsTitleRows {
 		t.Fatalf("Claude display-title fixture row guard failed: declared=%d actual=%d expected=%d",

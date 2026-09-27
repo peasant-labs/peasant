@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -42,14 +40,8 @@ type acquiredCursorFixtures struct {
 func LoadAcquiredCursorFixtures(t *testing.T) acquiredCursorFixtures {
 	t.Helper()
 	var fixture acquiredCursorFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(acquiredCursorYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(acquiredCursorYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("cursor fixture requires one YAML document")
 	}
 	required := []string{"acquired-zero-then-newer", "changed-attribution-preserves-artifact", "missing-cursor-preserves-progress"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

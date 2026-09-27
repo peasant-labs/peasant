@@ -4,9 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -17,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/session_origin_declaration.yaml
@@ -46,14 +43,8 @@ type originDeclarationCase struct {
 
 func decodeOriginDeclarations(source []byte) (originDeclarationFixture, error) {
 	var fixture originDeclarationFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode session-origin declaration fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, fmt.Errorf("session-origin declaration fixture must contain exactly one YAML document: %v", err)
 	}
 	present := make(map[string]bool, len(fixture.Cases))
 	for index, testCase := range fixture.Cases {

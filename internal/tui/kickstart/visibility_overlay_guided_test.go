@@ -5,15 +5,14 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -58,17 +57,8 @@ var visibilityOverlayData []byte
 
 func decodeVisibilityOverlayDocument(data []byte) (visibilityOverlayDocument, error) {
 	var document visibilityOverlayDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("decode testdata/guided/visibility_overlay.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return document, fmt.Errorf("visibility_overlay.yaml must hold exactly one document: %w", err)
 	}
 	if document.ExpectedCaseCount != expectedVisibilityOverlayCases || len(document.Cases) != expectedVisibilityOverlayCases {
 		return document, fmt.Errorf("visibility overlay rows: declared=%d actual=%d required=%d",

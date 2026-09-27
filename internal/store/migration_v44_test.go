@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -65,15 +62,9 @@ func loadClaudeEvidenceFixture(t *testing.T) claudeEvidenceFixtureFile {
 }
 
 func decodeClaudeEvidenceFixture(source []byte) (claudeEvidenceFixtureFile, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
 	var fixture claudeEvidenceFixtureFile
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return claudeEvidenceFixtureFile{}, fmt.Errorf("decode Claude evidence fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return claudeEvidenceFixtureFile{}, fmt.Errorf("Claude evidence fixture must contain exactly one YAML document: %v", err)
 	}
 	if err := testutil.RequireFixtureNames("Claude evidence fixture", "record", fixture.RequiredRecordNames, recordNames(fixture.Records)); err != nil {
 		return claudeEvidenceFixtureFile{}, err

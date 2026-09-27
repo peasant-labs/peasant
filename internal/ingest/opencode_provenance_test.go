@@ -1,12 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/opencode_provenance.yaml
@@ -109,15 +105,9 @@ type ocProvDocument struct {
 
 func loadOpenCodeProvenanceDocument(t *testing.T) ocProvDocument {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeProvenanceYAML))
-	decoder.KnownFields(true)
 	var document ocProvDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeProvenanceYAML, &document); err != nil {
 		t.Fatalf("decode OpenCode provenance fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("OpenCode provenance fixture must contain exactly one YAML document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(openCodeProvenanceManifestYAML, "OpenCode provenance")
 	if err != nil {

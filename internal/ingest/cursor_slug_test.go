@@ -1,10 +1,7 @@
 package ingest
 
 import (
-	"io/fs"
-	"os"
 	"testing"
-	"time"
 )
 
 func TestDecodeCursorSlug(t *testing.T) {
@@ -221,38 +218,4 @@ func TestDecodeCursorWorkspace(t *testing.T) {
 	}
 }
 
-// stubStatFS implements FileSystem with only Stat wired (used by CursorAdapter.dirExists).
-var _ FileSystem = (*stubStatFS)(nil)
-
-type stubStatFS struct {
-	dirs map[string]bool
-}
-
-func (s *stubStatFS) ReadFile(string) ([]byte, error) { panic("stubStatFS: ReadFile") }
-func (s *stubStatFS) WriteFile(string, []byte, os.FileMode) error {
-	panic("stubStatFS: WriteFile")
-}
-func (s *stubStatFS) Stat(path string) (os.FileInfo, error) {
-	if s.dirs[path] {
-		return stubDirInfo{}, nil
-	}
-	return nil, os.ErrNotExist
-}
-func (s *stubStatFS) Lstat(path string) (os.FileInfo, error)     { return s.Stat(path) }
-func (s *stubStatFS) MkdirAll(string, os.FileMode) error         { panic("stubStatFS: MkdirAll") }
-func (s *stubStatFS) ReadDir(string) ([]os.DirEntry, error)      { panic("stubStatFS: ReadDir") }
-func (s *stubStatFS) Rename(string, string) error                { panic("stubStatFS: Rename") }
-func (s *stubStatFS) Remove(string) error                        { panic("stubStatFS: Remove") }
-func (s *stubStatFS) RemoveAll(string) error                     { panic("stubStatFS: RemoveAll") }
-func (s *stubStatFS) WalkDir(string, fs.WalkDirFunc) error       { panic("stubStatFS: WalkDir") }
-func (s *stubStatFS) CopyFile(string, string, os.FileMode) error { panic("stubStatFS: CopyFile") }
-
-// stubDirInfo is a minimal os.FileInfo that reports IsDir() == true.
-type stubDirInfo struct{}
-
-func (stubDirInfo) Name() string       { return "" }
-func (stubDirInfo) Size() int64        { return 0 }
-func (stubDirInfo) Mode() os.FileMode  { return os.ModeDir | 0755 }
-func (stubDirInfo) ModTime() time.Time { return time.Time{} }
-func (stubDirInfo) IsDir() bool        { return true }
-func (stubDirInfo) Sys() any           { return nil }
+// stubStatFS and stubDirInfo live in fsfault_test.go (Owner B).

@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/indexer_completion.yaml
@@ -57,14 +55,8 @@ func loadIndexerCompletionFixtures(t *testing.T) []indexerCompletionFixture {
 		RequiredNames []string                   `yaml:"requiredNames"`
 		Cases         []indexerCompletionFixture `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexerCompletionData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexerCompletionData, &fixtures); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("completion fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {

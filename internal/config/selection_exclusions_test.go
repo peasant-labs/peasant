@@ -3,15 +3,14 @@ package config_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -90,15 +89,9 @@ func loadSelectionExclusionFixtures(t *testing.T) selectionExclusionFixtures {
 }
 
 func decodeSelectionExclusionFixtures(data []byte) (selectionExclusionFixtures, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixtures selectionExclusionFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixtures); err != nil {
 		return selectionExclusionFixtures{}, fmt.Errorf("decode fixture fields: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return selectionExclusionFixtures{}, fmt.Errorf("fixture must contain exactly one YAML document: %v", err)
 	}
 	return fixtures, nil
 }

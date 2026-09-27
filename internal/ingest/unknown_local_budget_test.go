@@ -4,8 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/unknown_local_budget.yaml
@@ -44,14 +41,8 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			PaddingBytes int    `yaml:"paddingBytes"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(unknownLocalBudgetYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(unknownLocalBudgetYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := d.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatal("expected one fixture document")
 	}
 	var names []string
 	for _, c := range fixture.Cases {

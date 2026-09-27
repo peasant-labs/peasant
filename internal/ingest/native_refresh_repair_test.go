@@ -1,11 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -53,15 +49,9 @@ type nativeRefreshRepairFixture struct {
 
 func loadNativeRefreshRepairFixture(t *testing.T) nativeRefreshRepairFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(nativeRefreshRepairYAML))
-	decoder.KnownFields(true)
 	var fixture nativeRefreshRepairFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(nativeRefreshRepairYAML, &fixture); err != nil {
 		t.Fatalf("decode native_refresh_repair.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("native_refresh_repair.yaml must contain exactly one document: %v", err)
 	}
 	names := make([]string, 0, len(fixture.Cases))
 	seen := make(map[string]bool, len(fixture.Cases))

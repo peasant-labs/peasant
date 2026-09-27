@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,11 +39,6 @@ var classificationCasesYAML []byte
 type fileSystemStub struct{ FileSystem }
 
 var _ FileSystem = fileSystemStub{}
-
-// The internal/testutil owner's existing decorator already conforms to the
-// shared base: it is an ingest.FileSystem, and the base is pinned equal to
-// ingest.FileSystem below.
-var _ FileSystem = (*testutil.CountingFS)(nil)
 
 type gatedStub struct{ FileSystem }
 
@@ -333,22 +327,9 @@ func TestFileSystemMirrorsIngest(t *testing.T) {
 	}
 }
 
-// TestOpVocabularyMatchesTestutil pins the canonical operation set to the one
-// CountingFS already uses, so the later migration of FSOp onto Op cannot
-// silently change the vocabulary.
-func TestOpVocabularyMatchesTestutil(t *testing.T) {
-	want := make([]string, 0, len(testutil.AllFSOps))
-	for _, op := range testutil.AllFSOps {
-		want = append(want, string(op))
-	}
-	got := make([]string, 0, len(AllOps))
-	for _, op := range AllOps {
-		got = append(got, string(op))
-	}
-	if !reflect.DeepEqual(want, got) {
-		t.Fatalf("the operation vocabulary drifted from testutil:\n  got  %v\n  want %v", got, want)
-	}
-}
+// TestOpVocabularyMatchesTestutil moved to drift_test.go (package
+// fsdecorator_test): internal/testutil now imports this package, so the
+// vocabulary drift guard must live in an external test package.
 
 func TestContract_DecoratorMutationsAreDetected(t *testing.T) {
 	file := loadShapeFile(t)

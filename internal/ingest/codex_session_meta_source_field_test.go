@@ -19,16 +19,13 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_session_meta_source_field.yaml
@@ -51,15 +48,9 @@ type codexSourceFieldFixture struct {
 }
 
 func decodeCodexSourceFieldFixture(data []byte) (codexSourceFieldFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture codexSourceFieldFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return codexSourceFieldFixture{}, fmt.Errorf("decode codex session_meta source-field fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return codexSourceFieldFixture{}, fmt.Errorf("codex session_meta source-field fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, c := range fixture.Cases {

@@ -1,16 +1,13 @@
 package kickstart_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -47,17 +44,8 @@ type previewBodyDocument struct {
 func loadPreviewBodies(t *testing.T) previewBodyDocument {
 	t.Helper()
 	var doc previewBodyDocument
-	dec := yaml.NewDecoder(bytes.NewReader(previewBodyData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewBodyData, &doc); err != nil {
 		t.Fatalf("decode testdata/preview_bodies.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("preview_bodies.yaml must hold exactly one document: %v", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))

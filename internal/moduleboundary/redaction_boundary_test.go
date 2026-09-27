@@ -8,7 +8,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -18,8 +17,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -102,14 +101,8 @@ func loadBoundaryFixture(t *testing.T) boundaryFixture {
 
 func decodeBoundaryFixture(data []byte) (boundaryFixture, error) {
 	var fixture boundaryFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return boundaryFixture{}, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return boundaryFixture{}, fmt.Errorf("redaction boundary fixture must contain exactly one YAML document")
 	}
 	return fixture, nil
 }

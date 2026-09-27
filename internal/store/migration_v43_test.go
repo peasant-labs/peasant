@@ -1,11 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,8 +10,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -57,15 +54,9 @@ type publicationAttemptFixture struct {
 
 func loadPublicationFixture(t *testing.T) publicationFixtureFile {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationFixture))
-	decoder.KnownFields(true)
 	var fixture publicationFixtureFile
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationFixture, &fixture); err != nil {
 		t.Fatalf("decode publication fixture: %v", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatalf("publication fixture must contain exactly one document: %v", err)
 	}
 	if len(fixture.Records) != 2 || len(fixture.Attempts) != len(store.AllPublicationAttemptStages) || len(fixture.Rejections) != 1 {
 		t.Fatalf("publication fixture rows = records:%d attempts:%d rejections:%d", len(fixture.Records), len(fixture.Attempts), len(fixture.Rejections))

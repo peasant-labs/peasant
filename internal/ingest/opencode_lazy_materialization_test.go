@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"errors"
-	"io"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 const expectedOpenCodeBoundaryCases = 1
@@ -43,15 +41,9 @@ type openCodeBoundaryDocument struct {
 var openCodeBoundaryYAML []byte
 
 func loadOpenCodeBoundaryDocument(data []byte) (openCodeBoundaryDocument, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var document openCodeBoundaryDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, errors.New("expected exactly one YAML document")
 	}
 	if document.DeclaredCases != expectedOpenCodeBoundaryCases || len(document.Cases) != expectedOpenCodeBoundaryCases {
 		return document, errors.New("boundary fixture count guard failed")

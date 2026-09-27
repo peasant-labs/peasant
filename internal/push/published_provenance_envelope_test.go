@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -24,7 +22,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/published_provenance_envelope.yaml
@@ -143,15 +140,9 @@ type ppeEarlierExpect struct {
 
 func loadPublishedProvenanceEnvelopeFixture(t *testing.T) publishedProvenanceEnvelopeFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(publishedProvenanceEnvelopeYAML))
-	decoder.KnownFields(true)
 	var fixture publishedProvenanceEnvelopeFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publishedProvenanceEnvelopeYAML, &fixture); err != nil {
 		t.Fatalf("decode published provenance envelope fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("published provenance envelope fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(publishedProvenanceEnvelopeManifestYAML, "published provenance envelope")
 	if err != nil {

@@ -1,12 +1,9 @@
 package indexformat_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -14,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/enum_membership.yaml
@@ -40,14 +36,8 @@ var snapshotValidationManifestYAML []byte
 func decodeFixture[T any](t *testing.T, data []byte, label string) T {
 	t.Helper()
 	var out T
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&out); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &out); err != nil {
 		t.Fatalf("decode %s fixture: %v", label, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("%s fixture must contain exactly one YAML document: %v", label, err)
 	}
 	return out
 }

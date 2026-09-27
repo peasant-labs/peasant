@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 type unknownFailingStore struct {
@@ -60,14 +58,8 @@ func loadRetainedUnknownFixtures(t *testing.T) []retainedUnknownCase {
 		Required []string              `yaml:"required_names"`
 		Cases    []retainedUnknownCase `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(retainedUnknownYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(retainedUnknownYAML, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := d.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatalf("trailing YAML: %v", err)
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {

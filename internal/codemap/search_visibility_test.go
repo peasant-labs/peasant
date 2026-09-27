@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,7 +23,6 @@ import (
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	testassert "github.com/peasant-labs/schema/testcase/assert"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/search_visibility.yaml
@@ -62,14 +59,8 @@ func decodeSearchVisibilityCorpus(data []byte) (testcase.Corpus[searchVisibility
 		return testcase.Corpus[searchVisibilityInput, searchVisibilityExpected]{}, err
 	}
 	var corpus testcase.Corpus[searchVisibilityInput, searchVisibilityExpected]
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &corpus); err != nil {
 		return testcase.Corpus[searchVisibilityInput, searchVisibilityExpected]{}, fmt.Errorf("decode search visibility fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return testcase.Corpus[searchVisibilityInput, searchVisibilityExpected]{}, fmt.Errorf("search visibility fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(corpus.Cases))
 	actualNames := make([]string, 0, len(corpus.Cases))

@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,14 +110,8 @@ const storedBackfillRuleVersion = ingest.OriginRuleVersion
 // outside the production menu, or expects a session it never stored.
 func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 	var fixture storedBackfillFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return storedBackfillFixture{}, fmt.Errorf("decode stored-origin backfill fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill fixture must contain exactly one YAML document: %v", err)
 	}
 
 	present := make(map[string]bool, len(fixture.Cases))

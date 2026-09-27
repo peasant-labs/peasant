@@ -4,14 +4,13 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
@@ -110,17 +109,8 @@ func treeFixtureValuesPresent(values ...[]string) bool {
 
 func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
 	var doc treeAffordanceDocument
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/tree_affordances.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("tree_affordances.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != expectedTreeAffordanceCaseCount || len(doc.Cases) != expectedTreeAffordanceCaseCount {
 		return doc, fmt.Errorf("tree_affordances.yaml cases: declared=%d actual=%d required=%d",

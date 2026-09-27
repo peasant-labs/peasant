@@ -1,14 +1,13 @@
 package projectlabel_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/projectlabel"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema/testcase"
 	"github.com/peasant-labs/schema/testcase/assert"
 	"gopkg.in/yaml.v3"
@@ -81,17 +80,8 @@ func loadLabelFixturesFromYAML(corpusYAML, manifestYAML []byte) (testcase.Corpus
 
 func decodeLabelFixtureManifest(data []byte) (labelFixtureManifest, error) {
 	var decoded labelFixtureManifestYAML
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &decoded); err != nil {
 		return labelFixtureManifest{}, fmt.Errorf("decode projectlabel manifest: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err != nil {
-			return labelFixtureManifest{}, fmt.Errorf("decode trailing projectlabel manifest document: %w", err)
-		}
-		return labelFixtureManifest{}, fmt.Errorf("decode projectlabel manifest: multiple YAML documents are not allowed")
 	}
 	manifest := labelFixtureManifest{
 		RequiredCaseNames: make([]string, len(decoded.RequiredCaseNames)),

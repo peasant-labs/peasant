@@ -1,11 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -16,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/metrics_refresh.yaml
@@ -112,14 +109,8 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 			WantDiagnostic string `yaml:"wantDiagnostic"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(metricsRefreshYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(metricsRefreshYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("metric refresh fixture requires one document")
 	}
 	required := []string{"current-index-refreshes-metrics", "failed-save-is-visible", "future-producer-refusal-is-visible"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

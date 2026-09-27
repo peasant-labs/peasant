@@ -1,11 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -15,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 // openCodeBuildTopologyDirectoryPrefix names every copied build-topology
@@ -134,15 +132,9 @@ type openCodeTopologyCleanupFixture struct {
 
 func loadOpenCodeTopologyCleanupFixture(t testing.TB) openCodeTopologyCleanupFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeTopologyCleanupFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture openCodeTopologyCleanupFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeTopologyCleanupFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode %s: %v", openCodeTopologyCleanupFixturePath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("decode %s: expected exactly one YAML document: %v", openCodeTopologyCleanupFixturePath, err)
 	}
 	if err := validateOpenCodeTopologyCleanupFixture(fixture); err != nil {
 		t.Fatal(err)

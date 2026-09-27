@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/unknown_public_source.yaml
@@ -56,14 +53,8 @@ type unknownPublicSourceDocument struct {
 func loadUnknownPublicSources(t *testing.T) unknownPublicSourceDocument {
 	t.Helper()
 	var doc unknownPublicSourceDocument
-	d := yaml.NewDecoder(bytes.NewReader(unknownPublicSourceYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(unknownPublicSourceYAML, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("trailing fixture document: %v", err)
 	}
 	names := map[string]bool{}
 	var actualNames []string

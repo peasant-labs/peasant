@@ -5,14 +5,13 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
@@ -57,17 +56,8 @@ type oauthPromptRenderDoc struct {
 
 func decodeOAuthPromptRenderDoc(data []byte) (oauthPromptRenderDoc, error) {
 	var doc oauthPromptRenderDoc
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/oauth_prompt_render.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("oauth_prompt_render.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != expectedOAuthPromptRenderCaseCount || len(doc.Cases) != expectedOAuthPromptRenderCaseCount {
 		return doc, fmt.Errorf("oauth prompt render cases: declared=%d actual=%d required=%d",

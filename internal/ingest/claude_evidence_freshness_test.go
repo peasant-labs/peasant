@@ -14,18 +14,14 @@ package ingest_test
 // actually produces.
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/origin/freshness.yaml
@@ -47,15 +43,9 @@ type claudeOriginFreshnessCase struct {
 
 func loadClaudeOriginFreshnessFixture(t *testing.T) claudeOriginFreshnessFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeOriginFreshnessFixtureBytes))
-	decoder.KnownFields(true)
 	var fixture claudeOriginFreshnessFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(claudeOriginFreshnessFixtureBytes, &fixture); err != nil {
 		t.Fatalf("decode Claude origin freshness fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude origin freshness fixture must contain exactly one YAML document: %v", err)
 	}
 
 	present := make(map[string]bool, len(fixture.Cases))

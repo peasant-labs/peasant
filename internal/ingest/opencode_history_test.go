@@ -1,10 +1,7 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -12,7 +9,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/opencode_history_projection.yaml
@@ -79,15 +75,9 @@ type ocHistDocument struct {
 
 func loadOpenCodeHistoryCases(t *testing.T) []ocHistCase {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeHistoryYAML))
-	decoder.KnownFields(true)
 	var document ocHistDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeHistoryYAML, &document); err != nil {
 		t.Fatalf("decode OpenCode history fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("OpenCode history fixture must contain exactly one YAML document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(openCodeHistoryManifestYAML, "OpenCode history")
 	if err != nil {
