@@ -78,7 +78,7 @@ partition:
       body only drives HTTP and asserts tokens, so it has no shared-memory
       concurrency subject of its own.
     build_flags: ["-race=false"]
-    exec_command_site: cmd/peasant/web_capabilities_matrix_test.go:181
+    exec_command_site: cmd/peasant/web_capabilities_matrix_test.go:178
     cost: { wall_ms: 21330, cpu_ms: 138425 }
 
   - package: internal/transcript
@@ -102,5 +102,5 @@ protected:
       can never be a partition member — the child must carry the detector with
       the enclosing suite.
     build_flags: ["-race=true"]
-    exec_command_site: internal/ingest/opencode_native_cli_test.go:91
+    exec_command_site: internal/ingest/opencode_native_cli_test.go:88
     cost: { wall_ms: 39216, cpu_ms: 53162 }
