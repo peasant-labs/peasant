@@ -6,8 +6,6 @@ import (
 	_ "embed"
 	"errors"
 	"io"
-	"os"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -207,31 +205,7 @@ func TestDiffParallelMatchesSequentialAndPreservesOrder(t *testing.T) {
 	}
 }
 
-// cancellingLookupFS cancels the run from inside a managed-layout lookup. That
-// reproduces a cancellation arriving while the pool is already classifying,
-// without depending on timing between goroutines.
-type cancellingLookupFS struct {
-	FileSystem
-	lookups     atomic.Int64
-	cancelAfter int64
-	cancel      context.CancelFunc
-}
-
-func (filesystem *cancellingLookupFS) note() {
-	if filesystem.lookups.Add(1) == filesystem.cancelAfter {
-		filesystem.cancel()
-	}
-}
-
-func (filesystem *cancellingLookupFS) Stat(path string) (os.FileInfo, error) {
-	filesystem.note()
-	return filesystem.FileSystem.Stat(path)
-}
-
-func (filesystem *cancellingLookupFS) ReadDir(path string) ([]os.DirEntry, error) {
-	filesystem.note()
-	return filesystem.FileSystem.ReadDir(path)
-}
+// cancellingLookupFS lives in fsfault_test.go (Owner B).
 
 // TestDiffStopsOnContextCancellation pins that DIFF returns the run's context
 // error once the context is done: before the slice, from an expired deadline,
