@@ -111,16 +111,7 @@ func SaveCredentialsFrom(creds *Credentials, xdgConfigHomeOverride string) error
 		return fmt.Errorf("save credentials: atomically replace %q from %q: %w; the previous destination remains available; fix destination permissions and retry", path, tmpPath, err)
 	}
 	committed = true
-	if parent, err := os.Open(dir); err == nil {
-		if syncErr := parent.Sync(); syncErr != nil {
-			_ = parent.Close()
-			return fmt.Errorf("save credentials: sync directory %q after replacing %q: %w; the new file is present but crash durability is not confirmed; verify it and retry", dir, path, syncErr)
-		}
-		if closeErr := parent.Close(); closeErr != nil {
-			return fmt.Errorf("save credentials: close directory %q after replacing %q: %w; the new file is present; verify it before continuing", dir, path, closeErr)
-		}
-	}
-	return nil
+	return syncSavedCredentialsDir(dir, path)
 }
 
 // ClearCredentials removes the credentials file from disk.

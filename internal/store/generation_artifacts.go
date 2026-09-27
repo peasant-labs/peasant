@@ -308,7 +308,7 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 			return fail(err)
 		}
 	}
-	if err := fsyncRootDir(root, tmpRel); err != nil {
+	if err := fsyncGenerationStagingDir(root, tmpRel); err != nil {
 		return fail(err)
 	}
 	if a.seam != nil {
@@ -342,7 +342,7 @@ func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexf
 	if err := root.Rename(tmpRel, genRel); err != nil {
 		return fail(fmt.Errorf("atomically rename staged generation %s: %s", generation.ID, sanitizeFSError(err)))
 	}
-	if err := fsyncRootDir(root, parentRel); err != nil {
+	if err := fsyncGenerationStagingDir(root, parentRel); err != nil {
 		return indexformat.Generation{}, fmt.Errorf("store: fsync generation parent in Stage for session %s generation %s: %s; the staged generation exists but was not durably recorded; activation will be refused and retried", sessionID, generation.ID, sanitizeFSError(err))
 	}
 	if a.seam != nil {
@@ -874,17 +874,5 @@ func writeRootSyncedAtomic(root *os.Root, rel string, data []byte, sessionID sch
 		_ = root.Remove(tmpRel)
 		return fmt.Errorf("store: atomically rename file in %s for session %s: %s; the previous durable file is unchanged; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 	}
-	return fsyncRootDir(root, dir)
-}
-
-func fsyncRootDir(root *os.Root, rel string) error {
-	dir, err := root.Open(rel)
-	if err != nil {
-		return fmt.Errorf("open directory to fsync in generation staging: %s; the staged file is not durably recorded; re-run the operation after fixing filesystem access", sanitizeFSError(err))
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("fsync directory in generation staging: %s; the staged file is not durably recorded; re-run the operation after fixing filesystem access", sanitizeFSError(err))
-	}
-	return nil
+	return fsyncGenerationStagingDir(root, dir)
 }
