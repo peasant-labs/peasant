@@ -161,7 +161,7 @@ var (
 // that pre-builds once pays for the build once, not once per test binary.
 func buildPeasantMatrixBinary(t *testing.T) string {
 	t.Helper()
-	if injected := strings.TrimSpace(os.Getenv("PEASANT_BIN")); injected != "" {
+	if injected := strings.TrimSpace(os.Getenv(defaults.EnvPeasantBin.String())); injected != "" {
 		return injected
 	}
 	peasantCLIOnce.Do(func() {
