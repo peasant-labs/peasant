@@ -48,6 +48,11 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 
 ## Tests and fixtures
 
+The test gate itself — two passes, the no-race registry, the four-rule
+exactly-once screen, the run classes, and the committed budget — is documented in
+`TESTING.md` under **Test gate**. Run `make check` as usual; the gate is the entry
+point, not a wrapper you invoke by hand.
+
 - Use an integration test first for behavior that involves I/O, state, or more than one
   component.
 - Test the production path. Mock the dependencies, not the system under test.

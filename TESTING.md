@@ -87,12 +87,36 @@ changes the packing ceiling being measured. The gate prints the effective `-p`,
 
 ### Budget and calibration surface
 
-`budget.yaml` (committed by the release gate) carries the reference-machine
-budget; until then the gate reads `TEST_BUDGET` (seconds) from the environment and
-otherwise prints raw walls only. `CHECK_START_NS` is stamped by `make check` and
-the gate reports the pre-test wall (`test-start - CHECK_START_NS`) separately from
-the test wall. The calibration factor `L` is the gate's fixed CPU probe over the
-committed reference; `L > 4` is reported INCONCLUSIVE and does not fail the gate.
+`budget.yaml` at the repository root carries the committed budget for the whole
+suite: the gate normalises the combined test wall by the calibration factor `L` and
+**fails closed** when the normalised wall exceeds it — there is no warning-only mode
+and no ratchet. `CHECK_START_NS` is stamped by `make check` and the gate reports the
+pre-test wall (`test-start - CHECK_START_NS`) separately from the test wall. The
+calibration factor `L` is the gate's fixed CPU probe over the committed reference;
+`L > 4` is reported INCONCLUSIVE and does not fail the gate. When no fixture is
+present the gate reads `TEST_BUDGET` (seconds) from the environment and otherwise
+prints raw walls only.
+
+### Current status
+
+The committed budget is **120s** and the suite does **not** meet it, so `make check`
+fails at the budget line **by construction**. Measured on the consolidated tree
+(2026-09-27): race pass 12m44s–14m52s, combined 13m39s–15m51s, L-normalised
+822s–941s at `L` 0.996–1.011. The per-family report, the CPU numerator
+(5842.8s; 32-core floor 182.6s) and the full lever analysis are on peasant#389.
+
+The binding constraint and the remaining levers, measured rather than assumed:
+
+- the largest single test — `TestUnknownLocalRetentionBeyondTransferBudget` in
+  `internal/ingest` — costs **243.6s** focused and alone, so no batching or sharding
+  can put the suite below it until that test's cost falls;
+- no cost class has a positive `wall − CPU` gap, so there is no blocked time left to
+  reclaim; the remaining work is *fewer CPU seconds under instrumentation*;
+- achieved packing still leaves headroom: `internal/api` 2.02×, `internal/store`
+  1.40×, `internal/ingest` 2.90× of 32 hardware threads.
+
+Do not close a budget miss by raising the value or adding a warning-only mode. The
+bar is a target and the miss is the measurement.
 
 ### Counting-method rule
 
