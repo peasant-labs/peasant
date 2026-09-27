@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
 // FSOp names one FileSystem operation CountingFS counts. It is an alias of the

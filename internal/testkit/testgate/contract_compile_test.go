@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 // Compile-time shape pins for the gate contract.

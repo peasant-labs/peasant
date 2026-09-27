@@ -6,9 +6,9 @@ package ingest
 // test cannot import internal/testutil: that is an import cycle. The decorators
 // that need this package's unexported internals therefore live here, beside the
 // white-box tests that use them. The shared contract they implement is declared
-// in internal/fsdecorator, a standard-library-only leaf package both owners
+// in internal/testkit/fsdecorator, a standard-library-only leaf package both owners
 // import. See TESTING.md, "Two owners, no import cycle", and
-// internal/fsdecorator/testdata/decorator_classification.yaml for the
+// internal/testkit/fsdecorator/testdata/decorator_classification.yaml for the
 // per-decorator classification and owner.
 
 import (

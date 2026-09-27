@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
 func TestGatedFS_HoldsAndReleasesOneOperation(t *testing.T) {

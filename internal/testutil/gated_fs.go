@@ -5,8 +5,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
 // GatedFS wraps a MemFS and holds one operation on one path until the test

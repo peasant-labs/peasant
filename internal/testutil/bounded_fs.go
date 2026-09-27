@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
 // ErrBoundExceeded is returned when an operation outruns a declared MaxCalls

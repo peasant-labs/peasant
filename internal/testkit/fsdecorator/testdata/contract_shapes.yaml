@@ -2,7 +2,7 @@
 #
 # The interface declarations and their exact method signatures are the contract
 # both owners implement; the struct shapes are the classification schema. See
-# internal/fsdecorator/fsdecorator.go for the ownership and import-cycle rule.
+# internal/testkit/fsdecorator/fsdecorator.go for the ownership and import-cycle rule.
 #
 # `type`/`sig` strings are the exact reflect.Type.String() values. Interface
 # methods are listed in the order reflect reports them (lexicographic).

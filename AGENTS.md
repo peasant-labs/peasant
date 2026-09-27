@@ -63,7 +63,7 @@ point, not a wrapper you invoke by hand.
 - Add a compile-time interface guard for each new interface implementation.
 - Use an external test package when `internal/testutil` would create an import cycle.
 - The shared test filesystem decorators (`GatedFS`, `BoundedFS`, and the existing
-  `CountingFS`) implement the contract in `internal/fsdecorator`. It is a
+  `CountingFS`) implement the contract in `internal/testkit/fsdecorator`. It is a
   standard-library-only leaf package so both `internal/testutil` and a white-box
   `package ingest` test can import it without an import cycle; do not move the
   declaration into `internal/testutil`. `fsdecorator.FileSystem` mirrors
@@ -74,7 +74,7 @@ point, not a wrapper you invoke by hand.
   contract; both implement it.
 - The coverage map that records each moved, deleted, retained, or deferred test
   name — its `Inventory` and `CoverageMap` schema, the closed destination set,
-  and the validators — lives in `internal/coveragemap`. `TESTING.md` describes
+  and the validators — lives in `internal/testkit/coveragemap`. `TESTING.md` describes
   the map and the decorator owners.
 
 ## Types and boundaries
@@ -89,7 +89,7 @@ point, not a wrapper you invoke by hand.
 - The gate's exported shapes (per-invocation record, report document, registry,
   budget) and the shared stream library are frozen by contract tests. Change a
   shape only as a deliberate contract change; the `contract_test.go` files in
-  `internal/testgate` and `internal/teststream` fail on a rename, removal, retype,
+  `internal/testkit/testgate` and `internal/testkit/teststream` fail on a rename, removal, retype,
   retag, or reorder of a frozen field.
 
 Run the ast-grep rules of the repository when you change Go types or literals:

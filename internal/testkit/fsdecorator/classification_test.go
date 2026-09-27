@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -70,8 +70,9 @@ func TestDecoratorClassification_IsCompleteAndResolvable(t *testing.T) {
 		}
 	}
 
+	root := testutil.ModuleRoot(t)
 	for _, entry := range doc.Entries {
-		path := filepath.Join("..", "..", entry.Where[:strings.IndexByte(entry.Where, ':')])
+		path := filepath.Join(root, entry.Where[:strings.IndexByte(entry.Where, ':')])
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("%s: where file %s is unreadable: %v", entry.Type, path, err)

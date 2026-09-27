@@ -1,7 +1,7 @@
 # Classification of every `*FS` test decorator in the tree, recorded BEFORE any
 # migration. Each entry names the capability the decorator actually needs and the
 # owner that implements it (white_box routes to the white-box `package ingest`
-# owner; everything else to internal/testutil). See internal/fsdecorator/classify.go.
+# owner; everything else to internal/testutil). See internal/testkit/fsdecorator/classify.go.
 # A decorator's `where` names the file that declares it today: it is updated in
 # the same change that relocates the type.
 #

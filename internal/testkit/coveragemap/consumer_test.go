@@ -5,7 +5,7 @@ package coveragemap_test
 import (
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/coveragemap"
+	"github.com/peasant-labs/peasant/internal/testkit/coveragemap"
 )
 
 func TestConsumer_DecodesAndValidates(t *testing.T) {

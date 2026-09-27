@@ -6,8 +6,8 @@ package fsdecorator_test
 import (
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
 // consumerGate is a decorator built outside the contract package: it embeds the

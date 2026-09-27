@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/testgate"
-	"github.com/peasant-labs/peasant/internal/teststream"
+	"github.com/peasant-labs/peasant/internal/testkit/testgate"
+	"github.com/peasant-labs/peasant/internal/testkit/teststream"
 )
 
 func main() {
@@ -166,7 +166,7 @@ func fatal(code int, msg string, err error) {
 // runTiming summarizes a `go test -json` stream into the ranked per-test and
 // per-family report.
 //
-// It is the CLI half of the shared renderer in internal/teststream: the same
+// It is the CLI half of the shared renderer in internal/testkit/teststream: the same
 // library that renders the gate's own merged passes renders an ad-hoc stream
 // here, so a measurement taken by hand and one taken by the gate are the same
 // report. A file argument is read in place of stdin. A failing test makes the

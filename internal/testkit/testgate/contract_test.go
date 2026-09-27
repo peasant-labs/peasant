@@ -32,7 +32,7 @@ var contractShapesYAML []byte
 var contractMutationsYAML []byte
 
 // TestStreamPackagePath is the frozen import path of the shared stream library.
-const TestStreamPackagePath = "github.com/peasant-labs/peasant/internal/teststream"
+const TestStreamPackagePath = "github.com/peasant-labs/peasant/internal/testkit/teststream"
 
 type contractField struct {
 	Name string `yaml:"name"`
@@ -382,7 +382,7 @@ func indexOf(hay []string, needle string) int {
 // TestContract_TestStreamPathIsFrozen pins the shared library's import path. A
 // move of the package is a contract change: every consumer's import breaks.
 func TestContract_TestStreamPathIsFrozen(t *testing.T) {
-	if TestStreamPackagePath != "github.com/peasant-labs/peasant/internal/teststream" {
+	if TestStreamPackagePath != "github.com/peasant-labs/peasant/internal/testkit/teststream" {
 		t.Fatalf("the shared stream library moved to %q; every consumer must be re-pinned", TestStreamPackagePath)
 	}
 }

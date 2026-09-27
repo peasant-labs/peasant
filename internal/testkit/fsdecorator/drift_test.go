@@ -1,6 +1,6 @@
 // Package fsdecorator_test holds the drift guards that need to see both this
 // package and internal/testutil. They live in an external test package because
-// internal/testutil now imports internal/fsdecorator to implement the shared
+// internal/testutil now imports internal/testkit/fsdecorator to implement the shared
 // GatedFS/BoundedFS; an internal fsdecorator test that imported testutil would
 // close an import cycle.
 package fsdecorator_test
@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/fsdecorator"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
