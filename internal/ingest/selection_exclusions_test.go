@@ -3,9 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,7 +11,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/selection_exclusions.yaml
@@ -104,15 +102,9 @@ func loadMatcherExclusionFixtures(t *testing.T) matcherExclusionFixtures {
 }
 
 func decodeMatcherExclusionFixtures(data []byte) (matcherExclusionFixtures, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixtures matcherExclusionFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixtures); err != nil {
 		return matcherExclusionFixtures{}, fmt.Errorf("decode fixture fields: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return matcherExclusionFixtures{}, fmt.Errorf("fixture must contain exactly one YAML document: %v", err)
 	}
 	return fixtures, nil
 }

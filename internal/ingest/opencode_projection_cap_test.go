@@ -1,20 +1,17 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/opencode_projection_cap.yaml
@@ -74,15 +71,9 @@ type openCodeProjectionCapDoc struct {
 
 func loadOpenCodeProjectionCapDoc(t *testing.T) []openCodeProjectionCapCase {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeProjectionCapData))
-	decoder.KnownFields(true)
 	var doc openCodeProjectionCapDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeProjectionCapData, &doc); err != nil {
 		t.Fatalf("decode projection cap fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("projection cap fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("projection cap fixture declares no required cases")

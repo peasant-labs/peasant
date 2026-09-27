@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -163,15 +161,9 @@ type canonicalSelectionLoaderMutation struct {
 var canonicalSelectionYAML []byte
 
 func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture canonicalSelectionFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode canonical OpenCode selection fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, errors.New("canonical OpenCode selection fixture must contain exactly one YAML document")
 	}
 	if fixture.SourceFixture == "" || fixture.JSONMTimeMS <= 0 {
 		return fixture, errors.New("canonical OpenCode selection fixture source guard failed")

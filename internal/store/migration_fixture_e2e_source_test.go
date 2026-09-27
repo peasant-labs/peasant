@@ -3,15 +3,12 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"testing"
 
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 
@@ -39,15 +36,9 @@ type v39LegacyFixtureSource struct {
 }
 
 func decodeV39LegacyFixtureSource(source []byte) (v39LegacyFixtureSource, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
 	var fixture v39LegacyFixtureSource
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return v39LegacyFixtureSource{}, fmt.Errorf("decode v39 legacy fixture source: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return v39LegacyFixtureSource{}, fmt.Errorf("v39 legacy fixture source must contain exactly one YAML document: %v", err)
 	}
 	seedNames := make(map[string]bool, len(fixture.Seeds))
 	for _, seed := range fixture.Seeds {

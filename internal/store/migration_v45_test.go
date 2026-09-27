@@ -1,15 +1,12 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -36,15 +33,9 @@ type openCodeSeqCursorRejection struct {
 
 func loadOpenCodeSeqCursorFixture(t *testing.T) openCodeSeqCursorFixtureFile {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeSeqCursorFixture))
-	decoder.KnownFields(true)
 	var fixture openCodeSeqCursorFixtureFile
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeSeqCursorFixture, &fixture); err != nil {
 		t.Fatalf("decode OpenCode seq cursor fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("OpenCode seq cursor fixture must contain exactly one YAML document: %v", err)
 	}
 	presentRecords := make(map[string]struct{}, len(fixture.Records))
 	for _, record := range fixture.Records {

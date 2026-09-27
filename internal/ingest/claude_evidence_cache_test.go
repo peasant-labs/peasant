@@ -1,11 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/claude_evidence_cache.yaml
@@ -54,15 +50,9 @@ type claudeEvidenceExpectation struct {
 
 func loadClaudeEvidenceCacheFixtures(t *testing.T) claudeEvidenceCacheFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeEvidenceCacheYAML))
-	decoder.KnownFields(true)
 	var fixtures claudeEvidenceCacheFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(claudeEvidenceCacheYAML, &fixtures); err != nil {
 		t.Fatalf("decode Claude evidence cache fixtures: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude evidence cache fixture must contain exactly one YAML document: %v", err)
 	}
 	const expectedRows = 4
 	if fixtures.DeclaredRows != expectedRows || len(fixtures.Cases) != expectedRows {

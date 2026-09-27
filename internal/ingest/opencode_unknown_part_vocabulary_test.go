@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
-	"gopkg.in/yaml.v3"
 )
 
 type unknownTypeExpectation struct {
@@ -45,15 +42,9 @@ type unknownPartVocabularyDocument struct {
 var unknownPartVocabularyYAML []byte
 
 func loadUnknownPartVocabularyDocument(data []byte) (unknownPartVocabularyDocument, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var document unknownPartVocabularyDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, errors.New("expected exactly one YAML document")
 	}
 	presentVocab := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {

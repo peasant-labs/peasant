@@ -10,9 +10,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_provenance.yaml
@@ -156,15 +153,9 @@ type codexProvenanceFixtureDoc struct {
 
 func loadCodexProvenanceFixture(t *testing.T) codexProvenanceFixtureDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(codexProvenanceYAML))
-	decoder.KnownFields(true)
 	var fixture codexProvenanceFixtureDoc
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexProvenanceYAML, &fixture); err != nil {
 		t.Fatalf("decode codex provenance fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("codex provenance fixture must contain exactly one YAML document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(codexProvenanceManifestYAML, "codex provenance")
 	if err != nil {

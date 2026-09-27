@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,7 +23,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -86,15 +84,9 @@ type currentMountedBehaviorMutation struct {
 var currentMountedYAML []byte
 
 func loadCurrentMountedFixture(data []byte) (currentMountedFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture currentMountedFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode mounted current OpenCode fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, fmt.Errorf("decode mounted current OpenCode fixture: expected exactly one YAML document: %w", err)
 	}
 	if fixture.DeclaredCases != expectedCurrentMountedCases || len(fixture.Cases) != expectedCurrentMountedCases || fixture.DeclaredNegativeCases != expectedCurrentMountedNegatives || len(fixture.NegativeCases) != expectedCurrentMountedNegatives || fixture.DeclaredLoaderMutations != expectedCurrentMountedMutations || len(fixture.LoaderMutations) != expectedCurrentMountedMutations || fixture.DeclaredBehaviorMutations != expectedCurrentMountedBehaviors || len(fixture.BehaviorMutations) != expectedCurrentMountedBehaviors {
 		return fixture, fmt.Errorf("validate mounted current OpenCode fixture row guard: cases=%d/%d negatives=%d/%d mutations=%d/%d behavior_mutations=%d/%d", fixture.DeclaredCases, len(fixture.Cases), fixture.DeclaredNegativeCases, len(fixture.NegativeCases), fixture.DeclaredLoaderMutations, len(fixture.LoaderMutations), fixture.DeclaredBehaviorMutations, len(fixture.BehaviorMutations))

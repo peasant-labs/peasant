@@ -15,11 +15,8 @@
 package coveragemap_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/coveragemap"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 const (
@@ -177,15 +174,9 @@ func TestCoverageMapCarriesNoTaskTaxonomy(t *testing.T) {
 
 func decodeGuardMutations(t *testing.T) guardMutationFile {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(guardMutationYAML))
-	decoder.KnownFields(true)
 	var fixture guardMutationFile
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(guardMutationYAML, &fixture); err != nil {
 		t.Fatalf("decode %s fixture: %v", mutationLabel, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("%s fixture must contain exactly one YAML document", mutationLabel)
 	}
 	if len(fixture.RequiredNames) == 0 {
 		t.Fatal("mutation fixture declares no required_names")

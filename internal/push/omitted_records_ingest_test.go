@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +20,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/omitted_records_ingest.yaml
@@ -61,15 +58,9 @@ type omittedRecordsIngestFixture struct {
 }
 
 func decodeOmittedRecordsIngestFixture(raw []byte) (omittedRecordsIngestFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
 	var fixture omittedRecordsIngestFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(raw, &fixture); err != nil {
 		return fixture, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, errors.New("omitted-records ingest fixture must contain exactly one YAML document")
 	}
 	return fixture, nil
 }

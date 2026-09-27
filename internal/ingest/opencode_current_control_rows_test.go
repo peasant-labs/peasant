@@ -1,20 +1,18 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
-	"gopkg.in/yaml.v3"
 )
 
 type skippedControlExpectation struct {
@@ -41,15 +39,9 @@ type currentControlRowsDocument struct {
 var currentControlRowsYAML []byte
 
 func loadCurrentControlRowsDocument(data []byte) (currentControlRowsDocument, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var document currentControlRowsDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, errors.New("expected exactly one YAML document")
 	}
 	present := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {

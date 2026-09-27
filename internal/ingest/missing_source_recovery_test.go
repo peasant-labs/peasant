@@ -1,20 +1,17 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/missing_source_recovery.yaml
@@ -43,15 +40,9 @@ type missingSourceRecoveryFixture struct {
 }
 
 func decodeMissingSourceRecoveryFixture(data []byte) (missingSourceRecoveryFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture missingSourceRecoveryFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return missingSourceRecoveryFixture{}, fmt.Errorf("decode missing-source recovery fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return missingSourceRecoveryFixture{}, fmt.Errorf("missing-source recovery fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, fixtureCase := range fixture.Cases {

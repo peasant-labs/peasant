@@ -1,12 +1,9 @@
 package village_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/content_capabilities.yaml
@@ -51,15 +47,9 @@ type contentCapabilityFixture struct {
 
 func loadContentCapabilityFixture(t *testing.T) contentCapabilityFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(contentCapabilityFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture contentCapabilityFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(contentCapabilityFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode content capability fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("content capability fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeSemanticManifest(contentCapabilityManifestYAML, "content capability")
 	if err != nil {

@@ -1,15 +1,11 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -38,15 +34,9 @@ type previewNoticeDoc struct {
 
 func loadPreviewNoticeDoc(t *testing.T) previewNoticeDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(previewNoticeData))
-	decoder.KnownFields(true)
 	var doc previewNoticeDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewNoticeData, &doc); err != nil {
 		t.Fatalf("decode preview notice fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("preview notice fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("preview notice fixture declares no required cases")

@@ -1,15 +1,10 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
@@ -46,15 +41,9 @@ type sourcePreviewSQLiteDoc struct {
 
 func loadSourcePreviewSQLiteDoc(t *testing.T) sourcePreviewSQLiteDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(sourcePreviewSQLiteData))
-	decoder.KnownFields(true)
 	var doc sourcePreviewSQLiteDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(sourcePreviewSQLiteData, &doc); err != nil {
 		t.Fatalf("decode SQLite preview fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("SQLite preview fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("SQLite preview fixture declares no required cases")

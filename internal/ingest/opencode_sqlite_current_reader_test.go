@@ -5,13 +5,12 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -393,15 +392,9 @@ func loadCurrentReaderFixture(t testing.TB) currentReaderFixture {
 }
 
 func parseCurrentReaderFixture(data []byte) (currentReaderFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture currentReaderFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return currentReaderFixture{}, fmt.Errorf("decode strict current reader fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return currentReaderFixture{}, fmt.Errorf("decode strict current reader fixture: expected exactly one YAML document: %w", err)
 	}
 	if fixture.DeclaredPageCases != expectedCurrentPageCases || len(fixture.PageCases) != expectedCurrentPageCases ||
 		fixture.DeclaredMalformedCases != expectedCurrentMalformedCases || len(fixture.MalformedCases) != expectedCurrentMalformedCases ||

@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/session_graph_publish.yaml
@@ -66,15 +65,9 @@ type sessionGraphPublishFixture struct {
 
 func loadSessionGraphPublishFixture(t *testing.T) sessionGraphPublishFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(sessionGraphPublishFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture sessionGraphPublishFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(sessionGraphPublishFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode session graph publish fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("session graph publish fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(sessionGraphPublishManifestYAML, "session graph publish")
 	if err != nil {

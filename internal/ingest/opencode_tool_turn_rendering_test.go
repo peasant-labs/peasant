@@ -1,17 +1,13 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 )
 
@@ -50,15 +46,9 @@ type openCodeToolTurnRenderingDoc struct {
 
 func loadOpenCodeToolTurnRenderingDoc(t *testing.T) openCodeToolTurnRenderingDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeToolTurnRenderingData))
-	decoder.KnownFields(true)
 	var doc openCodeToolTurnRenderingDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeToolTurnRenderingData, &doc); err != nil {
 		t.Fatalf("decode tool-turn rendering fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("tool-turn rendering fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("tool-turn rendering fixture declares no required cases")

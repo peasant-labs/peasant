@@ -11,16 +11,13 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -72,15 +69,9 @@ type v46NamedSQL struct {
 }
 
 func decodeV46Fixture(source []byte) (v46SessionOriginFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
 	var fixture v46SessionOriginFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return v46SessionOriginFixture{}, fmt.Errorf("decode v46 session-origin fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return v46SessionOriginFixture{}, fmt.Errorf("v46 session-origin fixture must contain exactly one YAML document: %v", err)
 	}
 
 	sessionRecordNames := make(map[string]bool, len(fixture.SessionRecords))

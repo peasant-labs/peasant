@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +17,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -46,15 +44,9 @@ type publicationOmissionsFixture struct {
 }
 
 func decodePublicationOmissionsFixture(raw []byte) (publicationOmissionsFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(raw))
-	decoder.KnownFields(true)
 	var fixture publicationOmissionsFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(raw, &fixture); err != nil {
 		return fixture, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, errors.New("publication omissions fixture must contain exactly one YAML document")
 	}
 	return fixture, nil
 }

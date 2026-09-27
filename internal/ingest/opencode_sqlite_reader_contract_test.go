@@ -4,16 +4,14 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"zombiezen.com/go/sqlite"
 )
 
@@ -502,15 +500,9 @@ func loadReaderContractFixture(t testing.TB) readerContractFixture {
 }
 
 func parseReaderContractFixture(data []byte) (readerContractFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture readerContractFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return readerContractFixture{}, fmt.Errorf("decode strict OpenCode SQLite reader fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return readerContractFixture{}, fmt.Errorf("decode strict OpenCode SQLite reader fixture: expected exactly one YAML document: %w", err)
 	}
 	if len(fixture.RequiredPageCases) == 0 || len(fixture.RequiredInvalidIdentifiers) == 0 || len(fixture.RequiredMethods) == 0 || len(fixture.RequiredSignatureRules) == 0 || len(fixture.RequiredGuardMutations) == 0 || len(fixture.RequiredLoaderMutations) == 0 {
 		return readerContractFixture{}, fmt.Errorf("strict OpenCode SQLite reader fixture declares an empty required manifest")
