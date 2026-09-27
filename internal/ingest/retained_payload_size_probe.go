@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -15,121 +17,188 @@ import (
 // defaults.SessionDetailDocumentCapBytes rather than repeating the literal.
 const retainedUnknownTransferLimitBytes = defaults.SessionDetailDocumentCapBytes
 
-// storedRetainedPayloadExceedsTransferLimit reports whether any entry stores a
-// retained evidence payload whose public transfer size exceeds the published
+// The in-place probe below must measure exactly the two quantities the
+// authoritative read path measures, or its early refusal drifts from the
+// projection-time backstop:
+//
+//   - payloadText (modern encoding): the DECODED text length. UnmarshalJSON
+//     stores the decoded string as json.RawMessage, so the backstop compares
+//     len(record.Payload) against the decoded length. TestScanJSONStringDecodedLength
+//     cross-checks this quantity against encoding/json.
+//   - payload (legacy raw encoding): the RAW value extent, including quotes and
+//     escape bytes, because UnmarshalJSON stores payloadRaw verbatim so the
+//     backstop compares len(record.Payload) against the byte extent of the
+//     stored value. TestJSONValueRawExtentMatchesAuthoritativePayload cross-checks
+//     this quantity against json.RawMessage.
+//
+// Delete the legacy raw `payload` branch when that stored encoding is retired.
+
+// storedRetainedPayloadExceedsTransferLimit reports whether every retained
+// evidence record in the entries is a canonical, well-formed envelope and at
+// least one stores a payload whose public transfer size exceeds the published
 // limit. It reads the stored JSON text in place, so a refusal allocates nothing
 // proportional to the payload: an oversized record is refused before it is
 // decoded or copied.
 //
-// The probe is deliberately conservative and sound in one direction only. It
-// returns true only when it can positively measure a canonical stored record
-// whose payload is over the limit. Any shape it does not recognize, any record
-// that lacks public traversal coordinates, and any envelope outside the closed
-// owned member set return false, so the authoritative read path
-// (CollectRetainedUnknown) stays responsible for those refusals. That keeps
-// payload-syntax corruption, envelope corruption, and the legacy missing-
-// coordinate refusal on their existing error paths; only an oversized record
-// that the authoritative path would otherwise accept is short-circuited here.
-func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry) bool {
+// The verdict is member-order independent. The probe walks every member of every
+// envelope and every record of every array before it decides, so corruption that
+// follows an over-limit payload is still seen; the over-limit result is
+// accumulated and returned only once the whole set is known canonical. It is
+// deliberately conservative and sound in one direction only: it returns true
+// only when every record it examines is a canonical stored record and at least
+// one is over the limit. Any shape it does not recognize, any record that lacks
+// public traversal coordinates, and any envelope outside the closed owned member
+// set return false, so the authoritative read path (CollectRetainedUnknown)
+// stays responsible for those refusals. That keeps payload-syntax corruption,
+// envelope corruption, and the legacy missing-coordinate refusal on their
+// existing error paths; only an oversized record that the authoritative path
+// would otherwise accept is short-circuited here.
+func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, harness Harness) bool {
+	over := false
 	for i := range entries {
 		extra := entries[i].Extra
 		if extra == nil {
 			continue
 		}
-		if storedRetainedExtraExceedsTransferLimit(*extra, retainedUnknownTransferLimitBytes) {
-			return true
-		}
-	}
-	return false
-}
-
-// storedRetainedExtraExceedsTransferLimit walks one stored Extra root object in
-// place and probes only its retainedUnknown evidence array.
-func storedRetainedExtraExceedsTransferLimit(extra string, limit int) bool {
-	i := skipJSONSpace(extra, 0)
-	if i >= len(extra) || extra[i] != '{' {
-		return false
-	}
-	i++
-	for {
-		i = skipJSONSpace(extra, i)
-		if i >= len(extra) {
-			return false
-		}
-		if extra[i] == '}' {
-			return false
-		}
-		if extra[i] != '"' {
-			return false
-		}
-		name, next, ok := canonicalJSONKey(extra, i)
+		entryOver, ok := storedRetainedExtraExceedsTransferLimit(*extra, harness, entries[i].Harness, retainedUnknownTransferLimitBytes)
 		if !ok {
 			return false
 		}
+		if entryOver {
+			over = true
+		}
+	}
+	return over
+}
+
+// storedRetainedExtraExceedsTransferLimit walks one stored Extra root in place
+// and probes only its retainedUnknown evidence array. It returns (over, ok):
+// over reports an over-limit payload in a canonical record, and ok reports that
+// the whole root and every retained record in it were recognized as canonical
+// stored shapes. A duplicate or case-aliased root member, an unrecognized
+// shape, or any malformed record returns ok=false so the authoritative path
+// owns the integrity error.
+func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness Harness, limit int) (over, ok bool) {
+	i := skipJSONSpace(extra, 0)
+	if i >= len(extra) || extra[i] != '{' {
+		return false, false
+	}
+	i++
+	seen := make(map[string]struct{})
+	folded := make(map[string]string)
+	arrayStart := -1
+	for {
+		i = skipJSONSpace(extra, i)
+		if i >= len(extra) {
+			return false, false
+		}
+		if extra[i] == '}' {
+			break
+		}
+		if extra[i] != '"' {
+			return false, false
+		}
+		name, next, keyOK := canonicalJSONKey(extra, i)
+		if !keyOK {
+			return false, false
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return false, false
+		}
+		seen[name] = struct{}{}
+		fold := strings.ToLower(name)
+		if prev, exists := folded[fold]; exists && prev != name {
+			return false, false
+		}
+		folded[fold] = name
 		i = skipJSONSpace(extra, next)
 		if i >= len(extra) || extra[i] != ':' {
-			return false
+			return false, false
 		}
 		i = skipJSONSpace(extra, i+1)
 		if name == retainedUnknownKey {
 			if i >= len(extra) || extra[i] != '[' {
-				return false
+				return false, false
 			}
-			return retainedArrayExceedsTransferLimit(extra, i, limit)
+			arrayStart = i
 		}
-		end, ok := skipJSONValue(extra, i)
-		if !ok {
-			return false
-		}
-		i = skipJSONSpace(extra, end)
-		if i < len(extra) && extra[i] == ',' {
-			i++
-			continue
-		}
-		return false
-	}
-}
-
-// retainedArrayExceedsTransferLimit walks the retainedUnknown array in place.
-func retainedArrayExceedsTransferLimit(extra string, i, limit int) bool {
-	i++ // consume '['
-	for {
-		i = skipJSONSpace(extra, i)
-		if i >= len(extra) {
-			return false
-		}
-		if extra[i] == ']' {
-			return false
-		}
-		if extra[i] != '{' {
-			return false
-		}
-		over, end, ok := retainedEnvelopeExceedsTransferLimit(extra, i, limit)
-		if !ok {
-			return false
-		}
-		if over {
-			return true
+		end, valueOK := skipJSONValue(extra, i)
+		if !valueOK {
+			return false, false
 		}
 		i = skipJSONSpace(extra, end)
 		if i >= len(extra) {
-			return false
+			return false, false
 		}
 		if extra[i] == ',' {
 			i++
 			continue
 		}
-		return false
+		if extra[i] == '}' {
+			break
+		}
+		return false, false
+	}
+	if arrayStart < 0 {
+		// A root without retained evidence stores nothing to measure.
+		return false, true
+	}
+	return retainedArrayExceedsTransferLimit(extra, arrayStart, harness, entryHarness, limit)
+}
+
+// retainedArrayExceedsTransferLimit walks the retainedUnknown array in place.
+// It keeps walking every envelope after an over-limit one so a later malformed
+// record still declines the probe (ok=false), which keeps the verdict
+// independent of envelope order.
+func retainedArrayExceedsTransferLimit(extra string, i int, harness, entryHarness Harness, limit int) (over, ok bool) {
+	i++ // consume '['
+	for {
+		i = skipJSONSpace(extra, i)
+		if i >= len(extra) {
+			return false, false
+		}
+		if extra[i] == ']' {
+			return over, true
+		}
+		if extra[i] != '{' {
+			return false, false
+		}
+		envelopeOver, end, envelopeOK := retainedEnvelopeExceedsTransferLimit(extra, i, harness, entryHarness, limit)
+		if !envelopeOK {
+			return false, false
+		}
+		if envelopeOver {
+			over = true
+		}
+		i = skipJSONSpace(extra, end)
+		if i >= len(extra) {
+			return false, false
+		}
+		if extra[i] == ',' {
+			i++
+			continue
+		}
+		if extra[i] == ']' {
+			return over, true
+		}
+		return false, false
 	}
 }
 
 // retainedEnvelopeExceedsTransferLimit measures one canonical stored record
-// envelope in place. It requires the closed owned member set, at most one
-// payload encoding, and public traversal coordinates; anything else is not
-// measured and defers to the authoritative read path.
-func retainedEnvelopeExceedsTransferLimit(extra string, i, limit int) (over bool, end int, ok bool) {
+// envelope in place. It validates the whole envelope before deciding: every
+// owned member must be present and non-null, no member may be unknown or
+// duplicated, exactly one payload encoding may be present, the harness must be
+// a known harness matching every harness the caller expects, and position must
+// carry a canonical public coordinate object. The over-limit verdict is
+// accumulated across members and returned last, so member order cannot let an
+// over-limit payload mask corruption later in the envelope. Anything
+// non-canonical is not measured and defers to the authoritative read path
+// (ok=false), which owns the integrity error.
+func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHarness Harness, limit int) (over bool, end int, ok bool) {
 	var seen uint8
 	sawPayload := false
+	over = false
 	i++ // consume '{'
 	for {
 		i = skipJSONSpace(extra, i)
@@ -137,19 +206,16 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i, limit int) (over bool
 			return false, 0, false
 		}
 		if extra[i] == '}' {
-			if !sawPayload {
-				return false, 0, false
-			}
-			return false, i + 1, true
+			break
 		}
 		if extra[i] != '"' {
 			return false, 0, false
 		}
-		name, next, ok := canonicalJSONKey(extra, i)
-		if !ok {
+		name, next, keyOK := canonicalJSONKey(extra, i)
+		if !keyOK {
 			return false, 0, false
 		}
-		bit, owned := retainedEnvelopeMemberBit(name)
+		bit, owned := jsonMemberBit(retainedEnvelopeKeys, name)
 		if !owned || seen&bit != 0 {
 			return false, 0, false
 		}
@@ -167,44 +233,51 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i, limit int) (over bool
 				return false, 0, false
 			}
 			sawPayload = true
-			_, stringEnd, exceeded, stringOK := scanJSONString(extra, i, limit)
+			decoded, valueEnd, _, stringOK := scanJSONString(extra, i, 0)
 			if !stringOK {
 				return false, 0, false
 			}
-			if exceeded {
-				return true, 0, true
+			if decoded > limit {
+				over = true
 			}
-			i = stringEnd
+			i = valueEnd
 		case "payload":
 			if sawPayload {
 				return false, 0, false
 			}
 			sawPayload = true
-			valueEnd, exceeded, valueOK := skipJSONValueCapped(extra, i, limit)
-			if !valueOK {
+			valueStart := i
+			valueEnd, valueOK := skipJSONValue(extra, i)
+			if !valueOK || extra[valueStart:valueEnd] == "null" {
 				return false, 0, false
 			}
-			if exceeded {
-				return true, 0, true
+			// Match the backstop, which measures the raw stored extent
+			// (len(record.Payload)) for the legacy encoding, whatever JSON kind
+			// the value is: a string's quotes and escape bytes count too.
+			if valueEnd-valueStart > limit {
+				over = true
 			}
 			i = valueEnd
 		case "position":
-			valueEnd, valueOK := skipJSONValue(extra, i)
-			if !valueOK {
+			valueEnd, positionOK := scanRetainedPosition(extra, i)
+			if !positionOK {
 				return false, 0, false
 			}
-			// A legacy record without public coordinates must reach the
-			// authoritative missing-coordinate refusal, never this one.
-			if !strings.Contains(extra[i:valueEnd], `"public"`) {
+			i = valueEnd
+		case "harness":
+			valueEnd, harnessOK := scanEnvelopeHarness(extra, i, harness, entryHarness)
+			if !harnessOK {
+				return false, 0, false
+			}
+			i = valueEnd
+		case "namespace", "kind":
+			valueEnd, textOK := scanNonEmptyJSONString(extra, i)
+			if !textOK {
 				return false, 0, false
 			}
 			i = valueEnd
 		default:
-			valueEnd, valueOK := skipJSONValue(extra, i)
-			if !valueOK {
-				return false, 0, false
-			}
-			i = valueEnd
+			return false, 0, false
 		}
 		i = skipJSONSpace(extra, i)
 		if i >= len(extra) {
@@ -215,25 +288,293 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i, limit int) (over bool
 			continue
 		}
 		if extra[i] == '}' {
-			if !sawPayload {
-				return false, 0, false
-			}
-			return false, i + 1, true
+			break
 		}
 		return false, 0, false
 	}
+	required := jsonMemberMask(retainedEnvelopeKeys, "harness", "namespace", "kind", "position")
+	if seen&required != required || !sawPayload {
+		return false, 0, false
+	}
+	return over, i + 1, true
 }
 
-// retainedEnvelopeMemberBit maps an owned envelope member to its duplicate-
-// detection bit. Membership comes from the canonical member set the decode path
-// enforces, so the probe cannot drift onto a different closed set.
-func retainedEnvelopeMemberBit(name string) (uint8, bool) {
-	for index, key := range retainedEnvelopeKeys {
+// jsonMemberBit maps a canonical object member name to its duplicate-detection
+// bit within one closed key set.
+func jsonMemberBit(keys []string, name string) (uint8, bool) {
+	for index, key := range keys {
 		if key == name {
 			return 1 << uint(index), true
 		}
 	}
 	return 0, false
+}
+
+// jsonMemberMask returns the combined bits of the named members within a closed
+// key set.
+func jsonMemberMask(keys []string, names ...string) uint8 {
+	var mask uint8
+	for _, name := range names {
+		if bit, ok := jsonMemberBit(keys, name); ok {
+			mask |= bit
+		}
+	}
+	return mask
+}
+
+// scanEnvelopeHarness reads the envelope harness member and requires it to name
+// a known harness that matches every harness the caller expects (the export
+// harness and the carrier entry's harness, either of which may be empty). An
+// absent, null, escaped, unknown, or mismatched harness returns ok=false so the
+// authoritative path reports the integrity error.
+func scanEnvelopeHarness(s string, i int, want ...Harness) (end int, ok bool) {
+	name, end, ok := canonicalJSONKey(s, i)
+	if !ok {
+		return 0, false
+	}
+	harness := Harness(name)
+	if !slices.Contains(schema.Harnesses(), harness) {
+		return 0, false
+	}
+	for _, expected := range want {
+		if expected != "" && harness != expected {
+			return 0, false
+		}
+	}
+	return end, true
+}
+
+// scanNonEmptyJSONString reads a canonical (unescaped) JSON string and requires
+// its decoded text to be non-empty after trimming space, matching the
+// authoritative namespace and kind rule. An escaped spelling defers to the
+// authoritative path rather than being measured.
+func scanNonEmptyJSONString(s string, i int) (end int, ok bool) {
+	text, end, ok := canonicalJSONKey(s, i)
+	if !ok || strings.TrimSpace(text) == "" {
+		return 0, false
+	}
+	return end, true
+}
+
+// scanRetainedPosition validates one owned position object in place. It
+// requires the closed position member set with no duplicates, the optional
+// members to carry the right scalar kind, and a canonical, non-null public
+// coordinate object carrying all three members. A legacy position with no
+// public member returns ok=false so the authoritative missing-coordinate
+// refusal stays on its existing path.
+func scanRetainedPosition(s string, i int) (end int, ok bool) {
+	i = skipJSONSpace(s, i)
+	if i >= len(s) || s[i] != '{' {
+		return 0, false
+	}
+	i++
+	var seen uint8
+	hasPublic := false
+	for {
+		i = skipJSONSpace(s, i)
+		if i >= len(s) {
+			return 0, false
+		}
+		if s[i] == '}' {
+			break
+		}
+		if s[i] != '"' {
+			return 0, false
+		}
+		name, next, keyOK := canonicalJSONKey(s, i)
+		if !keyOK {
+			return 0, false
+		}
+		bit, owned := jsonMemberBit(retainedPositionKeys, name)
+		if !owned || seen&bit != 0 {
+			return 0, false
+		}
+		seen |= bit
+		i = skipJSONSpace(s, next)
+		if i >= len(s) || s[i] != ':' {
+			return 0, false
+		}
+		i = skipJSONSpace(s, i+1)
+		switch name {
+		case "public":
+			publicEnd, publicOK := scanRetainedPublicPosition(s, i)
+			if !publicOK {
+				return 0, false
+			}
+			hasPublic = true
+			i = publicEnd
+		case "line", "sequence":
+			valueEnd, valueOK := scanOptionalJSONInteger(s, i)
+			if !valueOK {
+				return 0, false
+			}
+			i = valueEnd
+		case "sourceEntryRef", "sourceId", "jsonPointer":
+			valueEnd, valueOK := scanOptionalJSONString(s, i)
+			if !valueOK {
+				return 0, false
+			}
+			i = valueEnd
+		default:
+			return 0, false
+		}
+		i = skipJSONSpace(s, i)
+		if i >= len(s) {
+			return 0, false
+		}
+		if s[i] == ',' {
+			i++
+			continue
+		}
+		if s[i] == '}' {
+			break
+		}
+		return 0, false
+	}
+	if !hasPublic {
+		return 0, false
+	}
+	return i + 1, true
+}
+
+// scanRetainedPublicPosition validates the owned public coordinate object in
+// place: the closed member set, no duplicates, all three members present and
+// non-null, sourceRef a non-empty string, and the two coordinates safe-range
+// unsigned integers. Anything else returns ok=false so the authoritative
+// decoder reports the integrity error.
+func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
+	i = skipJSONSpace(s, i)
+	if i >= len(s) || s[i] != '{' {
+		return 0, false
+	}
+	i++
+	var seen uint8
+	for {
+		i = skipJSONSpace(s, i)
+		if i >= len(s) {
+			return 0, false
+		}
+		if s[i] == '}' {
+			break
+		}
+		if s[i] != '"' {
+			return 0, false
+		}
+		name, next, keyOK := canonicalJSONKey(s, i)
+		if !keyOK {
+			return 0, false
+		}
+		bit, owned := jsonMemberBit(retainedPublicKeys, name)
+		if !owned || seen&bit != 0 {
+			return 0, false
+		}
+		seen |= bit
+		i = skipJSONSpace(s, next)
+		if i >= len(s) || s[i] != ':' {
+			return 0, false
+		}
+		i = skipJSONSpace(s, i+1)
+		var valueEnd int
+		var valueOK bool
+		if name == "sourceRef" {
+			valueEnd, valueOK = scanRequiredJSONString(s, i)
+		} else {
+			valueEnd, valueOK = scanRequiredJSONInteger(s, i)
+		}
+		if !valueOK {
+			return 0, false
+		}
+		i = valueEnd
+		i = skipJSONSpace(s, i)
+		if i >= len(s) {
+			return 0, false
+		}
+		if s[i] == ',' {
+			i++
+			continue
+		}
+		if s[i] == '}' {
+			break
+		}
+		return 0, false
+	}
+	if seen != jsonMemberMask(retainedPublicKeys, retainedPublicKeys...) {
+		return 0, false
+	}
+	return i + 1, true
+}
+
+// scanRequiredJSONString reads a non-empty canonical JSON string member.
+func scanRequiredJSONString(s string, i int) (end int, ok bool) {
+	text, end, ok := canonicalJSONKey(s, i)
+	if !ok || text == "" {
+		return 0, false
+	}
+	return end, true
+}
+
+// scanRequiredJSONInteger reads a non-null unsigned JSON integer member within
+// the shared JSON-safe coordinate range.
+func scanRequiredJSONInteger(s string, i int) (end int, ok bool) {
+	valueEnd, ok := skipJSONValue(s, i)
+	if !ok {
+		return 0, false
+	}
+	literal := s[i:valueEnd]
+	if !isUnsignedJSONInteger(literal) {
+		return 0, false
+	}
+	value, err := strconv.ParseUint(literal, 10, 64)
+	if err != nil || value > uint64(maxSafeCoordinate) {
+		return 0, false
+	}
+	return valueEnd, true
+}
+
+// scanOptionalJSONString reads an optional position string member. A `null`
+// value is allowed (the authoritative decoder ignores it); any other value must
+// be a canonical JSON string.
+func scanOptionalJSONString(s string, i int) (end int, ok bool) {
+	valueEnd, valueOK := skipJSONValue(s, i)
+	if !valueOK {
+		return 0, false
+	}
+	if s[i:valueEnd] == "null" {
+		return valueEnd, true
+	}
+	_, end, ok = canonicalJSONKey(s, i)
+	return end, ok
+}
+
+// scanOptionalJSONInteger reads an optional position integer member. A `null`
+// value is allowed; any other value must be an unsigned JSON integer literal.
+func scanOptionalJSONInteger(s string, i int) (end int, ok bool) {
+	valueEnd, valueOK := skipJSONValue(s, i)
+	if !valueOK {
+		return 0, false
+	}
+	literal := s[i:valueEnd]
+	if literal == "null" {
+		return valueEnd, true
+	}
+	if !isUnsignedJSONInteger(literal) {
+		return 0, false
+	}
+	return valueEnd, true
+}
+
+// isUnsignedJSONInteger reports whether literal is a bare run of decimal digits,
+// the only spelling encoding/json accepts for the int64 coordinate fields.
+func isUnsignedJSONInteger(literal string) bool {
+	if literal == "" {
+		return false
+	}
+	for k := 0; k < len(literal); k++ {
+		if literal[k] < '0' || literal[k] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // canonicalJSONKey returns the unescaped member name at s[i] when it is a
@@ -265,7 +606,9 @@ func canonicalJSONKey(s string, i int) (string, int, bool) {
 // encoding/json's string decoding: each escape yields the UTF-8 length of its
 // decoded rune, and raw bytes count one each (the stored document is valid
 // UTF-8, and a malformed byte only ever under-counts, which defers the refusal
-// to the authoritative path rather than fabricating one).
+// to the authoritative path rather than fabricating one). This is the quantity
+// the probe compares to the transfer limit for the payloadText encoding; see the
+// two-quantity contract at the top of this file.
 func scanJSONString(s string, i, limit int) (decoded, end int, exceeded, ok bool) {
 	j := i + 1
 	for j < len(s) {

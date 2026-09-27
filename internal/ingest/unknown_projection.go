@@ -25,7 +25,7 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // below remains as the authoritative backstop for any stored encoding the
 // in-place probe declines to measure.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
-	if storedRetainedPayloadExceedsTransferLimit(entries) {
+	if storedRetainedPayloadExceedsTransferLimit(entries, harness) {
 		return nil, retainedUnknownTransferLimitError()
 	}
 	projected, err := CollectRetainedUnknown(entries, harness)

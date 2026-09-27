@@ -18,21 +18,40 @@ const retainedPayloadSizeProbeFixturePath = "internal/ingest/testdata/retained_p
 
 type retainedPayloadSizeProbeFixtures struct {
 	RequiredNames []string `yaml:"requiredNames"`
-	MeasureCases  []struct {
+	// ProbeHarness is the export harness the probe cases are asked for unless a
+	// case overrides it.
+	ProbeHarness string `yaml:"probeHarness"`
+	MeasureCases []struct {
 		Name         string `yaml:"name"`
 		Raw          string `yaml:"raw"`
 		Want         int    `yaml:"want"`
 		Limit        int    `yaml:"limit"`
 		WantExceeded bool   `yaml:"wantExceeded"`
 	} `yaml:"measureCases"`
+	RawExtentCases []struct {
+		Name  string `yaml:"name"`
+		Value string `yaml:"value"`
+		Want  int    `yaml:"want"`
+	} `yaml:"rawExtentCases"`
 	ProbeCases []struct {
 		Name     string `yaml:"name"`
 		Limit    int    `yaml:"limit"`
+		Harness  string `yaml:"harness"`
 		Extra    string `yaml:"extra"`
 		WantOver bool   `yaml:"wantOver"`
+		Declined bool   `yaml:"declined"`
 	} `yaml:"probeCases"`
 }
 
+// loadRetainedPayloadSizeProbeFixtures loads the committed fixture and enforces
+// the requiredNames manifest.
+//
+// requiredNames is a deletion guard by design, per the workspace rule that
+// deletion protection uses required-NAME manifests and never a bare count: the
+// list must name every case so deleting or renaming one fails, while adding a
+// case is allowed and guards nothing until its name is added here. Asserting set
+// equality instead would go red on every legitimate addition and churn across
+// parallel changes, so it is deliberately not asserted.
 func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbeFixtures {
 	t.Helper()
 	var fixtures retainedPayloadSizeProbeFixtures
@@ -49,6 +68,12 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 	for _, c := range fixtures.MeasureCases {
 		if c.Name == "" || names[c.Name] {
 			t.Fatalf("missing or duplicate measure case name %q", c.Name)
+		}
+		names[c.Name] = true
+	}
+	for _, c := range fixtures.RawExtentCases {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("missing or duplicate raw extent case name %q", c.Name)
 		}
 		names[c.Name] = true
 	}
@@ -102,10 +127,42 @@ func TestScanJSONStringDecodedLength(t *testing.T) {
 	}
 }
 
+// TestJSONValueRawExtentMatchesAuthoritativePayload cross-checks the quantity the
+// probe measures for the legacy raw `payload` encoding against the
+// authoritative backstop. UnmarshalJSON stores the raw value verbatim, so
+// len(record.Payload) is the byte extent skipJSONValue reports, including quotes
+// and escape bytes, and never the decoded length of a string payload. See the
+// two-quantity contract at the top of retained_payload_size_probe.go.
+func TestJSONValueRawExtentMatchesAuthoritativePayload(t *testing.T) {
+	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
+	for _, c := range fixtures.RawExtentCases {
+		t.Run(c.Name, func(t *testing.T) {
+			end, ok := skipJSONValue(c.Value, 0)
+			if !ok || end != len(c.Value) {
+				t.Fatalf("skipJSONValue did not consume %q (end=%d ok=%v)", c.Value, end, ok)
+			}
+			var raw json.RawMessage
+			if err := json.Unmarshal([]byte(c.Value), &raw); err != nil {
+				t.Fatalf("encoding/json rejected %q: %v", c.Value, err)
+			}
+			if len(raw) != c.Want {
+				t.Fatalf("fixture want %d but len(json.RawMessage)=%d for %q", c.Want, len(raw), c.Value)
+			}
+			if end != len(raw) {
+				t.Fatalf("probe raw extent %d != len(record.Payload) %d for %q", end, len(raw), c.Value)
+			}
+		})
+	}
+}
+
 // TestStoredRetainedPayloadExceedsTransferLimit pins the in-place refusal
 // predicate: it measures a canonical stored payload, soundly declines to refuse
 // records whose public coordinates are absent, envelopes outside the owned
-// member set, ambiguous payload encodings, and unrelated extension fields.
+// member set, ambiguous payload encodings, invalid harnesses and coordinates,
+// and unrelated extension fields, and reaches the same verdict whichever member
+// order carries the corruption. Every case must report ok=true; a case that the
+// probe declines must still report over=false so the authoritative path owns the
+// refusal.
 func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.ProbeCases {
@@ -113,8 +170,13 @@ func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 			if c.Limit <= 0 {
 				t.Fatalf("probe case %q needs a positive limit", c.Name)
 			}
-			if got := storedRetainedExtraExceedsTransferLimit(c.Extra, c.Limit); got != c.WantOver {
-				t.Fatalf("probe verdict = %v, want %v for %s", got, c.WantOver, strings.TrimSpace(c.Extra))
+			harness := c.Harness
+			if harness == "" {
+				harness = fixtures.ProbeHarness
+			}
+			over, ok := storedRetainedExtraExceedsTransferLimit(c.Extra, Harness(harness), Harness(harness), c.Limit)
+			if over != c.WantOver || ok != !c.Declined {
+				t.Fatalf("probe verdict over=%v ok=%v, want over=%v declined=%v for %s", over, ok, c.WantOver, c.Declined, strings.TrimSpace(c.Extra))
 			}
 		})
 	}
