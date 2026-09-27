@@ -7,11 +7,99 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-27
+
+### Added
+- Unknown harness data is retained under a per-harness record-kind registry. A
+  well-formed kind this build does not recognize resolves to redacted opaque
+  retained evidence instead of being dropped; refused kinds are aggregated by
+  harness and kind in the harvest text and JSON reports; a generated
+  `docs/record-kinds.md` documents the registry, and the retained evidence is
+  certified through export and publication exactly when a placeholder accounts
+  for it (#412, #455).
+- Native repair activation through the harvester registry: a harness whose
+  effective target is a managed generation is built, staged, and activated
+  through the store instead of replacing bare entries, so repaired sessions keep
+  their captured content and prior evidence; a store that cannot persist a
+  managed generation keeps the retained baseline (#426).
+- The generation activation records the publication-capture agreement in the
+  same transaction as the managed-generation install, so a session repaired from
+  a stale index is publishable immediately. An uncertifiable provenance kind
+  records nothing and leaves stored provenance unchanged; an unchanged capture
+  never moves; a changed capture advances its revision once; a disagreement
+  refuses the activation (#429).
+- Published payloads carry durable session provenance — relationships and their
+  public anchors, the root session, the purpose, the input-submission count
+  (including a measured zero), and retained earlier history — through the
+  snapshot-first publish path, with the consent overlay and the metadata mirrors
+  the receiver requires (#428).
+- Mounted session navigation on the new detail surface: a stored context link
+  opens the exact stored target, current-parent links navigate, and the retained
+  earlier-history disclosure restores on Back, reload, and copied links without
+  moving the stream position (#432).
+- Grouped local browse and share: grouped local session lists on the home
+  picker, grouped search and share flows, and a share chooser that selects
+  explicit helper members (#426).
+- `peasant push` scans payloads offline and negotiates receiver capabilities
+  freshly before publishing (#426), and matches the prompt-request hint against
+  either the base or the fork remote a request names (#461).
+- The web app includes an inspect and feedback tool, development-gated and
+  app-local (#422).
+- `peasant -v` and `peasant --version` print the same version line as
+  `peasant version` (#285, #442).
+
+### Changed
+- The durable session detail no longer carries the read-only navigation field;
+  the viewer receives it as an adapter option, so sessions with relationships
+  cook correctly (#432).
+- The projects home no longer embeds the change graph (#425).
+- The `changes` visual regression baselines were re-blessed (#427).
+
+### Fixed
+- A stored session origin is read past leading harness scaffolding, so a
+  repaired-session origin is not misread from an unrecognized record (#452).
+- Repair eligibility survives an interrupted pair install, so a session
+  interrupted mid-repair is retried instead of being left settled incorrectly
+  (#454).
+- Session summaries and child-reference start times are emitted as UTC
+  instants, so the grouped and flat session lists and the sync chooser decode
+  against the Z-only wire contract on non-UTC hosts (#460).
+- Review and upload read the committed publication inputs rather than a
+  re-derived snapshot, so a published payload matches what was committed (#456).
+- Published payloads derive the metadata publication mirrors — the
+  input-submission count and the graph identity (root session, purpose,
+  relationships) — from the same active generation snapshot as the durable
+  detail; previously the metadata part could omit or diverge from those values,
+  so a receiver could refuse an otherwise valid publish with a mirror
+  disagreement (#433).
+- Pi publications keep their recorded duration when publishing through the
+  snapshot path; previously the duration was emitted as zero (#428).
+- The generated Homebrew cask carries the frozen string literal comment, so the
+  cask passes `brew style` (#477).
+
+### Performance
+- `peasant push` shares one lookup client and resolves the pushed repository
+  once per run instead of twice (#453).
+
 ### CI
+- CI calls the shared runner router, pulls the e2e images and the
+  release-validate matrix from the project mirrors and publisher registries, and
+  runs the Go suite on the self-hosted pool with a dedicated arm64 lane
+  (#441, #445, #451, #474).
+- The harvester version guard is routed to the runner pool, and the post-merge
+  `make check` is skipped only with proven pull-request evidence (#473, #440).
+- Release tooling: the release-PR gate re-runs only with a clear delta and
+  passing evidence (#419); partial re-runs of a failed release are documented
+  (#416); the release gate no longer runs the race detector (#414).
 - The full-stack e2e harness runs RustFS as its S3-compatible object store in
-  place of MinIO, pinned by digest to `ghcr.io/rustfs/rustfs`. MinIO's official
-  images were withdrawn from both Docker Hub and Quay, which failed the e2e
-  publication gate closed.
+  place of MinIO, whose official images were withdrawn from Docker Hub and Quay
+  (#485).
+
+### Dependencies
+- Contract pins: schema `v0.24.0`, redact `v0.1.6`, fairtrade `0.0.20`. The
+  full-stack e2e gate provisions the matching Village revision, so the release
+  gate exercises provenance publication against a receiver that advertises the
+  session-graph capability.
 
 ## [0.7.0-rc1] - 2026-09-16
 
