@@ -22,6 +22,9 @@ import (
 //go:embed testdata/content_batch.yaml
 var contentBatchFixtureData []byte
 
+//go:embed testdata/content_backfill.yaml
+var contentBackfillFixtureYAML []byte
+
 type captureBatchObserver struct {
 	MetricsStore
 	batches []int
@@ -604,8 +607,10 @@ type budgetTargetSession struct {
 // the stored-metadata compatibility check treats it as file-only.
 type budgetTargetStore struct {
 	MetricsStore
-	order    []SessionID
-	sessions map[SessionID]*budgetTargetSession
+	order      []SessionID
+	sessions   map[SessionID]*budgetTargetSession
+	listCalls  int
+	listLimits []int
 }
 
 var (
@@ -614,6 +619,8 @@ var (
 )
 
 func (s *budgetTargetStore) ListContentCaptureIncompleteSessionsAfter(_ context.Context, after SessionID, limit int) ([]ContentCaptureIncompleteSession, error) {
+	s.listCalls++
+	s.listLimits = append(s.listLimits, limit)
 	var out []ContentCaptureIncompleteSession
 	for _, id := range s.order {
 		if string(id) <= string(after) {
@@ -757,4 +764,64 @@ func TestContentBudgetStopsAfterK(t *testing.T) {
 			t.Fatalf("an unbounded pass clears the backlog: recovered=%d stopped=%t remaining=%d", len(recovered3), stopped3, remaining3)
 		}
 	})
+}
+
+// TestContentBackfillTargetsSpanPages pins the page contract in two parts that
+// must stay independent. The committed recovery fixture must declare a target
+// count LARGER than the pass's page size, so a fixture case really lands on a
+// second page rather than fitting one. The pass, driven by a store that records
+// the limit it was handed, must then issue more than one page request and ask
+// for exactly that page size. The count is read from the YAML, never derived
+// from the Go constant: a fixture computed from the constant would be generated
+// output, and the whole point is that the two agree by contract, not by
+// construction.
+func TestContentBackfillTargetsSpanPages(t *testing.T) {
+	t.Parallel()
+	var fixture struct {
+		Cases []struct {
+			Name  string `yaml:"name"`
+			Count int    `yaml:"count"`
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(contentBackfillFixtureYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	largest := 0
+	for _, testCase := range fixture.Cases {
+		if testCase.Count > largest {
+			largest = testCase.Count
+		}
+	}
+	if largest <= contentBackfillPageSize {
+		t.Fatalf("the recovery fixture's largest target count is %d; a case must exceed the page size %d so its targets land on a second page", largest, contentBackfillPageSize)
+	}
+
+	ctx := context.Background()
+	output := t.TempDir()
+	fs := &OSFileSystem{}
+	store := &budgetTargetStore{sessions: make(map[SessionID]*budgetTargetSession)}
+	for i := 0; i < largest; i++ {
+		seedBudgetContentSession(t, fs, store, output, i)
+	}
+	pipeline := &Pipeline{
+		fs:           fs,
+		metricsStore: store,
+		indexers:     NewIndexerRegistry(fs, IndexerRegistryOptions{}),
+		config:       PipelineConfig{OutputDir: ResolvedPath(output), Parallelism: 1, Force: true},
+	}
+	recovered, stopped, remaining, err := pipeline.backfillIncompleteContent(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovered) != largest || stopped || remaining != 0 {
+		t.Fatalf("an unbounded pass over %d targets: recovered=%d stopped=%t remaining=%d", largest, len(recovered), stopped, remaining)
+	}
+	if store.listCalls < 2 {
+		t.Fatalf("the pass read %d incomplete-session page(s) for %d targets; the page size %d must split them across pages", store.listCalls, largest, contentBackfillPageSize)
+	}
+	for i, limit := range store.listLimits {
+		if limit != contentBackfillPageSize {
+			t.Fatalf("page %d requested limit %d, want the named page size %d", i, limit, contentBackfillPageSize)
+		}
+	}
 }

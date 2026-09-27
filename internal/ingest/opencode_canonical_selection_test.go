@@ -428,9 +428,18 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		}
 		storedIDs[session.SessionID] = true
 	}
-	incomplete, err := database.ListContentCaptureIncompleteSessionsAfter(t.Context(), "", len(fixture.Cases)+1)
+	// Ask for one row more than the fixture can produce and assert the listing
+	// was not truncated at that request. The store returns at most `limit` rows,
+	// so the set comparison below is only meaningful when every incomplete
+	// target came back; a truncated page would drop entries and read as a
+	// mismatch for the wrong reason.
+	incompleteLimit := len(fixture.Cases) + 1
+	incomplete, err := database.ListContentCaptureIncompleteSessionsAfter(t.Context(), "", incompleteLimit)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(incomplete) >= incompleteLimit {
+		t.Fatalf("incomplete-session listing reached its request limit %d; the set comparison below would silently test a truncated prefix", incompleteLimit)
 	}
 	wantIncomplete := make(map[ingest.SessionID]bool)
 	// Two different questions, kept apart. eligible counts the sessions that
