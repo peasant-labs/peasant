@@ -756,7 +756,7 @@ go test -race ./internal/ingest/ -run TestPipeline_DryRun -v
 # Static analysis (ast-grep rules)
 ast-grep scan --config sgconfig.yml .
 
-# Full-stack end-to-end harness — podman: Postgres + MinIO + real village + real peasant CLI.
+# Full-stack end-to-end harness — podman: Postgres + RustFS + real village + real peasant CLI.
 # Build-tagged `e2e` (OUT of `make check`); needs podman + a village checkout.
 make e2e            # asserted: ingest fixture → push (skip-gate + retraction) → village secret-scan
 make demo           # same harness, verbose + unasserted ("watch it happen")

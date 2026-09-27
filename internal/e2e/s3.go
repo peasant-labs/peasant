@@ -13,21 +13,22 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// s3OpTimeout bounds every in-process S3 operation. A hung or unreachable MinIO
-// must fail fast and actionably rather than block the harness on a bare
+// s3OpTimeout bounds every in-process S3 operation. A hung or unreachable object
+// store must fail fast and actionably rather than block the harness on a bare
 // context.Background().
 const s3OpTimeout = 30 * time.Second
 
-// newMinioClient builds an in-process minio-go S3 client for the harness MinIO
-// instance. It strips the scheme from the http(s) endpoint (minio.New wants a
-// bare host:port), authenticates with the harness's static root credentials, and
-// selects TLS from the scheme (always plain http for the local podman MinIO).
+// newS3Client builds an in-process S3 client (via the minio-go SDK) for the
+// harness RustFS instance. It strips the scheme from the http(s) endpoint
+// (minio.New wants a bare host:port), authenticates with the harness's static
+// root credentials, and selects TLS from the scheme (always plain http for the
+// local podman RustFS).
 //
 // This client replaces the previous `podman run mc ...` text-parsing surface: it
 // returns typed ObjectInfo, so an empty bucket counts as 0 regardless of any
 // cgroup/warning lines podman writes to stderr. Podman 4.9.3 can emit several
 // stderr lines per run, which text-based counting once mistook for objects.
-func newMinioClient(endpoint string) (*minio.Client, error) {
+func newS3Client(endpoint string) (*minio.Client, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("parse S3 endpoint %q: %w", endpoint, err)
@@ -39,7 +40,7 @@ func newMinioClient(endpoint string) (*minio.Client, error) {
 		return nil, fmt.Errorf("S3 endpoint %q is missing host", endpoint)
 	}
 	return minio.New(u.Host, &minio.Options{
-		Creds:  credentials.NewStaticV4(minioUser, minioPassword, ""),
+		Creds:  credentials.NewStaticV4(s3AccessKey, s3SecretKey, ""),
 		Secure: u.Scheme == "https",
 	})
 }
@@ -51,16 +52,16 @@ func newMinioClient(endpoint string) (*minio.Client, error) {
 func transcriptBucketObjectCount(t *testing.T, endpoint, bucket string) int {
 	t.Helper()
 	bucket = requireTranscriptBucket(t, bucket)
-	client, err := newMinioClient(endpoint)
+	client, err := newS3Client(endpoint)
 	if err != nil {
 		fatalActionable(t, actionableFailure{
 			title: "count transcript bucket objects failed",
-			what:  "S3_ENDPOINT could not be converted into a MinIO client",
+			what:  "S3_ENDPOINT could not be converted into an S3 client",
 			why:   err.Error(),
-			where: "internal/e2e/minio.go transcriptBucketObjectCount",
+			where: "internal/e2e/s3.go transcriptBucketObjectCount",
 			when:  "asserting seeded baseline before push#1",
 			means: "the harness cannot prove S3 is clean before publishing",
-			fix:   "provide S3_ENDPOINT as http(s)://host:port for the harness MinIO instance",
+			fix:   "provide S3_ENDPOINT as http(s)://host:port for the harness object store",
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s3OpTimeout)
@@ -72,10 +73,10 @@ func transcriptBucketObjectCount(t *testing.T, endpoint, bucket string) int {
 				title: "count transcript bucket objects failed",
 				what:  fmt.Sprintf("ListObjects could not enumerate %s", bucket),
 				why:   obj.Err.Error(),
-				where: "internal/e2e/minio.go transcriptBucketObjectCount",
+				where: "internal/e2e/s3.go transcriptBucketObjectCount",
 				when:  "asserting seeded baseline before push#1",
 				means: "the harness cannot prove S3 is clean before publishing",
-				fix:   "check that the MinIO endpoint is reachable and the transcript bucket exists",
+				fix:   "check that the S3 endpoint is reachable and the transcript bucket exists",
 			})
 		}
 		count++
@@ -88,7 +89,7 @@ func transcriptBucketObjectCount(t *testing.T, endpoint, bucket string) int {
 // returns whatever it enumerated plus the first error encountered, so the caller
 // can log a self-diagnosing snapshot without aborting the run a second time.
 func listTranscriptBucketObjectKeys(endpoint, bucket string) ([]string, error) {
-	client, err := newMinioClient(endpoint)
+	client, err := newS3Client(endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +106,7 @@ func listTranscriptBucketObjectKeys(endpoint, bucket string) ([]string, error) {
 }
 
 // ensureTranscriptBucket creates the transcript bucket, ignoring the
-// already-own-it/already-exists responses (the minio-go equivalent of the old
+// already-own-it/already-exists responses (S3 client equivalent of the old
 // `mc mb --ignore-existing`).
 func ensureTranscriptBucket(ctx context.Context, client *minio.Client, bucket string) error {
 	if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
@@ -118,22 +119,22 @@ func ensureTranscriptBucket(ctx context.Context, client *minio.Client, bucket st
 	return nil
 }
 
-// startEphemeralMinIOBucket creates the transcript bucket on a freshly-started
-// MinIO and health-gates it on a real BucketExists check. It returns an error so
+// startEphemeralRustFSBucket creates the transcript bucket on a freshly-started
+// RustFS and health-gates it on a real BucketExists check. It returns an error so
 // the caller can t.Skip on an image-pull/provisioning failure (matching the prior
 // `mc mb` skip semantics).
-func startEphemeralMinIOBucket(t *testing.T, endpoint, bucket string) error {
+func startEphemeralRustFSBucket(t *testing.T, endpoint, bucket string) error {
 	t.Helper()
-	client, err := newMinioClient(endpoint)
+	client, err := newS3Client(endpoint)
 	if err != nil {
-		return fmt.Errorf("build minio client for %s: %w", endpoint, err)
+		return fmt.Errorf("build S3 client for %s: %w", endpoint, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s3OpTimeout)
 	defer cancel()
 	if err := ensureTranscriptBucket(ctx, client, bucket); err != nil {
 		return fmt.Errorf("create bucket %s: %w", bucket, err)
 	}
-	waitReady(t, "minio-bucket", func() bool {
+	waitReady(t, "rustfs-bucket", func() bool {
 		opCtx, opCancel := context.WithTimeout(context.Background(), s3OpTimeout)
 		defer opCancel()
 		exists, err := client.BucketExists(opCtx, bucket)
@@ -143,22 +144,22 @@ func startEphemeralMinIOBucket(t *testing.T, endpoint, bucket string) error {
 }
 
 // clearTranscriptBucket drains every object from the transcript bucket (the
-// minio-go equivalent of `mc rm --recursive --force`, draining the
+// S3 client equivalent of `mc rm --recursive --force`, draining the
 // RemoveObjects error channel), then re-ensures the bucket exists. Used between
 // warm-stack distro iterations so no run inherits a prior run's objects.
 func clearTranscriptBucket(t *testing.T, endpoint, bucket string) {
 	t.Helper()
 	bucket = requireTranscriptBucket(t, bucket)
-	client, err := newMinioClient(endpoint)
+	client, err := newS3Client(endpoint)
 	if err != nil {
 		fatalActionable(t, actionableFailure{
 			title: "clear transcript bucket failed",
-			what:  "S3_ENDPOINT could not be converted into a MinIO client",
+			what:  "S3_ENDPOINT could not be converted into an S3 client",
 			why:   err.Error(),
-			where: "internal/e2e/minio.go clearTranscriptBucket",
+			where: "internal/e2e/s3.go clearTranscriptBucket",
 			when:  "clearing S3 state during warm-stack refresh",
 			means: "the next distro could inherit transcript objects from a previous run",
-			fix:   "provide S3_ENDPOINT as http(s)://host:port for the harness MinIO instance",
+			fix:   "provide S3_ENDPOINT as http(s)://host:port for the harness object store",
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s3OpTimeout)
@@ -170,10 +171,10 @@ func clearTranscriptBucket(t *testing.T, endpoint, bucket string) {
 				title: "clear transcript bucket failed",
 				what:  fmt.Sprintf("RemoveObjects could not delete %s from %s", rmErr.ObjectName, bucket),
 				why:   rmErr.Err.Error(),
-				where: "internal/e2e/minio.go clearTranscriptBucket",
+				where: "internal/e2e/s3.go clearTranscriptBucket",
 				when:  "clearing S3 state during warm-stack refresh",
 				means: "the next distro could inherit transcript objects from a previous run",
-				fix:   "check that the MinIO endpoint is reachable and the credentials can delete objects",
+				fix:   "check that the S3 endpoint is reachable and the credentials can delete objects",
 			})
 		}
 	}
@@ -182,10 +183,10 @@ func clearTranscriptBucket(t *testing.T, endpoint, bucket string) {
 			title: "recreate transcript bucket failed",
 			what:  fmt.Sprintf("MakeBucket could not ensure %s exists after clearing", bucket),
 			why:   err.Error(),
-			where: "internal/e2e/minio.go clearTranscriptBucket",
+			where: "internal/e2e/s3.go clearTranscriptBucket",
 			when:  "recreating S3 state during warm-stack refresh",
 			means: "peasant village push will not have a transcript bucket to write into",
-			fix:   "check that the MinIO endpoint is reachable and the credentials can create buckets",
+			fix:   "check that the S3 endpoint is reachable and the credentials can create buckets",
 		})
 	}
 }

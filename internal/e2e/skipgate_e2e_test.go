@@ -2,7 +2,7 @@
 
 // Local end-to-end harness for transcript + annotation
 // skip-gate + retraction, driven through the REAL peasant CLI (subprocesses) and
-// a REAL village server, with ephemeral podman Postgres + MinIO. See fixture.go
+// a REAL village server, with ephemeral podman Postgres + RustFS. See fixture.go
 // for the package doc; docs/e2e.md for how to run.
 //
 // Flow: ingest the committed fixtures — claude root+subagent, two codex rollouts,
@@ -45,12 +45,12 @@ import (
 
 const (
 	postgresImage = "quay.io/peasant-labs/postgres:16-alpine"
-	// docker.io/minio/minio no longer serves a pullable image (manifest
-	// requests are denied), so pull from Quay by digest. The digest is the
-	// multi-arch (arm64/amd64) manifest list that `quay.io/minio/minio:latest`
-	// resolved to on 2026-09-14 (RELEASE.2025-09-07T16-13-09Z) and matches
-	// the pin in village's backend-tests workflow.
-	minioImage = "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+	// RustFS is the harness's S3-compatible object store. It replaces MinIO,
+	// whose official images were withdrawn from both docker.io and quay.io in
+	// September 2026. Pull from GHCR by the digest of the multi-arch
+	// (amd64/arm64) index for the 1.0.0 release; the digest is the sha256 of the
+	// served index manifest, so it stays addressable.
+	rustfsImage = "ghcr.io/rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff"
 
 	pgUser, pgPassword, pgDatabase = "peasant", "peasant", "peasant"
 
@@ -319,11 +319,11 @@ func provisionHarnessStack(t *testing.T, bins villageBinaries) harnessStack {
 	if external.engaged {
 		validateExternalStackUsable(t, external)
 		return harnessStack{
-			dsn:           external.dsn,
-			minioEndpoint: external.minioEndpoint,
-			bucket:        external.bucket,
-			villageURL:    external.villageURL,
-			external:      true,
+			dsn:        external.dsn,
+			s3Endpoint: external.s3Endpoint,
+			bucket:     external.bucket,
+			villageURL: external.villageURL,
+			external:   true,
 		}
 	}
 
@@ -331,15 +331,15 @@ func provisionHarnessStack(t *testing.T, bins villageBinaries) harnessStack {
 	reapStaleE2EInfra(t)
 	bucket := uniqueName("transcripts")
 	dsn, db := startEphemeralPostgres(t)
-	minioEndpoint := startEphemeralMinIO(t, bucket)
-	village := startVillageProcess(t, bins.server, dsn, minioEndpoint, bucket)
+	s3Endpoint := startEphemeralRustFS(t, bucket)
+	village := startVillageProcess(t, bins.server, dsn, s3Endpoint, bucket)
 	return harnessStack{
-		dsn:           dsn,
-		db:            db,
-		minioEndpoint: minioEndpoint,
-		bucket:        bucket,
-		villageURL:    village.url,
-		village:       village,
+		dsn:        dsn,
+		db:         db,
+		s3Endpoint: s3Endpoint,
+		bucket:     bucket,
+		villageURL: village.url,
+		village:    village,
 	}
 }
 
@@ -354,24 +354,24 @@ func validateExternalStackUsable(t *testing.T, cfg externalStackConfig) {
 		_ = resp.Body.Close()
 		return resp.StatusCode >= 200 && resp.StatusCode < 300
 	})
-	waitReady(t, "external minio", func() bool {
-		resp, err := hc.Get(cfg.minioEndpoint + "/minio/health/live")
+	waitReady(t, "external object store", func() bool {
+		resp, err := hc.Get(cfg.s3Endpoint + "/health/ready")
 		if err != nil {
 			return false
 		}
 		_ = resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
 	})
-	client, err := newMinioClient(cfg.minioEndpoint)
+	client, err := newS3Client(cfg.s3Endpoint)
 	if err != nil {
 		fatalActionable(t, actionableFailure{
 			title: "external stack bucket preflight failed",
-			what:  "S3_ENDPOINT could not be converted into a MinIO client",
+			what:  "S3_ENDPOINT could not be converted into an S3 client",
 			why:   err.Error(),
 			where: "internal/e2e/skipgate_e2e_test.go provisionExternalStack",
 			when:  "checking injected external stack before running the harness",
 			means: "the harness cannot prove S3_BUCKET belongs to the injected stack",
-			fix:   "set S3_ENDPOINT to http(s)://host:port for the injected MinIO endpoint",
+			fix:   "set S3_ENDPOINT to http(s)://host:port for the injected S3 endpoint",
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s3OpTimeout)
@@ -432,29 +432,31 @@ func startEphemeralPostgres(t *testing.T) (dsn string, db *sql.DB) {
 	return dsn, db
 }
 
-// --- ephemeral MinIO (S3) ---
+// --- ephemeral RustFS (S3) ---
 
-// startEphemeralMinIO runs MinIO on a random port, waits for health, creates the
-// transcript bucket via the in-process minio-go client, and health-gates the
-// bucket on a real S3 op (BucketExists). Returns the S3 endpoint URL.
-func startEphemeralMinIO(t *testing.T, bucket string) string {
+// startEphemeralRustFS runs RustFS on a random port, waits for readiness, creates
+// the transcript bucket via the in-process S3 client, and health-gates the bucket
+// on a real S3 op (BucketExists). Returns the S3 endpoint URL. The image's
+// entrypoint starts the server against its default /data volume, so no command
+// arguments are passed.
+func startEphemeralRustFS(t *testing.T, bucket string) string {
 	t.Helper()
 	bucket = requireTranscriptBucket(t, bucket)
-	name := uniqueName("minio")
+	name := uniqueName("rustfs")
 	t.Cleanup(func() { _ = exec.Command("podman", "rm", "-fv", name).Run() })
 	args := []string{"run", "-d", "--name", name,
 		"--memory", "1g", "--memory-swap", "1g",
-		"-e", "MINIO_ROOT_USER=" + minioUser, "-e", "MINIO_ROOT_PASSWORD=" + minioPassword,
-		"-p", "127.0.0.1::9000", minioImage, "server", "/data"}
+		"-e", "RUSTFS_ACCESS_KEY=" + s3AccessKey, "-e", "RUSTFS_SECRET_KEY=" + s3SecretKey,
+		"-p", "127.0.0.1::9000", rustfsImage}
 	if out, err := exec.Command("podman", args...).CombinedOutput(); err != nil {
-		t.Skipf("e2e: `podman run %s` failed (image pull/network?): %v\n%s", minioImage, err, out)
+		t.Skipf("e2e: `podman run %s` failed (image pull/network?): %v\n%s", rustfsImage, err, out)
 	}
 	port := readMappedPort(t, name, "9000/tcp")
 	endpoint := "http://127.0.0.1:" + port
 
 	hc := &http.Client{Timeout: 2 * time.Second}
-	waitReady(t, "minio", func() bool {
-		resp, err := hc.Get(endpoint + "/minio/health/live")
+	waitReady(t, "rustfs", func() bool {
+		resp, err := hc.Get(endpoint + "/health/ready")
 		if err != nil {
 			return false
 		}
@@ -462,7 +464,7 @@ func startEphemeralMinIO(t *testing.T, bucket string) string {
 		return resp.StatusCode == http.StatusOK
 	})
 
-	if err := startEphemeralMinIOBucket(t, endpoint, bucket); err != nil {
+	if err := startEphemeralRustFSBucket(t, endpoint, bucket); err != nil {
 		t.Fatalf("e2e: provision transcript bucket on %s: %v", endpoint, err)
 	}
 	return endpoint
@@ -476,7 +478,7 @@ func reapStaleE2EInfra(t *testing.T) {
 	// stdout-only (Output, not CombinedOutput): the parse below keys on a tab +
 	// the peasant-e2e- prefix, so podman's cgroup/warning stderr lines cannot be
 	// misread as container rows. This mirrors the typed-API principle behind the
-	// minio-go S3 migration — never let a quantity/identity decision read stderr.
+	// typed S3 client — never let a quantity/identity decision read stderr.
 	out, err := exec.Command("podman", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}").Output()
 	if err != nil {
 		t.Logf("e2e: could not list stale podman infrastructure before self-provisioning: %v\n%s", err, out)
@@ -525,8 +527,8 @@ func startVillageProcess(t *testing.T, serverBin, dsn, s3Endpoint, bucket string
 		fmt.Sprintf("PORT=%d", port),
 		envAssignment(envS3Endpoint, s3Endpoint),
 		envAssignment(envS3Bucket, bucket),
-		"S3_ACCESS_KEY="+minioUser,
-		"S3_SECRET_KEY="+minioPassword,
+		"S3_ACCESS_KEY="+s3AccessKey,
+		"S3_SECRET_KEY="+s3SecretKey,
 		"S3_USE_PATH_STYLE=true",
 	)
 	cmd.Env = append(cmd.Env, villageEncryptionEnvAssignments()...)
@@ -563,8 +565,8 @@ func (s *harnessStack) refresh(t *testing.T, bins villageBinaries, configHome st
 	s.requireRefreshable(t)
 	s.village.stop()
 	truncateVillageDatabase(t, s.db)
-	clearTranscriptBucket(t, s.minioEndpoint, s.bucket)
-	s.village = startVillageProcess(t, bins.server, s.dsn, s.minioEndpoint, s.bucket)
+	clearTranscriptBucket(t, s.s3Endpoint, s.bucket)
+	s.village = startVillageProcess(t, bins.server, s.dsn, s.s3Endpoint, s.bucket)
 	s.villageURL = s.village.url
 	apiKey := mintDemoCredentials(t, bins.setupDemo, s.dsn, s.villageURL, configHome)
 	assertSeededBaselineBeforePush(t, harnessOptions{assert: true}, *s)
@@ -619,7 +621,7 @@ func assertSeededBaselineBeforePush(t *testing.T, opts harnessOptions, stack har
 	got := seededBaselineCounts{
 		transcripts: villageTableCount(t, stack.db, "transcripts"),
 		annotations: villageTableCount(t, stack.db, "annotations"),
-		s3Objects:   transcriptBucketObjectCount(t, stack.minioEndpoint, stack.bucket),
+		s3Objects:   transcriptBucketObjectCount(t, stack.s3Endpoint, stack.bucket),
 	}
 	if got.s3Objects != seededZeroContentBaselineBeforePush.s3Objects {
 		dumpTranscriptBucketOnBaselineMismatch(t, stack)
@@ -629,21 +631,21 @@ func assertSeededBaselineBeforePush(t *testing.T, opts harnessOptions, stack har
 
 // dumpTranscriptBucketOnBaselineMismatch is a LEAN, on-failure-only diagnostic: it
 // runs ONLY when the seeded S3 baseline is non-zero, listing the bucket's actual
-// object keys via the in-process minio-go client so a future CI failure is
+// object keys via the in-process S3 client so a future CI failure is
 // self-diagnosing from the log alone (the Blacksmith console is view-only) — with
 // none of the always-on noise of the reverted temp DIAG. Because the keys come
 // from typed ObjectInfo (not parsed CLI text), the dump itself cannot reintroduce
 // the stderr-miscount it diagnoses.
 func dumpTranscriptBucketOnBaselineMismatch(t *testing.T, stack harnessStack) {
 	t.Helper()
-	keys, err := listTranscriptBucketObjectKeys(stack.minioEndpoint, stack.bucket)
+	keys, err := listTranscriptBucketObjectKeys(stack.s3Endpoint, stack.bucket)
 	if err != nil {
 		t.Logf("e2e DIAG: seeded S3 baseline non-zero; could not list bucket %q on %q: %v",
-			stack.bucket, stack.minioEndpoint, err)
+			stack.bucket, stack.s3Endpoint, err)
 		return
 	}
 	t.Logf("e2e DIAG: seeded S3 baseline non-zero; bucket %q on %q holds %d object(s): %v",
-		stack.bucket, stack.minioEndpoint, len(keys), keys)
+		stack.bucket, stack.s3Endpoint, len(keys), keys)
 }
 
 func villageTableCount(t *testing.T, db *sql.DB, table string) int {

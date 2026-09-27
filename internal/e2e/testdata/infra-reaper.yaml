@@ -23,7 +23,7 @@ cases:
     rawName: unrelated
     status: Exited (0) 25 hours ago
   - name: recent-exited-container
-    kind: minio
+    kind: rustfs
     pid: 303
     age: 12h
     status: Exited (0) 10 minutes ago
@@ -60,7 +60,7 @@ cases:
     status: Running 25 hours
     alive: true
   - name: running-reused-live-pid
-    kind: minio
+    kind: rustfs
     pid: 606
     age: 48h
     status: Up 25 hours

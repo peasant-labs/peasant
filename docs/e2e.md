@@ -2,7 +2,7 @@
 
 This harness proves the **transcript + annotation skip-gate**, **retraction**, and
 **server-side redaction scan** end-to-end against a **real village server**, real
-**Postgres**, and real **MinIO (S3)** — all provisioned ephemerally — driven
+**Postgres**, and real **RustFS (S3)** — all provisioned ephemerally — driven
 through the **real peasant CLI**. It is the live demonstration for the full-stack
 skip-gate and pull contracts.
 
@@ -21,9 +21,9 @@ skip-gate and pull contracts.
    hardcoded): `SANDBOX = <state>/peasant/test/e2e/<unix-ts>`. Every peasant
    subprocess runs with `XDG_{DATA,CONFIG,STATE}_HOME` under it. Startup prunes
    stale sandboxes at start; `t.Cleanup` removes the sandbox.
-2. **Ephemeral infra** via `podman`: Postgres (`sslmode=disable`) + MinIO (random
+2. **Ephemeral infra** via `podman`: Postgres (`sslmode=disable`) + RustFS (random
    ports; bucket created and health-gated on a real S3 operation through the
-   in-process minio-go client) + the **real village `./cmd/server`** subprocess wired `S3 → MinIO`,
+   in-process S3 client) + the **real village `./cmd/server`** subprocess wired `S3 → RustFS`,
    `DB → Postgres`, with a strong JWT.
 3. **`village-setup-demo --local`** mints a demo user + API key → `credentials.json`
    in the sandbox config dir.
@@ -66,7 +66,7 @@ replaced; Maximum additionally AST-anonymizes the identifier.
 ## Pull round-trip + pollution gate (`TestPullRoundTripE2E`)
 
 A second `e2e`-tagged harness reuses the same provisioning machinery
-(podman Postgres + MinIO + the real village `./cmd/server` + the real peasant CLI
+(podman Postgres + RustFS + the real village `./cmd/server` + the real peasant CLI
 in throwaway XDG sandboxes) and adds a **second village user** to prove the
 auth-gated `peasant village transcripts {pull,list,context}` +
 `village annotations sync` surface end-to-end. The second user is minted by the
@@ -121,7 +121,7 @@ its annotation before the ordinary, non-force publication replay.
 ## Warm-stack refresh (`TestHarnessRefreshE2E`)
 
 The refresh regression publishes into a non-empty harness-owned Postgres and
-MinIO stack, resets mutable application state, restarts Village, and publishes
+RustFS stack, resets mutable application state, restarts Village, and publishes
 again. It proves refresh preserves migration-owned reference data such as the
 license and governance-event menus while clearing transcript rows and objects.
 An explicit table classification fails closed when a future migration adds an
@@ -131,7 +131,7 @@ unclassified public table.
 
 This backend test reuses the native `active-history` ingestion fixture, with named YAML
 usage variants and a required-name manifest. It runs the actual CLI in disposable HOME
-and XDG directories, against independently provisioned Village/Postgres/MinIO services.
+and XDG directories, against independently provisioned Village/Postgres/RustFS services.
 A pass checks:
 
 - Native harvest, SQLite reopen, and matching local API/export projections.
@@ -169,8 +169,8 @@ the [Peasant ↔ Village Auth Model](auth.md) (§3, §4).
 - **podman** on `PATH` (`t.Skip`s with guidance if absent).
 - A **village checkout** providing `./cmd/server` + `./cmd/village-setup-demo`
   (a separate Go module — run as subprocess binaries). `t.Skip`s if absent/unbuilt.
-- Network access to pull the `quay.io/peasant-labs/postgres` and `quay.io/minio/minio` images. (S3 operations
-  run in-process via the **minio-go** client — no `minio/mc` container is pulled.)
+- Network access to pull the `quay.io/peasant-labs/postgres` and `ghcr.io/rustfs/rustfs` images. (S3 operations
+  run in-process via the **minio-go** S3 client — no `mc` container is pulled.)
 
 ## Running
 
@@ -199,7 +199,7 @@ detects content-only changes even when file size and modification time match.
 > S3 count line-counted `mc`'s `CombinedOutput()` (stdout **+ stderr**), and CI
 > podman 4.9.3 emits ~8 cgroup-manager stderr warnings per `podman run`, so an
 > empty bucket counted as 8 and `assertSeededBaselineBeforePush` failed (want 0).
-> It was fixed by counting via the in-process **minio-go** client (typed
+> It was fixed by counting via the in-process **S3 client** (typed
 > `ObjectInfo`, no text parsing) — see [Podman version parity](#podman-version-parity-local--ci).
 > Per-run uniqueness, the Go reaper, and the Pdeathsig/killpg village teardown are
 > **orthogonal hygiene** (real leftover/orphan protection) — independently correct,
@@ -256,7 +256,7 @@ warning lines per `podman run` (rootless, no systemd user session). The original
 stderr**), so an empty bucket counted as 8 and the seeded baseline failed (want 0).
 **Local podman 5.x emits none of those lines**, so it counted 0 and passed — the
 exact false-confidence (10× green locally) that hid the bug. The same 4.9.x-vs-5.x
-gap hid the `status=dead` filter break. The real fix is in-process **minio-go**
+gap hid the `status=dead` filter break. The real fix is the in-process **S3 client**
 (typed `ObjectInfo`, no text parsing); parity is the backstop so a future CI-only
 divergence is reproducible locally instead of only on a view-only Blacksmith console.
 
@@ -271,7 +271,7 @@ podman version --format '{{.Client.Version}}' | grep -q '^4\.9\.' \
 ```
 
 To obtain a matching podman without a 24.04 host, run the suite on an Ubuntu 24.04
-VM/container (whose apt `podman` is 4.9.x). The in-process minio-go count is
+VM/container (whose apt `podman` is 4.9.x). The in-process S3 count is
 stderr-immune regardless of podman version, so on a 4.9.x box the focused
 `TestTranscriptBucketObjectCountMatchesKnownPuts` and the seeded baseline both stay
 green with the fix and (the baseline) RED without it.
@@ -308,7 +308,7 @@ make e2e E2E_TEST_FLAGS='-v -run ^TestSkipGateE2E$'
 ```
 
 Podman service scopes can escape the runner cgroup. Each harness-created Postgres
-and MinIO container therefore has a separate **1 GiB memory/no-swap** limit.
+and RustFS container therefore has a separate **1 GiB memory/no-swap** limit.
 Budget up to **10 GiB total** for one runner plus these two services, plus host
 overhead; pre-existing or externally supplied services are not changed. Smaller
 machines must lower the runner budget or use a suitably sized isolated runner.
@@ -331,7 +331,7 @@ arena and Go soft target from TestMain, but no cgroup or scheduling protection.
 ## Notes / scope
 
 - **Verified green** on a full-stack box (podman 5.8.2): mixed claude+codex+cursor
-  batch to MinIO, K system annotations, push#2 skip, retraction=1, village-scan
+  batch to the object store, K system annotations, push#2 skip, retraction=1, village-scan
   422 + clean 2xx, plus an unknown-harness direct publish rejected by schema.
 - Fixture bytes and provenance — see [`docs/e2e-fixture.md`](e2e-fixture.md). The
   **claude** fixture is fully synthetic; the other provider-shaped samples are
