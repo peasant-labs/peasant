@@ -80,10 +80,14 @@ A registry entry is admitted only when it carries:
 
 1. `class` from the closed set `single-threaded-bytes` · `subprocess` ·
    `static-analysis` · `toolchain`;
-2. `evidence`, a `file:line` that exists and is inside the named test's file;
+2. `evidence`, a `#<testName>` anchor that resolves to a test declared in the
+   named test's own file (the file is implied by `package`/`test`, so a line
+   offset cannot drift it);
 3. an observed `cost` pair (`wall_ms`, `cpu_ms`) from a committed measurement;
 4. for `subprocess`, `build_flags` resolved against the referenced
-   `exec_command_site` — a partition child must be built **without** `-race`.
+   `exec_command_site`, a `<file>#<funcName>#<fragment>` anchor that locates the
+   `exec.Command` call inside the named function by a required source fragment —
+   a partition child must be built **without** `-race`.
    `TestOpenCodeNativeCLI` is pinned in `protected` as the counter-example: its
    `go build` child uses `nativeCLIRaceFlag`, which is `-race=true` under the
    `race` build tag.

@@ -87,12 +87,13 @@ var (
 // --- Frozen function and method signatures --------------------------------
 
 var (
-	_ func(string) (Registry, error)     = LoadRegistry
-	_ func([]byte) (Registry, error)     = DecodeRegistry
-	_ func(string, Registry) error       = ValidateRegistry
-	_ func(string) (Position, error)     = ParsePosition
-	_ func(*BuildFlags) bool             = (*BuildFlags).HasRace
-	_ func(string) (Budget, bool, error) = LoadBudget
+	_ func(string) (Registry, error)       = LoadRegistry
+	_ func([]byte) (Registry, error)       = DecodeRegistry
+	_ func(string, Registry) error         = ValidateRegistry
+	_ func(string) (ExecAnchor, error)     = ParseExecAnchor
+	_ func(string) (EvidenceAnchor, error) = ParseEvidenceAnchor
+	_ func(*BuildFlags) bool               = (*BuildFlags).HasRace
+	_ func(string) (Budget, bool, error)   = LoadBudget
 
 	_ func(Invocation) string              = Invocation.Unit
 	_ func(*RunResult) []teststream.Record = (*RunResult).FailedTests
