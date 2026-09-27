@@ -52,36 +52,44 @@ type retainedPayloadSizeProbeFixtures struct {
 		Name     string `yaml:"name"`
 		Encoding string `yaml:"encoding"`
 	} `yaml:"noMaterializationCases"`
+	CapBoundaryCases []struct {
+		Name     string `yaml:"name"`
+		Encoding string `yaml:"encoding"`
+		Position string `yaml:"position"`
+	} `yaml:"capBoundaryCases"`
 }
 
 // expandProbeTokens replaces fixture tokens that YAML cannot spell literally:
 // {{FF}} is one raw 0xFF byte (invalid UTF-8), {{DEEP}} is a 12,001-deep raw
-// array for the depth-budget row, {{DEEP9997}} is one past the probe's
-// raw-payload budget (declined by the probe, accepted by the decoder),
-// {{DEEP9996}} is exactly the probe's raw-payload budget (accepted by both),
-// {{DEEP9999}} is exactly the extension budget (accepted by both), and
-// {{DEEP10000}} is one past the extension budget (declined by the probe,
-// refused by the decoder). The depths derive from retainedRawPayloadDepthBudget
-// and strictRetainedExtensionDepth, so the boundary rows move with the
-// constants instead of going stale when the shared depth constant changes.
+// array for the depth-budget row, {{DEEP9997}} is a 9,997-deep raw array one
+// past the probe's raw-payload budget (declined by the probe, accepted by the
+// decoder), {{DEEP9996}} is a 9,996-deep raw array exactly at the probe's
+// raw-payload budget (accepted by both), {{DEEP9999}} is a 9,999-deep raw
+// array exactly at the extension budget (accepted by both), and {{DEEP10000}}
+// is a 10,000-deep raw array one past the extension budget (declined by the
+// probe, refused by the decoder). The depths derive from localRawEvidenceDepth,
+// the shared authoritative ceiling, rather than from the probe's own budget
+// constants: narrowing a probe budget without moving the authority must turn
+// the accept row red instead of silently retargeting it, while the values stay
+// identical to the budget-relative spellings they replace.
 func expandProbeTokens(extra string) string {
 	if strings.Contains(extra, "{{FF}}") {
 		extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
 	}
 	if strings.Contains(extra, "{{DEEP9997}}") {
-		deep := strings.Repeat("[", retainedRawPayloadDepthBudget+1) + strings.Repeat("]", retainedRawPayloadDepthBudget+1)
+		deep := strings.Repeat("[", localRawEvidenceDepth-3) + strings.Repeat("]", localRawEvidenceDepth-3)
 		extra = strings.ReplaceAll(extra, "{{DEEP9997}}", deep)
 	}
 	if strings.Contains(extra, "{{DEEP9996}}") {
-		deep := strings.Repeat("[", retainedRawPayloadDepthBudget) + strings.Repeat("]", retainedRawPayloadDepthBudget)
+		deep := strings.Repeat("[", localRawEvidenceDepth-4) + strings.Repeat("]", localRawEvidenceDepth-4)
 		extra = strings.ReplaceAll(extra, "{{DEEP9996}}", deep)
 	}
 	if strings.Contains(extra, "{{DEEP9999}}") {
-		deep := strings.Repeat("[", strictRetainedExtensionDepth) + strings.Repeat("]", strictRetainedExtensionDepth)
+		deep := strings.Repeat("[", localRawEvidenceDepth-1) + strings.Repeat("]", localRawEvidenceDepth-1)
 		extra = strings.ReplaceAll(extra, "{{DEEP9999}}", deep)
 	}
 	if strings.Contains(extra, "{{DEEP10000}}") {
-		deep := strings.Repeat("[", strictRetainedExtensionDepth+1) + strings.Repeat("]", strictRetainedExtensionDepth+1)
+		deep := strings.Repeat("[", localRawEvidenceDepth) + strings.Repeat("]", localRawEvidenceDepth)
 		extra = strings.ReplaceAll(extra, "{{DEEP10000}}", deep)
 	}
 	if strings.Contains(extra, "{{DEEP}}") {
@@ -130,8 +138,8 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 			t.Fatalf("missing or duplicate probe case name %q", c.Name)
 		}
 		names[c.Name] = true
-		if c.DecoderAccepts && c.DecoderRefuses {
-			t.Fatalf("probe case %q sets both decoderAccepts and decoderRefuses", c.Name)
+		if c.Declined && !(c.DecoderAccepts != c.DecoderRefuses) {
+			t.Fatalf("probe case %q is declined and must set exactly one of decoderAccepts or decoderRefuses", c.Name)
 		}
 		if (c.DecoderAccepts || c.DecoderRefuses) && !c.Declined {
 			t.Fatalf("probe case %q pins a decoder outcome without declined: true", c.Name)
@@ -150,6 +158,12 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 		default:
 			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
 		}
+	}
+	for _, c := range fixtures.CapBoundaryCases {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("missing or duplicate cap-boundary case name %q", c.Name)
+		}
+		names[c.Name] = true
 	}
 	for _, name := range fixtures.RequiredNames {
 		if !names[name] {
@@ -266,16 +280,18 @@ func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 // fails here. It also pins measurement equivalence: the probe's over verdict
 // must equal the backstop's comparison of the longest decoded payload against
 // the case limit, so an under-measuring probe cannot pass by refusing late.
-// Declined rows are excluded unless they pin a decoder outcome: decoderAccepts
-// rows must decode cleanly (the probe is conservative there) and decoderRefuses
-// rows must not, which pins the depth-boundary margins in both directions.
+// Every declined row pins its authoritative outcome: decoderAccepts rows must
+// decode cleanly through both RetainedUnknownOf and CollectRetainedUnknown
+// (the probe is conservative there), and decoderRefuses rows must be refused
+// by CollectRetainedUnknown, the projection path ProjectRetainedUnknown takes
+// after a decline. The per-entry RetainedUnknownOf still accepts legacy shapes
+// without public coordinates and envelopes whose harness matches the entry but
+// not the export, so those rows pin decoderRefuses on the projection refusal
+// while the entry decode accepts them.
 func TestProbeAcceptedRowsMeetAuthoritativeDecoder(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.ProbeCases {
 		if c.Declined {
-			if !c.DecoderAccepts && !c.DecoderRefuses {
-				continue
-			}
 			t.Run(c.Name, func(t *testing.T) {
 				harness := c.Harness
 				if harness == "" {
@@ -292,8 +308,8 @@ func TestProbeAcceptedRowsMeetAuthoritativeDecoder(t *testing.T) {
 				if c.DecoderAccepts && (retainedErr != nil || collectErr != nil) {
 					t.Fatalf("declined row %q pins decoderAccepts but the authoritative decode refused it: retained=%v collect=%v", c.Name, retainedErr, collectErr)
 				}
-				if c.DecoderRefuses && (retainedErr == nil || collectErr == nil) {
-					t.Fatalf("declined row %q pins decoderRefuses but the authoritative decode accepted it: retained=%v collect=%v", c.Name, retainedErr, collectErr)
+				if c.DecoderRefuses && collectErr == nil {
+					t.Fatalf("declined row %q pins decoderRefuses but CollectRetainedUnknown accepted it", c.Name)
 				}
 			})
 			continue

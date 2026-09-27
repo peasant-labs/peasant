@@ -28,7 +28,11 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // through to the projection path below, which may allocate proportionally to
 // the payload before refusing. The size check
 // below remains as the authoritative backstop for any stored shape the
-// in-place probe declines to measure.
+// in-place probe declines to measure. Three content and cross-record classes
+// stay deliberately on the size refusal even though the authoritative path
+// would name an integrity error (invalid decoded payloadText content, invalid
+// legacy raw syntax, and cross-record ordering or pointer uniqueness); see
+// storedRetainedPayloadExceedsTransferLimit for the named set.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
 	if storedRetainedPayloadExceedsTransferLimit(entries, harness) {
 		return nil, retainedUnknownTransferLimitError()

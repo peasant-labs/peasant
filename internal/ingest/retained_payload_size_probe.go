@@ -129,9 +129,10 @@ func containsUnpairedSurrogateEscape(raw string) bool {
 // accumulate; each is named here and asserted in
 // TestProjectRetainedUnknownPrecedence:
 //   - a payloadText whose decoded content the shared scanner refuses
-//     (invalid JSON syntax, repeated object member names, unpaired escapes
-//     already excluded above, or depth beyond the local budget): measuring
-//     the decoded length cannot validate content without decoding;
+//     (invalid JSON syntax, repeated object member names, a double-escaped
+//     unpaired escape the stored-level pre-scan cannot see, or depth beyond
+//     the local budget): measuring the decoded length cannot validate content
+//     without decoding;
 //   - a legacy raw payload value with invalid JSON syntax, including repeated
 //     object member names (depth beyond the payload budget is mirrored above
 //     and declines): measuring the raw extent cannot validate syntax without
@@ -214,6 +215,9 @@ func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness
 			return false, false
 		}
 		folded[fold] = name
+		if fold == strings.ToLower(retainedUnknownKey) && name != retainedUnknownKey {
+			return false, false
+		}
 		i = skipJSONSpace(extra, next)
 		if i >= len(extra) || extra[i] != ':' {
 			return false, false
@@ -773,9 +777,11 @@ func scanOptionalJSONString(s string, i int) (end int, ok bool) {
 }
 
 // scanOptionalJSONInteger reads an optional position integer member. A `null`
-// value is allowed; any other value must be a bare digit run so the caller can
-// run it through the authoritative DecodeOwnedInt64, which refuses leading
-// zeros, fractions, and out-of-range spellings.
+// value is allowed; any other value must be an optional leading `-` followed
+// by a bare digit run so the caller can run it through the authoritative
+// DecodeOwnedInt64, which refuses leading zeros, fractions, and out-of-range
+// spellings. A spelled negative (other than -0) is accepted here and refused
+// by the caller's non-negative range check, exactly as the decoder decides it.
 func scanOptionalJSONInteger(s string, i int) (end int, ok bool) {
 	valueEnd, valueOK := skipJSONValue(s, i)
 	if !valueOK {
@@ -785,22 +791,32 @@ func scanOptionalJSONInteger(s string, i int) (end int, ok bool) {
 	if literal == "null" {
 		return valueEnd, true
 	}
-	if !isUnsignedJSONInteger(literal) {
+	if !isSignedJSONInteger(literal) {
 		return 0, false
 	}
 	return valueEnd, true
 }
 
-// isUnsignedJSONInteger reports whether literal is a bare run of decimal digits,
-// the pre-filter for the optional coordinate fields. The authoritative
-// DecodeOwnedInt64 run by the caller refuses leading-zero spellings among
-// them, so this helper accepts a superset that the caller narrows.
-func isUnsignedJSONInteger(literal string) bool {
+// isSignedJSONInteger reports whether literal is an optional leading `-`
+// followed by a bare run of decimal digits, the pre-filter for the optional
+// coordinate fields. The authoritative DecodeOwnedInt64 run by the caller
+// refuses leading-zero spellings among them, and the caller's non-negative
+// range check refuses true negatives, so this helper accepts a superset that
+// the caller narrows. The stored writer never emits a sign (Go marshals a zero
+// int field without one), so the signed arm only serves hand-crafted captures.
+func isSignedJSONInteger(literal string) bool {
 	if literal == "" {
 		return false
 	}
-	for k := 0; k < len(literal); k++ {
-		if literal[k] < '0' || literal[k] > '9' {
+	digits := literal
+	if digits[0] == '-' {
+		digits = digits[1:]
+	}
+	if digits == "" {
+		return false
+	}
+	for k := 0; k < len(digits); k++ {
+		if digits[k] < '0' || digits[k] > '9' {
 			return false
 		}
 	}

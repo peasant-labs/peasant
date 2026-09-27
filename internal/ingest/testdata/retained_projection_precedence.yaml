@@ -25,6 +25,8 @@ requiredNames:
   - oversized_duplicate_envelope_member_keeps_integrity_refusal
   - oversized_duplicate_root_key_keeps_integrity_refusal
   - oversized_duplicate_root_case_alias_keeps_integrity_refusal
+  - oversized_alias_only_root_key_before_over_entry_keeps_integrity_refusal
+  - oversized_over_entry_before_alias_only_root_key_keeps_integrity_refusal
   - oversized_corrupt_envelope_after_over_envelope_keeps_integrity_refusal
   - oversized_entry_before_corrupt_entry_keeps_integrity_refusal
   - oversized_corrupt_entry_before_oversized_entry_keeps_integrity_refusal
@@ -68,6 +70,7 @@ requiredNames:
   - oversized_over_entry_before_null_text_entry_keeps_integrity_refusal
   - oversized_deep_payload_text_with_over_companion_is_refused_for_size
   - oversized_over_entry_before_deep_text_entry_is_refused_for_size
+  - oversized_double_escaped_surrogate_content_is_refused_for_size
   - oversized_escaped_payload_text_key_is_refused_for_size
   - oversized_escaped_root_extension_key_is_refused_for_size
 
@@ -95,6 +98,12 @@ requiredNames:
 #                        ceiling: the probe measures its decoded length while
 #                        the authoritative path refuses its depth (the
 #                        deliberate depth change);
+#   {{OVER_DOUBLE_ESCAPED_SURROGATE}} a stored payloadText literal over the
+#                        limit whose decoded text carries an unpaired surrogate
+#                        escape: the escape is double-escaped in storage, so
+#                        the stored-level pre-scan cannot see it while the
+#                        authoritative path refuses the decoded content (the
+#                        deliberate double-escaped content change);
 #   {{FF}}               one raw 0xFF byte (invalid UTF-8, which YAML cannot
 #                        spell literally);
 #   {{DEEP}}             a 12,001-deep raw array, beyond the local depth budget.
@@ -189,6 +198,14 @@ precedenceCases:
   - name: oversized_duplicate_root_case_alias_keeps_integrity_refusal
     extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}],"RetainedUnknown":[]}']
     want: integrity
+  - name: oversized_alias_only_root_key_before_over_entry_keeps_integrity_refusal
+    extras: ['{"RetainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_over_entry_before_alias_only_root_key_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"RetainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
   - name: oversized_corrupt_envelope_after_over_envelope_keeps_integrity_refusal
     extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}},{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":2,"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":{{OVER}}}]}']
     want: integrity
@@ -346,6 +363,11 @@ precedenceCases:
     deliberateSizePrecedence: true
   - name: oversized_over_entry_before_deep_text_entry_is_refused_for_size
     extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DEEP_TEXT}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_double_escaped_surrogate_content_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DOUBLE_ESCAPED_SURROGATE}}}]}']
     want: size
     authoritative: integrity
     deliberateSizePrecedence: true

@@ -24,8 +24,9 @@ func oversizedPayload(size int) json.RawMessage {
 // retainedRefusalAllocationBound states the no-copy invariant shared by the
 // allocation proof and the boundary test: a transfer refusal allocates
 // nothing proportional to the payload. The observed deltas are about 1.2-1.5
-// KiB, so 1 MiB stays three orders of magnitude above the behavior while
-// catching a regression that copies even a fraction of a large payload.
+// KiB, so 1 MiB stays nearly three orders of magnitude (measured 708-840x)
+// above the behavior while catching a regression that copies even a fraction
+// of a large payload.
 const retainedRefusalAllocationBound = 1 << 20
 
 func publicPosition(record int64) ingest.UnknownSourcePosition {
@@ -56,9 +57,9 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // payload/4 calibration bound from the probe-off mutation story, and the
 // 1 MiB constant bound that states the real invariant, that the refusal
 // allocates nothing proportional to the payload. The observed deltas are
-// about 1.2-1.5 KiB, so the constant bound stays three orders of magnitude
-// above the behavior while catching a regression that copies even a fraction
-// of a 64 MiB payload. The closed encoding set is driven by
+// about 1.2-1.5 KiB, so the constant bound stays nearly three orders of
+// magnitude (measured 708-840x) above the behavior while catching a regression
+// that copies even a fraction of a 64 MiB payload. The closed encoding set is driven by
 // the noMaterializationCases fixture, including the escaped-owned-string,
 // escaped-owned-key, and escaped-evidence-root-key shapes that once lost the
 // early refusal. Every encoding carries a JSON-valid payload, so with the
@@ -68,8 +69,9 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // Calibration: forcing the in-place probe off makes this same 64 MiB payload
 // allocate ~3.5-3.8 GB depending on the encoding before the refusal, so the
 // payload/4 bound sits about 208-228 times (over two orders of magnitude)
-// below the allocation the probe removes. The bound is therefore reproducible
-// from this committed test alone, not from an unrecorded local measurement.
+// below the allocation the probe removes. The calibration is therefore
+// reproducible with the one-line probe-off mutation documented here, not from
+// this committed test alone.
 func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *testing.T) {
 	const payloadBytes = 64 << 20
 	overDigits := `"` + strings.Repeat("1", payloadBytes-2) + `"`
@@ -183,6 +185,61 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 	return raw.Cases
 }
 
+// loadCapBoundaryCases loads the at-cap boundary matrix for
+// TestProjectRetainedUnknownAcceptsAtCapPayloads and enforces its
+// required-name manifest: every name in requiredNames that starts with
+// cap_boundary_ must appear here, so shrinking the matrix fails while adding
+// a row is allowed until its name is required.
+func loadCapBoundaryCases(t *testing.T) []struct {
+	Name     string `yaml:"name"`
+	Encoding string `yaml:"encoding"`
+	Position string `yaml:"position"`
+} {
+	t.Helper()
+	var raw struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name     string `yaml:"name"`
+			Encoding string `yaml:"encoding"`
+			Position string `yaml:"position"`
+		} `yaml:"capBoundaryCases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(retainedPayloadSizeProbeFixtureData))
+	decoder.KnownFields(false)
+	if err := decoder.Decode(&raw); err != nil {
+		t.Fatalf("decode committed fixture %s: %v", retainedPayloadSizeProbeFixturePath, err)
+	}
+	if len(raw.Cases) == 0 {
+		t.Fatalf("committed fixture %s needs capBoundaryCases", retainedPayloadSizeProbeFixturePath)
+	}
+	names := make(map[string]bool)
+	for _, c := range raw.Cases {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("missing or duplicate cap-boundary case name %q", c.Name)
+		}
+		names[c.Name] = true
+		switch c.Encoding {
+		case "payloadText", "rawPayload":
+		default:
+			t.Fatalf("cap-boundary case %q encodes %q, must be payloadText or rawPayload", c.Name, c.Encoding)
+		}
+		switch c.Position {
+		case "atCap", "oneOver":
+		default:
+			t.Fatalf("cap-boundary case %q sits %q, must be atCap or oneOver", c.Name, c.Position)
+		}
+	}
+	for _, name := range raw.RequiredNames {
+		if !strings.HasPrefix(name, "cap_boundary_") {
+			continue
+		}
+		if !names[name] {
+			t.Fatalf("required fixture %q missing from %s", name, retainedPayloadSizeProbeFixturePath)
+		}
+	}
+	return raw.Cases
+}
+
 // TestProjectRetainedUnknownRefusalMessageStable pins the refusal text through
 // the public entry point.
 func TestProjectRetainedUnknownRefusalMessageStable(t *testing.T) {
@@ -199,10 +256,12 @@ func TestProjectRetainedUnknownRefusalMessageStable(t *testing.T) {
 // TestProjectRetainedUnknownAcceptsAtCapPayloads pins the strict boundary at
 // the published cap through the real entry: a payload of exactly 8 MiB is
 // accepted for both encodings, and one byte over is refused without
-// materializing. The probe unit pins the comparison at synthetic limits and
-// the constant is pinned to 8<<20; only this test composes the two at the
+// materializing. The matrix lives in the capBoundaryCases fixture with a
+// required-name manifest; only this test composes the boundary with the
 // production call site, so a drift that passes limit-1 (refusing legitimate
-// at-cap records) fails here while the fixture rows stay green.
+// at-cap records) fails here while the fixture rows stay green. The 8 MiB
+// literals are built in Go; the allocation bound is asserted on the refusal
+// side of each encoding.
 func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
 	const capBytes = 8 << 20
 	// A payloadText value carries two quote bytes around its decoded text, so
@@ -215,41 +274,34 @@ func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
 	rawExtra := func(payload string) string {
 		return `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":` + payload + `}]}`
 	}
-	atCapText := carrierEntry(t, publicPosition(0), json.RawMessage(textAtCap))
-	oneOverText := carrierEntry(t, publicPosition(0), json.RawMessage(textOneOver))
 	atCapRawExtra := rawExtra(rawAtCap)
 	oneOverRawExtra := rawExtra(rawOneOver)
-	atCapRaw := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &atCapRawExtra}
-	oneOverRaw := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &oneOverRawExtra}
-	for _, c := range []struct {
-		name  string
-		entry schema.SessionEntry
-	}{
-		{"payloadText", atCapText},
-		{"rawPayload", atCapRaw},
-	} {
-		t.Run(c.name+"/at_cap_accepted", func(t *testing.T) {
-			projected, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{c.entry}, schema.HarnessCodex)
-			if err != nil || len(projected) != 1 {
-				t.Fatalf("at-cap payload was not accepted: records=%d err=%v", len(projected), err)
-			}
-			if len(projected[0].Payload) != capBytes {
-				t.Fatalf("at-cap projected payload is %d bytes, want exactly %d", len(projected[0].Payload), capBytes)
-			}
-		})
+	entries := map[string]schema.SessionEntry{
+		"payloadText/atCap":   carrierEntry(t, publicPosition(0), json.RawMessage(textAtCap)),
+		"payloadText/oneOver": carrierEntry(t, publicPosition(0), json.RawMessage(textOneOver)),
+		"rawPayload/atCap":    {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &atCapRawExtra},
+		"rawPayload/oneOver":  {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &oneOverRawExtra},
 	}
-	for _, c := range []struct {
-		name  string
-		entry schema.SessionEntry
-	}{
-		{"payloadText", oneOverText},
-		{"rawPayload", oneOverRaw},
-	} {
-		t.Run(c.name+"/one_over_refused_early", func(t *testing.T) {
+	for _, c := range loadCapBoundaryCases(t) {
+		t.Run(c.Name, func(t *testing.T) {
+			entry, ok := entries[c.Encoding+"/"+c.Position]
+			if !ok {
+				t.Fatalf("cap-boundary case %q encodes %q at %q, must be payloadText/rawPayload at atCap/oneOver", c.Name, c.Encoding, c.Position)
+			}
+			if c.Position == "atCap" {
+				projected, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
+				if err != nil || len(projected) != 1 {
+					t.Fatalf("at-cap payload was not accepted: records=%d err=%v", len(projected), err)
+				}
+				if len(projected[0].Payload) != capBytes {
+					t.Fatalf("at-cap projected payload is %d bytes, want exactly %d", len(projected[0].Payload), capBytes)
+				}
+				return
+			}
 			var before, after runtime.MemStats
 			runtime.GC()
 			runtime.ReadMemStats(&before)
-			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{c.entry}, schema.HarnessCodex)
+			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
 			runtime.ReadMemStats(&after)
 			if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
 				t.Fatalf("one-over payload was not refused for size: %v", err)
@@ -367,7 +419,8 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 //
 // Three deliberate size precedences are asserted as the intended consequence of
 // refusing before materialization: a payloadText whose decoded content the
-// shared scanner refuses (invalid syntax, repeated object member names, or
+// shared scanner refuses (invalid syntax, repeated object member names, a
+// double-escaped unpaired escape the stored-level pre-scan cannot see, or
 // depth), a legacy raw payload value with invalid JSON syntax, including
 // repeated object member names (depth beyond the payload budget declines
 // instead), and cross-record ordering or pointer uniqueness, which the
@@ -390,6 +443,7 @@ var deliberateSizePrecedenceNames = []string{
 	"oversized_non_monotonic_positions_across_records_is_refused_for_size",
 	"oversized_deep_payload_text_with_over_companion_is_refused_for_size",
 	"oversized_over_entry_before_deep_text_entry_is_refused_for_size",
+	"oversized_double_escaped_surrogate_content_is_refused_for_size",
 }
 
 // overDeepPayloadTextDepth is one beyond the shared local depth ceiling the
@@ -433,6 +487,19 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 	overRawDuplicateKey := dupDecoded
 	deep := strings.Repeat("[", 12001) + strings.Repeat("]", 12001)
 	overDeepText := `"` + strings.Repeat("[", overDeepPayloadTextDepth) + strings.Repeat("1", fixtures.PayloadBytes) + strings.Repeat("]", overDeepPayloadTextDepth) + `"`
+	// overDoubleEscaped is a stored payloadText literal whose decoded text is
+	// exactly payloadBytes long and carries an unpaired surrogate escape the
+	// stored-level pre-scan cannot see: the escape stays double-escaped in the
+	// stored spelling, so only the decoded content trips the shared scanner.
+	// The thirteen framing bytes around the content (ten opening, three
+	// closing) make the stored literal five bytes longer than the decoded
+	// content, which the precedence row below pins as a deliberate size
+	// outcome.
+	padDoubleEscaped := strings.Repeat("1", fixtures.PayloadBytes-8)
+	overDoubleEscaped := `"\"\\uD800` + padDoubleEscaped + `\""`
+	if len(overDoubleEscaped) != fixtures.PayloadBytes+5 {
+		t.Fatalf("built double-escaped literal is %d bytes, want payloadBytes %d plus 5 framing bytes", len(overDoubleEscaped), fixtures.PayloadBytes)
+	}
 	if len(over) != fixtures.PayloadBytes {
 		t.Fatalf("built over-limit literal is %d bytes, want payloadBytes %d", len(over), fixtures.PayloadBytes)
 	}
@@ -460,6 +527,7 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 				extra = strings.ReplaceAll(extra, "{{OVER_DUPLICATE_KEY}}", overDuplicateKey)
 				extra = strings.ReplaceAll(extra, "{{OVER_RAW_DUPLICATE_KEY}}", overRawDuplicateKey)
 				extra = strings.ReplaceAll(extra, "{{OVER_DEEP_TEXT}}", overDeepText)
+	extra = strings.ReplaceAll(extra, "{{OVER_DOUBLE_ESCAPED_SURROGATE}}", overDoubleEscaped)
 				extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
 				extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)
 				entries = append(entries, schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: index, Extra: &extra})
