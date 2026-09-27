@@ -10,11 +10,11 @@ import (
 )
 
 // TestConcurrentGoldenCopiesAreIsolated protects the property that makes this
-// package safe to use from several test processes at once (the cross-process
-// shard sets): every user gets its own copy of the shared template inside its
-// own t.TempDir, so two concurrent opens can never share a database file. The
-// template itself lives under the process temp dir, so a second process builds
-// its own and the copies never cross a process boundary.
+// package safe to use from several test processes at once: every user gets its
+// own copy of the shared template inside its own t.TempDir, so two concurrent
+// opens can never share a database file. The template itself lives under the
+// process temp dir, so a second process builds its own and the copies never
+// cross a process boundary.
 func TestConcurrentGoldenCopiesAreIsolated(t *testing.T) {
 	t.Parallel()
 
@@ -34,7 +34,7 @@ func TestConcurrentGoldenCopiesAreIsolated(t *testing.T) {
 			if !strings.HasPrefix(template, filepath.Clean(os.TempDir())+string(os.PathSeparator)) {
 				t.Fatalf("golden template %s is not under the process temp dir %s", template, os.TempDir())
 			}
-			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "shard-marker"), []byte("private"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "isolation-marker"), []byte("private"), 0o600); err != nil {
 				t.Fatalf("write a sibling of the copy: %v", err)
 			}
 			mu.Lock()
