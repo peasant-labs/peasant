@@ -1,0 +1,89 @@
+requiredNames:
+  - measure_plain
+  - measure_escaped_quote
+  - measure_basic_escapes
+  - measure_surrogate_pair
+  - measure_unpaired_high_surrogate
+  - measure_unpaired_low_surrogate
+  - measure_bmp_escape
+  - measure_raw_multibyte
+  - measure_over_limit_stops
+  - probe_payload_text_over_limit
+  - probe_payload_text_under_limit
+  - probe_payload_text_escapes_over_limit
+  - probe_raw_payload_over_limit
+  - probe_extension_before_retained_evidence
+  - probe_retained_after_extension_payload
+  - probe_multiple_records_second_over_limit
+  - probe_legacy_without_public_coordinates
+  - probe_unknown_envelope_member
+  - probe_both_payload_encodings
+  - probe_non_object_root
+  - probe_missing_retained_array
+
+# measureCases drive scanJSONString directly: `raw` is one JSON string literal
+# and `want` is its decoded UTF-8 byte length. `limit`, when set, also asserts
+# that measurement stops as soon as the decoded length exceeds it.
+measureCases:
+  - { name: measure_plain, raw: '"hello"', want: 5 }
+  - { name: measure_escaped_quote, raw: '"a\"b"', want: 3 }
+  - { name: measure_basic_escapes, raw: '"\b\f\n\r\t\/\\"', want: 7 }
+  - { name: measure_surrogate_pair, raw: '"\uD83D\uDE00"', want: 4 }
+  - { name: measure_unpaired_high_surrogate, raw: '"\uD83D"', want: 3 }
+  - { name: measure_unpaired_low_surrogate, raw: '"\uDE00"', want: 3 }
+  - { name: measure_bmp_escape, raw: '"\u00e9"', want: 2 }
+  - { name: measure_raw_multibyte, raw: '"héllo"', want: 6 }
+  - { name: measure_over_limit_stops, raw: '"0123456789"', limit: 8, wantExceeded: true }
+
+# probeCases drive storedRetainedExtraExceedsTransferLimit over one stored Extra
+# root string. `limit` is the transfer limit the case exercises; a small value
+# keeps every case cheap. wantOver is the probe verdict.
+probeCases:
+  - name: probe_payload_text_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123456789"}]}'
+    wantOver: true
+  - name: probe_payload_text_under_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123"}]}'
+    wantOver: false
+  - name: probe_payload_text_escapes_over_limit
+    limit: 3
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"a\u00e9b"}]}'
+    wantOver: true
+  - name: probe_raw_payload_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":123456789}]}'
+    wantOver: true
+  - name: probe_extension_before_retained_evidence
+    limit: 8
+    extra: '{"other":{"a":1},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123456789"}]}'
+    wantOver: true
+  - name: probe_retained_after_extension_payload
+    limit: 8
+    extra: '{"other":{"payloadText":"0123456789"},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123"}]}'
+    wantOver: false
+  - name: probe_multiple_records_second_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123"},{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":"0123456789"}]}'
+    wantOver: true
+  - name: probe_legacy_without_public_coordinates
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1},"payloadText":"0123456789"}]}'
+    wantOver: false
+  - name: probe_unknown_envelope_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123456789"}]}'
+    wantOver: false
+  - name: probe_both_payload_encodings
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":"x","payloadText":"0123456789"}]}'
+    wantOver: false
+  - name: probe_non_object_root
+    limit: 8
+    extra: '[1,2,3]'
+    wantOver: false
+  - name: probe_missing_retained_array
+    limit: 8
+    extra: '{"other":1}'
+    wantOver: false
