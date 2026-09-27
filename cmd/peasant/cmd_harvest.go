@@ -239,18 +239,16 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, files
 	// can satisfy enabled-source path validation. Explicit path overrides still
 	// apply after loading and index mode never discovers native source paths.
 	var nativeHarness *defaults.Harness
-	var nativeFallback defaults.SourcePath
 	if mode != harvestIndexOnly && flags.sourceHarness != "" && flags.sourcePath == "" {
 		provider, err := resolveHarnessFlag(flags.sourceHarness)
 		if err != nil {
 			return err
 		}
 		nativeHarness = &provider
-		nativeFallback = defaultSourcePath(provider)
 	}
 
 	// 2. Load config.
-	cfg, err := loadRunConfigWithSourcePathFallback(configPath, flags.dryRun, nativeHarness, nativeFallback)
+	cfg, err := loadRunConfigForHarnessOnly(configPath, flags.dryRun, nativeHarness)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -290,9 +288,15 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, files
 			return fmt.Errorf("--source-path requires --source-harness")
 		}
 		if flags.sourceHarness != "" {
-			provider, err := resolveHarnessFlag(flags.sourceHarness)
-			if err != nil {
-				return err
+			var provider defaults.Harness
+			if nativeHarness != nil {
+				provider = *nativeHarness
+			} else {
+				var err error
+				provider, err = resolveHarnessFlag(flags.sourceHarness)
+				if err != nil {
+					return err
+				}
 			}
 			if flags.sourcePath != "" {
 				resolved, err := ingest.NewResolvedPath(flags.sourcePath)
@@ -300,8 +304,6 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, files
 					return fmt.Errorf("resolve source path: %w", err)
 				}
 				applySourceOverride(cfg, provider, resolved)
-			} else {
-				applyDefaultSourcePath(cfg, provider)
 			}
 			// --source-harness scopes the run to the named provider as the sole
 			// active source, whether its path comes from config, the default, or
@@ -1163,36 +1165,6 @@ func applySourceOverride(cfg *config.Config, provider defaults.Harness, path ing
 		cfg.Sources.Pi.Enabled = true
 		cfg.Sources.Pi.Paths = []string{string(path)}
 	}
-}
-
-// applyDefaultSourcePath fills an empty configured path list for a selected
-// provider. Non-empty configured paths remain authoritative.
-func applyDefaultSourcePath(cfg *config.Config, provider defaults.Harness) {
-	configured, ok := cfg.Sources.Provider(provider)
-	if !ok || len(configured.Paths) != 0 {
-		return
-	}
-
-	fallback := defaultSourcePath(provider)
-	configured.Paths = []string{fallback.String()}
-}
-
-func defaultSourcePath(provider defaults.Harness) defaults.SourcePath {
-	switch provider {
-	case defaults.HarnessClaudeCode:
-		return defaults.DefaultClaudePath
-	case defaults.HarnessOpenCode:
-		return defaults.DefaultOpenCodePath
-	case defaults.HarnessCodex:
-		return defaults.DefaultCodexPath
-	case defaults.HarnessCursor:
-		return defaults.DefaultCursorPath
-	case defaults.HarnessStrike:
-		return defaults.DefaultStrikePath
-	case defaults.HarnessPi:
-		return defaults.DefaultPiPath
-	}
-	return ""
 }
 
 type sourcePathIssue struct {

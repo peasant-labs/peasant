@@ -837,7 +837,7 @@ sources:
 	}
 }
 
-func TestParseWithSourcePathFallback_DefaultsOnlySelectedSourceBeforeValidation(t *testing.T) {
+func TestParseForHarnessOnly_DefaultsOnlySelectedSourceBeforeValidation(t *testing.T) {
 	t.Parallel()
 	data := []byte(`version: 1
 sources:
@@ -853,15 +853,32 @@ sources:
 		t.Fatalf("Parse error = %v, want enabled Codex path validation error", err)
 	}
 
-	cfg, err := ParseWithSourcePathFallback(data, defaults.HarnessCodex, defaults.DefaultCodexPath)
+	cfg, err := ParseForHarnessOnly(data, defaults.HarnessCodex)
 	if err != nil {
-		t.Fatalf("ParseWithSourcePathFallback: %v", err)
+		t.Fatalf("ParseForHarnessOnly: %v", err)
 	}
 	if got := cfg.Sources.Codex.Paths; len(got) != 1 || got[0] != defaults.DefaultCodexPath.String() {
 		t.Fatalf("Codex paths = %v, want [%q]", got, defaults.DefaultCodexPath)
 	}
 	if got := cfg.Sources.Strike.Paths; len(got) != 0 {
 		t.Fatalf("unselected Strike paths changed: %v", got)
+	}
+
+	unselectedEmpty := []byte(`version: 1
+sources:
+  codex:
+    enabled: true
+    paths: []
+  strike:
+    enabled: true
+    paths: []
+`)
+	if _, err := ParseForHarnessOnly(unselectedEmpty, defaults.HarnessCodex); err == nil || !strings.Contains(err.Error(), `enabled source "strike" must have at least one path`) {
+		t.Fatalf("ParseForHarnessOnly error = %v, want unselected Strike path validation error", err)
+	}
+
+	if _, err := ParseForHarnessOnly(data, defaults.Harness("unknown")); err == nil || !strings.Contains(err.Error(), `has no documented default path`) {
+		t.Fatalf("ParseForHarnessOnly unknown harness error = %v", err)
 	}
 }
 

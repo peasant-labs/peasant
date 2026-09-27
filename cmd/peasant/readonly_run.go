@@ -16,13 +16,13 @@ import (
 )
 
 func loadRunConfig(path string, dryRun bool) (*config.Config, error) {
-	return loadRunConfigWithSourcePathFallback(path, dryRun, nil, "")
+	return loadRunConfigForHarnessOnly(path, dryRun, nil)
 }
 
-func loadRunConfigWithSourcePathFallback(path string, dryRun bool, harness *defaults.Harness, fallback defaults.SourcePath) (*config.Config, error) {
+func loadRunConfigForHarnessOnly(path string, dryRun bool, harness *defaults.Harness) (*config.Config, error) {
 	if !dryRun {
 		if harness != nil {
-			return config.LoadWithSourcePathFallback(path, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, *harness, fallback)
+			return config.LoadForHarnessOnly(path, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, *harness)
 		}
 		return loadConfig(path)
 	}
@@ -30,7 +30,7 @@ func loadRunConfigWithSourcePathFallback(path string, dryRun bool, harness *defa
 		data, err := os.ReadFile(path)
 		if err == nil {
 			if harness != nil {
-				return config.ParseWithSourcePathFallback(data, *harness, fallback)
+				return config.ParseForHarnessOnly(data, *harness)
 			}
 			return config.Parse(data)
 		}

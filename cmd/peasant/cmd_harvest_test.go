@@ -312,24 +312,6 @@ func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 	}
 }
 
-// TestApplyDefaultSourcePath verifies harness-only discovery preserves a
-// configured path and fills an empty path list from the documented default.
-func TestApplyDefaultSourcePath(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{}
-	cfg.Sources.Codex.Paths = []string{"/configured/codex"}
-	applyDefaultSourcePath(cfg, defaults.HarnessCodex)
-	if got := cfg.Sources.Codex.Paths; len(got) != 1 || got[0] != "/configured/codex" {
-		t.Fatalf("configured paths changed: %v", got)
-	}
-
-	cfg.Sources.Codex.Paths = nil
-	applyDefaultSourcePath(cfg, defaults.HarnessCodex)
-	if got := cfg.Sources.Codex.Paths; len(got) != 1 || got[0] != defaults.DefaultCodexPath.String() {
-		t.Fatalf("default paths = %v, want %q", got, defaults.DefaultCodexPath)
-	}
-}
-
 // TestBuildSourceConfigs_DisabledProvider confirms that a disabled provider is
 // not included in the source map returned by buildSourceConfigs.
 func TestBuildSourceConfigs_DisabledProvider(t *testing.T) {

@@ -743,20 +743,14 @@ func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, e
 	return load(path, fs, git, nil)
 }
 
-// LoadWithSourcePathFallback loads and validates configuration after filling an
-// empty path list for one selected source. It is used by harness-scoped native
-// discovery, where the selected harness's documented default must satisfy the
-// normal enabled-source validation rule.
-func LoadWithSourcePathFallback(path string, fs ingest.FileSystem, git ingest.GitResolver, harness defaults.Harness, fallback defaults.SourcePath) (*Config, error) {
-	return load(path, fs, git, &sourcePathFallback{harness: harness, path: fallback})
+// LoadForHarnessOnly loads and validates configuration for harness-scoped
+// native discovery. An empty path list for the selected harness is filled from
+// its documented default before the normal validation rules run.
+func LoadForHarnessOnly(path string, fs ingest.FileSystem, git ingest.GitResolver, harness defaults.Harness) (*Config, error) {
+	return load(path, fs, git, &harness)
 }
 
-type sourcePathFallback struct {
-	harness defaults.Harness
-	path    defaults.SourcePath
-}
-
-func load(path string, fs ingest.FileSystem, git ingest.GitResolver, fallback *sourcePathFallback) (*Config, error) {
+func load(path string, fs ingest.FileSystem, git ingest.GitResolver, harnessOnly *defaults.Harness) (*Config, error) {
 	if path == "" {
 		return LoadDefaults(context.Background(), git), nil
 	}
@@ -777,14 +771,14 @@ func load(path string, fs ingest.FileSystem, git ingest.GitResolver, fallback *s
 				if err != nil {
 					return nil, fmt.Errorf("config: read migrated %q: %w", path, err)
 				}
-				return parse(data, fallback)
+				return parse(data, harnessOnly)
 			}
 			return LoadDefaults(context.Background(), git), nil
 		}
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 
-	return parse(data, fallback)
+	return parse(data, harnessOnly)
 }
 
 // LoadDefaults returns a Config populated with sensible production defaults.
@@ -810,21 +804,25 @@ func Parse(data []byte) (*Config, error) {
 	return parse(data, nil)
 }
 
-// ParseWithSourcePathFallback parses and validates configuration after filling
-// an empty path list for one selected source.
-func ParseWithSourcePathFallback(data []byte, harness defaults.Harness, fallback defaults.SourcePath) (*Config, error) {
-	return parse(data, &sourcePathFallback{harness: harness, path: fallback})
+// ParseForHarnessOnly parses and validates configuration for harness-scoped
+// native discovery, applying only the selected harness's documented default.
+func ParseForHarnessOnly(data []byte, harness defaults.Harness) (*Config, error) {
+	return parse(data, &harness)
 }
 
-func parse(data []byte, fallback *sourcePathFallback) (*Config, error) {
+func parse(data []byte, harnessOnly *defaults.Harness) (*Config, error) {
 	cfg := BaseConfig()
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
 	}
-	if fallback != nil {
-		if provider, ok := cfg.Sources.Provider(fallback.harness); ok && len(provider.Paths) == 0 {
-			provider.Paths = []string{fallback.path.String()}
+	if harnessOnly != nil {
+		fallback, known := defaults.SourcePathFor(*harnessOnly)
+		if !known {
+			return nil, fmt.Errorf("config: harness-only source %q has no documented default path", *harnessOnly)
+		}
+		if provider, ok := cfg.Sources.Provider(*harnessOnly); ok && len(provider.Paths) == 0 {
+			provider.Paths = []string{fallback.String()}
 		}
 	}
 
