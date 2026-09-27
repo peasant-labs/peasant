@@ -7,10 +7,94 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+// readAllSessionRecords drains every bounded session-record page of one source
+// and returns the records keyed by session identifier.
+func readAllSessionRecords(t *testing.T, fixtureName string) map[string]OpenCodeSessionRecord {
+	t.Helper()
+	materialized := testfixture.MaterializeByName(t, fixtureName)
+	path, err := NewOpenCodeSQLiteSourcePath(materialized.Path)
+	if err != nil {
+		t.Fatalf("validate synthetic source path: %v", err)
+	}
+	opened, err := OpenOpenCodeSQLiteSource(t.Context(), path, DefaultOpenCodeSQLiteSourceOptions())
+	if err != nil {
+		t.Fatalf("open synthetic source: %v", err)
+	}
+	defer func() { _ = opened.Close(t.Context()) }()
+
+	pageSize, err := NewOpenCodeCurrentPageSize(1)
+	if err != nil {
+		t.Fatalf("build bounded page size: %v", err)
+	}
+	records := make(map[string]OpenCodeSessionRecord)
+	var cursor *OpenCodeSessionRecordCursor
+	pages := 0
+	for {
+		page, readErr := opened.SessionRecords(t.Context(), OpenCodeSessionRecordPageRequest{PageSize: pageSize, After: cursor})
+		if readErr != nil {
+			t.Fatalf("read session-record page %d: %v", pages, readErr)
+		}
+		if !page.Supported || !page.HasParent || !page.HasClock {
+			t.Fatalf("session-record page %d support = supported %t parent %t clock %t, want all true", pages, page.Supported, page.HasParent, page.HasClock)
+		}
+		for _, record := range page.Records {
+			records[record.SessionID.String()] = record
+		}
+		pages++
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+		if pages > 20 {
+			t.Fatal("session-record pagination did not terminate")
+		}
+	}
+	return records
+}
+
+// TestSessionRecordsReadAttributionColumns proves the bounded session-record
+// read attributes each session to its working directory, title, and creation
+// time when the session table carries those columns.
+func TestSessionRecordsReadAttributionColumns(t *testing.T) {
+	records := readAllSessionRecords(t, "hybrid-attribution")
+
+	legacyWinner, ok := records["ses_3cd91f52effeXd3QAJ54jOyzL1"]
+	if !ok {
+		t.Fatalf("session records = %v, want the legacy-only winner", records)
+	}
+	if legacyWinner.Directory != "/home/dev/peasant-labs/garden" || legacyWinner.Title != "legacy winner attribution" || legacyWinner.TimeCreated != 3000 {
+		t.Fatalf("legacy winner attribution = directory %q title %q created %d, want the fixture attribution", legacyWinner.Directory, legacyWinner.Title, legacyWinner.TimeCreated)
+	}
+
+	currentWinner, ok := records["ses_3cd91f52effeXd3QAJ54jOyzL2"]
+	if !ok {
+		t.Fatalf("session records = %v, want the current winner", records)
+	}
+	if currentWinner.Directory != "/home/dev/peasant-labs/tool" || currentWinner.Title != "current winner attribution" || currentWinner.TimeCreated != 3010 {
+		t.Fatalf("current winner attribution = directory %q title %q created %d, want the fixture attribution", currentWinner.Directory, currentWinner.Title, currentWinner.TimeCreated)
+	}
+}
+
+// TestSessionRecordsWithoutAttributionColumnsYieldEmptyFields proves that a
+// session table that lacks the attribution columns reports empty directory and
+// title and a zero creation time rather than failing the read.
+func TestSessionRecordsWithoutAttributionColumnsYieldEmptyFields(t *testing.T) {
+	records := readAllSessionRecords(t, "hybrid-catalog")
+	if len(records) == 0 {
+		t.Fatal("hybrid catalog produced no session records")
+	}
+	for id, record := range records {
+		if record.Directory != "" || record.Title != "" || record.TimeCreated != 0 {
+			t.Fatalf("session %q without attribution columns = directory %q title %q created %d, want empty attribution", id, record.Directory, record.Title, record.TimeCreated)
+		}
+	}
+}
 
 //go:embed testdata/opencode_session_record_columns.yaml
 var openCodeSessionRecordColumnsYAML []byte
@@ -227,5 +311,97 @@ func assertEmptyExtendedFields(t *testing.T, id string, record OpenCodeSessionRe
 	t.Helper()
 	if record.Agent != "" || record.TokensInput != 0 || record.TokensOutput != 0 || record.TokensReasoning != 0 || record.TokensCacheRead != 0 || record.TokensCacheWrite != 0 || record.Cost != 0 || record.Version != "" || record.Slug != "" || record.Revert != "" {
 		t.Fatalf("session %q older layout leaked extended fields: %+v", id, record)
+	}
+}
+
+// TestSessionRecordsPaginateThroughSharedBoundedPage proves that the
+// session-record read paginates through the shared bounded page and its cursor,
+// returning every session row across bounded pages with no duplicates.
+func TestSessionRecordsPaginateThroughSharedBoundedPage(t *testing.T) {
+	materialized := testfixture.MaterializeByName(t, "legacy-reader-pages")
+	path, err := NewOpenCodeSQLiteSourcePath(materialized.Path)
+	if err != nil {
+		t.Fatalf("validate synthetic source path: %v", err)
+	}
+	opened, err := OpenOpenCodeSQLiteSource(t.Context(), path, DefaultOpenCodeSQLiteSourceOptions())
+	if err != nil {
+		t.Fatalf("open synthetic source: %v", err)
+	}
+	defer func() { _ = opened.Close(t.Context()) }()
+
+	pageSize, err := NewOpenCodeCurrentPageSize(1)
+	if err != nil {
+		t.Fatalf("build bounded page size: %v", err)
+	}
+	seen := make(map[string]int)
+	var cursor *OpenCodeSessionRecordCursor
+	pages := 0
+	for {
+		page, readErr := opened.SessionRecords(t.Context(), OpenCodeSessionRecordPageRequest{PageSize: pageSize, After: cursor})
+		if readErr != nil {
+			t.Fatalf("read session-record page %d: %v", pages, readErr)
+		}
+		pages++
+		for _, record := range page.Records {
+			seen[record.SessionID.String()]++
+		}
+		if len(page.Records) > 1 {
+			t.Fatalf("bounded page returned %d rows above the page size of 1", len(page.Records))
+		}
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+		if pages > 10 {
+			t.Fatal("session-record pagination did not terminate")
+		}
+	}
+	if len(seen) != 2 || seen["ses_reader_a"] != 1 || seen["ses_reader_z"] != 1 {
+		t.Fatalf("paginated session rows = %v, want each of the two sessions exactly once", seen)
+	}
+	if pages < 2 {
+		t.Fatalf("pagination produced %d pages, want at least 2 for two sessions at page size 1", pages)
+	}
+}
+
+// TestSessionColumnSupportIsCachedPerSource proves that the session table's
+// column support is read once per source and reused, rather than re-read on
+// every session-record page.
+func TestSessionColumnSupportIsCachedPerSource(t *testing.T) {
+	materialized := testfixture.MaterializeByName(t, "legacy-message-part")
+	path, err := NewOpenCodeSQLiteSourcePath(materialized.Path)
+	if err != nil {
+		t.Fatalf("validate synthetic source path: %v", err)
+	}
+	opened, err := OpenOpenCodeSQLiteSource(t.Context(), path, DefaultOpenCodeSQLiteSourceOptions())
+	if err != nil {
+		t.Fatalf("open synthetic source: %v", err)
+	}
+	source := opened.(*zombiezenOpenCodeSQLiteSource)
+	defer func() { _ = source.Close(t.Context()) }()
+
+	pageSize, err := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
+	if err != nil {
+		t.Fatalf("build page size: %v", err)
+	}
+	first, err := source.SessionRecords(t.Context(), OpenCodeSessionRecordPageRequest{PageSize: pageSize})
+	if err != nil {
+		t.Fatalf("read first session-record page: %v", err)
+	}
+	if !first.HasParent || !first.HasClock {
+		t.Fatalf("first page column support = parent %t clock %t, want both present for the legacy session table", first.HasParent, first.HasClock)
+	}
+	// Poison the cache with a support value the real schema does not have. A
+	// second read must return the cached value, proving the pragma is not re-run.
+	source.stateMu.Lock()
+	source.sessionColumns = openCodeSessionColumnSupport{table: OpenCodeSessionTableLegacy, hasID: true, present: true, hasParent: false, hasClock: false}
+	source.stateMu.Unlock()
+
+	second, err := source.SessionRecords(t.Context(), OpenCodeSessionRecordPageRequest{PageSize: pageSize})
+	if err != nil {
+		t.Fatalf("read second session-record page: %v", err)
+	}
+	if second.HasParent || second.HasClock {
+		t.Fatalf("second page re-read the session columns instead of using the cache: parent %t clock %t", second.HasParent, second.HasClock)
 	}
 }
