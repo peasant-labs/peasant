@@ -60,13 +60,31 @@ func ModulePath(root string) (string, error) {
 	return "", fmt.Errorf("no module directive in %s", filepath.Join(root, "go.mod"))
 }
 
-// ListPackages runs `go list ./...` from root and returns the import paths.
-func ListPackages(root string) ([]string, error) {
-	cmd := exec.Command("go", "list", "./...")
+// DefaultPackagePattern is the whole-module pattern. A run whose patterns
+// reduce to exactly this pattern is a full-suite run; anything narrower is a
+// subset run.
+const DefaultPackagePattern = "./..."
+
+// normalizePatterns returns the patterns unchanged, or the whole-module default
+// when none were given.
+func normalizePatterns(patterns []string) []string {
+	if len(patterns) == 0 {
+		return []string{DefaultPackagePattern}
+	}
+	return patterns
+}
+
+// ListPackages runs `go list` over the given package patterns from root and
+// returns the import paths. `go list` does not compile, so a package with a
+// build error is still listed; a pattern that matches nothing is an error, so a
+// typo cannot silently resolve to an empty run.
+func ListPackages(root string, patterns []string) ([]string, error) {
+	patterns = normalizePatterns(patterns)
+	cmd := exec.Command("go", append([]string{"list"}, patterns...)...)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("go list ./...: %w", err)
+		return nil, fmt.Errorf("go list %s: %w", strings.Join(patterns, " "), err)
 	}
 	var pkgs []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -78,15 +96,17 @@ func ListPackages(root string) ([]string, error) {
 	return pkgs, nil
 }
 
-// ListTests runs `go test -list '.*' -json ./...` from root and returns the
-// top-level test/benchmark/example/fuzz names per package, plus the wall cost.
+// ListTests runs `go test -list '.*' -json` over the given package patterns
+// from root and returns the top-level test/benchmark/example/fuzz names per
+// package, plus the wall cost. An empty pattern list means the whole module.
 //
 // A package that fails to build contributes no names; the gate's screen treats
 // a registered package with no events as a failure, so a build failure is not
 // swallowed.
-func ListTests(root string) (map[string][]string, time.Duration, error) {
+func ListTests(root string, patterns []string) (map[string][]string, time.Duration, error) {
+	patterns = normalizePatterns(patterns)
 	start := time.Now()
-	cmd := exec.Command("go", "test", "-list", ".*", "-json", "./...")
+	cmd := exec.Command("go", append([]string{"test", "-list", ".*", "-json"}, patterns...)...)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	elapsed := time.Since(start)
@@ -169,7 +189,7 @@ func BuildPlan(root string, modulePath string, tests map[string][]string, reg Re
 	plan := &Plan{ModulePath: modulePath}
 	listed := map[string]bool{}
 	for _, importPath := range sortedKeys(tests) {
-		dir := packageDir(modulePath, importPath)
+		dir := PackageDir(modulePath, importPath)
 		names := tests[importPath]
 		for _, n := range names {
 			listed[dir+"|"+n] = true
@@ -204,12 +224,31 @@ func BuildPlan(root string, modulePath string, tests map[string][]string, reg Re
 	return plan, nil
 }
 
-// packageDir converts an import path to its repo-relative directory.
-func packageDir(modulePath, importPath string) string {
+// PackageDir converts an import path to its repo-relative directory.
+func PackageDir(modulePath, importPath string) string {
 	if importPath == modulePath {
 		return "."
 	}
 	return strings.TrimPrefix(strings.TrimPrefix(importPath, modulePath), "/")
+}
+
+// ScopeRegistry returns a copy of reg holding only the entries whose package is
+// in dirs. A subset run scopes its registry this way so the plan's
+// missing-registered check and the screen's liveness rule cover the requested
+// packages and nothing outside them.
+func ScopeRegistry(reg Registry, dirs map[string]bool) Registry {
+	out := Registry{Version: reg.Version}
+	for _, e := range reg.Partition {
+		if dirs[e.Package] {
+			out.Partition = append(out.Partition, e)
+		}
+	}
+	for _, e := range reg.Protected {
+		if dirs[e.Package] {
+			out.Protected = append(out.Protected, e)
+		}
+	}
+	return out
 }
 
 func sortedKeys[T any](m map[string]T) []string {

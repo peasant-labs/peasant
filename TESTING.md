@@ -31,6 +31,32 @@ and to prove that every test still runs exactly once across the passes.
   computes the plan and applies the screen. The gate computes the plan from
   `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
 
+### Subset runs (`-pkgs`)
+
+`run` and `plan` take `-pkgs`, a comma-separated list of repo-relative package
+patterns that defaults to `./...`:
+
+```bash
+go run ./cmd/testgate run -pkgs ./internal/testkit/coveragemap,./cmd/testgate -race=false
+```
+
+Only the named patterns are listed, planned, and executed, so the gate can be
+checked end to end in seconds instead of the whole 13–15 minute suite. A subset
+run is **not** a full-suite gate result and says so:
+
+- it prints a `SUBSET RUN` header naming the patterns and the package count;
+- the four-rule screen's **registered liveness** rule (rule 3) requires events
+  only for registered packages the plan contains, so a registered package the
+  subset deliberately excluded does not fail the screen — while a planned
+  registered package that emits no events still does;
+- the whole-suite budget is **not applicable**: the gate prints
+  `budget: not applicable (subset run: N of M packages)` and never compares a
+  subset wall against the committed 120s bar.
+
+A full run (`-pkgs ./...`, the default) behaves exactly as before: the whole
+registry is in force and the budget verdict is enforced. `profile`'s existing
+single-package `-pkg` is separate and unchanged.
+
 ### Timing mode
 
 `cmd/testgate timing` summarizes an arbitrary `go test -json` stream with the

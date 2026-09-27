@@ -16,6 +16,9 @@ required_names:
   - verdict-inconclusive
   - verdict-over-budget
   - verdict-within-budget
+  - budget-subset-not-applicable
+  - budget-subset-ignores-wall
+  - budget-full-enforced
 
 budget_cases:
   - { name: budget-file-wins,   file_seconds: 120, env_seconds: 90, want_present: true,  want_seconds: 120, want_basis: "reference-machine wall" }
@@ -32,3 +35,11 @@ budget_verdict_cases:
   - { name: verdict-inconclusive, present: true,  cal_l: 5.0, wall_ms: 999999, seconds: 1,   want_fail: false }
   - { name: verdict-over-budget,  present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, want_fail: true }
   - { name: verdict-within-budget, present: true, cal_l: 1.0, wall_ms: 50000,  seconds: 100, want_fail: false }
+
+# Subset runs have no whole-suite budget: the line must say so and never fail,
+# even against a present budget and an over-budget wall. A full run keeps the
+# existing verdict.
+budget_mode_cases:
+  - { name: budget-subset-not-applicable, subset: true,  planned: 2, total: 512, present: true,  cal_l: 1.0, wall_ms: 999999, seconds: 1,   want_fail: false, want_note: "not applicable (subset run: 2 of 512 packages)" }
+  - { name: budget-subset-ignores-wall,   subset: true,  planned: 1, total: 512, present: true,  cal_l: 1.0, wall_ms: 500000, seconds: 100, want_fail: false, want_note: "not applicable (subset run: 1 of 512 packages)" }
+  - { name: budget-full-enforced,         subset: false, planned: 0, total: 0,   present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, want_fail: true,  want_note: "FAIL" }

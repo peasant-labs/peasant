@@ -65,8 +65,10 @@ type ScreenInput struct {
 //
 //  1. exactly-once: a test that ran in more than one pass is a double-run.
 //  2. partition containment: a partition member must not run in the race pass.
-//  3. registered liveness: a registered package with no events, or a registered
-//     member with no run, fails.
+//  3. registered liveness: a registered package IN THE PLAN with no events, or
+//     a registered member IN THE PLAN with no run, fails. A registered package
+//     the plan does not contain is outside this run (a subset run deliberately
+//     excluded it) and is not required to emit events.
 //  4. unregistered liveness: an unregistered planned package with no events is
 //     reported, not failed.
 //
@@ -80,10 +82,14 @@ func Screen(in ScreenInput) []Finding {
 	}
 
 	// Registry packages are repo-relative directories; streams are keyed by
-	// import path. Normalize every registry lookup through the plan.
+	// import path. Normalize every registry lookup through the plan. Rules 3
+	// and 4 are scoped to the plan, so a subset run only owes events for the
+	// packages it planned to run.
 	importOf := map[string]string{}
+	plannedDirs := map[string]bool{}
 	for _, p := range in.Plan.Packages {
 		importOf[p.Dir] = p.ImportPath
+		plannedDirs[p.Dir] = true
 	}
 	pkgKey := func(dir string) string {
 		if ip, ok := importOf[dir]; ok {
@@ -161,8 +167,11 @@ func Screen(in ScreenInput) []Finding {
 		}
 	}
 
-	// Rule 3 — registered liveness.
+	// Rule 3 — registered liveness, scoped to the planned packages.
 	for _, dir := range registeredPackages(in.Registry) {
+		if !plannedDirs[dir] {
+			continue
+		}
 		if eventCount[pkgKey(dir)] == 0 {
 			findings = append(findings, Finding{
 				Rule:     "registered-liveness",
@@ -177,6 +186,9 @@ func Screen(in ScreenInput) []Finding {
 		}
 	}
 	for _, e := range partitionEntries {
+		if !plannedDirs[e.Package] {
+			continue
+		}
 		if ranCount[pkgKey(e.Package)][e.Test] == 0 {
 			findings = append(findings, Finding{
 				Rule:     "registered-liveness",
@@ -191,6 +203,9 @@ func Screen(in ScreenInput) []Finding {
 		}
 	}
 	for _, e := range protectedEntries {
+		if !plannedDirs[e.Package] {
+			continue
+		}
 		ranInPass := false
 		for _, pass := range passes {
 			if passRan[pass][pkgKey(e.Package)][e.Test] {

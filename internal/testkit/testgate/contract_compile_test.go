@@ -101,9 +101,11 @@ var (
 	_ func(*Runner, context.Context, *Plan, PassMode, bool) (*RunResult, error) = (*Runner).Run
 
 	_ func(string) (string, error)                                       = ModulePath
-	_ func(string) ([]string, error)                                     = ListPackages
-	_ func(string) (map[string][]string, time.Duration, error)           = ListTests
+	_ func(string, []string) ([]string, error)                           = ListPackages
+	_ func(string, []string) (map[string][]string, time.Duration, error) = ListTests
 	_ func(string, string, map[string][]string, Registry) (*Plan, error) = BuildPlan
+	_ func(string, string) string                                        = PackageDir
+	_ func(Registry, map[string]bool) Registry                           = ScopeRegistry
 	_ func([]string) string                                              = RunRegex
 
 	_ func(ScreenInput) []Finding     = Screen
