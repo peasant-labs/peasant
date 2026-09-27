@@ -44,6 +44,14 @@ func main() {
 	outDir := fs.String("out", "", "directory for streams and profiles (default: $TESTGATE_OUT or .agents.local/testgate/<ts>)")
 	parallel := fs.Int("p", runtime.GOMAXPROCS(0), "packages to invoke concurrently (default: GOMAXPROCS)")
 	raceFlag := fs.Bool("race", os.Getenv("RACE") != "0", "run the race pass (default: $RACE != 0)")
+	pkgFlag := fs.String("pkg", "", "profile: repo-relative package to profile (e.g. ./internal/ingest)")
+	batchesFlag := fs.Int("n", 0, "profile: concurrent batches (default: half the cores, a quarter under -race)")
+	parallelFlag := fs.Int("parallel", 1, "profile: per-batch -parallel; 0 leaves it unpinned (isolated run)")
+	priorFlag := fs.String("prior", "", "profile: prior go test -json stream used for LPT batch weights")
+	cpuTopFlag := fs.Int("cpuprofile-top", 0, "profile: re-profile the N slowest tests with -cpuprofile")
+	pretestFlag := fs.Bool("pretest", false, "profile: measure the five pre-test steps instead of a package")
+	profilesFlag := fs.Bool("profiles", false, "profile: write Class B block/mutex/cpu profiles per batch")
+	traceFlag := fs.Bool("trace", false, "profile: also write a runtime trace per batch (perturbs block.out)")
 	_ = fs.Parse(os.Args[2:])
 
 	root, err := findRepoRoot()
@@ -73,6 +81,27 @@ func main() {
 	case "run":
 		code := runGate(root, reg, *outDir, *parallel, *raceFlag)
 		os.Exit(code)
+	case "profile":
+		goBin, err := exec.LookPath("go")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testgate: go is not on PATH: %v\n", err)
+			os.Exit(2)
+		}
+		code := runProfile(profileOptions{
+			root:     root,
+			goBin:    goBin,
+			outDir:   *outDir,
+			pkg:      *pkgFlag,
+			batches:  *batchesFlag,
+			parallel: *parallelFlag,
+			prior:    *priorFlag,
+			cpuTop:   *cpuTopFlag,
+			pretest:  *pretestFlag,
+			profiles: *profilesFlag,
+			trace:    *traceFlag,
+			race:     *raceFlag,
+		})
+		os.Exit(code)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -85,14 +114,22 @@ func usage() {
 	fmt.Fprint(os.Stderr, `testgate — two-pass test gate with an exactly-once screen
 
 usage:
-  testgate plan [flags]   print the run plan; run nothing
-  testgate run  [flags]   execute the plan and screen the result
+  testgate plan [flags]     print the run plan; run nothing
+  testgate run  [flags]     execute the plan and screen the result
+  testgate profile [flags]  measure: batched LPT per-test profile, or -pretest
 
 flags:
   -registry PATH   registry fixture (default: <repo>/no-race-partition.yaml)
   -out DIR         stream output dir (default: .agents.local/testgate/<ts>)
   -p N             packages invoked concurrently (default: GOMAXPROCS)
   -race            run the race pass (default: $RACE != 0)
+  -pkg DIR         profile: repo-relative package to profile
+  -n N             profile: concurrent batches
+  -parallel N      profile: per-batch -parallel; 0 is unpinned (isolated run)
+  -prior FILE      profile: prior go test -json stream for LPT weights
+  -profiles        profile: write Class B block/mutex/cpu profiles
+  -trace           profile: also write a runtime trace (perturbs block.out)
+  -pretest         profile: measure the five pre-test steps
 
 exit codes:
   0  the gate passed
@@ -240,6 +277,7 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	ctx := context.Background()
 	streams := map[testgate.PassMode]map[string][]teststream.Record{}
 	walls := map[testgate.PassMode]time.Duration{}
+	passCPU := map[testgate.PassMode][2]time.Duration{}
 	var raceRecords, noRaceRecords []testgate.Record
 	invocationErrors := []string{}
 
@@ -258,6 +296,8 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		streams[testgate.ModeNoRace] = resB.Streams[testgate.ModeNoRace]
 		walls[testgate.ModeRace] = resA.Walls[testgate.ModeRace]
 		walls[testgate.ModeNoRace] = resB.Walls[testgate.ModeNoRace]
+		passCPU[testgate.ModeRace] = [2]time.Duration{resA.User, resA.System}
+		passCPU[testgate.ModeNoRace] = [2]time.Duration{resB.User, resB.System}
 		invocationErrors = append(invocationErrors, resA.Errors...)
 		invocationErrors = append(invocationErrors, resB.Errors...)
 		raceRecords = resA.Records[testgate.ModeRace]
@@ -272,11 +312,42 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		}
 		streams[testgate.ModeNoRace] = res.Streams[testgate.ModeNoRace]
 		walls[testgate.ModeNoRace] = res.Walls[testgate.ModeNoRace]
+		passCPU[testgate.ModeNoRace] = [2]time.Duration{res.User, res.System}
 		invocationErrors = append(invocationErrors, res.Errors...)
 		noRaceRecords = res.Records[testgate.ModeNoRace]
 		printRecords("no-race (single pass)", noRaceRecords)
 	}
 	testWall := time.Since(testStart)
+
+	// The per-class decision table: registry classes and the race pass from the
+	// test records, plus measured pre-test steps when a pre-test doc is present
+	// in the same output directory.
+	passes := []testgate.PassSummary{}
+	if race {
+		passes = append(passes, testgate.PassSummary{
+			Pass: testgate.ModeRace, Wall: walls[testgate.ModeRace],
+			User: passCPU[testgate.ModeRace][0], System: passCPU[testgate.ModeRace][1],
+			Serialized: false, Units: len(raceRecords),
+		})
+	}
+	passes = append(passes, testgate.PassSummary{
+		Pass: testgate.ModeNoRace, Wall: walls[testgate.ModeNoRace],
+		User: passCPU[testgate.ModeNoRace][0], System: passCPU[testgate.ModeNoRace][1],
+		Serialized: true, Units: len(noRaceRecords),
+	})
+	classTable := testgate.BuildClassTable(passes, append(append([]testgate.Record{}, raceRecords...), noRaceRecords...))
+
+	var preTestRecords []testgate.ReportRecord
+	preTestDoc, havePreTest, preTestErr := testgate.ReadPreTestDocument(filepath.Join(outDir, "pretest.json"))
+	if preTestErr != nil {
+		fmt.Fprintf(os.Stderr, "testgate: %v\n", preTestErr)
+	}
+	if havePreTest {
+		classTable = append(classTable, preTestDoc.Rows...)
+		preTestRecords = testgate.StepRecords(preTestDoc.Steps)
+	}
+	printClassTable(classTable)
+	printCapacityCheck(race, passCPU)
 
 	combined := &testgate.RunResult{Streams: streams}
 	failed := combined.FailedTests()
@@ -339,15 +410,17 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		Findings:         reportFindings(findings),
 		FailedTests:      reportTests(failed),
 		InvocationErrors: invocationErrors,
+		ClassTable:       classTable,
+		PreTestSteps:     preTestRecords,
 	}
 	if haveCheckStart {
 		report.PreTestWallMS = testStart.Sub(checkStart).Milliseconds()
 	}
 	if race {
-		report.PassA = passReport("race", plan, testgate.ModeRace, walls[testgate.ModeRace], race)
-		report.PassB = passReport("no-race", plan, testgate.ModeNoRace, walls[testgate.ModeNoRace], race)
+		report.PassA = passReport("race", plan, testgate.ModeRace, walls[testgate.ModeRace], passCPU[testgate.ModeRace], race)
+		report.PassB = passReport("no-race", plan, testgate.ModeNoRace, walls[testgate.ModeNoRace], passCPU[testgate.ModeNoRace], race)
 	} else {
-		report.PassB = passReport("no-race (single pass)", plan, testgate.ModeNoRace, walls[testgate.ModeNoRace], race)
+		report.PassB = passReport("no-race (single pass)", plan, testgate.ModeNoRace, walls[testgate.ModeNoRace], passCPU[testgate.ModeNoRace], race)
 	}
 	reportPath := filepath.Join(outDir, "report.json")
 	if err := testgate.WriteReport(reportPath, report); err != nil {
@@ -399,8 +472,9 @@ func reportTests(records []teststream.Record) []testgate.ReportTest {
 	return out
 }
 
-// passReport counts the packages and tests a pass ran.
-func passReport(name string, plan *testgate.Plan, mode testgate.PassMode, wall time.Duration, race bool) *testgate.PassReport {
+// passReport counts the packages and tests a pass ran, and carries the pass's
+// whole-pass child CPU and the derived wall − CPU gap.
+func passReport(name string, plan *testgate.Plan, mode testgate.PassMode, wall time.Duration, cpu [2]time.Duration, race bool) *testgate.PassReport {
 	pkgs, tests := 0, 0
 	for _, p := range plan.Packages {
 		var n int
@@ -417,7 +491,13 @@ func passReport(name string, plan *testgate.Plan, mode testgate.PassMode, wall t
 			tests += n
 		}
 	}
-	return &testgate.PassReport{Name: name, WallMS: wall.Milliseconds(), Packages: pkgs, Tests: tests}
+	wallMS := wall.Milliseconds()
+	userMS := cpu[0].Milliseconds()
+	sysMS := cpu[1].Milliseconds()
+	return &testgate.PassReport{
+		Name: name, WallMS: wallMS, Packages: pkgs, Tests: tests,
+		UserMS: userMS, SystemMS: sysMS, GapMS: wallMS - userMS - sysMS,
+	}
 }
 
 func printRecords(label string, records []testgate.Record) {
@@ -427,6 +507,31 @@ func printRecords(label string, records []testgate.Record) {
 	for _, r := range records {
 		fmt.Printf("%-56s %-22s %9s %9s %9s\n", r.Unit, r.Class, round(r.Wall), round(r.User), round(r.System))
 	}
+}
+
+// printClassTable prints the per-class wall/user/system decision table and the
+// derived wall − CPU gap: the work more cores cannot compress.
+func printClassTable(rows []testgate.ClassRow) {
+	fmt.Println("\n=== per-class decision table (wall − CPU = work cores cannot compress) ===")
+	fmt.Printf("%-24s %5s %9s %9s %9s %9s  %s\n", "CLASS", "UNITS", "WALL", "USER", "SYSTEM", "GAP", "BASIS")
+	for _, r := range rows {
+		fmt.Printf("%-24s %5d %9s %9s %9s %9s  %s\n", r.Class, r.Units, ms(r.WallMS), ms(r.UserMS), ms(r.SystemMS), ms(r.GapMS), r.Basis)
+	}
+}
+
+// printCapacityCheck states the CPU-numerator bookkeeping. The bar is held at
+// 120 s (a user ruling, not this measurement's decision); this tool measures the
+// CPU input and asserts no impossibility claim in either direction.
+func printCapacityCheck(race bool, passCPU map[testgate.PassMode][2]time.Duration) {
+	var total time.Duration
+	for _, mode := range []testgate.PassMode{testgate.ModeRace, testgate.ModeNoRace} {
+		c := passCPU[mode]
+		total += c[0] + c[1]
+	}
+	fmt.Println("\n=== capacity check (CPU seconds; the bar is HELD at 120s — this measurement does not decide it) ===")
+	fmt.Printf("measured CPU today (user+system, all passes): %s\n", round(total))
+	fmt.Println("Y  post-optimization CPU numerator: PENDING (the parallelism/faking work has not run)")
+	fmt.Println("check CPU_seconds(Y)/120: PENDING — no impossibility claim is asserted in either direction")
 }
 
 func printControls(concurrency int, race bool) {

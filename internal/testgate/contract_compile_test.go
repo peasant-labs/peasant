@@ -58,18 +58,22 @@ var (
 
 	_ = Runner{Root: "", OutDir: "", GoBin: "", Concurrency: 0, Env: nil, SerialPassB: false}
 
-	_ = RunResult{Records: nil, Streams: nil, Walls: nil, Errors: nil}
+	_ = RunResult{Records: nil, Streams: nil, Walls: nil, Errors: nil, User: 0, System: 0}
 
 	_ = Report{
 		SchemaVersion: 0, Module: "", Race: false, Concurrency: 0, GOMAXPROCS: 0,
 		ListWallMS: 0, PassA: nil, PassB: nil, CombinedWallMS: 0, PreTestWallMS: 0,
 		Calibration: Calibration{}, Records: nil, Findings: nil, FailedTests: nil, InvocationErrors: nil,
+		ClassTable: nil, PreTestSteps: nil,
 	}
-	_ = PassReport{Name: "", WallMS: 0, Packages: 0, Tests: 0}
+	_ = PassReport{Name: "", WallMS: 0, Packages: 0, Tests: 0, UserMS: 0, SystemMS: 0, GapMS: 0}
 	_ = Calibration{L: 0, ProbeMS: 0, ReferenceMS: 0, Inconclusive: false}
 	_ = ReportRecord{Unit: "", Class: "", Pass: "", WallMS: 0, UserMS: 0, SystemMS: 0}
 	_ = ReportTest{Package: "", Test: ""}
 	_ = ReportFinding{Rule: "", Severity: "", What: "", Why: "", Where: "", When: "", Means: "", Fix: ""}
+	_ = ClassRow{Class: "", Units: 0, WallMS: 0, UserMS: 0, SystemMS: 0, GapMS: 0, Basis: ""}
+	_ = StepMeasurement{Step: StepFmt, Wall: 0, User: 0, System: 0, ExitCode: 0, Failed: false, LogPath: ""}
+	_ = PassSummary{Pass: ModeRace, Wall: 0, User: 0, System: 0, Serialized: false, Units: 0}
 
 	_ = Cost{WallMS: 0, CPUMs: 0}
 	_ = Entry{Package: "", Test: "", Class: ClassRace, Evidence: "", Justification: "", Cost: Cost{}, BuildFlags: nil, ExecCommandSite: ""}
@@ -105,6 +109,22 @@ var (
 	_ func([]Finding) bool            = Fails
 	_ func() (float64, time.Duration) = Calibrate
 	_ func(string, Report) error      = WriteReport
+
+	_ func([]PassSummary, []Record) []ClassRow                                        = BuildClassTable
+	_ func([]StepMeasurement) []ClassRow                                              = PreTestRows
+	_ func(string, int, time.Duration, time.Duration, time.Duration, string) ClassRow = NewClassRow
+
+	_ func([]byte) (PreTestFixture, error)        = LoadPreTestFixture
+	_ func() ([]PreTestCommand, error)            = PreTestCommands
+	_ func(string, PreTestDocument) error         = WritePreTestDocument
+	_ func(string) (PreTestDocument, bool, error) = ReadPreTestDocument
+	_ func([]StepMeasurement) []ReportRecord      = StepRecords
+
+	_ func([]string, map[string]time.Duration, int) (BatchPlan, error)                             = PlanBatches
+	_ func(context.Context, BatchProfileConfig) (*BatchProfileResult, error)                       = RunBatchProfile
+	_ func(string, *BatchProfileResult) error                                                      = WriteProfileDocument
+	_ func(context.Context, string, string, string) ([]string, error)                              = ListTestsForPackage
+	_ func(context.Context, string, string, []PreTestCommand, []string) ([]StepMeasurement, error) = RunPreTestSteps
 
 	_ func() []string         = RegistryClassNames
 	_ func(PreTestStep) Class = PreTestClass
