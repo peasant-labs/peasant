@@ -35,8 +35,8 @@ type codexLexicalExportCase struct {
 	UnknownEvery     int      `yaml:"unknown_every"`
 }
 
-// TestCodexLexicalReopenExport is the SLICE-5-L4 consolidated pass: lexical +
-// wide bytes through a real SQLite close/reopen and export. The prepare path
+// TestCodexLexicalReopenExport is the consolidated pass: lexical + wide bytes
+// through a real SQLite close/reopen and export. The prepare path
 // (pointer rebasing, sibling alignment) is pinned in TestCodexLexicalFidelity;
 // this test pins that the same bytes survive the store boundary and the
 // export-time baseline egress byte-exact (lexical payloads carry no secrets,
