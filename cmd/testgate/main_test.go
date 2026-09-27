@@ -293,7 +293,7 @@ func mustParseInt(t *testing.T, value string) int64 {
 func TestCLI_ExitCodes(t *testing.T) {
 	root := repoRoot(t)
 	bin := filepath.Join(t.TempDir(), "testgate")
-	build := exec.Command("go", "build", "-o", bin, "./scripts/testgate")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/testgate")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build the gate binary: %v\n%s", err, out)

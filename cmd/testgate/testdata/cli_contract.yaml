@@ -1,4 +1,4 @@
-# Frozen CLI contract for scripts/testgate.
+# Frozen CLI contract for cmd/testgate.
 #
 # The usage text IS the human-facing contract: subcommands, flags, and exit
 # codes. Each check asserts an exact substring of the real usage() output; the

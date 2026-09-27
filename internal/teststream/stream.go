@@ -1,7 +1,7 @@
 // Package teststream parses a `go test -json` stream into terminal test
 // records and renders the ranked per-test and per-family report.
 //
-// It is the stream core of `scripts/testgate`: the `run` mode merges the gate's
+// It is the stream core of `cmd/testgate`: the `run` mode merges the gate's
 // passes and applies the exactly-once screen, and the `timing` mode summarizes
 // an arbitrary stream. Keeping the parse in one place means a stream shape
 // change is fixed once.
