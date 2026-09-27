@@ -43,6 +43,24 @@ type retainedPayloadSizeProbeFixtures struct {
 		WantOver     bool   `yaml:"wantOver"`
 		Declined     bool   `yaml:"declined"`
 	} `yaml:"probeCases"`
+	NoMaterializationCases []struct {
+		Name     string `yaml:"name"`
+		Encoding string `yaml:"encoding"`
+	} `yaml:"noMaterializationCases"`
+}
+
+// expandProbeTokens replaces fixture tokens that YAML cannot spell literally:
+// {{FF}} is one raw 0xFF byte (invalid UTF-8) and {{DEEP}} is a 12,001-deep
+// raw array for the depth-budget row.
+func expandProbeTokens(extra string) string {
+	if strings.Contains(extra, "{{FF}}") {
+		extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
+	}
+	if strings.Contains(extra, "{{DEEP}}") {
+		deep := strings.Repeat("[", 12001) + strings.Repeat("]", 12001)
+		extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)
+	}
+	return extra
 }
 
 // loadRetainedPayloadSizeProbeFixtures loads the committed fixture and enforces
@@ -84,6 +102,17 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 			t.Fatalf("missing or duplicate probe case name %q", c.Name)
 		}
 		names[c.Name] = true
+	}
+	for _, c := range fixtures.NoMaterializationCases {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("missing or duplicate no-materialization case name %q", c.Name)
+		}
+		names[c.Name] = true
+		switch c.Encoding {
+		case "payloadText", "rawPayload", "escapedKind":
+		default:
+			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, or escapedKind", c.Name, c.Encoding)
+		}
 	}
 	for _, name := range fixtures.RequiredNames {
 		if !names[name] {
@@ -163,10 +192,11 @@ func TestJSONValueRawExtentMatchesAuthoritativePayload(t *testing.T) {
 // predicate: it measures a canonical stored payload, soundly declines to refuse
 // records whose public coordinates are absent, envelopes outside the owned
 // member set, ambiguous payload encodings, invalid harnesses and coordinates,
-// and unrelated extension fields, and reaches the same verdict whichever member
-// order carries the corruption. A case marked declined must report ok=false with
-// over=false so the authoritative path owns the refusal; any other case must
-// report ok=true.
+// document-level strictness (invalid UTF-8, unpaired surrogates, depth, null
+// text, leading-zero integers), and unrelated extension fields, and reaches
+// the same verdict whichever member order carries the corruption. A case marked
+// declined must report ok=false with over=false so the authoritative path owns
+// the refusal; any other case must report ok=true.
 func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.ProbeCases {
@@ -182,9 +212,44 @@ func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 			if entryHarness == "" {
 				entryHarness = harness
 			}
-			over, ok := storedRetainedExtraExceedsTransferLimit(c.Extra, Harness(harness), Harness(entryHarness), c.Limit)
+			extra := expandProbeTokens(c.Extra)
+			over, ok := storedRetainedExtraExceedsTransferLimit(extra, Harness(harness), Harness(entryHarness), c.Limit)
 			if over != c.WantOver || ok != !c.Declined {
-				t.Fatalf("probe verdict over=%v ok=%v, want over=%v declined=%v for %s", over, ok, c.WantOver, c.Declined, strings.TrimSpace(c.Extra))
+				t.Fatalf("probe verdict over=%v ok=%v, want over=%v declined=%v for %s", over, ok, c.WantOver, c.Declined, strings.TrimSpace(extra))
+			}
+		})
+	}
+}
+
+// TestProbeAcceptedRowsMeetAuthoritativeDecoder is the differential oracle:
+// every probe-accepted fixture row must be accepted by the authoritative read
+// path, which enforces no transfer limit. A passing row proves the mirror is
+// closed in the accept direction; the next drift is falsifiable by
+// construction because adding a probe-accepted row that the decoder refuses
+// fails here. Declined rows are excluded: they are either corruption the
+// decoder refuses or legacy absence, both owned by the authoritative path.
+func TestProbeAcceptedRowsMeetAuthoritativeDecoder(t *testing.T) {
+	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
+	for _, c := range fixtures.ProbeCases {
+		if c.Declined {
+			continue
+		}
+		t.Run(c.Name, func(t *testing.T) {
+			harness := c.Harness
+			if harness == "" {
+				harness = fixtures.ProbeHarness
+			}
+			entryHarness := c.EntryHarness
+			if entryHarness == "" {
+				entryHarness = harness
+			}
+			extra := expandProbeTokens(c.Extra)
+			entry := schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: 0, Extra: &extra}
+			if _, err := RetainedUnknownOf(entry); err != nil {
+				t.Fatalf("probe accepted %q but the authoritative decode refused it: %v", c.Name, err)
+			}
+			if _, err := CollectRetainedUnknown([]schema.SessionEntry{entry}, schema.Harness(harness)); err != nil {
+				t.Fatalf("probe accepted %q but CollectRetainedUnknown refused it: %v", c.Name, err)
 			}
 		})
 	}

@@ -43,12 +43,13 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 
 // TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing proves
 // the transfer refusal is decided from the stored bytes: an oversized payload
-// is refused without decoding or copying it. The allocated-byte delta is
-// measured for the refusal call alone, after the entry already exists in
-// memory, and asserted far below the payload size. A bound of payload/4 is
+// is refused without decoding or copying the payload itself. The allocated-byte
+// delta is measured for the refusal call alone, after the entry already exists
+// in memory, and asserted far below the payload size. A bound of payload/4 is
 // generous for allocator noise while still an order of magnitude below what
-// decoding the payload would allocate. Both stored encodings are exercised:
-// the modern payloadText string and the legacy raw payload value.
+// decoding the payload would allocate. The closed encoding set is driven by
+// the noMaterializationCases fixture, including the escaped-owned-string shape
+// that once lost the early refusal.
 //
 // Calibration: forcing the in-place probe off makes this same 64 MiB payload
 // allocate ~3.83 GB before the refusal, so the payload/4 bound sits about 230
@@ -59,19 +60,30 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 	const payloadBytes = 64 << 20
 	rawLiteral := `"` + strings.Repeat("x", payloadBytes-2) + `"`
 	rawExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payload":` + rawLiteral + `}]}`
-	cases := []struct {
-		name  string
-		entry schema.SessionEntry
-	}{
-		{"payloadText", carrierEntry(t, publicPosition(0), oversizedPayload(payloadBytes))},
-		{"rawPayload", schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &rawExtra}},
+	escapedRecord, err := ingest.NewRetainedUnknown(schema.HarnessCodex, "record", "future&more", publicPosition(0), oversizedPayload(payloadBytes))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
+	escapedEntry, err := ingest.RetainedUnknownEntry(testutil.TestSessionUUID, 0, escapedRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureCases := loadNoMaterializationCases(t)
+	entries := map[string]schema.SessionEntry{
+		"payloadText": carrierEntry(t, publicPosition(0), oversizedPayload(payloadBytes)),
+		"rawPayload":  {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &rawExtra},
+		"escapedKind": escapedEntry,
+	}
+	for _, c := range fixtureCases {
+		t.Run(c.Name, func(t *testing.T) {
+			entry, ok := entries[c.Encoding]
+			if !ok {
+				t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, or escapedKind", c.Name, c.Encoding)
+			}
 			var before, after runtime.MemStats
 			runtime.GC()
 			runtime.ReadMemStats(&before)
-			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{c.entry}, schema.HarnessCodex)
+			_, err := ingest.ProjectRetainedUnknown([]schema.SessionEntry{entry}, schema.HarnessCodex)
 			runtime.ReadMemStats(&after)
 
 			if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
@@ -84,6 +96,58 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 			}
 		})
 	}
+}
+
+//go:embed testdata/retained_payload_size_probe.yaml
+var retainedPayloadSizeProbeFixtureData []byte
+
+const retainedPayloadSizeProbeFixturePath = "internal/ingest/testdata/retained_payload_size_probe.yaml"
+
+// loadNoMaterializationCases loads the closed encoding set for the allocation
+// proof and enforces its required-name manifest: every name in requiredNames
+// that starts with no_materialization_ must appear here, so deleting an
+// encoding fails while adding one is allowed until its name is required.
+func loadNoMaterializationCases(t *testing.T) []struct {
+	Name     string `yaml:"name"`
+	Encoding string `yaml:"encoding"`
+} {
+	t.Helper()
+	var raw struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name     string `yaml:"name"`
+			Encoding string `yaml:"encoding"`
+		} `yaml:"noMaterializationCases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(retainedPayloadSizeProbeFixtureData))
+	decoder.KnownFields(false)
+	if err := decoder.Decode(&raw); err != nil {
+		t.Fatalf("decode committed fixture %s: %v", retainedPayloadSizeProbeFixturePath, err)
+	}
+	if len(raw.Cases) == 0 {
+		t.Fatalf("committed fixture %s needs noMaterializationCases", retainedPayloadSizeProbeFixturePath)
+	}
+	names := make(map[string]bool)
+	for _, c := range raw.Cases {
+		if c.Name == "" || names[c.Name] {
+			t.Fatalf("missing or duplicate no-materialization case name %q", c.Name)
+		}
+		names[c.Name] = true
+		switch c.Encoding {
+		case "payloadText", "rawPayload", "escapedKind":
+		default:
+			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, or escapedKind", c.Name, c.Encoding)
+		}
+	}
+	for _, name := range raw.RequiredNames {
+		if !strings.HasPrefix(name, "no_materialization_") {
+			continue
+		}
+		if !names[name] {
+			t.Fatalf("required fixture %q missing from %s", name, retainedPayloadSizeProbeFixturePath)
+		}
+	}
+	return raw.Cases
 }
 
 // TestProjectRetainedUnknownRefusalMessageStable pins the refusal text through
@@ -116,6 +180,15 @@ type retainedProjectionPrecedenceFixtures struct {
 		Want          string `yaml:"want"`
 		ExportHarness string `yaml:"exportHarness"`
 		EntryHarness  string `yaml:"entryHarness"`
+		// Authoritative names the CollectRetainedUnknown outcome for size
+		// rows: accepts for the motivating canonical path, integrity for
+		// the named deliberate precedences. Required when want is size.
+		Authoritative string `yaml:"authoritative"`
+		// DeliberateSizePrecedence marks the named deliberate set: size
+		// rows the authoritative path would refuse for integrity, kept on
+		// size because deciding them needs the decode or global state the
+		// probe avoids. Only size rows with authoritative integrity may set it.
+		DeliberateSizePrecedence bool `yaml:"deliberateSizePrecedence"`
 	} `yaml:"precedenceCases"`
 }
 
@@ -146,6 +219,26 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 		default:
 			t.Fatalf("precedence case %q wants %q, must be integrity, legacy, or size", c.Name, c.Want)
 		}
+		switch c.Authoritative {
+		case "", "integrity", "legacy", "accepts":
+		default:
+			t.Fatalf("precedence case %q has authoritative %q, must be integrity, legacy, accepts, or empty", c.Name, c.Authoritative)
+		}
+		if c.Want == "size" {
+			switch c.Authoritative {
+			case "integrity", "accepts":
+			default:
+				t.Fatalf("precedence size case %q needs authoritative integrity or accepts, got %q", c.Name, c.Authoritative)
+			}
+			if c.DeliberateSizePrecedence && c.Authoritative != "integrity" {
+				t.Fatalf("precedence case %q marks deliberateSizePrecedence but authoritative is %q, must be integrity", c.Name, c.Authoritative)
+			}
+			if !c.DeliberateSizePrecedence && c.Authoritative != "accepts" {
+				t.Fatalf("precedence size case %q without deliberateSizePrecedence must authoritative accepts, got %q", c.Name, c.Authoritative)
+			}
+		} else if c.DeliberateSizePrecedence {
+			t.Fatalf("precedence case %q marks deliberateSizePrecedence but want is %q, only size rows may be deliberate", c.Name, c.Want)
+		}
 		if len(c.Extras) == 0 {
 			t.Fatalf("precedence case %q needs at least one stored Extra", c.Name)
 		}
@@ -167,16 +260,22 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 // authoritative error surfaced, not merely that some integrity error appeared.
 //
 // Missing traversal coordinates and every envelope the in-place probe declines
-// keep their existing errors, including corrupt coordinates, trailing content,
-// lax grammar, and an empty evidence array in any member or entry order. A
-// record whose coordinates order corruptly (position < recordIndex) keeps the
-// position refusal: the probe mirrors the ordering rule in place.
+// keep their existing errors, including corrupt coordinates, document-level
+// strictness (invalid UTF-8, unpaired surrogates, depth, null text,
+// leading-zero integers), trailing content, lax grammar, and an empty evidence
+// array in any member or entry order. A record whose coordinates order
+// corruptly (position < recordIndex) keeps the position refusal: the probe
+// mirrors the ordering rule in place.
 //
 // Three deliberate size precedences are asserted as the intended consequence of
-// refusing before materialization: a payloadText whose decoded text is not
-// valid JSON, a legacy raw payload value with invalid JSON syntax, and
-// cross-record ordering or pointer uniqueness, which the authoritative path
-// decides over the coordinate-sorted record set.
+// refusing before materialization: a payloadText whose decoded content the
+// shared scanner refuses (invalid syntax or depth), a legacy raw payload value
+// with invalid JSON syntax (depth beyond the payload budget declines instead),
+// and cross-record ordering or pointer uniqueness, which the authoritative path
+// decides over the coordinate-sorted record set. Each size row also asserts
+// its authoritative outcome: canonical rows are accepted by
+// CollectRetainedUnknown apart from size, deliberate rows carry an integrity
+// error there.
 func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 	fixtures := loadRetainedProjectionPrecedenceFixtures(t)
 	if fixtures.PayloadBytes <= 0 {
@@ -185,6 +284,7 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 	over := `"` + strings.Repeat("1", fixtures.PayloadBytes-2) + `"`
 	overInvalid := `"` + strings.Repeat("x", fixtures.PayloadBytes-2) + `"`
 	overRawInvalid := `[` + strings.Repeat(",", fixtures.PayloadBytes-2) + `]`
+	deep := strings.Repeat("[", 12001) + strings.Repeat("]", 12001)
 	if len(over) != fixtures.PayloadBytes {
 		t.Fatalf("built over-limit literal is %d bytes, want payloadBytes %d", len(over), fixtures.PayloadBytes)
 	}
@@ -203,6 +303,8 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 				extra := strings.ReplaceAll(template, "{{OVER}}", over)
 				extra = strings.ReplaceAll(extra, "{{OVER_INVALID}}", overInvalid)
 				extra = strings.ReplaceAll(extra, "{{OVER_RAW_INVALID}}", overRawInvalid)
+				extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
+				extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)
 				entries = append(entries, schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: index, Extra: &extra})
 			}
 			_, err := ingest.ProjectRetainedUnknown(entries, schema.Harness(exportHarness))
@@ -225,6 +327,35 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 			case "size":
 				if err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
 					t.Fatalf("oversized record was not refused for size: %v", err)
+				}
+			}
+			// Assert the authoritative outcome too, so the deliberate claim
+			// stays pinned: canonical size rows are accepted apart from size,
+			// deliberate size rows carry an integrity error there, and every
+			// integrity or legacy row meets the same refusal without the
+			// transfer limit in the way.
+			_, authoritativeErr := ingest.CollectRetainedUnknown(entries, schema.Harness(exportHarness))
+			switch c.Want {
+			case "integrity":
+				var target *ingest.EvidenceIntegrityError
+				if !errors.As(authoritativeErr, &target) {
+					t.Fatalf("authoritative path did not name integrity for %q: %v", c.Name, authoritativeErr)
+				}
+			case "legacy":
+				if !errors.Is(authoritativeErr, ingest.ErrUnknownPositionUnavailable) {
+					t.Fatalf("authoritative path did not name legacy absence for %q: %v", c.Name, authoritativeErr)
+				}
+			case "size":
+				switch c.Authoritative {
+				case "accepts":
+					if authoritativeErr != nil {
+						t.Fatalf("authoritative path refused canonical size row %q: %v", c.Name, authoritativeErr)
+					}
+				case "integrity":
+					var target *ingest.EvidenceIntegrityError
+					if !errors.As(authoritativeErr, &target) {
+						t.Fatalf("authoritative path did not name integrity for deliberate size row %q: %v", c.Name, authoritativeErr)
+					}
 				}
 			}
 		})

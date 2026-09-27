@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -38,14 +39,69 @@ const retainedUnknownTransferLimitBytes = defaults.SessionDetailDocumentCapBytes
 // root extension value. The authoritative root scan allows localRawEvidenceDepth
 // levels from the document root (retained_raw_codec.go); an extension value
 // sits one level below the root, so the same budget applies minus that level.
-const strictRetainedExtensionDepth = 10000 - 1
+const strictRetainedExtensionDepth = localRawEvidenceDepth - 1
+
+// retainedRawPayloadDepthBudget bounds the bracket nesting the probe measures
+// for a legacy raw `payload` value. The authoritative document scan allows
+// localRawEvidenceDepth levels from the Extra root; a payload value sits three
+// levels below that root (root object, retainedUnknown array, envelope object),
+// so the same budget applies minus those levels. The cap is conservative by
+// one: it declines a payload nested exactly at the authoritative ceiling
+// rather than risk reporting size over corruption.
+const retainedRawPayloadDepthBudget = localRawEvidenceDepth - 4
+
+// containsUnpairedSurrogateEscape mirrors the schema validateRawUnicodeEscapes
+// rule byte-for-byte, including its quote tracking: a `\uXXXX` escape inside
+// a JSON string that names a high surrogate must be immediately followed by a
+// `\u` low surrogate in DC00-DFFF, and a lone low surrogate is refused. An
+// invalid hex escape is ignored here and left to the structural walk, exactly
+// as the authoritative pre-scan does. scanJSONString stays the measurement
+// helper pinned by the measureCases fixture; this strict pass is a separate
+// walk that declines.
+func containsUnpairedSurrogateEscape(raw string) bool {
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '"' {
+			inString = !inString
+			continue
+		}
+		if !inString || raw[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(raw) || raw[i] != 'u' || i+4 >= len(raw) {
+			continue
+		}
+		value, err := strconv.ParseUint(raw[i+1:i+5], 16, 16)
+		if err != nil {
+			continue
+		}
+		r := rune(value)
+		if r >= 0xD800 && r <= 0xDFFF {
+			if r < 0xD800 || r > 0xDBFF || i+10 >= len(raw) || raw[i+5] != '\\' || raw[i+6] != 'u' {
+				return true
+			}
+			low, err := strconv.ParseUint(raw[i+7:i+11], 16, 16)
+			if err != nil || low < 0xDC00 || low > 0xDFFF {
+				return true
+			}
+			i += 10
+		} else {
+			i += 4
+		}
+	}
+	return false
+}
 
 // storedRetainedPayloadExceedsTransferLimit reports whether every retained
 // evidence record in the entries is a canonical, well-formed envelope and at
 // least one stores a payload whose public transfer size exceeds the published
 // limit. It reads the stored JSON text in place, so a refusal allocates nothing
-// proportional to the payload: an oversized record is refused before it is
-// decoded or copied.
+// proportional to the payload: an oversized payload is refused without decoding
+// or copying the payload itself. Small owned members (harness, namespace,
+// kind, source references, pointers) are decoded one at a time to validate
+// their canonical escaped spellings; each is bounded by its own member extent,
+// never by a retained payload.
 //
 // The verdict is member-order independent. The probe walks every member of every
 // envelope and every record of every array before it decides, so corruption that
@@ -54,14 +110,16 @@ const strictRetainedExtensionDepth = 10000 - 1
 // deliberately conservative and sound in one direction only: it returns true
 // only when every record it examines is a canonical stored record and at least
 // one is over the limit. The probe mirrors the authoritative decoder's cheap
-// shape rules in place: whole-document strictness for the Extra root (trailing
-// content, lax extension values, and trailing commas decline), the non-empty
-// evidence array, the required envelope members with exactly one payload
-// encoding, the harness match, the non-empty namespace and kind, the position
-// locator rule (a non-zero line or sequence, a non-blank sourceId, or a valid
-// sourceEntryRef alongside public), the RFC 6901 pointer grammar, safe-range
-// coordinates with position >= recordIndex, and the non-empty decoded payload
-// text. Anything else returns false, so the authoritative read path
+// shape rules in place: whole-document strictness for the Extra root (valid
+// UTF-8, no unpaired surrogate escapes, trailing content, lax extension
+// values, and trailing commas decline), the non-empty evidence array, the
+// required envelope members with exactly one payload encoding, the harness
+// match, the non-empty namespace and kind, the position locator rule (a
+// non-zero line or sequence, a non-blank sourceId, or a valid sourceEntryRef
+// alongside public), the RFC 6901 pointer grammar, safe-range coordinates with
+// position >= recordIndex, the non-empty decoded payload text that does not
+// trim to the null literal, and the legacy raw payload depth budget.
+// Anything else returns false, so the authoritative read path
 // (CollectRetainedUnknown) stays responsible for those refusals.
 //
 // Three classes stay deliberately on the size refusal even though the
@@ -69,9 +127,12 @@ const strictRetainedExtensionDepth = 10000 - 1
 // the decode this probe exists to avoid or the global state it does not
 // accumulate; each is named here and asserted in
 // TestProjectRetainedUnknownPrecedence:
-//   - a payloadText whose decoded text is not valid JSON: measuring the decoded
-//     length cannot validate content without decoding;
-//   - a legacy raw payload value with invalid JSON syntax: measuring the raw
+//   - a payloadText whose decoded content the shared scanner refuses (invalid
+//     JSON syntax, unpaired escapes already excluded above, or depth beyond
+//     the local budget): measuring the decoded length cannot validate content
+//     without decoding;
+//   - a legacy raw payload value with invalid JSON syntax (depth beyond the
+//     payload budget is mirrored above and declines): measuring the raw
 //     extent cannot validate syntax without copying the value, which would
 //     materialize exactly what the refusal must not materialize;
 //   - cross-record ordering and pointer uniqueness, which the authoritative path
@@ -104,6 +165,19 @@ func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, ha
 // evidence array, an unrecognized shape, or any malformed record returns
 // ok=false so the authoritative path owns the integrity error.
 func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness Harness, limit int) (over, ok bool) {
+	// The authoritative root scan refuses the whole document for invalid
+	// UTF-8 and unpaired surrogate escapes before any structural walk
+	// (schema.ScanRawJSONDocument via retained_raw_codec.go), so the probe
+	// declines both without measuring. The UTF-8 check is one linear pass
+	// with no allocation; the surrogate pre-scan mirrors the schema
+	// validateRawUnicodeEscapes rule byte-for-byte, including its
+	// quote-tracking, so the verdict cannot drift from the decoder.
+	if !utf8.ValidString(extra) {
+		return false, false
+	}
+	if containsUnpairedSurrogateEscape(extra) {
+		return false, false
+	}
 	i := skipJSONSpace(extra, 0)
 	if i >= len(extra) || extra[i] != '{' {
 		return false, false
@@ -293,8 +367,11 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 				return false, 0, false
 			}
 			// An empty decoded payload is refused by the authoritative path
-			// (len(payload) == 0), so the probe declines it too.
-			if decoded == 0 {
+			// (len(payload) == 0), so the probe declines it too. A decoded
+			// text that trims to the null literal is refused the same way
+			// (retained_unknown.go), so it declines as well rather than
+			// reporting size over corruption.
+			if decoded == 0 || decodedJSONStringIsNullLiteral(extra, i, valueEnd) {
 				return false, 0, false
 			}
 			if decoded > limit {
@@ -309,6 +386,12 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 			valueStart := i
 			valueEnd, valueOK := skipJSONValue(extra, i)
 			if !valueOK || extra[valueStart:valueEnd] == "null" {
+				return false, 0, false
+			}
+			// A payload nested beyond its share of the authoritative depth
+			// budget is refused for integrity, so it declines rather than
+			// reporting size over corruption.
+			if rawPayloadDepthExceedsBudget(extra, valueStart, valueEnd) {
 				return false, 0, false
 			}
 			// Match the backstop, which measures the raw stored extent
@@ -388,11 +471,12 @@ func jsonMemberMask(keys []string, names ...string) uint64 {
 
 // scanEnvelopeHarness reads the envelope harness member and requires it to name
 // a known harness that matches every harness the caller expects (the export
-// harness and the carrier entry's harness, either of which may be empty). An
-// absent, null, escaped, unknown, or mismatched harness returns ok=false so the
+// harness and the carrier entry's harness, either of which may be empty). The
+// value is decoded in place so canonical escaped spellings measure; an
+// absent, null, unknown, or mismatched harness returns ok=false so the
 // authoritative path reports the integrity error.
 func scanEnvelopeHarness(s string, i int, harness, entryHarness Harness) (end int, ok bool) {
-	name, end, ok := canonicalJSONKey(s, i)
+	name, end, ok := decodeOwnedJSONString(s, i)
 	if !ok {
 		return 0, false
 	}
@@ -408,13 +492,16 @@ func scanEnvelopeHarness(s string, i int, harness, entryHarness Harness) (end in
 	return end, true
 }
 
-// scanNonEmptyJSONString reads a canonical (unescaped) JSON string and requires
-// its decoded text to be non-empty after trimming space, matching the
-// authoritative namespace and kind rule. An escaped spelling defers to the
-// authoritative path rather than being measured.
+// scanNonEmptyJSONString reads one owned JSON string member, decoding its
+// canonical escaped spellings in place, and requires its decoded text to be
+// non-empty after trimming space, matching the authoritative namespace and
+// kind rule.
 func scanNonEmptyJSONString(s string, i int) (end int, ok bool) {
-	text, end, ok := canonicalJSONKey(s, i)
+	text, end, ok := decodeOwnedJSONString(s, i)
 	if !ok || strings.TrimSpace(text) == "" {
+		return 0, false
+	}
+	if !utf8.ValidString(text) {
 		return 0, false
 	}
 	return end, true
@@ -495,8 +582,11 @@ func scanRetainedPosition(s string, i int) (end int, ok bool) {
 				return 0, false
 			}
 			if s[i:valueEnd] != "null" {
-				value, _, valueOK := canonicalJSONKey(s, i)
+				value, _, valueOK := decodeOwnedJSONString(s, i)
 				if !valueOK {
+					return 0, false
+				}
+				if !utf8.ValidString(value) {
 					return 0, false
 				}
 				switch name {
@@ -546,8 +636,9 @@ func scanRetainedPosition(s string, i int) (end int, ok bool) {
 // scanRetainedPublicPosition validates the owned public coordinate object in
 // place: the closed member set, no duplicates, all three members present and
 // non-null, sourceRef a non-empty string, and the two coordinates safe-range
-// unsigned integers with position >= recordIndex, mirroring the authoritative
-// decode. Anything else returns ok=false so the authoritative
+// integers with position >= recordIndex, mirroring the authoritative
+// DecodeOwnedInt64 decode (which refuses leading zeros, fractions, and
+// out-of-range spellings). Anything else returns ok=false so the authoritative
 // decoder reports the integrity error.
 func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 	i = skipJSONSpace(s, i)
@@ -556,7 +647,9 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 	}
 	i++
 	var seen uint64
-	var recordIndex, position uint64
+	var recordIndex, position int64
+	haveRecordIndex := false
+	havePosition := false
 	for {
 		i = skipJSONSpace(s, i)
 		if i >= len(s) {
@@ -587,16 +680,15 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 		if name == "sourceRef" {
 			valueEnd, valueOK = scanRequiredJSONString(s, i)
 		} else {
-			valueEnd, valueOK = scanRequiredJSONInteger(s, i)
+			var coordinate int64
+			coordinate, valueEnd, valueOK = scanRequiredJSONInteger(s, i)
 			if valueOK {
-				coordinate, err := strconv.ParseUint(s[i:valueEnd], 10, 64)
-				if err != nil {
-					return 0, false
-				}
 				if name == "recordIndex" {
 					recordIndex = coordinate
+					haveRecordIndex = true
 				} else {
 					position = coordinate
+					havePosition = true
 				}
 			}
 		}
@@ -623,42 +715,47 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 	if seen != jsonMemberMask(retainedPublicKeys, retainedPublicKeys...) {
 		return 0, false
 	}
-	if position < recordIndex {
+	if !haveRecordIndex || !havePosition || position < recordIndex {
 		return 0, false
 	}
 	return i + 1, true
 }
 
-// scanRequiredJSONString reads a non-empty canonical JSON string member.
+// scanRequiredJSONString reads a non-empty owned JSON string member, decoding
+// its canonical escaped spellings in place.
 func scanRequiredJSONString(s string, i int) (end int, ok bool) {
-	text, end, ok := canonicalJSONKey(s, i)
+	text, end, ok := decodeOwnedJSONString(s, i)
 	if !ok || text == "" {
+		return 0, false
+	}
+	if !utf8.ValidString(text) {
 		return 0, false
 	}
 	return end, true
 }
 
-// scanRequiredJSONInteger reads a non-null unsigned JSON integer member within
-// the shared JSON-safe coordinate range.
-func scanRequiredJSONInteger(s string, i int) (end int, ok bool) {
-	valueEnd, ok := skipJSONValue(s, i)
-	if !ok {
-		return 0, false
+// scanRequiredJSONInteger reads a non-null owned JSON integer member through
+// the shared DecodeOwnedInt64 helper plus the JSON-safe coordinate bound, so a
+// leading-zero spelling the authoritative decoder refuses declines here too.
+func scanRequiredJSONInteger(s string, i int) (value int64, end int, ok bool) {
+	valueEnd, valueOK := skipJSONValue(s, i)
+	if !valueOK {
+		return 0, 0, false
 	}
 	literal := s[i:valueEnd]
-	if !isUnsignedJSONInteger(literal) {
-		return 0, false
+	if literal == "null" {
+		return 0, 0, false
 	}
-	value, err := strconv.ParseUint(literal, 10, 64)
-	if err != nil || value > uint64(maxSafeCoordinate) {
-		return 0, false
+	coordinate, err := DecodeOwnedInt64(json.RawMessage(literal), "position.public")
+	if err != nil || coordinate < 0 || coordinate > maxSafeCoordinate {
+		return 0, 0, false
 	}
-	return valueEnd, true
+	return coordinate, valueEnd, true
 }
 
 // scanOptionalJSONString reads an optional position string member. A `null`
 // value is allowed (the authoritative decoder ignores it); any other value must
-// be a canonical JSON string.
+// be a JSON string with a canonical escaped spelling decoded in place.
 func scanOptionalJSONString(s string, i int) (end int, ok bool) {
 	valueEnd, valueOK := skipJSONValue(s, i)
 	if !valueOK {
@@ -667,12 +764,14 @@ func scanOptionalJSONString(s string, i int) (end int, ok bool) {
 	if s[i:valueEnd] == "null" {
 		return valueEnd, true
 	}
-	_, end, ok = canonicalJSONKey(s, i)
+	_, end, ok = decodeOwnedJSONString(s, i)
 	return end, ok
 }
 
 // scanOptionalJSONInteger reads an optional position integer member. A `null`
-// value is allowed; any other value must be an unsigned JSON integer literal.
+// value is allowed; any other value must be a bare digit run so the caller can
+// run it through the authoritative DecodeOwnedInt64, which refuses leading
+// zeros, fractions, and out-of-range spellings.
 func scanOptionalJSONInteger(s string, i int) (end int, ok bool) {
 	valueEnd, valueOK := skipJSONValue(s, i)
 	if !valueOK {
@@ -689,7 +788,9 @@ func scanOptionalJSONInteger(s string, i int) (end int, ok bool) {
 }
 
 // isUnsignedJSONInteger reports whether literal is a bare run of decimal digits,
-// the only spelling encoding/json accepts for the int64 coordinate fields.
+// the pre-filter for the optional coordinate fields. The authoritative
+// DecodeOwnedInt64 run by the caller refuses leading-zero spellings among
+// them, so this helper accepts a superset that the caller narrows.
 func isUnsignedJSONInteger(literal string) bool {
 	if literal == "" {
 		return false
@@ -703,8 +804,11 @@ func isUnsignedJSONInteger(literal string) bool {
 }
 
 // canonicalJSONKey returns the unescaped member name at s[i] when it is a
-// canonical (unescaped) JSON key. An escaped key can never name an owned member,
-// which is exactly the closed-member rule, so it is not a candidate.
+// canonical (unescaped) JSON key. The probe declines an escaped spelling and
+// defers; the authoritative decoder normalizes escaped keys before it compares
+// (retained_raw_codec.go), so the decline only loses the early refusal, never
+// correctness. Stored keys produced by the capture constructor are never
+// escaped, so the fast path stays allocation-free.
 func canonicalJSONKey(s string, i int) (string, int, bool) {
 	if i >= len(s) || s[i] != '"' {
 		return "", 0, false
@@ -724,14 +828,167 @@ func canonicalJSONKey(s string, i int) (string, int, bool) {
 	return "", 0, false
 }
 
+// decodeOwnedJSONString decodes one small owned JSON string member in place.
+// The literal extent is bounded by the member itself, never by a retained
+// payload, so the allocation cannot scale with the payload the refusal must
+// not materialize. It accepts the canonical escaped spellings the capture
+// constructor stores (encoding/json escapes `&`, `<`, `>`, `"`, `\` and
+// controls), which canonicalJSONKey declines. A lone surrogate escape never
+// reaches here: the whole-document pre-scan declines it first.
+func decodeOwnedJSONString(s string, i int) (string, int, bool) {
+	end, ok := skipJSONValue(s, i)
+	if !ok || i >= len(s) || s[i] != '"' {
+		return "", 0, false
+	}
+	var decoded string
+	if err := json.Unmarshal([]byte(s[i:end]), &decoded); err != nil {
+		return "", 0, false
+	}
+	return decoded, end, true
+}
+
+// decodedJSONStringIsNullLiteral reports whether the JSON string literal
+// s[start:end] (including quotes) decodes to text that trims to the null
+// literal, mirroring the authoritative isNullJSON(payload) refusal for a
+// payloadText whose decoded text is empty-adjacent to null. The walk decodes
+// escapes on the fly without materializing the string, so a whitespace-padded
+// null of any length declines without allocating proportionally to it.
+func decodedJSONStringIsNullLiteral(s string, start, end int) bool {
+	// State: 0 leading whitespace, 1-4 matching "null", 5 trailing whitespace.
+	state := 0
+	j := start + 1
+	limit := end - 1
+	for j < limit {
+		var r rune
+		var width int
+		c := s[j]
+		if c == '\\' {
+			j++
+			if j >= limit {
+				return false
+			}
+			switch s[j] {
+			case '"', '\\', '/':
+				r = rune(s[j])
+				width = 0
+				j++
+			case 'b':
+				r = '\b'
+				width = 0
+				j++
+			case 'f':
+				r = '\f'
+				width = 0
+				j++
+			case 'n':
+				r = '\n'
+				width = 0
+				j++
+			case 'r':
+				r = '\r'
+				width = 0
+				j++
+			case 't':
+				r = '\t'
+				width = 0
+				j++
+			case 'u':
+				if j+4 >= len(s) {
+					return false
+				}
+				// j points at 'u'; hex follows inside the literal, which
+				// scanJSONString already proved well-formed.
+				r1, hexOK := parseHex4(s[j+1 : j+5])
+				if !hexOK {
+					return false
+				}
+				j += 5
+				if r1 >= 0xD800 && r1 <= 0xDBFF {
+					low, pairOK := parseHex4Pair(s, j)
+					if !pairOK {
+						return false
+					}
+					r = rune(0x10000 + (r1-0xD800)*0x400 + (low - 0xDC00))
+					j += 6
+				} else if r1 >= 0xDC00 && r1 <= 0xDFFF {
+					return false
+				} else {
+					r = rune(r1)
+				}
+				width = 0
+			default:
+				return false
+			}
+			_ = width
+		} else if c < 0x80 {
+			r = rune(c)
+			j++
+		} else {
+			decoded, size := utf8.DecodeRuneInString(s[j:limit])
+			if decoded == utf8.RuneError && size <= 1 {
+				return false
+			}
+			r = decoded
+			j += size
+		}
+		// Feed the decoded rune to the null-trim state machine, matching the
+		// authoritative bytes.TrimSpace rule via unicode.IsSpace.
+		isSpace := unicode.IsSpace(r)
+		switch state {
+		case 0:
+			if isSpace {
+				continue
+			}
+			if r == 'n' {
+				state = 1
+			} else {
+				return false
+			}
+		case 1:
+			if r == 'u' {
+				state = 2
+			} else {
+				return false
+			}
+		case 2:
+			if r == 'l' {
+				state = 3
+			} else {
+				return false
+			}
+		case 3:
+			if r == 'l' {
+				state = 4
+			} else {
+				return false
+			}
+		case 4:
+			if isSpace {
+				state = 5
+			} else {
+				return false
+			}
+		case 5:
+			if !isSpace {
+				return false
+			}
+		}
+	}
+	// Empty decoded text is handled by the decoded==0 rule; here null means
+	// exactly the four letters with only surrounding whitespace.
+	return state == 4 || state == 5
+}
+
 // scanJSONString measures the decoded byte length of the JSON string literal at
 // s[i] without decoding it into a string. The count matches encoding/json's
 // string decoding: each escape yields the UTF-8 length of its decoded rune, and
-// raw bytes count one each (the stored document is valid UTF-8, and a malformed
-// byte only ever under-counts, which defers the refusal to the authoritative
-// path rather than fabricating one). This is the quantity the probe compares to
-// the transfer limit for the payloadText encoding; see the two-quantity
-// contract at the top of this file.
+// raw bytes count one each. Probe-level callers reach here only after the
+// whole-document valid-UTF-8 and unpaired-surrogate pre-scans pass, so raw
+// bytes are valid UTF-8 on that path; the unpaired-surrogate arms below count
+// the replacement length only to keep this measurement helper pinned by the
+// measureCases fixture, never to accept the shape. This is the quantity the
+// probe compares to the transfer limit for the payloadText encoding; see the
+// two-quantity contract at the top of this file.
 func scanJSONString(s string, i int) (decoded, end int, ok bool) {
 	j := i + 1
 	for j < len(s) {
@@ -832,6 +1089,11 @@ func skipJSONSpace(s string, i int) int {
 // but lax interiors (a trailing comma, a leading zero) inside a skipped value
 // are the strict re-scan's job for extension members, and a deliberately named
 // size precedence for the legacy raw payload value (see the probe header).
+// Nesting depth is not capped here: the legacy raw payload branch enforces its
+// own share of the authoritative depth budget via rawPayloadDepthExceedsBudget,
+// and extension values enforce theirs via the strict re-scan, so this walk
+// stays unbounded and cannot pre-decline a shape the authoritative check
+// would accept.
 func skipJSONValue(s string, i int) (int, bool) {
 	i = skipJSONSpace(s, i)
 	if i >= len(s) {
@@ -887,6 +1149,42 @@ func isJSONValueDelimiter(c byte) bool {
 	switch c {
 	case ' ', '\t', '\n', '\r', ',', '}', ']':
 		return true
+	}
+	return false
+}
+
+// rawPayloadDepthExceedsBudget reports whether the JSON value s[start:end]
+// nests brackets deeper than the payload's share of the authoritative depth
+// budget. The walk is structural and allocation-free: strings are consumed
+// exactly, and only the bracket depth of the payload value itself is measured.
+// A deeper payload declines so corruption surfaces as integrity rather than
+// size; extension values keep their own budget via the strict re-scan.
+func rawPayloadDepthExceedsBudget(s string, start, end int) bool {
+	depth := 0
+	maxDepth := 0
+	for j := start; j < end; {
+		switch s[j] {
+		case '"':
+			_, stringEnd, stringOK := scanJSONString(s, j)
+			if !stringOK || stringEnd > end {
+				return true
+			}
+			j = stringEnd
+		case '{', '[':
+			depth++
+			if depth > maxDepth {
+				maxDepth = depth
+				if maxDepth > retainedRawPayloadDepthBudget {
+					return true
+				}
+			}
+			j++
+		case '}', ']':
+			depth--
+			j++
+		default:
+			j++
+		}
 	}
 	return false
 }

@@ -21,7 +21,9 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 //
 // The published transfer refusal is decided from the stored bytes before the
 // evidence is projected: an oversized payload is refused without decoding or
-// copying it (see storedRetainedPayloadExceedsTransferLimit). The size check
+// copying the payload itself (see storedRetainedPayloadExceedsTransferLimit).
+// Small owned members are decoded one at a time to validate their canonical
+// escaped spellings; the payload never is. The size check
 // below remains as the authoritative backstop for any stored encoding the
 // in-place probe declines to measure.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
