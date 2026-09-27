@@ -94,10 +94,10 @@ func TestPeasantBinSeamInvalidCommandFatalIsActionable(t *testing.T) {
 
 func TestExternalStackConfigValidation(t *testing.T) {
 	valid := externalStackConfig{
-		dsn:           "postgres://peasant:peasant@127.0.0.1:5432/peasant?sslmode=disable",
-		minioEndpoint: "http://127.0.0.1:9000",
-		bucket:        "peasant-e2e-transcripts-123",
-		villageURL:    "http://127.0.0.1:8080",
+		dsn:        "postgres://peasant:peasant@127.0.0.1:5432/peasant?sslmode=disable",
+		s3Endpoint: "http://127.0.0.1:9000",
+		bucket:     "peasant-e2e-transcripts-123",
+		villageURL: "http://127.0.0.1:8080",
 	}
 
 	cfg, err := validateExternalStackConfig(externalStackConfig{})
@@ -121,14 +121,14 @@ func TestExternalStackConfigValidation(t *testing.T) {
 
 	spaced := valid
 	spaced.dsn = " " + valid.dsn + " "
-	spaced.minioEndpoint = " " + valid.minioEndpoint + "/ "
+	spaced.s3Endpoint = " " + valid.s3Endpoint + "/ "
 	spaced.bucket = " " + valid.bucket + " "
 	spaced.villageURL = " " + valid.villageURL + "/ "
 	cfg, err = validateExternalStackConfig(spaced)
 	if err != nil {
 		t.Fatalf("spaced external stack returned error: %v", err)
 	}
-	if cfg.dsn != valid.dsn || cfg.minioEndpoint != valid.minioEndpoint || cfg.bucket != valid.bucket || cfg.villageURL != valid.villageURL {
+	if cfg.dsn != valid.dsn || cfg.s3Endpoint != valid.s3Endpoint || cfg.bucket != valid.bucket || cfg.villageURL != valid.villageURL {
 		t.Fatalf("normalized external stack = %#v, want %#v", cfg, valid)
 	}
 
@@ -185,7 +185,7 @@ func TestExternalStackFromEnv(t *testing.T) {
 }
 
 // fakeBucketChecker injects a BucketExists result so the preflight keeps DI unit
-// coverage without a live MinIO (the seam migrated from a fake mc text-exec to a
+// coverage without a live object store (the seam migrated from a fake mc text-exec to a
 // typed S3 client interface; *minio.Client satisfies bucketChecker in production).
 type fakeBucketChecker struct {
 	gotBucket string
@@ -322,9 +322,9 @@ func TestRefreshRejectsExternalStack(t *testing.T) {
 func TestRefreshRejectsMissingDatabaseHandle(t *testing.T) {
 	if getenv(envRefreshMissingDBFatalHelper) == "1" {
 		stack := harnessStack{
-			minioEndpoint: "http://127.0.0.1:9000",
-			bucket:        "test-bucket",
-			village:       &villageProcess{},
+			s3Endpoint: "http://127.0.0.1:9000",
+			bucket:     "test-bucket",
+			village:    &villageProcess{},
 		}
 		stack.requireRefreshable(t)
 		return

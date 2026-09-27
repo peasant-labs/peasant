@@ -37,7 +37,7 @@ func TestPublicationConvergenceE2E(t *testing.T) {
 	peasantBin := buildPeasant(t)
 	stack := provisionHarnessStack(t, bins)
 	if stack.external {
-		t.Skip("publication convergence evidence requires harness-owned Village, Postgres, and MinIO")
+		t.Skip("publication convergence evidence requires harness-owned Village, Postgres, and RustFS")
 	}
 	sandbox := newDisposableSandbox(t, peasantBin)
 	controlRepo := sandbox.initRepository(t, "publication-control")

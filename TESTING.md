@@ -318,7 +318,7 @@ serves.
 ## Full-stack e2e (verified)
 
 `internal/e2e/` also contains a **podman** harness, build-tagged `e2e`
-(so it is OUT of `make check`). It provisions Postgres + MinIO (S3) + the **real
+(so it is OUT of `make check`). It provisions Postgres + RustFS (S3) + the **real
 village `./cmd/server`** subprocess and drives the **real peasant CLI** in a
 throwaway sandbox under `<resolved XDG_STATE_HOME>/peasant/test/e2e/<ts>` (the
 real `~/.claude`, `~/.codex`, and `~/.local/share/peasant` are never touched —
@@ -341,7 +341,7 @@ What `TestSkipGateE2E` proves end-to-end (claude + codex + cursor fixtures):
 `TestPullRoundTripE2E` (same tag, same prereqs) exercises auth-gated village pull,
 annotations sync, and the pollution gate — see [`docs/e2e.md`](docs/e2e.md).
 
-`TestHarnessRefreshE2E` seeds both Postgres and MinIO, refreshes the harness-owned
+`TestHarnessRefreshE2E` seeds both Postgres and the object store, refreshes the harness-owned
 warm stack, and proves the restarted Village can publish again with its
 migration-owned license and governance-event reference rows intact.
 
@@ -350,7 +350,7 @@ Prerequisites:
 - a **village checkout** providing `./cmd/server` + `./cmd/village-setup-demo` (a
   separate Go module, run as subprocess binaries);
 - network access to pull the `quay.io/peasant-labs/postgres` and
-  `quay.io/minio/minio` images (S3 operations use the in-process minio-go
+  `ghcr.io/rustfs/rustfs` image (S3 operations use the in-process S3
   client).
 
 Environment overrides:
