@@ -527,7 +527,7 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 				extra = strings.ReplaceAll(extra, "{{OVER_DUPLICATE_KEY}}", overDuplicateKey)
 				extra = strings.ReplaceAll(extra, "{{OVER_RAW_DUPLICATE_KEY}}", overRawDuplicateKey)
 				extra = strings.ReplaceAll(extra, "{{OVER_DEEP_TEXT}}", overDeepText)
-	extra = strings.ReplaceAll(extra, "{{OVER_DOUBLE_ESCAPED_SURROGATE}}", overDoubleEscaped)
+				extra = strings.ReplaceAll(extra, "{{OVER_DOUBLE_ESCAPED_SURROGATE}}", overDoubleEscaped)
 				extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
 				extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)
 				entries = append(entries, schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: index, Extra: &extra})
