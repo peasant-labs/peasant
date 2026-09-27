@@ -477,7 +477,12 @@ func (g *ExecGitResolver) Worktree(ctx context.Context, dir string) (string, err
 	// Check if dir is within a non-main worktree.
 	for _, wt := range worktrees[1:] { // skip main worktree (index 0)
 		cleanWt := filepath.Clean(wt)
-		if strings.HasPrefix(absDir, cleanWt+"/") || absDir == cleanWt {
+		// absDir and cleanWt are both native-separator paths (filepath.Abs and
+		// filepath.Clean normalize to filepath.Separator on every platform), so
+		// the containment prefix must use the native separator too. A hardcoded
+		// "/" never matches on Windows, where a directory below a linked
+		// worktree would otherwise fail to resolve to that worktree.
+		if strings.HasPrefix(absDir, cleanWt+string(filepath.Separator)) || absDir == cleanWt {
 			return cleanWt, nil
 		}
 	}

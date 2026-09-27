@@ -3572,13 +3572,21 @@ func (p *Pipeline) moveSessionFiles(src, dst, sessionID string) error {
 		if err != nil {
 			return err
 		}
+		// filepath.Rel yields native separators from the real filesystem
+		// (backslash on Windows) but forward slashes from the MemFS test
+		// double used throughout this package's tests. Normalize once for the
+		// "under debug/" prefix comparisons so both inputs match a hardcoded
+		// forward-slash literal; the un-normalized rel is still what gets
+		// appended to paths and joined below, since filepath.Join/Clean accept
+		// either separator and rewrite to native on every platform.
+		relSlash := filepath.ToSlash(rel)
 		if d.IsDir() {
-			if rel != defaults.DirDebug.String() && !strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+			if rel != defaults.DirDebug.String() && !strings.HasPrefix(relSlash, defaults.DirDebug.String()+"/") {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if strings.HasPrefix(rel, sessionID+"--") || strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+		if strings.HasPrefix(rel, sessionID+"--") || strings.HasPrefix(relSlash, defaults.DirDebug.String()+"/") {
 			paths = append(paths, rel)
 		}
 		return nil
