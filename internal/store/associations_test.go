@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -13,6 +14,19 @@ import (
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+// platformAbsPath is a local copy of testutil.PlatformAbsPath's logic. This
+// file is `package store` (a white-box test), and internal/testutil already
+// imports internal/store (for other test helpers), so importing testutil here
+// would create an import cycle. See internal/testutil/platformpath.go for the
+// canonical version and its rationale.
+func platformAbsPath(posixPath string) string {
+	volume := filepath.VolumeName(os.TempDir())
+	if volume == "" {
+		return posixPath
+	}
+	return volume + filepath.FromSlash(posixPath)
+}
 
 const associationLifecycleSessionID = "40000000-0000-0000-0000-000000000001"
 
@@ -178,7 +192,7 @@ func makeStoreEntry(t *testing.T, rawSessionID, rawProjectHash, rawHostSlug stri
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	resolvedPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	resolvedPath, err := ingest.NewResolvedPath(platformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}

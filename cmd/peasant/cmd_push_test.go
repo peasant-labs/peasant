@@ -107,7 +107,7 @@ func makeCmdStoreEntry(t *testing.T, sessionID, hostSlug, remote, branch string,
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/" + sessionID + ".jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/" + sessionID + ".jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}

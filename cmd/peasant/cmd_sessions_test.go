@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 // testSessionUUID mirrors testutil.TestSessionUUID for use in package main tests.
@@ -145,7 +146,7 @@ func seedTestSession(t *testing.T, dir, sessionID string) {
 			Project: ingest.ProjectInfo{
 				Hash:     ingest.ProjectHash("testhash"),
 				Name:     "test-project",
-				FilePath: "/test/path",
+				FilePath: testutil.PlatformAbsPath("/test/path"),
 			},
 			Source: ingest.SourceInfo{
 				Format: ingest.SourceFormatJSONL,

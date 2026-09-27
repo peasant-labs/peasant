@@ -317,7 +317,7 @@ func seedSyncDoorSession(t *testing.T, sessionID, basePath string) *store.Store 
 	meta.ModelHarness = defaults.HarnessClaudeCode
 	meta.Model = schema.ModelID("claude-opus-4-6")
 	meta.Timestamp = ingest.TimestampInfo{Start: startMs, End: startMs + 60000, Ingested: &ingested}
-	meta.Source = ingest.SourceInfo{FilePath: "/test/path/" + sessionID + ".jsonl", Format: ingest.SourceFormatJSONL}
+	meta.Source = ingest.SourceInfo{FilePath: testutil.PlatformAbsPath("/test/path/" + sessionID + ".jsonl"), Format: ingest.SourceFormatJSONL}
 	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp", FilePath: "/home/test/myapp"}
 	meta.Stats = ingest.StatsInfo{TurnCount: 5, ToolCallCount: 3, DurationMs: 60000, TokensIn: 100, TokensOut: 50}
 	meta.Git = ingest.GitContext{Remote: &remote, Branch: &branch}

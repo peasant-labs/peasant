@@ -150,7 +150,7 @@ func seedPiSession(t *testing.T, ctx context.Context, s *store.Store, sid ingest
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourcePath, err := ingest.NewResolvedPath("/test/path/recording.jsonl")
+	sourcePath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/recording.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

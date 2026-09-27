@@ -57,7 +57,7 @@ func seedTestSessionInto(t *testing.T, dir, sessionID string) {
 			Project: ingest.ProjectInfo{
 				Hash:     testutil.TestProjectHash,
 				Name:     "test-project",
-				FilePath: "/test/path",
+				FilePath: testutil.PlatformAbsPath("/test/path"),
 			},
 			Source: ingest.SourceInfo{
 				Format: ingest.SourceFormatJSONL,
