@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,11 +23,9 @@ type retainedPayloadSizeProbeFixtures struct {
 	// case overrides it.
 	ProbeHarness string `yaml:"probeHarness"`
 	MeasureCases []struct {
-		Name         string `yaml:"name"`
-		Raw          string `yaml:"raw"`
-		Want         int    `yaml:"want"`
-		Limit        int    `yaml:"limit"`
-		WantExceeded bool   `yaml:"wantExceeded"`
+		Name string `yaml:"name"`
+		Raw  string `yaml:"raw"`
+		Want int    `yaml:"want"`
 	} `yaml:"measureCases"`
 	RawExtentCases []struct {
 		Name  string `yaml:"name"`
@@ -34,12 +33,15 @@ type retainedPayloadSizeProbeFixtures struct {
 		Want  int    `yaml:"want"`
 	} `yaml:"rawExtentCases"`
 	ProbeCases []struct {
-		Name     string `yaml:"name"`
-		Limit    int    `yaml:"limit"`
-		Harness  string `yaml:"harness"`
-		Extra    string `yaml:"extra"`
-		WantOver bool   `yaml:"wantOver"`
-		Declined bool   `yaml:"declined"`
+		Name    string `yaml:"name"`
+		Limit   int    `yaml:"limit"`
+		Harness string `yaml:"harness"`
+		// EntryHarness overrides the carrier entry's harness for the case;
+		// empty means the entry carries the export harness.
+		EntryHarness string `yaml:"entryHarness"`
+		Extra        string `yaml:"extra"`
+		WantOver     bool   `yaml:"wantOver"`
+		Declined     bool   `yaml:"declined"`
 	} `yaml:"probeCases"`
 }
 
@@ -92,26 +94,17 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 }
 
 // TestScanJSONStringDecodedLength pins the decoded byte length the size probe
-// derives from a stored JSON string, including escapes and surrogate pairs, and
-// pins that measurement stops once the limit is exceeded. Every non-exceeded
-// case is cross-checked against encoding/json's own decoding, so the probe's
-// length cannot drift from the length the authoritative read path measures.
+// derives from a stored JSON string, including escapes and surrogate pairs.
+// Every case is cross-checked against encoding/json's own decoding, so the
+// probe's length cannot drift from the length the authoritative read path
+// measures.
 func TestScanJSONStringDecodedLength(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.MeasureCases {
 		t.Run(c.Name, func(t *testing.T) {
-			decoded, end, exceeded, ok := scanJSONString(c.Raw, 0, c.Limit)
+			decoded, end, ok := scanJSONString(c.Raw, 0)
 			if !ok {
 				t.Fatalf("scan rejected valid JSON string %q", c.Raw)
-			}
-			if c.WantExceeded {
-				if !exceeded {
-					t.Fatalf("scan did not stop at limit %d for %q (decoded %d)", c.Limit, c.Raw, decoded)
-				}
-				return
-			}
-			if exceeded {
-				t.Fatalf("scan exceeded limit %d for %q", c.Limit, c.Raw)
 			}
 			if decoded != c.Want || end != len(c.Raw) {
 				t.Fatalf("scan measured decoded=%d end=%d, want %d/%d for %q", decoded, end, c.Want, len(c.Raw), c.Raw)
@@ -129,10 +122,12 @@ func TestScanJSONStringDecodedLength(t *testing.T) {
 
 // TestJSONValueRawExtentMatchesAuthoritativePayload cross-checks the quantity the
 // probe measures for the legacy raw `payload` encoding against the
-// authoritative backstop. UnmarshalJSON stores the raw value verbatim, so
+// authoritative read path. UnmarshalJSON stores the raw value verbatim, so
 // len(record.Payload) is the byte extent skipJSONValue reports, including quotes
 // and escape bytes, and never the decoded length of a string payload. See the
-// two-quantity contract at the top of retained_payload_size_probe.go.
+// two-quantity contract at the top of retained_payload_size_probe.go. The
+// encoding/json comparison pins the extent; the RetainedUnknownOf comparison
+// pins it to the stored record length the projection-time backstop measures.
 func TestJSONValueRawExtentMatchesAuthoritativePayload(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.RawExtentCases {
@@ -151,6 +146,15 @@ func TestJSONValueRawExtentMatchesAuthoritativePayload(t *testing.T) {
 			if end != len(raw) {
 				t.Fatalf("probe raw extent %d != len(record.Payload) %d for %q", end, len(raw), c.Value)
 			}
+			extra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":` + c.Value + `}]}`
+			entry := schema.SessionEntry{Harness: schema.HarnessCodex, Extra: &extra}
+			records, err := RetainedUnknownOf(entry)
+			if err != nil {
+				t.Fatalf("authoritative decode rejected canonical raw payload %q: %v", c.Value, err)
+			}
+			if len(records) != 1 || len(records[0].Payload) != end {
+				t.Fatalf("authoritative len(record.Payload)=%d != probe raw extent %d for %q", len(records[0].Payload), end, c.Value)
+			}
 		})
 	}
 }
@@ -160,9 +164,9 @@ func TestJSONValueRawExtentMatchesAuthoritativePayload(t *testing.T) {
 // records whose public coordinates are absent, envelopes outside the owned
 // member set, ambiguous payload encodings, invalid harnesses and coordinates,
 // and unrelated extension fields, and reaches the same verdict whichever member
-// order carries the corruption. Every case must report ok=true; a case that the
-// probe declines must still report over=false so the authoritative path owns the
-// refusal.
+// order carries the corruption. A case marked declined must report ok=false with
+// over=false so the authoritative path owns the refusal; any other case must
+// report ok=true.
 func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.ProbeCases {
@@ -174,7 +178,11 @@ func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 			if harness == "" {
 				harness = fixtures.ProbeHarness
 			}
-			over, ok := storedRetainedExtraExceedsTransferLimit(c.Extra, Harness(harness), Harness(harness), c.Limit)
+			entryHarness := c.EntryHarness
+			if entryHarness == "" {
+				entryHarness = harness
+			}
+			over, ok := storedRetainedExtraExceedsTransferLimit(c.Extra, Harness(harness), Harness(entryHarness), c.Limit)
 			if over != c.WantOver || ok != !c.Declined {
 				t.Fatalf("probe verdict over=%v ok=%v, want over=%v declined=%v for %s", over, ok, c.WantOver, c.Declined, strings.TrimSpace(c.Extra))
 			}

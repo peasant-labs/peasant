@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,6 +34,12 @@ const retainedUnknownTransferLimitBytes = defaults.SessionDetailDocumentCapBytes
 //
 // Delete the legacy raw `payload` branch when that stored encoding is retired.
 
+// strictRetainedExtensionDepth bounds the strict re-scan of a skipped Extra
+// root extension value. The authoritative root scan allows localRawEvidenceDepth
+// levels from the document root (retained_raw_codec.go); an extension value
+// sits one level below the root, so the same budget applies minus that level.
+const strictRetainedExtensionDepth = 10000 - 1
+
 // storedRetainedPayloadExceedsTransferLimit reports whether every retained
 // evidence record in the entries is a canonical, well-formed envelope and at
 // least one stores a payload whose public transfer size exceeds the published
@@ -46,13 +53,30 @@ const retainedUnknownTransferLimitBytes = defaults.SessionDetailDocumentCapBytes
 // accumulated and returned only once the whole set is known canonical. It is
 // deliberately conservative and sound in one direction only: it returns true
 // only when every record it examines is a canonical stored record and at least
-// one is over the limit. Any shape it does not recognize, any record that lacks
-// public traversal coordinates, and any envelope outside the closed owned member
-// set return false, so the authoritative read path (CollectRetainedUnknown)
-// stays responsible for those refusals. That keeps payload-syntax corruption,
-// envelope corruption, and the legacy missing-coordinate refusal on their
-// existing error paths; only an oversized record that the authoritative path
-// would otherwise accept is short-circuited here.
+// one is over the limit. The probe mirrors the authoritative decoder's cheap
+// shape rules in place: whole-document strictness for the Extra root (trailing
+// content, lax extension values, and trailing commas decline), the non-empty
+// evidence array, the required envelope members with exactly one payload
+// encoding, the harness match, the non-empty namespace and kind, the position
+// locator rule (a non-zero line or sequence, a non-blank sourceId, or a valid
+// sourceEntryRef alongside public), the RFC 6901 pointer grammar, safe-range
+// coordinates with position >= recordIndex, and the non-empty decoded payload
+// text. Anything else returns false, so the authoritative read path
+// (CollectRetainedUnknown) stays responsible for those refusals.
+//
+// Three classes stay deliberately on the size refusal even though the
+// authoritative path would name an integrity error, because deciding them needs
+// the decode this probe exists to avoid or the global state it does not
+// accumulate; each is named here and asserted in
+// TestProjectRetainedUnknownPrecedence:
+//   - a payloadText whose decoded text is not valid JSON: measuring the decoded
+//     length cannot validate content without decoding;
+//   - a legacy raw payload value with invalid JSON syntax: measuring the raw
+//     extent cannot validate syntax without copying the value, which would
+//     materialize exactly what the refusal must not materialize;
+//   - cross-record ordering and pointer uniqueness, which the authoritative path
+//     decides over the coordinate-sorted record set while the probe walks each
+//     record once in stored order.
 func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, harness Harness) bool {
 	over := false
 	for i := range entries {
@@ -75,9 +99,10 @@ func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, ha
 // and probes only its retainedUnknown evidence array. It returns (over, ok):
 // over reports an over-limit payload in a canonical record, and ok reports that
 // the whole root and every retained record in it were recognized as canonical
-// stored shapes. A duplicate or case-aliased root member, an unrecognized
-// shape, or any malformed record returns ok=false so the authoritative path
-// owns the integrity error.
+// stored shapes. A duplicate or case-aliased root member, trailing content
+// after the root object, a trailing comma, a lax extension value, an empty
+// evidence array, an unrecognized shape, or any malformed record returns
+// ok=false so the authoritative path owns the integrity error.
 func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness Harness, limit int) (over, ok bool) {
 	i := skipJSONSpace(extra, 0)
 	if i >= len(extra) || extra[i] != '{' {
@@ -126,17 +151,35 @@ func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness
 		if !valueOK {
 			return false, false
 		}
+		if name != retainedUnknownKey {
+			// Extension members are preserved verbatim by the authoritative
+			// path, which still scans the whole root strictly
+			// (ExtractExtraRetainedArray), so the probe strict-checks each
+			// skipped value with the same helper. The copy is bounded by the
+			// extension value's own extent, never by a retained payload.
+			if err := schema.ScanRawJSONDocument([]byte(extra[i:end]), schema.RawJSONPathPolicy{MaxDocumentBytes: end - i, MaxDocumentDepth: strictRetainedExtensionDepth}); err != nil {
+				return false, false
+			}
+		}
 		i = skipJSONSpace(extra, end)
 		if i >= len(extra) {
 			return false, false
 		}
 		if extra[i] == ',' {
-			i++
+			i = skipJSONSpace(extra, i+1)
+			if i >= len(extra) || extra[i] == '}' {
+				return false, false
+			}
 			continue
 		}
 		if extra[i] == '}' {
 			break
 		}
+		return false, false
+	}
+	// The authoritative root scan refuses trailing content after the document;
+	// the probe must decline it too rather than report size over corruption.
+	if skipJSONSpace(extra, i+1) != len(extra) {
 		return false, false
 	}
 	if arrayStart < 0 {
@@ -152,12 +195,19 @@ func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness
 // independent of envelope order.
 func retainedArrayExceedsTransferLimit(extra string, i int, harness, entryHarness Harness, limit int) (over, ok bool) {
 	i++ // consume '['
+	count := 0
 	for {
 		i = skipJSONSpace(extra, i)
 		if i >= len(extra) {
 			return false, false
 		}
 		if extra[i] == ']' {
+			// An empty evidence array is refused by the authoritative path
+			// (RetainedUnknownOf), so the probe declines it too rather than
+			// letting an over-limit record in another entry mask it.
+			if count == 0 {
+				return false, false
+			}
 			return over, true
 		}
 		if extra[i] != '{' {
@@ -170,12 +220,16 @@ func retainedArrayExceedsTransferLimit(extra string, i int, harness, entryHarnes
 		if envelopeOver {
 			over = true
 		}
+		count++
 		i = skipJSONSpace(extra, end)
 		if i >= len(extra) {
 			return false, false
 		}
 		if extra[i] == ',' {
-			i++
+			i = skipJSONSpace(extra, i+1)
+			if i >= len(extra) || extra[i] == ']' {
+				return false, false
+			}
 			continue
 		}
 		if extra[i] == ']' {
@@ -189,14 +243,15 @@ func retainedArrayExceedsTransferLimit(extra string, i int, harness, entryHarnes
 // envelope in place. It validates the whole envelope before deciding: every
 // owned member must be present and non-null, no member may be unknown or
 // duplicated, exactly one payload encoding may be present, the harness must be
-// a known harness matching every harness the caller expects, and position must
-// carry a canonical public coordinate object. The over-limit verdict is
+// a known harness matching every harness the caller expects, the decoded
+// payload text must be non-empty, and position must carry public coordinates
+// plus a non-public locator with safe-range ordering. The over-limit verdict is
 // accumulated across members and returned last, so member order cannot let an
 // over-limit payload mask corruption later in the envelope. Anything
 // non-canonical is not measured and defers to the authoritative read path
 // (ok=false), which owns the integrity error.
 func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHarness Harness, limit int) (over bool, end int, ok bool) {
-	var seen uint8
+	var seen uint64
 	sawPayload := false
 	over = false
 	i++ // consume '{'
@@ -233,8 +288,13 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 				return false, 0, false
 			}
 			sawPayload = true
-			decoded, valueEnd, _, stringOK := scanJSONString(extra, i, 0)
+			decoded, valueEnd, stringOK := scanJSONString(extra, i)
 			if !stringOK {
+				return false, 0, false
+			}
+			// An empty decoded payload is refused by the authoritative path
+			// (len(payload) == 0), so the probe declines it too.
+			if decoded == 0 {
 				return false, 0, false
 			}
 			if decoded > limit {
@@ -284,7 +344,10 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 			return false, 0, false
 		}
 		if extra[i] == ',' {
-			i++
+			i = skipJSONSpace(extra, i+1)
+			if i >= len(extra) || extra[i] == '}' {
+				return false, 0, false
+			}
 			continue
 		}
 		if extra[i] == '}' {
@@ -300,8 +363,9 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 }
 
 // jsonMemberBit maps a canonical object member name to its duplicate-detection
-// bit within one closed key set.
-func jsonMemberBit(keys []string, name string) (uint8, bool) {
+// bit within one closed key set. Masks are 64 bits wide so a growing key set
+// cannot silently wrap around and disable duplicate detection.
+func jsonMemberBit(keys []string, name string) (uint64, bool) {
 	for index, key := range keys {
 		if key == name {
 			return 1 << uint(index), true
@@ -312,8 +376,8 @@ func jsonMemberBit(keys []string, name string) (uint8, bool) {
 
 // jsonMemberMask returns the combined bits of the named members within a closed
 // key set.
-func jsonMemberMask(keys []string, names ...string) uint8 {
-	var mask uint8
+func jsonMemberMask(keys []string, names ...string) uint64 {
+	var mask uint64
 	for _, name := range names {
 		if bit, ok := jsonMemberBit(keys, name); ok {
 			mask |= bit
@@ -327,17 +391,17 @@ func jsonMemberMask(keys []string, names ...string) uint8 {
 // harness and the carrier entry's harness, either of which may be empty). An
 // absent, null, escaped, unknown, or mismatched harness returns ok=false so the
 // authoritative path reports the integrity error.
-func scanEnvelopeHarness(s string, i int, want ...Harness) (end int, ok bool) {
+func scanEnvelopeHarness(s string, i int, harness, entryHarness Harness) (end int, ok bool) {
 	name, end, ok := canonicalJSONKey(s, i)
 	if !ok {
 		return 0, false
 	}
-	harness := Harness(name)
-	if !slices.Contains(schema.Harnesses(), harness) {
+	harnessValue := Harness(name)
+	if !slices.Contains(schema.Harnesses(), harnessValue) {
 		return 0, false
 	}
-	for _, expected := range want {
-		if expected != "" && harness != expected {
+	for _, expected := range []Harness{harness, entryHarness} {
+		if expected != "" && harnessValue != expected {
 			return 0, false
 		}
 	}
@@ -359,17 +423,24 @@ func scanNonEmptyJSONString(s string, i int) (end int, ok bool) {
 // scanRetainedPosition validates one owned position object in place. It
 // requires the closed position member set with no duplicates, the optional
 // members to carry the right scalar kind, and a canonical, non-null public
-// coordinate object carrying all three members. A legacy position with no
-// public member returns ok=false so the authoritative missing-coordinate
-// refusal stays on its existing path.
+// coordinate object carrying all three members. It mirrors the authoritative
+// locator rule (checkRetainedUnknownShape): besides public, the position must
+// carry a non-zero line or sequence, a non-blank sourceId, or a valid
+// sourceEntryRef; a public-only position declines. Line and sequence spellings
+// are checked with the authoritative DecodeOwnedInt64 plus the int range, the
+// pointer must satisfy the shared validUnknownPointer grammar, and a non-empty
+// sourceEntryRef must satisfy schema.SourceEntryRef.Validate. A legacy position
+// with no public member returns ok=false so the authoritative
+// missing-coordinate refusal stays on its existing path.
 func scanRetainedPosition(s string, i int) (end int, ok bool) {
 	i = skipJSONSpace(s, i)
 	if i >= len(s) || s[i] != '{' {
 		return 0, false
 	}
 	i++
-	var seen uint8
+	var seen uint64
 	hasPublic := false
+	hasLocator := false
 	for {
 		i = skipJSONSpace(s, i)
 		if i >= len(s) {
@@ -408,11 +479,43 @@ func scanRetainedPosition(s string, i int) (end int, ok bool) {
 			if !valueOK {
 				return 0, false
 			}
+			if literal := s[i:valueEnd]; literal != "null" {
+				coordinate, err := DecodeOwnedInt64(json.RawMessage(literal), "position."+name)
+				if err != nil || coordinate < 0 || coordinate > int64(maxIntCoordinate()) {
+					return 0, false
+				}
+				if coordinate != 0 {
+					hasLocator = true
+				}
+			}
 			i = valueEnd
 		case "sourceEntryRef", "sourceId", "jsonPointer":
 			valueEnd, valueOK := scanOptionalJSONString(s, i)
 			if !valueOK {
 				return 0, false
+			}
+			if s[i:valueEnd] != "null" {
+				value, _, valueOK := canonicalJSONKey(s, i)
+				if !valueOK {
+					return 0, false
+				}
+				switch name {
+				case "sourceEntryRef":
+					if value != "" {
+						if err := schema.SourceEntryRef(value).Validate(); err != nil {
+							return 0, false
+						}
+						hasLocator = true
+					}
+				case "sourceId":
+					if strings.TrimSpace(value) != "" {
+						hasLocator = true
+					}
+				default: // jsonPointer
+					if !validUnknownPointer(value) {
+						return 0, false
+					}
+				}
 			}
 			i = valueEnd
 		default:
@@ -423,7 +526,10 @@ func scanRetainedPosition(s string, i int) (end int, ok bool) {
 			return 0, false
 		}
 		if s[i] == ',' {
-			i++
+			i = skipJSONSpace(s, i+1)
+			if i >= len(s) || s[i] == '}' {
+				return 0, false
+			}
 			continue
 		}
 		if s[i] == '}' {
@@ -431,7 +537,7 @@ func scanRetainedPosition(s string, i int) (end int, ok bool) {
 		}
 		return 0, false
 	}
-	if !hasPublic {
+	if !hasPublic || !hasLocator {
 		return 0, false
 	}
 	return i + 1, true
@@ -440,7 +546,8 @@ func scanRetainedPosition(s string, i int) (end int, ok bool) {
 // scanRetainedPublicPosition validates the owned public coordinate object in
 // place: the closed member set, no duplicates, all three members present and
 // non-null, sourceRef a non-empty string, and the two coordinates safe-range
-// unsigned integers. Anything else returns ok=false so the authoritative
+// unsigned integers with position >= recordIndex, mirroring the authoritative
+// decode. Anything else returns ok=false so the authoritative
 // decoder reports the integrity error.
 func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 	i = skipJSONSpace(s, i)
@@ -448,7 +555,8 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 		return 0, false
 	}
 	i++
-	var seen uint8
+	var seen uint64
+	var recordIndex, position uint64
 	for {
 		i = skipJSONSpace(s, i)
 		if i >= len(s) {
@@ -480,6 +588,17 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 			valueEnd, valueOK = scanRequiredJSONString(s, i)
 		} else {
 			valueEnd, valueOK = scanRequiredJSONInteger(s, i)
+			if valueOK {
+				coordinate, err := strconv.ParseUint(s[i:valueEnd], 10, 64)
+				if err != nil {
+					return 0, false
+				}
+				if name == "recordIndex" {
+					recordIndex = coordinate
+				} else {
+					position = coordinate
+				}
+			}
 		}
 		if !valueOK {
 			return 0, false
@@ -490,7 +609,10 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 			return 0, false
 		}
 		if s[i] == ',' {
-			i++
+			i = skipJSONSpace(s, i+1)
+			if i >= len(s) || s[i] == '}' {
+				return 0, false
+			}
 			continue
 		}
 		if s[i] == '}' {
@@ -499,6 +621,9 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 		return 0, false
 	}
 	if seen != jsonMemberMask(retainedPublicKeys, retainedPublicKeys...) {
+		return 0, false
+	}
+	if position < recordIndex {
 		return 0, false
 	}
 	return i + 1, true
@@ -600,25 +725,23 @@ func canonicalJSONKey(s string, i int) (string, int, bool) {
 }
 
 // scanJSONString measures the decoded byte length of the JSON string literal at
-// s[i] without decoding it into a string. When limit is positive it stops as
-// soon as the decoded length exceeds limit and reports exceeded, so an
-// oversized payload is measured from its prefix only. The count matches
-// encoding/json's string decoding: each escape yields the UTF-8 length of its
-// decoded rune, and raw bytes count one each (the stored document is valid
-// UTF-8, and a malformed byte only ever under-counts, which defers the refusal
-// to the authoritative path rather than fabricating one). This is the quantity
-// the probe compares to the transfer limit for the payloadText encoding; see the
-// two-quantity contract at the top of this file.
-func scanJSONString(s string, i, limit int) (decoded, end int, exceeded, ok bool) {
+// s[i] without decoding it into a string. The count matches encoding/json's
+// string decoding: each escape yields the UTF-8 length of its decoded rune, and
+// raw bytes count one each (the stored document is valid UTF-8, and a malformed
+// byte only ever under-counts, which defers the refusal to the authoritative
+// path rather than fabricating one). This is the quantity the probe compares to
+// the transfer limit for the payloadText encoding; see the two-quantity
+// contract at the top of this file.
+func scanJSONString(s string, i int) (decoded, end int, ok bool) {
 	j := i + 1
 	for j < len(s) {
 		switch c := s[j]; {
 		case c == '"':
-			return decoded, j + 1, false, true
+			return decoded, j + 1, true
 		case c == '\\':
 			j++
 			if j >= len(s) {
-				return 0, 0, false, false
+				return 0, 0, false
 			}
 			switch s[j] {
 			case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
@@ -626,11 +749,11 @@ func scanJSONString(s string, i, limit int) (decoded, end int, exceeded, ok bool
 				j++
 			case 'u':
 				if j+4 >= len(s) {
-					return 0, 0, false, false
+					return 0, 0, false
 				}
 				r1, hexOK := parseHex4(s[j+1 : j+5])
 				if !hexOK {
-					return 0, 0, false, false
+					return 0, 0, false
 				}
 				j += 5
 				switch {
@@ -647,19 +770,16 @@ func scanJSONString(s string, i, limit int) (decoded, end int, exceeded, ok bool
 					decoded += utf8.RuneLen(rune(r1))
 				}
 			default:
-				return 0, 0, false, false
+				return 0, 0, false
 			}
 		case c < 0x20:
-			return 0, 0, false, false
+			return 0, 0, false
 		default:
 			decoded++
 			j++
 		}
-		if limit > 0 && decoded > limit {
-			return decoded, 0, true, true
-		}
 	}
-	return 0, 0, false, false
+	return 0, 0, false
 }
 
 // parseHex4Pair consumes a low-surrogate escape at s[i] when it directly
@@ -707,24 +827,20 @@ func skipJSONSpace(s string, i int) int {
 	return i
 }
 
-// skipJSONValue advances past one JSON value without decoding it.
+// skipJSONValue advances past one JSON value without decoding it. Bracket
+// balancing is structural, not strict grammar: strings are consumed exactly,
+// but lax interiors (a trailing comma, a leading zero) inside a skipped value
+// are the strict re-scan's job for extension members, and a deliberately named
+// size precedence for the legacy raw payload value (see the probe header).
 func skipJSONValue(s string, i int) (int, bool) {
-	end, _, ok := skipJSONValueCapped(s, i, 0)
-	return end, ok
-}
-
-// skipJSONValueCapped advances past one JSON value without decoding it. When
-// limit is positive it stops early once the raw value extent exceeds limit and
-// reports exceeded, so a legacy raw payload is rejected from its prefix.
-func skipJSONValueCapped(s string, i, limit int) (end int, exceeded bool, ok bool) {
 	i = skipJSONSpace(s, i)
 	if i >= len(s) {
-		return 0, false, false
+		return 0, false
 	}
 	switch c := s[i]; {
 	case c == '"':
-		_, end, exceeded, stringOK := scanJSONString(s, i, limit)
-		return end, exceeded, stringOK
+		_, end, stringOK := scanJSONString(s, i)
+		return end, stringOK
 	case c == '{' || c == '[':
 		open := c
 		closeBracket := byte('}')
@@ -736,9 +852,9 @@ func skipJSONValueCapped(s string, i, limit int) (end int, exceeded bool, ok boo
 		for j < len(s) {
 			switch s[j] {
 			case '"':
-				_, stringEnd, _, stringOK := scanJSONString(s, j, 0)
+				_, stringEnd, stringOK := scanJSONString(s, j)
 				if !stringOK {
-					return 0, false, false
+					return 0, false
 				}
 				j = stringEnd
 			case open:
@@ -748,31 +864,22 @@ func skipJSONValueCapped(s string, i, limit int) (end int, exceeded bool, ok boo
 				depth--
 				j++
 				if depth == 0 {
-					if limit > 0 && j-i > limit {
-						return j, true, true
-					}
-					return j, false, true
+					return j, true
 				}
 			default:
 				j++
 			}
-			if limit > 0 && j-i > limit {
-				return j, true, true
-			}
 		}
-		return 0, false, false
+		return 0, false
 	default:
 		j := i
 		for j < len(s) && !isJSONValueDelimiter(s[j]) {
 			j++
 		}
 		if j == i {
-			return 0, false, false
+			return 0, false
 		}
-		if limit > 0 && j-i > limit {
-			return j, true, true
-		}
-		return j, false, true
+		return j, true
 	}
 }
 
