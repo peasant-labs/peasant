@@ -89,6 +89,7 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 // Moving only the mtime floor is a no-op; moving source metadata recaptures the
 // session even when the source clock remains older than the ingest audit time.
 func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
+	t.Parallel()
 	oldModTime := time.Unix(1_700_001_000, 0)
 	newerModTime := time.Unix(1_700_002_000, 0)
 	newRowMS := int64(1_700_002_000_000)

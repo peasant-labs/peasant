@@ -1,11 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"path/filepath"
 	"testing"
 
@@ -14,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/stale_index_settling.yaml
@@ -43,14 +40,8 @@ type staleIndexSettlingFixture struct {
 func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 	t.Helper()
 	var document staleIndexSettlingDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(staleIndexSettlingFixtureData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(staleIndexSettlingFixtureData, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("trailing stale-index fixture document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range document.Cases {
@@ -93,6 +84,7 @@ func loadStaleIndexSettlingFixtures(t *testing.T) staleIndexSettlingDocument {
 // for input this build must not settle: the stale state is unchanged and the
 // refusal is reported.
 func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
+	t.Parallel()
 	document := loadStaleIndexSettlingFixtures(t)
 	for _, fixture := range document.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -151,7 +143,7 @@ func TestOrdinaryHarvestSettlesStaleIndexSessions(t *testing.T) {
 				adapters := map[ingest.Harness]ingest.AdapterFactory{
 					ingest.HarnessClaudeCode: makeStubAdapter(nil, nil),
 				}
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 				if err != nil {

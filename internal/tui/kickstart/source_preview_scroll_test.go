@@ -1,14 +1,9 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -49,15 +44,9 @@ type sourcePreviewScrollDoc struct {
 
 func loadSourcePreviewScrollDoc(t *testing.T) sourcePreviewScrollDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(sourcePreviewScrollData))
-	decoder.KnownFields(true)
 	var doc sourcePreviewScrollDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(sourcePreviewScrollData, &doc); err != nil {
 		t.Fatalf("decode the scrolled preview fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("the scrolled preview fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("the scrolled preview fixture declares no required cases")

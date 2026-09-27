@@ -1,4 +1,3 @@
-expectedCaseCount: 9
 requiredNames:
   - all_mode_selection_inactive_nothing_hidden
   - selected_mode_hides_one_project_entirely

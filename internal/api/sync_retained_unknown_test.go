@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,7 +62,8 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			t.Setenv(defaults.EnvXDGConfigHome.String(), t.TempDir())
+			t.Parallel()
+			hs := newTestXDGHomes(t)
 			db := seedSyncMirrorCase(t, syncPublicationMirrorCase{Name: c.Name})
 			input, _, err := push.LoadPublicationInput(t.Context(), db, testutil.TestSessionUUID)
 			if err != nil {
@@ -86,8 +88,9 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 				t.Fatalf("seed full retained capture: %+v", written)
 			}
 			cfg := config.BaseConfig()
+			cfg.Output.BasePath = filepath.Join(hs.Data, "peasant-sync")
 			cfg.Redaction.CustomPatterns = []config.CustomPattern{{ID: "unknown-review", Category: config.CategoryProject, Pattern: "custom-secret", Replacement: "[CUSTOM]"}}
-			handler := &syncHandler{store: db, config: cfg}
+			handler := hs.handler(db, cfg)
 			// Consent scans raw pre-push evidence while uploads carry the
 			// redacted form: the review validates the upload path with the
 			// configured redactor yet exposes unredacted text to the scanner.
@@ -121,7 +124,7 @@ func TestSyncRetainedUnknownConsent(t *testing.T) {
 				t.Fatal("review mutated retained payload")
 			}
 			ctx, cancel := context.WithCancel(t.Context())
-			server := NewServer(ServerConfig{Port: 0, Store: db, Config: cfg})
+			server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg}))
 			if err := server.Listen(ctx); err != nil {
 				cancel()
 				t.Fatal(err)

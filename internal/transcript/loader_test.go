@@ -22,6 +22,7 @@ var _ ingest.FullSessionEntryReader = (*store.Store)(nil)
 var fullLoaderYAML []byte
 
 func TestFullLoaderSQLitePageProgress(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -96,6 +97,7 @@ func (s *fullReaderStub) LoadFullSessionEntries(_ context.Context, id ingest.Ses
 }
 
 func TestFullLoaderMandatoryDelegation(t *testing.T) {
+	t.Parallel()
 	var f struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {

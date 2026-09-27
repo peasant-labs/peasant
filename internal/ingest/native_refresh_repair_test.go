@@ -1,11 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -53,15 +49,9 @@ type nativeRefreshRepairFixture struct {
 
 func loadNativeRefreshRepairFixture(t *testing.T) nativeRefreshRepairFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(nativeRefreshRepairYAML))
-	decoder.KnownFields(true)
 	var fixture nativeRefreshRepairFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(nativeRefreshRepairYAML, &fixture); err != nil {
 		t.Fatalf("decode native_refresh_repair.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("native_refresh_repair.yaml must contain exactly one document: %v", err)
 	}
 	names := make([]string, 0, len(fixture.Cases))
 	seen := make(map[string]bool, len(fixture.Cases))
@@ -119,7 +109,7 @@ func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem
 	t.Helper()
 	cfg := makePipelineConfig(outputDir)
 	versions := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
-	pipeline, err := ingest.NewPipeline(
+	pipeline, err := newTestPipeline(
 		fs,
 		testutil.DefaultGitResolver(),
 		ingest.DefaultAdapterRegistry,
@@ -204,7 +194,7 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	defer func() { _ = db.Close() }()
 	seedOpenCodeRepairSession(t, db, tc.SessionID, sid)
 
-	adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	metadata := schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessOpenCode}
 	first := buildOpenCodeRepairCandidate(t, adapter, source.Path, tc.SessionID, sid, metadata, "gen-open-repair-1", ingest.NewProjectionPriorState())
 	if _, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{

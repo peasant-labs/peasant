@@ -1,7 +1,6 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"os"
 	"path/filepath"
@@ -13,13 +12,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/publication_capture_child.yaml
 var publicationCaptureChildYAML []byte
 
 func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Cases []struct {
 			Name     string `yaml:"name"`
@@ -29,9 +28,7 @@ func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
 			Child    string `yaml:"child"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationCaptureChildYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationCaptureChildYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)
@@ -78,7 +75,7 @@ func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
 				ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}},
 			}}
 			run := func() *ingest.PipelineResult {
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 					ingest.WithSalt(database.InstallationSalt()), ingest.WithStore(database), ingest.WithMetricsStore(database),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs)}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {

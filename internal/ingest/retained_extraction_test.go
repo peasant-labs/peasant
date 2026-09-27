@@ -2,10 +2,8 @@ package ingest
 
 import (
 	"bytes"
-	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"maps"
 	"path/filepath"
 	"testing"
@@ -37,7 +35,7 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	filesystem := &preparedRetainedFS{OSFileSystem: &OSFileSystem{}, store: store, sid: artifact.Metadata.SessionID}
 	versions := maps.Clone(HarvesterVersionRegistry)
 	versions[HarnessClaudeCode] = HarvesterVersions{AdapterVersion: 2, IndexerVersion: versions[HarnessClaudeCode].IndexerVersion, IndexVersion: versions[HarnessClaudeCode].IndexVersion}
-	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions))
+	pipeline, err := NewPipeline(filesystem, nil, DefaultAdapterRegistry, PipelineConfig{OutputDir: ResolvedPath(output)}, WithHarvesterVersions(versions), WithArenaSizeBytes(testIngestArenaBytes))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,23 +85,4 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	}
 }
 
-// Observe the existing retained fixture at the filesystem boundary, before any
-// installed file changes, rather than merely checking eventual index success.
-type preparedRetainedFS struct {
-	*OSFileSystem
-	store *serialIndexStore
-	sid   SessionID
-}
-
-var _ FileSystem = (*preparedRetainedFS)(nil)
-
-func (f *preparedRetainedFS) Rename(src, dst string) error {
-	state, err := f.store.ReadIndexState(context.Background(), f.sid)
-	if err != nil {
-		return err
-	}
-	if state.IndexedInputHash != nil {
-		return fmt.Errorf("retained publication renamed a file before preparation")
-	}
-	return f.OSFileSystem.Rename(src, dst)
-}
+// preparedRetainedFS lives in fsfault_test.go (Owner B).

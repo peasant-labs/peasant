@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -95,12 +96,35 @@ func buildPeasant(t *testing.T) string {
 	if raw := strings.TrimSpace(getenv(envPeasantBin)); raw != "" {
 		return validateInjectedPeasantBin(t, raw)
 	}
-	out := filepath.Join(t.TempDir(), "peasant")
-	if output, err := exec.Command("go", "build", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant").CombinedOutput(); err != nil {
-		t.Fatalf("e2e: build peasant: %v\n%s", err, output)
+	buildPeasantOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "peasant-e2e-bin-*")
+		if err != nil {
+			buildPeasantErr = fmt.Errorf("e2e: create temp dir for the peasant build: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "peasant")
+		if output, err := exec.Command("go", "build", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant").CombinedOutput(); err != nil {
+			buildPeasantErr = fmt.Errorf("e2e: build peasant: %v\n%s", err, output)
+			return
+		}
+		buildPeasantPath = out
+	})
+	if buildPeasantErr != nil {
+		t.Fatalf("%v", buildPeasantErr)
 	}
-	return out
+	return buildPeasantPath
 }
+
+// buildPeasantOnce memoizes the default (PEASANT_BIN-unset) build so one test
+// binary performs exactly one `go build` even when several e2e tests ask for
+// the CLI. The output lives for the process; the OS temp reaper removes it after
+// exit. An injected PEASANT_BIN is resolved per call and never memoized, so the
+// seam tests keep observing their own command.
+var (
+	buildPeasantOnce sync.Once
+	buildPeasantPath string
+	buildPeasantErr  error
+)
 
 func validateInjectedPeasantBin(t *testing.T, raw string) string {
 	t.Helper()

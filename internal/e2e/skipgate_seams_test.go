@@ -30,6 +30,7 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 }
 
 func TestPeasantBinWrapperQuotesInjectedCommand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "fake peasant")
 	script := "#!/bin/sh\necho quoted-peasant \"$@\"\n"
@@ -93,6 +94,7 @@ func TestPeasantBinSeamInvalidCommandFatalIsActionable(t *testing.T) {
 }
 
 func TestExternalStackConfigValidation(t *testing.T) {
+	t.Parallel()
 	valid := externalStackConfig{
 		dsn:        "postgres://peasant:peasant@127.0.0.1:5432/peasant?sslmode=disable",
 		s3Endpoint: "http://127.0.0.1:9000",
@@ -199,6 +201,7 @@ func (f *fakeBucketChecker) BucketExists(_ context.Context, bucket string) (bool
 }
 
 func TestExternalStackBucketPreflightListsConfiguredBucket(t *testing.T) {
+	t.Parallel()
 	checker := &fakeBucketChecker{exists: true}
 	failure := externalStackBucketPreflight(context.Background(), checker, "peasant-e2e-transcripts-123")
 	if failure != nil {
@@ -210,6 +213,7 @@ func TestExternalStackBucketPreflightListsConfiguredBucket(t *testing.T) {
 }
 
 func TestExternalStackBucketPreflightFailureIsActionable(t *testing.T) {
+	t.Parallel()
 	failure := externalStackBucketPreflight(context.Background(),
 		&fakeBucketChecker{err: fmt.Errorf("bucket missing")}, "wrong-bucket")
 	if failure == nil {
@@ -231,6 +235,7 @@ func TestExternalStackBucketPreflightFailureIsActionable(t *testing.T) {
 }
 
 func TestExternalStackBucketPreflightMissingBucketIsActionable(t *testing.T) {
+	t.Parallel()
 	failure := externalStackBucketPreflight(context.Background(),
 		&fakeBucketChecker{exists: false}, "absent-bucket")
 	if failure == nil {
@@ -245,6 +250,7 @@ func TestExternalStackBucketPreflightMissingBucketIsActionable(t *testing.T) {
 }
 
 func TestTranscriptBucketSeams(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(123, 456)
 	first := uniqueNameAt("transcripts", 42, now)
 	second := uniqueNameAt("transcripts", 42, now.Add(time.Nanosecond))
@@ -267,12 +273,14 @@ func TestTranscriptBucketSeams(t *testing.T) {
 }
 
 func TestProcessAliveRecognizesCurrentProcess(t *testing.T) {
+	t.Parallel()
 	if !processAlive(os.Getpid()) {
 		t.Fatalf("current process PID %d reported dead", os.Getpid())
 	}
 }
 
 func TestSeededBaselineCounts(t *testing.T) {
+	t.Parallel()
 	assertSeededBaselineCounts(t, harnessOptions{assert: true}, seededZeroContentBaselineBeforePush, seededZeroContentBaselineBeforePush)
 	assertSeededBaselineCounts(t, harnessOptions{assert: false},
 		seededBaselineCounts{transcripts: 1, annotations: 2, s3Objects: 3},
@@ -280,6 +288,7 @@ func TestSeededBaselineCounts(t *testing.T) {
 }
 
 func TestSeededBaselineMismatchFatalIsActionable(t *testing.T) {
+	t.Parallel()
 	if getenv(envBaselineFatalHelper) == "1" {
 		assertSeededBaselineCounts(t, harnessOptions{assert: true},
 			seededBaselineCounts{transcripts: 1},
@@ -299,6 +308,7 @@ func TestSeededBaselineMismatchFatalIsActionable(t *testing.T) {
 }
 
 func TestRefreshRejectsExternalStack(t *testing.T) {
+	t.Parallel()
 	if getenv(envRefreshExternalFatalHelper) == "1" {
 		stack := harnessStack{external: true}
 		stack.requireRefreshable(t)
@@ -320,6 +330,7 @@ func TestRefreshRejectsExternalStack(t *testing.T) {
 }
 
 func TestRefreshRejectsMissingDatabaseHandle(t *testing.T) {
+	t.Parallel()
 	if getenv(envRefreshMissingDBFatalHelper) == "1" {
 		stack := harnessStack{
 			s3Endpoint: "http://127.0.0.1:9000",

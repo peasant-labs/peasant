@@ -22,6 +22,13 @@ endef
 RACE ?= 1
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
+# Wall-clock start of `make check`, stamped immediately at parse time so the
+# gate's pre-test wall includes the fmt/lint/ast-grep/release-guard steps that
+# run before the test passes. `cmd/testgate run` reads it and reports
+# `test-start - CHECK_START_NS` as the pre-test wall, separate from the test
+# wall. `:=` forces the stamp now, before the prerequisites run.
+CHECK_START_NS := $(shell date +%s%N)
+
 all: build
 
 # web/package.json is the SOURCE OF TRUTH for web deps; all @peasant-labs/* deps resolve from
@@ -81,20 +88,26 @@ lint: web-stub
 	go vet ./...
 
 check: fmt lint
-	ast-grep scan --config sgconfig.yml .
-	# The key grep gate (internal/tui/gates/astrules/, enforced by
-	# keys_astgrep_test.go) shells out to ast-grep too, but is gated behind
-	# the "astgrep" build tag so a plain `go test ./...` never depends on the
-	# binary - ast-grep is ALREADY a hard `make check` dependency via the
-	# untagged scan above, so this adds no new external requirement here.
-	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...
-	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml
-	# One pass over every package. The race detector (GORACE_FLAG) is on by
-	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
-	# The explicit timeout outlives Go's 10m default so a slow package gets the
-	# job's own budget instead of a mid-suite panic. cmd/peasant and internal/api
-	# exceed 10m when the race detector runs; local runs default to RACE=1.
-	go test -timeout=30m $(GORACE_FLAG) ./...
+	@set -e; \
+	export CHECK_START_NS="$(CHECK_START_NS)"; \
+	ast-grep scan --config sgconfig.yml .; \
+	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
+	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
+	RACE=$(RACE) go run ./cmd/testgate run
+	# The gate above replaces the single `go test` pass. It computes the run
+	# plan from `go test -list`, runs a race pass and a no-race pass (or one
+	# no-race pass when RACE=0), merges the streams, and applies the
+	# exactly-once screen. The key grep gate (internal/tui/gates/astrules/,
+	# enforced by keys_astgrep_test.go) runs as a pre-test step above because it
+	# is gated behind the "astgrep" build tag, so a plain `go test` never depends
+	# on the ast-grep binary; ast-grep is already a hard `make check` dependency
+	# via the untagged scan.
+	#
+	# The race detector (GORACE_FLAG) is on by default and gated to RACE=0 on CI
+	# feature PRs; see the RACE variable above. When RACE=0 the gate runs a single
+	# no-race pass but still plans and screens. cmd/peasant and internal/api
+	# exceed Go's 10m default under race, so the gate sets -timeout=0 and lets
+	# the job's own budget apply.
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
 .PHONY: check-harvester-versions

@@ -1,15 +1,11 @@
 package kit_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"fmt"
-	"io"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
@@ -46,17 +42,8 @@ type propagationDocument struct {
 func loadPropagation(t *testing.T) propagationDocument {
 	t.Helper()
 	var doc propagationDocument
-	dec := yaml.NewDecoder(bytes.NewReader(treePropagationData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(treePropagationData, &doc); err != nil {
 		t.Fatalf("decode testdata/tree_propagation.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("second document")
-		}
-		t.Fatalf("tree_propagation.yaml must hold exactly one document: %v", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases", doc.ExpectedCaseCount, len(doc.Cases))

@@ -69,6 +69,7 @@ func workflowJobSteps(t *testing.T, doc *yaml.Node, jobName, context string) []*
 // refuse the existing filename or make the archive glob match more than one
 // file. Expectations live in testdata/workflows/release_workspace_contract.yaml.
 func TestReleaseSmokeStagesCleanWorkspace(t *testing.T) {
+	t.Parallel()
 	fixture := loadReleaseWorkspaceContractFixture(t)
 	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "release.yml"))
 	steps := workflowJobSteps(t, doc, "smoke", "release.yml")
@@ -98,6 +99,7 @@ func TestReleaseSmokeStagesCleanWorkspace(t *testing.T) {
 // before downloading; a package glob that then matches two versions fails the
 // job. The reset step must exist and run before the download.
 func TestReleasePackagingResetsDistDirectory(t *testing.T) {
+	t.Parallel()
 	fixture := loadReleaseWorkspaceContractFixture(t)
 	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "release-validate.yml"))
 	for _, jobName := range fixture.Packaging.Jobs {

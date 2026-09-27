@@ -207,8 +207,18 @@ jobs:
       RACE: '0'
       TMPDIR: /tmp
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
-    timeout-minutes: 30  # fail fast instead of wedging if the run hangs
+    # 20 minutes = the measured amd64 pool gate (~9m30s wall for the whole suite
+    # at RACE=0) plus ~2x headroom. This is a wedging cap, not the budget check:
+    # the committed budget fixture is what fails a slow suite, and the 5-minute
+    # aggregate is assessed on this job's wall (it is the critical path; the
+    # other pool jobs run in parallel). See docs/testing/ci-phase-measurement.md.
+    timeout-minutes: 20
     steps:
+      # Job-start clock for the phase report. It must be the first step so the
+      # pre-test phase covers checkout, toolchain setup, and cache restore.
+      - name: Phase clock start
+        run: echo "PHASE_START_S=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -232,22 +242,58 @@ jobs:
       - name: Install ast-grep
         run: npm install --global @ast-grep/cli@0.43.0
 
-      # Cache the Go build + module dirs (the dominant cost is the `go test -race`
-      # suite). The old DeterminateSystems/magic-nix-cache-action was REMOVED: it
-      # was retired in favour of FlakeHub Cache, which requires a FlakeHub account
-      # and now fails ("Unable to authenticate to FlakeHub") on a plain repo.
-      - name: Cache Go build + modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # Cache the Go build + module dirs. The key is namespaced `-go-amd64-`:
+      # `runner.os` is `Linux` on the arm64 runner too, so the old shared
+      # `${{ runner.os }}-go-` key/restore-key was a PREFIX of the arm64 lane's
+      # `Linux-go-arm64-<hash>` (and the harvester guard's `Linux-go-r1-<hash>`),
+      # so an amd64 run could restore an arm64 tarball and then pay a full cold
+      # rebuild. Every job now restores only its own architecture's lane.
+      #
+      # Restore and save are split so each is its own timed step (the combined
+      # action saves in an untimed-by-name post step). `if: success() &&
+      # cache-hit != 'true'` reproduces the combined action's `post-if:
+      # success()` save semantics. The old DeterminateSystems/magic-nix-cache-action
+      # was REMOVED: it was retired in favour of FlakeHub Cache, which requires a
+      # FlakeHub account and now fails ("Unable to authenticate to FlakeHub") on
+      # a plain repo.
+      - name: Restore Go build + modules cache (amd64)
+        id: cache-go
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+          key: ${{ runner.os }}-go-amd64-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-amd64-
 
-      # RACE comes from the job-level env above.
-      - name: make check
-        run: make check RACE=${{ env.RACE }}
+      # RACE comes from the job-level env above. The phase summary makes the
+      # pre-test / go-test split quotable per run; the gate itself prints its own
+      # in-`make check` pre-test, plan, and per-pass walls.
+      - name: make check (amd64 pool gate)
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          make check RACE=${{ env.RACE }}
+          end=$(date +%s)
+          {
+            echo "### amd64 pool gate — phase wall"
+            echo ""
+            echo "| phase | seconds |"
+            echo "| --- | --- |"
+            echo "| pre-test (job start -> gate start) | $(( start - ${PHASE_START_S:-$start} )) |"
+            echo "| go test (make check body, RACE=${{ env.RACE }}) | $(( end - start )) |"
+            echo ""
+            echo "Cache phases are the two \`cache (amd64)\` step durations (restore, then save)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save Go build + modules cache (amd64)
+        if: success() && steps.cache-go.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.cache-go.outputs.cache-primary-key }}
 
   # arm64 lane. `check` moved to the x86_64 pool, so arm64 signal would otherwise
   # disappear from CI entirely. This keeps it on a subset rather than the whole
@@ -271,10 +317,20 @@ jobs:
        !startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 30
+    # 20 minutes = the measured arm64 subset job wall (9m54s-10m31s on a 2-vCPU
+    # Blacksmith runner) plus ~2x headroom. This lane is measured and reported,
+    # not a budget commitment (its wall-clock variance is not deterministically
+    # testable); the cap is wedging protection only. It is NOT gated on the
+    # 5-minute aggregate, which is assessed on the amd64 pool gate.
+    timeout-minutes: 20
     env:
       RACE: '0'
     steps:
+      # Job-start clock for the phase report (covers checkout, the Nix install,
+      # cache restore, and the web stub).
+      - name: Phase clock start
+        run: echo "PHASE_START_S=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -283,20 +339,55 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
 
-      - name: Cache Go build + modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # Namespaced `-go-arm64-` for the same reason as the amd64 lane: the old
+      # shared `${{ runner.os }}-go-` restore-key let this lane seed or restore
+      # another job's artifacts. Restore and save are split for phase timing.
+      - name: Restore Go build + modules cache (arm64)
+        id: cache-go
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-arm64-${{ hashFiles('go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+          restore-keys: ${{ runner.os }}-go-arm64-
 
+      # The Nix install + web stub are part of this lane's pre-test cost; stamp
+      # the stub separately so the arm64 pre-test budget can be attributed.
       - name: make web-stub
-        run: nix develop -c make web-stub
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          nix develop -c make web-stub
+          echo "WEB_STUB_S=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
 
       - name: arm64 subset
-        run: nix develop -c go test -timeout=30m ./cmd/peasant/... ./internal/ingest/...
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          nix develop -c go test -timeout=30m ./cmd/peasant/... ./internal/ingest/...
+          end=$(date +%s)
+          {
+            echo "### arm64 lane — phase wall"
+            echo ""
+            echo "| phase | seconds |"
+            echo "| --- | --- |"
+            echo "| pre-test (job start -> test start) | $(( start - ${PHASE_START_S:-$start} )) |"
+            echo "| — of which web stub | ${WEB_STUB_S:-n/a} |"
+            echo "| go test (arm64 subset) | $(( end - start )) |"
+            echo ""
+            echo "Cache phases are the two \`cache (arm64)\` step durations (restore, then save)."
+            echo "Reported, not budget-gated: the aggregate is assessed on the amd64 pool gate."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save Go build + modules cache (arm64)
+        if: success() && steps.cache-go.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.cache-go.outputs.cache-primary-key }}
 
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
@@ -330,7 +421,10 @@ jobs:
           go-version-file: go.mod
 
       # The guard's probes compile and run under -race, so it keeps its own race
-      # lane rather than sharing the plain `make check` artifacts.
+      # lane rather than sharing the plain `make check` artifacts. The key and its
+      # restore-key are both namespaced `-go-r1-` so no other job can restore (or
+      # seed) this race lane, and this lane cannot restore another architecture's
+      # tarball.
       - name: Cache Go build + modules
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -338,7 +432,7 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-r1-${{ hashFiles('go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+          restore-keys: ${{ runner.os }}-go-r1-
 
       - name: Require harvester version bumps for changed behavior
         env:
@@ -384,6 +478,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Already namespaced `-go-cgo0-` on both the key and the restore-key, so
+      # this release-only lane never collided with the shared prefix; kept as the
+      # consistent pattern for every job.
       - name: Cache Go build + modules
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:

@@ -29,6 +29,13 @@ import (
 type syncHandler struct {
 	store  *store.Store
 	config *config.Config
+	// configHome, dataHome, and stateHome override the XDG roots this handler
+	// resolves config, data, and state paths under. Empty keeps the process
+	// environment as the default, so only tests inject explicit roots and the
+	// CLI keeps its environment-derived defaults. Mirrors ServerConfig.
+	configHome string
+	dataHome   string
+	stateHome  string
 	// scopeIssuer mints the opaque member scope a rendered sync helper group
 	// carries. The server owns the bounded scope cache; the sync route only
 	// consumes the issuer seam so its members replay the sync predicate.
@@ -40,6 +47,34 @@ type syncHandler struct {
 	ingestProgress *ingest.ProgressState
 	ingestResult   *ingest.PipelineResult
 	ingestError    error
+}
+
+// configDir resolves the config directory this handler reads and writes under,
+// preferring the injected XDG_CONFIG_HOME override over the environment.
+func (h *syncHandler) configDir() defaults.ConfigDirPath {
+	return defaults.ResolveConfigDirPathWith(h.configHome)
+}
+
+// dataDir resolves the data directory this handler reads and writes under,
+// preferring the injected XDG_DATA_HOME override over the environment.
+func (h *syncHandler) dataDir() defaults.DataDirPath {
+	return defaults.ResolveDataDirPathWith(h.dataHome)
+}
+
+// stateDir resolves the state directory this handler reads under, preferring the
+// injected XDG_STATE_HOME override over the environment.
+func (h *syncHandler) stateDir() defaults.StateDirPath {
+	return defaults.ResolveStateDirPathWith(h.stateHome)
+}
+
+// dbPath resolves the analytics database path under dataDir.
+func (h *syncHandler) dbPath() defaults.DBFilePath {
+	return defaults.ResolveDBFilePathWith(h.dataHome)
+}
+
+// credentials loads the stored village credentials from configDir.
+func (h *syncHandler) credentials() (*auth.Credentials, error) {
+	return auth.LoadCredentialsFrom(h.configHome)
 }
 
 func syncUserPatterns(cfg *config.Config) ([]redact.UserPattern, error) {
@@ -164,7 +199,7 @@ func computeSyncStatus(s ingest.PushSessionRow, heldMap map[string]bool, readine
 func (h *syncHandler) handleSyncAuth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	creds, err := auth.LoadCredentials()
+	creds, err := h.credentials()
 	if err != nil || creds == nil || !creds.IsValid() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"authenticated": false,
@@ -271,9 +306,9 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 
 	// Create redactor at the requested level.
 	xdg := redact.XDGPaths{
-		DataHome:   string(defaults.ResolveDataDirPath()),
-		ConfigHome: string(defaults.ResolveConfigDirPath()),
-		StateHome:  string(defaults.ResolveStateDirPath()),
+		DataHome:   string(h.dataDir()),
+		ConfigHome: string(h.configDir()),
+		StateHome:  string(h.stateDir()),
 	}
 	redactor, err := redact.NewRedactor(redactLevel, userPatterns, xdg)
 	if err != nil {
@@ -742,7 +777,7 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load credentials.
-	creds, err := auth.LoadCredentials()
+	creds, err := h.credentials()
 	if err != nil || creds == nil || !creds.IsValid() {
 		http.Error(w, `{"error":"not authenticated — run 'peasant village login' first"}`, http.StatusUnauthorized)
 		return
@@ -754,9 +789,9 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 
 	// Create redactor.
 	xdg := redact.XDGPaths{
-		DataHome:   string(defaults.ResolveDataDirPath()),
-		ConfigHome: string(defaults.ResolveConfigDirPath()),
-		StateHome:  string(defaults.ResolveStateDirPath()),
+		DataHome:   string(h.dataDir()),
+		ConfigHome: string(h.configDir()),
+		StateHome:  string(h.stateDir()),
 	}
 	redactor, err := redact.NewRedactor(level, userPatterns, xdg)
 	if err != nil {
@@ -911,7 +946,7 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	// If already fully authenticated (valid creds + village URL), nothing to do.
-	creds, err := auth.LoadCredentials()
+	creds, err := h.credentials()
 	if err == nil && creds != nil && creds.IsValid() && creds.VillageURL != "" {
 		json.NewEncoder(w).Encode(map[string]string{"status": "already_authenticated"})
 		return
@@ -926,14 +961,14 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 
 	// Clear any stale credentials so auth.Login doesn't short-circuit with
 	// "already logged in" when creds exist but are invalid/expired.
-	_ = auth.ClearCredentials()
+	_ = auth.ClearCredentialsFrom(h.configHome)
 
 	// Launch the OAuth flow in a background goroutine. auth.Login opens the
 	// browser and waits for the callback, so we return immediately.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		if _, loginErr := auth.Login(ctx, villageURL, false); loginErr != nil {
+		if _, loginErr := auth.LoginFrom(ctx, villageURL, false, h.configHome, nil); loginErr != nil {
 			slog.Error("village login failed", "err", loginErr)
 		}
 	}()
@@ -984,7 +1019,7 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 
 	outputPath := cfg.Output.BasePath
 	if outputPath == "" {
-		outputPath = string(defaults.ResolveDataDirPath())
+		outputPath = string(h.dataDir())
 	}
 	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
 	if err != nil {
@@ -1005,12 +1040,12 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	}
 
 	// Open DB and wire analytics stages.
-	dataDir := string(defaults.ResolveDataDirPath())
+	dataDir := string(h.dataDir())
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		h.setIngestError(fmt.Errorf("create data directory: %w", err))
 		return
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePath()))
+	db, err := store.Open(string(h.dbPath()))
 	if err != nil {
 		h.setIngestError(fmt.Errorf("open analytics store: %w", err))
 		return

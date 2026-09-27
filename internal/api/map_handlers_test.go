@@ -17,8 +17,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/project_resolution.yaml
@@ -48,14 +48,8 @@ type mapErrorResponseFixture struct {
 
 func decodeMapErrorResponses(source []byte) (mapErrorResponseFixture, error) {
 	var fixture mapErrorResponseFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode map error response fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return fixture, fmt.Errorf("map error response fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixture.ExpectedCaseCount != 13 || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.Cases) != fixture.ExpectedCaseCount {
 		return fixture, fmt.Errorf("map error response fixture count mismatch: declared=%d names=%d cases=%d, want 13", fixture.ExpectedCaseCount, len(fixture.RequiredNames), len(fixture.Cases))
@@ -115,17 +109,8 @@ type projectSummariesErrorFixture struct {
 
 func decodeProjectSummariesErrorFixture(source []byte) (projectSummariesErrorFixture, error) {
 	var fixture projectSummariesErrorFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode project summaries error fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fixture, fmt.Errorf("project summaries error fixture contains more than one YAML document")
-		}
-		return fixture, fmt.Errorf("decode trailing project summaries error fixture content: %w", err)
 	}
 	if fixture.ExpectedCaseCount != projectSummariesErrorCaseCount {
 		return fixture, fmt.Errorf("project summaries error fixture expectedCaseCount = %d, want independently defined %d", fixture.ExpectedCaseCount, projectSummariesErrorCaseCount)
@@ -186,14 +171,8 @@ var requiredProjectResolutionNames = map[string]struct{}{
 
 func decodeProjectResolutionFixture(source []byte) (projectResolutionFixture, error) {
 	var fixture projectResolutionFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode project resolution fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return fixture, fmt.Errorf("project resolution fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixture.ExpectedCaseCount != len(requiredProjectResolutionNames) || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.Cases) != fixture.ExpectedCaseCount {
 		return fixture, fmt.Errorf("project resolution fixture cardinality mismatch")

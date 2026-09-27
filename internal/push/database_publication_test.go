@@ -27,6 +27,7 @@ type forbiddenPublicationFS struct{ ingest.FileSystem }
 var _ ingest.FileSystem = forbiddenPublicationFS{}
 
 func TestDatabasePublicationWithoutSourcesOrSidecars(t *testing.T) {
+	t.Parallel()
 	var cases []struct {
 		Name              string `yaml:"name"`
 		CWD               string `yaml:"cwd"`

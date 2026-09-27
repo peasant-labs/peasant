@@ -1,0 +1,11 @@
+# Whole-suite test budget.
+#
+# `make check` runs the test gate against this value: the gate normalizes the
+# combined test wall by the calibration factor L (this box's probe wall over the
+# committed reference) and fails closed when the normalized wall exceeds the
+# budget. A miss is a red gate; there is no warning-only mode.
+#
+# The bar is a fixed target, not a value derived from the current measurement.
+version: 1
+seconds: 120
+basis: reference-box wall, 32-thread Linux amd64, Go 1.26.5 (L-normalized)

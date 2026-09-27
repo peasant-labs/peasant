@@ -1,9 +1,7 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
-	"io"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -12,7 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -32,14 +30,8 @@ func TestArtifactMirrorStopsOnOuterTransactionLoss(t *testing.T) {
 			Panic    string   `yaml:"panic"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(artifactMirrorTransactionsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(artifactMirrorTransactionsYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("mirror transaction fixture must contain one document")
 	}
 	required := []string{"middle-item-rolls-back-outer", "commit-failure-rolls-back-all", "item-abort-preserves-peers", "panic-rolls-back-all"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

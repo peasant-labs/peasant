@@ -1,0 +1,37 @@
+# Mutation cases for the coverage-map guard. Each case names the deliberate
+# defect it applies to the committed map and the diagnostic the guard must
+# produce, so the guard cannot pass vacuously. required_names keeps a case from
+# being deleted silently.
+required_names:
+  - unknown-name-is-not-inventory
+  - duplicate-name-appears-twice
+  - dropped-entry-has-no-destination
+  - unknown-destination-kind
+  - moved-target-must-exist
+
+mutations:
+  - name: unknown-name-is-not-inventory
+    op: append-entry
+    entry_name: "internal/nowhere.TestLandedAfterFreeze"
+    destination: retained-in-place
+    want_error: "is not in the inventory"
+    forbid_error: "has no destination"
+  - name: duplicate-name-appears-twice
+    op: duplicate-entry
+    index: 0
+    want_error: "appears more than once"
+  - name: dropped-entry-has-no-destination
+    op: drop-entry
+    index: 0
+    want_error: "has no destination"
+    forbid_error: "is not in the inventory"
+  - name: unknown-destination-kind
+    op: set-destination
+    index: 0
+    destination: "teleported:somewhere"
+    want_error: "unknown destination kind"
+  - name: moved-target-must-exist
+    op: set-destination
+    index: 0
+    destination: "moved:internal/nowhere/missing_file.go"
+    want_error: "does not exist"

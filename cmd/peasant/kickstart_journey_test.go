@@ -125,6 +125,7 @@ func loadKickstartPublicationFailureFixtures(raw []byte) ([]kickstartPublication
 }
 
 func TestMountedKickstartJourneyProductionPath(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadKickstartJourneyFixtures(kickstartJourneyYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -191,6 +192,7 @@ func TestMountedKickstartJourneyProductionPath(t *testing.T) {
 }
 
 func TestKickstartJourneyFixtureStrictness(t *testing.T) {
+	t.Parallel()
 	if _, err := loadKickstartJourneyFixtures(append(kickstartJourneyYAML, []byte("\n---\n{}\n")...)); err == nil {
 		t.Fatal("accepted second YAML document")
 	}
@@ -200,6 +202,7 @@ func TestKickstartJourneyFixtureStrictness(t *testing.T) {
 }
 
 func TestKickstartPublicationFailureReportsActualCause(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadKickstartPublicationFailureFixtures(kickstartPublicationFailuresYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -250,6 +253,7 @@ func TestKickstartPublicationFailureReportsActualCause(t *testing.T) {
 }
 
 func TestKickstartPublicationFailureFixtureStrictness(t *testing.T) {
+	t.Parallel()
 	if _, err := loadKickstartPublicationFailureFixtures(append(kickstartPublicationFailuresYAML, []byte("\n---\n{}\n")...)); err == nil {
 		t.Fatal("accepted second YAML document")
 	}
@@ -259,6 +263,7 @@ func TestKickstartPublicationFailureFixtureStrictness(t *testing.T) {
 }
 
 func TestBlockedHookDiagnosticNeverFormatsNilError(t *testing.T) {
+	t.Parallel()
 	err := hookInstallFailure("/tmp/disposable-repository", true, nil)
 	if strings.Contains(err.Error(), "<nil>") || !strings.Contains(err.Error(), "occupied by content Peasant does not own") || !strings.Contains(err.Error(), "manual integration instructions") {
 		t.Fatalf("blocked-hook diagnostic is not actionable: %v", err)
@@ -266,6 +271,7 @@ func TestBlockedHookDiagnosticNeverFormatsNilError(t *testing.T) {
 }
 
 func TestReceiptRetryReopensAndClosesStorePerRun(t *testing.T) {
+	t.Parallel()
 	opened, closed := 0, 0
 	cmd := buildTestRootCmd()
 	runner := buildKickstartJourneyRunnerWithDeps(cmd, "/tmp/config.yaml", config.BaseConfig(), nil, false, nil, kickstartJourneyDeps{

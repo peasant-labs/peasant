@@ -7,40 +7,36 @@ import (
 	"sync"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 )
 
-// FSOp names one FileSystem operation CountingFS counts. It is a closed set:
-// a test asks for a count by operation, and an operation this type does not
-// name is one the filesystem cannot have counted.
-type FSOp string
+// FSOp names one FileSystem operation CountingFS counts. It is an alias of the
+// fsdecorator operation set, so the counted vocabulary and the decorator
+// contract are the same closed set: a new operation is added in one place and
+// the drift guard fails until both agree.
+type FSOp = fsdecorator.Op
 
 const (
-	FSOpReadFile  FSOp = "ReadFile"
-	FSOpWriteFile FSOp = "WriteFile"
-	FSOpMkdirAll  FSOp = "MkdirAll"
-	FSOpStat      FSOp = "Stat"
-	FSOpLstat     FSOp = "Lstat"
-	FSOpWalkDir   FSOp = "WalkDir"
-	FSOpRename    FSOp = "Rename"
-	FSOpReadDir   FSOp = "ReadDir"
-	FSOpRemove    FSOp = "Remove"
-	FSOpRemoveAll FSOp = "RemoveAll"
-	FSOpCopyFile  FSOp = "CopyFile"
+	FSOpReadFile  = fsdecorator.OpReadFile
+	FSOpWriteFile = fsdecorator.OpWriteFile
+	FSOpMkdirAll  = fsdecorator.OpMkdirAll
+	FSOpStat      = fsdecorator.OpStat
+	FSOpLstat     = fsdecorator.OpLstat
+	FSOpWalkDir   = fsdecorator.OpWalkDir
+	FSOpRename    = fsdecorator.OpRename
+	FSOpReadDir   = fsdecorator.OpReadDir
+	FSOpRemove    = fsdecorator.OpRemove
+	FSOpRemoveAll = fsdecorator.OpRemoveAll
+	FSOpCopyFile  = fsdecorator.OpCopyFile
 )
 
-// AllFSOps lists every counted operation, so a fixture that names one can be
-// checked against the closed set.
-var AllFSOps = []FSOp{FSOpReadFile, FSOpWriteFile, FSOpMkdirAll, FSOpStat, FSOpLstat, FSOpWalkDir, FSOpRename, FSOpReadDir, FSOpRemove, FSOpRemoveAll, FSOpCopyFile}
+// AllFSOps lists every counted operation.
+var AllFSOps = fsdecorator.AllOps
 
 // NewFSOp converts a fixture name into an operation, refusing anything outside
 // the closed set instead of counting nothing under an unknown name.
 func NewFSOp(name string) (FSOp, bool) {
-	for _, op := range AllFSOps {
-		if string(op) == name {
-			return op, true
-		}
-	}
-	return "", false
+	return fsdecorator.NewOp(name)
 }
 
 type fsFault struct {

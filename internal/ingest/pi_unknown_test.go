@@ -35,6 +35,7 @@ var piUnknownCarriersYAML []byte
 var piUnknownOracleYAML []byte
 
 func TestPiUnknownOriginalPayloadOracle(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -78,6 +79,7 @@ func TestPiUnknownOriginalPayloadOracle(t *testing.T) {
 }
 
 func TestPiUnknownCarrierValidation(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -189,6 +191,7 @@ func validatePiUnknownFixturePayload(payload string) error {
 }
 
 func TestPiUnknownPersistence(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		SessionID     string   `yaml:"sessionID"`
 		Header        string   `yaml:"header"`
@@ -344,7 +347,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{schema.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{resolved}}}, OutputDir: output, IncludeActive: true, Parallelism: 1}
 			run := func() *ingest.PipelineResult {
 				t.Helper()
-				p, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+				p, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(writer), ingest.WithMetricsStore(writer), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}

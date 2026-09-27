@@ -79,6 +79,7 @@ func inventoryFromSessions(sessions []SessionListing) ProviderInventory {
 }
 
 func TestSetupWizard_ScriptedPageWalk(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range loadWizardWalkFixture(t) {
 		t.Run(scenario.Name, func(t *testing.T) {
 			var m tea.Model = NewWizard(

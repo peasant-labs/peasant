@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/claude_model_observations.yaml
@@ -41,15 +38,9 @@ type claudeModelObservationFixture struct {
 }
 
 func decodeClaudeModelObservationFixture(data []byte) (claudeModelObservationFixture, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var fixture claudeModelObservationFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return claudeModelObservationFixture{}, fmt.Errorf("decode Claude model-observation fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return claudeModelObservationFixture{}, fmt.Errorf("Claude model-observation fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, fixtureCase := range fixture.Cases {

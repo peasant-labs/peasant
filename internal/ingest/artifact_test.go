@@ -4,13 +4,12 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/artifact_capture.yaml
@@ -29,14 +28,8 @@ func TestManagedArtifactCapturePreservesValidatedInput(t *testing.T) {
 			ErrorContains string `yaml:"errorContains"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(artifactCaptureYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(artifactCaptureYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("artifact capture fixture must have exactly one YAML document")
 	}
 	required := []string{"valid-legacy-hashes-absent", "derived-cache-time-not-input", "ingested-time-not-input", "redaction-time-not-input", "nested-key-order-is-not-input", "adapter-version-is-input", "future-adapter-remains-readable", "future-schema-refused", "invalid-content-hash-refused", "unknown-field-preserved-in-input", "invalid-adapter-refused"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

@@ -1,0 +1,64 @@
+# Fixture cases for the measurement surface: the LPT batch planner, the
+# per-class decision table, and the pre-test step rows.
+#
+# required_names is a deletion-protection manifest across all three case
+# families: removing a case fails the test even if the counts still line up.
+required_names:
+  - lpt-balances-heavy-first
+  - round-robin-without-prior
+  - planner-dedups-and-sorts
+  - serialized-classes-exact
+  - concurrent-pass-level
+  - pretest-rows-exact
+
+planner_cases:
+  # LPT puts the heaviest tests on the lightest batch: A(10) and D(1) land on
+  # batch 0, B(8) and C(3) on batch 1 — and C differs from round-robin, so the
+  # case proves LPT is actually applied rather than falling through.
+  - name: lpt-balances-heavy-first
+    names: [A, B, C, D]
+    n: 2
+    prior: {A: 10s, B: 8s, C: 3s, D: 1s}
+    want_lpt: true
+    want_batch: {A: 0, B: 1, C: 1, D: 0}
+  - name: round-robin-without-prior
+    names: [D, C, B, A]
+    n: 2
+    want_lpt: false
+    want_batch: {A: 0, B: 1, C: 0, D: 1}
+  - name: planner-dedups-and-sorts
+    names: [B, A, B, A, C]
+    n: 3
+    want_lpt: false
+    want_batch: {A: 0, B: 1, C: 2}
+
+classtable_cases:
+  - name: serialized-classes-exact
+    passes:
+      - {pass: no-race, wall: 10s, user: 8s, system: 2s, serialized: true, units: 2}
+    records:
+      - {unit: u1, class: subprocess, pass: no-race, wall: 6s, user: 5s, system: 1s}
+      - {unit: u2, class: single-threaded-bytes, pass: no-race, wall: 4s, user: 3s, system: 1s}
+    want:
+      - {class: single-threaded-bytes, units: 1, wall_ms: 4000, user_ms: 3000, system_ms: 1000, gap_ms: 0, basis: serialized-per-invocation}
+      - {class: subprocess, units: 1, wall_ms: 6000, user_ms: 5000, system_ms: 1000, gap_ms: 0, basis: serialized-per-invocation}
+  # A concurrent pass cannot attribute CPU per unit, so the row carries the
+  # whole-pass delta once, not the (inflated) sum of per-invocation deltas.
+  - name: concurrent-pass-level
+    passes:
+      - {pass: race, wall: 100s, user: 90s, system: 5s, serialized: false, units: 3}
+    records:
+      - {unit: p1, class: race, pass: race, wall: 100s, user: 90s, system: 5s}
+      - {unit: p2, class: race, pass: race, wall: 100s, user: 90s, system: 5s}
+      - {unit: p3, class: race, pass: race, wall: 100s, user: 90s, system: 5s}
+    want:
+      - {class: race, units: 3, wall_ms: 100000, user_ms: 90000, system_ms: 5000, gap_ms: 5000, basis: pass-level-aggregate}
+
+pretest_cases:
+  - name: pretest-rows-exact
+    steps:
+      - {step: fmt, wall: 25s, user: 24s, system: 1s}
+      - {step: release-guard, wall: 12s, user: 10s, system: 2s}
+    want:
+      - {class: "pre:fmt", units: 1, wall_ms: 25000, user_ms: 24000, system_ms: 1000, gap_ms: 0, basis: pre-test-step}
+      - {class: "pre:release-guard", units: 1, wall_ms: 12000, user_ms: 10000, system_ms: 2000, gap_ms: 0, basis: pre-test-step}

@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -12,7 +10,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -43,14 +40,8 @@ func loadIndexAnnotationScopeFixtures(t *testing.T) []indexAnnotationScopeCase {
 		RequiredNames []string                   `yaml:"requiredNames"`
 		Cases         []indexAnnotationScopeCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexAnnotationScopeYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexAnnotationScopeYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("annotation scope fixtures require one document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {

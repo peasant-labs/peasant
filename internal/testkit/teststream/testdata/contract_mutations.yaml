@@ -1,0 +1,36 @@
+# Shape-mutation cases for the shared stream library's frozen shapes.
+#
+# Each case mutates the FROZEN EXPECTATION and asserts the comparator detects a
+# mismatch against the real type, proving the freeze is not vacuous.
+required_names:
+  - rename-field
+  - drop-field
+  - retype-field
+  - retag-json
+  - reorder-fields
+
+mutations:
+  - name: rename-field
+    target: teststream.Record
+    op: rename
+    field: Skipped
+    to: Ignored
+  - name: drop-field
+    target: teststream.Record
+    op: drop
+    field: Failed
+  - name: retype-field
+    target: teststream.Event
+    op: retype
+    field: Elapsed
+    to: string
+  - name: retag-json
+    target: teststream.Event
+    op: retag
+    field: Package
+    value: 'json:"Pkg"'
+  - name: reorder-fields
+    target: teststream.Record
+    op: reorder
+    field: Package
+    with: Failed

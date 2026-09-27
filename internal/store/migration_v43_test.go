@@ -1,11 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,8 +10,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -57,15 +54,9 @@ type publicationAttemptFixture struct {
 
 func loadPublicationFixture(t *testing.T) publicationFixtureFile {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationFixture))
-	decoder.KnownFields(true)
 	var fixture publicationFixtureFile
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationFixture, &fixture); err != nil {
 		t.Fatalf("decode publication fixture: %v", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatalf("publication fixture must contain exactly one document: %v", err)
 	}
 	if len(fixture.Records) != 2 || len(fixture.Attempts) != len(store.AllPublicationAttemptStages) || len(fixture.Rejections) != 1 {
 		t.Fatalf("publication fixture rows = records:%d attempts:%d rejections:%d", len(fixture.Records), len(fixture.Attempts), len(fixture.Rejections))
@@ -120,6 +111,7 @@ func publicationRecordFromFixture(t *testing.T, row publicationFixtureRecord) st
 }
 
 func TestMigrationV43SQLiteCheckRejectsUnknownDiagnosticStage(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rejected := fixture.Records[0], fixture.Rejections[0]
 	dbPath := filepath.Join(t.TempDir(), "stage-check.db")
@@ -146,6 +138,7 @@ func TestMigrationV43SQLiteCheckRejectsUnknownDiagnosticStage(t *testing.T) {
 }
 
 func TestMigrationV43RejectsUnknownDiagnosticStage(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rejected := fixture.Records[0], fixture.Rejections[0]
 	s := openTestStore(t)
@@ -159,6 +152,7 @@ func TestMigrationV43RejectsUnknownDiagnosticStage(t *testing.T) {
 }
 
 func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rollback := fixture.Records[0], fixture.Rollback
 	dbPath := filepath.Join(t.TempDir(), "publication.db")
@@ -218,6 +212,7 @@ func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
 }
 
 func TestMigrationV43PersistsOnlyCompleteAuthoritativeReceipts(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	s := openTestStore(t)
 	defer s.Close()
@@ -278,6 +273,7 @@ func TestMigrationV43PersistsOnlyCompleteAuthoritativeReceipts(t *testing.T) {
 }
 
 func TestMigrationV43ProjectIdentityCannotReadOrOverwritePublicationState(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	primary := publicationRecordFromFixture(t, fixture.Records[0])
 	wrongProject := publicationRecordFromFixture(t, fixture.Records[1])

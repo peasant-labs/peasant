@@ -3,9 +3,7 @@ package sessionvisibility_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/policy.yaml
@@ -95,14 +93,8 @@ type candidateFixture struct {
 
 func loadPolicyFixture(data []byte) (policyFixture, error) {
 	var fixture policyFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return policyFixture{}, fmt.Errorf("decode policy fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return policyFixture{}, fmt.Errorf("policy fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {

@@ -1,12 +1,10 @@
 package push_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -15,9 +13,9 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/annotation_repository_scope.yaml
@@ -72,22 +70,12 @@ type annotationScopeCase struct {
 
 func loadAnnotationScopeFixture(data []byte) (annotationScopeDocument, error) {
 	var document annotationScopeDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf(
 			"annotation repository scope fixture rule failed: typed YAML fields must match the document schema; unknown or "+
 				"malformed data invalidates the attribution evidence; where=%s loader=first-document decode; when=test fixture loading; "+
 				"impact=what a repository-scoped push publishes cannot be trusted; fix=match the typed schema: %w",
 			annotationRepositoryScopeFixturePath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return document, fmt.Errorf(
-			"annotation repository scope fixture rule failed: exactly one YAML document is allowed; trailing data is silently "+
-				"ignored; where=%s loader=end-of-document check; when=test fixture loading; "+
-				"impact=what a repository-scoped push publishes cannot be trusted; fix=remove the second document",
-			annotationRepositoryScopeFixturePath)
 	}
 	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {
 		return document, fmt.Errorf(

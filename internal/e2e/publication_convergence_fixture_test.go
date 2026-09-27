@@ -107,6 +107,7 @@ func loadPublicationConvergenceFixtures() (publicationConvergenceDocument, error
 }
 
 func TestPublicationConvergenceCorpus(t *testing.T) {
+	t.Parallel()
 	document, err := loadPublicationConvergenceFixtures()
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +118,7 @@ func TestPublicationConvergenceCorpus(t *testing.T) {
 }
 
 func TestPublicationConvergenceMarkersMatchClaudeFixture(t *testing.T) {
+	t.Parallel()
 	document, err := loadPublicationConvergenceFixtures()
 	if err != nil {
 		t.Fatal(err)

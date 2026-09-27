@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/wal_commit_frames.yaml
@@ -55,14 +52,8 @@ type walCommitFramesFixtures struct {
 func loadWALCommitFramesFixtures(t *testing.T) walCommitFramesFixtures {
 	t.Helper()
 	var fixture walCommitFramesFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(walCommitFramesYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(walCommitFramesYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("write-ahead-log commit fixture requires one YAML document")
 	}
 	present := make(map[string]bool)
 	for _, row := range fixture.Cases {

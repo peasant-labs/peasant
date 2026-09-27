@@ -1,15 +1,14 @@
 package tui_test
 
 import (
-	"bytes"
 	_ "embed"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui"
 	"github.com/peasant-labs/peasant/internal/tuitest"
-	"gopkg.in/yaml.v3"
 )
 
 // This is a program-level smoke test for the analytics app (peasant tui). It
@@ -42,10 +41,8 @@ type analyticsWalkScenario struct {
 
 func loadAnalyticsWalkFixture(t *testing.T) []analyticsWalkScenario {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(analyticsWalkFixtureBytes))
-	decoder.KnownFields(true)
 	var doc analyticsWalkDocument
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(analyticsWalkFixtureBytes, &doc); err != nil {
 		t.Fatalf("decode analytics walk fixture: %v", err)
 	}
 	if len(doc.Scenarios) == 0 || doc.ExpectedScenarioCount != len(doc.Scenarios) {

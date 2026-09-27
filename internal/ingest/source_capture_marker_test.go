@@ -32,7 +32,7 @@ func TestFileOnlyHarvestPersistsSourceCaptureMarker(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir)
 	run := func(label string) ingest.PipelineSummary {
 		t.Helper()
-		pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+		pipeline, err := newTestPipeline(mfs, git, adapters, cfg)
 		if err != nil {
 			t.Fatalf("%s: %v", label, err)
 		}

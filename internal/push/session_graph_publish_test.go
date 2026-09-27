@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/session_graph_publish.yaml
@@ -66,15 +65,9 @@ type sessionGraphPublishFixture struct {
 
 func loadSessionGraphPublishFixture(t *testing.T) sessionGraphPublishFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(sessionGraphPublishFixtureYAML))
-	decoder.KnownFields(true)
 	var fixture sessionGraphPublishFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(sessionGraphPublishFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode session graph publish fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("session graph publish fixture must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(sessionGraphPublishManifestYAML, "session graph publish")
 	if err != nil {
@@ -120,6 +113,7 @@ func containsString(values []string, needle string) bool {
 // immediately before upload and refuse a requirement-bearing payload the
 // receiver cannot preserve, with no upload, receipt, or attempt side effect.
 func TestSessionGraphPublishOfflineScanAndFreshNegotiation(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadSessionGraphPublishFixture(t).Cases {
 		if fixtureCase.Arm != "pipeline" {
 			continue
@@ -206,6 +200,7 @@ func requireLegacyEnvelope(t *testing.T, transport push.Transport) {
 // indexed entries: a payload that only carries a count, a root, or a purpose
 // still requires the graph token, while a lone source reference does not.
 func TestSessionGraphPublishCapabilityDerivation(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadSessionGraphPublishFixture(t).Cases {
 		if fixtureCase.Arm != "preflight" {
 			continue
@@ -233,6 +228,7 @@ func TestSessionGraphPublishCapabilityDerivation(t *testing.T) {
 // contentCapabilities is malformed, so a graph-bearing payload is refused
 // before any upload. The only request the receiver sees is the negotiation.
 func TestSessionGraphPublishNullAdvertisementRefusedByRealTransport(t *testing.T) {
+	t.Parallel()
 	var negotiationRequests, otherRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/schema/version" {
@@ -272,6 +268,7 @@ func TestSessionGraphPublishNullAdvertisementRefusedByRealTransport(t *testing.T
 // owner/local identity: the terminal receipt is keyed by the same
 // owner/project/session tuple and reused rather than duplicated.
 func TestSessionGraphPublishSupportedRepublishPreservesIdentity(t *testing.T) {
+	t.Parallel()
 	store, fs := sessionGraphPublishStore(t, "graph")
 	publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
@@ -322,6 +319,7 @@ func TestSessionGraphPublishSupportedRepublishPreservesIdentity(t *testing.T) {
 // (covered by the fixture) is the only alternative to an evidence-preserving
 // upload.
 func TestSessionGraphPublishSupportedUploadPreservesEvidence(t *testing.T) {
+	t.Parallel()
 	store, fs := sessionGraphPublishStore(t, "graph")
 	publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),

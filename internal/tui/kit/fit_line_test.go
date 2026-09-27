@@ -4,14 +4,13 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
@@ -62,17 +61,8 @@ var fitLineFixtureData []byte
 
 func decodeFitLineDocument(data []byte) (fitLineDocument, error) {
 	var document fitLineDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("decode testdata/fit_line.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return document, fmt.Errorf("testdata/fit_line.yaml must contain exactly one document: %w", err)
 	}
 	if document.ExpectedCaseCount != requiredFitLineCaseCount || len(document.Cases) != requiredFitLineCaseCount {
 		return document, fmt.Errorf("fit-line rows: declared=%d actual=%d required=%d",

@@ -3,9 +3,7 @@ package config_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -19,9 +17,11 @@ import (
 //go:embed testdata/selection_clone_paths.yaml
 var selectionClonePathFixtureYAML []byte
 
+//go:embed testdata/selection_clone_paths.manifest.yaml
+var selectionClonePathManifestYAML []byte
+
 type selectionClonePathFixtures struct {
-	DeclaredRows int                         `yaml:"declared_rows"`
-	Cases        []selectionClonePathFixture `yaml:"cases"`
+	Cases []selectionClonePathFixture `yaml:"cases"`
 }
 
 type selectionClonePathFixture struct {
@@ -35,21 +35,12 @@ type selectionClonePathFixture struct {
 
 func loadSelectionClonePathFixtures(t *testing.T) selectionClonePathFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(selectionClonePathFixtureYAML))
-	decoder.KnownFields(true)
 	var fixtures selectionClonePathFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(selectionClonePathFixtureYAML, &fixtures); err != nil {
 		t.Fatalf("decode clone-path configuration fixture: %v", err)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("clone-path configuration fixture must contain exactly one YAML document: %v", err)
-	}
-	const expectedRows = 5
-	if fixtures.DeclaredRows != expectedRows || len(fixtures.Cases) != expectedRows {
-		t.Fatalf("clone-path configuration fixture row guard failed: declared=%d actual=%d expected=%d", fixtures.DeclaredRows, len(fixtures.Cases), expectedRows)
-	}
 	seen := make(map[string]struct{}, len(fixtures.Cases))
+	names := make([]string, 0, len(fixtures.Cases))
 	for index, fixture := range fixtures.Cases {
 		if strings.TrimSpace(fixture.Name) == "" || strings.TrimSpace(fixture.Document) == "" {
 			t.Fatalf("clone-path configuration fixture row %d needs a name and document", index)
@@ -58,6 +49,14 @@ func loadSelectionClonePathFixtures(t *testing.T) selectionClonePathFixtures {
 			t.Fatalf("clone-path configuration fixture repeats name %q", fixture.Name)
 		}
 		seen[fixture.Name] = struct{}{}
+		names = append(names, fixture.Name)
+	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(selectionClonePathManifestYAML, "clone-path configuration")
+	if err != nil {
+		t.Fatalf("decode clone-path configuration manifest: %v", err)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "clone-path configuration"); err != nil {
+		t.Fatalf("clone-path configuration fixture/manifest mismatch: %v", err)
 	}
 	return fixtures
 }
@@ -130,15 +129,9 @@ func allSelectionProjects(selection config.SelectionConfig) []config.ProjectSele
 }
 
 func decodeSelectionStrict(data []byte) (config.SelectionConfig, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var selection config.SelectionConfig
-	if err := decoder.Decode(&selection); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &selection); err != nil {
 		return config.SelectionConfig{}, fmt.Errorf("decode selection: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return config.SelectionConfig{}, fmt.Errorf("selection must contain exactly one YAML document: %v", err)
 	}
 	return selection, nil
 }

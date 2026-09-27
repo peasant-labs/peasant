@@ -1,24 +1,21 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/unknown_local_integrity.yaml
 var unknownLocalIntegrityYAML []byte
 
 func TestUnknownLocalIntegrity(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -35,14 +32,8 @@ func TestUnknownLocalIntegrity(t *testing.T) {
 			} `yaml:"records"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(unknownLocalIntegrityYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(unknownLocalIntegrityYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := d.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatal("expected one YAML document")
 	}
 	var names []string
 	for _, c := range fixture.Cases {

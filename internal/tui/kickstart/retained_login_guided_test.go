@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -87,17 +87,8 @@ var retainedLoginData []byte
 
 func decodeRetainedLoginDocument(data []byte) (retainedLoginDocument, error) {
 	var document retainedLoginDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("decode testdata/guided/retained_login.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return document, fmt.Errorf("retained_login.yaml must hold exactly one document: %w", err)
 	}
 	if document.ExpectedCaseCount != expectedRetainedLoginCases || len(document.Cases) != expectedRetainedLoginCases {
 		return document, fmt.Errorf("retained login rows: declared=%d actual=%d required=%d",
@@ -154,6 +145,7 @@ func loadRetainedLoginDocument(t *testing.T) retainedLoginDocument {
 }
 
 func TestRetainedLoginFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), retainedLoginData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeRetainedLoginDocument(mutated); err == nil {
 		t.Fatal("retained login fixture accepted an unknown field")
@@ -161,6 +153,7 @@ func TestRetainedLoginFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestRetainedLoginFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), retainedLoginData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeRetainedLoginDocument(mutated); err == nil {
 		t.Fatal("retained login fixture accepted a trailing document")
@@ -168,6 +161,7 @@ func TestRetainedLoginFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestRetainedLoginFixtureEnforcesExactRowCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedRetainedLoginCases))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedRetainedLoginCases+1))
 	mutated := bytes.Replace(retainedLoginData, declared, changed, 1)
@@ -377,6 +371,7 @@ func assertRetainedView(t *testing.T, row retainedLoginCase, view string) {
 }
 
 func TestVisibilityLoginRetainsMountedSelectionStateAndAsyncDelivery(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadRetainedLoginDocument(t).Cases {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

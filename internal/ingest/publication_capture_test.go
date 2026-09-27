@@ -22,7 +22,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -63,9 +62,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 	var doc struct {
 		Cases []publicationCaptureCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationCaptureYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationCaptureYAML, &doc); err != nil {
 		t.Fatal(err)
 	}
 	required := map[string]bool{
@@ -106,6 +103,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 // The same real adapters, SQLite store, index writers and metrics engine used
 // by normal ingest repair legacy rows with no generated metadata file.
 func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPublicationCaptureCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx := t.Context()
@@ -213,7 +211,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			git.Remote = "https://example.com/changed/current.git"
 			run := func() *ingest.PipelineResult {
 				writer := &publicationReindexStore{Store: database, recapture: cfg.Reindex && c.ReindexConcurrentCapture, unreadableEntries: cfg.Reindex && c.ReindexUnreadableEntries}
-				pipeline, err := ingest.NewPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
+				pipeline, err := newTestPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
 					ingest.WithSalt(installationSalt), ingest.WithStore(writer), ingest.WithMetricsStore(writer),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {

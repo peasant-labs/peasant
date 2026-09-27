@@ -1,15 +1,10 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"os"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -48,15 +43,9 @@ type sourcePreviewTwoStepDoc struct {
 
 func loadSourcePreviewTwoStepDoc(t *testing.T) sourcePreviewTwoStepDoc {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(sourcePreviewTwoStepData))
-	decoder.KnownFields(true)
 	var doc sourcePreviewTwoStepDoc
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(sourcePreviewTwoStepData, &doc); err != nil {
 		t.Fatalf("decode two-step preview fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("two-step preview fixture must hold exactly one document")
 	}
 	if len(doc.RequiredCases) == 0 {
 		t.Fatal("two-step preview fixture declares no required cases")

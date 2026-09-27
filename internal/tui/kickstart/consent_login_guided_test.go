@@ -223,6 +223,7 @@ func advanceToConsent(t *testing.T, program kickstart.Program) kickstart.Program
 }
 
 func TestFinalConsentUsesVisibleDraftValuesAndPromisesNoPublication(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadConsentLoginDocument(t).Consent {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
@@ -256,6 +257,7 @@ func TestFinalConsentUsesVisibleDraftValuesAndPromisesNoPublication(t *testing.T
 }
 
 func TestVisibilityLoginRetainsSameSourceAndPreservesDraft(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadConsentLoginDocument(t).Login {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

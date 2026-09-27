@@ -182,6 +182,7 @@ func assertFixtureShape(t *testing.T, indexPath string) {
 }
 
 func TestFixture_SlugDecodeInvariants(t *testing.T) {
+	t.Parallel()
 	for _, m := range loadFixtureIndexes(t) {
 		if m.Slug == nil {
 			continue
@@ -240,6 +241,7 @@ func dirExistsFromTree(paths []string) func(string) bool {
 }
 
 func TestFixtureIndex_CoverageFloors(t *testing.T) {
+	t.Parallel()
 	indexes := loadFixtureIndexes(t)
 	if len(indexes) < 2 {
 		t.Errorf("fixture indexes = %d, want >= 2 provider fixture directories", len(indexes))
@@ -271,6 +273,7 @@ func TestFixtureIndex_CoverageFloors(t *testing.T) {
 }
 
 func TestFixtureIndex_AssociationRoundTrip(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(FixtureSourcePath(), fixtureIndexFile)
 	m, err := LoadFixtureIndex(path)
 	if err != nil {
@@ -285,6 +288,7 @@ func TestFixtureIndex_AssociationRoundTrip(t *testing.T) {
 }
 
 func TestLoadFixtureIndex_RejectsUnknownField(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(FixtureSourcePath(), fixtureIndexFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -306,6 +310,7 @@ func TestLoadFixtureIndex_RejectsUnknownField(t *testing.T) {
 }
 
 func TestLoadFixtureIndex_RejectsTrailingDocument(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(FixtureSourcePath(), fixtureIndexFile)
 	data, err := os.ReadFile(path)
 	if err != nil {

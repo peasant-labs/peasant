@@ -42,6 +42,7 @@ func seedColumnsPair(t *testing.T, fs ingest.FileSystem, sessionDir, sid string,
 // pair moves a counted column. The expected columns live in the fixture; "pair"
 // is the session's own transcript and metadata paths under peasant-sync.
 func TestWritePathColumns(t *testing.T) {
+	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
@@ -99,7 +100,7 @@ func TestWritePathColumns(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer db.Close()
-				pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+				pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 					ingest.WithStore(db), ingest.WithMetricsStore(db),
 					ingest.WithIndexers(ingest.NewIndexerRegistry(mfs, ingest.IndexerRegistryOptions{})))
 				if err != nil {
@@ -141,7 +142,7 @@ func TestWritePathColumns(t *testing.T) {
 					},
 				}
 				mfs.ResetCounts()
-				pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
+				pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -175,7 +176,7 @@ func TestWritePathColumns(t *testing.T) {
 					},
 				}
 				mfs.ResetCounts()
-				pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
+				pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithStore(stub))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -227,6 +228,7 @@ func TestWritePathColumns(t *testing.T) {
 // the work, so the fixture asserts the bound the design guarantees rather than
 // a timing-dependent number.
 func TestWritePathMirrorsInPagesOf256(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// The store refuses a page larger than MirrorPageSize outright; this is why
@@ -276,7 +278,7 @@ func TestWritePathMirrorsInPagesOf256(t *testing.T) {
 	indexer := &testutil.StubIndexer{Kind: ingest.TranscriptSourceFile}
 
 	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir),
+	pipeline, err := newTestPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir),
 		ingest.WithStore(ds), ingest.WithMetricsStore(ds),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: indexer}))
 	if err != nil {
@@ -306,6 +308,7 @@ func TestWritePathMirrorsInPagesOf256(t *testing.T) {
 // metadata installed first, the same fault would leave both files old and no
 // mixed pair, so this fixture fails if the order regresses.
 func TestWritePathInstallsMetadataLast(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mfs := testutil.NewCountingFS(testutil.NewMemFS())
 	git := testutil.DefaultGitResolver()
@@ -327,7 +330,7 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta}),
 	}
-	first, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	first, err := newTestPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +360,7 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: makeMinimalMeta(t, testSessionID)}),
 	}
 	mfs.Fail(testutil.FSOpRename, metadataPath, fmt.Errorf("simulated crash before the metadata rename"))
-	second, err := ingest.NewPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
+	second, err := newTestPipeline(mfs, git, adapters, makePipelineConfig(testOutputDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,6 +396,7 @@ func TestWritePathInstallsMetadataLast(t *testing.T) {
 // build is pruned with one RemoveAll; and the only read of the saved pair is the
 // single old-metadata read the replacement-header check makes.
 func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mfs := testutil.NewCountingFS(testutil.NewMemFS())
 	git := testutil.DefaultGitResolver()
@@ -426,7 +430,7 @@ func TestWritePathReplacedSessionSubagentsSurvive(t *testing.T) {
 	}
 	defer db.Close()
 	runHarvest := func(sessions []ingest.DiscoveredSession) {
-		pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+		pipeline, err := newTestPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
 			ingest.HarnessClaudeCode: makeStubAdapter(sessions, metas),
 		}, makePipelineConfig(testOutputDir),
 			ingest.WithStore(db), ingest.WithMetricsStore(db),

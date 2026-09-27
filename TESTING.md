@@ -1,7 +1,9 @@
 # Testing Patterns
 
 Code examples and strategies for testing the Peasant web dashboard and WebSocket protocol.
-See `AGENTS.md` for the test package map, fixture tree, writing rules, and channel reference table.
+See [`AGENTS.md`](AGENTS.md) for the test and fixture writing rules and
+[`README.md`](README.md#package-map) for the package map; the documentation map below links each
+test layer to its entry point.
 
 ### E2E documentation map
 
@@ -10,6 +12,226 @@ See `AGENTS.md` for the test package map, fixture tree, writing rules, and chann
 | WebSocket hub E2E | `make check` | [Go WebSocket E2E](#go-websocket-e2e-verified) (below) |
 | Committed transcript fixtures (`internal/e2e/testdata/`) | `make check` | [Fixture meta-tests](#committed-fixture-meta-tests-make-check) + [`docs/e2e-fixture.md`](docs/e2e-fixture.md) |
 | Full-stack skip-gate + pull round-trip (podman + village + real CLI) | `make e2e` only | [Full-stack e2e](#full-stack-e2e-verified) + [`docs/e2e.md`](docs/e2e.md) |
+
+## Test gate
+
+`make check` runs the Go suite through `cmd/testgate`. The gate exists to move
+the suite's expensive non-race work out of the race pass **without dropping it**,
+and to prove that every test still runs exactly once across the passes.
+
+### Two passes, one registry
+
+- **`no-race-partition.yaml`** (committed at the repo root) is the admission
+  record. Its `partition` entries run in the **no-race pass** and are excluded
+  from the race pass; its `protected` entries are pinned into the race pass and
+  must never be registered as partition members.
+- Under `RACE=1` the gate runs a **race pass** (every listed test minus the
+  partition members) and a **no-race pass** (exactly the partition members).
+  Under `RACE=0` it runs a **single no-race pass** over every test, but still
+  computes the plan and applies the screen. The gate computes the plan from
+  `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
+
+### Subset runs (`-pkgs`)
+
+`run` and `plan` take `-pkgs`, a comma-separated list of repo-relative package
+patterns that defaults to `./...`:
+
+```bash
+go run ./cmd/testgate run -pkgs ./internal/testkit/coveragemap,./cmd/testgate -race=false
+```
+
+Only the named patterns are listed, planned, and executed, so the gate can be
+checked end to end in seconds instead of the whole 13–15 minute suite. A subset
+run is **not** a full-suite gate result and says so:
+
+- it prints a `SUBSET RUN` header naming the patterns and the package count;
+- the four-rule screen's **registered liveness** rule (rule 3) requires events
+  only for registered packages the plan contains, so a registered package the
+  subset deliberately excluded does not fail the screen — while a planned
+  registered package that emits no events still does;
+- the whole-suite budget is **not applicable**: the gate prints
+  `budget: not applicable (subset run: N of M packages)` and never compares a
+  subset wall against the committed 120s bar.
+
+A full run (`-pkgs ./...`, the default) behaves exactly as before: the whole
+registry is in force and the budget verdict is enforced. `profile`'s existing
+single-package `-pkg` is separate and unchanged.
+
+### Timing mode
+
+`cmd/testgate timing` summarizes an arbitrary `go test -json` stream with the
+gate's own stream library:
+
+```bash
+go test -race -json ./internal/ingest/... | go run ./cmd/testgate timing -top 40
+go run ./cmd/testgate timing -top 40 < ingest.json
+```
+
+It takes `-top N` (rows per section, default 25), `-family-re RE` (regroup by a
+capture-group regexp), `-no-families` (skip the per-family section), and
+`-warn-pct PCT` (mark tests over that share). With no file argument it reads
+stdin. The report and the gate's merged-pass report come from the same renderer,
+so a hand measurement and a gate measurement are the same measurement. A failing
+test exits non-zero.
+
+### Admission — all four criteria
+
+A registry entry is admitted only when it carries:
+
+1. `class` from the closed set `single-threaded-bytes` · `subprocess` ·
+   `static-analysis` · `toolchain`;
+2. `evidence`, a `file:line` that exists and is inside the named test's file;
+3. an observed `cost` pair (`wall_ms`, `cpu_ms`) from a committed measurement;
+4. for `subprocess`, `build_flags` resolved against the referenced
+   `exec_command_site` — a partition child must be built **without** `-race`.
+   `TestOpenCodeNativeCLI` is pinned in `protected` as the counter-example: its
+   `go build` child uses `nativeCLIRaceFlag`, which is `-race=true` under the
+   `race` build tag.
+
+`internal/testkit/testgate/registry_test.go` validates the committed registry against the
+tree and runs named negative cases from `testdata/registry_cases.yaml`; moving the
+counter-example into `partition` fails the test.
+
+### The four-rule exactly-once screen
+
+The screen merges the passes and checks, in both `RACE` modes:
+
+1. **exactly-once** — a test that ran in more than one pass is a double-run (FAIL);
+2. **partition containment** — a partition member must not run in the race pass (FAIL);
+3. **registered liveness** — a registered package with no test events, a partition
+   member that did not run, or a protected test that did not run (FAIL);
+4. **unregistered liveness** — a planned unregistered package with no events is
+   **reported only** (REPORT).
+
+The screen records no baseline and compares nothing across time. Any test failure,
+screen FAIL, or invocation error makes the gate exit non-zero.
+
+### Per-invocation records and run classes
+
+Each `go test` invocation is a recordable unit with a `{unit, class, wall, user,
+system}` record. The race pass records one unit per package (class `race`); the
+`RACE=1` no-race pass records one unit per partition test, carrying that entry's
+class. `user`/`system` come from `getrusage(RUSAGE_CHILDREN)`; under concurrency
+the counter is process-global, so per-unit CPU is best-effort while **wall is
+always exact**.
+
+Run classes (keep them separate):
+
+- **truth / budget (profile-free):** `-race -count=1 -timeout=0 -json -fullpath
+  -outputdir <d>`. This is the only quotable wall.
+- **attribution (profiles ON; wall not quotable):** add `-blockprofile`,
+  `-mutexprofile`, `-cpuprofile`, `-trace`. `-cpuprofile` does not profile child
+  processes, so it is for intra-binary attribution only.
+- **interactive debug:** `-v -fullpath -run <target>`.
+
+Do not pin `-parallel`: it defaults to `GOMAXPROCS` (cgroup-aware) and pinning
+changes the packing ceiling being measured. The gate prints the effective `-p`,
+`-parallel`, `-count`, and `GOMAXPROCS`.
+
+### Budget and calibration surface
+
+`budget.yaml` at the repository root carries the committed budget for the whole
+suite: the gate normalises the combined test wall by the calibration factor `L` and
+**fails closed** when the normalised wall exceeds it — there is no warning-only mode
+and no ratchet. `CHECK_START_NS` is stamped by `make check` and the gate reports the
+pre-test wall (`test-start - CHECK_START_NS`) separately from the test wall. The
+calibration factor `L` is the gate's fixed CPU probe over the committed reference;
+`L > 4` is reported INCONCLUSIVE and does not fail the gate. When no fixture is
+present the gate reads `TEST_BUDGET` (seconds) from the environment and otherwise
+prints raw walls only.
+
+### Current status
+
+The committed budget is **120s** and the suite does **not** meet it, so `make check`
+fails at the budget line **by construction**. Measured on the consolidated tree
+(2026-09-27): race pass 12m44s–14m52s, combined 13m39s–15m51s, L-normalised
+822s–941s at `L` 0.996–1.011. The per-family report, the CPU numerator
+(5842.8s; 32-core floor 182.6s) and the full lever analysis are on peasant#389.
+
+The binding constraint and the remaining levers, measured rather than assumed:
+
+- the largest single test — `TestUnknownLocalRetentionBeyondTransferBudget` in
+  `internal/ingest` — costs **243.6s** focused and alone, so no batching or sharding
+  can put the suite below it until that test's cost falls;
+- no cost class has a positive `wall − CPU` gap, so there is no blocked time left to
+  reclaim; the remaining work is *fewer CPU seconds under instrumentation*;
+- achieved packing still leaves headroom: `internal/api` 2.02×, `internal/store`
+  1.40×, `internal/ingest` 2.90× of 32 hardware threads.
+
+Do not close a budget miss by raising the value or adding a warning-only mode. The
+bar is a target and the miss is the measurement.
+
+### Counting-method rule
+
+Every count in a report must carry the exact command that produced it and the SHA
+it was run at, or be explicitly labelled **"carried, not re-verified"**. No relayed
+number may be restated without re-running it.
+
+### Frozen contract
+
+The gate's exported shape is a frozen contract: the per-invocation record, the
+report document, the registry and budget schemas, the class and pre-test closed
+sets, the shared stream library path, and the CLI and environment surface.
+`internal/testkit/testgate/contract_test.go` and `internal/testkit/teststream/contract_test.go`
+pin the shapes against `testdata/contract_shapes.yaml`; the
+`contract_compile_test.go` files break the build on a rename, removal, or retype;
+and `cmd/testgate/main_test.go` pins the usage text, the exit codes, and the
+budget/env precedence. Each frozen axis carries a mutation case that must be
+detected, so the freeze is tested rather than asserted. Update the fixture only
+when a contract change is deliberate and the consumers are re-pinned.
+
+## Test-support filesystem decorators
+
+The suite's test filesystem decorators wrap an `ingest.FileSystem` to count and
+fault an operation, hold an operation, or bound it. The shared contract is
+declared once in `internal/testkit/fsdecorator`, a standard-library-only leaf package.
+
+- `CountingFS` (`internal/testutil/counting_fs.go`) is the path-keyed fault and
+  count capability.
+- `fsdecorator.GatedFS` is the blocking gate: `Arm` holds one operation on one
+  path, `Reached` closes when the held operation is entered, and `Release` lets it
+  proceed.
+- `fsdecorator.BoundedFS` is the bound and read-only case: `Limit` bounds one
+  operation on a path, `ReadOnly` refuses every mutating operation.
+
+`fsdecorator.FileSystem` mirrors `ingest.FileSystem`; a contract test asserts the
+two are identical, so a decorator held as `GatedFS` or `BoundedFS` is also an
+`ingest.FileSystem`.
+
+### Two owners, no import cycle
+
+`internal/testutil` imports `internal/ingest`, so a white-box `package ingest`
+test cannot import `internal/testutil` (that would be an import cycle). The
+decorators therefore have two owners:
+
+- `internal/testutil` implements the non-white-box decorators.
+- `internal/ingest/fsfault_test.go` (`package ingest`) implements the white-box
+  decorators, which need the package's unexported internals.
+
+Both import `internal/testkit/fsdecorator`, which imports nothing from `internal/ingest`,
+so the same capability can be implemented on either side. Because Go interfaces
+are structural, a decorator also satisfies the interface without naming it, and a
+consumer can take `fsdecorator.GatedFS`/`BoundedFS` and pass the value to
+production code that expects `ingest.FileSystem`.
+`internal/testkit/fsdecorator/testdata/decorator_classification.yaml` records, per
+decorator type, its capability, owner, and declaring file:line, so each
+migration's owner is explicit before any code moves; a test asserts every entry
+resolves to a real declaration and the required-name manifest matches both ways.
+
+## Coverage map for the consolidation
+
+The consolidation records every moved, deleted, retained, or deferred name in a
+coverage map, closed against an inventory generated at the slice branch point:
+
+- `internal/testkit/coveragemap` declares `Inventory` and `CoverageMap`, the destination
+  closed set (`retained-in-place`, `moved:<file>`, `deleted:<rationale-ref>`,
+  `followup:<task-id>`), strict loaders, and the validators.
+- The inventory's `frozen_from` is the branch-point commit; the validator refuses
+  anything that is not a commit-shaped value, so a plan-time inventory is not
+  admissible.
+- Every inventory name appears in the map exactly once, a `moved` target must
+  exist, and a `deleted` or `followup` entry must name its rationale or task. An
+  entry is written by the slice that performs the move, in the same commit.
 
 ## Test performance: keeping `cmd/peasant` fast (and parallel)
 
@@ -134,8 +356,15 @@ production **2 GiB** arena (`DefaultArenaSizeBytes`). With `t.Parallel` at
 `internal/ingest` `TestMain`s. The API test binary applies the same override for
 its mounted ingest paths, and E2E TestMain supplies it to the harness and CLI
 children. Result: `cmd/peasant -race` 2173–6267 MB →
-**240 MB**, `ingest` 6185 → **274 MB**; full `make check -race` runs ~26s and
-fits a **2-vcpu** runner (so the per-PR job stays a plain `make check`, no split).
+**240 MB**, `ingest` 6185 → **274 MB**. The memory result stands; the time claim
+that followed it did not. The ~26s once stated here was stale: at the point the
+race/no-race partition landed, a full `make check -race` on a 32-thread box
+measured **26m23.8s** for the race pass, **30.4s** for the no-race pass, and
+**14.6s** of pre-test steps (calibration L=0.96). The gate prints the current
+wall on every run, so read that output rather than a figure fixed here — the
+suite is still being optimised, and a hardcoded number ages. Whether a 2-vcpu
+runner can hold the per-PR job is a separate CI question and is not settled by
+this paragraph.
 
 ### How memory was profiled (different tools than time)
 

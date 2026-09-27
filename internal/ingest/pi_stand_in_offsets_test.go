@@ -129,6 +129,7 @@ func piStandInOffsetArtifact(t *testing.T, fixtureCase piStandInOffsetCase) []by
 // truncation-shaped error is then accepted as an incomplete final line and the
 // session imports a truncated prefix, where it must be refused.
 func TestPiReadPlacesRecordsAfterAStandInByTheBytesItRead(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadPiStandInOffsetFixtures(t).Cases {
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			data := piStandInOffsetArtifact(t, fixtureCase)

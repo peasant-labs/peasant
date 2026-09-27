@@ -1,17 +1,14 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/title_parity.yaml
@@ -64,15 +61,9 @@ type titleParityCase struct {
 
 func loadTitleParityFixtures(t *testing.T) titleParityFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(titleParityYAML))
-	decoder.KnownFields(true)
 	var fixtures titleParityFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(titleParityYAML, &fixtures); err != nil {
 		t.Fatalf("decode title parity fixtures: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("title parity fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixtures.DeclaredRows != titleParityRows || len(fixtures.Cases) != titleParityRows {
 		t.Fatalf("title parity fixture row guard failed: declared=%d actual=%d expected=%d",

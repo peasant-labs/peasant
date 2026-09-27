@@ -5,15 +5,14 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -58,17 +57,8 @@ var visibilityOverlayData []byte
 
 func decodeVisibilityOverlayDocument(data []byte) (visibilityOverlayDocument, error) {
 	var document visibilityOverlayDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("decode testdata/guided/visibility_overlay.yaml: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return document, fmt.Errorf("visibility_overlay.yaml must hold exactly one document: %w", err)
 	}
 	if document.ExpectedCaseCount != expectedVisibilityOverlayCases || len(document.Cases) != expectedVisibilityOverlayCases {
 		return document, fmt.Errorf("visibility overlay rows: declared=%d actual=%d required=%d",
@@ -105,6 +95,7 @@ func loadVisibilityOverlayDocument(t *testing.T) visibilityOverlayDocument {
 }
 
 func TestVisibilityOverlayFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), visibilityOverlayData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeVisibilityOverlayDocument(mutated); err == nil {
 		t.Fatal("visibility overlay fixture accepted an unknown field")
@@ -112,6 +103,7 @@ func TestVisibilityOverlayFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestVisibilityOverlayFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), visibilityOverlayData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeVisibilityOverlayDocument(mutated); err == nil {
 		t.Fatal("visibility overlay fixture accepted a trailing document")
@@ -119,6 +111,7 @@ func TestVisibilityOverlayFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestVisibilityOverlayFixturePinsCounts(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedVisibilityOverlayCases))
 	mutated := bytes.Replace(visibilityOverlayData, declared,
 		[]byte(fmt.Sprintf("expectedCaseCount: %d", expectedVisibilityOverlayCases-1)), 1)
@@ -162,6 +155,7 @@ func advanceRetainedProgramToLicense(t *testing.T, program kickstart.Program, wa
 }
 
 func TestVisibilityDetourYieldsToFlowOwnedOverlays(t *testing.T) {
+	t.Parallel()
 	for _, row := range loadVisibilityOverlayDocument(t).Cases {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {

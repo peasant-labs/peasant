@@ -1,15 +1,11 @@
 package kit_test
 
 import (
-	"bytes"
 	_ "embed"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/exp/golden"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -39,17 +35,8 @@ type childCountLineDocument struct {
 func loadChildCountLines(t *testing.T) childCountLineDocument {
 	t.Helper()
 	var doc childCountLineDocument
-	dec := yaml.NewDecoder(bytes.NewReader(childCountLineData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(childCountLineData, &doc); err != nil {
 		t.Fatalf("decode testdata/child_count_line.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("child_count_line.yaml must hold exactly one document: %v", err)
 	}
 	present := make(map[string]bool, len(doc.Cases))
 	for _, c := range doc.Cases {

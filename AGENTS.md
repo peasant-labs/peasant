@@ -48,6 +48,11 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 
 ## Tests and fixtures
 
+The test gate itself — two passes, the no-race registry, the four-rule
+exactly-once screen, the run classes, and the committed budget — is documented in
+`TESTING.md` under **Test gate**. Run `make check` as usual; the gate is the entry
+point, not a wrapper you invoke by hand.
+
 - Use an integration test first for behavior that involves I/O, state, or more than one
   component.
 - Test the production path. Mock the dependencies, not the system under test.
@@ -57,6 +62,20 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 - Assert observable outcomes. Do not assert private implementation details.
 - Add a compile-time interface guard for each new interface implementation.
 - Use an external test package when `internal/testutil` would create an import cycle.
+- The shared test filesystem decorators (`GatedFS`, `BoundedFS`, and the existing
+  `CountingFS`) implement the contract in `internal/testkit/fsdecorator`. It is a
+  standard-library-only leaf package so both `internal/testutil` and a white-box
+  `package ingest` test can import it without an import cycle; do not move the
+  declaration into `internal/testutil`. `fsdecorator.FileSystem` mirrors
+  `ingest.FileSystem`, and a contract test keeps them identical.
+- The decorators have two owners. `internal/testutil` owns the non-white-box
+  decorators. The white-box `internal/ingest/fsfault_test.go` owns the decorators
+  that need the package's unexported internals. Neither owner declares the shared
+  contract; both implement it.
+- The coverage map that records each moved, deleted, retained, or deferred test
+  name — its `Inventory` and `CoverageMap` schema, the closed destination set,
+  and the validators — lives in `internal/testkit/coveragemap`. `TESTING.md` describes
+  the map and the decorator owners.
 
 ## Types and boundaries
 
@@ -67,6 +86,11 @@ GitHub-hosted review evidence. Generated PNGs stay untracked.
 - Keep reusable defaults in `internal/defaults`. Keep package-specific values local.
 - Keep dependencies injectable. Production wiring uses real dependencies. Tests may replace them.
 - Use atomic file operations for persisted data. Keep the existing XDG directory layout.
+- The gate's exported shapes (per-invocation record, report document, registry,
+  budget) and the shared stream library are frozen by contract tests. Change a
+  shape only as a deliberate contract change; the `contract_test.go` files in
+  `internal/testkit/testgate` and `internal/testkit/teststream` fail on a rename, removal, retype,
+  retag, or reorder of a frozen field.
 
 Run the ast-grep rules of the repository when you change Go types or literals:
 

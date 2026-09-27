@@ -90,6 +90,7 @@ func loadModelProjectionFixture(t *testing.T) modelProjectionFixture {
 }
 
 func TestModelProjectionFixtureGuards(t *testing.T) {
+	t.Parallel()
 	loadModelProjectionFixture(t)
 	manifest, err := testutil.DecodeSemanticManifest(modelProjectionManifestYAML, "model projection")
 	if err != nil {
@@ -114,6 +115,7 @@ func TestModelProjectionFixtureGuards(t *testing.T) {
 }
 
 func TestModelProjectionProductionPath(t *testing.T) {
+	t.Parallel()
 	results := runModelProjectionFixture(loadModelProjectionFixture(t))
 	for _, result := range results {
 		result := result

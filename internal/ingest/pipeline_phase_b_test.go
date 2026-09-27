@@ -134,7 +134,7 @@ func runPhaseBPipeline(
 		StalenessThreshold: 5 * time.Minute,
 	}
 
-	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg, ingest.WithSalt(s))
+	pipeline, err := newTestPipeline(mfs, git, adapters, cfg, ingest.WithSalt(s))
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}

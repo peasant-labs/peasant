@@ -1,13 +1,11 @@
 package push_test
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/scoped_empty_state.yaml
@@ -69,18 +67,10 @@ type scopedEmptyStateCase struct {
 // loadScopedEmptyStateFixture decodes and fully validates the corpus.
 func loadScopedEmptyStateFixture(data []byte) (scopedEmptyStateDocument, error) {
 	var document scopedEmptyStateDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, scopedEmptyStateRuleError(
 			"typed YAML fields must match the document schema", "loader=first-document decode",
 			fmt.Sprintf("fix=remove unknown fields and match the typed schema: %v", err))
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return document, scopedEmptyStateRuleError(
-			"exactly one YAML document is allowed; trailing data is silently ignored", "loader=end-of-document check",
-			"fix=remove the second document so the next decode returns EOF")
 	}
 	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {
 		return document, scopedEmptyStateRuleError(

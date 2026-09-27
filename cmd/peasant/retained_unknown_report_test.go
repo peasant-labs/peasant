@@ -23,6 +23,7 @@ var retainedReportYAML []byte
 var retainedReportManifest []byte
 
 func TestRetainedUnknownReport(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Cases []struct {
 			Name        string `yaml:"name"`

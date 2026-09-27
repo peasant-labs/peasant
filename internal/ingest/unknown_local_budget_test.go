@@ -4,8 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,13 +23,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/unknown_local_budget.yaml
 var unknownLocalBudgetYAML []byte
 
 func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Payload       string   `yaml:"payload"`
@@ -43,14 +41,8 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			PaddingBytes int    `yaml:"paddingBytes"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(bytes.NewReader(unknownLocalBudgetYAML))
-	d.KnownFields(true)
-	if err := d.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(unknownLocalBudgetYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := d.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatal("expected one fixture document")
 	}
 	var names []string
 	for _, c := range fixture.Cases {
@@ -61,6 +53,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			fs := &ingest.OSFileSystem{}
 			// Use ordinary word-separated source text rather than a multi-megabyte
@@ -110,7 +103,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			cfg.Force = true
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{ingest.HarnessCodex: {Enabled: true, Paths: []ingest.ResolvedPath{sourcePath}}}
 			cfg.AllowedSessionIDs = map[ingest.SessionID]bool{sid: true}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
 			if err != nil {
 				t.Fatal(err)
 			}

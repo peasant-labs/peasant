@@ -1,12 +1,10 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -57,14 +54,8 @@ type indexFormatSnapshotDocument struct {
 func loadIndexFormatSnapshotFixtures(t *testing.T) indexFormatSnapshotDocument {
 	t.Helper()
 	var document indexFormatSnapshotDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(indexFormatSnapshotsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexFormatSnapshotsYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("snapshot fixtures require one document: %v", err)
 	}
 	guardNames, snapshotNames := make(map[string]bool), make(map[string]bool)
 	for _, row := range document.Guards {

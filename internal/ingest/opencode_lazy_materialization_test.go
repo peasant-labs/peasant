@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"errors"
-	"io"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 const expectedOpenCodeBoundaryCases = 1
@@ -43,15 +41,9 @@ type openCodeBoundaryDocument struct {
 var openCodeBoundaryYAML []byte
 
 func loadOpenCodeBoundaryDocument(data []byte) (openCodeBoundaryDocument, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var document openCodeBoundaryDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, errors.New("expected exactly one YAML document")
 	}
 	if document.DeclaredCases != expectedOpenCodeBoundaryCases || len(document.Cases) != expectedOpenCodeBoundaryCases {
 		return document, errors.New("boundary fixture count guard failed")
@@ -140,7 +132,7 @@ func TestOpenCodeDiscoveryAndFilteredPipelineDoNotReadLegacyPayloads(t *testing.
 		ingest.HarnessOpenCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return newAdapter() },
 	}
 	config := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: ingest.ResolvedPath(t.TempDir()), Parallelism: 1, SessionFilter: func(ingest.DiscoveredSession) bool { return false }}
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config)
+	pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config)
 	if err != nil {
 		t.Fatalf("construct unselected-session pipeline: %v", err)
 	}
@@ -157,7 +149,7 @@ func TestOpenCodeDiscoveryAndFilteredPipelineDoNotReadLegacyPayloads(t *testing.
 	store := &testutil.StubSessionStore{LocationsByID: locations}
 	config.SessionFilter = nil
 	config.OutputDir = ingest.ResolvedPath(t.TempDir())
-	unchangedPipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config, ingest.WithStore(store))
+	unchangedPipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), adapters, config, ingest.WithStore(store))
 	if err != nil {
 		t.Fatalf("construct unchanged-session pipeline: %v", err)
 	}
@@ -173,7 +165,7 @@ func TestOpenCodeDiscoveryAndFilteredPipelineDoNotReadLegacyPayloads(t *testing.
 	commitAnalyzer := &testutil.StubGitDiffAnalyzer{CommitInfos: []ingest.CommitInfo{commit}}
 	commitStore := &testutil.StubSessionStore{}
 	config.OutputDir = ingest.ResolvedPath(t.TempDir())
-	selectedPipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, config,
+	selectedPipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), adapters, config,
 		ingest.WithGitDiffAnalyzer(commitAnalyzer),
 		ingest.WithCommitTranscriptReader(commitReader),
 		ingest.WithStore(commitStore),

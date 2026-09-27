@@ -77,6 +77,7 @@ func mutateKickstartConsentFixture(t *testing.T, data, old, replacement []byte) 
 }
 
 func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadKickstartConsentFixtures(kickstartConsentYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +159,7 @@ func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
 }
 
 func TestKickstartConsentFixtureStrictnessAndMutation(t *testing.T) {
+	t.Parallel()
 	if _, err := loadKickstartConsentFixtures(append(kickstartConsentYAML, []byte("\n---\n{}\n")...)); err == nil {
 		t.Fatal("loader accepted second document")
 	}

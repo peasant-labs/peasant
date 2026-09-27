@@ -92,6 +92,7 @@ func headHash(t *testing.T, dir string) string {
 // --- DefaultBranch ---
 
 func TestExecGitRepository_DefaultBranch_FallbackMain(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	repo := NewExecGitRepository(dir)
 
@@ -105,6 +106,7 @@ func TestExecGitRepository_DefaultBranch_FallbackMain(t *testing.T) {
 }
 
 func TestExecGitRepository_DefaultBranch_OriginHEADWins(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	// origin/HEAD names "develop" even though only main exists locally —
 	// the symbolic-ref path must win over the candidate fallback.
@@ -121,6 +123,7 @@ func TestExecGitRepository_DefaultBranch_OriginHEADWins(t *testing.T) {
 }
 
 func TestExecGitRepository_DefaultBranch_FallbackTrunk(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	// Rename main → trunk: only the later fallback candidate exists.
 	mustGit(t, dir, "git", "branch", "-m", testDefaultBranchName, "trunk")
@@ -136,6 +139,7 @@ func TestExecGitRepository_DefaultBranch_FallbackTrunk(t *testing.T) {
 }
 
 func TestExecGitRepository_DefaultBranch_Undeterminable(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	mustGit(t, dir, "git", "branch", "-m", testDefaultBranchName, "weird-name")
 	repo := NewExecGitRepository(dir)
@@ -148,6 +152,7 @@ func TestExecGitRepository_DefaultBranch_Undeterminable(t *testing.T) {
 // --- Branches ---
 
 func TestExecGitRepository_Branches_ExcludesDefault(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	mustGit(t, dir, "git", "branch", "feat/a")
 	mustGit(t, dir, "git", "branch", "feat/b")
@@ -169,6 +174,7 @@ func TestExecGitRepository_Branches_ExcludesDefault(t *testing.T) {
 }
 
 func TestExecGitRepository_Branches_OnlyDefault(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	repo := NewExecGitRepository(dir)
 
@@ -184,6 +190,7 @@ func TestExecGitRepository_Branches_OnlyDefault(t *testing.T) {
 // --- BranchState ---
 
 func TestExecGitRepository_BranchState(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	writeAndCommit(t, dir, "keep.txt", "to be deleted\n", "add keep.txt")
 	writeAndCommit(t, dir, "old.go", "package old\n\nfunc Old() {}\n", "add old.go")
@@ -254,6 +261,7 @@ func TestExecGitRepository_BranchState(t *testing.T) {
 }
 
 func TestExecGitRepository_BranchState_UnknownBranch(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	repo := NewExecGitRepository(dir)
 
@@ -265,6 +273,7 @@ func TestExecGitRepository_BranchState_UnknownBranch(t *testing.T) {
 // --- DiffStats ---
 
 func TestExecGitRepository_DiffStats(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	writeAndCommit(t, dir, "keep.txt", "line1\nline2\n", "add keep.txt")
 
@@ -320,6 +329,7 @@ func TestExecGitRepository_DiffStats(t *testing.T) {
 }
 
 func TestExecGitRepository_DiffStats_Rename(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	writeAndCommit(t, dir, "pkg/old.go", "package pkg\n", "add pkg/old.go")
 	writeAndCommit(t, dir, "top_old.go", "package top\n", "add top_old.go")
@@ -357,6 +367,7 @@ func TestExecGitRepository_DiffStats_Rename(t *testing.T) {
 }
 
 func TestExecGitRepository_DiffStats_BinaryFile(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 
 	// Binary file (NUL bytes) added alongside a text change: numstat emits
@@ -392,6 +403,7 @@ func TestExecGitRepository_DiffStats_BinaryFile(t *testing.T) {
 }
 
 func TestExecGitRepository_DiffStats_IdenticalRefs(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	repo := NewExecGitRepository(dir)
 
@@ -405,6 +417,7 @@ func TestExecGitRepository_DiffStats_IdenticalRefs(t *testing.T) {
 }
 
 func TestNumstatPath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		field string
 		want  string
@@ -424,6 +437,7 @@ func TestNumstatPath(t *testing.T) {
 }
 
 func TestParseNumstat_MalformedCount(t *testing.T) {
+	t.Parallel()
 	if _, err := parseNumstat([]string{"x\t1\tfile.go"}); err == nil {
 		t.Error("parseNumstat: expected error for non-numeric added count")
 	}
@@ -435,6 +449,7 @@ func TestParseNumstat_MalformedCount(t *testing.T) {
 // --- FileAtCommit ---
 
 func TestExecGitRepository_FileAtCommit(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	firstHash := headHash(t, dir)
 	writeAndCommit(t, dir, "file.txt", "second version\n", "modify file")
@@ -456,6 +471,7 @@ func TestExecGitRepository_FileAtCommit(t *testing.T) {
 // --- FilesAtCommit ---
 
 func TestExecGitRepository_FilesAtCommit(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	firstHash := headHash(t, dir)
 	writeAndCommit(t, dir, "sub/nested.txt", "nested\n", "add nested file")
@@ -499,6 +515,7 @@ func TestExecGitRepository_FilesAtCommit(t *testing.T) {
 }
 
 func TestExecGitRepository_FilesAtCommit_MatchesFileAtCommit(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	repo := NewExecGitRepository(dir)
 	ctx := context.Background()
@@ -519,6 +536,7 @@ func TestExecGitRepository_FilesAtCommit_MatchesFileAtCommit(t *testing.T) {
 // --- ListFiles ---
 
 func TestExecGitRepository_ListFiles(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	writeAndCommit(t, dir, "sub/nested.txt", "nested\n", "add nested file")
 
@@ -545,6 +563,7 @@ func TestExecGitRepository_ListFiles(t *testing.T) {
 // --- Commits ---
 
 func TestExecGitRepository_Commits(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	writeAndCommit(t, dir, "file.txt", "v2\n", "second commit")
 	writeAndCommit(t, dir, "file.txt", "v3\n", "third commit")
@@ -588,6 +607,7 @@ func TestExecGitRepository_Commits(t *testing.T) {
 // --- CommitsInRange ---
 
 func TestExecGitRepository_CommitsInRange(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 
 	mustGit(t, dir, "git", "checkout", "-b", "feat/range")
@@ -625,6 +645,7 @@ func TestExecGitRepository_CommitsInRange(t *testing.T) {
 // --- MergedBranches ---
 
 func TestExecGitRepository_MergedBranches(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 
 	// Branch merged with a true merge commit.
@@ -696,6 +717,7 @@ func TestExecGitRepository_MergedBranches(t *testing.T) {
 }
 
 func TestExecGitRepository_MergedBranches_NoneMerged(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepoWithFile(t)
 	mustGit(t, dir, "git", "checkout", "-b", "feat/open")
 	writeAndCommit(t, dir, "open.txt", "open\n", "open work")
@@ -715,6 +737,7 @@ func TestExecGitRepository_MergedBranches_NoneMerged(t *testing.T) {
 // --- Missing repo / timeout ---
 
 func TestExecGitRepository_MissingRepo(t *testing.T) {
+	t.Parallel()
 	repo := NewExecGitRepository(t.TempDir()) // empty dir, not a git repo
 	ctx := context.Background()
 
@@ -751,6 +774,7 @@ func TestExecGitRepository_MissingRepo(t *testing.T) {
 }
 
 func TestExecGitRepository_TimeoutConfigurable(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	repo := NewExecGitRepository(dir)
 	repo.Timeout = time.Nanosecond // expires before git can run
@@ -763,6 +787,7 @@ func TestExecGitRepository_TimeoutConfigurable(t *testing.T) {
 // --- FileStatus ---
 
 func TestNewFileStatus(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		raw     string
 		want    FileStatus
@@ -798,6 +823,7 @@ func TestNewFileStatus(t *testing.T) {
 }
 
 func TestFileStatus_IsValid(t *testing.T) {
+	t.Parallel()
 	for _, s := range []FileStatus{FileStatusModified, FileStatusAdded, FileStatusDeleted, FileStatusRenamed} {
 		if !s.IsValid() {
 			t.Errorf("FileStatus(%q).IsValid() = false, want true", s)

@@ -1,13 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -18,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_unknown_lexical.yaml
@@ -39,8 +35,8 @@ type codexLexicalExportCase struct {
 	UnknownEvery     int      `yaml:"unknown_every"`
 }
 
-// TestCodexLexicalReopenExport is the SLICE-5-L4 consolidated pass: lexical +
-// wide bytes through a real SQLite close/reopen and export. The prepare path
+// TestCodexLexicalReopenExport is the consolidated pass: lexical + wide bytes
+// through a real SQLite close/reopen and export. The prepare path
 // (pointer rebasing, sibling alignment) is pinned in TestCodexLexicalFidelity;
 // this test pins that the same bytes survive the store boundary and the
 // export-time baseline egress byte-exact (lexical payloads carry no secrets,
@@ -52,14 +48,8 @@ func TestCodexLexicalReopenExport(t *testing.T) {
 		Required []string                 `yaml:"required_names"`
 		Cases    []codexLexicalExportCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(codexLexicalExportYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexLexicalExportYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("trailing fixture document")
 	}
 	// The manifest owns the case list: deleting or renaming a fixture case
 	// fails here, and an undeclared row fails the same way. The fidelity test
@@ -200,9 +190,7 @@ func TestCodexWideReopenExport(t *testing.T) {
 		Required []string                 `yaml:"required_names"`
 		Cases    []codexLexicalExportCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(codexLexicalExportYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&wideFixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexLexicalExportYAML, &wideFixture); err != nil {
 		t.Fatal(err)
 	}
 	var wide *codexLexicalExportCase

@@ -1,12 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -66,14 +63,8 @@ type captureAssessmentDocument struct {
 
 func loadCaptureAssessment(data []byte) (captureAssessmentDocument, error) {
 	var doc captureAssessmentDocument
-	d := yaml.NewDecoder(bytes.NewReader(data))
-	d.KnownFields(true)
-	if err := d.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return captureAssessmentDocument{}, fmt.Errorf("decode capture assessment fixture first document: %w", err)
-	}
-	var trailing any
-	if err := d.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return captureAssessmentDocument{}, fmt.Errorf("capture assessment fixture must contain exactly one YAML document: %v", trailing)
 	}
 	names := map[string]bool{}
 	for _, c := range doc.Cases {

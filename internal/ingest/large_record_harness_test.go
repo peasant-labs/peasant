@@ -119,6 +119,7 @@ func loadLargeRecordHarnessFixtures(t *testing.T) ([]largeRecordHarnessFixture, 
 // whole, and omits an over-limit one the same way, with the same diagnostic
 // and the same placeholder.
 func TestLargeRecordsAreHandledUniformlyAcrossHarnesses(t *testing.T) {
+	t.Parallel()
 	harnesses, requiredNames, survivingRecordTexts := loadLargeRecordHarnessFixtures(t)
 	ran := make(map[string]bool, len(requiredNames))
 

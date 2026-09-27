@@ -87,6 +87,7 @@ func loadNextStepDocument(t *testing.T) nextStepDocument {
 }
 
 func TestProgramValidatesTypedNextStepProvider(t *testing.T) {
+	t.Parallel()
 	providerType := reflect.TypeOf(kickstart.NextStepsFunc(nil))
 	if providerType.NumOut() != 1 || providerType.Out(0) != reflect.TypeOf([]kickstart.NextStepKind{}) {
 		t.Fatalf("NextStepsFunc output = %v, want []kickstart.NextStepKind", providerType.Out(0))

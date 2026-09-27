@@ -1,0 +1,48 @@
+# Screen rule 3 cases: liveness is scoped to the plan.
+#
+# A registered package the plan does not contain is outside the run (a subset
+# run deliberately excluded it) and must not be required to emit events; a
+# registered package the plan DOES contain and that emits none still fails.
+# required_names is the deletion-protection manifest.
+required_names:
+  - registered-unplanned-ignored
+  - registered-planned-empty-fails
+  - unregistered-planned-empty-reported
+
+cases:
+  # sub is registered and planned and emitted its test; out is registered but
+  # the plan does not contain it. out emitted nothing, yet must not fail.
+  - name: registered-unplanned-ignored
+    race: false
+    plan:
+      - { import_path: example.com/m/sub, dir: sub, tests: [TestSub], registered: true }
+    registry:
+      partition:
+        - { package: sub, test: TestSub, class: single-threaded-bytes }
+        - { package: out, test: TestOut, class: single-threaded-bytes }
+    events:
+      - { package: example.com/m/sub, test: TestSub }
+    want_rules: {}
+    want_fail: false
+
+  # sub is registered and planned but emitted no events: rule 3 still fails.
+  - name: registered-planned-empty-fails
+    race: false
+    plan:
+      - { import_path: example.com/m/sub, dir: sub, tests: [TestSub], registered: true }
+    registry:
+      partition:
+        - { package: sub, test: TestSub, class: single-threaded-bytes }
+    events: []
+    want_rules: { registered-liveness: FAIL }
+    want_fail: true
+
+  # An unregistered planned package with no events is reported, not failed.
+  - name: unregistered-planned-empty-reported
+    race: false
+    plan:
+      - { import_path: example.com/m/other, dir: other, tests: [TestOther], registered: false }
+    registry: {}
+    events: []
+    want_rules: { unregistered-liveness: REPORT }
+    want_fail: false

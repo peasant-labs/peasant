@@ -130,6 +130,7 @@ func loadCaptureFixtures(t *testing.T) []captureFixture {
 }
 
 func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
@@ -194,6 +195,7 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 }
 
 func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if fixture.Reject || fixture.Control || fixture.Unknown {
 			continue
@@ -225,7 +227,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 					return &captureFixtureAdapter{SourceAdapter: base(fs, git, salt), fs: fs}
 				}
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -266,7 +268,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 				text = strings.Repeat("界", 1000) + "CHANGED_CAPTURE_TAIL"
 				captureFixtureSource(t, fixture, fs, text)
 				cfg.Force = true
-				pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+				pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -293,7 +295,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.Reindex = true
-			pipeline, err = ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
+			pipeline, err = newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})), ingest.WithStore(database), ingest.WithMetricsStore(database))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -328,6 +330,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 }
 
 func TestOpenCodeCapturePreservesPreviewAnchors(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	session := setupOpenCodeFixture(t, fs, testutil.TestOpenCodeSesID, "project")
 	text := strings.Repeat("界", 1000) + "SAFE_CAPTURE_TAIL"
@@ -356,6 +359,7 @@ func TestOpenCodeCapturePreservesPreviewAnchors(t *testing.T) {
 }
 
 func TestNativeOpenCodeUnknownSurvivesManagedProjection(t *testing.T) {
+	t.Parallel()
 	native := testfixture.MaterializeByName(t, "current-unknown-conversation-omission")
 	root, err := ingest.NewResolvedPath(filepath.Dir(native.Path))
 	if err != nil {
@@ -394,6 +398,7 @@ func TestNativeOpenCodeUnknownSurvivesManagedProjection(t *testing.T) {
 // asserts the observable entry it produces: its provider kind, role, retained
 // payload and preview. The fixture declares one case per represented kind.
 func TestClaudeControlRecordEntryShape(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control {
 			continue
@@ -442,6 +447,7 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 // bound. The preview must obey the bound and the retained payload must fall
 // back to its identity object once it exceeds the payload cap.
 func TestClaudeControlRecordTolerantPreviewBound(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control || !fixture.Tolerant {
 			continue

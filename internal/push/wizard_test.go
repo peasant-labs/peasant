@@ -150,6 +150,7 @@ func acceptStart(m PushWizardModel) PushWizardModel {
 }
 
 func TestWizard_Start_Accept(t *testing.T) {
+	t.Parallel()
 	m := mountWizard(testSessions())
 	if m.page != pageInitialConfirm {
 		t.Fatalf("expected pageInitialConfirm, got %s", m.page)
@@ -161,6 +162,7 @@ func TestWizard_Start_Accept(t *testing.T) {
 }
 
 func TestWizard_Start_Decline(t *testing.T) {
+	t.Parallel()
 	m := mountWizard(testSessions())
 	// The prompt opens on "no", so enter alone declines.
 	m = pressKey(m, keyEnter())
@@ -170,6 +172,7 @@ func TestWizard_Start_Decline(t *testing.T) {
 }
 
 func TestWizard_Selection_SpaceTogglesTheHighlightedProject(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	if m.sessions[0].Action != PushWithRedaction {
 		t.Fatal("expected the first session to open selected")
@@ -187,6 +190,7 @@ func TestWizard_Selection_SpaceTogglesTheHighlightedProject(t *testing.T) {
 }
 
 func TestWizard_Selection_SpaceTogglesTheHighlightedSession(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	// Down moves from the project row onto its session row.
 	m = pressKey(m, keyDown())
@@ -200,6 +204,7 @@ func TestWizard_Selection_SpaceTogglesTheHighlightedSession(t *testing.T) {
 }
 
 func TestWizard_Selection_SelectAllCycles(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	// Every session opens selected, so the ring skips the step that would
 	// change nothing: the first press clears the forest, the second restores
@@ -219,6 +224,7 @@ func TestWizard_Selection_SelectAllCycles(t *testing.T) {
 }
 
 func TestWizard_Selection_Navigation(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	if got := m.tree.Cursor(); got != 0 {
 		t.Fatalf("expected the cursor to open on the first row, got %d", got)
@@ -234,6 +240,7 @@ func TestWizard_Selection_Navigation(t *testing.T) {
 }
 
 func TestWizard_PageWalk(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	m = pressKey(m, keyEnter())
 	if m.page != pageRedactionPreview {
@@ -252,6 +259,7 @@ func TestWizard_PageWalk(t *testing.T) {
 }
 
 func TestWizard_SelectedSessionIDs(t *testing.T) {
+	t.Parallel()
 	m := mountWizard(testSessions())
 	m.sessions[1].Action = PushExclude
 
@@ -268,6 +276,7 @@ func TestWizard_SelectedSessionIDs(t *testing.T) {
 }
 
 func TestWizard_RedactionState(t *testing.T) {
+	t.Parallel()
 	sessions := testSessions()
 	cases := []struct {
 		index int
@@ -285,6 +294,7 @@ func TestWizard_RedactionState(t *testing.T) {
 }
 
 func TestWizard_RedactionState_NilMeta(t *testing.T) {
+	t.Parallel()
 	s := PushWizardSession{Row: ingest.PushSessionRow{SessionID: "test"}}
 	if got := s.RedactionState(); got != RedactionStateUnknown {
 		t.Errorf("RedactionState() = %s, want %s for nil metadata", got, RedactionStateUnknown)
@@ -292,6 +302,7 @@ func TestWizard_RedactionState_NilMeta(t *testing.T) {
 }
 
 func TestWizard_BackNavigation(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	m = pressKey(m, keyEsc())
 	if m.page != pageInitialConfirm {
@@ -300,6 +311,7 @@ func TestWizard_BackNavigation(t *testing.T) {
 }
 
 func TestWizard_FinalConfirm_Decline_ReturnsToSelection(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	m = pressKey(m, keyEnter())
 	m = pressKey(m, keyEnter())
@@ -317,6 +329,7 @@ func TestWizard_FinalConfirm_Decline_ReturnsToSelection(t *testing.T) {
 }
 
 func TestWizard_CtrlC_Cancels(t *testing.T) {
+	t.Parallel()
 	m := mountWizard(testSessions())
 	next, cmd := pressKeyWithCmd(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if !next.quitting {
@@ -328,6 +341,7 @@ func TestWizard_CtrlC_Cancels(t *testing.T) {
 }
 
 func TestWizard_Help_OpensAndCloses(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	m = pressKey(m, keyRune('?'))
 	if !m.helping {
@@ -349,6 +363,7 @@ func TestWizard_Help_OpensAndCloses(t *testing.T) {
 }
 
 func TestWizard_Selection_FooterNamesTheKitKeys(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	view := ansi.Strip(m.viewString())
 	for _, want := range []string{"tab", "prev field"} {
@@ -532,6 +547,7 @@ func TestWizard_Selection_ReportsWhyASessionIsWithheld(t *testing.T) {
 }
 
 func TestWizard_Notice_NoSelectionBlocksAdvance(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	// Every session opens selected, so one press of the select-all key clears
 	// the whole forest.
@@ -551,6 +567,7 @@ func TestWizard_Notice_NoSelectionBlocksAdvance(t *testing.T) {
 }
 
 func TestWizard_Notice_Scrolls(t *testing.T) {
+	t.Parallel()
 	// A short region is what makes the consent copy longer than the page, which
 	// is the state scrolling exists for. The region shrank when the copy did:
 	// the page dropped the stored-copy classification, so at 80x24 the whole
@@ -588,6 +605,7 @@ func TestWizard_Notice_Scrolls(t *testing.T) {
 // the gap this test closes, and it is why the forbidden list is phrased as claims
 // rather than as exact strings: a reworded promise is still a promise.
 func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
+	t.Parallel()
 	m := mountWizard(testSessions())
 	// Assertions run on WHITESPACE-NORMALISED text, because the screen wraps.
 	//
@@ -727,6 +745,7 @@ func windowSize(width, height int) tea.WindowSizeMsg {
 // away and the rest are what is left - which is how a maintainer read it on a
 // real store.
 func TestWizard_Receipt_CountsThePushAndNotADeletion(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	// Space on the first project row deselects its only session, so the receipt
 	// has both a pushed set and a skipped one.
@@ -758,6 +777,7 @@ func TestWizard_Receipt_CountsThePushAndNotADeletion(t *testing.T) {
 // line is conditional: with every candidate selected there is no skipped set,
 // and a line reporting zero of them would be noise on the confirmation screen.
 func TestWizard_Receipt_OmitsTheSkippedLineWhenNothingIsSkipped(t *testing.T) {
+	t.Parallel()
 	m := acceptStart(mountWizard(testSessions()))
 	m = pressKey(m, keyEnter())
 	m = pressKey(m, keyEnter())

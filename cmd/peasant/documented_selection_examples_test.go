@@ -145,6 +145,7 @@ func loadDocumentedSelectionExamples(t *testing.T) documentedSelectionExamples {
 }
 
 func TestDocumentedSelectionExamplesParseThroughProductionBoundaries(t *testing.T) {
+	t.Parallel()
 	workingDirectory, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("locate documented selection sources from the package working directory: %v", err)

@@ -64,11 +64,10 @@ func requireExactNameSet(t *testing.T, label string, want []string, got map[stri
 
 func TestMain(m *testing.M) {
 	// Open a 2-connection pool instead of the default 10: every store.Open
-	// otherwise opens 10 connections, each re-parsing the schema, and these
-	// tests do hundreds of Opens. 2 (not 1) because some store operations take a
-	// second connection while holding the first — a 1-connection pool deadlocks
-	// them. Measured: internal/store -race 29s -> 9s. (Production keeps the
-	// default; this env override is test-only.)
+	// otherwise eagerly opens 10 connections, and these tests do hundreds of
+	// Opens. 2 (not 1) because some store operations take a second connection
+	// while holding the first — a 1-connection pool deadlocks them.
+	// (Production keeps the default; this env override is test-only.)
 	os.Setenv(store.EnvPoolSize, "2")
 	goleak.VerifyTestMain(m)
 }

@@ -80,37 +80,7 @@ func loadMetadataCancellationCases(t *testing.T) []metadataCancellationCase {
 	return fixture.Cases
 }
 
-// countingCancelFS records every filesystem read the lookup performs and can
-// cancel the run from inside one of them, which is how a case reproduces a
-// cancellation that arrives mid-walk without depending on timing.
-type countingCancelFS struct {
-	FileSystem
-	calls       int
-	cancelAfter int
-	cancel      context.CancelFunc
-}
-
-func (filesystem *countingCancelFS) note() {
-	filesystem.calls++
-	if filesystem.cancelAfter > 0 && filesystem.calls == filesystem.cancelAfter {
-		filesystem.cancel()
-	}
-}
-
-func (filesystem *countingCancelFS) Stat(path string) (os.FileInfo, error) {
-	filesystem.note()
-	return filesystem.FileSystem.Stat(path)
-}
-
-func (filesystem *countingCancelFS) ReadDir(path string) ([]os.DirEntry, error) {
-	filesystem.note()
-	return filesystem.FileSystem.ReadDir(path)
-}
-
-func (filesystem *countingCancelFS) ReadFile(path string) ([]byte, error) {
-	filesystem.note()
-	return filesystem.FileSystem.ReadFile(path)
-}
+// countingCancelFS lives in fsfault_test.go (Owner B).
 
 // TestMetadataForRewriteObeysTheRunContext pins that the metadata lookup which
 // runs before every rewrite stops reading the filesystem when the run is

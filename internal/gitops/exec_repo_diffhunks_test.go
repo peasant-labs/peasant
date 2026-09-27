@@ -35,6 +35,7 @@ func countKind(f FileDiff, kind DiffLineKind) int {
 // hunk structure, three-dot (merge-base) scoping, the paths filter and the
 // per-file line cap — all against a real throwaway repo.
 func TestExecGitRepository_DiffHunks(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	// Base files on main, before the branch forks.
 	writeAndCommit(t, dir, "keep.go", "package keep\n\nfunc A() int { return 1 }\n", "add keep")
@@ -112,6 +113,7 @@ func TestExecGitRepository_DiffHunks(t *testing.T) {
 // comments) — once the diff marker is prepended they read as "--- "/"+++ ",
 // which must NOT be mistaken for file headers and dropped.
 func TestExecGitRepository_DiffHunks_DashAndPlusContent(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	writeAndCommit(t, dir, "q.sql", "SELECT 1;\n", "base")
 	mustGit(t, dir, "git", "checkout", "-b", "feat/sql")
@@ -147,6 +149,7 @@ func TestExecGitRepository_DiffHunks_DashAndPlusContent(t *testing.T) {
 // TestExecGitRepository_RevertedCommits detects the commit a `git revert` undid
 // via the "This reverts commit <hash>" trailer.
 func TestExecGitRepository_RevertedCommits(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	writeAndCommit(t, dir, "f.txt", "v1\n", "feature")
 	target := headHash(t, dir)
@@ -171,6 +174,7 @@ func TestExecGitRepository_RevertedCommits(t *testing.T) {
 }
 
 func TestExecGitRepository_DiffHunks_PathsFilter(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	writeAndCommit(t, dir, "a.go", "package a\n", "add a")
 	writeAndCommit(t, dir, "b.go", "package b\n", "add b")
@@ -192,6 +196,7 @@ func TestExecGitRepository_DiffHunks_PathsFilter(t *testing.T) {
 // TestExecGitRepository_BlameCommits attributes each line to the commit that
 // last touched it (the basis for per-hunk → conversation attribution).
 func TestExecGitRepository_BlameCommits(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	writeAndCommit(t, dir, "f.go", "line1\nline2\nline3\n", "c1")
 	c1 := headHash(t, dir)
@@ -227,6 +232,7 @@ func TestExecGitRepository_BlameCommits(t *testing.T) {
 }
 
 func TestExecGitRepository_DiffHunks_Truncates(t *testing.T) {
+	t.Parallel()
 	dir := initTestRepo(t)
 	writeAndCommit(t, dir, "big.txt", "", "add big")
 	base := headHash(t, dir)

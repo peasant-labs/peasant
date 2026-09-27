@@ -205,6 +205,7 @@ func TestConvertLegacyAll_StoredEvidenceCorpus(t *testing.T) {
 }
 
 func TestLegacyAllConversionFixtureRejectsUnknownStoredIdentityKey(t *testing.T) {
+	t.Parallel()
 	malformed := bytes.Replace(legacyAllConversionData, []byte("gitWorktree:"), []byte("gitWorktreeTypo:"), 1)
 	if bytes.Equal(malformed, legacyAllConversionData) {
 		t.Fatal("legacy all conversion fixture has no gitWorktree key to mutate")

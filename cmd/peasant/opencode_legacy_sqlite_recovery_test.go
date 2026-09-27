@@ -226,6 +226,7 @@ func mustLegacySQLiteRecoveryDocument(t testing.TB) legacySQLiteRecoveryDocument
 }
 
 func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.T) {
+	t.Parallel()
 	testCase := mustLegacySQLiteRecoveryDocument(t).FreshnessCases[0]
 	materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
 	writer := openMountedLegacyWALWriter(t, materialized.Path)
@@ -394,6 +395,7 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 }
 
 func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testing.T) {
+	t.Parallel()
 	document := mustLegacySQLiteRecoveryDocument(t)
 	for _, testCase := range document.RecoveryCases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -479,6 +481,7 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 }
 
 func TestLegacySQLiteRecoveryFixtureLoaderMutationsAreRejected(t *testing.T) {
+	t.Parallel()
 	unknownField := bytes.Replace(legacySQLiteRecoveryYAML, []byte("source_fixture:"), []byte("unknown_source_fixture:"), 1)
 	if _, err := loadLegacySQLiteRecoveryDocument(unknownField); err == nil {
 		t.Fatal("legacy SQLite recovery fixture accepted an unknown field mutation")

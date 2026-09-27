@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,9 +117,6 @@ func TestWebCapabilitiesMatrix_StrictDecoder(t *testing.T) {
 // forwarded to the forked foreground child.
 func TestWebCapabilitiesMatrix(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping real-binary web capabilities matrix in -short mode")
-	}
 	fixtures := loadWebCapabilityMatrixFixtures(t)
 	bin := buildPeasantMatrixBinary(t)
 
@@ -144,27 +142,60 @@ func TestWebCapabilitiesMatrix(t *testing.T) {
 	}
 }
 
-// buildPeasantMatrixBinary compiles the peasant CLI into the test's temp dir so
-// the matrix drives the real production entry point rather than an in-process
-// server.
+// peasantCLIOnce guards the single per-test-binary CLI build. Both the web
+// capabilities matrix and any future in-process test that needs the real
+// production entry point share this one artifact, so the test binary runs
+// exactly one `go build` no matter how many tests ask for it.
+var (
+	peasantCLIOnce sync.Once
+	peasantCLIPath string
+	peasantCLIErr  error
+)
+
+// buildPeasantMatrixBinary returns the peasant CLI for the matrix. The binary is
+// built once per test binary (through the shared peasantCLIOnce) so the matrix
+// drives the real production entry point rather than an in-process server.
+//
+// The existing PEASANT_BIN seam is honored first: when a caller (or the gate)
+// has already produced a CLI, that path is used instead of building, so a suite
+// that pre-builds once pays for the build once, not once per test binary.
 func buildPeasantMatrixBinary(t *testing.T) string {
 	t.Helper()
-	out := filepath.Join(t.TempDir(), "peasant")
-	cmd := exec.Command("go", "build", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf(
-			"build peasant binary for the web capabilities matrix failed.\n"+
-				"  what: `go build -o %s github.com/peasant-labs/peasant/cmd/peasant` returned an error\n"+
-				"  why:  %v\n"+
-				"  where: cmd/peasant/web_capabilities_matrix_test.go buildPeasantMatrixBinary\n"+
-				"  when: before booting any matrix case\n"+
-				"  means: the matrix cannot exercise the real binary\n"+
-				"  fix:  run the build manually to see the compiler error; ensure the module builds\n"+
-				"  output:\n%s",
-			out, err, output,
-		)
+	if injected := strings.TrimSpace(os.Getenv(defaults.EnvPeasantBin.String())); injected != "" {
+		return injected
 	}
-	return out
+	peasantCLIOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "peasant-matrix-bin-*")
+		if err != nil {
+			peasantCLIErr = fmt.Errorf("create temp dir for the peasant CLI build: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "peasant")
+		// -race=false is explicit: the matrix asserts the advertised
+		// capabilities of the production binary, not race coverage of it. The
+		// build flag is resolved by the no-race partition registry against this
+		// exec site.
+		cmd := exec.Command("go", "build", "-race=false", "-o", out, "github.com/peasant-labs/peasant/cmd/peasant")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			peasantCLIErr = fmt.Errorf(
+				"build peasant binary for the web capabilities matrix failed.\n"+
+					"  what: `go build -race=false -o %s github.com/peasant-labs/peasant/cmd/peasant` returned an error\n"+
+					"  why:  %v\n"+
+					"  where: cmd/peasant/web_capabilities_matrix_test.go buildPeasantMatrixBinary\n"+
+					"  when: before booting any matrix case\n"+
+					"  means: the matrix cannot exercise the real binary\n"+
+					"  fix:  run the build manually to see the compiler error; ensure the module builds\n"+
+					"  output:\n%s",
+				out, err, output,
+			)
+			return
+		}
+		peasantCLIPath = out
+	})
+	if peasantCLIErr != nil {
+		t.Fatalf("%v", peasantCLIErr)
+	}
+	return peasantCLIPath
 }
 
 // isolatedXDGEnv returns the parent process environment with HOME and the XDG

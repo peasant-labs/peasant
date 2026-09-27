@@ -10,6 +10,7 @@ import (
 )
 
 func TestDocgenUsesPortableConfigDefault(t *testing.T) {
+	t.Parallel()
 	docsDir := t.TempDir()
 	runtimeConfigPath := filepath.Join(t.TempDir(), "config.yaml")
 	root := &cobra.Command{Use: "peasant"}

@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -56,14 +54,8 @@ const (
 func loadIndexInputPipelineFixture(t *testing.T) indexInputPipelineFixture {
 	t.Helper()
 	var fixture indexInputPipelineFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(indexInputPipelineYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexInputPipelineYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatal("index input pipeline fixtures require one document")
 	}
 	names := make(map[string]bool)
 	for _, row := range fixture.Cases {
@@ -191,7 +183,7 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			}
 			config := makePipelineConfig(output)
 			config.Reindex, config.Force = true, true
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{session.Harness: indexer}))
+			pipeline, err := newTestPipeline(filesystem, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{session.Harness: indexer}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,7 +246,7 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			indexer := &capturedInputIndexer{TranscriptIndexer: ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})[harness]}
 			config := makePipelineConfig(output)
 			config.Reindex = mode == indexInputIndexRun
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
+			pipeline, err := newTestPipeline(filesystem, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
 			if err != nil {
 				t.Fatal(err)
 			}

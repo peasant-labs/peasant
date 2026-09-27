@@ -1,10 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"io"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -48,14 +46,8 @@ type refusalChurnFixture struct {
 func loadRefusalChurnFixture(t *testing.T) refusalChurnFixture {
 	t.Helper()
 	var fixture refusalChurnFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(refusalChurnYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(refusalChurnYAML, &fixture); err != nil {
 		t.Fatalf("decode the refusal churn fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("the refusal churn fixture must hold exactly one YAML document: %v", err)
 	}
 	if len(fixture.Required) == 0 {
 		t.Fatal("refusal churn fixture declares no required cases")
@@ -127,7 +119,7 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 		t.Helper()
 		cfg := makePipelineConfig(testOutputDir)
 		adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(sessions, metaMap)}
-		pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 			ingest.WithStore(indexStore), ingest.WithMetricsStore(indexStore), ingest.WithIndexLogger(database),
 			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 			ingest.WithHarvesterVersions(versions))

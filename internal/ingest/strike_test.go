@@ -1,11 +1,9 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/strike_graph.yaml
@@ -219,14 +216,8 @@ func TestStrikeDiscoveryNormalizesGraphAndEffectiveModTime(t *testing.T) {
 	t.Parallel()
 
 	var fixtures strikeGraphFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(strikeGraphFixtureData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(strikeGraphFixtureData, &fixtures); err != nil {
 		t.Fatalf("decode committed fixture %s: %v", strikeGraphFixturePath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("committed fixture %s must contain exactly one YAML document, trailing decode: %v", strikeGraphFixturePath, err)
 	}
 	if len(fixtures.Sessions) != 6 {
 		t.Fatalf("committed fixture %s must define six graph sessions, got %d", strikeGraphFixturePath, len(fixtures.Sessions))

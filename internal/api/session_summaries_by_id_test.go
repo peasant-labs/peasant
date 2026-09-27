@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,7 +22,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/session_summaries_by_id.yaml
@@ -70,14 +67,8 @@ type summariesByIDRow struct {
 
 func decodeSummariesByID(source []byte) (summariesByIDFixture, error) {
 	var fixture summariesByIDFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixture); err != nil {
 		return fixture, fmt.Errorf("decode session-summaries-by-id fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fixture, fmt.Errorf("session-summaries-by-id fixture must contain exactly one YAML document: %v", err)
 	}
 	if fixture.Harness != defaults.HarnessClaudeCode.String() {
 		return fixture, fmt.Errorf("session-summaries-by-id fixture harness = %q, want %q", fixture.Harness, defaults.HarnessClaudeCode)

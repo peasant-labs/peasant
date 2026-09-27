@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -94,14 +92,8 @@ func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
 		RequiredNames []string                `yaml:"requiredNames"`
 		Cases         []indexFormatOutputCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(indexFormatOutputYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexFormatOutputYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("index output fixture needs one document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, row := range document.Cases {
@@ -289,7 +281,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			if !row.LogsOnly {
 				options = append(options, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, cfg, options...)
+			pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, cfg, options...)
 			if row.WantConstructorError != "" {
 				if err == nil || !strings.Contains(err.Error(), row.WantConstructorError) {
 					t.Fatalf("constructor error=%v, want %q", err, row.WantConstructorError)

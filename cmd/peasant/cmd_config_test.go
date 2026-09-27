@@ -342,6 +342,7 @@ func decodeConfigScreenFixture(name string, data []byte, destination any) error 
 }
 
 func TestConfigScreenFixtureDecoder_StrictAndSingleDocument(t *testing.T) {
+	t.Parallel()
 	var unknown configRetentionDocument
 	withUnknown := append([]byte("unexpectedField: true\n"), configRetentionFixtureYAML...)
 	if err := decodeConfigScreenFixture("retention.yaml", withUnknown, &unknown); err == nil || !strings.Contains(err.Error(), "field unexpectedField not found") {
@@ -356,6 +357,7 @@ func TestConfigScreenFixtureDecoder_StrictAndSingleDocument(t *testing.T) {
 }
 
 func TestConfigCommand_RetentionFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigRetentionFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -393,6 +395,7 @@ func TestConfigCommand_RetentionFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_AliasParityFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigAliasFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -412,6 +415,7 @@ func TestConfigCommand_AliasParityFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_ProductionRegistrationFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigAliasFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -435,6 +439,7 @@ func TestConfigCommand_ProductionRegistrationFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_SavePendingFreezesMountedModel(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigSaveOrderFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -493,6 +498,7 @@ func TestConfigCommand_SavePendingFreezesMountedModel(t *testing.T) {
 }
 
 func TestConfigCommand_PartialSuccessIsActionable(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigPartialSuccessFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -527,6 +533,7 @@ func TestConfigCommand_PartialSuccessIsActionable(t *testing.T) {
 }
 
 func TestConfigCommand_SaveSemanticsFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigSaveSemanticsFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -590,6 +597,7 @@ func TestConfigCommand_SaveSemanticsFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_RetentionIOFixtures(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadConfigRetentionIOFixtures(t) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
@@ -707,6 +715,7 @@ func TestConfigCommand_RetentionIOFixtures(t *testing.T) {
 }
 
 func TestConfigCommand_AuthorityBoundaryFixture(t *testing.T) {
+	t.Parallel()
 	document := loadConfigAuthorityFixture(t)
 	source, err := os.ReadFile("cmd_config.go")
 	if err != nil {

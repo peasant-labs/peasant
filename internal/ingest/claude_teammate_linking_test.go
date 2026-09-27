@@ -4,16 +4,13 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/claude_teammate_linking.yaml
@@ -72,15 +69,9 @@ func loadClaudeTeammateFixtures(t *testing.T) claudeTeammateFixtures {
 }
 
 func decodeClaudeTeammateFixtures(source []byte) (claudeTeammateFixtures, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
 	var fixtures claudeTeammateFixtures
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &fixtures); err != nil {
 		return claudeTeammateFixtures{}, fmt.Errorf("decode Claude teammate fixtures: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture must contain exactly one YAML document: %v", err)
 	}
 	present := make(map[string]bool, len(fixtures.Cases))
 	for _, testCase := range fixtures.Cases {

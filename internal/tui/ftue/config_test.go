@@ -23,7 +23,8 @@ func providerSources(providers ...defaults.Harness) []string {
 }
 
 func TestConfigSave_WritesYAML(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 
 	cfg := &Config{
 		VillageConnected: true,
@@ -33,12 +34,12 @@ func TestConfigSave_WritesYAML(t *testing.T) {
 		ImportSources:    providerSources(defaults.HarnessClaudeCode, defaults.HarnessOpenCode),
 	}
 
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
 	// File must be config.yaml (not config.toml).
-	yamlPath := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	yamlPath := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(yamlPath)
 	if err != nil {
 		t.Fatalf("read config.yaml: %v", err)
@@ -65,18 +66,19 @@ func TestConfigSave_WritesYAML(t *testing.T) {
 }
 
 func TestConfigSave_PersistsEnablementForEveryConfiguredHarness(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 	selected := providerSources(defaults.HarnessOpenCode, defaults.HarnessStrike)
 	cfg := &Config{
 		DaemonMode:    "opt-in",
 		ImportMethod:  string(config.PushMethodBySource),
 		ImportSources: selected,
 	}
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	path := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
@@ -103,7 +105,8 @@ func TestConfigSave_PersistsEnablementForEveryConfiguredHarness(t *testing.T) {
 }
 
 func TestConfigSave_AllFields(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 
 	cfg := &Config{
 		VillageConnected: true,
@@ -113,11 +116,11 @@ func TestConfigSave_AllFields(t *testing.T) {
 		ImportSources:    providerSources(defaults.HarnessClaudeCode, defaults.HarnessOpenCode),
 	}
 
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	path := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
@@ -160,7 +163,8 @@ func TestConfigSave_AllFields(t *testing.T) {
 }
 
 func TestConfigSave_ImportDisabled(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 
 	cfg := &Config{
 		VillageConnected: false,
@@ -170,11 +174,11 @@ func TestConfigSave_ImportDisabled(t *testing.T) {
 		ImportSources:    nil,
 	}
 
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	path := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
@@ -203,7 +207,8 @@ func TestConfigSave_ImportDisabled(t *testing.T) {
 }
 
 func TestConfigSave_MultipleSources(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 
 	cfg := &Config{
 		VillageConnected: true,
@@ -213,11 +218,11 @@ func TestConfigSave_MultipleSources(t *testing.T) {
 		ImportSources:    providerSources(defaults.HarnessClaudeCode, defaults.HarnessGeminiCLI, defaults.HarnessCodex, defaults.HarnessOpenCode),
 	}
 
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	path := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
@@ -234,8 +239,9 @@ func TestConfigSave_MultipleSources(t *testing.T) {
 }
 
 func TestConfigSave_CreatesDirectory(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	configHome := tmpDir
 
 	cfg := &Config{
 		VillageConnected: false,
@@ -244,7 +250,7 @@ func TestConfigSave_CreatesDirectory(t *testing.T) {
 		ImportMethod:     string(config.PushMethodAll),
 	}
 
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
@@ -270,7 +276,8 @@ func TestConfigSave_CreatesDirectory(t *testing.T) {
 }
 
 func TestConfigSave_EmptySources(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 
 	cfg := &Config{
 		VillageConnected: true,
@@ -280,11 +287,11 @@ func TestConfigSave_EmptySources(t *testing.T) {
 		ImportSources:    []string{},
 	}
 
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	path := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
@@ -302,6 +309,7 @@ func TestConfigSave_EmptySources(t *testing.T) {
 }
 
 func TestConfigSave_RedactionLevel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		level string
@@ -313,17 +321,17 @@ func TestConfigSave_RedactionLevel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			configHome := t.TempDir()
 
 			cfg := &Config{
 				DaemonMode:     "opt-in",
 				RedactionLevel: tt.level,
 			}
-			if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+			if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 				t.Fatalf("Save() error: %v", err)
 			}
 
-			path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+			path := defaults.ResolveConfigFilePathWith(configHome).String()
 			data, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("read config file: %v", err)
@@ -345,6 +353,7 @@ func TestConfigSave_RedactionLevel(t *testing.T) {
 // push.license and round-trips through the real config parser. The empty case
 // (no license chosen) must leave push.license unset, never imposing a default.
 func TestConfigSave_License(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		license config.License
@@ -357,14 +366,14 @@ func TestConfigSave_License(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			configHome := t.TempDir()
 
 			cfg := &Config{DaemonMode: "opt-in", License: tt.license}
-			if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+			if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 				t.Fatalf("Save() error: %v", err)
 			}
 
-			path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+			path := defaults.ResolveConfigFilePathWith(configHome).String()
 			data, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatalf("read config file: %v", err)
@@ -381,17 +390,18 @@ func TestConfigSave_License(t *testing.T) {
 }
 
 func TestConfigSave_EmptyRedactionLevel_DefaultsToStandard(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Parallel()
+	configHome := t.TempDir()
 
 	cfg := &Config{
 		DaemonMode:     "opt-in",
 		RedactionLevel: "", // empty — should fall back to BaseConfig default
 	}
-	if err := cfg.SaveTo(defaults.ResolveConfigFilePath().String(), config.BaseConfig()); err != nil {
+	if err := cfg.SaveTo(defaults.ResolveConfigFilePathWith(configHome).String(), config.BaseConfig()); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
 
-	path := filepath.Join(defaults.ResolveConfigDirPath().String(), "config.yaml")
+	path := defaults.ResolveConfigFilePathWith(configHome).String()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config file: %v", err)
@@ -404,5 +414,31 @@ func TestConfigSave_EmptyRedactionLevel_DefaultsToStandard(t *testing.T) {
 
 	if parsed.Redaction.Level != redact.Standard {
 		t.Errorf("Redaction.Level = %q, want %q (default)", parsed.Redaction.Level, redact.Standard)
+	}
+}
+
+// TestConfigHomeResolvesFromTheEnvironmentDefault proves the environment
+// default still configures the kickstart config location when no explicit path
+// is supplied. TestMain pins XDG_CONFIG_HOME once for the test binary; this
+// asserts the production resolver reads it, and that the explicit override used
+// by the tests above wins over it while an empty override falls back to it.
+// Without this, the tests could all pass while production silently ignored the
+// environment.
+func TestConfigHomeResolvesFromTheEnvironmentDefault(t *testing.T) {
+	// Not parallel: it reads the process-environment default that TestMain pins.
+	home := os.Getenv(defaults.EnvXDGConfigHome.String())
+	if home == "" {
+		t.Fatal("XDG_CONFIG_HOME is unset; TestMain must pin the config home for this package")
+	}
+	want := filepath.Join(home, defaults.AppName.String(), string(defaults.Config.FileName))
+	if got := defaults.ResolveConfigFilePath().String(); got != want {
+		t.Fatalf("ResolveConfigFilePath() = %q, want the environment default %q", got, want)
+	}
+	override := t.TempDir()
+	if got := defaults.ResolveConfigFilePathWith(override).String(); !strings.HasPrefix(got, override) {
+		t.Fatalf("ResolveConfigFilePathWith(%q) = %q, want it under the override", override, got)
+	}
+	if got := defaults.ResolveConfigFilePathWith("").String(); got != want {
+		t.Fatalf("ResolveConfigFilePathWith(\"\") = %q, want the environment default %q", got, want)
 	}
 }

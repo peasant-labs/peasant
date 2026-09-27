@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,18 +21,19 @@ import (
 	storepkg "github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/authoritative-receipt-mismatches.yaml
 var authoritativeReceiptMismatchYAML []byte
 
+//go:embed testdata/authoritative-receipt-mismatches.manifest.yaml
+var authoritativeReceiptMismatchManifestYAML []byte
+
 var _ push.PipelineStore = (*testutil.StubPushStore)(nil)
 var _ push.PipelineStore = (*storepkg.Store)(nil)
 
 type authoritativeReceiptMismatchDocument struct {
-	ExpectedCaseCount int                                `yaml:"expectedCaseCount"`
-	Cases             []authoritativeReceiptMismatchCase `yaml:"cases"`
+	Cases []authoritativeReceiptMismatchCase `yaml:"cases"`
 }
 type authoritativeReceiptMismatchCase struct {
 	Name            string `yaml:"name"`
@@ -46,24 +46,24 @@ type authoritativeReceiptMismatchCase struct {
 func loadAuthoritativeReceiptMismatchCases(t *testing.T) []authoritativeReceiptMismatchCase {
 	t.Helper()
 	var doc authoritativeReceiptMismatchDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(authoritativeReceiptMismatchYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(authoritativeReceiptMismatchYAML, &doc); err != nil {
 		t.Fatal(err)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("receipt mismatch corpus must have exact EOF: %v", err)
+	manifest, err := testutil.DecodeRequiredNamesManifest(authoritativeReceiptMismatchManifestYAML, "receipt mismatch")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if doc.ExpectedCaseCount != 3 || len(doc.Cases) != doc.ExpectedCaseCount {
-		t.Fatalf("receipt mismatch rows=%d declared=%d", len(doc.Cases), doc.ExpectedCaseCount)
-	}
+	names := make([]string, 0, len(doc.Cases))
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
 		if c.Name == "" || c.Replacement == "" || len(c.Replacement) != 64 || c.ErrorContains == "" || seen[c.Name] || (c.Mismatch != "content" && c.Mismatch != "fingerprint" && c.Mismatch != "parent-fingerprint") || (c.Mismatch == "parent-fingerprint" && c.ParentSessionID == "") {
 			t.Fatalf("invalid receipt mismatch row: %+v", c)
 		}
 		seen[c.Name] = true
+		names = append(names, c.Name)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "receipt mismatch"); err != nil {
+		t.Fatal(err)
 	}
 	return doc.Cases
 }
@@ -336,6 +336,7 @@ func seedSubagentMemFS(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID, pa
 // resolve (no "read metadata: no such file") and upload with identity.parentUuid
 // set, alongside its root parent.
 func TestPipeline_Subagent_ResolvesAndUploadsParentUUID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 	cc := string(defaults.HarnessClaudeCode)
@@ -443,6 +444,7 @@ func seedEmptyModelMemFS(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID s
 // metadata records no model is a client-side Error (sentinel push.ErrNoModel),
 // is NOT uploaded (no village 400), in BOTH the real push and dry-run paths.
 func TestPipeline_EmptyModel_RefusedNotUploaded(t *testing.T) {
+	t.Parallel()
 	cc := string(defaults.HarnessClaudeCode)
 	const hostSlug = testutil.TestHostSlug
 	sessID := testutil.TestSessionUUID
@@ -532,6 +534,7 @@ func seedMissingHarnessMemFS(t *testing.T, fs *testutil.MemFS, hostSlug, session
 // pre-flight applies before the dry-run upload skip), driving the REAL pipeline +
 // validator + StubPublisher (the publisher is the only mocked dependency).
 func TestPipeline_InvalidBody_RefusedNotUploaded(t *testing.T) {
+	t.Parallel()
 	const hostSlug = testutil.TestHostSlug
 	validID := testutil.TestSessionUUID
 	invalidID := testutil.TestOpenCodeSesID
@@ -610,6 +613,7 @@ func TestPipeline_InvalidBody_RefusedNotUploaded(t *testing.T) {
 // transport failure (statusCode 0 + connection error) classifies as network.
 // This covers the statusCode==0 || isConnectionError branch beyond the unit test.
 func TestPipeline_UploadError_VillageVsNetwork(t *testing.T) {
+	t.Parallel()
 	cc := string(defaults.HarnessClaudeCode)
 	const hostSlug = testutil.TestHostSlug
 	sessID := testutil.TestSessionUUID
@@ -698,6 +702,7 @@ func newTestPipeline(
 // request and the structured transcript content). GitBranch and HostSlug
 // stay off (plain booleans, default false).
 func TestPipeline_DefaultFieldsSendRepositoryLabelAndGitRemote(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
 	rawProject, rawWorkdir, rawBranch, remote := plantRawPublicationIdentity(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID)
@@ -755,6 +760,7 @@ func TestPipeline_DefaultFieldsSendRepositoryLabelAndGitRemote(t *testing.T) {
 }
 
 func TestPipelineRejectsAuthoritativeReceiptIdentityMismatch(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range loadAuthoritativeReceiptMismatchCases(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
@@ -798,6 +804,7 @@ func TestPipelineRejectsAuthoritativeReceiptIdentityMismatch(t *testing.T) {
 // --- Tests ---
 
 func TestPipeline_Selection_FiltersByBranch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 	cc := string(defaults.HarnessClaudeCode)
@@ -837,6 +844,7 @@ func TestPipeline_Selection_FiltersByBranch(t *testing.T) {
 }
 
 func TestPipeline_Selection_WithheldConflict_Surfaced(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 	cc := string(defaults.HarnessClaudeCode)
@@ -878,6 +886,7 @@ func TestPipeline_Selection_WithheldConflict_Surfaced(t *testing.T) {
 }
 
 func TestPipeline_NormalPush_ThreeNew(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -931,6 +940,7 @@ func TestPipeline_NormalPush_ThreeNew(t *testing.T) {
 // published body AND is persisted with the authoritative receipt. Exercises resolveLicense (CLI >
 // config > none) without reaching into the unexported method.
 func TestPipeline_License(t *testing.T) {
+	t.Parallel()
 	const hostSlug = testutil.TestHostSlug
 	sessID := testutil.TestSessionUUID
 
@@ -997,6 +1007,7 @@ func TestPipeline_License(t *testing.T) {
 }
 
 func TestPipeline_DryRun_NoHTTPNoStoreWrites(t *testing.T) {
+	t.Parallel()
 	if push.DryRunCapabilityMutation {
 		t.Skip("the mounted capability fixture owns the dry-run decision mutation")
 	}
@@ -1047,6 +1058,7 @@ func TestPipeline_DryRun_NoHTTPNoStoreWrites(t *testing.T) {
 }
 
 func TestPipeline_DryRun_UpdatedStatus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1078,6 +1090,7 @@ func TestPipeline_DryRun_UpdatedStatus(t *testing.T) {
 }
 
 func TestPipeline_Force_CallsAllPushableSessions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1113,6 +1126,7 @@ func TestPipeline_Force_CallsAllPushableSessions(t *testing.T) {
 }
 
 func TestPipeline_EmptyState_NothingIngested(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1135,6 +1149,7 @@ func TestPipeline_EmptyState_NothingIngested(t *testing.T) {
 }
 
 func TestPipeline_EmptyState_AllAlreadyPushed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1402,6 +1417,7 @@ func TestPipeline_BoundedRunUploadsSmallestFirst(t *testing.T) {
 // ONE repository; listing unrelated session identifiers there is noise the user
 // cannot act on and disclosure they did not ask for.
 func TestPipeline_HeldBackNoticeIsScopedToTheRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := &testutil.StubPushStore{
 		Sessions: []ingest.PushSessionRow{},
@@ -1458,6 +1474,7 @@ func testScope(stale bool) *push.RepositoryScope {
 }
 
 func TestPipeline_ConnectionAbort_ThreeConsecutiveFailures(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1496,6 +1513,7 @@ func TestPipeline_ConnectionAbort_ThreeConsecutiveFailures(t *testing.T) {
 }
 
 func TestPipeline_ContinueOnError_NonConnectionError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1530,6 +1548,7 @@ func TestPipeline_ContinueOnError_NonConnectionError(t *testing.T) {
 }
 
 func TestPipeline_UnscopedHeldBackSessions_StderrNotice(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1563,6 +1582,7 @@ func TestPipeline_UnscopedHeldBackSessions_StderrNotice(t *testing.T) {
 }
 
 func TestPipeline_IndividualMethod_Error(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1585,6 +1605,7 @@ func TestPipeline_IndividualMethod_Error(t *testing.T) {
 }
 
 func TestPipeline_SourceProvider_FiltersCorrectly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1620,6 +1641,7 @@ func TestPipeline_SourceProvider_FiltersCorrectly(t *testing.T) {
 }
 
 func TestPipeline_InsertPushLog_ErrorLoggedToStderr(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1651,6 +1673,7 @@ func TestPipeline_InsertPushLog_ErrorLoggedToStderr(t *testing.T) {
 }
 
 func TestPipeline_ReceiptPersistenceFailureIsPartialFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1691,6 +1714,7 @@ func TestPipeline_ReceiptPersistenceFailureIsPartialFailure(t *testing.T) {
 }
 
 func TestPipeline_BySourceMethod(t *testing.T) {
+	t.Parallel()
 	// Verifies the by-source code path in getTargetSessions:
 	// when Method == PushMethodBySource the pipeline calls UnpushedSessionsByProvider
 	// for each configured provider, collects their sessions, and pushes them.
@@ -1743,6 +1767,7 @@ func TestPipeline_BySourceMethod(t *testing.T) {
 }
 
 func TestPipeline_BySourceMethod_SingleProvider(t *testing.T) {
+	t.Parallel()
 	// Verifies by-source with a single provider configured: only that provider's
 	// sessions are fetched; sessions for other providers in the store are not pushed.
 	ctx := context.Background()
@@ -1786,6 +1811,7 @@ func TestPipeline_BySourceMethod_SingleProvider(t *testing.T) {
 }
 
 func TestPipeline_MetricsPresent_QualityIncludedInPayload(t *testing.T) {
+	t.Parallel()
 	// When the store has QualityMetrics for a session, the pipeline should
 	// fetch them via GetQualityMetrics and include them in the publish request
 	// JSON under the "quality" key.
@@ -1856,6 +1882,7 @@ func TestPipeline_MetricsPresent_QualityIncludedInPayload(t *testing.T) {
 }
 
 func TestPipeline_MetricsAbsent_PushSucceedsWithoutQuality(t *testing.T) {
+	t.Parallel()
 	// When the store has NO metrics for a session (GetQualityMetrics returns nil),
 	// the pipeline should still push successfully. The published JSON should
 	// NOT contain the "quality" key (graceful degradation).
@@ -1899,6 +1926,7 @@ func TestPipeline_MetricsAbsent_PushSucceedsWithoutQuality(t *testing.T) {
 }
 
 func TestPipeline_MetricsError_RefusesIncompleteBundle(t *testing.T) {
+	t.Parallel()
 	// A database error must not produce a partially read publication bundle.
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
@@ -1928,6 +1956,7 @@ func TestPipeline_MetricsError_RefusesIncompleteBundle(t *testing.T) {
 }
 
 func TestPipeline_EntriesPresent_IncludedInPayload(t *testing.T) {
+	t.Parallel()
 	// When the store has entries for a session, the pipeline should fetch them
 	// via ListEntries and include them in the published JSON under "entries".
 	//
@@ -2013,6 +2042,7 @@ func TestPipeline_EntriesPresent_IncludedInPayload(t *testing.T) {
 }
 
 func TestPipeline_EntriesAbsent_PushSucceedsWithoutEntries(t *testing.T) {
+	t.Parallel()
 	// When the store has NO entries for a session (ListEntries returns nil),
 	// the pipeline should push successfully. The published JSON should NOT
 	// contain the "entries" key (omitempty).
@@ -2056,6 +2086,7 @@ func TestPipeline_EntriesAbsent_PushSucceedsWithoutEntries(t *testing.T) {
 }
 
 func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -2102,6 +2133,7 @@ func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
 }
 
 func TestPipeline_EntriesRereadErrorReportsPostNegotiationStage(t *testing.T) {
+	t.Parallel()
 	fs := testutil.NewMemFS()
 	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
 	store := &testutil.StubPushStore{
@@ -2131,6 +2163,7 @@ func TestPipeline_EntriesRereadErrorReportsPostNegotiationStage(t *testing.T) {
 // in GitContext. A store read failure is fail-closed: it must not publish a
 // session with incomplete association ownership context.
 func TestPipeline_PublishesCurrentDurableAssociations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 	const hostSlug = testutil.TestHostSlug
@@ -2189,6 +2222,7 @@ func TestPipeline_PublishesCurrentDurableAssociations(t *testing.T) {
 }
 
 func TestPipeline_StatusCode_201New_200Updated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -2252,6 +2286,7 @@ func TestPipeline_StatusCode_201New_200Updated(t *testing.T) {
 // instead of raw provider JSONL. Village's migrate-on-read path
 // migrate-on-read consumes exactly this shape.
 func TestPipeline_StructuredContentUpload(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 

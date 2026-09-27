@@ -1,10 +1,8 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -15,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pair_snapshot.yaml
@@ -45,14 +42,8 @@ func loadPairSnapshotExtFixture(t *testing.T) pairSnapshotExtFixture {
 		pairSnapshotExtFixture `yaml:",inline"`
 		CaptureReads           []pairSnapshotExtCaptureRead `yaml:"captureReads"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(pairSnapshotExtYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(pairSnapshotExtYAML, &fixture); err != nil {
 		t.Fatalf("decode the pair snapshot fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("the pair snapshot fixture must hold exactly one YAML document")
 	}
 	names := make(map[string]bool, len(fixture.CaptureReads))
 	for _, row := range fixture.CaptureReads {

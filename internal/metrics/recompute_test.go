@@ -1,11 +1,9 @@
 package metrics_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
-	"io"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -13,8 +11,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/recompute.yaml
@@ -59,14 +57,8 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 			WantError    bool   `yaml:"wantError"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(recomputeYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(recomputeYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("metric recomputation fixture requires one document")
 	}
 	required := []string{"current-version-recomputed", "future-producer-preserved", "failed-save-preserves-last-good"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

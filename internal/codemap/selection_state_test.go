@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"testing"
 
@@ -23,7 +21,6 @@ import (
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	"github.com/peasant-labs/schema/testcase/assert"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/selection_state.yaml
@@ -58,8 +55,6 @@ type selectionStateExpected struct {
 	VisibleSessionCount int  `yaml:"visible_session_count"`
 }
 
-const selectionStateExpectedCaseCount = 9
-
 // selectionStatePathResolver treats the fixture's clean absolute paths as
 // already-resolved physical identities. Production uses
 // ingest.NewPhysicalPathResolver; this seam keeps store-backed fixture cases
@@ -79,19 +74,13 @@ func (selectionStatePathResolver) Resolve(dir string) (ingest.ClonePath, error) 
 // TestSelectionStateFixtureGuards can drive it directly with mutated bytes —
 // same split as project_resolution_test.go's decode/load pair.
 func decodeSelectionStateCorpus(data []byte) (testcase.Corpus[selectionStateInput, selectionStateExpected], error) {
-	manifest, err := testutil.DecodeSemanticManifest(selectionStateManifestYAML, "selection state")
+	manifest, err := testutil.DecodeRequiredNamesManifest(selectionStateManifestYAML, "selection state")
 	if err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, err
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var corpus testcase.Corpus[selectionStateInput, selectionStateExpected]
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &corpus); err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, fmt.Errorf("decode selection state fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, fmt.Errorf("selection state fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make([]string, 0, len(corpus.Cases))
 	for _, c := range corpus.Cases {
@@ -99,9 +88,9 @@ func decodeSelectionStateCorpus(data []byte) (testcase.Corpus[selectionStateInpu
 	}
 	// EXACT-manifest guard (mirrors project_resolution_manifest.yaml): a
 	// count-preserving swap that silently drops a real case and adds a
-	// filler with a different name is invisible to assert.RequireMin alone,
-	// but not to a manifest that independently names every required case.
-	if err := testutil.ValidateSemanticNames(manifest, names, "selection state"); err != nil {
+	// filler with a different name is invisible to any bare count, but not to
+	// a manifest that independently names every required case.
+	if err := testutil.ValidateRequiredNames(manifest, names, "selection state"); err != nil {
 		return testcase.Corpus[selectionStateInput, selectionStateExpected]{}, err
 	}
 	return corpus, nil
@@ -113,7 +102,6 @@ func loadSelectionStateCorpus(t *testing.T) testcase.Corpus[selectionStateInput,
 	if err != nil {
 		t.Fatalf("load selection state fixture: %v", err)
 	}
-	assert.RequireMin(t, corpus, selectionStateExpectedCaseCount)
 	assert.RequireValid(t, corpus)
 	return corpus
 }
@@ -122,6 +110,7 @@ func loadSelectionStateCorpus(t *testing.T) testcase.Corpus[selectionStateInput,
 // rejects the mutations it exists to catch (mirrors
 // TestProjectResolutionFixtureGuards's structure).
 func TestSelectionStateFixtureGuards(t *testing.T) {
+	t.Parallel()
 	swapped := bytes.Replace(selectionStateYAML, []byte("name: all_mode_selection_inactive_nothing_hidden"), []byte("name: replacement_case"), 1)
 	if _, err := decodeSelectionStateCorpus(swapped); err == nil {
 		t.Fatal("expected a count-preserving case-name swap to be rejected by the manifest guard")
@@ -134,9 +123,9 @@ func TestSelectionStateFixtureGuards(t *testing.T) {
 	if _, err := decodeSelectionStateCorpus(trailing); err == nil {
 		t.Fatal("expected a trailing-document mutation to be rejected")
 	}
-	unknownManifestField := bytes.Replace(selectionStateManifestYAML, []byte("expectedCaseCount:"), []byte("unexpected: true\nexpectedCaseCount:"), 1)
-	if _, err := testutil.DecodeSemanticManifest(unknownManifestField, "selection state"); err == nil {
-		t.Fatal("expected an unknown-field manifest mutation to be rejected")
+	unknownManifestField := bytes.Replace(selectionStateManifestYAML, []byte("requiredNames:"), []byte("expectedCaseCount: 9\nrequiredNames:"), 1)
+	if _, err := testutil.DecodeRequiredNamesManifest(unknownManifestField, "selection state"); err == nil {
+		t.Fatal("expected a stray count field in the name-only manifest to be rejected")
 	}
 }
 
@@ -162,6 +151,7 @@ func buildSelectionPolicy(t *testing.T, sel config.SelectionConfig) sessionvisib
 // derived from the same visibility pass ProjectSummaries uses to build Projects
 // after project-selection usability testing.
 func TestProjectSummaries_SelectionState(t *testing.T) {
+	t.Parallel()
 	corpus := loadSelectionStateCorpus(t)
 	for _, fixtureCase := range corpus.Cases {
 		t.Run(fixtureCase.Name, func(t *testing.T) {

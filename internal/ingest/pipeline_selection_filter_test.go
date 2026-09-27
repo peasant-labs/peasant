@@ -4,16 +4,13 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pipeline_selection_filter.yaml
@@ -52,14 +49,8 @@ const (
 
 func decodePipelineSelectionFilterFixture(source []byte) (pipelineSelectionFilterDocument, error) {
 	var document pipelineSelectionFilterDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &document); err != nil {
 		return document, fmt.Errorf("decode pipeline selection-filter fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, fmt.Errorf("pipeline selection-filter fixture must contain exactly one YAML document: %v", err)
 	}
 	if document.DeclaredCases != pipelineSelectionFilterCaseCount || len(document.Cases) != pipelineSelectionFilterCaseCount {
 		return document, fmt.Errorf("pipeline selection-filter fixture case count mismatch: declared=%d actual=%d required=%d", document.DeclaredCases, len(document.Cases), pipelineSelectionFilterCaseCount)
@@ -107,6 +98,7 @@ func loadPipelineSelectionFilterFixture(t *testing.T) pipelineSelectionFilterDoc
 }
 
 func TestPipelineSelectionFilterFixtureRejectsSemanticMutation(t *testing.T) {
+	t.Parallel()
 	mutated := bytes.Replace(
 		pipelineSelectionFilterYAML,
 		[]byte("name: dry_run_uses_exact_child_deny"),
@@ -119,6 +111,7 @@ func TestPipelineSelectionFilterFixtureRejectsSemanticMutation(t *testing.T) {
 }
 
 func TestPipeline_SessionFilterExactChildDenialAndDryRunUseSharedPass(t *testing.T) {
+	t.Parallel()
 	for _, testCase := range loadPipelineSelectionFilterFixture(t).Cases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -167,7 +160,7 @@ func TestPipeline_SessionFilterExactChildDenialAndDryRunUseSharedPass(t *testing
 					return excluded[session.SessionID]
 				}
 			})
-			pipeline, err := ingest.NewPipeline(
+			pipeline, err := newTestPipeline(
 				mfs,
 				testutil.DefaultGitResolver(),
 				map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(sessions, metadata)},

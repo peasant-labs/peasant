@@ -4,15 +4,14 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -62,17 +61,8 @@ type selectionAffordanceDocument struct {
 
 func decodeSelectionAffordances(data []byte) (selectionAffordanceDocument, error) {
 	var doc selectionAffordanceDocument
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &doc); err != nil {
 		return doc, fmt.Errorf("decode testdata/selection_affordances.yaml: %w", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return doc, fmt.Errorf("selection_affordances.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != expectedSelectionAffordanceCaseCount || len(doc.Cases) != expectedSelectionAffordanceCaseCount {
 		return doc, fmt.Errorf("selection_affordances.yaml cases: declared=%d actual=%d required=%d",
@@ -196,6 +186,7 @@ func assertSingleSelectionSearchBar(t *testing.T, view string) {
 }
 
 func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionAffordances(t)
 	for _, c := range doc.Cases {
 		c := c
@@ -260,6 +251,7 @@ func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionAffordanceData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeSelectionAffordances(mutated); err == nil {
 		t.Fatal("selection affordance fixture accepted an unknown field")
@@ -267,6 +259,7 @@ func TestSelectionAffordanceFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionAffordanceData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeSelectionAffordances(mutated); err == nil {
 		t.Fatal("selection affordance fixture accepted a trailing document")
@@ -274,6 +267,7 @@ func TestSelectionAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureEnforcesRowCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionAffordanceCaseCount))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionAffordanceCaseCount+1))
 	mutated := bytes.Replace(selectionAffordanceData, declared, changed, 1)

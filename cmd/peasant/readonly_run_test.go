@@ -16,6 +16,7 @@ import (
 )
 
 func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	output := filepath.Join(directory, "managed")
 	native := filepath.Join(directory, "native")

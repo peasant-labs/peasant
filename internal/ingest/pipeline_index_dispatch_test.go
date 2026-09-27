@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/index_dispatch.yaml
@@ -163,23 +161,11 @@ func dispatchExitOf(testCase indexDispatchCase) dispatchExit {
 // how the undeclared kind spent its life folded into the file arm.
 func loadIndexDispatchFixture(data []byte) (indexDispatchDocument, error) {
 	var document indexDispatchDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, indexDispatchRuleError(
 			"typed YAML fields must match the document schema",
 			"loader=first-document decode",
 			fmt.Sprintf("fix=remove unknown fields and match the typed schema: %v", err))
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found another YAML document")
-		}
-		return document, indexDispatchRuleError(
-			"exactly one YAML document is allowed; cases below a second one prove nothing",
-			"loader=end-of-document check",
-			fmt.Sprintf("fix=remove the second document so the next decode returns EOF: %v", err))
 	}
 	if len(document.Cases) == 0 {
 		return document, indexDispatchRuleError(
@@ -363,6 +349,7 @@ func TestLoadIndexDispatchFixture_RejectsARenamedRequiredCase(t *testing.T) {
 // TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind verifies captured
 // file bytes, canonical native-tree parsing and actionable refusal through Store.
 func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T) {
+	t.Parallel()
 	document, err := loadIndexDispatchFixture(indexDispatchFixtureData)
 	if err != nil {
 		t.Fatal(err)
@@ -443,7 +430,7 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 			if testCase.Bytes == absent {
 				// Retained reindex starts without extraction bytes; capture must
 				// still deliver the committed file bytes directly to the parser.
-				seed, err := ingest.NewPipeline(mfs, git, adapters, cfg)
+				seed, err := newTestPipeline(mfs, git, adapters, cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -453,7 +440,7 @@ func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T
 				}
 				cfg.Reindex, cfg.Force = true, true
 			}
-			pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+			pipeline, err := newTestPipeline(mfs, git, adapters, cfg,
 				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{defaults.HarnessOpenCode: indexer}),
 				ingest.WithMetricsStore(fixtureStore),
 			)

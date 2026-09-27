@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -67,9 +66,7 @@ type metadataReadPolicyFixtures struct {
 func loadMetadataReadPolicyFixtures(t *testing.T) metadataReadPolicyFixtures {
 	t.Helper()
 	var fixtures metadataReadPolicyFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(metadataReadPolicyYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(metadataReadPolicyYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -360,7 +357,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 						baselineConfig := makePipelineConfig(testOutputDir)
 						baselineConfig.Reindex = true
 						baselineConfig.Sources = nil
-						baseline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, baselineConfig,
+						baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, baselineConfig,
 							ingest.WithStore(database), ingest.WithMetricsStore(database),
 							ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 						if err != nil {
@@ -405,7 +402,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg, options...)
+			pipeline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), adapters, cfg, options...)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -49,6 +49,7 @@ func testdataRoot() string {
 // guarantee that no secret ever lands in the repo through them. It is
 // intentionally NOT build-tagged.
 func TestFixture_NoSecrets(t *testing.T) {
+	t.Parallel()
 	indexes := loadFixtureIndexes(t)
 	files := collectFixtureFiles(t, indexes)
 	if len(files) == 0 {
@@ -103,6 +104,7 @@ func TestFixture_NoSecrets(t *testing.T) {
 // the harness depends on. Each immediate fixture directory must carry a
 // fixture-index.yaml; adding another provider fixture is therefore data-first.
 func TestFixture_StructureSanity(t *testing.T) {
+	t.Parallel()
 	for _, m := range loadFixtureIndexes(t) {
 		assertFixtureShape(t, m.Path)
 	}
@@ -113,6 +115,7 @@ func TestFixture_StructureSanity(t *testing.T) {
 // token "task-id" does NOT trip the OpenAI rule. Guards against a regex regression
 // silently disabling the security gate.
 func TestNoSecretsGate_DetectsKnownSecrets(t *testing.T) {
+	t.Parallel()
 	mustMatch := map[string]string{
 		"github-token":       "ghp_0123456789abcdef0123456789abcdef0123",
 		"aws-access-key":     "AKIAIOSFODNN7EXAMPLE",

@@ -49,6 +49,7 @@ func TestKickstartDiscoveryMountsCurrentOnlyOpenCodeSession(t *testing.T) {
 // drives it through the retained runLegacyFTUEWizard entry point rather than
 // cmd.Execute.
 func TestBuildKickstartCommandMountsProjectFirstScope(t *testing.T) {
+	t.Parallel()
 	sessions := []ftue.SessionListing{
 		{Harness: defaults.HarnessClaudeCode.String(), ProjectName: "tool", GitRemote: "git@github.com:acme/tool.git", WorkingDir: "/work/acme/tool", SessionID: "11111111-1111-1111-1111-111111111111"},
 		{Harness: defaults.HarnessOpenCode.String(), ProjectName: "tool", GitRemote: "https://github.com/acme/tool.git", WorkingDir: "/work/acme/tool", SessionID: "22222222-2222-2222-2222-222222222222"},

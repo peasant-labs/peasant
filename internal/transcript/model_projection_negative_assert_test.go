@@ -8,6 +8,7 @@ import (
 )
 
 func TestModelProjectionNegativeFailsOnlyDesignatedCase(t *testing.T) {
+	t.Parallel()
 	results := runModelProjectionFixture(loadModelProjectionFixture(t))
 	failed := make([]string, 0, len(results))
 	for _, result := range results {

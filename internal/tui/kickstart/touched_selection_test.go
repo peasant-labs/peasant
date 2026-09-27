@@ -1,17 +1,13 @@
 package kickstart_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -72,14 +68,8 @@ type mountedTouchedCase struct {
 func loadMountedTouchedDocument(t *testing.T) mountedTouchedDocument {
 	t.Helper()
 	var document mountedTouchedDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(mountedTouchedSelectionData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(mountedTouchedSelectionData, &document); err != nil {
 		t.Fatalf("decode kickstart testdata/touched_selection.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("kickstart touched_selection.yaml must hold exactly one document: %v", err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || document.ExpectedCaseCount != len(document.ExpectedNames) || len(document.Cases) == 0 {
 		t.Fatalf("mounted fixture manifest count=%d names=%d cases=%d", document.ExpectedCaseCount, len(document.ExpectedNames), len(document.Cases))
@@ -140,6 +130,7 @@ func validMountedTouchedAction(action mountedTouchedAction) bool {
 }
 
 func TestMountedTouchedSelectionActions(t *testing.T) {
+	t.Parallel()
 	document := loadMountedTouchedDocument(t)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

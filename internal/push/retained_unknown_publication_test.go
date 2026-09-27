@@ -5,8 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -19,7 +17,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/retained_unknown_publication.yaml
@@ -52,14 +49,8 @@ func loadRetainedPublicationCases(t *testing.T) []retainedPublicationCase {
 	var fixture struct {
 		Cases []retainedPublicationCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(retainedPublicationYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(retainedPublicationYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("fixture requires one YAML document")
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(retainedPublicationManifest, "retained publication")
 	if err != nil {
@@ -76,6 +67,7 @@ func loadRetainedPublicationCases(t *testing.T) []retainedPublicationCase {
 }
 
 func TestRetainedUnknownPublication(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadRetainedPublicationCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx := context.Background()

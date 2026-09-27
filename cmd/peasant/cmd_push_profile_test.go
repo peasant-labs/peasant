@@ -173,9 +173,11 @@ func unwritableParent(t *testing.T, dir string) string {
 }
 
 func TestPushCmd_Profile(t *testing.T) {
+	t.Parallel()
 	fixtures := loadPushProfileFixtures(t)
 	for _, c := range fixtures.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			outputPath := filepath.Join(dir, "profile.json")
 			tracePath := filepath.Join(dir, "PRIVATE_HISTORY_SENTINEL.jsonl")
@@ -463,6 +465,7 @@ func assertMountedProfileBottlenecks(t *testing.T, stderr string, doc perf.Profi
 }
 
 func TestPushCmd_ProfileSummary(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPushProfileFixtures(t).SummaryCases {
 		t.Run(c.Name, func(t *testing.T) {
 			var doc perf.ProfileDocument
@@ -487,6 +490,7 @@ func TestPushCmd_ProfileSummary(t *testing.T) {
 // no-child fallback through the actual collector/reducer/file writer as well,
 // without disabling those production stages just to force an empty summary.
 func TestPushCmd_ProfileSummaryWriter(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPushProfileFixtures(t).SummaryCases {
 		if !c.RecordSpans {
 			continue
@@ -590,6 +594,7 @@ func readPrivateProfileFile(t *testing.T, path string) []byte {
 }
 
 func TestPushCmd_ProfileInvalidPaths(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPushProfileFixtures(t).InvalidCases {
 		t.Run(c.Name, func(t *testing.T) {
 			dir := t.TempDir()

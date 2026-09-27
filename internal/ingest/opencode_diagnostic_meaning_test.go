@@ -1,14 +1,11 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
 //go:embed testdata/opencode_diagnostic_meaning.yaml
@@ -31,15 +28,9 @@ type openCodeDiagnosticMeaningFixture struct {
 
 func loadOpenCodeDiagnosticMeaningFixture(t testing.TB) openCodeDiagnosticMeaningFixture {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeDiagnosticMeaningYAML))
-	decoder.KnownFields(true)
 	var fixture openCodeDiagnosticMeaningFixture
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeDiagnosticMeaningYAML, &fixture); err != nil {
 		t.Fatalf("decode OpenCode diagnostic meaning fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("decode OpenCode diagnostic meaning fixture: expected exactly one YAML document: %v", err)
 	}
 	presentDiag := make(map[string]struct{}, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {

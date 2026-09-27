@@ -1,16 +1,13 @@
 package kickstart_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"io"
 	"path/filepath"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -35,14 +32,8 @@ type retentionGatingDoc struct {
 func loadRetentionGatingDoc(t *testing.T) retentionGatingDoc {
 	t.Helper()
 	var doc retentionGatingDoc
-	dec := yaml.NewDecoder(bytes.NewReader(retentionGatingData))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(retentionGatingData, &doc); err != nil {
 		t.Fatalf("decode testdata/retention_gating.yaml: %v", err)
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		t.Fatalf("retention_gating.yaml must hold exactly one document")
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases", doc.ExpectedCaseCount, len(doc.Cases))
@@ -71,6 +62,7 @@ func retentionSectionWhen(t *testing.T, reg settings.Registry, d *settings.Draft
 // TestRegistry_RetentionGating proves the Claude retention section is offered
 // only when Claude Code sessions were discovered.
 func TestRegistry_RetentionGating(t *testing.T) {
+	t.Parallel()
 	doc := loadRetentionGatingDoc(t)
 	for _, c := range doc.Cases {
 		c := c

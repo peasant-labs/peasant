@@ -3,8 +3,6 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
-	"io"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/opencode_unknown.yaml
@@ -39,14 +36,8 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			Texts       []string    `yaml:"texts"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(openCodeUnknownYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(openCodeUnknownYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("trailing fixture document", err)
 	}
 	names := []string{}
 	if len(fixture.Required) == 0 {
@@ -75,7 +66,7 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			}
 			source := testfixture.MaterializeByName(t, "native-current-rows")
 			seedOpenCodeProvenanceCase(t, source, ocProvCase{Scope: ocProvScope{SessionID: string(sid), ParentNullProven: true}, Rows: row.Rows})
-			adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
+			adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessOpenCode, SourcePath: ingest.ResolvedPath(source.Path), TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite}
 			nativeIndexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(openCodeNativeProvenanceConfig(source, string(sid), ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)))
 			candidate, nativeErr := nativeIndexer.BuildNativeGeneration(t.Context(), session)

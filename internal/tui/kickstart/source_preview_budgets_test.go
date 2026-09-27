@@ -1,11 +1,8 @@
 package kickstart_test
 
 import (
-	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -14,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -44,15 +40,9 @@ type sourcePreviewBudgetDocument struct {
 
 func loadSourcePreviewBudgetDocument(t *testing.T) sourcePreviewBudgetDocument {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(sourcePreviewBudgetData))
-	decoder.KnownFields(true)
 	var document sourcePreviewBudgetDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(sourcePreviewBudgetData, &document); err != nil {
 		t.Fatalf("decode source preview budget fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("source preview budget fixture must contain exactly one document")
 	}
 	if len(document.RequiredCases) == 0 {
 		t.Fatal("source preview budget fixture declares no required cases")
@@ -84,6 +74,7 @@ func loadSourcePreviewBudgetDocument(t *testing.T) sourcePreviewBudgetDocument {
 // inspecting SourceTurns fields or overriding any budget. Run cases serially
 // because each deliberately exceeds two continuation budgets.
 func TestSourceTurns_DefaultBudgetsAreSharedAcrossOrigins(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadSourcePreviewBudgetDocument(t).Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			if c.InitialBytes != defaults.TranscriptInitialReadBytes || c.BodyBytes != defaults.TranscriptContinuationReadBytes || c.ContinuationBytes != defaults.TranscriptContinuationReadBytes {

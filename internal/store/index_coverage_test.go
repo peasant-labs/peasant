@@ -6,15 +6,14 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 )
 
@@ -49,17 +48,8 @@ var indexCoverageCaseKinds = map[string]bool{
 
 func loadIndexCoverageFixture(data []byte) (indexCoverageFixtureDocument, error) {
 	var document indexCoverageFixtureDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("%s: decode typed fields: %w", indexCoverageFixturePath, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = errors.New("found another YAML document")
-		}
-		return document, fmt.Errorf("%s: exactly one YAML document is allowed: %w", indexCoverageFixturePath, err)
 	}
 	if len(document.Cases) == 0 {
 		return document, fmt.Errorf("%s: the fixture holds no cases", indexCoverageFixturePath)

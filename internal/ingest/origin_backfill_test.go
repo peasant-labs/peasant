@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,14 +110,8 @@ const storedBackfillRuleVersion = ingest.OriginRuleVersion
 // outside the production menu, or expects a session it never stored.
 func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 	var fixture storedBackfillFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return storedBackfillFixture{}, fmt.Errorf("decode stored-origin backfill fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill fixture must contain exactly one YAML document: %v", err)
 	}
 
 	present := make(map[string]bool, len(fixture.Cases))
@@ -173,6 +165,7 @@ func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 }
 
 func TestLoadStoredBackfillFixturesRejectsAmbiguousMessages(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -486,6 +479,7 @@ func assertStoredBackfillRows(t *testing.T, label string, tc storedBackfillCase,
 // command, no re-import and no second run, and only full-evidence rows are
 // finalised.
 func TestResolveStoredOriginsWritesAVerdictIntoEveryRow(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
 	if err != nil {
 		t.Fatalf("load stored-origin backfill fixture: %v", err)
@@ -535,6 +529,7 @@ func TestResolveStoredOriginsWritesAVerdictIntoEveryRow(t *testing.T) {
 // must still have judged every one of them. An implementation that finalised
 // what it resolved from a stored message fails here on every row.
 func TestResolveStoredOriginsLeavesEveryRowRetryableWhenNoTranscriptSurvives(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
 	if err != nil {
 		t.Fatalf("load stored-origin backfill fixture: %v", err)
@@ -607,6 +602,7 @@ func (s *interruptibleOriginStore) UpdateOriginState(ctx context.Context, sessio
 // down with it, and a row the pass never reached is untouched rather than
 // half-marked. Running the pass again finishes the job.
 func TestResolveStoredOriginsResumesAfterAnInterruptedPass(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
 	if err != nil {
 		t.Fatalf("load stored-origin backfill fixture: %v", err)
@@ -672,6 +668,7 @@ func TestResolveStoredOriginsResumesAfterAnInterruptedPass(t *testing.T) {
 // finalise nothing, and report success over a store where every row is still
 // unjudged.
 func TestResolveStoredOriginsRefusesAnUnusableRuleVersion(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
 	if err != nil {
 		t.Fatalf("load stored-origin backfill fixture: %v", err)
@@ -686,6 +683,7 @@ func TestResolveStoredOriginsRefusesAnUnusableRuleVersion(t *testing.T) {
 // boundary: a resolver with nothing to read from would report a clean pass over
 // a store it never opened.
 func TestNewOriginResolverRefusesToRunWithoutAStore(t *testing.T) {
+	t.Parallel()
 	if _, err := ingest.NewOriginResolver(nil, nil, nil); err == nil {
 		t.Fatal("a resolver with no store was accepted; it would report a clean pass over rows it never read")
 	}
@@ -695,6 +693,7 @@ func TestNewOriginResolverRefusesToRunWithoutAStore(t *testing.T) {
 // proven rather than declared: drop any one case and the loader refuses the
 // corpus by NAME, so an arm cannot be quietly removed to make a change pass.
 func TestLoadStoredBackfillFixturesRejectsADeletedCase(t *testing.T) {
+	t.Parallel()
 	fixture, err := LoadStoredBackfillFixtures(storedBackfillFixtureBytes)
 	if err != nil {
 		t.Fatalf("load stored-origin backfill fixture: %v", err)

@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -19,7 +18,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/selection_discovery.yaml
@@ -51,9 +49,7 @@ type selectionDiscoveryFixture struct {
 func loadSelectionDiscoveryFixture(t *testing.T) selectionDiscoveryFixture {
 	t.Helper()
 	var fixture selectionDiscoveryFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(selectionDiscoveryFixtureYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(selectionDiscoveryFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode selection discovery fixture: %v", err)
 	}
 	if len(fixture.Sessions) < 2 || fixture.SelectedSession == fixture.HiddenSession {

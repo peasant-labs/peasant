@@ -53,6 +53,7 @@ func loadDiscoveryDiagnosticsFixtures(raw []byte) ([]discoveryDiagnosticsFixture
 }
 
 func TestProjectScopeShowsNonOperationalHarnessDiagnostics(t *testing.T) {
+	t.Parallel()
 	fixtures, err := loadDiscoveryDiagnosticsFixtures(discoveryDiagnosticsYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +81,7 @@ func TestProjectScopeShowsNonOperationalHarnessDiagnostics(t *testing.T) {
 }
 
 func TestDiscoveryDiagnosticsFixtureIsStrict(t *testing.T) {
+	t.Parallel()
 	if _, err := loadDiscoveryDiagnosticsFixtures(append(discoveryDiagnosticsYAML, []byte("\n---\n{}\n")...)); err == nil {
 		t.Fatal("loader accepted a second YAML document")
 	}

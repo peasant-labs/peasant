@@ -80,6 +80,7 @@ func exportWiringSnapshot() (indexformat.ReadSnapshot, map[schema.SourceEntryRef
 }
 
 func TestExportSnapshotPayloadWiring(t *testing.T) {
+	t.Parallel()
 	snapshot, blobs := exportWiringSnapshot()
 	sessionID := snapshot.Metadata.SessionID
 

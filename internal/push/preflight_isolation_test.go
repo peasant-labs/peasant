@@ -26,6 +26,7 @@ import (
 // than a message this test invented. Discovery is answered by the stub, so the
 // refusal reaches the preflight rather than stopping at the candidate query.
 func TestPreflightSeparatesRunWideFailureFromSessionRefusal(t *testing.T) {
+	t.Parallel()
 	closedStoreErr := closedStoreReadError(t)
 
 	t.Run("closed-database-stops-the-run", func(t *testing.T) {

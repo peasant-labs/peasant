@@ -460,6 +460,7 @@ func TestInterruptedPairInstallMounted(t *testing.T) {
 	f := loadInterruptedPairFixtures(t)
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			for _, command := range c.Commands {
 				w := setupInstallWorld(t, f)
 				before := requireInstallSettled(t, w, f.Target, w.transcript, w.metadata)

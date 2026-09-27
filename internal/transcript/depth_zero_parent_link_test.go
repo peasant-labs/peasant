@@ -132,6 +132,7 @@ func depthZeroParentLinkEntries(fixtureCase depthZeroParentLinkCase) []schema.Se
 // still fold into it, and the content overlay never adopts it as a child of the
 // entry it points at.
 func TestDepthZeroParentLinkIsNotAChild(t *testing.T) {
+	t.Parallel()
 	fixture := loadDepthZeroParentLinkFixture(t)
 	for _, fixtureCase := range fixture.Cases {
 		t.Run(fixtureCase.Name, func(t *testing.T) {

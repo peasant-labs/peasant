@@ -13,6 +13,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// contentBackfillPageSize is how many incomplete-content targets one store
+// page returns. The recovery pass walks by exclusive keyset cursor, so this is
+// a per-page bound on a single listing round trip, not a cap on the work a run
+// can do: the next page resumes after the last identity of this one.
+const contentBackfillPageSize = 100
+
 // ContentCaptureResult is one retained-content capture, as the adapter that
 // parsed it reports it. The adapter declares its own completeness: Complete is
 // false whenever the adapter knows that rows were filtered or omitted, so a
@@ -135,7 +141,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 		if err := ctx.Err(); err != nil {
 			return recovered, stoppedOnBudget, remaining, err
 		}
-		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize)
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return recovered, stoppedOnBudget, remaining, cancelErr
 		}
@@ -262,7 +268,7 @@ func (p *Pipeline) countIncompleteContentWork(ctx context.Context, store Content
 		if err := ctx.Err(); err != nil {
 			return count, err
 		}
-		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, 100)
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize)
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return count, cancelErr
 		}

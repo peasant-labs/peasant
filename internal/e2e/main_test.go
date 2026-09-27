@@ -25,6 +25,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestMemoryBudgetInheritedByChild(t *testing.T) {
+	t.Parallel()
 	// Use the same inheritance as the real CLI's isolated XDG environments.
 	command := exec.Command("env")
 	command.Env = append(os.Environ(), xdgEnvAssignments(t.TempDir(), t.TempDir(), t.TempDir())...)

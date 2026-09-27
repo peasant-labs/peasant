@@ -104,7 +104,7 @@ func piRoundTripNativeSource(t *testing.T, name string) string {
 	t.Helper()
 	wd, err := os.Getwd()
 	piNoError(t, err)
-	raw, err := os.ReadFile(filepath.Join(peasantRepoRoot(wd), "internal", "ingest", "testdata", "pi_source_v3_structure.yaml"))
+	raw, err := os.ReadFile(filepath.Join(peasantRepoRoot(wd), "cmd", "peasant", "testdata", "pi_source_v3_structure.yaml"))
 	piNoError(t, err)
 	var corpus struct {
 		Cases []struct{ Name, Source string }
@@ -122,6 +122,7 @@ func piRoundTripNativeSource(t *testing.T, name string) string {
 }
 
 func TestPiRoundTripFixtureSources(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiRoundTripCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			piCheck(t, piRoundTripNativeSource(t, c.NativeCase) != "", "native fixture source required")

@@ -1,7 +1,6 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
 	"io/fs"
@@ -13,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pair_repair.yaml
@@ -45,9 +43,7 @@ type pairRepairCase struct {
 func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 	t.Helper()
 	var document pairRepairDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(pairRepairFixtureData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(pairRepairFixtureData, &document); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -208,7 +204,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 
 			run := func() *ingest.PipelineResult {
 				t.Helper()
-				pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database))
 				if err != nil {

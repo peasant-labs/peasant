@@ -3,16 +3,13 @@ package api_test
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema/testcase"
 	testassert "github.com/peasant-labs/schema/testcase/assert"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/search_limit_handler.yaml
@@ -38,14 +35,8 @@ func decodeSearchLimitHandlerCorpus(data []byte) (testcase.Corpus[searchLimitHan
 		return testcase.Corpus[searchLimitHandlerInput, searchLimitHandlerExpected]{}, err
 	}
 	var corpus testcase.Corpus[searchLimitHandlerInput, searchLimitHandlerExpected]
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &corpus); err != nil {
 		return testcase.Corpus[searchLimitHandlerInput, searchLimitHandlerExpected]{}, fmt.Errorf("decode search limit handler fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return testcase.Corpus[searchLimitHandlerInput, searchLimitHandlerExpected]{}, fmt.Errorf("search limit handler fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(corpus.Cases))
 	actualNames := make([]string, 0, len(corpus.Cases))

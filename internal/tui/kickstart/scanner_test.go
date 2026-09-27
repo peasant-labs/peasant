@@ -47,6 +47,7 @@ func loadListings(t *testing.T) listingsDoc {
 }
 
 func TestListingsFixtureRejectsUnknownCloneIdentityKey(t *testing.T) {
+	t.Parallel()
 	malformed := bytes.Replace(listingsData, []byte("workingDir:"), []byte("workingDirectoryTypo:"), 1)
 	if bytes.Equal(malformed, listingsData) {
 		t.Fatal("listings fixture has no workingDir key to mutate")
@@ -339,6 +340,7 @@ func (r *recordingPathResolver) Resolve(dir string) (ingest.ClonePath, error) {
 }
 
 func TestScannerTreeSource_ResolvesEveryNonEmptyWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	resolver := &recordingPathResolver{}
 	listings := []ftue.SessionListing{
 		{Harness: "claude-code", ProjectName: "tool", WorkingDir: "/fixtures/a/tool", SessionID: "a"},
