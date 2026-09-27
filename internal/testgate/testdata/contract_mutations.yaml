@@ -13,6 +13,7 @@ required_names:
   - retag-json
   - retag-yaml
   - reorder-fields
+  - retag-pretest-fragment
   - drop-enum-member
   - reorder-enum-members
 
@@ -46,6 +47,11 @@ mutations:
     op: reorder
     field: Unit
     with: System
+  - name: retag-pretest-fragment
+    target: testgate.PreTestCommand
+    op: retag
+    field: Fragment
+    value: 'yaml:"recipe"'
   - name: drop-enum-member
     target: testgate.RegistryClasses
     op: drop
