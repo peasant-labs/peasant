@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -75,31 +74,12 @@ func DecodeRegistry(data []byte) (Registry, error) {
 	return reg, nil
 }
 
-// Position is a parsed file:line evidence reference.
-type Position struct {
-	File string
-	Line int
-}
-
-// ParsePosition parses a "file:line" reference.
-func ParsePosition(s string) (Position, error) {
-	i := strings.LastIndex(s, ":")
-	if i <= 0 || i == len(s)-1 {
-		return Position{}, fmt.Errorf("evidence %q is not file:line", s)
-	}
-	line, err := strconv.Atoi(s[i+1:])
-	if err != nil {
-		return Position{}, fmt.Errorf("evidence %q has a non-numeric line: %w", s, err)
-	}
-	return Position{File: filepath.FromSlash(s[:i]), Line: line}, nil
-}
-
 // ValidateRegistry checks every admission criterion against the tree rooted at
 // root. It returns one error naming every finding, so one run fixes them all.
 //
 // Admission criteria, per entry: a valid closed-set class; a non-empty
-// justification; an evidence file:line that exists and is inside the named
-// test's file; an observed cost pair; and, for a subprocess entry, a
+// justification; an evidence anchor that resolves to a test declared in the
+// named test's file; an observed cost pair; and, for a subprocess entry, a
 // build_flags declaration resolved against the referenced exec.Command site
 // that proves the child carries no race detector.
 func ValidateRegistry(root string, reg Registry) error {
@@ -160,20 +140,9 @@ func ValidateRegistry(root string, reg Registry) error {
 }
 
 func validateEvidence(root, pkgAbs string, e Entry, where string, add func(string, ...any)) {
-	pos, err := ParsePosition(e.Evidence)
+	anchor, err := ParseEvidenceAnchor(e.Evidence)
 	if err != nil {
 		add("%s: %v", where, err)
-		return
-	}
-	evidenceRel := filepath.Clean(pos.File)
-	evidenceAbs := filepath.Join(root, evidenceRel)
-	data, err := os.ReadFile(evidenceAbs)
-	if err != nil {
-		add("%s: evidence file %s does not exist", where, evidenceRel)
-		return
-	}
-	if pos.Line < 1 || pos.Line > strings.Count(string(data), "\n")+1 {
-		add("%s: evidence line %d is outside %s", where, pos.Line, evidenceRel)
 		return
 	}
 	declFile, err := testDeclFile(pkgAbs, e.Test)
@@ -181,12 +150,21 @@ func validateEvidence(root, pkgAbs string, e Entry, where string, add func(strin
 		add("%s: %v", where, err)
 		return
 	}
+	evidenceFile, err := testDeclFile(pkgAbs, anchor.Test)
+	if err != nil {
+		add("%s: evidence anchor #%s resolves to no test in package %s", where, anchor.Test, e.Package)
+		return
+	}
 	declRel, err := filepath.Rel(root, declFile)
 	if err != nil {
 		declRel = declFile
 	}
-	if evidenceRel != filepath.Clean(declRel) {
-		add("%s: evidence %s is not inside the named test's file %s", where, evidenceRel, filepath.ToSlash(declRel))
+	evidenceRel, err := filepath.Rel(root, evidenceFile)
+	if err != nil {
+		evidenceRel = evidenceFile
+	}
+	if filepath.Clean(evidenceRel) != filepath.Clean(declRel) {
+		add("%s: evidence anchor #%s resolves to %s, outside the named test's file %s", where, anchor.Test, filepath.ToSlash(evidenceRel), filepath.ToSlash(declRel))
 	}
 }
 
@@ -205,12 +183,12 @@ func validateSubprocess(root, list string, e Entry, where string, add func(strin
 		add("%s: subprocess entry must declare build_flags (use `build_flags: []` for a no-flag child)", where)
 		return
 	}
-	pos, err := ParsePosition(e.ExecCommandSite)
+	anchor, err := ParseExecAnchor(e.ExecCommandSite)
 	if err != nil {
 		add("%s: exec_command_site: %v", where, err)
 		return
 	}
-	site, err := ResolveExecSite(root, filepath.FromSlash(pos.File), pos.Line)
+	site, err := ResolveExecSite(root, anchor)
 	if err != nil {
 		add("%s: %v", where, err)
 		return
