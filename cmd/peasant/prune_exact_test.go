@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -175,11 +174,11 @@ func openTestTerminal(t *testing.T) (master, terminal *os.File) {
 	}
 	t.Cleanup(func() { _ = master.Close() })
 	var unlock int32
-	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, master.Fd(), ioctlUnlockPT, uintptr(unsafe.Pointer(&unlock))); errno != 0 {
+	if _, _, errno := ptyIoctl(t, master.Fd(), ioctlUnlockPT, uintptr(unsafe.Pointer(&unlock))); errno != 0 {
 		t.Fatalf(brokenEnv, errno)
 	}
 	var number uint32
-	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, master.Fd(), ioctlGetPTN, uintptr(unsafe.Pointer(&number))); errno != 0 {
+	if _, _, errno := ptyIoctl(t, master.Fd(), ioctlGetPTN, uintptr(unsafe.Pointer(&number))); errno != 0 {
 		t.Fatalf(brokenEnv, errno)
 	}
 	terminal, err = os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR, 0)

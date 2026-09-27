@@ -28,7 +28,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -333,9 +332,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			r := newProgressProgram(out, state, nil, cancel)
 			r.isTTY = true
 			master, terminal := openTestTerminal(t)
-			if err := unix.IoctlSetWinsize(int(terminal.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
-				t.Fatal(err)
-			}
+			setTestTerminalSize(t, terminal, 24, 80)
 			before, err := term.GetState(int(terminal.Fd()))
 			if err != nil {
 				t.Fatal(err)
@@ -1059,15 +1056,14 @@ func TestHarvestInterruptProcess(t *testing.T) {
 }
 
 func TestHarvestInterruptMounted(t *testing.T) {
+	requireMountedInterruptSupport(t)
 	for _, c := range loadIngestProgressFixtures(t).Interrupt.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			source := testfixture.MaterializeByName(t, "native-v2-only")
 			project := testfixture.PrepareNativeCLI(t, source)
 			dir := t.TempDir()
 			fifo := filepath.Join(dir, "blocked-git")
-			if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			mkfifoForTest(t, fifo)
 			ready := filepath.Join(dir, "git-ready")
 			var metadataWriter *os.File
 			if c.DiffSession != "" {
@@ -1075,9 +1071,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(fifo), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-					t.Fatal(err)
-				}
+				mkfifoForTest(t, fifo)
 				t.Cleanup(func() {
 					if metadataWriter != nil {
 						_ = metadataWriter.Close()
@@ -1101,7 +1095,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			}
 			child := exec.Command(os.Args[0], "-test.run=^TestHarvestInterruptProcess$")
 			child.Env = append(os.Environ(), "PEASANT_INTERRUPT_CHILD=1", "PEASANT_INTERRUPT_ARGS="+strings.Join(args, "\n"), "PEASANT_INTERRUPT_READY="+ready, "PEASANT_INTERRUPT_FIFO="+fifo, "PATH="+dir+":"+os.Getenv("PATH"), "HOME="+dir, defaults.EnvXDGConfigHome.String()+"="+dir, defaults.EnvXDGDataHome.String()+"="+dir, "TERM=xterm-256color")
-			child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			child.SysProcAttr = interruptGroupAttr()
 			child.Env = append(child.Env, "PEASANT_INTERRUPT_PROJECT="+project, defaults.EnvXDGStateHome.String()+"="+dir, "XDG_CACHE_HOME="+dir)
 			stdout := newSignalWriter("")
 			stderr := newSignalWriter("ctrl+c to cancel")
@@ -1111,9 +1105,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			var before *term.State
 			if c.Terminal {
 				master, terminal = openTestTerminal(t)
-				if err := unix.IoctlSetWinsize(int(terminal.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 120}); err != nil {
-					t.Fatal(err)
-				}
+				setTestTerminalSize(t, terminal, 40, 120)
 				var err error
 				before, err = term.GetState(int(terminal.Fd()))
 				if err != nil {
@@ -1131,7 +1123,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			go func() { done <- child.Wait() }()
 			waited := false
 			t.Cleanup(func() {
-				_ = syscall.Kill(-child.Process.Pid, syscall.SIGKILL)
+				killInterruptGroup(child.Process.Pid)
 				if !waited {
 					<-done
 				}
@@ -1146,11 +1138,11 @@ func TestHarvestInterruptMounted(t *testing.T) {
 					// A nonblocking writer opens only once the real DIFF ReadFile
 					// is waiting at the synthetic metadata FIFO. No timing-sized tree.
 					if metadataWriter == nil {
-						fd, openErr := unix.Open(fifo, unix.O_WRONLY|unix.O_NONBLOCK, 0)
-						if openErr == nil {
+						fd, opened, openErr := openFIFOWriterNonblock(fifo)
+						if opened {
 							metadataWriter = os.NewFile(uintptr(fd), fifo)
 						}
-						if openErr != nil && !errors.Is(openErr, unix.ENXIO) {
+						if openErr != nil {
 							t.Fatal(openErr)
 						}
 					}

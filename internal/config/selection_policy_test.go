@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"syscall"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -304,7 +303,7 @@ func TestSaveAtomic_PreservesLoadedConfigAtExactPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat exact config path: %v", err)
 	}
-	if info.Mode().Perm() != defaults.PublicFilePerm {
+	if posixFileModeSupported() && info.Mode().Perm() != defaults.PublicFilePerm {
 		t.Fatalf("config mode = %o, want %o", info.Mode().Perm(), defaults.PublicFilePerm)
 	}
 }
@@ -359,7 +358,7 @@ func TestSaveAtomic_ValidatesBeforeReplacementAndRenames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat seeded config: %v", err)
 	}
-	beforeStat, supported := beforeInfo.Sys().(*syscall.Stat_t)
+	beforeIno, supported := fileIdentity(beforeInfo)
 	if !supported {
 		t.Skip("inode replacement assertion is unsupported on this platform")
 	}
@@ -392,8 +391,8 @@ func TestSaveAtomic_ValidatesBeforeReplacementAndRenames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat replaced config: %v", err)
 	}
-	afterStat := afterInfo.Sys().(*syscall.Stat_t)
-	if beforeStat.Ino == afterStat.Ino {
+	afterIno, _ := fileIdentity(afterInfo)
+	if beforeIno == afterIno {
 		t.Fatal("config inode did not change; SaveAtomic must replace by rename, not truncate in place")
 	}
 	data, err := os.ReadFile(path)

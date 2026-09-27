@@ -229,9 +229,7 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // detach from terminal
-	}
+	cmd.SysProcAttr = backgroundProcAttr()
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start background server: %w", err)

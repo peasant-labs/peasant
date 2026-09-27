@@ -360,6 +360,57 @@ func TestExecGitResolver_Worktree_Subdir(t *testing.T) {
 	}
 }
 
+// TestExecGitResolver_Worktree_LinkedWorktreeSubdir exercises the containment
+// check fixed for issue #375: a directory below a linked worktree's root must
+// resolve to that worktree, on both Linux and Windows. Before the fix, the
+// comparison hardcoded a "/" separator, so on Windows (where filepath.Abs and
+// filepath.Clean both yield backslash-separated paths) the prefix check never
+// matched and the subdirectory silently failed to resolve to its worktree.
+// This test uses a real repository and a real `git worktree add`, so it
+// exercises the native separators the running platform actually produces
+// rather than asserting a hardcoded POSIX string.
+func TestExecGitResolver_Worktree_LinkedWorktreeSubdir(t *testing.T) {
+	repoDir := initTestRepo(t)
+
+	// wtPath must not exist yet: `git worktree add` creates it.
+	wtPath := filepath.Join(t.TempDir(), "linked-worktree")
+	addCmd := exec.Command("git", "worktree", "add", wtPath, "-b", "linked-branch")
+	addCmd.Dir = repoDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+
+	wantWT, err := filepath.EvalSymlinks(wtPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(wtPath): %v", err)
+	}
+	wantWT = filepath.Clean(wantWT)
+
+	subdir := filepath.Join(wtPath, "src", "foo")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatalf("MkdirAll subdir: %v", err)
+	}
+
+	g := &ExecGitResolver{}
+	ctx := context.Background()
+
+	got, err := g.Worktree(ctx, subdir)
+	if err != nil {
+		t.Fatalf("Worktree from linked-worktree subdir: %v", err)
+	}
+	if got == "" {
+		t.Fatalf("Worktree from linked-worktree subdir = %q, want the linked worktree root %q", got, wantWT)
+	}
+
+	gotResolved, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(got): %v", err)
+	}
+	if filepath.Clean(gotResolved) != wantWT {
+		t.Errorf("Worktree from linked-worktree subdir = %q, want %q", gotResolved, wantWT)
+	}
+}
+
 func TestExecGitResolver_UserEmail(t *testing.T) {
 	// UserEmail reads --global config; skip if not set
 	g := &ExecGitResolver{}

@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"go.uber.org/goleak"
 	"gopkg.in/yaml.v3"
@@ -302,7 +303,7 @@ func makeStoreEntry(t *testing.T, sessionID, projectHash, hostSlug string, harne
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}
@@ -659,7 +660,7 @@ func TestStore_InsertSessions_PreservesSessionEntriesHashOnUpsert(t *testing.T) 
 	entry.Metadata.Stats.TokensIn = 2000
 	entry.Metadata.Stats.TokensOut = 900
 	entry.Metadata.Timestamp.End = 1700000123456
-	entry.Metadata.Source.FilePath = "/test/path/session-updated.jsonl"
+	entry.Metadata.Source.FilePath = testutil.PlatformAbsPath("/test/path/session-updated.jsonl")
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("second InsertSessions: %v", err)
 	}
