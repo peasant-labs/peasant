@@ -18,14 +18,23 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // ProjectRetainedUnknown validates stored evidence and copies the retained JSON
 // text verbatim. Capture owns coordinates: entry indices, line numbers and native
 // IDs cannot reconstruct traversal positions after known blocks have been folded.
+//
+// The published transfer refusal is decided from the stored bytes before the
+// evidence is projected: an oversized payload is refused without decoding or
+// copying it (see storedRetainedPayloadExceedsTransferLimit). The size check
+// below remains as the authoritative backstop for any stored encoding the
+// in-place probe declines to measure.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
+	if storedRetainedPayloadExceedsTransferLimit(entries) {
+		return nil, retainedUnknownTransferLimitError()
+	}
 	projected, err := CollectRetainedUnknown(entries, harness)
 	if err != nil {
 		return nil, err
 	}
 	for _, record := range projected {
-		if len(record.Payload) > 8<<20 {
-			return nil, fmt.Errorf("export retained evidence: payload exceeds the published 8 MiB transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available")
+		if len(record.Payload) > retainedUnknownTransferLimitBytes {
+			return nil, retainedUnknownTransferLimitError()
 		}
 	}
 	if len(projected) > 0 {
@@ -34,6 +43,13 @@ func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]s
 		}
 	}
 	return projected, nil
+}
+
+// retainedUnknownTransferLimitError is the published refusal for a retained
+// evidence payload over the 8 MiB transfer limit. The message is part of the
+// refusal contract; keep it byte-identical.
+func retainedUnknownTransferLimitError() error {
+	return fmt.Errorf("export retained evidence: payload exceeds the published 8 MiB transfer limit; complete source data remains stored locally; nothing exported or uploaded; use a receiver and contract supporting larger transfers when available")
 }
 
 // CollectRetainedUnknown certifies LOCAL evidence integrity and source positions.
