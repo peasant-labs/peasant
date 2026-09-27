@@ -4,15 +4,14 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -57,17 +56,8 @@ var guidedPresentationFixtureData []byte
 
 func decodeGuidedPresentationDocument(data []byte) (guidedPresentationDocument, error) {
 	var document guidedPresentationDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
 		return document, fmt.Errorf("decode guided presentation matrix: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		return document, fmt.Errorf("guided presentation matrix must contain exactly one document: %w", err)
 	}
 	if document.ExpectedSectionCount != requiredGuidedPresentationSections || len(document.Sections) != requiredGuidedPresentationSections {
 		return document, fmt.Errorf("guided presentation sections: declared=%d actual=%d required=%d",

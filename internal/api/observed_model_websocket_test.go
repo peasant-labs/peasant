@@ -1,12 +1,9 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/observed_model_websocket.yaml
@@ -54,14 +50,8 @@ type observedModelWebSocketRejection struct {
 func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixture {
 	t.Helper()
 	var fixture observedModelWebSocketFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(observedModelWebSocketFixtureYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(observedModelWebSocketFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode observed model websocket fixture: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("observed model websocket fixture must contain exactly one document: %v", err)
 	}
 	if fixture.SessionID == "" || fixture.StoredModel == "" || fixture.ExpectedSeed == "" || fixture.ExpectedCaseCount != 3 || len(fixture.Turns)+len(fixture.Rejections) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
 		t.Fatalf("observed model websocket fixture inventory is incomplete: %+v", fixture)

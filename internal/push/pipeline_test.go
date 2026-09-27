@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,7 +21,6 @@ import (
 	storepkg "github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/authoritative-receipt-mismatches.yaml
@@ -48,14 +46,8 @@ type authoritativeReceiptMismatchCase struct {
 func loadAuthoritativeReceiptMismatchCases(t *testing.T) []authoritativeReceiptMismatchCase {
 	t.Helper()
 	var doc authoritativeReceiptMismatchDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(authoritativeReceiptMismatchYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(authoritativeReceiptMismatchYAML, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("receipt mismatch corpus must have exact EOF: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(authoritativeReceiptMismatchManifestYAML, "receipt mismatch")
 	if err != nil {

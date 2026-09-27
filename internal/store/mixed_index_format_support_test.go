@@ -1,12 +1,10 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
@@ -14,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -110,14 +107,8 @@ type mixedFormatDocument struct {
 func loadMixedIndexFormatFixtures(t *testing.T) mixedFormatDocument {
 	t.Helper()
 	var document mixedFormatDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(mixedIndexFormatsYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(mixedIndexFormatsYAML, &document); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("mixed format fixture requires one document: %v", err)
 	}
 	names, records := make(map[string]bool), make(map[string]bool)
 	for _, row := range document.Cases {

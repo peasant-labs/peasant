@@ -1,15 +1,14 @@
 package sessionorigin_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,14 +81,8 @@ func (e evidenceFixture) evidence() sessionorigin.Evidence {
 // outside the production closed sets.
 func LoadClassificationFixtures(data []byte) (classificationFixture, error) {
 	var fixture classificationFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return classificationFixture{}, fmt.Errorf("decode classification fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return classificationFixture{}, fmt.Errorf("classification fixture must contain exactly one YAML document: %v", err)
 	}
 
 	names := make(map[string]struct{}, len(fixture.Cases))

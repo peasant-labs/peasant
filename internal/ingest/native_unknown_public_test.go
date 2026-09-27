@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -30,7 +29,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -74,14 +72,8 @@ type nativeUnknownPublicDocument struct {
 func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 	t.Helper()
 	var doc nativeUnknownPublicDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(nativeUnknownPublicYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(nativeUnknownPublicYAML, &doc); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("trailing fixture document", err)
 	}
 	names := map[string]bool{}
 	var actualNames []string

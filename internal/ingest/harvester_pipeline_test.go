@@ -1,9 +1,7 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
-	"io"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -15,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -44,14 +41,8 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			ExpectedHarnesses []ingest.Harness `yaml:"expectedHarnesses"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(harvesterPipelineYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(harvesterPipelineYAML, &fixtures); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("harvester pipeline fixture must contain one YAML document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {

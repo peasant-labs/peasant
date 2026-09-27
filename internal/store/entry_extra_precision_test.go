@@ -1,18 +1,14 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/entry_extra_precision.yaml
@@ -31,14 +27,8 @@ func loadEntryExtraPrecisionFixtures(t *testing.T) []entryExtraPrecisionFixture 
 		Required []string                     `yaml:"required_names"`
 		Cases    []entryExtraPrecisionFixture `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(entryExtraPrecisionYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(entryExtraPrecisionYAML, &corpus); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("expected one extra-precision fixture document")
 	}
 	names := make(map[string]bool)
 	var actualNames []string

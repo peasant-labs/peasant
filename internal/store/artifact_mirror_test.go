@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
-	"io"
 	"reflect"
 	"testing"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -158,14 +155,8 @@ func preparationSessionState(t *testing.T, pool *sqlitex.Pool, sid string) map[s
 func loadArtifactMirrorFixtures(t *testing.T) artifactMirrorFixtures {
 	t.Helper()
 	var fixture artifactMirrorFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(artifactMirrorYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(artifactMirrorYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("artifact mirror fixture requires one document")
 	}
 	required := []string{"acquired-evidence", "judged-origin-outranks-adapter-evidence", "retained-preserves-evidence", "explicit-zero-cursor", "association-failure-rolls-back", "orphan-refused", "opencode-orphan-retained", "parent-first", "future-stored-adapter-refused", "missing-stats-stay-unknown"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {

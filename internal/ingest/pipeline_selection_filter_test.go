@@ -4,16 +4,13 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pipeline_selection_filter.yaml
@@ -52,14 +49,8 @@ const (
 
 func decodePipelineSelectionFilterFixture(source []byte) (pipelineSelectionFilterDocument, error) {
 	var document pipelineSelectionFilterDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(source, &document); err != nil {
 		return document, fmt.Errorf("decode pipeline selection-filter fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, fmt.Errorf("pipeline selection-filter fixture must contain exactly one YAML document: %v", err)
 	}
 	if document.DeclaredCases != pipelineSelectionFilterCaseCount || len(document.Cases) != pipelineSelectionFilterCaseCount {
 		return document, fmt.Errorf("pipeline selection-filter fixture case count mismatch: declared=%d actual=%d required=%d", document.DeclaredCases, len(document.Cases), pipelineSelectionFilterCaseCount)

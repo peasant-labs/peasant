@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 	"testing"
@@ -68,14 +66,8 @@ type claudeOriginExpectation struct {
 // production closed menu.
 func LoadClaudeOriginFixtures(data []byte) (claudeOriginFixture, error) {
 	var fixture claudeOriginFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &fixture); err != nil {
 		return claudeOriginFixture{}, fmt.Errorf("decode Claude origin fixture first document: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return claudeOriginFixture{}, fmt.Errorf("Claude origin fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {

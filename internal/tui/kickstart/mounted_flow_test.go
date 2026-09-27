@@ -1,11 +1,8 @@
 package kickstart_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,7 +12,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -127,17 +123,8 @@ type mountedRootExpectation struct {
 func loadMountedFlowDocument(t *testing.T) mountedFlowDocument {
 	t.Helper()
 	var document mountedFlowDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(mountedFlowData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(mountedFlowData, &document); err != nil {
 		t.Fatalf("decode testdata/mounted_flow.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			err = fmt.Errorf("found a second YAML document")
-		}
-		t.Fatalf("mounted_flow.yaml must hold exactly one document: %v", err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || len(document.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", document.ExpectedCaseCount, len(document.Cases))

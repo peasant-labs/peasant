@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,7 +21,6 @@ import (
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	testassert "github.com/peasant-labs/schema/testcase/assert"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/familiarity_visibility.yaml
@@ -73,14 +70,8 @@ func decodeFamiliarityVisibilityCorpus(data []byte) (testcase.Corpus[familiarity
 		return testcase.Corpus[familiarityVisibilityInput, familiarityVisibilityExpected]{}, err
 	}
 	var corpus testcase.Corpus[familiarityVisibilityInput, familiarityVisibilityExpected]
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&corpus); err != nil {
+	if err := testutil.DecodeFixtureYAML(data, &corpus); err != nil {
 		return testcase.Corpus[familiarityVisibilityInput, familiarityVisibilityExpected]{}, fmt.Errorf("decode familiarity visibility fixture: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return testcase.Corpus[familiarityVisibilityInput, familiarityVisibilityExpected]{}, fmt.Errorf("familiarity visibility fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]struct{}, len(corpus.Cases))
 	actualNames := make([]string, 0, len(corpus.Cases))

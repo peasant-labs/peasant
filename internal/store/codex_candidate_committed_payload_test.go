@@ -9,13 +9,10 @@ package store_test
 // blanks or skips the managed hydration now fails this oracle.
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +25,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_candidate_committed_wrapper.yaml
@@ -74,14 +70,8 @@ type codexCommittedPayloadFixture struct {
 func loadCodexCommittedPayloadFixture(t *testing.T) codexCommittedPayloadFixture {
 	t.Helper()
 	var fixture codexCommittedPayloadFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(codexCommittedPayloadYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexCommittedPayloadYAML, &fixture); err != nil {
 		t.Fatalf("decode codex_candidate_committed_wrapper.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("codex_candidate_committed_wrapper.yaml must contain exactly one document: %v", err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(codexCommittedPayloadManifestYAML, "codex committed payload")
 	if err != nil {

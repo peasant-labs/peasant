@@ -1,12 +1,10 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -56,14 +54,8 @@ const (
 func loadIndexInputPipelineFixture(t *testing.T) indexInputPipelineFixture {
 	t.Helper()
 	var fixture indexInputPipelineFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(indexInputPipelineYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(indexInputPipelineYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatal("index input pipeline fixtures require one document")
 	}
 	names := make(map[string]bool)
 	for _, row := range fixture.Cases {

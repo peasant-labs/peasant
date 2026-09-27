@@ -5,9 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -52,14 +50,8 @@ func TestCodexLexicalReopenExport(t *testing.T) {
 		Required []string                 `yaml:"required_names"`
 		Cases    []codexLexicalExportCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(codexLexicalExportYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexLexicalExportYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatal("trailing fixture document")
 	}
 	// The manifest owns the case list: deleting or renaming a fixture case
 	// fails here, and an undeclared row fails the same way. The fidelity test

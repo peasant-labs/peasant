@@ -1,15 +1,12 @@
 package testutil_test
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
-	"io"
 	"io/fs"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/counting_fs.yaml
@@ -30,14 +27,8 @@ type countingFSFixture struct {
 func loadCountingFSFixture(t *testing.T) countingFSFixture {
 	t.Helper()
 	var fixture countingFSFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(countingFSYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(countingFSYAML, &fixture); err != nil {
 		t.Fatal(err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		t.Fatal("counting filesystem fixture requires one YAML document")
 	}
 	present := make(map[string]bool)
 	for _, row := range fixture.Cases {

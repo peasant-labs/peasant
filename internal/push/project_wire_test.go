@@ -4,8 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/project_wire.yaml
@@ -51,14 +48,8 @@ type projectWireFixture struct {
 func loadProjectWireFixture(t *testing.T) projectWireFixture {
 	t.Helper()
 	var fixture projectWireFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(projectWireYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(projectWireYAML, &fixture); err != nil {
 		t.Fatalf("decode project_wire.yaml: %v", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("project_wire.yaml must contain exactly one YAML document: %v", err)
 	}
 	for i, c := range fixture.Cases {
 		if c.Name == "" {
