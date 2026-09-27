@@ -42,6 +42,11 @@ type retainedPayloadSizeProbeFixtures struct {
 		Extra        string `yaml:"extra"`
 		WantOver     bool   `yaml:"wantOver"`
 		Declined     bool   `yaml:"declined"`
+		// DecoderAccepts pins that the authoritative decode accepts a
+		// declined row (the probe is conservative there); DecoderRefuses
+		// pins that it refuses one. Both are declined rows only.
+		DecoderAccepts bool `yaml:"decoderAccepts"`
+		DecoderRefuses bool `yaml:"decoderRefuses"`
 	} `yaml:"probeCases"`
 	NoMaterializationCases []struct {
 		Name     string `yaml:"name"`
@@ -50,11 +55,21 @@ type retainedPayloadSizeProbeFixtures struct {
 }
 
 // expandProbeTokens replaces fixture tokens that YAML cannot spell literally:
-// {{FF}} is one raw 0xFF byte (invalid UTF-8) and {{DEEP}} is a 12,001-deep
-// raw array for the depth-budget row.
+// {{FF}} is one raw 0xFF byte (invalid UTF-8), {{DEEP}} is a 12,001-deep raw
+// array for the depth-budget row, {{DEEP9997}} is a 9,997-deep raw array at the
+// probe's conservative raw-payload floor, and {{DEEP10000}} is a 10,000-deep
+// raw array for the extension budget boundary.
 func expandProbeTokens(extra string) string {
 	if strings.Contains(extra, "{{FF}}") {
 		extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
+	}
+	if strings.Contains(extra, "{{DEEP9997}}") {
+		deep := strings.Repeat("[", 9997) + strings.Repeat("]", 9997)
+		extra = strings.ReplaceAll(extra, "{{DEEP9997}}", deep)
+	}
+	if strings.Contains(extra, "{{DEEP10000}}") {
+		deep := strings.Repeat("[", 10000) + strings.Repeat("]", 10000)
+		extra = strings.ReplaceAll(extra, "{{DEEP10000}}", deep)
 	}
 	if strings.Contains(extra, "{{DEEP}}") {
 		deep := strings.Repeat("[", 12001) + strings.Repeat("]", 12001)
@@ -102,6 +117,15 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 			t.Fatalf("missing or duplicate probe case name %q", c.Name)
 		}
 		names[c.Name] = true
+		if c.DecoderAccepts && c.DecoderRefuses {
+			t.Fatalf("probe case %q sets both decoderAccepts and decoderRefuses", c.Name)
+		}
+		if (c.DecoderAccepts || c.DecoderRefuses) && !c.Declined {
+			t.Fatalf("probe case %q pins a decoder outcome without declined: true", c.Name)
+		}
+		if c.Declined && c.WantOver {
+			t.Fatalf("probe case %q is declined yet wants over=true", c.Name)
+		}
 	}
 	for _, c := range fixtures.NoMaterializationCases {
 		if c.Name == "" || names[c.Name] {
@@ -109,9 +133,9 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 		}
 		names[c.Name] = true
 		switch c.Encoding {
-		case "payloadText", "rawPayload", "escapedKind":
+		case "payloadText", "rawPayload", "escapedKind", "escapedKey":
 		default:
-			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, or escapedKind", c.Name, c.Encoding)
+			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, or escapedKey", c.Name, c.Encoding)
 		}
 	}
 	for _, name := range fixtures.RequiredNames {
@@ -226,12 +250,39 @@ func TestStoredRetainedPayloadExceedsTransferLimit(t *testing.T) {
 // path, which enforces no transfer limit. A passing row proves the mirror is
 // closed in the accept direction; the next drift is falsifiable by
 // construction because adding a probe-accepted row that the decoder refuses
-// fails here. Declined rows are excluded: they are either corruption the
-// decoder refuses or legacy absence, both owned by the authoritative path.
+// fails here. It also pins measurement equivalence: the probe's over verdict
+// must equal the backstop's comparison of the longest decoded payload against
+// the case limit, so an under-measuring probe cannot pass by refusing late.
+// Declined rows are excluded unless they pin a decoder outcome: decoderAccepts
+// rows must decode cleanly (the probe is conservative there) and decoderRefuses
+// rows must not, which pins the depth-boundary margins in both directions.
 func TestProbeAcceptedRowsMeetAuthoritativeDecoder(t *testing.T) {
 	fixtures := loadRetainedPayloadSizeProbeFixtures(t)
 	for _, c := range fixtures.ProbeCases {
 		if c.Declined {
+			if !c.DecoderAccepts && !c.DecoderRefuses {
+				continue
+			}
+			t.Run(c.Name, func(t *testing.T) {
+				harness := c.Harness
+				if harness == "" {
+					harness = fixtures.ProbeHarness
+				}
+				entryHarness := c.EntryHarness
+				if entryHarness == "" {
+					entryHarness = harness
+				}
+				extra := expandProbeTokens(c.Extra)
+				entry := schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: 0, Extra: &extra}
+				_, retainedErr := RetainedUnknownOf(entry)
+				_, collectErr := CollectRetainedUnknown([]schema.SessionEntry{entry}, schema.Harness(harness))
+				if c.DecoderAccepts && (retainedErr != nil || collectErr != nil) {
+					t.Fatalf("declined row %q pins decoderAccepts but the authoritative decode refused it: retained=%v collect=%v", c.Name, retainedErr, collectErr)
+				}
+				if c.DecoderRefuses && (retainedErr == nil || collectErr == nil) {
+					t.Fatalf("declined row %q pins decoderRefuses but the authoritative decode accepted it: retained=%v collect=%v", c.Name, retainedErr, collectErr)
+				}
+			})
 			continue
 		}
 		t.Run(c.Name, func(t *testing.T) {
@@ -245,12 +296,37 @@ func TestProbeAcceptedRowsMeetAuthoritativeDecoder(t *testing.T) {
 			}
 			extra := expandProbeTokens(c.Extra)
 			entry := schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: 0, Extra: &extra}
-			if _, err := RetainedUnknownOf(entry); err != nil {
+			over, ok := storedRetainedExtraExceedsTransferLimit(extra, Harness(harness), Harness(entryHarness), c.Limit)
+			if !ok {
+				t.Fatalf("probe declined non-declined row %q", c.Name)
+			}
+			records, err := RetainedUnknownOf(entry)
+			if err != nil {
 				t.Fatalf("probe accepted %q but the authoritative decode refused it: %v", c.Name, err)
 			}
 			if _, err := CollectRetainedUnknown([]schema.SessionEntry{entry}, schema.Harness(harness)); err != nil {
 				t.Fatalf("probe accepted %q but CollectRetainedUnknown refused it: %v", c.Name, err)
 			}
+			measuredOver := false
+			for _, record := range records {
+				if len(record.Payload) > c.Limit {
+					measuredOver = true
+				}
+			}
+			if over != measuredOver {
+				t.Fatalf("probe over=%v but the longest decoded payload is over=%v at limit %d for %q", over, measuredOver, c.Limit, c.Name)
+			}
 		})
+	}
+}
+
+// TestRetainedUnknownTransferLimitMatchesPublishedLabel pins the probe limit
+// to the 8 MiB the refusal text publishes. The message is built from a literal
+// while the enforced limit comes from defaults.SessionDetailDocumentCapBytes,
+// so a defaults change that moves the limit without the label would otherwise
+// stay green while the refusal overstates what it enforces.
+func TestRetainedUnknownTransferLimitMatchesPublishedLabel(t *testing.T) {
+	if retainedUnknownTransferLimitBytes != 8<<20 {
+		t.Fatalf("probe limit is %d bytes, want 8 MiB (8388608) to match the published refusal label", retainedUnknownTransferLimitBytes)
 	}
 }

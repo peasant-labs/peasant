@@ -48,18 +48,19 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // in memory, and asserted far below the payload size. A bound of payload/4 is
 // generous for allocator noise while still an order of magnitude below what
 // decoding the payload would allocate. The closed encoding set is driven by
-// the noMaterializationCases fixture, including the escaped-owned-string shape
-// that once lost the early refusal.
+// the noMaterializationCases fixture, including the escaped-owned-string and
+// escaped-owned-key shapes that once lost the early refusal.
 //
 // Calibration: forcing the in-place probe off makes this same 64 MiB payload
-// allocate ~3.83 GB before the refusal, so the payload/4 bound sits about 230
-// times (over two orders of magnitude) below the allocation the probe removes.
-// The bound is therefore reproducible from this committed test alone, not from
-// an unrecorded local measurement.
+// allocate ~3.5-3.8 GB depending on the encoding before the refusal, so the
+// payload/4 bound sits about 208-228 times (over two orders of magnitude)
+// below the allocation the probe removes. The bound is therefore reproducible
+// from this committed test alone, not from an unrecorded local measurement.
 func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *testing.T) {
 	const payloadBytes = 64 << 20
 	rawLiteral := `"` + strings.Repeat("x", payloadBytes-2) + `"`
 	rawExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"payload":` + rawLiteral + `}]}`
+	escapedKeyExtra := `{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"source-0","recordIndex":0,"position":0}},"pay\u006CoadText":` + rawLiteral + `}]}`
 	escapedRecord, err := ingest.NewRetainedUnknown(schema.HarnessCodex, "record", "future&more", publicPosition(0), oversizedPayload(payloadBytes))
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +69,19 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	if escapedEntry.Extra == nil || !strings.Contains(*escapedEntry.Extra, `\u0026`) {
+		t.Fatal("escapedKind entry does not carry an escaped owned string in its stored form, so it no longer covers the shape it names")
+	}
+	escapedKeyEntry := schema.SessionEntry{Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &escapedKeyExtra}
+	if !strings.Contains(*escapedKeyEntry.Extra, `\u006C`) {
+		t.Fatal("escapedKey entry does not carry an escaped owned key in its stored form, so it no longer covers the shape it names")
+	}
 	fixtureCases := loadNoMaterializationCases(t)
 	entries := map[string]schema.SessionEntry{
 		"payloadText": carrierEntry(t, publicPosition(0), oversizedPayload(payloadBytes)),
 		"rawPayload":  {Harness: schema.HarnessCodex, EntryIndex: 0, Extra: &rawExtra},
 		"escapedKind": escapedEntry,
+		"escapedKey":  escapedKeyEntry,
 	}
 	for _, c := range fixtureCases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -134,9 +143,9 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 		}
 		names[c.Name] = true
 		switch c.Encoding {
-		case "payloadText", "rawPayload", "escapedKind":
+		case "payloadText", "rawPayload", "escapedKind", "escapedKey":
 		default:
-			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, or escapedKind", c.Name, c.Encoding)
+			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, or escapedKey", c.Name, c.Encoding)
 		}
 	}
 	for _, name := range raw.RequiredNames {
@@ -276,17 +285,55 @@ func loadRetainedProjectionPrecedenceFixtures(t *testing.T) retainedProjectionPr
 // its authoritative outcome: canonical rows are accepted by
 // CollectRetainedUnknown apart from size, deliberate rows carry an integrity
 // error there.
+// deliberateSizePrecedenceNames is the closed deliberate set named in the
+// probe header: size rows the authoritative path would refuse for integrity,
+// kept on size because deciding them needs the decode or global state the
+// probe avoids. The precedence runner asserts this membership exactly, so a
+// new deliberate class cannot be added (or an existing one removed) with
+// every test still green.
+var deliberateSizePrecedenceNames = []string{
+	"oversized_malformed_payload_content_is_refused_for_size",
+	"oversized_raw_invalid_syntax_is_refused_for_size",
+	"oversized_duplicate_pointers_across_records_is_refused_for_size",
+	"oversized_non_monotonic_positions_across_records_is_refused_for_size",
+	"oversized_deep_payload_text_with_over_companion_is_refused_for_size",
+	"oversized_over_entry_before_deep_text_entry_is_refused_for_size",
+}
+
+// overDeepPayloadTextDepth is one beyond the shared local depth ceiling the
+// probe header names: a payloadText whose decoded text nests this deep is
+// measured by the probe but refused for depth by the authoritative path.
+const overDeepPayloadTextDepth = 10001
+
 func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 	fixtures := loadRetainedProjectionPrecedenceFixtures(t)
 	if fixtures.PayloadBytes <= 0 {
 		t.Fatalf("precedence fixture %s needs a positive payloadBytes", retainedProjectionPrecedenceFixturePath)
 	}
+	marked := make(map[string]bool)
+	for _, c := range fixtures.Cases {
+		if c.DeliberateSizePrecedence {
+			marked[c.Name] = true
+		}
+	}
+	if len(marked) != len(deliberateSizePrecedenceNames) {
+		t.Fatalf("deliberate size-precedence set has %d rows, want exactly %d %v", len(marked), len(deliberateSizePrecedenceNames), deliberateSizePrecedenceNames)
+	}
+	for _, name := range deliberateSizePrecedenceNames {
+		if !marked[name] {
+			t.Fatalf("deliberate size-precedence row %q missing; the set must be exactly %v", name, deliberateSizePrecedenceNames)
+		}
+	}
 	over := `"` + strings.Repeat("1", fixtures.PayloadBytes-2) + `"`
 	overInvalid := `"` + strings.Repeat("x", fixtures.PayloadBytes-2) + `"`
 	overRawInvalid := `[` + strings.Repeat(",", fixtures.PayloadBytes-2) + `]`
 	deep := strings.Repeat("[", 12001) + strings.Repeat("]", 12001)
+	overDeepText := `"` + strings.Repeat("[", overDeepPayloadTextDepth) + strings.Repeat("1", fixtures.PayloadBytes) + strings.Repeat("]", overDeepPayloadTextDepth) + `"`
 	if len(over) != fixtures.PayloadBytes {
 		t.Fatalf("built over-limit literal is %d bytes, want payloadBytes %d", len(over), fixtures.PayloadBytes)
+	}
+	if len(overDeepText) != fixtures.PayloadBytes+2*overDeepPayloadTextDepth+2 {
+		t.Fatalf("built over-limit deep text is %d bytes, want payloadBytes %d plus %d brackets and 2 quotes", len(overDeepText), fixtures.PayloadBytes, 2*overDeepPayloadTextDepth)
 	}
 	for _, c := range fixtures.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -303,6 +350,7 @@ func TestProjectRetainedUnknownPrecedence(t *testing.T) {
 				extra := strings.ReplaceAll(template, "{{OVER}}", over)
 				extra = strings.ReplaceAll(extra, "{{OVER_INVALID}}", overInvalid)
 				extra = strings.ReplaceAll(extra, "{{OVER_RAW_INVALID}}", overRawInvalid)
+				extra = strings.ReplaceAll(extra, "{{OVER_DEEP_TEXT}}", overDeepText)
 				extra = strings.ReplaceAll(extra, "{{FF}}", "\xff")
 				extra = strings.ReplaceAll(extra, "{{DEEP}}", deep)
 				entries = append(entries, schema.SessionEntry{Harness: schema.Harness(entryHarness), EntryIndex: index, Extra: &extra})

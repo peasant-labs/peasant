@@ -20,11 +20,14 @@ var ErrUnknownPositionUnavailable = errors.New("stored capture lacks complete so
 // IDs cannot reconstruct traversal positions after known blocks have been folded.
 //
 // The published transfer refusal is decided from the stored bytes before the
-// evidence is projected: an oversized payload is refused without decoding or
-// copying the payload itself (see storedRetainedPayloadExceedsTransferLimit).
-// Small owned members are decoded one at a time to validate their canonical
-// escaped spellings; the payload never is. The size check
-// below remains as the authoritative backstop for any stored encoding the
+// evidence is projected: for a stored shape the probe recognizes as canonical,
+// an oversized payload is refused without decoding or copying the payload
+// itself (see storedRetainedPayloadExceedsTransferLimit). Small owned members
+// and member names are decoded one at a time to validate their canonical
+// escaped spellings; the payload never is. A shape the probe declines falls
+// through to the projection path below, which may allocate proportionally to
+// the payload before refusing. The size check
+// below remains as the authoritative backstop for any stored shape the
 // in-place probe declines to measure.
 func ProjectRetainedUnknown(entries []schema.SessionEntry, harness Harness) ([]schema.RetainedUnknownRecord, error) {
 	if storedRetainedPayloadExceedsTransferLimit(entries, harness) {

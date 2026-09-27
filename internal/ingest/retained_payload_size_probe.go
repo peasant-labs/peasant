@@ -99,17 +99,18 @@ func containsUnpairedSurrogateEscape(raw string) bool {
 // limit. It reads the stored JSON text in place, so a refusal allocates nothing
 // proportional to the payload: an oversized payload is refused without decoding
 // or copying the payload itself. Small owned members (harness, namespace,
-// kind, source references, pointers) are decoded one at a time to validate
-// their canonical escaped spellings; each is bounded by its own member extent,
-// never by a retained payload.
+// kind, source references, pointers) and member names are decoded one at a time
+// to validate their canonical escaped spellings; each decode is bounded by its
+// own member or key extent, never by a retained payload.
 //
 // The verdict is member-order independent. The probe walks every member of every
 // envelope and every record of every array before it decides, so corruption that
 // follows an over-limit payload is still seen; the over-limit result is
 // accumulated and returned only once the whole set is known canonical. It is
 // deliberately conservative and sound in one direction only: it returns true
-// only when every record it examines is a canonical stored record and at least
-// one is over the limit. The probe mirrors the authoritative decoder's cheap
+// only when every record it examines is a canonical stored envelope apart from
+// the three named content/global-state classes below, and at least one payload
+// is over the limit. The probe mirrors the authoritative decoder's cheap
 // shape rules in place: whole-document strictness for the Extra root (valid
 // UTF-8, no unpaired surrogate escapes, trailing content, lax extension
 // values, and trailing commas decline), the non-empty evidence array, the
@@ -162,8 +163,10 @@ func storedRetainedPayloadExceedsTransferLimit(entries []schema.SessionEntry, ha
 // the whole root and every retained record in it were recognized as canonical
 // stored shapes. A duplicate or case-aliased root member, trailing content
 // after the root object, a trailing comma, a lax extension value, an empty
-// evidence array, an unrecognized shape, or any malformed record returns
-// ok=false so the authoritative path owns the integrity error.
+// evidence array, an unrecognized shape, or any malformed envelope or owned
+// member returns ok=false so the authoritative path owns the integrity error.
+// Payload and payloadText content are deliberately not validated here (see the
+// three named precedences at the top of this file).
 func storedRetainedExtraExceedsTransferLimit(extra string, harness, entryHarness Harness, limit int) (over, ok bool) {
 	// The authoritative root scan refuses the whole document for invalid
 	// UTF-8 and unpaired surrogate escapes before any structural walk
@@ -803,12 +806,13 @@ func isUnsignedJSONInteger(literal string) bool {
 	return true
 }
 
-// canonicalJSONKey returns the unescaped member name at s[i] when it is a
-// canonical (unescaped) JSON key. The probe declines an escaped spelling and
-// defers; the authoritative decoder normalizes escaped keys before it compares
-// (retained_raw_codec.go), so the decline only loses the early refusal, never
-// correctness. Stored keys produced by the capture constructor are never
-// escaped, so the fast path stays allocation-free.
+// canonicalJSONKey returns the decoded member name at s[i]. A canonical
+// (unescaped) spelling returns a slice of the stored text without allocating;
+// an escaped spelling is decoded in place with decodeOwnedJSONString, bounded
+// by the key extent, so escaped spellings measure and duplicate/alias checks
+// run on decoded names exactly as the authoritative decoder normalizes them
+// (CheckCanonicalObjectKeys / ExtractExtraRetainedArray via encoding/json).
+// An undecodable key declines so the authoritative path owns the refusal.
 func canonicalJSONKey(s string, i int) (string, int, bool) {
 	if i >= len(s) || s[i] != '"' {
 		return "", 0, false
@@ -819,7 +823,13 @@ func canonicalJSONKey(s string, i int) (string, int, bool) {
 		switch c := s[j]; {
 		case c == '"':
 			return s[start:j], j + 1, true
-		case c == '\\' || c < 0x20:
+		case c == '\\':
+			name, end, ok := decodeOwnedJSONString(s, i)
+			if !ok {
+				return "", 0, false
+			}
+			return name, end, true
+		case c < 0x20:
 			return "", 0, false
 		default:
 			j++
@@ -860,7 +870,6 @@ func decodedJSONStringIsNullLiteral(s string, start, end int) bool {
 	limit := end - 1
 	for j < limit {
 		var r rune
-		var width int
 		c := s[j]
 		if c == '\\' {
 			j++
@@ -870,27 +879,21 @@ func decodedJSONStringIsNullLiteral(s string, start, end int) bool {
 			switch s[j] {
 			case '"', '\\', '/':
 				r = rune(s[j])
-				width = 0
 				j++
 			case 'b':
 				r = '\b'
-				width = 0
 				j++
 			case 'f':
 				r = '\f'
-				width = 0
 				j++
 			case 'n':
 				r = '\n'
-				width = 0
 				j++
 			case 'r':
 				r = '\r'
-				width = 0
 				j++
 			case 't':
 				r = '\t'
-				width = 0
 				j++
 			case 'u':
 				if j+4 >= len(s) {
@@ -915,11 +918,9 @@ func decodedJSONStringIsNullLiteral(s string, start, end int) bool {
 				} else {
 					r = rune(r1)
 				}
-				width = 0
 			default:
 				return false
 			}
-			_ = width
 		} else if c < 0x80 {
 			r = rune(c)
 			j++

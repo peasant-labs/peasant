@@ -64,6 +64,10 @@ requiredNames:
   - oversized_over_entry_before_deep_payload_entry_keeps_integrity_refusal
   - oversized_null_payload_text_with_over_companion_keeps_integrity_refusal
   - oversized_over_entry_before_null_text_entry_keeps_integrity_refusal
+  - oversized_deep_payload_text_with_over_companion_is_refused_for_size
+  - oversized_over_entry_before_deep_text_entry_is_refused_for_size
+  - oversized_escaped_payload_text_key_is_refused_for_size
+  - oversized_escaped_root_extension_key_is_refused_for_size
 
 # payloadBytes is the total byte size of the over-limit payload literal the
 # loader builds per token below. The 8 MiB payload cannot be written literally,
@@ -76,6 +80,11 @@ requiredNames:
 #                        text is not valid JSON (the deliberate content change);
 #   {{OVER_RAW_INVALID}} a bracket-balanced but lexically invalid raw value over
 #                        the limit (the deliberate raw-syntax change);
+#   {{OVER_DEEP_TEXT}}   a JSON string over the limit whose decoded text nests
+#                        10,001 arrays deep, one beyond the shared local depth
+#                        ceiling: the probe measures its decoded length while
+#                        the authoritative path refuses its depth (the
+#                        deliberate depth change);
 #   {{FF}}               one raw 0xFF byte (invalid UTF-8, which YAML cannot
 #                        spell literally);
 #   {{DEEP}}             a 12,001-deep raw array, beyond the local depth budget.
@@ -310,3 +319,21 @@ precedenceCases:
     extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"  null  "}]}']
     want: integrity
     authoritative: integrity
+  - name: oversized_deep_payload_text_with_over_companion_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DEEP_TEXT}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_over_entry_before_deep_text_entry_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DEEP_TEXT}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_escaped_payload_text_key_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\u006CoadText":{{OVER}}}]}']
+    want: size
+    authoritative: accepts
+  - name: oversized_escaped_root_extension_key_is_refused_for_size
+    extras: ['{"a\u0026b":1,"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: accepts

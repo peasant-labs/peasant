@@ -88,9 +88,20 @@ requiredNames:
   - probe_null_payload_text_escaped
   - probe_escaped_namespace_over_limit
   - probe_escaped_kind_over_limit
+  - probe_payload_text_at_limit
+  - probe_payload_text_one_over_limit
+  - probe_raw_extent_at_limit
+  - probe_raw_extent_one_over_limit
+  - probe_escaped_payload_text_key_over_limit
+  - probe_escaped_root_extension_key_over_limit
+  - probe_escaped_duplicate_envelope_key
+  - probe_escaped_case_alias_root_key
+  - probe_deep_raw_payload_9997_declined
+  - probe_deep_extension_10000_declined
   - no_materialization_payload_text
   - no_materialization_raw_payload
   - no_materialization_escaped_kind
+  - no_materialization_escaped_key
 
 # probeHarness is the export harness the probe cases are asked for unless the
 # case overrides it. The probe requires the envelope harness to name a known
@@ -128,12 +139,19 @@ rawExtentCases:
 # the entry-harness arm is exercised with distinct values. wantOver is the probe
 # verdict. `declined: true` marks a shape the probe refuses to measure so the
 # authoritative path owns the refusal; an unmarked wantOver:false case is a
-# canonical record that stays under the limit. Cases with wantOver true are
-# canonical records with an over-limit payload: each carries a line locator
-# beside public so the authoritative path would accept them apart from size,
-# including canonical escaped spellings of owned strings. Templates carry
-# tokens the test replaces: {{FF}} is one raw 0xFF byte (invalid UTF-8, which
-# YAML cannot spell literally) and {{DEEP}} is a 12,001-deep raw array. The
+# canonical record that stays under the limit. `decoderAccepts: true` on a
+# declined row additionally pins that the authoritative decode accepts the
+# shape (the probe is conservative there); `decoderRefuses: true` pins that the
+# authoritative decode refuses it. Both flags are declined rows only. Cases
+# with wantOver true are canonical records with an over-limit payload: each
+# carries a line locator beside public so the authoritative path would accept
+# them apart from size, including canonical escaped spellings of owned strings
+# and member names. Templates carry tokens the test replaces: {{FF}} is one raw
+# 0xFF byte (invalid UTF-8, which YAML cannot spell literally), {{DEEP}} is a
+# 12,001-deep raw array, {{DEEP9997}} is a 9,997-deep raw array at the probe's
+# conservative raw-payload floor (declined by the probe, accepted by the
+# decoder), and {{DEEP10000}} is a 10,000-deep raw array for the extension
+# budget boundary (declined by the probe, refused by the decoder). The
 # measureCases unpaired-surrogate rows pin the measurement helper only; the
 # probe declines those shapes via its whole-document pre-scan, pinned by the
 # probe_lone_surrogate rows below. Deliberate size-precedence shapes (invalid
@@ -502,12 +520,60 @@ probeCases:
     limit: 8
     extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future\u0026more","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
     wantOver: true
+  - name: probe_payload_text_at_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"12345678"}]}'
+    wantOver: false
+  - name: probe_payload_text_one_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"123456789"}]}'
+    wantOver: true
+  - name: probe_raw_extent_at_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":12345678}]}'
+    wantOver: false
+  - name: probe_raw_extent_one_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":123456789}]}'
+    wantOver: true
+  - name: probe_escaped_payload_text_key_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\u006CoadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_root_extension_key_over_limit
+    limit: 8
+    extra: '{"a\u0026b":1,"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_duplicate_envelope_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","ki\u006Ed":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+  - name: probe_escaped_case_alias_root_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}],"Retained\u0055nknown":[]}'
+    wantOver: false
+    declined: true
+  - name: probe_deep_raw_payload_9997_declined
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP9997}}}]}'
+    wantOver: false
+    declined: true
+    decoderAccepts: true
+  - name: probe_deep_extension_10000_declined
+    limit: 8
+    extra: '{"other":{{DEEP10000}},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
 
 # noMaterializationCases drive the allocation proof in
 # TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing: each
 # name is a required closed set over the stored encodings, including the
-# escaped-owned-string shape that once lost the early refusal.
+# escaped-owned-string shape and the escaped-owned-key shape that once lost
+# the early refusal.
 noMaterializationCases:
   - { name: no_materialization_payload_text, encoding: payloadText }
   - { name: no_materialization_raw_payload, encoding: rawPayload }
   - { name: no_materialization_escaped_kind, encoding: escapedKind }
+  - { name: no_materialization_escaped_key, encoding: escapedKey }
