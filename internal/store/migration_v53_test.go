@@ -28,6 +28,7 @@ var migrationPiYAML []byte
 var migrationPiManifest []byte
 
 func TestMigrationV53PiPreservesCurrentStore(t *testing.T) {
+	t.Parallel()
 	var f struct {
 		Cases []struct {
 			Name                string   `yaml:"name"`

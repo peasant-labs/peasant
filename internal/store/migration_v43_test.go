@@ -111,6 +111,7 @@ func publicationRecordFromFixture(t *testing.T, row publicationFixtureRecord) st
 }
 
 func TestMigrationV43SQLiteCheckRejectsUnknownDiagnosticStage(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rejected := fixture.Records[0], fixture.Rejections[0]
 	dbPath := filepath.Join(t.TempDir(), "stage-check.db")
@@ -137,6 +138,7 @@ func TestMigrationV43SQLiteCheckRejectsUnknownDiagnosticStage(t *testing.T) {
 }
 
 func TestMigrationV43RejectsUnknownDiagnosticStage(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rejected := fixture.Records[0], fixture.Rejections[0]
 	s := openTestStore(t)
@@ -150,6 +152,7 @@ func TestMigrationV43RejectsUnknownDiagnosticStage(t *testing.T) {
 }
 
 func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	row, rollback := fixture.Records[0], fixture.Rollback
 	dbPath := filepath.Join(t.TempDir(), "publication.db")
@@ -209,6 +212,7 @@ func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
 }
 
 func TestMigrationV43PersistsOnlyCompleteAuthoritativeReceipts(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	s := openTestStore(t)
 	defer s.Close()
@@ -269,6 +273,7 @@ func TestMigrationV43PersistsOnlyCompleteAuthoritativeReceipts(t *testing.T) {
 }
 
 func TestMigrationV43ProjectIdentityCannotReadOrOverwritePublicationState(t *testing.T) {
+	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	primary := publicationRecordFromFixture(t, fixture.Records[0])
 	wrongProject := publicationRecordFromFixture(t, fixture.Records[1])

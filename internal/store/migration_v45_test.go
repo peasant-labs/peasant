@@ -65,6 +65,7 @@ func loadOpenCodeSeqCursorFixture(t *testing.T) openCodeSeqCursorFixtureFile {
 // stores and returns each session's last ingested sequence, that an upsert
 // replaces an earlier value, and that the closed constraints refuse a wrong row.
 func TestMigrationV45OpenCodeSeqCursorRoundTrip(t *testing.T) {
+	t.Parallel()
 	fixture := loadOpenCodeSeqCursorFixture(t)
 	st := openTestStore(t)
 	ctx := context.Background()

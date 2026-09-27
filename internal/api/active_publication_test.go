@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -27,6 +26,7 @@ import (
 var activePublicationYAML []byte
 
 func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Name    string `yaml:"name"`
 		Initial string `yaml:"initial"`
@@ -38,10 +38,8 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	if fixture.Name != "active upstream snapshot explicit publication convergence" || fixture.Initial == "" || fixture.Append == "" {
 		t.Fatal("required active publication fixture is missing")
 	}
+	hs := newTestXDGHomes(t)
 	home := t.TempDir()
-	t.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, "config"))
-	t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
-	t.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, "state"))
 	repo := filepath.Join(home, "repo")
 	if err := os.MkdirAll(repo, 0o700); err != nil {
 		t.Fatal(err)
@@ -101,11 +99,11 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 		_, _ = w.Write(receipt)
 	}))
 	defer village.Close()
-	writeSyncDoorCredentials(t, village.URL)
-	if err := os.MkdirAll(filepath.Dir(string(defaults.ResolveDBFilePath())), 0o700); err != nil {
+	writeSyncDoorCredentials(t, hs.Config, village.URL)
+	if err := os.MkdirAll(filepath.Dir(hs.dbPath()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePath()))
+	db, err := store.Open(hs.dbPath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +113,7 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	cfg.Sources = config.SourcesConfig{}
 	cfg.Sources.ClaudeCode.Enabled = true
 	cfg.Sources.ClaudeCode.Paths = []string{filepath.Dir(source)}
-	handler := &syncHandler{store: db, config: cfg}
+	handler := hs.handler(db, cfg)
 	ingestNow := func() {
 		t.Helper()
 		handler.runIngestPipeline(ingest.NewProgressState())

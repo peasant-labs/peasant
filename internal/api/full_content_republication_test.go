@@ -49,11 +49,11 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 		}
 		seen[f.Name] = true
 		t.Run(f.Name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, "data"))
+			t.Parallel()
+			hs := newTestXDGHomes(t)
 			const id = "eeee5555-eeee-4eee-8eee-eeeeeeeeeeee"
-			base := filepath.Join(home, "retained")
-			db := seedSyncDoorSession(t, id, base)
+			base := filepath.Join(hs.Data, "retained")
+			db := seedSyncDoorSession(t, hs.dbPath(), id, base)
 			defer db.Close()
 			cfg := config.BaseConfig()
 			cfg.Output.BasePath = base

@@ -50,9 +50,8 @@ func (a *consumerSource) MaterializeTranscript(ctx context.Context, s ingest.Dis
 	return ingest.MaterializedTranscript{Metadata: meta, Data: data, SourceFingerprint: fingerprint[:], EventSeq: s.EventSeq}, err
 }
 
-func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePath, text string) *store.Store {
+func ingestConsumerSession(t *testing.T, dbPath string, fixture fullConsumerFixture, id, basePath, text string) *store.Store {
 	t.Helper()
-	t.Setenv(ingest.EnvArenaSizeBytes, "1048576")
 	harness := ingest.Harness(fixture.Harness)
 	sid, err := ingest.NewSessionID(id)
 	if err != nil {
@@ -87,7 +86,6 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 	remote, branch := "git@github.com:user/repo.git", "main"
 	meta.Git = ingest.GitContext{Remote: &remote, Branch: &branch}
 	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp", FilePath: "/home/test/myapp"}
-	dbPath := string(defaults.ResolveDBFilePath())
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatal(err)
 	}
