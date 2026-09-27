@@ -13,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/metadata_child_compatibility.yaml
@@ -35,9 +34,7 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			WantIndexed   int    `yaml:"wantIndexed"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(metadataChildCompatibilityYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(metadataChildCompatibilityYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)

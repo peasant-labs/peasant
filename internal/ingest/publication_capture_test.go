@@ -22,7 +22,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -63,9 +62,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 	var doc struct {
 		Cases []publicationCaptureCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationCaptureYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationCaptureYAML, &doc); err != nil {
 		t.Fatal(err)
 	}
 	required := map[string]bool{

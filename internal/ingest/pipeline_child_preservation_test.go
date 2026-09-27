@@ -1,7 +1,6 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -12,7 +11,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pipeline_child_preservation.yaml
@@ -38,9 +36,7 @@ type pipelineChildPreservationCase struct {
 func loadPipelineChildPreservationCases(t *testing.T) []pipelineChildPreservationCase {
 	t.Helper()
 	var document pipelineChildPreservationDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(pipelineChildPreservationYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(pipelineChildPreservationYAML, &document); err != nil {
 		t.Fatalf("decode child preservation fixture: %v", err)
 	}
 	seen := make(map[string]bool, len(document.Cases))

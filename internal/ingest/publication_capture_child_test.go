@@ -1,7 +1,6 @@
 package ingest_test
 
 import (
-	"bytes"
 	_ "embed"
 	"os"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/publication_capture_child.yaml
@@ -30,9 +28,7 @@ func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
 			Child    string `yaml:"child"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(publicationCaptureChildYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(publicationCaptureChildYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)

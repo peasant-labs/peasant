@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -67,9 +66,7 @@ type metadataReadPolicyFixtures struct {
 func loadMetadataReadPolicyFixtures(t *testing.T) metadataReadPolicyFixtures {
 	t.Helper()
 	var fixtures metadataReadPolicyFixtures
-	decoder := yaml.NewDecoder(bytes.NewReader(metadataReadPolicyYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
+	if err := testutil.DecodeFixtureYAML(metadataReadPolicyYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)

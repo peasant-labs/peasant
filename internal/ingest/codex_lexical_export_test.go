@@ -1,7 +1,6 @@
 package ingest_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -16,7 +15,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/codex_unknown_lexical.yaml
@@ -192,9 +190,7 @@ func TestCodexWideReopenExport(t *testing.T) {
 		Required []string                 `yaml:"required_names"`
 		Cases    []codexLexicalExportCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(codexLexicalExportYAML))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&wideFixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(codexLexicalExportYAML, &wideFixture); err != nil {
 		t.Fatal(err)
 	}
 	var wide *codexLexicalExportCase

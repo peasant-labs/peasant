@@ -19,7 +19,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/deferred_pair_repair.yaml
@@ -63,9 +62,7 @@ type deferredSelectionRead struct {
 func loadDeferredPairRepairFixtures(t *testing.T) deferredPairRepairDocument {
 	t.Helper()
 	var document deferredPairRepairDocument
-	decoder := yaml.NewDecoder(bytes.NewReader(deferredPairRepairFixtureData))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&document); err != nil {
+	if err := testutil.DecodeFixtureYAML(deferredPairRepairFixtureData, &document); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
