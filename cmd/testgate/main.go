@@ -10,8 +10,8 @@
 //
 // Usage:
 //
-//	scripts/testgate plan    print the run plan; run nothing
-//	scripts/testgate run     execute the plan and screen the result
+//	cmd/testgate plan    print the run plan; run nothing
+//	cmd/testgate run     execute the plan and screen the result
 //
 // See TESTING.md, "Test gate", for the contract.
 package main

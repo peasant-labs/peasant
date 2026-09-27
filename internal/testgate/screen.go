@@ -155,7 +155,7 @@ func Screen(in ScreenInput) []Finding {
 					Where:    fmt.Sprintf("partition entry %s/%s (class %s)", e.Package, e.Test, e.Class),
 					When:     "screening the race pass",
 					Means:    "the race pass's -run selection is not excluding the partition member",
-					Fix:      "re-run `scripts/testgate plan` and confirm the package's race set excludes the partition member",
+					Fix:      "re-run `cmd/testgate plan` and confirm the package's race set excludes the partition member",
 				})
 			}
 		}
@@ -186,7 +186,7 @@ func Screen(in ScreenInput) []Finding {
 				Where:    fmt.Sprintf("partition entry %s/%s", e.Package, e.Test),
 				When:     "screening the no-race pass",
 				Means:    "the no-race pass did not execute the registered test",
-				Fix:      fmt.Sprintf("run `scripts/testgate plan` and confirm %s lists %s, then check the no-race pass stderr", e.Package, e.Test),
+				Fix:      fmt.Sprintf("run `cmd/testgate plan` and confirm %s lists %s, then check the no-race pass stderr", e.Package, e.Test),
 			})
 		}
 	}

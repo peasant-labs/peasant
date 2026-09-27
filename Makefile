@@ -24,7 +24,7 @@ GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
 # Wall-clock start of `make check`, stamped immediately at parse time so the
 # gate's pre-test wall includes the fmt/lint/ast-grep/release-guard steps that
-# run before the test passes. `scripts/testgate run` reads it and reports
+# run before the test passes. `cmd/testgate run` reads it and reports
 # `test-start - CHECK_START_NS` as the pre-test wall, separate from the test
 # wall. `:=` forces the stamp now, before the prerequisites run.
 CHECK_START_NS := $(shell date +%s%N)
@@ -93,7 +93,7 @@ check: fmt lint
 	ast-grep scan --config sgconfig.yml .; \
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
-	RACE=$(RACE) go run ./scripts/testgate run
+	RACE=$(RACE) go run ./cmd/testgate run
 	# The gate above replaces the single `go test` pass. It computes the run
 	# plan from `go test -list`, runs a race pass and a no-race pass (or one
 	# no-race pass when RACE=0), merges the streams, and applies the

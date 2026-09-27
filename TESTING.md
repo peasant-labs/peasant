@@ -15,7 +15,7 @@ test layer to its entry point.
 
 ## Test gate
 
-`make check` runs the Go suite through `scripts/testgate`. The gate exists to move
+`make check` runs the Go suite through `cmd/testgate`. The gate exists to move
 the suite's expensive non-race work out of the race pass **without dropping it**,
 and to prove that every test still runs exactly once across the passes.
 
@@ -29,16 +29,16 @@ and to prove that every test still runs exactly once across the passes.
   partition members) and a **no-race pass** (exactly the partition members).
   Under `RACE=0` it runs a **single no-race pass** over every test, but still
   computes the plan and applies the screen. The gate computes the plan from
-  `go test -list`, so `scripts/testgate plan` prints the plan and runs nothing.
+  `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
 
 ### Timing mode
 
-`scripts/testgate timing` summarizes an arbitrary `go test -json` stream with the
+`cmd/testgate timing` summarizes an arbitrary `go test -json` stream with the
 gate's own stream library:
 
 ```bash
-go test -race -json ./internal/ingest/... | go run ./scripts/testgate timing -top 40
-go run ./scripts/testgate timing -top 40 < ingest.json
+go test -race -json ./internal/ingest/... | go run ./cmd/testgate timing -top 40
+go run ./cmd/testgate timing -top 40 < ingest.json
 ```
 
 It takes `-top N` (rows per section, default 25), `-family-re RE` (regroup by a
@@ -149,7 +149,7 @@ sets, the shared stream library path, and the CLI and environment surface.
 `internal/testgate/contract_test.go` and `internal/teststream/contract_test.go`
 pin the shapes against `testdata/contract_shapes.yaml`; the
 `contract_compile_test.go` files break the build on a rename, removal, or retype;
-and `scripts/testgate/main_test.go` pins the usage text, the exit codes, and the
+and `cmd/testgate/main_test.go` pins the usage text, the exit codes, and the
 budget/env precedence. Each frozen axis carries a mutation case that must be
 detected, so the freeze is tested rather than asserted. Update the fixture only
 when a contract change is deliberate and the consumers are re-pinned.

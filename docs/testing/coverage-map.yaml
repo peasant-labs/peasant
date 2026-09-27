@@ -3664,11 +3664,11 @@ entries:
   - { name: "scripts/release-pr-delta.TestParseGatesManifestCases", destination: retained-in-place }
   - { name: "scripts/release-pr-delta.TestRunsFollowsPaginationAndFiltersByPullRequest", destination: retained-in-place }
   - { name: "scripts/release-pr-delta.TestWritePlan", destination: retained-in-place }
-  - { name: "scripts/test-timing.TestSummarizer_DoesNotDoubleCountRetriedTest", destination: "moved:scripts/testgate/timing_test.go" }
-  - { name: "scripts/test-timing.TestSummarizer_ExcludesSubtestsFromTotal", destination: "moved:scripts/testgate/timing_test.go" }
-  - { name: "scripts/test-timing.TestSummarizer_RanksSlowestTestFirst", destination: "moved:scripts/testgate/timing_test.go" }
-  - { name: "scripts/test-timing.TestSummarizer_RejectsEmptyInput", destination: "moved:scripts/testgate/timing_test.go" }
-  - { name: "scripts/test-timing.TestSummarizer_WarnsOnDominantTest", destination: "moved:scripts/testgate/timing_test.go" }
+  - { name: "scripts/test-timing.TestSummarizer_DoesNotDoubleCountRetriedTest", destination: "moved:cmd/testgate/timing_test.go" }
+  - { name: "scripts/test-timing.TestSummarizer_ExcludesSubtestsFromTotal", destination: "moved:cmd/testgate/timing_test.go" }
+  - { name: "scripts/test-timing.TestSummarizer_RanksSlowestTestFirst", destination: "moved:cmd/testgate/timing_test.go" }
+  - { name: "scripts/test-timing.TestSummarizer_RejectsEmptyInput", destination: "moved:cmd/testgate/timing_test.go" }
+  - { name: "scripts/test-timing.TestSummarizer_WarnsOnDominantTest", destination: "moved:cmd/testgate/timing_test.go" }
   - { name: "scripts/testgate.TestBudget_ResolutionPrecedence", destination: retained-in-place }
   - { name: "scripts/testgate.TestBudget_VerdictSemantics", destination: retained-in-place }
   - { name: "scripts/testgate.TestCLI_ExitCodes", destination: retained-in-place }
