@@ -22,6 +22,7 @@ required_names:
   - testgate.ReportFinding
   - testgate.ClassRow
   - testgate.StepMeasurement
+  - testgate.PreTestCommand
   - testgate.Cost
   - testgate.Entry
   - testgate.Registry
@@ -153,6 +154,15 @@ shapes:
       - { name: ExitCode, type: int }
       - { name: Failed,   type: bool }
       - { name: LogPath,  type: string }
+
+  # --- one pre-test step and its Makefile source anchor ---------------------
+  - name: testgate.PreTestCommand
+    fields:
+      - { name: Step,     type: testgate.PreTestStep, tag: 'yaml:"step"' }
+      - { name: Program,  type: string, tag: 'yaml:"program"' }
+      - { name: Args,     type: "[]string", tag: 'yaml:"args"' }
+      - { name: Target,   type: string, tag: 'yaml:"target"' }
+      - { name: Fragment, type: string, tag: 'yaml:"fragment"' }
 
   # --- registry schema (no-race-partition.yaml) -----------------------------
   - name: testgate.Cost

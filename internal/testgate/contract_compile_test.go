@@ -73,6 +73,7 @@ var (
 	_ = ReportFinding{Rule: "", Severity: "", What: "", Why: "", Where: "", When: "", Means: "", Fix: ""}
 	_ = ClassRow{Class: "", Units: 0, WallMS: 0, UserMS: 0, SystemMS: 0, GapMS: 0, Basis: ""}
 	_ = StepMeasurement{Step: StepFmt, Wall: 0, User: 0, System: 0, ExitCode: 0, Failed: false, LogPath: ""}
+	_ = PreTestCommand{Step: StepFmt, Program: "", Args: nil, Target: "", Fragment: ""}
 	_ = PassSummary{Pass: ModeRace, Wall: 0, User: 0, System: 0, Serialized: false, Units: 0}
 
 	_ = Cost{WallMS: 0, CPUMs: 0}

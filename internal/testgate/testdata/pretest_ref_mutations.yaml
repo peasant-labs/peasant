@@ -1,0 +1,31 @@
+# Mutation cases for the pre-test fixture's Makefile source anchors.
+#
+# Each case mutates a copy of the embedded fixture and asserts
+# validatePreTestSources rejects it, proving the source check is not vacuous: a
+# fragment absent from its declared target, a target that does not exist, a
+# fragment placed in the wrong target, and a reordered step must each fail.
+#
+# required_names keeps a mutation case from being deleted silently.
+required_names:
+  - fragment-absent
+  - target-absent
+  - fragment-wrong-target
+  - step-reordered
+
+mutations:
+  - name: fragment-absent
+    step: lint
+    op: set-fragment
+    value: "go vet ./does-not-exist"
+  - name: target-absent
+    step: fmt
+    op: set-target
+    value: no-such-target
+  - name: fragment-wrong-target
+    step: ast-grep-scan
+    op: set-target
+    value: lint
+  - name: step-reordered
+    step: ast-grep-scan
+    op: swap
+    with: release-guard

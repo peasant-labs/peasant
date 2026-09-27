@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -19,17 +21,22 @@ import (
 // The five pre-test steps of `make check` are inside the budget, so the gate
 // must be able to price them as wall/user/system rather than as one aggregate.
 // The commands live in testdata/pretest_steps.yaml so the list is a fixture, not
-// an inline table, and each row names the Makefile line it mirrors.
+// an inline table, and each row names the Makefile target it mirrors plus a
+// literal fragment of that target's recipe. A content anchor, not a line range:
+// a line reference drifts silently the moment the Makefile above it changes.
 
 //go:embed testdata/pretest_steps.yaml
 var preTestFixtureYAML []byte
 
 // PreTestCommand is one `make check` pre-test step and the command it runs.
+// Target names the Makefile target whose recipe runs the step; Fragment is the
+// distinguishing literal that must appear in that target's recipe.
 type PreTestCommand struct {
 	Step     PreTestStep `yaml:"step"`
 	Program  string      `yaml:"program"`
 	Args     []string    `yaml:"args"`
-	Makefile string      `yaml:"makefile"`
+	Target   string      `yaml:"target"`
+	Fragment string      `yaml:"fragment"`
 }
 
 // PreTestFixture is the embedded pre-test command list.
@@ -78,8 +85,11 @@ func validatePreTestFixture(file PreTestFixture) error {
 		if cmd.Program == "" {
 			return fmt.Errorf("pre-test fixture step %q has no program", cmd.Step)
 		}
-		if cmd.Makefile == "" {
-			return fmt.Errorf("pre-test fixture step %q names no makefile source", cmd.Step)
+		if cmd.Target == "" {
+			return fmt.Errorf("pre-test fixture step %q names no Makefile target", cmd.Step)
+		}
+		if cmd.Fragment == "" {
+			return fmt.Errorf("pre-test fixture step %q has no recipe fragment", cmd.Step)
 		}
 	}
 	for _, want := range file.RequiredNames {
@@ -105,6 +115,126 @@ func PreTestCommands() ([]PreTestCommand, error) {
 		return nil, err
 	}
 	return file.Steps, nil
+}
+
+// checkTarget is the Makefile target whose execution runs the pre-test steps:
+// its direct prerequisites first, then its own recipe.
+const checkTarget = "check"
+
+// makefileTarget is one parsed Makefile target: its direct prerequisites and the
+// physical lines of its recipe, with the leading tab stripped.
+type makefileTarget struct {
+	Prereqs []string
+	Recipe  []string
+}
+
+// makefileTargetRE matches a target definition line (`name: prerequisites`).
+// Variable assignments (`NAME := ...`) also match the shape, so a candidate
+// whose value field begins with `=` is rejected in parseMakefileTargets.
+var makefileTargetRE = regexp.MustCompile(`^([A-Za-z0-9_./-]+)[ \t]*:[ \t]*(.*)$`)
+
+// parseMakefileTargets reads the target/prerequisite/recipe structure needed to
+// resolve the pre-test anchors. It is a small reader for this repository's own
+// Makefile, not a general Make parser.
+func parseMakefileTargets(data []byte) map[string]makefileTarget {
+	targets := map[string]makefileTarget{}
+	current := ""
+	for _, raw := range strings.Split(string(data), "\n") {
+		if current != "" && strings.HasPrefix(raw, "\t") {
+			t := targets[current]
+			t.Recipe = append(t.Recipe, strings.TrimPrefix(raw, "\t"))
+			targets[current] = t
+			continue
+		}
+		current = ""
+		m := makefileTargetRE.FindStringSubmatch(raw)
+		if m == nil || strings.HasPrefix(m[2], "=") {
+			continue
+		}
+		targets[m[1]] = makefileTarget{Prereqs: makefilePrereqs(m[2])}
+		current = m[1]
+	}
+	return targets
+}
+
+// makefilePrereqs splits a target line's prerequisite field, dropping an inline
+// recipe after `;` and the order-only `|` separator.
+func makefilePrereqs(field string) []string {
+	if i := strings.IndexByte(field, ';'); i >= 0 {
+		field = field[:i]
+	}
+	var out []string
+	for _, p := range strings.Fields(field) {
+		if p == "|" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func recipeContains(recipe []string, fragment string) bool {
+	for _, line := range recipe {
+		if strings.Contains(line, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+// validatePreTestSources checks the fixture against the Makefile it mirrors.
+// Each step's Fragment must appear in its declared Target's recipe, and the
+// steps must appear, fragment by fragment, in the same order the `check` target
+// executes them: its direct prerequisites in order, then its own recipe. A
+// dropped, renamed, or reordered recipe line therefore fails loudly instead of
+// the fixture measuring a step the Makefile no longer runs.
+func validatePreTestSources(file PreTestFixture, makefile []byte) error {
+	targets := parseMakefileTargets(makefile)
+	check, ok := targets[checkTarget]
+	if !ok {
+		return fmt.Errorf("Makefile has no %q target", checkTarget)
+	}
+
+	type execLine struct {
+		target string
+		line   string
+	}
+	var exec []execLine
+	for _, pre := range check.Prereqs {
+		t, ok := targets[pre]
+		if !ok {
+			return fmt.Errorf("%s prerequisite %q is not a Makefile target", checkTarget, pre)
+		}
+		for _, line := range t.Recipe {
+			exec = append(exec, execLine{target: pre, line: line})
+		}
+	}
+	for _, line := range check.Recipe {
+		exec = append(exec, execLine{target: checkTarget, line: line})
+	}
+
+	pos := -1
+	for _, cmd := range file.Steps {
+		t, ok := targets[cmd.Target]
+		if !ok {
+			return fmt.Errorf("step %q names Makefile target %q, which does not exist", cmd.Step, cmd.Target)
+		}
+		if !recipeContains(t.Recipe, cmd.Fragment) {
+			return fmt.Errorf("step %q: fragment %q does not appear in Makefile target %q", cmd.Step, cmd.Fragment, cmd.Target)
+		}
+		found := -1
+		for i := pos + 1; i < len(exec); i++ {
+			if exec[i].target == cmd.Target && strings.Contains(exec[i].line, cmd.Fragment) {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			return fmt.Errorf("step %q (target %q) is out of order or missing from the %s target's execution", cmd.Step, cmd.Target, checkTarget)
+		}
+		pos = found
+	}
+	return nil
 }
 
 // StepMeasurement is one measured pre-test step. Every step runs alone, so wall,

@@ -87,6 +87,7 @@ func frozenShapes() map[string]reflect.Type {
 		"testgate.ReportFinding":   reflect.TypeOf(ReportFinding{}),
 		"testgate.ClassRow":        reflect.TypeOf(ClassRow{}),
 		"testgate.StepMeasurement": reflect.TypeOf(StepMeasurement{}),
+		"testgate.PreTestCommand":  reflect.TypeOf(PreTestCommand{}),
 		"testgate.Cost":            reflect.TypeOf(Cost{}),
 		"testgate.Entry":           reflect.TypeOf(Entry{}),
 		"testgate.Registry":        reflect.TypeOf(Registry{}),
