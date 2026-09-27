@@ -39,6 +39,7 @@ var cliVersion = defaults.PublishSchemaVersion
 // --- negotiate() matrix (FAILS until L3) ---
 
 func TestNegotiate_Within_EmitsAtCLIVersion(t *testing.T) {
+	t.Parallel()
 	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
 		PushContractVersion:    cliVersion, // current == cli → within
@@ -59,6 +60,7 @@ func TestNegotiate_Within_EmitsAtCLIVersion(t *testing.T) {
 }
 
 func TestNegotiate_OlderThanMin_AbortsUpgradeCLI(t *testing.T) {
+	t.Parallel()
 	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.2.0"),
 		PushContractVersion:    schema.PushContractVersion("0.5.0"),
@@ -83,6 +85,7 @@ func TestNegotiate_OlderThanMin_AbortsUpgradeCLI(t *testing.T) {
 }
 
 func TestNegotiate_AheadOfCurrent_DowngradeEmitsWithWarning(t *testing.T) {
+	t.Parallel()
 	current := schema.PushContractVersion("0.0.5") // below cli 0.1.1, same major
 	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
@@ -114,6 +117,7 @@ func TestNegotiate_AheadOfCurrent_DowngradeEmitsWithWarning(t *testing.T) {
 }
 
 func TestNegotiate_Unadvertised_ProceedsAtCLIVersion(t *testing.T) {
+	t.Parallel()
 	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{}} // empty window
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)

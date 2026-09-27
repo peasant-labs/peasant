@@ -116,6 +116,7 @@ func loadServedBoundsFixture(t *testing.T) servedBoundsFixture {
 }
 
 func TestServedBoundsFixtureGuards(t *testing.T) {
+	t.Parallel()
 	loadServedBoundsFixture(t)
 	manifest, err := testutil.DecodeRequiredNamesManifest(servedBoundsManifestYAML, "served bounds")
 	if err != nil {
@@ -245,6 +246,7 @@ func assertServedBoundIsLargestThatFits(t *testing.T, detail *schema.SessionDeta
 // schema.DecodeSessionDetailPayloadRaw, which refuses a document over the
 // contract's cap.
 func TestServedBoundsProductionPath(t *testing.T) {
+	t.Parallel()
 	fixture := loadServedBoundsFixture(t)
 	for _, fixtureCase := range fixture.Cases {
 		fixtureCase := fixtureCase
@@ -327,6 +329,7 @@ func TestServedBoundsProductionPath(t *testing.T) {
 // TestServedDocumentBudgetDerivesFromTheContractCap pins the one place the cap is
 // stated and the margin the served budget keeps under it.
 func TestServedDocumentBudgetDerivesFromTheContractCap(t *testing.T) {
+	t.Parallel()
 	budget := DefaultServedDocumentBudget()
 	if budget.Document() >= defaults.SessionDetailDocumentCapBytes {
 		t.Fatalf("served document budget %d is not below the contract cap %d", budget.Document(), defaults.SessionDetailDocumentCapBytes)
@@ -362,6 +365,7 @@ func TestServedDocumentBudgetDerivesFromTheContractCap(t *testing.T) {
 // TestServedDocumentBudgetConstructorRefusesIncoherentSizes keeps the boundary
 // typed: a caller cannot assemble a budget whose parts contradict each other.
 func TestServedDocumentBudgetConstructorRefusesIncoherentSizes(t *testing.T) {
+	t.Parallel()
 	if _, err := NewServedDocumentBudget(16, 0); err == nil {
 		t.Fatal("a zero document budget was accepted")
 	}

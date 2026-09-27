@@ -35,6 +35,7 @@ func readCorpus(t *testing.T, version, validity, name string) []byte {
 // The current content.json decodes into a TranscriptContent envelope and
 // round-trips losslessly.
 func TestContract_Current_TranscriptContent_RoundTrip(t *testing.T) {
+	t.Parallel()
 	raw := readCorpus(t, "current", "valid", "content.json")
 
 	var env schema.TranscriptContent
@@ -74,6 +75,7 @@ func TestContract_Current_TranscriptContent_RoundTrip(t *testing.T) {
 // The current metadata.json decodes into a PublishRequest with the unified
 // harness key and round-trips.
 func TestContract_Current_PublishRequest_RoundTrip(t *testing.T) {
+	t.Parallel()
 	raw := readCorpus(t, "current", "valid", "metadata.json")
 
 	var req schema.PublishRequest
@@ -124,6 +126,7 @@ func corpusVersionDirs(t *testing.T) []string {
 // Every corpus version's content + metadata is loadable/decodable peasant-side
 // (sanity that the shared corpus stays parseable against the current types).
 func TestContract_AllVersions_Loadable(t *testing.T) {
+	t.Parallel()
 	for _, v := range corpusVersionDirs(t) {
 		t.Run(v, func(t *testing.T) {
 			content := readCorpus(t, v, "valid", "content.json")

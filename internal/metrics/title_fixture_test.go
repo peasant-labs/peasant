@@ -165,6 +165,7 @@ func runTitleCase(tc titleCase) error {
 }
 
 func TestEngine_CanonicalTitleFixture(t *testing.T) {
+	t.Parallel()
 	fixture := loadTitleFixture(t)
 	for _, tc := range fixture.Cases {
 		tc := tc
@@ -177,6 +178,7 @@ func TestEngine_CanonicalTitleFixture(t *testing.T) {
 }
 
 func TestEngine_TitleFixtureMutationIsDetected(t *testing.T) {
+	t.Parallel()
 	fixture := loadTitleFixture(t)
 	var mutated titleCase
 	for _, tc := range fixture.Cases {

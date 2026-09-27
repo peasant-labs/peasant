@@ -73,6 +73,7 @@ func loadTimelineBindingsFixture(t *testing.T) timelineBindingsFixture {
 }
 
 func TestTimelineBindingFixtureLoaderRejectsStructuralDrift(t *testing.T) {
+	t.Parallel()
 	unknownField := bytes.Replace(timelineBindingsYAML, []byte("expectedSessionOrder:"), []byte("unexpectedField: true\n    expectedSessionOrder:"), 1)
 	if _, err := decodeTimelineBindingsFixture(unknownField); err == nil || !strings.Contains(err.Error(), "field unexpectedField not found") {
 		t.Fatalf("unknown-field mutation error = %v, want strict known-field rejection", err)

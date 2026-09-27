@@ -10,6 +10,7 @@ import (
 // TestSandbox_ComputationAndLayout verifies the SANDBOX is rooted at the resolved
 // state dir (NOT hardcoded), timestamped, and that the XDG sub-dirs nest under it.
 func TestSandbox_ComputationAndLayout(t *testing.T) {
+	t.Parallel()
 	realStateDir := "/some/state/peasant"
 	const ts int64 = 1234567890
 
@@ -35,6 +36,7 @@ func TestSandbox_ComputationAndLayout(t *testing.T) {
 // TestSandbox_PruneStale verifies startup cleanup removes only age-stale leftover
 // timestamped sandboxes and is a no-op when the base is absent.
 func TestSandbox_PruneStale(t *testing.T) {
+	t.Parallel()
 	realStateDir := t.TempDir()
 	base := sandboxBase(realStateDir)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)

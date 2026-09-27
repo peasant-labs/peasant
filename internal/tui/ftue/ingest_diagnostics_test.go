@@ -76,6 +76,7 @@ func loadLegacyDiagnosticFixtures(t *testing.T) legacyDiagnosticDocument {
 }
 
 func TestLegacyIngestCompletionRetainsWarnings(t *testing.T) {
+	t.Parallel()
 	fixture := loadLegacyDiagnosticFixtures(t)
 	for _, row := range fixture.Cases {
 		for _, size := range fixture.Viewports {
@@ -119,6 +120,7 @@ func TestLegacyIngestCompletionRetainsWarnings(t *testing.T) {
 }
 
 func TestLegacyJourneyReceiptRetainsWarningHistory(t *testing.T) {
+	t.Parallel()
 	fixture := loadLegacyDiagnosticFixtures(t)
 	for _, row := range fixture.Cases {
 		for _, size := range fixture.Viewports {

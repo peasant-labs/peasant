@@ -210,6 +210,7 @@ func buildWizardScreen(t *testing.T, c wizardRenderCase) PushWizardModel {
 // the tree, the preview, the consent copy, the receipt, and the help card are
 // all visible in the test artifact.
 func TestPushWizard_RenderGolden(t *testing.T) {
+	t.Parallel()
 	doc := loadWizardRenderDoc(t)
 	assertions := make(map[wizardRenderState]wizardRenderAssertionRow, len(doc.Assertions))
 	for _, row := range doc.Assertions {
@@ -239,6 +240,7 @@ func TestPushWizard_RenderGolden(t *testing.T) {
 // overflow: every captured screen is exactly the height it was sized to, and no
 // line exceeds its width.
 func TestPushWizard_RenderSizeInvariant(t *testing.T) {
+	t.Parallel()
 	doc := loadWizardRenderDoc(t)
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {

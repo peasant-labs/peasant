@@ -415,6 +415,7 @@ func parseParityConfig(t *testing.T, path string) *config.Config {
 }
 
 func TestBuildRegistryFlowScreenParity(t *testing.T) {
+	t.Parallel()
 	document := loadParityDocument(t)
 	th := theme.New(theme.ModeDark)
 	for _, row := range document.Rows {
@@ -547,6 +548,7 @@ func drainParityScreenInit(screen settings.Screen) settings.Screen {
 }
 
 func TestBuildRegistryHasNoPresentationOptions(t *testing.T) {
+	t.Parallel()
 	document := loadParityDocument(t)
 	typ := reflect.TypeOf(kickstart.Options{})
 	for index := 0; index < typ.NumField(); index++ {

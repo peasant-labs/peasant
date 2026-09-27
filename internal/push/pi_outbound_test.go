@@ -79,6 +79,7 @@ func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
 }
 
 func TestPiOutboundNamespaceRedaction(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiOutboundFixtures(t).Namespaces {
 		t.Run(c.Name, func(t *testing.T) {
 			entries, err := piOutboundEntries(`{"safe":true}`)
@@ -107,6 +108,7 @@ func TestPiOutboundNamespaceRedaction(t *testing.T) {
 }
 
 func TestPiOutboundMetadataRedaction(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiOutboundFixtures(t).Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			entries, err := piOutboundEntries(c.Data + strings.Repeat(" ", c.Padding))
@@ -141,6 +143,7 @@ func TestPiOutboundMetadataRedaction(t *testing.T) {
 }
 
 func TestPiPipelineCapabilityAndMultipartPreservation(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadPiOutboundFixtures(t).Capabilities {
 		t.Run(c.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()

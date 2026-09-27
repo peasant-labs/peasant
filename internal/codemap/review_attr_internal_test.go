@@ -9,6 +9,7 @@ import (
 
 // TestCommitSessionMap reverses the session→commits index into commit→session.
 func TestCommitSessionMap(t *testing.T) {
+	t.Parallel()
 	pd := &projectData{
 		commitsByID: map[string][]commitRow{
 			"sessA": {{hash: "h1"}, {hash: "h2"}},
@@ -30,6 +31,7 @@ func TestCommitSessionMap(t *testing.T) {
 // per-conversation rate runs notably above the project baseline, with enough
 // data on both sides.
 func TestUnusualSignals(t *testing.T) {
+	t.Parallel()
 	ri := func(n int) *int { return &n }
 	boundTwo := []sessionBinding{
 		{sessionID: "s1", binding: schema.ChangeBindingBound},
@@ -78,6 +80,7 @@ func TestUnusualSignals(t *testing.T) {
 // TestAttributeHunk picks the recorded session that wrote most of a hunk's
 // ADDED lines, tracking the new-line counter and ignoring removed lines.
 func TestAttributeHunk(t *testing.T) {
+	t.Parallel()
 	// new lines: 10 context, 11 add, 12 add, (a removed line), 13 context.
 	h := gitops.Hunk{
 		NewStart: 10,

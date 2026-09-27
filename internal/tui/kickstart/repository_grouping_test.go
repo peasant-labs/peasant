@@ -395,6 +395,7 @@ func TestScannerRepositoryGroupingFacetKeepsSharedAncestors(t *testing.T) {
 }
 
 func TestProductionRepositoryResolverGroupsRealLinkedWorktreeButNotIndependentClone(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
 	main := filepath.Join(root, "main")
@@ -496,6 +497,7 @@ func TestProductionRepositoryResolverGroupsRealLinkedWorktreeButNotIndependentCl
 }
 
 func TestProductionRepositoryResolverGroupsLinkedWorktreeSubmodulesByTopology(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	submoduleOrigin := filepath.Join(root, "submodule-origin.git")
 	submoduleSeed := filepath.Join(root, "submodule-seed")

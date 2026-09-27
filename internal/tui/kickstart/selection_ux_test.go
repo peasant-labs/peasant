@@ -154,6 +154,7 @@ func footerLine(view string) string {
 }
 
 func TestSelectionStep_FirstRunUX(t *testing.T) {
+	t.Parallel()
 	doc := loadSelectionUXDoc(t)
 	for _, c := range doc.Cases {
 		c := c
@@ -191,6 +192,7 @@ func TestSelectionStep_FirstRunUX(t *testing.T) {
 }
 
 func TestSelectionUXFixtureRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionUXData...), []byte("\nunknownField: true\n")...)
 	if _, err := decodeSelectionUX(mutated); err == nil {
 		t.Fatal("selection ux fixture accepted an unknown field")
@@ -198,6 +200,7 @@ func TestSelectionUXFixtureRejectsUnknownFields(t *testing.T) {
 }
 
 func TestSelectionUXFixtureRejectsTrailingDocuments(t *testing.T) {
+	t.Parallel()
 	mutated := append(append([]byte(nil), selectionUXData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeSelectionUX(mutated); err == nil {
 		t.Fatal("selection ux fixture accepted a trailing document")
@@ -205,6 +208,7 @@ func TestSelectionUXFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionUXFixturePinsCaseCount(t *testing.T) {
+	t.Parallel()
 	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionUXCaseCount))
 	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionUXCaseCount+1))
 	mutated := bytes.Replace(selectionUXData, declared, changed, 1)

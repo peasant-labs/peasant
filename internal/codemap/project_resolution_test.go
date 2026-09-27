@@ -103,6 +103,7 @@ func loadProjectResolutionCorpus(t *testing.T) testcase.Corpus[projectResolution
 }
 
 func TestProjectResolutionFixtureGuards(t *testing.T) {
+	t.Parallel()
 	corpus := loadProjectResolutionCorpus(t)
 	manifest, err := testutil.DecodeSemanticManifest(projectResolutionManifestYAML, "project resolution")
 	if err != nil {
@@ -145,6 +146,7 @@ func TestProjectResolutionFixtureGuards(t *testing.T) {
 }
 
 func TestResolveProject_CanonicalAndLegacyIdentity(t *testing.T) {
+	t.Parallel()
 	corpus := loadProjectResolutionCorpus(t)
 	for _, fixtureCase := range corpus.Cases {
 		fixtureCase := fixtureCase

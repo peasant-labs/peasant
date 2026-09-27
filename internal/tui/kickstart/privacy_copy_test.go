@@ -75,6 +75,7 @@ func countSentences(text string) int {
 }
 
 func TestPrivacyGuideCopyContract(t *testing.T) {
+	t.Parallel()
 	fixture := loadPrivacyCopyFixture(t)
 	guide := privacySectionGuide(t)
 

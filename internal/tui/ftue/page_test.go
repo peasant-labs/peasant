@@ -42,6 +42,7 @@ func (m *mockProgress) Snapshot() map[string]StageProgress { return m.data }
 // ---------------------------------------------------------------------------
 
 func TestOAuthPage_ExistingUser_ContinueCompletesImmediately(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 
 	opts, _ := p.displayOptions()
@@ -65,6 +66,7 @@ func TestOAuthPage_ExistingUser_ContinueCompletesImmediately(t *testing.T) {
 }
 
 func TestOAuthPage_ExistingUser_StayLocalCompletes(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 
 	// Press "3" → "Stay local" (index 2).
@@ -80,6 +82,7 @@ func TestOAuthPage_ExistingUser_StayLocalCompletes(t *testing.T) {
 }
 
 func TestOAuthPage_ExistingUser_NewAccountShowsLogoutStep(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 	p.openBrowser = func(string) error { return nil }
 
@@ -103,6 +106,7 @@ func TestOAuthPage_ExistingUser_NewAccountShowsLogoutStep(t *testing.T) {
 }
 
 func TestOAuthPage_ExistingUser_BrowserFailureSurfaced(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 	p.openBrowser = func(string) error { return fmt.Errorf("no browser launcher found") }
 
@@ -124,6 +128,7 @@ func TestOAuthPage_ExistingUser_BrowserFailureSurfaced(t *testing.T) {
 }
 
 func TestOAuthPage_ExistingUser_NewAccountFiresOAuthAfterLogout(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 	p.openBrowser = func(string) error { return nil }
 
@@ -145,6 +150,7 @@ func TestOAuthPage_ExistingUser_NewAccountFiresOAuthAfterLogout(t *testing.T) {
 }
 
 func TestOAuthPage_ExistingUser_NewAccountCompletesAfterAuth(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 	p.openBrowser = func(string) error { return nil }
 
@@ -167,6 +173,7 @@ func TestOAuthPage_ExistingUser_NewAccountCompletesAfterAuth(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestOAuthPage_Reset_PreservesExistingUser(t *testing.T) {
+	t.Parallel()
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 	// Make a selection, then reset.
 	p.Update(tea.KeyPressMsg{Code: '1', Text: "1"}) //nolint
@@ -185,6 +192,7 @@ func TestOAuthPage_Reset_PreservesExistingUser(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWizard_ExistingUser_PassedToOAuthPage(t *testing.T) {
+	t.Parallel()
 	m := NewWizard(WithExistingUser("alice"))
 
 	oauthPage, ok := m.pages[0].(*OAuthPage)
@@ -201,6 +209,7 @@ func TestWizard_ExistingUser_PassedToOAuthPage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIngestPage_EmptySnapshot_ShowsNotStartedIcons(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = true
 	p.progress = &mockProgress{data: map[string]StageProgress{
@@ -232,6 +241,7 @@ func TestIngestPage_EmptySnapshot_ShowsNotStartedIcons(t *testing.T) {
 }
 
 func TestIngestPage_PartialProgress_ShowsProgressBars(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = true
 	p.progress = &mockProgress{data: map[string]StageProgress{
@@ -267,6 +277,7 @@ func TestIngestPage_PartialProgress_ShowsProgressBars(t *testing.T) {
 }
 
 func TestIngestPage_AllCompleted_ShowsCheckmarks(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = true
 	p.progress = &mockProgress{data: map[string]StageProgress{
@@ -293,6 +304,7 @@ func TestIngestPage_AllCompleted_ShowsCheckmarks(t *testing.T) {
 }
 
 func TestIngestPage_ErrorStage_ShowsErrorIcon(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = true
 	p.progress = &mockProgress{data: map[string]StageProgress{
@@ -315,6 +327,7 @@ func TestIngestPage_ErrorStage_ShowsErrorIcon(t *testing.T) {
 }
 
 func TestIngestPage_RestoresLegacyIngestionErrorCopy(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.err = errors.New("source unavailable")
 	view := p.View(80, 24)
@@ -324,6 +337,7 @@ func TestIngestPage_RestoresLegacyIngestionErrorCopy(t *testing.T) {
 }
 
 func TestIngestPage_NilProgress_FallsBackToMessage(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = true
 	// progress is nil
@@ -335,6 +349,7 @@ func TestIngestPage_NilProgress_FallsBackToMessage(t *testing.T) {
 }
 
 func TestIngestPage_TickKeepsTicking_WhileRunning(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = true
 
@@ -349,6 +364,7 @@ func TestIngestPage_TickKeepsTicking_WhileRunning(t *testing.T) {
 }
 
 func TestIngestPage_TickStops_WhenNotRunning(t *testing.T) {
+	t.Parallel()
 	p := NewIngestPage("Ingesting")
 	p.running = false
 
@@ -370,6 +386,7 @@ func TestIngestPage_TickStops_WhenNotRunning(t *testing.T) {
 // entries it had when that was written; removing the first entry left the cursor
 // one past the end, where the first read of SelectedLevel panics.
 func TestPrivacyPreferencePage_DefaultsToTheRecommendedLevel(t *testing.T) {
+	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
 	want := recommendedPrivacyOption()
 	if p.cursor != want {
@@ -396,6 +413,7 @@ func TestPrivacyPreferencePage_DefaultsToTheRecommendedLevel(t *testing.T) {
 // names the levels rather than only the count, and checks containment in both
 // directions.
 func TestPrivacyPreferencePage_OffersOnlyLevelsTheProductOffers(t *testing.T) {
+	t.Parallel()
 	offered := make([]redact.RedactionLevel, 0, len(privacyOptions))
 	for _, option := range privacyOptions {
 		if !config.RedactionLevelOffered(option.level) {
@@ -430,6 +448,7 @@ func TestPrivacyPreferencePage_OffersOnlyLevelsTheProductOffers(t *testing.T) {
 }
 
 func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
+	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
 
 	// Can't go above the first option.
@@ -466,6 +485,7 @@ func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
 }
 
 func TestPrivacyPreferencePage_EnterConfirms(t *testing.T) {
+	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
 	if p.IsComplete() {
 		t.Error("should not be complete before enter")
@@ -484,6 +504,7 @@ func TestPrivacyPreferencePage_EnterConfirms(t *testing.T) {
 // the option list, so a level added to or removed from the wizard cannot leave a
 // digit pointing at the wrong one.
 func TestPrivacyPreferencePage_NumberKeySelectsAndConfirms(t *testing.T) {
+	t.Parallel()
 	for index, option := range privacyOptions {
 		key := rune('1' + index)
 		t.Run(string(key), func(t *testing.T) {
@@ -504,6 +525,7 @@ func TestPrivacyPreferencePage_NumberKeySelectsAndConfirms(t *testing.T) {
 // cannot apply, so onboarding must not be able to write one: a user would finish
 // the wizard and find the next import and the next upload both refuse.
 func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
+	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
 	for index := range privacyOptions {
 		key := rune('1' + index)
@@ -526,6 +548,7 @@ func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
 }
 
 func TestPrivacyPreferencePage_Reset(t *testing.T) {
+	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
 	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
@@ -547,6 +570,7 @@ func TestPrivacyPreferencePage_Reset(t *testing.T) {
 // concludes something was withheld, on the one screen whose job is to say what is
 // withheld from everyone else.
 func TestPrivacyPreferencePage_StatesRatherThanOffersWhenOneLevelIsOffered(t *testing.T) {
+	t.Parallel()
 	if len(config.OfferedRedactionLevels) != 1 {
 		t.Skip("more than one level is offered, so the chooser is the correct rendering; see the sibling test")
 	}
@@ -669,6 +693,7 @@ func TestPrivacyPreferencePage_ChoosesWhenMoreThanOneLevelIsOffered(t *testing.T
 //   - a secret must be shown, the category the screen previously omitted entirely;
 //   - and every rendered line must be what the redactor actually returns.
 func TestPrivacyPreferencePage_DerivesItsExamplesFromTheRedactor(t *testing.T) {
+	t.Parallel()
 	page := NewPrivacyPreferencePage("Privacy")
 	if len(page.examples) == 0 {
 		t.Fatal("the screen rendered no examples at all. That is the fail-safe path, which means privacyExamples " +
@@ -712,6 +737,7 @@ func TestPrivacyPreferencePage_DerivesItsExamplesFromTheRedactor(t *testing.T) {
 }
 
 func TestPrivacyPreferencePage_Title(t *testing.T) {
+	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy Preference")
 	if p.Title() != "Privacy Preference" {
 		t.Errorf("Title() = %q, want %q", p.Title(), "Privacy Preference")
@@ -723,6 +749,7 @@ func TestPrivacyPreferencePage_Title(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLicensePage_DefaultsToCC0(t *testing.T) {
+	t.Parallel()
 	p := NewLicensePage("Content License")
 	// Kickstart requires a real license (no "none" option); the default cursor sits
 	// on the first/most-permissive entry, CC0.
@@ -743,6 +770,7 @@ func TestLicensePage_DefaultsToCC0(t *testing.T) {
 // It was briefly gated behind VillageConnected, which hid it from anyone who did
 // not connect during kickstart.
 func TestWizard_LicensePage_AlwaysShown(t *testing.T) {
+	t.Parallel()
 	for _, connected := range []bool{true, false} {
 		m := NewWizard()
 		m.answers.VillageConnected = connected
@@ -753,6 +781,7 @@ func TestWizard_LicensePage_AlwaysShown(t *testing.T) {
 }
 
 func TestLicensePage_NumberKeySelectsAndConfirms(t *testing.T) {
+	t.Parallel()
 	p := NewLicensePage("Content License")
 	// "2" selects the second option (CC BY 4.0 — index 1) and confirms.
 	p.Update(tea.KeyPressMsg{Text: "2"})
@@ -769,6 +798,7 @@ func TestLicensePage_NumberKeySelectsAndConfirms(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWizard_PageSequence_IncludesPrivacyPage(t *testing.T) {
+	t.Parallel()
 	m := NewWizard()
 
 	if len(m.pages) != 11 {
@@ -805,6 +835,7 @@ func TestWizard_PageSequence_IncludesPrivacyPage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildSummaryContentShowsOnlyStandardRedaction(t *testing.T) {
+	t.Parallel()
 	a := &WizardAnswers{
 		VillageConnected: true,
 		WantImport:       false,
@@ -821,6 +852,7 @@ func TestBuildSummaryContentShowsOnlyStandardRedaction(t *testing.T) {
 }
 
 func TestBuildSummaryContent_DefaultRedactionLevel(t *testing.T) {
+	t.Parallel()
 	a := &WizardAnswers{
 		VillageConnected: false,
 		WantImport:       false,
@@ -833,6 +865,7 @@ func TestBuildSummaryContent_DefaultRedactionLevel(t *testing.T) {
 }
 
 func TestBuildSummaryContent_ProviderSelections(t *testing.T) {
+	t.Parallel()
 	a := &WizardAnswers{
 		WantImport: true,
 		ProviderSelections: []ProviderSelection{
@@ -864,6 +897,7 @@ func enabledProviderInventory(counts map[defaults.Harness]int) ProviderInventory
 }
 
 func TestProviderSelectPage_ShowsAllProvidersIncludingZeroCount(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{
 		defaults.HarnessClaudeCode: 42,
 		defaults.HarnessOpenCode:   0,
@@ -885,6 +919,7 @@ func TestProviderSelectPage_ShowsAllProvidersIncludingZeroCount(t *testing.T) {
 }
 
 func TestProviderSelectPage_DefaultState(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -910,6 +945,7 @@ func TestProviderSelectPage_DefaultState(t *testing.T) {
 }
 
 func TestProviderSelectPage_DefaultsEveryOperationalHarnessSelected(t *testing.T) {
+	t.Parallel()
 	for _, enabledHarness := range defaults.AllHarnesses {
 		inventory := ProviderInventory{}
 		for _, harness := range defaults.AllHarnesses {
@@ -925,6 +961,7 @@ func TestProviderSelectPage_DefaultsEveryOperationalHarnessSelected(t *testing.T
 }
 
 func TestProviderSelectPage_FlatRowsWithCheckedProvider(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -946,6 +983,7 @@ func TestProviderSelectPage_FlatRowsWithCheckedProvider(t *testing.T) {
 }
 
 func TestProviderSelectPage_FlatRowsWithUncheckedProvider(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -962,6 +1000,7 @@ func TestProviderSelectPage_FlatRowsWithUncheckedProvider(t *testing.T) {
 }
 
 func TestProviderSelectPage_SpaceTogglesCheckbox(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -979,6 +1018,7 @@ func TestProviderSelectPage_SpaceTogglesCheckbox(t *testing.T) {
 }
 
 func TestProviderSelectPage_SpaceTogglesEnterConfirms(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1000,6 +1040,7 @@ func TestProviderSelectPage_SpaceTogglesEnterConfirms(t *testing.T) {
 }
 
 func TestProviderSelectPage_SubItemSelectsImportMode(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1020,6 +1061,7 @@ func TestProviderSelectPage_SubItemSelectsImportMode(t *testing.T) {
 }
 
 func TestProviderSelectPage_SubItemsDisappearOnUncheck(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1040,6 +1082,7 @@ func TestProviderSelectPage_SubItemsDisappearOnUncheck(t *testing.T) {
 }
 
 func TestProviderSelectPage_CursorClampsOnUncheck(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1063,6 +1106,7 @@ func TestProviderSelectPage_CursorClampsOnUncheck(t *testing.T) {
 }
 
 func TestProviderSelectPage_EnterConfirmsFromAnyPosition(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1074,6 +1118,7 @@ func TestProviderSelectPage_EnterConfirmsFromAnyPosition(t *testing.T) {
 }
 
 func TestProviderSelectPage_EnterWithNoneCheckedSkipsImport(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1090,6 +1135,7 @@ func TestProviderSelectPage_EnterWithNoneCheckedSkipsImport(t *testing.T) {
 }
 
 func TestProviderSelectPage_Selections(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{
 		defaults.HarnessClaudeCode: 10,
 		defaults.HarnessOpenCode:   5,
@@ -1126,6 +1172,7 @@ func TestProviderSelectPage_Selections(t *testing.T) {
 }
 
 func TestProviderSelectPage_Reset(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -1142,6 +1189,7 @@ func TestProviderSelectPage_Reset(t *testing.T) {
 }
 
 func TestProviderSelectPage_CursorNavigation(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{
 		defaults.HarnessClaudeCode: 10,
 		defaults.HarnessOpenCode:   5,
@@ -1199,6 +1247,7 @@ func TestProviderSelectPage_CursorNavigation(t *testing.T) {
 }
 
 func TestProviderSelectPage_ViewContent(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 42})
 	p := NewProviderSelectPage("Select Providers", "Choose providers", inventory)
 
@@ -1218,6 +1267,7 @@ func TestProviderSelectPage_ViewContent(t *testing.T) {
 }
 
 func TestProviderSelectPage_ViewNoTabInHelpBar(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 	view := p.View(80, 24)
@@ -1231,6 +1281,7 @@ func TestProviderSelectPage_ViewNoTabInHelpBar(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_LExpandsProviderAndRemote(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 	}
@@ -1256,6 +1307,7 @@ func TestTreeSelectPage_LExpandsProviderAndRemote(t *testing.T) {
 }
 
 func TestTreeSelectPage_HCollapsesProviderAndRemote(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 	}
@@ -1281,6 +1333,7 @@ func TestTreeSelectPage_HCollapsesProviderAndRemote(t *testing.T) {
 }
 
 func TestTreeSelectPage_HOnSessionCollapsesParentWorktree(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s2"},
@@ -1301,6 +1354,7 @@ func TestTreeSelectPage_HOnSessionCollapsesParentWorktree(t *testing.T) {
 }
 
 func TestTreeSelectPage_LOnSessionDoesNotToggleSelection(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 	}
@@ -1320,6 +1374,7 @@ func TestTreeSelectPage_LOnSessionDoesNotToggleSelection(t *testing.T) {
 }
 
 func TestTreeSelectPage_ExpandOnlyDoesNotToggle(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 	}
@@ -1335,6 +1390,7 @@ func TestTreeSelectPage_ExpandOnlyDoesNotToggle(t *testing.T) {
 }
 
 func TestTreeSelectPage_BracketLeftJumpsToPreviousSibling(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1367,6 +1423,7 @@ func TestTreeSelectPage_BracketLeftJumpsToPreviousSibling(t *testing.T) {
 }
 
 func TestTreeSelectPage_BracketLeft_FirstProjectStaysOnProject(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1392,6 +1449,7 @@ func TestTreeSelectPage_BracketLeft_FirstProjectStaysOnProject(t *testing.T) {
 }
 
 func TestTreeSelectPage_BracketRightJumpsToNextSibling(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1417,6 +1475,7 @@ func TestTreeSelectPage_BracketRightJumpsToNextSibling(t *testing.T) {
 }
 
 func TestTreeSelectPage_AltK_PrevSibling(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1449,6 +1508,7 @@ func TestTreeSelectPage_AltK_PrevSibling(t *testing.T) {
 }
 
 func TestTreeSelectPage_AltJ_NextSibling(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1474,6 +1534,7 @@ func TestTreeSelectPage_AltJ_NextSibling(t *testing.T) {
 }
 
 func TestTreeSelectPage_DateIncludesYear(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{
 			Harness:     string(defaults.HarnessClaudeCode),
@@ -1497,6 +1558,7 @@ func TestTreeSelectPage_DateIncludesYear(t *testing.T) {
 }
 
 func TestTreeSelectPage_StatusBarShowsArrowKeys(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -1521,6 +1583,7 @@ func TestTreeSelectPage_StatusBarShowsArrowKeys(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWizard_ScopePageCombinesProjectAndHarnessAxes(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	m := NewWizard(WithProviderInventory(inventory))
 
@@ -1546,6 +1609,7 @@ func TestWizard_ScopePageCombinesProjectAndHarnessAxes(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildFilteredSelectionPage_ImportAllPreCheckedAndCollapsed(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s2"},
@@ -1575,6 +1639,7 @@ func TestBuildFilteredSelectionPage_ImportAllPreCheckedAndCollapsed(t *testing.T
 }
 
 func TestBuildFilteredSelectionPage_SelectSessionsExpandedNotPreChecked(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "proj-b", SessionID: "s3"},
 	}
@@ -1609,6 +1674,7 @@ func TestBuildFilteredSelectionPage_SelectSessionsExpandedNotPreChecked(t *testi
 }
 
 func TestBuildFilteredSelectionPage_FiltersToCheckedProviders(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1634,6 +1700,7 @@ func TestBuildFilteredSelectionPage_FiltersToCheckedProviders(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWizard_ShouldSkipPage3_AllImportAll(t *testing.T) {
+	t.Parallel()
 	m := NewWizard()
 	m.answers.WantImport = true
 	m.answers.ProviderSelections = []ProviderSelection{
@@ -1647,6 +1714,7 @@ func TestWizard_ShouldSkipPage3_AllImportAll(t *testing.T) {
 }
 
 func TestWizard_ShouldNotSkipPage3_MixedImportModes(t *testing.T) {
+	t.Parallel()
 	m := NewWizard()
 	m.answers.WantImport = true
 	m.answers.ProviderSelections = []ProviderSelection{
@@ -1660,6 +1728,7 @@ func TestWizard_ShouldNotSkipPage3_MixedImportModes(t *testing.T) {
 }
 
 func TestWizard_ShouldSkipRetentionPage(t *testing.T) {
+	t.Parallel()
 	t.Run("zero-claude-count", func(t *testing.T) {
 		m := NewWizard()
 		m.providerInventory[defaults.HarnessClaudeCode] = ProviderDiscovery{SessionCount: 0, Enabled: true}
@@ -1682,6 +1751,7 @@ func TestWizard_ShouldSkipRetentionPage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_ShiftJ_PageDown(t *testing.T) {
+	t.Parallel()
 	// Create enough sessions to test page jumping.
 	var sessions []SessionListing
 	for i := 0; i < 20; i++ {
@@ -1711,6 +1781,7 @@ func TestTreeSelectPage_ShiftJ_PageDown(t *testing.T) {
 }
 
 func TestTreeSelectPage_ShiftK_PageUp(t *testing.T) {
+	t.Parallel()
 	var sessions []SessionListing
 	for i := 0; i < 20; i++ {
 		sessions = append(sessions, SessionListing{
@@ -1747,6 +1818,7 @@ func TestTreeSelectPage_ShiftK_PageUp(t *testing.T) {
 }
 
 func TestTreeSelectPage_ShiftJ_ClampsAtEnd(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s2"},
@@ -1770,6 +1842,7 @@ func TestTreeSelectPage_ShiftJ_ClampsAtEnd(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_SearchMode_FKeyActivates(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -1782,6 +1855,7 @@ func TestTreeSelectPage_SearchMode_FKeyActivates(t *testing.T) {
 }
 
 func TestTreeSelectPage_SearchMode_TypingFiltersItems(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "alpha", SessionID: "s1"},
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "beta", SessionID: "s2"},
@@ -1811,6 +1885,7 @@ func TestTreeSelectPage_SearchMode_TypingFiltersItems(t *testing.T) {
 }
 
 func TestTreeSelectPage_SearchMode_EscapeClearsFilter(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "alpha", SessionID: "s1"},
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "beta", SessionID: "s2"},
@@ -1837,6 +1912,7 @@ func TestTreeSelectPage_SearchMode_EscapeClearsFilter(t *testing.T) {
 }
 
 func TestTreeSelectPage_SearchMode_EnterKeepsFilter(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "alpha", SessionID: "s1"},
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "beta", SessionID: "s2"},
@@ -1857,6 +1933,7 @@ func TestTreeSelectPage_SearchMode_EnterKeepsFilter(t *testing.T) {
 }
 
 func TestTreeSelectPage_SearchMode_BlocksNormalKeys(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -1878,6 +1955,7 @@ func TestTreeSelectPage_SearchMode_BlocksNormalKeys(t *testing.T) {
 }
 
 func TestTreeSelectPage_FilterActive_EscapeClearsFromNormalMode(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "alpha", SessionID: "s1"},
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "beta", SessionID: "s2"},
@@ -1901,6 +1979,7 @@ func TestTreeSelectPage_FilterActive_EscapeClearsFromNormalMode(t *testing.T) {
 }
 
 func TestTreeSelectPage_OverlayShowsPowerUserKeys(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -1916,6 +1995,7 @@ func TestTreeSelectPage_OverlayShowsPowerUserKeys(t *testing.T) {
 }
 
 func TestTreeSelectPage_SearchMode_NoMatches(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "alpha", SessionID: "s1"},
 		{Harness: string(defaults.HarnessOpenCode), ProjectName: "beta", SessionID: "s2"},
@@ -1953,6 +2033,7 @@ func TestTreeSelectPage_SearchMode_NoMatches(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWizard_SearchMode_GlobalKeysPassedToPage(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -1995,6 +2076,7 @@ func TestWizard_SearchMode_GlobalKeysPassedToPage(t *testing.T) {
 }
 
 func TestWizard_SearchMode_CtrlCStillQuits(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 	}
@@ -2026,6 +2108,7 @@ func TestWizard_SearchMode_CtrlCStillQuits(t *testing.T) {
 }
 
 func TestWizard_ConfirmMode_BackKeyDoesNotNavigate(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2127,6 +2210,7 @@ var sessionRemoteLabelYAML []byte
 const expectedSessionRemoteLabelCaseCount = 8
 
 func TestSessionRemoteLabel_MatchesSharedFormatter(t *testing.T) {
+	t.Parallel()
 	corpus, err := testcase.LoadCorpus[sessionRemoteLabelInput, sessionRemoteLabelExpected](sessionRemoteLabelYAML)
 	if err != nil {
 		t.Fatalf("load session remote label fixture: %v", err)
@@ -2180,6 +2264,7 @@ func TestSessionRemoteLabel_MatchesSharedFormatter(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_GitRemoteGrouping(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "my-repo", GitRemote: "git@github.com:user/my-repo.git", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "my-repo", GitRemote: "git@github.com:user/my-repo.git", SessionID: "s2"},
@@ -2222,6 +2307,7 @@ func TestTreeSelectPage_GitRemoteGrouping(t *testing.T) {
 }
 
 func TestTreeSelectPage_SameRemoteDifferentBranches(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s2"},
@@ -2255,6 +2341,7 @@ func TestTreeSelectPage_SameRemoteDifferentBranches(t *testing.T) {
 }
 
 func TestTreeSelectPage_NonGitSessions_DefaultWorktree(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "my-project", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "my-project", SessionID: "s2"},
@@ -2282,6 +2369,7 @@ func TestTreeSelectPage_NonGitSessions_DefaultWorktree(t *testing.T) {
 }
 
 func TestTreeSelectPage_SessionDisplayIncludesTitle(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{
 			Harness:     string(defaults.HarnessClaudeCode),
@@ -2314,6 +2402,7 @@ func TestTreeSelectPage_SessionDisplayIncludesTitle(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_SpaceTogglesItem(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2349,6 +2438,7 @@ func TestTreeSelectPage_SpaceTogglesItem(t *testing.T) {
 }
 
 func TestTreeSelectPage_Enter_ShowsConfirmSummary(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s2"},
@@ -2369,6 +2459,7 @@ func TestTreeSelectPage_Enter_ShowsConfirmSummary(t *testing.T) {
 }
 
 func TestTreeSelectPage_CtrlS_DoesNotOpenConfirm(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2385,6 +2476,7 @@ func TestTreeSelectPage_CtrlS_DoesNotOpenConfirm(t *testing.T) {
 }
 
 func TestTreeSelectPage_ConfirmSummary_EnterConfirms(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2406,6 +2498,7 @@ func TestTreeSelectPage_ConfirmSummary_EnterConfirms(t *testing.T) {
 }
 
 func TestTreeSelectPage_ConfirmSummary_EscapeCancels(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2426,6 +2519,7 @@ func TestTreeSelectPage_ConfirmSummary_EscapeCancels(t *testing.T) {
 }
 
 func TestTreeSelectPage_ConfirmSummary_BackCancels(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2450,6 +2544,7 @@ func TestTreeSelectPage_ConfirmSummary_BackCancels(t *testing.T) {
 }
 
 func TestTreeSelectPage_Enter_AllowsZeroSelection(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2463,6 +2558,7 @@ func TestTreeSelectPage_Enter_AllowsZeroSelection(t *testing.T) {
 }
 
 func TestTreeSelectPage_ConfirmSummary_BlocksOtherKeys(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2486,6 +2582,7 @@ func TestTreeSelectPage_ConfirmSummary_BlocksOtherKeys(t *testing.T) {
 }
 
 func TestTreeSelectPage_ConfirmSummary_ViewShowsSummary(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s2"},
@@ -2512,6 +2609,7 @@ func TestTreeSelectPage_ConfirmSummary_ViewShowsSummary(t *testing.T) {
 }
 
 func TestTreeSelectPage_PageUpPageDown_PhysicalKeys(t *testing.T) {
+	t.Parallel()
 	var sessions []SessionListing
 	for i := range 20 {
 		sessions = append(sessions, SessionListing{
@@ -2540,6 +2638,7 @@ func TestTreeSelectPage_PageUpPageDown_PhysicalKeys(t *testing.T) {
 }
 
 func TestTreeSelectPage_Reset_ClearsConfirmingSelection(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2563,6 +2662,7 @@ func TestTreeSelectPage_Reset_ClearsConfirmingSelection(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_SelectedSessions(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1", Title: "Session 1", Date: mustParseTime("2025-01-01T00:00:00Z")},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s2", Title: "Session 2", Date: mustParseTime("2025-01-02T00:00:00Z")},
@@ -2604,6 +2704,7 @@ func TestTreeSelectPage_SelectedSessions(t *testing.T) {
 }
 
 func TestTreeSelectPage_SelectedSessions_EmptyWhenNoneToggled(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2620,6 +2721,7 @@ func TestTreeSelectPage_SelectedSessions_EmptyWhenNoneToggled(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionMatchesFilter_GitRemote(t *testing.T) {
+	t.Parallel()
 	s := SessionListing{
 		Harness:     string(defaults.HarnessClaudeCode),
 		ProjectName: "my-repo",
@@ -2666,6 +2768,7 @@ func TestSessionMatchesFilter_GitRemote(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_ShiftEnter_DoesNotConfirm(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2687,6 +2790,7 @@ func TestTreeSelectPage_ShiftEnter_DoesNotConfirm(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_ExpandCollapseWorktree(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s2"},
@@ -2733,6 +2837,7 @@ func TestTreeSelectPage_ExpandCollapseWorktree(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_ToggleCascadesAtRemoteAndWorktree(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "feat", SessionID: "s2"},
@@ -2787,6 +2892,7 @@ func TestTreeSelectPage_ToggleCascadesAtRemoteAndWorktree(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_SiblingNavigation_WorktreeLevel(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "feat-a", SessionID: "s2"},
@@ -2840,6 +2946,7 @@ func TestTreeSelectPage_SiblingNavigation_WorktreeLevel(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_SearchMode_FilterByBranchName(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "main", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "repo", GitRemote: "git@github.com:user/repo.git", Branch: "feat-x", SessionID: "s2"},
@@ -2885,6 +2992,7 @@ func TestTreeSelectPage_SearchMode_FilterByBranchName(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_EnterOpensConfirmOverlay(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2901,6 +3009,7 @@ func TestTreeSelectPage_EnterOpensConfirmOverlay(t *testing.T) {
 }
 
 func TestTreeSelectPage_SpaceTogglesDoesNotConfirm(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2914,6 +3023,7 @@ func TestTreeSelectPage_SpaceTogglesDoesNotConfirm(t *testing.T) {
 }
 
 func TestTreeSelectPage_EnterAllowsZeroSelection(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2927,6 +3037,7 @@ func TestTreeSelectPage_EnterAllowsZeroSelection(t *testing.T) {
 }
 
 func TestTreeSelectPage_NoConfirmFooterRow(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2943,6 +3054,7 @@ func TestTreeSelectPage_NoConfirmFooterRow(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTreeSelectPage_QuestionMarkTogglesHelpOverlay(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2966,6 +3078,7 @@ func TestTreeSelectPage_QuestionMarkTogglesHelpOverlay(t *testing.T) {
 }
 
 func TestTreeSelectPage_EscapeClosesHelpOverlay(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -2983,6 +3096,7 @@ func TestTreeSelectPage_EscapeClosesHelpOverlay(t *testing.T) {
 }
 
 func TestTreeSelectPage_NavigationBlockedWhileHelpShowing(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-a", SessionID: "s1"},
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj-b", SessionID: "s2"},
@@ -3009,6 +3123,7 @@ func TestTreeSelectPage_NavigationBlockedWhileHelpShowing(t *testing.T) {
 }
 
 func TestTreeSelectPage_HelpOverlayContent(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -3048,6 +3163,7 @@ func TestTreeSelectPage_HelpOverlayContent(t *testing.T) {
 }
 
 func TestTreeSelectPage_StatusBarShowsEssentialKeys(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -3079,6 +3195,7 @@ func TestTreeSelectPage_StatusBarShowsEssentialKeys(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestProviderSelectPage_QuestionMarkTogglesHelpOverlay(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 5})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
@@ -3099,6 +3216,7 @@ func TestProviderSelectPage_QuestionMarkTogglesHelpOverlay(t *testing.T) {
 }
 
 func TestProviderSelectPage_HelpOverlayContent(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 5})
 	p := NewProviderSelectPage("title", "desc", inventory)
 	p.showingHelp = true
@@ -3121,6 +3239,7 @@ func TestProviderSelectPage_HelpOverlayContent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWizard_BKeyBlockedWhileHelpShowing(t *testing.T) {
+	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 5})
 	w := NewWizard(WithProviderInventory(inventory))
 
@@ -3147,6 +3266,7 @@ func TestWizard_BKeyBlockedWhileHelpShowing(t *testing.T) {
 }
 
 func TestWizard_QKeyBlockedWhileTreeHelpShowing(t *testing.T) {
+	t.Parallel()
 	sessions := []SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "proj", SessionID: "s1"},
 	}
@@ -3172,6 +3292,7 @@ func TestWizard_QKeyBlockedWhileTreeHelpShowing(t *testing.T) {
 // --- buildSelectionConfig tests ---
 
 func TestBuildSelectionConfig_NoImport(t *testing.T) {
+	t.Parallel()
 	answers := &WizardAnswers{WantImport: false}
 	got := buildSelectionConfig(answers)
 	if got == nil || got.Mode != config.SelectionModeSelected || len(got.Harnesses) != 0 {
@@ -3180,6 +3301,7 @@ func TestBuildSelectionConfig_NoImport(t *testing.T) {
 }
 
 func TestBuildSelectionConfig_AllImportAll(t *testing.T) {
+	t.Parallel()
 	answers := &WizardAnswers{
 		WantImport: true,
 		ProviderSelections: []ProviderSelection{
@@ -3200,6 +3322,7 @@ func TestBuildSelectionConfig_AllImportAll(t *testing.T) {
 }
 
 func TestBuildSelectionConfig_MixedProviders(t *testing.T) {
+	t.Parallel()
 	answers := &WizardAnswers{
 		WantImport: true,
 		ProviderSelections: []ProviderSelection{
@@ -3274,6 +3397,7 @@ func TestBuildSelectionConfig_MixedProviders(t *testing.T) {
 }
 
 func TestBuildSelectionConfig_SessionWithoutProject(t *testing.T) {
+	t.Parallel()
 	answers := &WizardAnswers{
 		WantImport: true,
 		ProviderSelections: []ProviderSelection{
@@ -3302,6 +3426,7 @@ func TestBuildSelectionConfig_SessionWithoutProject(t *testing.T) {
 }
 
 func TestBuildSelectionConfig_LocalProjectByName(t *testing.T) {
+	t.Parallel()
 	answers := &WizardAnswers{
 		WantImport: true,
 		ProviderSelections: []ProviderSelection{

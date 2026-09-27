@@ -100,6 +100,7 @@ func parsePublishRequest(t *testing.T, payload []byte) map[string]any {
 }
 
 func TestMapMetadata_BasicFields(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
 	if err != nil {
@@ -135,6 +136,7 @@ func TestMapMetadata_BasicFields(t *testing.T) {
 // producer-owned opaque association IDs alongside the originally observed
 // commit hashes, rather than deriving response-time session/hash identifiers.
 func TestMapMetadata_PublishesDurableAssociations(t *testing.T) {
+	t.Parallel()
 	associationID, err := schema.NewAssociationID("assoc-00000000-0000-0000-0000-000000000001")
 	if err != nil {
 		t.Fatalf("NewAssociationID: %v", err)
@@ -166,6 +168,7 @@ func TestMapMetadata_PublishesDurableAssociations(t *testing.T) {
 }
 
 func TestMapMetadata_License(t *testing.T) {
+	t.Parallel()
 	t.Run("set license lands in the body", func(t *testing.T) {
 		meta := fixtureMetadata()
 		opts := mapOpts(meta, nil, nil)
@@ -193,6 +196,7 @@ func TestMapMetadata_License(t *testing.T) {
 }
 
 func TestMapMetadata_TimestampConversion(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
 	if err != nil {
@@ -208,6 +212,7 @@ func TestMapMetadata_TimestampConversion(t *testing.T) {
 }
 
 func TestMapMetadata_GitFields(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
 	if err != nil {
@@ -224,6 +229,7 @@ func TestMapMetadata_GitFields(t *testing.T) {
 }
 
 func TestMapMetadata_NullGitFields(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	meta.Git = ingest.GitContext{}
 	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
@@ -243,6 +249,7 @@ func TestMapMetadata_NullGitFields(t *testing.T) {
 }
 
 func TestMapMetadata_StatsFields(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
 	if err != nil {
@@ -264,6 +271,7 @@ func TestMapMetadata_StatsFields(t *testing.T) {
 }
 
 func TestMapMetadata_SubagentsField(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	subID := ingest.SessionID(testutil.TestSubagentID)
 	parentID := ingest.SessionID(testutil.TestSessionUUID)
@@ -292,6 +300,7 @@ func TestMapMetadata_SubagentsField(t *testing.T) {
 }
 
 func TestMapMetadata_EmptySubagents(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	meta.Subagents = []ingest.SubagentRef{}
 
@@ -308,6 +317,7 @@ func TestMapMetadata_EmptySubagents(t *testing.T) {
 }
 
 func TestMapMetadata_DiagnosticsWarnings(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	meta.Diagnostics = ingest.DiagnosticsInfo{
 		Warnings: []ingest.DiagnosticEntry{
@@ -351,6 +361,7 @@ func TestMapMetadata_DiagnosticsWarnings(t *testing.T) {
 }
 
 func TestMapMetadata_ParentUUID(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	parentID := ingest.SessionID(testutil.TestSubagentID)
 	meta.ParentUUID = &parentID
@@ -367,6 +378,7 @@ func TestMapMetadata_ParentUUID(t *testing.T) {
 }
 
 func TestMapMetadata_NoParentUUID(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	meta.ParentUUID = nil
 
@@ -384,6 +396,7 @@ func TestMapMetadata_NoParentUUID(t *testing.T) {
 }
 
 func TestMapMetadata_VisibilityVariants(t *testing.T) {
+	t.Parallel()
 	// Note: visibility is NOT in PublishRequest in schema. It's used to determine access.
 	// However, if we wanted it in the JSON, it would need to be added to PublishRequest.
 	// The current PublishRequest does NOT have visibility.
@@ -391,6 +404,7 @@ func TestMapMetadata_VisibilityVariants(t *testing.T) {
 }
 
 func TestMapMetadata_NilMetrics_NoQualityKey(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	payload, err := push.MapMetadata(mapOpts(meta, nil, nil))
 	if err != nil {
@@ -403,6 +417,7 @@ func TestMapMetadata_NilMetrics_NoQualityKey(t *testing.T) {
 }
 
 func TestMapMetadata_WithMetrics_V2Fields(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 
 	title := "Fix login bug"
@@ -478,6 +493,7 @@ func TestMapMetadata_WithMetrics_V2Fields(t *testing.T) {
 }
 
 func TestMapMetadata_WithCostFields(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 
 	costInput := 0.015
@@ -539,6 +555,7 @@ func TestMapMetadata_WithCostFields(t *testing.T) {
 // omitted under DefaultPushFieldVisibility even though GitRemote/ProjectPath/
 // ProjectName now default on (D8).
 func TestMapMetadata_DefaultVisibility_BranchAndHostSlugOmitted(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	opts := push.MapOptions{
 		Meta:   meta,
@@ -573,6 +590,7 @@ func TestMapMetadata_DefaultVisibility_BranchAndHostSlugOmitted(t *testing.T) {
 // includes gitRemote but sends no project name or path (no label because
 // ProjectName is off, no path because it is explicitly off too).
 func TestMapMetadata_SelectiveVisibility_GitRemoteOnly(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 	opts := push.MapOptions{
 		Meta: meta,
@@ -618,6 +636,7 @@ func TestMapMetadata_SelectiveVisibility_GitRemoteOnly(t *testing.T) {
 // a user's sessions by project without recovering any plaintext, and avoids the
 // village 422 that an omitted hash previously triggered.
 func TestMapMetadata_ProjectHash_AlwaysSent(t *testing.T) {
+	t.Parallel()
 	wantHash := string(testutil.TestProjectHash)
 	hexPattern := regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -664,6 +683,7 @@ func TestMapMetadata_ProjectHash_AlwaysSent(t *testing.T) {
 // NOTE (L2): This test will FAIL at runtime until L3 wires entries into
 // MapMetadata (currently the entries parameter is ignored with `_ = entries`).
 func TestMapMetadata_EntriesPassthrough(t *testing.T) {
+	t.Parallel()
 	meta := fixtureMetadata()
 
 	toolKind := schema.ToolCallKindRead
@@ -727,6 +747,7 @@ func TestMapMetadata_EntriesPassthrough(t *testing.T) {
 // TestSessionEntry_WireFormat_ToolCallID_JSONKey verifies that the schema.SessionEntry
 // JSON key for the tool call ID is "toolCallId" (not "toolUseId"), aligning with ACP.
 func TestSessionEntry_WireFormat_ToolCallID_JSONKey(t *testing.T) {
+	t.Parallel()
 	toolCallID := "tc-xyz-789"
 	entry := schema.SessionEntry{
 		SessionID:  schema.SessionID(testutil.TestSessionUUID),
@@ -759,6 +780,7 @@ func TestSessionEntry_WireFormat_ToolCallID_JSONKey(t *testing.T) {
 // TestSessionEntry_WireFormat_ToolKindAndStopReason verifies that ToolKind and
 // StopReason are present in the marshaled wire format when set.
 func TestSessionEntry_WireFormat_ToolKindAndStopReason(t *testing.T) {
+	t.Parallel()
 	toolKind := schema.ToolCallKindEdit
 	stopReason := schema.StopReasonMaxTokens
 
@@ -790,6 +812,7 @@ func TestSessionEntry_WireFormat_ToolKindAndStopReason(t *testing.T) {
 // TestSessionEntry_WireFormat_OmitEmptyOptionals verifies that optional pointer
 // fields are omitted from JSON when nil.
 func TestSessionEntry_WireFormat_OmitEmptyOptionals(t *testing.T) {
+	t.Parallel()
 	entry := schema.SessionEntry{
 		SessionID:  schema.SessionID(testutil.TestSessionUUID),
 		EntryIndex: 0,

@@ -140,6 +140,7 @@ func validMountedTouchedAction(action mountedTouchedAction) bool {
 }
 
 func TestMountedTouchedSelectionActions(t *testing.T) {
+	t.Parallel()
 	document := loadMountedTouchedDocument(t)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

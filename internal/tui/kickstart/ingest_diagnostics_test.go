@@ -69,6 +69,7 @@ func loadIngestDiagnosticsFixtures(t *testing.T) ingestDiagnosticsDocument {
 }
 
 func TestProgramKeepsIngestDiagnosticsReadableAndNonfatal(t *testing.T) {
+	t.Parallel()
 	fixtures := loadIngestDiagnosticsFixtures(t)
 	for _, row := range fixtures.Cases {
 		for _, size := range fixtures.Viewports {

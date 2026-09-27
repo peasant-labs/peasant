@@ -329,17 +329,20 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 }
 
 func TestReleaseE2EWorkflowContract(t *testing.T) {
+	t.Parallel()
 	assertReleaseE2EWorkflowContract(t)
 	assertReusableWorkflowCallerSecrets(t)
 }
 
 func TestReleaseArtifactWorkflowsRequireRealDashboard(t *testing.T) {
+	t.Parallel()
 	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release.yml", "release", "Run goreleaser")
 	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release-e2e.yml", "release-e2e", "Build release snapshot artifacts")
 	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release-validate.yml", "snapshot", "goreleaser release --snapshot")
 }
 
 func TestReleaseWorkflowGuardDoesNotRequirePriorRC(t *testing.T) {
+	t.Parallel()
 	fixture := loadE2EWorkflowContractFixture(t)
 	path := filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseGuard.Workflow)
 	doc := readWorkflowDoc(t, path)
@@ -392,6 +395,7 @@ func TestReleaseWorkflowGuardDoesNotRequirePriorRC(t *testing.T) {
 }
 
 func TestReusableWorkflowCallerPermissions(t *testing.T) {
+	t.Parallel()
 	fixture := loadE2EWorkflowContractFixture(t)
 	for _, caller := range fixture.ReusableCallers {
 		path := filepath.Join(releaseWorkflowRepoRoot(t), caller.Workflow)
@@ -450,6 +454,7 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 // GitHub rejects the whole workflow graph at startup (release.yml did exactly
 // that before this assertion existed).
 func TestRoutedWorkflowsCallTheSharedRouter(t *testing.T) {
+	t.Parallel()
 	fixture := loadE2EWorkflowContractFixture(t)
 	wantUses := fixture.Router.Workflow + "@" + fixture.Router.Ref
 	for _, relativePath := range fixture.Router.RoutedWorkflows {
@@ -502,6 +507,7 @@ func mappingGrantsContentsRead(permissions *yaml.Node) bool {
 }
 
 func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
+	t.Parallel()
 	fixture := loadE2EWorkflowContractFixture(t)
 	path := filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseValidate.Workflow)
 	doc := readWorkflowDoc(t, path)
@@ -529,6 +535,7 @@ func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
 // determine-runner. The install jobs keep the router; that job must stay
 // defined. Expectations live in testdata/workflows/e2e_contract.yaml.
 func TestReleaseValidateSnapshotPinsTheAmd64Runner(t *testing.T) {
+	t.Parallel()
 	fixture := loadE2EWorkflowContractFixture(t)
 	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseValidate.Workflow))
 	jobs := yamlMappingValue(doc, "jobs")
@@ -555,6 +562,7 @@ func TestReleaseValidateSnapshotPinsTheAmd64Runner(t *testing.T) {
 }
 
 func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
+	t.Parallel()
 	fixture := loadReleaseValidateRPMFixture(t)
 	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixtureWorkflowReleaseValidate))
 	job := yamlMappingValue(yamlMappingValue(doc, "jobs"), "rpm")
@@ -817,6 +825,7 @@ func assertReleaseWorkflowBuildsRealDashboard(t *testing.T, relativePath, jobNam
 }
 
 func TestE2EWorkflowContract(t *testing.T) {
+	t.Parallel()
 	fixture := loadE2EWorkflowContractFixture(t)
 	workflowPath := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows", "e2e.yml")
 	data, err := os.ReadFile(workflowPath)

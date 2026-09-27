@@ -15,6 +15,7 @@ import (
 // negative-lookalike cases come from the fixture's categories. See that module's
 // pull-fixture generators and the meta-tests that pin the fixture's structure/coverage.
 func TestParseTranscriptRef(t *testing.T) {
+	t.Parallel()
 	fix, err := schema.LoadPullRefFixtures()
 	if err != nil {
 		t.Fatalf("LoadPullRefFixtures: %v", err)
@@ -58,6 +59,7 @@ func TestParseTranscriptRef(t *testing.T) {
 // (no bare literals); the expected wire string comes from the fixture, keyed by
 // const_name.
 func TestPullStatus_String(t *testing.T) {
+	t.Parallel()
 	fix, err := schema.LoadPullStatusFixtures()
 	if err != nil {
 		t.Fatalf("LoadPullStatusFixtures: %v", err)

@@ -11,6 +11,7 @@ import (
 // The shipped functional corpus must remain acceptable to authoritative
 // indexing, not only the tolerant parser used by older fixture shape tests.
 func TestFixture_AuthoritativeCaptureCompatibility(t *testing.T) {
+	t.Parallel()
 	registry := ingest.NewIndexerRegistry(&ingest.OSFileSystem{}, ingest.IndexerRegistryOptions{})
 	for _, corpus := range loadFixtureIndexes(t) {
 		for _, fixture := range corpus.Sessions {

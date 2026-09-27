@@ -66,6 +66,7 @@ func loadMountedJourneyFixtures(raw []byte) (mountedJourneyDocument, error) {
 }
 
 func TestMountedDestinationJourney(t *testing.T) {
+	t.Parallel()
 	document, err := loadMountedJourneyFixtures(mountedJourneyYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -103,6 +104,7 @@ func TestMountedDestinationJourney(t *testing.T) {
 }
 
 func TestMountedJourneyFixtureStrictnessAndMutation(t *testing.T) {
+	t.Parallel()
 	if _, err := loadMountedJourneyFixtures(append(mountedJourneyYAML, []byte("\n---\n{}\n")...)); err == nil {
 		t.Fatal("loader accepted second document")
 	}

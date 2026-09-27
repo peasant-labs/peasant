@@ -13,6 +13,7 @@ import (
 )
 
 func TestMetricsRecomputesChangedInputAndReusesEqualProof(t *testing.T) {
+	t.Parallel()
 	db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)

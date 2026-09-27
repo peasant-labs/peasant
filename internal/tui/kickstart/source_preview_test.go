@@ -384,6 +384,7 @@ func previewNeedle(s string) string { return strings.Join(strings.Fields(s), " "
 // on a session Peasant has not imported, in both themes and at two widths, so
 // the transcript beside the tree is visible in the test artifact.
 func TestSourcePreview_RenderGolden(t *testing.T) {
+	t.Parallel()
 	doc := loadSourcePreviewDoc(t)
 	for _, c := range doc.RenderCases {
 		t.Run(c.Name, func(t *testing.T) {

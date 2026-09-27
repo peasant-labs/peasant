@@ -156,6 +156,7 @@ func (c *redactionProfileClock) Now() time.Time {
 }
 
 func TestPipelineRedactionProfile(t *testing.T) {
+	t.Parallel()
 	shared, err := testutil.LoadProfileRedactionFixtures()
 	if err != nil {
 		t.Fatal(err)

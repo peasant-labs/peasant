@@ -190,6 +190,7 @@ func TestMountedProgramRestoresSavedSelectionThroughProductionRegistry(t *testin
 }
 
 func TestMountedKickstartNoEditSaveKeepsExplicitSessionsScoped(t *testing.T) {
+	t.Parallel()
 	testCase := restorationCaseNamed(t, loadRestorationDocument(t), "all-current-explicit-sessions-stay-session-scoped")
 	configured := config.BaseConfig()
 	configured.Selection = testCase.Saved
@@ -232,6 +233,7 @@ func TestMountedKickstartNoEditSaveKeepsExplicitSessionsScoped(t *testing.T) {
 }
 
 func TestMountedKickstartSelectAllNamesProjectScopeAndCommitsCurrentClones(t *testing.T) {
+	t.Parallel()
 	testCase := restorationCaseNamed(t, loadRestorationDocument(t), "select-all-saves-exact-current-clones")
 
 	configured := config.BaseConfig()

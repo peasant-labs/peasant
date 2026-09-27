@@ -284,6 +284,7 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 }
 
 func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
+	t.Parallel()
 	document := loadPrivacyLicenseDocument(t)
 	draft, _ := newGuidedDraft(t)
 	section := findSection(t, kickstart.BuildRegistry(kickstart.Options{
@@ -356,6 +357,7 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 }
 
 func TestPrivacyCategoryLabelFixtureMutationsFailClosed(t *testing.T) {
+	t.Parallel()
 	document := loadPrivacyLicenseDocument(t)
 	byName := make(map[string]privacySampleFixture, len(document.PrivacySamples))
 	for _, sample := range document.PrivacySamples {
@@ -374,6 +376,7 @@ func TestPrivacyCategoryLabelFixtureMutationsFailClosed(t *testing.T) {
 }
 
 func TestPrivacyGuideViewportAtCommonTerminalHeight(t *testing.T) {
+	t.Parallel()
 	document := loadPrivacyLicenseDocument(t)
 	section := findSection(t, kickstart.BuildRegistry(kickstart.Options{
 		Source: scannerfix.NewFixtureTreeSource("standard"),
@@ -423,6 +426,7 @@ func TestPrivacyGuideViewportAtCommonTerminalHeight(t *testing.T) {
 }
 
 func TestLicenseGuidanceUsesLoadedDraftAndNoLicenseDefault(t *testing.T) {
+	t.Parallel()
 	document := loadPrivacyLicenseDocument(t)
 	if got := config.BaseConfig().Push.License; got != "" {
 		t.Fatalf("base config license = %q, want empty no-license default", got)

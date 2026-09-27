@@ -113,6 +113,7 @@ func loadSearchVisibilityCorpus(t *testing.T) testcase.Corpus[searchVisibilityIn
 }
 
 func TestSearchVisibilityFixtureGuards(t *testing.T) {
+	t.Parallel()
 	corpus := loadSearchVisibilityCorpus(t)
 	manifest, err := testutil.DecodeSemanticManifest(searchVisibilityManifestYAML, "search visibility")
 	if err != nil {
@@ -156,6 +157,7 @@ func TestSearchVisibilityFixtureGuards(t *testing.T) {
 }
 
 func TestSearch_IncludesAllStoredMatches(t *testing.T) {
+	t.Parallel()
 	corpus := loadSearchVisibilityCorpus(t)
 	for _, tc := range corpus.Cases {
 		tc := tc

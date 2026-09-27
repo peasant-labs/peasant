@@ -93,6 +93,7 @@ func validateConfig(t *testing.T, sch *jsonschema.Schema, i int, cfg export.EEEM
 // Every fixture includes lower_is_better because the authoritative metric_config
 // sub-schema requires it.
 func TestEEE_ConformsToSchema(t *testing.T) {
+	t.Parallel()
 	sch := loadCompiledEEEMetricConfigSchema(t)
 
 	lb := true

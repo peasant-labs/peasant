@@ -210,6 +210,7 @@ func TestConvertLegacySelected_ExactCopyDoesNotAliasInput(t *testing.T) {
 }
 
 func TestLegacySelectedConversionFixtureRejectsUnknownExclusionKey(t *testing.T) {
+	t.Parallel()
 	malformed := bytes.Replace(legacySelectedConversionData, []byte("exclusions:"), []byte("exclusionsTypo:"), 1)
 	if bytes.Equal(malformed, legacySelectedConversionData) {
 		t.Fatal("legacy selected conversion fixture has no exclusions key to mutate")

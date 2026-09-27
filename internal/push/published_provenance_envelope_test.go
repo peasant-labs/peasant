@@ -208,6 +208,7 @@ func loadPublishedProvenanceEnvelopeFixture(t *testing.T) publishedProvenanceEnv
 // real generation-capable store for every fixture case and asserts the emitted
 // envelope and metadata mirrors member-for-member.
 func TestPublishedProvenanceEnvelopeCarriage(t *testing.T) {
+	t.Parallel()
 	for _, fixtureCase := range loadPublishedProvenanceEnvelopeFixture(t).Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
