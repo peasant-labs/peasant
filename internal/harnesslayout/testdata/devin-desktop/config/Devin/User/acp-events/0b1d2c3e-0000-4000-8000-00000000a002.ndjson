@@ -1,0 +1,2 @@
+{"providerId":"claude-code","notification":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"FIXTURE-USER-PROMPT second session"}}}
+{"providerId":"claude-code","notification":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"FIXTURE-AGENT-REPLY second session"}}}
