@@ -207,6 +207,14 @@ func TestRunHonorsLimitAndRecordsFailures(t *testing.T) {
 	if err != nil || len(report.Captures) != 0 || len(report.Failures) != 2 {
 		t.Fatalf("failing probe: %+v, %v", report, err)
 	}
+	if report.Failures[0].Error == "" || report.Failures[0].ErrorClass != harnesslayout.ErrorPermission {
+		t.Fatalf("failure = %+v, want text and the permission class", report.Failures[0])
+	}
+	for _, failure := range report.ShapeOnly().Failures {
+		if failure.Session != "" || failure.Error != "" || failure.ErrorClass != harnesslayout.ErrorPermission {
+			t.Fatalf("shape-only failure = %+v, want only the class", failure)
+		}
+	}
 }
 
 func TestShapeRecorderBoundsFieldPaths(t *testing.T) {
@@ -263,8 +271,8 @@ func (missingFS) Open(string) (fs.File, error) { return nil, fs.ErrNotExist }
 
 type failingProbe struct{ exampleProbe }
 
-func (failingProbe) Capture(context.Context, harnesslayout.Source, harnesslayout.SessionRef) (harnesslayout.Capture, error) {
-	return harnesslayout.Capture{}, fs.ErrPermission
+func (failingProbe) Capture(_ context.Context, _ harnesslayout.Source, ref harnesslayout.SessionRef) (harnesslayout.Capture, error) {
+	return harnesslayout.Capture{}, &fs.PathError{Op: "open", Path: ref.Paths[0], Err: fs.ErrPermission}
 }
 
 func assertPanics(t *testing.T, name string, fn func()) {
