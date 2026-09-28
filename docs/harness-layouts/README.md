@@ -25,7 +25,8 @@ gives the recovered metadata counts and model identifiers. For each artifact it 
 record count, a record-kind census, and every field path with the JSON types seen there.
 
 The report never contains transcript text. By default it also removes root paths, session
-identifiers, titles, project paths, and timestamps, so it can be attached to a public issue.
+identifiers, titles, project paths, timestamps, and error text, keeping only a coarse error
+class for each failure, so it can be attached to a public issue.
 `--include-metadata` keeps those values for local inspection. Do not post such a report.
 
 ## Declaring a layout
