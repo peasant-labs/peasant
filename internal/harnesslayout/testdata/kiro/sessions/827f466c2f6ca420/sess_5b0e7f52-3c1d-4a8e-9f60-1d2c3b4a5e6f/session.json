@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataModelVersion": 1,
+  "id": "sess_5b0e7f52-3c1d-4a8e-9f60-1d2c3b4a5e6f",
+  "title": "Add a health check endpoint",
+  "agentMode": "vibe",
+  "workspacePaths": ["/work/demo-app"],
+  "modelId": "claude-sonnet-4.5",
+  "status": "in_progress",
+  "createdAt": "2026-07-14T13:39:00.000Z",
+  "lastModifiedAt": "2026-07-14T13:41:30.000Z"
+}
