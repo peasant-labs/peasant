@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "updated_at": "2026-01-06T00:03:00.000Z",
+  "agent": "subagent",
+  "sessionId": "1767657600000_k3x9q__researcher",
+  "taskType": "subagent_task",
+  "origin": {"source": "subagent", "mode": "user", "sessionId": "1767657600000_k3x9q__researcher", "parentThreadId": "1767657600000_k3x9q", "subagent": "researcher"},
+  "messages": [
+    {"role": "user", "content": "SYNTHETIC-SUBAGENT-PROMPT", "ts": 1767657701000},
+    {"role": "assistant", "content": [{"type": "text", "text": "SYNTHETIC-ASSISTANT-TEXT"}], "modelInfo": {"id": "anthropic/claude-haiku-4.5", "provider": "cline"}, "ts": 1767657790000}
+  ]
+}
