@@ -1,0 +1,9 @@
+{"type":"session","version":1,"id":"sub-7f3a","owner":"default","task":null,"pack":null,"agent":"kirocrew","slot":"","thread":null,"cwd":"/work/example-app","remote":null,"createdAt":1790067600000}
+{"type":"session/opened","seq":1,"time":1790067600000,"src":"gateway","data":{"agent":"kirocrew","slot":"","model":"claude-haiku-4.5","cwd":"/work/example-app","owner":"default","resumed":false,"parent":{"slot":"fix-build"}}}
+{"type":"message/received","seq":2,"time":1790067600010,"src":"gateway","data":{"turn":1,"role":"user","source":"subagent","text":"SENTINEL-KIROCREW-SUBAGENT list the flaky tests"}}
+{"type":"turn/started","seq":3,"time":1790067600020,"src":"gateway","data":{"turn":1,"actor":"subagent","depth":0,"message_seq":2}}
+{"type":"tool/called","seq":4,"time":1790067605000,"src":"acp","data":{"turn":1,"call_id":"c-01","name":"grep","server":"","kind":"search","call_index":1,"step":1,"args_hash":"0a1b2c3d","args_bytes":20}}
+{"type":"tool/completed","seq":5,"time":1790067605500,"src":"acp","data":{"turn":1,"call_id":"c-01","name":"grep","server":"","status":"completed","call_index":1,"step":1,"elapsed_ms":500,"result_hash":"3d4e5f60","result_bytes":210}}
+{"type":"message/sent","seq":6,"time":1790067606000,"src":"acp","data":{"turn":1,"step":1,"text":"Searching."}}
+{"type":"message/sent","seq":7,"time":1790067610000,"src":"acp","data":{"turn":1,"step":2,"text":"Two tests are flaky."}}
+{"type":"turn/completed","seq":8,"time":1790067610100,"src":"acp","data":{"turn":1,"depth":0,"stop_reason":"end_turn","duration_ms":10080,"model":"claude-haiku-4.5","provider":"kiro"}}
