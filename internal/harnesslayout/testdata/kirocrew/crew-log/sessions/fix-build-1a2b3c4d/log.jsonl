@@ -1,0 +1,10 @@
+{"type":"session","version":1,"id":"7c9e6679-7425-40de-944b-e07fc1f90ae7","owner":"default","task":null,"pack":null,"agent":"kirocrew","slot":"fix-build","thread":null,"cwd":"/work/example-app","remote":null,"createdAt":1789899600000}
+{"type":"session/opened","seq":1,"time":1789899600000,"src":"gateway","data":{"agent":"kirocrew","slot":"fix-build","model":"claude-sonnet-4.5","cwd":"/work/example-app","owner":"default","resumed":false,"class":{"memory":"persistent"},"previous_none":true}}
+{"type":"message/received","seq":2,"time":1789899600010,"src":"gateway","data":{"turn":1,"role":"user","source":"dashboard","text":"SENTINEL-KIROCREW-CREWLOG the build fails"}}
+{"type":"turn/started","seq":3,"time":1789899600020,"src":"gateway","data":{"turn":1,"actor":"user","depth":0,"message_seq":2}}
+{"type":"tool/called","seq":4,"time":1789899610000,"src":"acp","data":{"turn":1,"call_id":"c-01","name":"read","server":"","kind":"fs","call_index":1,"step":1,"args_hash":"9f2b7c41","args_bytes":42}}
+{"type":"tool/completed","seq":5,"time":1789899610090,"src":"acp","data":{"turn":1,"call_id":"c-01","name":"read","server":"","status":"completed","call_index":1,"step":1,"elapsed_ms":90,"result_hash":"1a3c9e02","result_bytes":512}}
+{"type":"tool/called","seq":6,"time":1789899620000,"src":"acp","data":{"turn":1,"call_id":"c-02","name":"shell","server":"","kind":"execute","call_index":2,"step":1,"args_hash":"4d5e6f70","args_bytes":18}}
+{"type":"tool/completed","seq":7,"time":1789899625000,"src":"acp","data":{"turn":1,"call_id":"c-02","name":"shell","server":"","status":"failed","call_index":2,"step":1,"elapsed_ms":5000,"is_error":true,"result_hash":"70819a2b","result_bytes":96}}
+{"type":"message/sent","seq":8,"time":1789899640000,"src":"acp","data":{"turn":1,"step":2,"text":"SENTINEL-KIROCREW-CREWLOG-REPLY the cache directory is reused"}}
+{"type":"turn/completed","seq":9,"time":1789899640100,"src":"acp","data":{"turn":1,"depth":0,"stop_reason":"end_turn","duration_ms":40080,"credits":0.0021,"model":"claude-sonnet-4.5","provider":"kiro","tokens":{"input":812,"output":143,"cache_read":0,"cache_write":0}}}
