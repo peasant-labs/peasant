@@ -1,13 +1,19 @@
 package ingest
 
 // DecodeClaudeSlug decodes a Claude project slug to a real filesystem path.
-// Claude encodes paths by replacing "/" with "-" and prepending "-":
+// Claude encodes paths by replacing the path separator with "-":
 //
-//	/home/user/dev/project → -home-user-dev-project
+//	/home/user/dev/project  → -home-user-dev-project        (unix: leading "-")
+//	C:\Users\alice\project  → C--Users-alice-project         (windows: drive letter + "--")
+//
+// On Windows the colon and the separator each become a dash, so the slug
+// leads with the drive letter followed by two dashes instead of one; see
+// splitSlugRoot for how the two shapes are told apart.
 //
 // The encoding is ambiguous (dashes in directory names vs path separators), so
-// this uses a greedy filesystem-based decoder: starting from root, it tries each
-// segment and checks if a directory exists. If not, it merges segments with dashes.
+// this uses a greedy filesystem-based decoder: starting from the slug's root,
+// it tries each segment and checks if a directory exists. If not, it merges
+// segments with dashes.
 //
 // Claude often appends branch or worktree names to the encoded project path
 // (e.g., -home-user-dev-my-repo-feature-branch). When the trailing segments

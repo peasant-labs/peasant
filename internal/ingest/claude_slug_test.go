@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+// slugTestPath joins path segments from the unix root exactly the way
+// decodeProjectSlug does internally (filepath.Join from "/"), so a
+// table-driven case's simulated directory tree and expected path stay
+// platform-native instead of asserting a hardcoded POSIX string. On unix
+// this reproduces the original literal "/a/b/c" strings unchanged; on
+// Windows filepath.Join normalizes "/" to the native separator, so the same
+// call yields "\a\b\c" there — matching what the decoder itself produces.
+func slugTestPath(segments ...string) string {
+	return filepath.Join(append([]string{"/"}, segments...)...)
+}
+
 func TestDecodeClaudeSlug(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -17,32 +28,32 @@ func TestDecodeClaudeSlug(t *testing.T) {
 			name:    "basic decode all segments exist",
 			encoded: "-home-user-dev-project",
 			dirs: map[string]bool{
-				"/home":                  true,
-				"/home/user":             true,
-				"/home/user/dev":         true,
-				"/home/user/dev/project": true,
+				slugTestPath("home"):                           true,
+				slugTestPath("home", "user"):                   true,
+				slugTestPath("home", "user", "dev"):            true,
+				slugTestPath("home", "user", "dev", "project"): true,
 			},
-			want: "/home/user/dev/project",
+			want: slugTestPath("home", "user", "dev", "project"),
 		},
 		{
 			name:    "dash in directory name merges segments",
 			encoded: "-home-user-my-project",
 			dirs: map[string]bool{
-				"/home":                 true,
-				"/home/user":            true,
-				"/home/user/my-project": true,
+				slugTestPath("home"):                       true,
+				slugTestPath("home", "user"):               true,
+				slugTestPath("home", "user", "my-project"): true,
 			},
-			want: "/home/user/my-project",
+			want: slugTestPath("home", "user", "my-project"),
 		},
 		{
 			name:    "multiple dashes in directory name",
 			encoded: "-home-user-my-cool-project",
 			dirs: map[string]bool{
-				"/home":                      true,
-				"/home/user":                 true,
-				"/home/user/my-cool-project": true,
+				slugTestPath("home"):                            true,
+				slugTestPath("home", "user"):                    true,
+				slugTestPath("home", "user", "my-cool-project"): true,
 			},
-			want: "/home/user/my-cool-project",
+			want: slugTestPath("home", "user", "my-cool-project"),
 		},
 		{
 			name:    "no matching dirs returns empty",
@@ -72,41 +83,66 @@ func TestDecodeClaudeSlug(t *testing.T) {
 			name:    "partial match returns longest prefix",
 			encoded: "-home-user-dev-project",
 			dirs: map[string]bool{
-				"/home":      true,
-				"/home/user": true,
+				slugTestPath("home"):         true,
+				slugTestPath("home", "user"): true,
 				// /home/user/dev does not exist — remaining segments are unmatched
 			},
-			want: "/home/user",
+			want: slugTestPath("home", "user"),
 		},
 		{
 			name:    "trailing branch name returns repo root",
 			encoded: "-home-user-dev-my-repo-feature-branch",
 			dirs: map[string]bool{
-				"/home":                  true,
-				"/home/user":             true,
-				"/home/user/dev":         true,
-				"/home/user/dev/my-repo": true,
+				slugTestPath("home"):                           true,
+				slugTestPath("home", "user"):                   true,
+				slugTestPath("home", "user", "dev"):            true,
+				slugTestPath("home", "user", "dev", "my-repo"): true,
 				// "feature" and "branch" segments don't match dirs
 			},
-			want: "/home/user/dev/my-repo",
+			want: slugTestPath("home", "user", "dev", "my-repo"),
 		},
 		{
 			name:    "worktree suffix after repo root returns repo root",
 			encoded: "-home-user-dev-widget-service-feature-worktree",
 			dirs: map[string]bool{
-				"/home":                         true,
-				"/home/user":                    true,
-				"/home/user/dev":                true,
-				"/home/user/dev/widget-service": true,
+				slugTestPath("home"):                                  true,
+				slugTestPath("home", "user"):                          true,
+				slugTestPath("home", "user", "dev"):                   true,
+				slugTestPath("home", "user", "dev", "widget-service"): true,
 				// "feature" and "worktree" don't match
 			},
-			want: "/home/user/dev/widget-service",
+			want: slugTestPath("home", "user", "dev", "widget-service"),
 		},
 		{
 			name:    "no segments match at all returns empty",
 			encoded: "-nonexistent-path-here",
 			dirs:    map[string]bool{},
 			want:    "",
+		},
+		{
+			name:    "windows drive-letter slug decodes from the drive root",
+			encoded: "C--Users-alice-project",
+			dirs: map[string]bool{
+				windowsSlugTestPath("C", "Users"):                     true,
+				windowsSlugTestPath("C", "Users", "alice"):            true,
+				windowsSlugTestPath("C", "Users", "alice", "project"): true,
+			},
+			want: windowsSlugTestPath("C", "Users", "alice", "project"),
+		},
+		{
+			// Claude's encoding only replaces path separators (and, on Windows,
+			// the drive colon) with dashes — it never touches spaces, so a
+			// space inside a directory name survives untouched inside a
+			// single dash-delimited segment rather than needing dash-merge
+			// resolution.
+			name:    "windows drive-letter slug with a space in a directory name",
+			encoded: "C--Users-alice-My Project",
+			dirs: map[string]bool{
+				windowsSlugTestPath("C", "Users"):                        true,
+				windowsSlugTestPath("C", "Users", "alice"):               true,
+				windowsSlugTestPath("C", "Users", "alice", "My Project"): true,
+			},
+			want: windowsSlugTestPath("C", "Users", "alice", "My Project"),
 		},
 	}
 
@@ -121,6 +157,17 @@ func TestDecodeClaudeSlug(t *testing.T) {
 			}
 		})
 	}
+}
+
+// windowsSlugTestPath joins path segments from a drive root exactly the way
+// splitSlugRoot + decodeProjectSlug do internally (drive letter + ":" +
+// filepath.Separator, then filepath.Join for every segment after that), so a
+// drive-letter case's simulated directory tree and expected path stay
+// platform-native. It never asserts a literal "C:\..." or "C:/..." string —
+// see splitSlugRoot's doc comment for why the trailing separator matters.
+func windowsSlugTestPath(drive string, segments ...string) string {
+	root := drive + ":" + string(filepath.Separator)
+	return filepath.Join(append([]string{root}, segments...)...)
 }
 
 // legacyDecodeClaudeSlug is the pre-refactor inline implementation from develop,
