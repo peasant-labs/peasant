@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "session_id": "1767657600000_k3x9q",
+  "source": "vscode",
+  "pid": 4242,
+  "started_at": "2026-01-06T00:00:00.000Z",
+  "ended_at": "2026-01-06T00:05:00.000Z",
+  "exit_code": 0,
+  "status": "completed",
+  "interactive": true,
+  "provider": "cline",
+  "model": "anthropic/claude-sonnet-4.5",
+  "cwd": "/projects/sample-api",
+  "workspace_root": "/projects/sample-api",
+  "enable_tools": true,
+  "enable_spawn": true,
+  "enable_teams": false,
+  "prompt": "<mode_notice>SYNTHETIC-NOTICE</mode_notice><user_input mode=\"act\">Rename the config loader</user_input>",
+  "metadata": {
+    "tokensIn": 3000,
+    "tokensOut": 400,
+    "cacheReads": 0,
+    "cacheWrites": 0,
+    "totalCost": 0.02
+  },
+  "messages_path": "/srv/cline/data/sessions/1767657600000_k3x9q/1767657600000_k3x9q.messages.json",
+  "compaction_path": "/srv/cline/data/sessions/1767657600000_k3x9q/1767657600000_k3x9q.compaction.json"
+}

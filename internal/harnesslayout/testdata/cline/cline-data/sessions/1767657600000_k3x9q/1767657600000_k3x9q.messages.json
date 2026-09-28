@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "updated_at": "2026-01-06T00:05:00.000Z",
+  "agent": "lead",
+  "sessionId": "1767657600000_k3x9q",
+  "origin": {"source": "vscode", "mode": "user", "sessionId": "1767657600000_k3x9q"},
+  "messages": [
+    {"id": "m1", "role": "user", "content": [{"type": "text", "text": "<user_input mode=\"act\">Rename the config loader</user_input>"}], "ts": 1767657600000},
+    {"id": "m2", "role": "assistant", "content": [{"type": "thinking", "thinking": "SYNTHETIC-THINKING-TEXT", "signature": "sig-02"}, {"type": "tool_use", "id": "call_1", "name": "read_files", "input": {"files": [{"path": "src/config.ts"}]}}], "modelInfo": {"id": "anthropic/claude-sonnet-4.5", "provider": "cline", "family": "claude"}, "metrics": {"inputTokens": 1500, "outputTokens": 200, "cacheReadTokens": 0, "cacheWriteTokens": 0, "cost": 0.01}, "ts": 1767657610000},
+    {"id": "m3", "role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "name": "read_files", "content": "SYNTHETIC-TOOL-OUTPUT"}], "ts": 1767657611000},
+    {"id": "m4", "role": "assistant", "content": [{"type": "text", "text": "SYNTHETIC-ASSISTANT-TEXT"}, {"type": "tool_use", "id": "call_2", "name": "spawn_agent", "input": {"agentId": "researcher"}}], "modelInfo": {"id": "anthropic/claude-sonnet-4.5", "provider": "cline", "family": "claude"}, "metrics": {"inputTokens": 1500, "outputTokens": 200, "cost": 0.01}, "ts": 1767657700000},
+    {"id": "m5", "role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_2", "name": "spawn_agent", "content": [{"type": "text", "text": "SYNTHETIC-TOOL-OUTPUT"}], "is_error": false}], "ts": 1767657800000},
+    {"id": "m6", "role": "assistant", "content": [{"type": "text", "text": "Renamed the loader."}], "modelInfo": {"id": "anthropic/claude-sonnet-4.5", "provider": "cline", "family": "claude"}, "ts": 1767657890000}
+  ],
+  "system_prompt": "SYNTHETIC-SYSTEM-PROMPT"
+}
