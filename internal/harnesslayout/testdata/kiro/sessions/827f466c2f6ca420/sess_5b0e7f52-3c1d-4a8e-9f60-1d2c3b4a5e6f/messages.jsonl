@@ -1,0 +1,12 @@
+{"id":"evt-01","timestamp":"2026-07-14T13:39:00.000Z","payload":{"type":"session_start","agentType":"vibe"}}
+{"id":"evt-02","timestamp":"2026-07-14T13:39:05.000Z","payload":{"type":"user","content":"kiro-ide fixture prompt that must never leak","images":[],"documents":[]}}
+{"id":"evt-03","timestamp":"2026-07-14T13:39:05.100Z","payload":{"type":"turn_start","executionId":"exec-0001"}}
+{"id":"evt-04","timestamp":"2026-07-14T13:39:08.000Z","payload":{"type":"assistant","operationType":"Reasoning","content":"fixture reasoning text","executionId":"exec-0001"}}
+{"id":"evt-05","timestamp":"2026-07-14T13:39:10.000Z","payload":{"type":"tool_call","toolName":"readFile","toolCallId":"tc-0001","executionId":"exec-0001"}}
+{"id":"evt-06","timestamp":"2026-07-14T13:39:11.000Z","payload":{"type":"tool_result","toolCallId":"tc-0001","content":"fixture tool output","success":true,"executionId":"exec-0001"}}
+{"id":"evt-07","timestamp":"2026-07-14T13:39:20.000Z","payload":{"type":"assistant","operationType":"Say","content":"fixture assistant answer","executionId":"exec-0001"}}
+{"id":"evt-08","timestamp":"2026-07-14T13:39:21.000Z","payload":{"type":"session_metadata","key":"contextUsage","value":{"usagePercentage":12.5},"executionId":"exec-0001"}}
+{"id":"evt-09","timestamp":"2026-07-14T13:39:21.500Z","payload":{"type":"usage_summary","promptTurnSummaries":[{"unit":"credit","unitPlural":"credits","usage":1.2,"usedTools":["readFile"]}],"status":"success","executionId":"exec-0001"}}
+{"id":"evt-10","timestamp":"2026-07-14T13:39:22.000Z","payload":{"type":"turn_end","stopReason":"end_turn","executionId":"exec-0001"}}
+{"id":"evt-11","timestamp":"2026-07-14T13:41:30.000Z","payload":{"type":"user","content":"a second fixture prompt"}}
+{"id":"evt-12","timestamp":"2026-07-14T13:41:31.000Z","payload":{"type":"assistant","operationType":"Say","content":"partial line
