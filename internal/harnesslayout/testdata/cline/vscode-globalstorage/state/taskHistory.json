@@ -1,0 +1,26 @@
+[
+  {
+    "id": "1767225600000",
+    "ulid": "01KDX0000000000000000000AA",
+    "ts": 1767225710000,
+    "task": "Add a health check endpoint\nto the sample service",
+    "tokensIn": 2400,
+    "tokensOut": 160,
+    "cacheWrites": 0,
+    "cacheReads": 0,
+    "totalCost": 0.008,
+    "size": 20480,
+    "cwdOnTaskInitialization": "/projects/sample-app",
+    "isFavorited": false,
+    "modelId": "gpt-5"
+  },
+  {
+    "id": "1767312000000",
+    "ts": 1767312090000,
+    "task": "Explain the build script",
+    "tokensIn": 900,
+    "tokensOut": 120,
+    "totalCost": 0.002,
+    "cwdOnTaskInitialization": "/projects/tooling"
+  }
+]

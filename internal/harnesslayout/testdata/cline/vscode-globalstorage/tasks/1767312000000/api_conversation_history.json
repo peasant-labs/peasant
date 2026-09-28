@@ -1,0 +1,8 @@
+[
+  {"role":"user","content":[{"type":"text","text":"<task>\nExplain the build script\n</task>"},{"type":"text","text":"<environment_details>\nSYNTHETIC-ENVIRONMENT\n</environment_details>"}]},
+  {"role":"assistant","content":[{"type":"text","text":"<read_file>\n<path>build.sh</path>\n</read_file>"}]},
+  {"role":"user","content":[{"type":"text","text":"[read_file for 'build.sh'] Result:"},{"type":"text","text":"SYNTHETIC-TOOL-OUTPUT"}]},
+  {"role":"assistant","content":[{"type":"text","text":"<execute_command>\n<command>make -n</command>\n</execute_command>"}]},
+  {"role":"user","content":[{"type":"text","text":"[execute_command for 'make -n'] Result:"},{"type":"text","text":"SYNTHETIC-TOOL-OUTPUT"}]},
+  {"role":"assistant","content":[{"type":"text","text":"<attempt_completion>\n<result>SYNTHETIC-ASSISTANT-TEXT</result>\n</attempt_completion>"}]}
+]
