@@ -8,18 +8,43 @@ import (
 	"sort"
 )
 
+// ErrorClass is the coarse category of a failure. Unlike the error text, it
+// never names a path or a session, so shape-only reports keep it.
+type ErrorClass string
+
+const (
+	ErrorNotFound   ErrorClass = "not_found"
+	ErrorPermission ErrorClass = "permission"
+	ErrorCanceled   ErrorClass = "canceled"
+	ErrorOther      ErrorClass = "other"
+)
+
+func classify(err error) ErrorClass {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return ErrorNotFound
+	case errors.Is(err, fs.ErrPermission):
+		return ErrorPermission
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return ErrorCanceled
+	}
+	return ErrorOther
+}
+
 // RootReport states what a capture found at one root.
 type RootReport struct {
-	Path     string `json:"path"`
-	Present  bool   `json:"present"`
-	Sessions int    `json:"sessions"`
-	Error    string `json:"error,omitempty"`
+	Path       string     `json:"path,omitempty"`
+	Present    bool       `json:"present"`
+	Sessions   int        `json:"sessions"`
+	Error      string     `json:"error,omitempty"`
+	ErrorClass ErrorClass `json:"errorClass,omitempty"`
 }
 
 // SessionError records a session whose capture failed.
 type SessionError struct {
-	Session string `json:"session"`
-	Error   string `json:"error"`
+	Session    string     `json:"session,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	ErrorClass ErrorClass `json:"errorClass"`
 }
 
 // Report is the result of capturing one tool on one machine.
@@ -31,11 +56,13 @@ type Report struct {
 }
 
 // ShapeOnly returns the report with every identifying value removed: root
-// paths, session identifiers, titles, project paths, and timestamps.
+// paths, session identifiers, titles, project paths, timestamps, and error
+// text. Error classes stay.
 func (r Report) ShapeOnly() Report {
 	roots := make([]RootReport, len(r.Roots))
 	for i, root := range r.Roots {
 		root.Path = ""
+		root.Error = ""
 		roots[i] = root
 	}
 	captures := make([]Capture, len(r.Captures))
@@ -45,6 +72,7 @@ func (r Report) ShapeOnly() Report {
 	failures := make([]SessionError, len(r.Failures))
 	for i, failure := range r.Failures {
 		failure.Session = ""
+		failure.Error = ""
 		failures[i] = failure
 	}
 	r.Roots, r.Captures, r.Failures = roots, captures, failures
@@ -72,7 +100,7 @@ func Run(ctx context.Context, layout Layout, paths []string, open func(string) S
 		src := open(path)
 		if _, err := fs.Stat(src.FS, "."); err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				root.Error = err.Error()
+				root.Error, root.ErrorClass = err.Error(), classify(err)
 			}
 			report.Roots = append(report.Roots, root)
 			continue
@@ -80,7 +108,7 @@ func Run(ctx context.Context, layout Layout, paths []string, open func(string) S
 		root.Present = true
 		refs, err := layout.Probe.Discover(ctx, src)
 		if err != nil {
-			root.Error = err.Error()
+			root.Error, root.ErrorClass = err.Error(), classify(err)
 		}
 		root.Sessions = len(refs)
 		report.Roots = append(report.Roots, root)
@@ -98,7 +126,7 @@ func Run(ctx context.Context, layout Layout, paths []string, open func(string) S
 		}
 		capture, err := layout.Probe.Capture(ctx, item.src, item.ref)
 		if err != nil {
-			report.Failures = append(report.Failures, SessionError{Session: item.ref.ID, Error: err.Error()})
+			report.Failures = append(report.Failures, SessionError{Session: item.ref.ID, Error: err.Error(), ErrorClass: classify(err)})
 			continue
 		}
 		capture.Tool = layout.Tool
