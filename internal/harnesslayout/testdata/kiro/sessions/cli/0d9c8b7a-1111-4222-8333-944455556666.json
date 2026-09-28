@@ -1,0 +1,16 @@
+{
+  "session_id": "0d9c8b7a-1111-4222-8333-944455556666",
+  "cwd": "/work/cli-project",
+  "created_at": "2026-03-02T09:00:00Z",
+  "updated_at": "2026-03-02T09:05:00Z",
+  "title": "Rename the config loader",
+  "session_state": {
+    "rts_model_state": {"model_info": {"model_id": "claude-sonnet-4"}},
+    "conversation_metadata": {
+      "user_turn_metadatas": [
+        {"end_timestamp": "2026-03-02T09:01:00Z", "builtin_tool_uses": 1, "total_request_count": 2, "metering_usage": [{"value": 0.05, "unit": "credit"}]},
+        {"end_timestamp": "2026-03-02T09:05:00Z", "builtin_tool_uses": 0, "total_request_count": 1, "metering_usage": [{"value": 0.02, "unit": "credit"}]}
+      ]
+    }
+  }
+}
