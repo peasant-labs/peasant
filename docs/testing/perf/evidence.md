@@ -317,3 +317,129 @@ api/metrics/push/e2e/transcript/export); the remainder belongs to
 `cmd/peasant`, `internal/ingest`, the migration suite, and the already
 skip-bearing sites owned by other leaves. `ast-grep scan --config sgconfig.yml
 .` exits 0 (the enforcement rule file itself lands with the enforcement leaf).
+
+## T3 focus restoration: storetest template cache
+
+The `storetest` template was built once per process (61 migrations under
+`ensureGolden`), so a focused run paid a full migration pass on top of the
+test's own work. The cache (`internal/store/storetest/golden.go` rewritten;
+new `internal/filelock` leaf; `store.SchemaFingerprint()` stamp;
+tmpfs-preferred managed copy root; read-once template buffer) makes the
+template reusable across processes. A tree is the epoch integration branch at
+`764aa87f` (with the seam-default conversions), B tree is the L6 worktree at
+`7aa9a7f0`; the three family test files are byte-identical between the trees,
+and the only other A/B delta is `storetest` itself, so the pairs are
+attributable to the cache. Serial, quiet box, one discarded build-cache
+warmup per tree per test, GOMAXPROCS=32 (nproc), GNU `time -v`. L from the
+documented companion
+(`RACE=0 go run ./cmd/testgate run -pkgs
+./internal/testkit/coveragemap,./cmd/testgate -race=false`): 0.951 at window
+start (A), 0.982 at window end (B), 0.952 bracketing the final-code B re-runs
+— all far below the `L > 4` discard bar.
+
+Design evidence rows:
+
+- Row 1 (carried): #3 base-tree focused — 45.27 s wall / 41.46 s user (from
+  the T3 diagnostic, labelled).
+- Row 2 (carried + re-measured): converted tree, cache cold — 58.37 s
+  carried from the diagnostic (the regression this change fixes); re-measured
+  47.03 s mean on the current integration head (A1 46.13 / A2 47.92 below).
+  The 11 s gap is tree drift between the diagnostic and the seam-converted
+  head, recorded here rather than hidden.
+- Row 3 (the fix's proof): converted tree, cache warm — #3 B-final mean
+  15.84 s (B1 14.59 / B2 17.09), i.e. roughly the base wall minus the test's
+  own migration pass plus the template build (row 4 decomposes it).
+- Row 4 (mechanism): warm-run `-cpuprofile` (`-top -nodecount=300`) shows
+  `sqlitemigration.Migrate` absent on B in all three contexts (B-ingest3,
+  B-storepub with `ensureGolden` at 0.01 s cum, B-cmdpub with `store.Open` at
+  0.18 s cum); cold A runs keep it at 27.85 s / 25.31 s / 3.78 s cum
+  (ingest/store/cmd). No residual migrating open on the warm path.
+- Row 5 (concurrency): two focused store-publication processes started
+  together on a cold cache — both pass (4.73 s / 4.77 s), exactly one stamped
+  file, no corruption, no leftover build dir.
+- Row 6 (copy path, no bar): 100 warm production copies of the 800 KiB
+  template take 44.8 ms to the tmpfs managed root (0.45 ms/copy) vs 36.6 ms
+  to `t.TempDir()` (0.37 ms/copy), `-race`, same process; the cold-process
+  first copy (adoption + first-use sweep + buffer fill + one copy) takes
+  5.4 ms. The destination effect is in the noise next to the ~25–30 s
+  migration saving, and tmpfs shows no speed advantage on this box — the
+  keep/drop decision rests on hygiene (dead-owner sweep, no `/tmp` pile), not
+  speed. The first-use sweep cost is reported, not amortized away.
+- Row 7 (hygiene): `storetest-golden-*` count under `/tmp` is 195 before and
+  195 after every L6 run — no new `TMPDIR` litter (managed roots only; the
+  195 are other trees' per-process builds, still unconverted).
+- Row 7b (killed-run proof): SIGKILL of a race test process ~1 s into a cold
+  template build (`signal: killed`, orphaned `build-*` dir + reused lock
+  file as the only trace) — the next run passes (4.81 s), the orphaned
+  build dir is reclaimed under the exclusive build lock, exactly one stamped
+  file exists, no `-shm`/`-wal` beside it, `/tmp` count unchanged. Honest
+  limit: the `t.TempDir()` fallback path still relies on `t.Cleanup` under
+  SIGKILL; the managed root is the improvement where available. The
+  dead-owner age rule itself (dead AND ≥10 min) is proven by unit test with
+  backdated shelves, not by waiting.
+
+Family A/B pairs (wall / user / sys, seconds; exact command per row:
+`go test -race -count=1 -timeout=0 -run '^<Test>$' ./<pkg>`):
+
+| test | A1 | A2 | B1-final (warm) | B2-final (warm) | L |
+|---|---|---|---|---|---|
+| `TestNormalIngestStoresAuthoritativeContent` (ingest) | 46.13 / 41.52 / 1.78 | 47.92 / 41.95 / 1.80 | 14.59 / 13.00 / 1.40 | 17.09 / 14.91 / 1.51 | 0.951–0.982 |
+| `TestPublicationFullCaptureEligibilityAndBundle` (store) | 35.14 / 31.26 / 1.36 | 33.65 / 30.29 / 1.32 | 5.49 / 3.68 / 1.08 | 5.20 / 3.64 / 1.07 | 0.951–0.982 |
+| `TestPiDatabasePublicationThroughCLI` (cmd) | 38.97 / 36.12 / 1.58 | 37.11 / 33.80 / 1.58 | 37.15 / 32.23 / 1.52 | 36.21 / 32.93 / 1.62 | 0.951–0.982 |
+
+Reading: the store publication test sheds ~29.0 s (−84%, A-mean 34.40 to
+B-mean 5.35 — better than the ~12 s estimate); #3 sheds ~31.2 s (−66%,
+47.03 to 15.84); the cmd publication test sheds ~1.4 s (−4%, 38.04 to
+36.68), consistent with its small template build (row 4: 3.78 s Migrate).
+B-side repeats are flat — no per-test sweep inflation (sweeps run only on a
+successful build and once per process at first use; the copy path takes no
+cross-process lock). One pre-fix B run (`B2-warm` store) failed to BUILD
+(`[build failed]`) because a `go test` invocation compiled the tree between
+two of the worker's own edits; it was re-run clean on the final code and is
+recorded here, not hidden. Pre-fix warm Bs (14.22/16.21, 4.30, 33.12/35.17)
+agree with the final-code Bs within load noise.
+
+On the ~6x template-build magnitude (same schema, different contexts): the
+A-side profiles decompose `store.Open` into Migrate-internal plus eager pool
+open — ingest (pool 10) carries ~8.9 s outside Migrate, store (pool 2)
+~1.4 s, cmd (pool 1) ~0.2 s, matching pool sizes; Migrate-internal itself
+measures 27.85 s / 25.31 s / 3.78 s for the identical 61-migration list
+(pure-Go SQLite under `-race`/checkptr, binary-context-sensitive; root cause
+not isolated). Moot for the epoch either way: the cache removes the build in
+all three contexts, and every warm profile shows Migrate absent.
+
+Validation-found deviations from the design letter (mechanism unchanged):
+validation runs against a scratch copy inside the cache dir via the
+sanctioned `store.SchemaVersionAt` (never the shared file) because a probe
+through this repo's own driver showed a read-only open of a WAL template
+creates `-shm`/`-wal` beside the file while `immutable=1` creates none; the
+scratch removes its own sidecars, and the under-lock reclaim plus the
+`build-*` age sweep cover a SIGKILLed validator. The managed root is
+UID-suffixed and scheme-versioned (`peasant-storetest-v1-u<uid>`); sharing
+one override root across PID namespaces is unsupported and documented.
+Standing template: `golden-v1-61-3f6c0858cc34.db`, 819200 bytes (800 KiB).
+
+Not run: the retention test as a fourth pair — a 230 s-class test needs ~6
+runs (~25 min) for one more instance of the identical template mechanism the
+three pairs already span across three packages; stated, not silently
+dropped.
+
+## T3 focus restoration, copy-root decision: tmpfs default dropped
+
+Follow-up decision on the section above: the tmpfs-preferred managed copy
+root is dropped as the default. The isolated micro (row 6: 100 warm
+production copies of the 800 KiB template, `-race`, same process) measured
+44.8 ms to the tmpfs root vs 36.6 ms to `t.TempDir()` — noise next to the
+~25–30 s migration saving, with no speed edge for tmpfs on this box. The
+default copy root is therefore `t.TempDir()` again (status-quo semantics,
+Go-owned cleanup, OS tmpfiles under SIGKILL); `PEASANT_STORETEST_TMPDIR`
+stays as the opt-in override, routing copies through the managed root
+(per-user scheme subdirectory, first-use dead-owner sweep under the pinned
+conservative rules) when set and writable. The tmpfs auto-probe and its test
+seam are removed; the template cache itself (stamp, lock, sweeps, space
+guard, read-once buffer) is unchanged, as are the `!unix` age-only sweep and
+the override validation. Copy hygiene without tmpfs rests on the template
+cache's own sweeps plus OS tmpfiles for the per-test copies; the `/tmp`
+litter row above (195 → 195 across every L6 run) already measured the
+default path. The family A/B walls stand as quoted: they measured the cache
+effect, and the copy destination contributed ~0.4 ms per copy either way.
