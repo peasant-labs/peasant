@@ -108,7 +108,7 @@ partition:
       instrumentation. Retained race coverage: TestConcurrentReadAcrossActivation,
       TestClose_ConcurrentReadersDoNotPanic (store). Residual risk: a future
       change that parallelises the backfill must add its own race-run test.
-    cost: { wall_ms: 41510, cpu_ms: 39750 }
+    cost: { wall_ms: 2750, cpu_ms: 2090 }
 
   - package: cmd/peasant
     test: TestMountedKickstartStoredGateAlignsViewerAndPush
@@ -123,7 +123,7 @@ partition:
       and candidate sets. Retained race coverage: n/a for the gate (no concurrent
       path); the real bubbletea runtime is not mounted here. Residual risk: races
       inside the live program loop are not observed by this test in either pass.
-    cost: { wall_ms: 16550, cpu_ms: 15240 }
+    cost: { wall_ms: 2040, cpu_ms: 2020 }
 
   - package: cmd/peasant
     test: TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection
@@ -138,7 +138,7 @@ partition:
       command path); store pool concurrency stays under
       TestClose_ConcurrentReadersDoNotPanic. Residual risk: a command that later
       fans reads out across goroutines would need its own race-run test.
-    cost: { wall_ms: 14350, cpu_ms: 13510 }
+    cost: { wall_ms: 1660, cpu_ms: 2060 }
 
   - package: internal/ingest
     test: TestUnknownPrivateEncoding
@@ -152,7 +152,7 @@ partition:
       oracle: this is byte and JSON work with no shared state. Retained race
       coverage: n/a. Residual risk: negligible; the functions hold no package-
       level mutable state.
-    cost: { wall_ms: 15200, cpu_ms: 14200 }
+    cost: { wall_ms: 1590, cpu_ms: 1930 }
 
   - package: cmd/peasant
     test: TestMountedLegacySelectedConversion_ConsentCancellationAndRerun
@@ -167,7 +167,7 @@ partition:
       selection and config bytes. Retained race coverage: n/a (no concurrent
       path). Residual risk: as for the stored-gate journey, the live program loop
       is not exercised.
-    cost: { wall_ms: 13480, cpu_ms: 12330 }
+    cost: { wall_ms: 2450, cpu_ms: 2050 }
 
   - package: cmd/peasant
     test: TestPublicationWizardAndReportUseDatabaseReadiness
@@ -182,7 +182,7 @@ partition:
       oracle: the invariant is readiness flags and missing-metadata counts.
       Retained race coverage: n/a. Residual risk: the wizard is constructed, not
       run, so program-loop races are out of scope here.
-    cost: { wall_ms: 20270, cpu_ms: 33320 }
+    cost: { wall_ms: 1530, cpu_ms: 1880 }
 
   - package: cmd/peasant
     test: TestModelsSync_500_StaticFallback
@@ -199,7 +199,7 @@ partition:
       TestModelsSync_500_StaticFallback_ProviderFilter stay in the race pass over
       the same client/server shape. Residual risk: low; the same HTTP interaction
       remains race-checked by its siblings.
-    cost: { wall_ms: 6700, cpu_ms: 6480 }
+    cost: { wall_ms: 1340, cpu_ms: 1990 }
 
   - package: internal/ingest
     test: TestNativeCoverageMatrix
@@ -215,7 +215,7 @@ partition:
       Retained race coverage: TestConcurrentReadAcrossActivation (store),
       TestConcurrentPairReadsFailClosed (ingest). Residual risk: concurrent
       activation versus reads is covered only by the retained tests.
-    cost: { wall_ms: 24900, cpu_ms: 22200 }
+    cost: { wall_ms: 3870, cpu_ms: 1950 }
 
   - package: cmd/peasant
     test: TestKickstartRescan_FallsBackWithoutCompatibleDatabase
@@ -230,7 +230,7 @@ partition:
       invariant is nil reuse plus resolved git fields and lookup counts. Retained
       race coverage: TestKickstartRescan_ReusesRecordedSessions stays in the race
       pass. Residual risk: negligible.
-    cost: { wall_ms: 6170, cpu_ms: 5750 }
+    cost: { wall_ms: 1460, cpu_ms: 1840 }
 
   - package: internal/ingest
     test: TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology
