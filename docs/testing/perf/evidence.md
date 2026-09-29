@@ -79,3 +79,34 @@ read-only mutation audit found no in-place entry writes (writer path reads
 `EntryIndex` only; the backfill already copies before mutating; sequential
 subtests; per-subtest fresh DBs), but the expected win is string-build only
 while per-subtest DB indexing dominates.
+
+## Screening additions: partition and fix-set pointers
+
+The remaining four confirmed >30 s screening findings. Walls in this section
+were taken on the epoch tree (`09d9e93c`), not the `da7abd7f` survey base; the
+row shape above still holds (test → class → exact command → before wall/CPU →
+after wall/CPU → L). After-columns marked pending are quoted by their owning
+change — the partition entries and the fix-set pair — and are not duplicated
+here. The store publication test's conversion pair is recorded in the section
+above and is not repeated; its final warm pair lands after the
+persistent-template amendment rebuilds the once-per-process template build.
+
+`TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (ingest) is T1,
+eligibility STRONG: the recorded read shows synchronous in-process byte work
+(filter + `IndexTranscriptBytes` + adapter extraction, no store open, no SQL,
+no goroutines/channels/atomics on the exercised path; the `t.Parallel` is
+suite scheduling), and the fixture sizes are the invariant (10 MiB whole-record
+cases across five harnesses; the 256 MiB production limit), not reduced. The
+committed rollup over the `-top -nodecount=300` profile puts the detector at
+81.47% flat with zero store/SQL/engine rows — past the 60% bar. The pair
+(preceded by screen 52.9 s, warm 48.6 s) is 8.9x; race CPU ≈ wall, the
+detector serializing single-threaded bytes. The five-part soundness argument
+and the registry cost travel with the partition entry, whose change is the
+registry's single writer.
+
+| test | class | exact command | before wall/CPU | after wall/CPU | L |
+|---|---|---|---|---|---|
+| `TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (ingest) | T1 | `go test -race -count=1 -timeout=0 -run '^TestLargeRecordsAreHandledUniformlyAcrossHarnesses$' ./internal/ingest` (before with `-race`; after without; one discarded warmup each, serial, GNU `time -v`, epoch tree, GOMAXPROCS=32) | 46.56 wall / 43.14 user / 3.75 sys | 5.22 wall / 5.59 user / 0.83 sys | 0.961 → 0.967 |
+| `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 45.0 / warm 42.72 wall (73.44 user / 30.52 sys) | pending — partition entry (after-wall quoted there) | not recorded (screening re-measure; the entry pair carries L) |
+| `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 33.0 / warm 31.94 wall (54.17 user / 22.57 sys) | pending — partition entry (after-wall quoted there) | not recorded (screening re-measure; the entry pair carries L) |
+| `TestHelperGroupListingThroughRegisteredRoutes` (api) | T6 | `go test -race -count=1 -timeout=0 -run '^TestHelperGroupListingThroughRegisteredRoutes$' ./internal/api` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 63.1 / warm 52.35 wall (47.87 user / 1.47 sys) | pending — fix-set pair (after-wall quoted there) | not recorded (screening re-measure; the pair carries L) |
