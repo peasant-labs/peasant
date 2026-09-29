@@ -10,8 +10,9 @@
 // keyed by schema fingerprint) so focused runs reuse it across processes; the
 // per-test copies stay private. The template is published read-only and each
 // process reads it once into memory, so copies never touch the cache file's
-// lifetime. Point golden copies at a RAM disk with PEASANT_STORETEST_TMPDIR
-// where /dev/shm is absent or small. Delete the cache with `rm -rf
+// lifetime. Copies default to `t.TempDir()`; set `PEASANT_STORETEST_TMPDIR`
+// to route them through a managed root (e.g. a RAM disk) with dead-owner
+// sweeping. Delete the cache with `rm -rf
 // .testcache/`.
 package storetest
 
@@ -380,7 +381,7 @@ func sweepCache(dir, current string) {
 
 // buildPrivateGolden is today's per-process template build, used when the
 // cache is unavailable or contended past the deadline. It routes under the
-// managed copy root when available so the dead-owner sweep covers it,
+// managed override root when set so the dead-owner sweep covers it,
 // otherwise under os.MkdirTemp exactly as before. Only a failure here is
 // fatal.
 func buildPrivateGolden(t *testing.T) (path, dir string) {
@@ -415,8 +416,8 @@ func buildGoldenIn(t *testing.T, dir string) string {
 	s, err := store.Open(path)
 	if err != nil {
 		// A managed-root build may fail where the classic temp build
-		// succeeds (e.g. a transient /dev/shm pressure spike); let the
-		// caller retry on the classic path instead of failing the test.
+		// succeeds (e.g. transient pressure on the override filesystem); let
+		// the caller retry on the classic path instead of failing the test.
 		if isManagedDir(dir) {
 			return ""
 		}

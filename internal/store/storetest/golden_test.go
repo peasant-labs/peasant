@@ -28,7 +28,6 @@ func resetGoldenStateForTest(t *testing.T) {
 	savedCached, savedPrivateDir := goldenCached, goldenPrivateDir
 	savedBuf, savedBufFor := goldenBuf, goldenBufFor
 	savedCacheDir := cacheDirForTest
-	savedProbe := probeTmpfsForTest
 	copyRootMu.Lock()
 	savedRoot, savedSwept := copyRoot, copyRootSwept
 	copyRoot, copyRootSwept = "", false
@@ -37,7 +36,6 @@ func resetGoldenStateForTest(t *testing.T) {
 	goldenCached, goldenPrivateDir = false, ""
 	goldenBuf, goldenBufFor = nil, ""
 	cacheDirForTest = ""
-	probeTmpfsForTest = nil
 	goldenMu.Unlock()
 	t.Cleanup(func() {
 		goldenMu.Lock()
@@ -49,8 +47,16 @@ func resetGoldenStateForTest(t *testing.T) {
 		goldenCached, goldenPrivateDir = savedCached, savedPrivateDir
 		goldenBuf, goldenBufFor = savedBuf, savedBufFor
 		cacheDirForTest = savedCacheDir
-		probeTmpfsForTest = savedProbe
 	})
+}
+
+// resetCopyRootResolution clears the once-per-process override resolution so
+// a test can change EnvStoretestTmpDir between cases. Serial tests only; it
+// lives here (not in the production file) because only tests re-resolve.
+func resetCopyRootResolution() {
+	copyRootMu.Lock()
+	defer copyRootMu.Unlock()
+	copyRoot, copyRootSwept = "", false
 }
 
 // TestConcurrentGoldenCopiesAreIsolated protects the property that makes this
@@ -209,32 +215,28 @@ func TestGoldenCacheFailureFallsBackPrivately(t *testing.T) {
 }
 
 // TestCopyRootPrecedence pins the managed-root precedence without touching
-// the real /dev/shm: an explicit override wins, then the tmpfs probe, else
-// no managed root. The pure core is tested directly; the probe seam covers
-// the live branch.
-func TestCopyRootPrecedence(t *testing.T) {
+// TestCopyRootOverridePrecedence pins the managed-root precedence: unset
+// means the t.TempDir default (no managed root); a set override resolves to
+// the per-user scheme subdirectory, validated loudly. There is no other
+// branch — no filesystem probing.
+func TestCopyRootOverridePrecedence(t *testing.T) {
 	resetGoldenStateForTest(t)
 
-	if root, ok := resolveManagedRootForConfig("", false); ok || root != "" {
-		t.Fatalf("no override and no tmpfs resolved to %q, want the t.TempDir fallback", root)
-	}
-	wantShm := filepath.Join("/dev/shm", defaultShmRoot())
-	if root, ok := resolveManagedRootForConfig("", true); !ok || root != wantShm {
-		t.Fatalf("no override with tmpfs resolved to %q, want %q", root, wantShm)
-	}
-	override := filepath.Join(t.TempDir(), "ramdisk")
-	if root, ok := resolveManagedRootForConfig(override, true); !ok || root != override {
-		t.Fatalf("explicit override with tmpfs present resolved to %q, want the override %q", root, override)
+	t.Setenv(EnvStoretestTmpDir, "")
+	if root, ok := resolveCopyRoot(t); ok || root != "" {
+		t.Fatalf("unset override resolved to %q, want the t.TempDir default", root)
 	}
 
+	override := filepath.Join(t.TempDir(), "ramdisk")
 	t.Setenv(EnvStoretestTmpDir, override)
 	if err := validateCopyRootOverride(override); err != nil {
 		t.Fatalf("a writable temp dir failed override validation: %v", err)
 	}
-	probeTmpfsForTest = boolPtr(false)
-	root, ok := managedRootCandidate()
-	if !ok || root != override {
-		t.Fatalf("env override resolved to %q, want %q", root, override)
+	resetCopyRootResolution()
+	root, ok := resolveCopyRoot(t)
+	want := filepath.Join(override, managedRootDirName())
+	if !ok || root != want {
+		t.Fatalf("env override resolved to %q, want the scheme subdir %q", root, want)
 	}
 
 	// An explicitly set but unusable override is an actionable error with no
@@ -251,38 +253,44 @@ func TestCopyRootPrecedence(t *testing.T) {
 	}
 }
 
-// TestCopyRootTmpfsUnavailableFallsBack disables the tmpfs probe and proves
-// copies still land in private per-test directories with no managed root.
-func TestCopyRootTmpfsUnavailableFallsBack(t *testing.T) {
+// TestCopyRootUnsetUsesTempDir proves the default: with no override, copies
+// land in private per-test directories under the OS temp dir with no managed
+// root resolved.
+func TestCopyRootUnsetUsesTempDir(t *testing.T) {
 	resetGoldenStateForTest(t)
-	probeTmpfsForTest = boolPtr(false)
+	t.Setenv(EnvStoretestTmpDir, "")
 
 	path := CopyGoldenDB(t)
 	copyRootMu.Lock()
 	managed := copyRoot
 	copyRootMu.Unlock()
 	if managed != "" {
-		t.Fatalf("tmpfs unavailable but a managed root resolved: %q", managed)
+		t.Fatalf("unset override but a managed root resolved: %q", managed)
+	}
+	if rel, err := filepath.Rel(os.TempDir(), path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("default copy %s is not under the OS temp dir %s", path, os.TempDir())
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("fallback copy missing: %v", err)
+		t.Fatalf("default copy missing: %v", err)
 	}
 }
 
 // TestCopyRootOverrideDirectsCopies points the override at a writable dir and
-// proves golden copies land under its owner shelf while CopyGoldenTo keeps
-// writing to its caller-chosen destination.
+// proves golden copies land under its per-user scheme shelf while
+// CopyGoldenTo keeps writing to its caller-chosen destination. The first-use
+// dead-owner sweep runs inside this resolve, so the cadence rule below is
+// exercised on the production path, not just directly.
 func TestCopyRootOverrideDirectsCopies(t *testing.T) {
 	resetGoldenStateForTest(t)
 	override := filepath.Join(t.TempDir(), "ramdisk")
 	t.Setenv(EnvStoretestTmpDir, override)
-	probeTmpfsForTest = boolPtr(false)
 	cacheDirForTest = filepath.Join(t.TempDir(), "golden")
 
 	path := CopyGoldenDB(t)
-	// The copy lives at <override>/pid-<pid>/t-*/test.db.
-	if rel, err := filepath.Rel(override, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		t.Fatalf("override copy %s is not under %s", path, override)
+	// The copy lives at <override>/<scheme>/pid-<pid>/t-*/test.db.
+	wantRoot := filepath.Join(override, managedRootDirName())
+	if rel, err := filepath.Rel(wantRoot, path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("override copy %s is not under the scheme root %s", path, wantRoot)
 	}
 
 	callerChosen := filepath.Join(t.TempDir(), "xdg", "test.db")
@@ -327,16 +335,18 @@ func TestCachedTemplateHasNoSidecars(t *testing.T) {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 // TestDeadOwnerSweepCadence pins the conservative reap rule: a dead owner's
 // shelf is removed only past the age floor (PID-reuse protection), a fresh
 // dead shelf is kept, a live owner's old shelf is never touched, and
 // non-matching entries are never touched. The dead PID comes from a reaped
-// child process, so it is provably dead at sweep time.
+// child process, so it is provably dead at sweep time. The sweep runs inside
+// the per-user scheme subdirectory, mirroring the production override path.
 func TestDeadOwnerSweepCadence(t *testing.T) {
 	resetGoldenStateForTest(t)
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), managedRootDirName())
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	deadPid := deadChildPID(t)
 	old := time.Now().Add(-(ownerAgeFloor + time.Minute))

@@ -386,3 +386,23 @@ Not run: the retention test as a fourth pair — a 230 s-class test needs ~6
 runs (~25 min) for one more instance of the identical template mechanism the
 three pairs already span across three packages; stated, not silently
 dropped.
+
+## T3 focus restoration, copy-root decision: tmpfs default dropped
+
+Follow-up decision on the section above: the tmpfs-preferred managed copy
+root is dropped as the default. The isolated micro (row 6: 100 warm
+production copies of the 800 KiB template, `-race`, same process) measured
+44.8 ms to the tmpfs root vs 36.6 ms to `t.TempDir()` — noise next to the
+~25–30 s migration saving, with no speed edge for tmpfs on this box. The
+default copy root is therefore `t.TempDir()` again (status-quo semantics,
+Go-owned cleanup, OS tmpfiles under SIGKILL); `PEASANT_STORETEST_TMPDIR`
+stays as the opt-in override, routing copies through the managed root
+(per-user scheme subdirectory, first-use dead-owner sweep under the pinned
+conservative rules) when set and writable. The tmpfs auto-probe and its test
+seam are removed; the template cache itself (stamp, lock, sweeps, space
+guard, read-once buffer) is unchanged, as are the `!unix` age-only sweep and
+the override validation. Copy hygiene without tmpfs rests on the template
+cache's own sweeps plus OS tmpfiles for the per-test copies; the `/tmp`
+litter row above (195 → 195 across every L6 run) already measured the
+default path. The family A/B walls stand as quoted: they measured the cache
+effect, and the copy destination contributed ~0.4 ms per copy either way.

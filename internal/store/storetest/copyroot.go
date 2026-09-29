@@ -11,35 +11,35 @@ import (
 	"time"
 )
 
-// EnvStoretestTmpDir names the override for the managed copy root that backs
-// golden copies (OpenWith/CopyGoldenDB) and storetest's private cold/fallback
-// template builds. It mirrors the repo's convention for package env overrides
-// (store.EnvPoolSize, ingest.EnvArenaSizeBytes): a package-level constant so
-// the literal appears once, read with os.Getenv. It is a Linux acceleration
-// knob, not a requirement — the tmpfs probe below and the t.TempDir fallback
-// keep every platform correct without it.
+// EnvStoretestTmpDir names the opt-in override for the managed copy root
+// that backs golden copies (OpenWith/CopyGoldenDB) and storetest's private
+// cold/fallback template builds. It mirrors the repo's convention for package
+// env overrides (store.EnvPoolSize, ingest.EnvArenaSizeBytes): a
+// package-level constant so the literal appears once, read with os.Getenv.
 //
-// Precedence: the override (validated: the path must be creatable and
-// writable; an explicit configuration error fails loudly with an actionable
-// message and no silent fallback) > the /dev/shm tmpfs probe (present,
-// tmpfs, writable, >= 256 MiB free) > t.TempDir(). Empty means unset.
+// The default (unset or empty) is t.TempDir(): status-quo semantics, Go-owned
+// cleanup, OS tmpfiles under SIGKILL. A focused-run micro-measurement showed
+// no copy-speed difference between a tmpfs root and t.TempDir (100 copies of
+// the 800 KiB template: 44.8 ms vs 36.6 ms — noise next to the ~25–30 s
+// migration saving), so no RAM-backed default is worth its machinery. Set the
+// override to route copies through a managed root instead — e.g. a RAM disk,
+// or a scratch placement of choice — with per-process owner shelves and the
+// dead-owner sweep below.
 const EnvStoretestTmpDir = "PEASANT_STORETEST_TMPDIR"
 
-// defaultShmRoot is the RAM-backed candidate for the managed copy root on
-// unix platforms that provide POSIX shared memory under /dev/shm. macOS has
-// no /dev/shm (the probe reports "no") and small-container /dev/shm mounts
-// fail the free check, so both fall back without error.
-//
-// The root is scoped per user (UID suffix) and carries a scheme version: the
-// machine-global /dev/shm is shared by every test process on the box (any
-// worktree, any build, any user), so users must neither collide nor hit each
-// other's permissions, and a future naming-scheme change must not make a new
-// sweeper reap an old layout. Old storetest code never touches this root (it
-// used t.TempDir/TMPDIR only), so there is no version skew with released
-// code. Deliberately sharing one override root across PID namespaces is
-// unsupported: a PID dead in one namespace may be alive in another, and only
-// the age floor guards that case.
-func defaultShmRoot() string {
+// minFreeBytesForCache is the free-space floor for the template cache: below
+// it the helper skips caching and builds privately, so a nearly-full
+// filesystem never gains a new standing file from tests.
+const minFreeBytesForCache = 256 << 20
+
+// managedRootDirName scopes the managed root per user and carries a scheme
+// version: an override root may live anywhere (any worktree, any build, any
+// user), so storetest works inside its own subdirectory — users neither
+// collide nor hit each other's permissions, the sweep never touches files
+// outside it, and a future naming-scheme change does not make a new sweeper
+// reap an old layout. (os.Getuid reports -1 on Windows; the name stays a
+// deterministic per-machine directory there.)
+func managedRootDirName() string {
 	return "peasant-storetest-v1-u" + strconv.Itoa(os.Getuid())
 }
 
@@ -60,59 +60,35 @@ const ownerUnknownMaxAge = 24 * time.Hour
 
 var (
 	copyRootMu    sync.Mutex
-	copyRoot      string // resolved managed root for this process ("" = t.TempDir fallback)
+	copyRoot      string // resolved managed root for this process ("" = t.TempDir default)
 	copyRootSwept bool
-	// probeTmpfsForTest overrides the /dev/shm probe in unit tests so the
-	// precedence test is deterministic without touching the real /dev/shm.
-	// nil means "probe the real filesystem".
-	probeTmpfsForTest *bool
 )
 
-// resolveManagedRootForConfig is the precedence core: an explicit override
-// wins, then the tmpfs probe, else no managed root. Pure over its inputs so
-// unit tests can pin the precedence without touching the environment.
-func resolveManagedRootForConfig(override string, tmpfs bool) (string, bool) {
-	if override != "" {
-		return override, true
-	}
-	if tmpfs {
-		return filepath.Join("/dev/shm", defaultShmRoot()), true
-	}
-	return "", false
-}
-
-// managedRootCandidate applies the precedence chain to the live environment.
-func managedRootCandidate() (string, bool) {
-	return resolveManagedRootForConfig(os.Getenv(EnvStoretestTmpDir), tmpfsAvailable())
-}
-
-// resolveCopyRoot returns the managed copy root for this process, resolving
-// once and sweeping dead-owner entries on first use. An explicitly set but
-// unusable PEASANT_STORETEST_TMPDIR fails the calling test loudly (no silent
-// fallback); a failed tmpfs probe falls back to t.TempDir.
+// resolveCopyRoot returns the managed copy root for this process when the
+// override is set: validated loudly, resolved once, with dead-owner entries
+// swept on first use. Without the override it reports no managed root and
+// the caller uses t.TempDir. An explicitly set but unusable
+// PEASANT_STORETEST_TMPDIR fails the calling test loudly (no silent
+// fallback); there is no other fallback chain.
 func resolveCopyRoot(t *testing.T) (root string, useManaged bool) {
 	t.Helper()
-	if override := os.Getenv(EnvStoretestTmpDir); override != "" {
-		// Validate outside the mutex: a loud failure must not wedge the lock.
-		if err := validateCopyRootOverride(override); err != nil {
-			t.Fatalf("storetest: %v", err)
-		}
+	override := os.Getenv(EnvStoretestTmpDir)
+	if override == "" {
+		return "", false
 	}
+	// Validate outside the mutex: a loud failure must not wedge the lock.
+	if err := validateCopyRootOverride(override); err != nil {
+		t.Fatalf("storetest: %v", err)
+	}
+	root = filepath.Join(override, managedRootDirName())
 	copyRootMu.Lock()
 	defer copyRootMu.Unlock()
 	if copyRootSwept {
 		return copyRoot, copyRoot != ""
 	}
 	copyRootSwept = true
-	root, ok := managedRootCandidate()
-	if !ok {
-		return "", false
-	}
 	if err := os.MkdirAll(ownerDir(root), 0o700); err != nil {
-		if os.Getenv(EnvStoretestTmpDir) != "" {
-			t.Fatalf("storetest: %s=%q: cannot create the owner shelf under the override copy root: %v; fix the permissions or unset %s to use the /dev/shm probe (else t.TempDir)", EnvStoretestTmpDir, root, err, EnvStoretestTmpDir)
-		}
-		return "", false
+		t.Fatalf("storetest: %s=%q: cannot create the owner shelf under the managed root %q: %v; fix the permissions or unset %s to use t.TempDir", EnvStoretestTmpDir, override, root, err, EnvStoretestTmpDir)
 	}
 	sweepDeadOwners(root)
 	copyRoot = root
@@ -120,10 +96,10 @@ func resolveCopyRoot(t *testing.T) (root string, useManaged bool) {
 }
 
 // copyDirForTest makes this test's private copy directory: a t-* subdir of
-// the process's owner shelf under the managed root when available, else under
-// t.TempDir. The removal cleanup is registered BEFORE the caller registers
-// the store's Close, so t.Cleanup's LIFO order closes the store first and
-// removes the directory after.
+// the process's owner shelf under the managed override root when set (the
+// removal cleanup is registered BEFORE the caller registers the store's
+// Close, so t.Cleanup's LIFO order closes the store first), else t.TempDir()
+// with Go-owned cleanup.
 func copyDirForTest(t *testing.T) string {
 	t.Helper()
 	if root, ok := resolveCopyRoot(t); ok {
@@ -138,54 +114,25 @@ func copyDirForTest(t *testing.T) string {
 		// than failing the test; only an explicit override fails loudly, and
 		// resolveCopyRoot already handled that.
 	}
-	dir := t.TempDir()
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
-	})
-	return dir
+	return t.TempDir()
 }
 
 // validateCopyRootOverride checks an explicitly set PEASANT_STORETEST_TMPDIR:
 // the path must be creatable as a directory and writable. The error is
 // actionable (what failed, why, where, how to fix) because an explicit
-// configuration error must never be hidden behind a silent fallback.
+// configuration error must never be hidden behind a silent fallback to
+// t.TempDir.
 func validateCopyRootOverride(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("%s=%q: cannot create the override copy root: %v; create the directory or unset %s to use the /dev/shm probe (else t.TempDir)", EnvStoretestTmpDir, dir, err, EnvStoretestTmpDir)
+		return fmt.Errorf("%s=%q: cannot create the override copy root: %v; create the directory or unset %s to use t.TempDir", EnvStoretestTmpDir, dir, err, EnvStoretestTmpDir)
 	}
 	probe, err := os.CreateTemp(dir, ".storetest-writable-*")
 	if err != nil {
-		return fmt.Errorf("%s=%q: the override copy root is not writable: %v; fix the permissions or unset %s to use the /dev/shm probe (else t.TempDir)", EnvStoretestTmpDir, dir, err, EnvStoretestTmpDir)
+		return fmt.Errorf("%s=%q: the override copy root is not writable: %v; fix the permissions or unset %s to use t.TempDir", EnvStoretestTmpDir, dir, err, EnvStoretestTmpDir)
 	}
 	_ = os.Remove(probe.Name())
 	_ = probe.Close()
 	return nil
-}
-
-// tmpfsAvailable reports whether /dev/shm exists, is a tmpfs, is writable,
-// and has at least minFreeBytesForCache free.
-func tmpfsAvailable() bool {
-	if probeTmpfsForTest != nil {
-		return *probeTmpfsForTest
-	}
-	info, err := os.Stat("/dev/shm")
-	if err != nil || !info.IsDir() {
-		return false
-	}
-	if !isTmpfsPath("/dev/shm") {
-		return false
-	}
-	free, ok := freeBytesOnFilesystem("/dev/shm")
-	if !ok || free < minFreeBytesForCache {
-		return false
-	}
-	probe, err := os.CreateTemp("/dev/shm", ".storetest-writable-*")
-	if err != nil {
-		return false
-	}
-	_ = os.Remove(probe.Name())
-	_ = probe.Close()
-	return true
 }
 
 // ownerDir is this process's shelf under the managed root. Per-process shelves
@@ -198,9 +145,9 @@ func ownerDir(root string) string {
 // sweepDeadOwners removes pid-* shelves whose owner is provably dead past
 // the age floor (or past the unknown-liveness age where PID probing is
 // unavailable). It touches only entries matching the helper's own pid-*
-// naming — never other files in a user-provided override root. Every error
-// (vanished entries, permission failures) is best-effort: the sweep never
-// fails a test.
+// naming inside the managed root — never other files in a user-provided
+// override root. Every error (vanished entries, permission failures) is
+// best-effort: the sweep never fails a test.
 func sweepDeadOwners(root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
