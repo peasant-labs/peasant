@@ -153,9 +153,7 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 			t.Fatalf("missing or duplicate no-materialization case name %q", c.Name)
 		}
 		names[c.Name] = true
-		switch c.Encoding {
-		case "payloadText", "rawPayload", "escapedKind", "escapedKey", "escapedRootKey":
-		default:
+		if !IsRetainedNoMaterializationEncoding(c.Encoding) {
 			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
 		}
 	}
@@ -346,6 +344,18 @@ func TestProbeAcceptedRowsMeetAuthoritativeDecoder(t *testing.T) {
 				t.Fatalf("probe over=%v but the longest decoded payload is over=%v at limit %d for %q", over, measuredOver, c.Limit, c.Name)
 			}
 		})
+	}
+}
+
+// TestProbeMemberMasksFit guards the 64-bit duplicate-detection masks: every
+// owned key set must stay below 64 names, because jsonMemberBit declines a
+// member at index 64 or beyond instead of issuing a zero bit that would
+// silently disable duplicate and required-member detection for it.
+func TestProbeMemberMasksFit(t *testing.T) {
+	for _, keys := range [][]string{retainedEnvelopeKeys, retainedPositionKeys, retainedPublicKeys} {
+		if len(keys) >= 64 {
+			t.Fatalf("owned key set %q holds %d names, reaching the 64-bit duplicate-detection mask width", keys, len(keys))
+		}
 	}
 }
 

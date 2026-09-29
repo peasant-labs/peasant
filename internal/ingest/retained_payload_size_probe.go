@@ -98,7 +98,9 @@ func containsUnpairedSurrogateEscape(raw string) bool {
 // least one stores a payload whose public transfer size exceeds the published
 // limit. It reads the stored JSON text in place, so a refusal allocates nothing
 // proportional to the payload: an oversized payload is refused without decoding
-// or copying the payload itself. Small owned members (harness, namespace,
+// or copying the payload itself. Sibling extension members are copied once
+// each for the strict re-scan, bounded by each extension value's own extent
+// and never by a retained payload. Small owned members (harness, namespace,
 // kind, source references, pointers) and member names are decoded one at a time
 // to validate their canonical escaped spellings; each decode is bounded by its
 // own member or key extent, never by a retained payload.
@@ -454,11 +456,19 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 }
 
 // jsonMemberBit maps a canonical object member name to its duplicate-detection
-// bit within one closed key set. Masks are 64 bits wide so a growing key set
-// cannot silently wrap around and disable duplicate detection.
+// bit within one closed key set. The masks are 64 bits wide, so a member at
+// index 64 or beyond would shift a zero bit and silently disable duplicate
+// and required-member detection for it; the helper instead reports such a
+// member as unowned, so the probe declines and the authoritative path owns
+// the refusal. The envelope, position, and public sets hold 6, 6, and 3
+// names, and TestProbeMemberMasksFit fails if any of them ever reaches the
+// mask width.
 func jsonMemberBit(keys []string, name string) (uint64, bool) {
 	for index, key := range keys {
 		if key == name {
+			if index >= 64 {
+				return 0, false
+			}
 			return 1 << uint(index), true
 		}
 	}

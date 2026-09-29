@@ -126,6 +126,15 @@ requiredNames:
   - cap_boundary_payload_text_one_over
   - cap_boundary_raw_payload_at_cap
   - cap_boundary_raw_payload_one_over
+  - probe_escaped_harness_over_limit
+  - probe_escaped_public_key_over_limit
+  - probe_escaped_raw_payload_key_over_limit
+  - probe_negative_zero_public_coordinate_over_limit
+  - probe_empty_public_source_ref_declined
+  - probe_retained_null_declined
+  - probe_retained_scalar_declined
+  - probe_duplicate_extension_key_declined
+  - probe_non_object_retained_element
 
 # probeHarness is the export harness the probe cases are asked for unless the
 # case overrides it. The probe requires the envelope harness to name a known
@@ -174,15 +183,17 @@ rawExtentCases:
 # would accept them apart from size, including canonical escaped spellings of
 # owned strings and member names. Templates carry tokens the test replaces: {{FF}} is one raw
 # 0xFF byte (invalid UTF-8, which YAML cannot spell literally), {{DEEP}} is a
-# 12,001-deep raw array, {{DEEP9997}} is a 9,997-deep raw array at the probe's
-# conservative raw-payload floor (declined by the probe, accepted by the
-# decoder), {{DEEP9996}} is a 9,996-deep raw array exactly at the probe's
+# 12,001-deep raw array, {{DEEP9997}} is a 9,997-deep raw array one past the
+# probe's conservative raw-payload budget (declined by the probe, accepted by
+# the decoder), {{DEEP9996}} is a 9,996-deep raw array exactly at the probe's
 # raw-payload budget (accepted by both), {{DEEP9999}} is a 9,999-deep raw
 # array exactly at the extension budget (accepted by both), and {{DEEP10000}}
-# is a 10,000-deep raw array for the extension budget boundary (declined by
+# is a 10,000-deep raw array one past the extension budget (declined by
 # the probe, refused by the decoder). The depth spellings are expanded from
-# the probe's budget constants in the test, so they move with the constants
-# instead of going stale. The
+# localRawEvidenceDepth, the shared authoritative ceiling, in the test rather
+# than from the probe's own budget constants, so narrowing a probe budget
+# without moving the authority turns the accepted boundary row red instead of
+# silently retargeting it. The
 # measureCases unpaired-surrogate rows pin the measurement helper only; the
 # probe declines those shapes via its whole-document pre-scan, pinned by the
 # probe_lone_surrogate rows below. Deliberate size-precedence shapes (invalid
@@ -744,6 +755,52 @@ probeCases:
   - name: probe_undecodable_escaped_root_key
     limit: 8
     extra: '{"retainedUnk\uZZown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_escaped_harness_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"cod\u0065x","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_public_key_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"publ\u0069c":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_raw_payload_key_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"paylo\u0061d":123456789}]}'
+    wantOver: true
+  - name: probe_negative_zero_public_coordinate_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":-0,"position":-0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_empty_public_source_ref_declined
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_retained_null_declined
+    limit: 8
+    extra: '{"retainedUnknown":null}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_retained_scalar_declined
+    limit: 8
+    extra: '{"retainedUnknown":1}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_duplicate_extension_key_declined
+    limit: 8
+    extra: '{"other":{"a":1,"a":2},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_non_object_retained_element
+    limit: 8
+    extra: '{"retainedUnknown":[1]}'
     wantOver: false
     declined: true
     decoderRefuses: true
