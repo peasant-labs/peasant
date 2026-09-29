@@ -232,3 +232,51 @@ registry's single writer.
 | `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 45.0 / warm 42.72 wall (73.44 user / 30.52 sys) | pending — partition entry (after-wall quoted there) | not recorded (screening re-measure; the entry pair carries L) |
 | `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 33.0 / warm 31.94 wall (54.17 user / 22.57 sys) | pending — partition entry (after-wall quoted there) | not recorded (screening re-measure; the entry pair carries L) |
 | `TestHelperGroupListingThroughRegisteredRoutes` (api) | T6 | `go test -race -count=1 -timeout=0 -run '^TestHelperGroupListingThroughRegisteredRoutes$' ./internal/api` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 63.1 / warm 52.35 wall (47.87 user / 1.47 sys) | pending — fix-set pair (after-wall quoted there) | not recorded (screening re-measure; the pair carries L) |
+## T2 — SQL statement and seed reductions
+
+Change: `SyncModels` prepares its 15-column upsert once and rebinds it per
+model; sixteen constant-text sites move from per-call prepare to the
+connection-cached statement; the backfill seed test commits one metadata
+batch and one entry write set instead of one transaction per session. No
+assertion changed. Focused command per row (one discarded warmup, serial):
+`go test -race -count=1 -timeout=0 -run '^<Test>$' ./<pkg>`, timed with GNU
+`time -v`; the before column is the survey baseline above (base `da7abd7f`,
+L=0.957). The after column ran on a box shared with a concurrent validation
+window — provisional walls may be inflated, which only understates wins. L
+from the documented companion (`RACE=0 go run ./cmd/testgate run -pkgs
+./internal/testkit/coveragemap,./cmd/testgate -race=false`): 0.952 at window
+start, 0.951 at window end. GOMAXPROCS=32. Before/after columns read
+wall / user / sys, seconds.
+
+| test | class | exact command | before wall/CPU | after wall/CPU | L |
+|---|---|---|---|---|---|
+| `TestModelsSync_500_StaticFallback` (cmd) | T2 | `go test -race -count=1 -timeout=0 -run '^TestModelsSync_500_StaticFallback$' ./cmd/peasant` | 10.2 / 8.9 / 1.1 | 6.70 / 5.59 / 0.89 | 0.952 |
+| `TestRetainedContentBackfill` (ingest) | T2 (seed batching) | `go test -race -count=1 -timeout=0 -run '^TestRetainedContentBackfill$' ./internal/ingest` | 28.3 / 26.0 / 1.2 | 25.78 / 24.47 / 1.03 | 0.952 |
+| `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (ingest) | T2 (origin conversions; migration-dominated) | `go test -race -count=1 -timeout=0 -run '^TestResolveStoredOriginsWritesAVerdictIntoEveryRow$' ./internal/ingest` | 41.1 / 38.0 / 1.3 | 41.51 / 38.56 / 1.19 | 0.952 |
+
+Behavior proof: `go test -race -count=1 ./internal/store/` PASS — wall
+397.68 s, user 543.42 s, sys 11.37 s. That suite covers the converted call
+sites (models sync/get, origin list/update, session insert, evidence
+load/save, index-state read, seq-cursor lookup/upsert).
+`go test -race -count=1 ./internal/salt/` PASS — wall 1.60 s, user 0.71 s,
+sys 0.27 s (covers the four `salt.Load` conversions).
+
+Disposition, no code change (each verified by reading the call site):
+- `BulkLookupSessionLocations` (`reader.go`) builds `IN (?,?,…)` with arity
+  from the input length — variable text, excluded by the constant-text
+  guard, no fallback.
+- `selectSessionIDs` (`harvester_selection.go`) executes caller-supplied
+  text — excluded, no fallback.
+- `ListStaleIndexSessions` (`index_state_writer.go`) builds a `WHERE …
+  OR …` chain from the targets map — excluded, no fallback.
+- `validateIndexFormatQueryOnConn` (`index_format_reader.go`) builds a
+  per-batch `IN` list sized to the final batch — excluded, no fallback.
+- `preparePragmas` (`store.go`) runs once per connection via
+  `PoolOptions.PrepareConn` — caching buys nothing; dropped.
+- `applyV23DataMigration` runs only on the migration path — T3-covered.
+
+Reading of the rows: the models-sync loop sheds ~34% of its focused wall;
+the backfill seed sheds ~9%; the origin verdict path is flat (+1%,
+shared-box noise on a migration-dominated test) — the origin conversions
+are kept as zero-risk parse savings and recorded here rather than forced
+into a win.

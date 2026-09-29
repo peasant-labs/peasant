@@ -70,6 +70,12 @@ func TestRetainedContentBackfill(t *testing.T) {
 			if fixture.Cursor {
 				data = []byte(fmt.Sprintf(`{"uuid":"stable_cursor_message","role":"assistant","content":%s}`, raw))
 			}
+			// Seed setup batches its store writes: one metadata commit and one
+			// entry write set for every session, instead of one transaction per
+			// session. The per-session reads below still observe the same rows;
+			// only the write batching changed, not what is stored.
+			var storeEntries []ingest.StoreEntry
+			var entryWrites []ingest.SessionEntryWrite
 			for i := 0; i < count; i++ {
 				id, err := ingest.NewSessionID(fmt.Sprintf("ses_backfill%03d", i))
 				if err != nil {
@@ -103,9 +109,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 					meta.ParentUUID = &parentID
 					dir = filepath.Join(dir, parentID.String(), "subagents")
 				}
-				if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: meta}}); err != nil {
-					t.Fatal(err)
-				}
+				storeEntries = append(storeEntries, ingest.StoreEntry{Metadata: meta})
 				path := filepath.Join(dir, id.String(), id.String()+"--transcript.jsonl")
 				session := ingest.DiscoveredSession{SessionID: id, Harness: harness, SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL}
 				idx := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[harness]
@@ -117,13 +121,40 @@ func TestRetainedContentBackfill(t *testing.T) {
 					value := `{"legacy":"anchor"}`
 					entries[0].Extra = &value
 				}
-				if err := database.IndexSessionEntries(ctx, id, entries); err != nil {
+				if fixture.Cursor && (entries[0].ContentPreview == nil || *entries[0].ContentPreview != "example") {
+					t.Fatal("tolerant Cursor preview shape changed")
+				}
+				// IndexSessionEntries is a single-write IndexSessionEntryBatch
+				// with these exact arguments; collect the identical write and
+				// commit one batch for all sessions below.
+				entryWrites = append(entryWrites, ingest.SessionEntryWrite{
+					SessionID: id, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+					Mode: ingest.SessionEntryWriteExplicitRebuild,
+				})
+				metadata, _ := json.Marshal(meta)
+				if err := fs.WriteFile(filepath.Join(dir, id.String(), id.String()+"--metadata.json"), metadata, 0600); err != nil {
 					t.Fatal(err)
 				}
+				content := data
+				if fixture.Corrupt && i == 0 {
+					content = []byte(`{"type":`)
+				}
+				if err := fs.WriteFile(path, content, 0600); err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, id)
+			}
+			if err := database.InsertSessions(ctx, storeEntries); err != nil {
+				t.Fatal(err)
+			}
+			results := database.IndexSessionEntryBatch(ctx, entryWrites)
+			for _, result := range results {
+				if result.Err != nil {
+					t.Fatal(result.Err)
+				}
+			}
+			for _, id := range ids {
 				if fixture.Cursor {
-					if entries[0].ContentPreview == nil || *entries[0].ContentPreview != "example" {
-						t.Fatal("tolerant Cursor preview shape changed")
-					}
 					annotator, err := database.GetAnnotatorIDByName(ctx, "frustration-classifier")
 					if err != nil {
 						t.Fatal(err)
@@ -146,18 +177,6 @@ func TestRetainedContentBackfill(t *testing.T) {
 					t.Fatal(err)
 				}
 				captures = append(captures, capture)
-				metadata, _ := json.Marshal(meta)
-				if err := fs.WriteFile(filepath.Join(dir, id.String(), id.String()+"--metadata.json"), metadata, 0600); err != nil {
-					t.Fatal(err)
-				}
-				content := data
-				if fixture.Corrupt && i == 0 {
-					content = []byte(`{"type":`)
-				}
-				if err := fs.WriteFile(path, content, 0600); err != nil {
-					t.Fatal(err)
-				}
-				ids = append(ids, id)
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex = true
