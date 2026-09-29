@@ -300,10 +300,18 @@ func spawnWebServer(spawn webServerSpawn) (pid int, pidFile string, err error) {
 	return pid, pidFile, nil
 }
 
+// webServerReadyWait is how long a freshly forked server has to answer the
+// health route.
+const webServerReadyWait = time.Duration(defaults.HealthCheckAttempts) * defaults.HealthCheckInterval
+
 // webServerHealthy reports whether a Peasant server answers the health route
-// under baseURL.
-func webServerHealthy(client *http.Client, baseURL string) bool {
-	resp, err := client.Get(baseURL + defaults.RouteHealth.String())
+// under baseURL before ctx ends.
+func webServerHealthy(ctx context.Context, client *http.Client, baseURL string) bool {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+defaults.RouteHealth.String(), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(request)
 	if err != nil {
 		return false
 	}
@@ -311,16 +319,22 @@ func webServerHealthy(client *http.Client, baseURL string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// waitForWebServer polls the health route until the server answers or the
-// attempts run out.
-func waitForWebServer(client *http.Client, baseURL string, attempts int, interval time.Duration) bool {
-	for range attempts {
-		time.Sleep(interval)
-		if webServerHealthy(client, baseURL) {
+// waitForWebServer polls the health route every interval until the server
+// answers or wait has passed. No probe outlives the wait, so a listener that
+// accepts connections and never answers cannot stretch it.
+func waitForWebServer(client *http.Client, baseURL string, wait, interval time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(interval):
+		}
+		if webServerHealthy(ctx, client, baseURL) {
 			return true
 		}
 	}
-	return false
 }
 
 // runWebBackground forks the server as a background process.
@@ -333,7 +347,7 @@ func runWebBackground(spawn webServerSpawn, noBrowser bool) error {
 	// Readiness probe: poll health endpoint
 	serverURL := dashboardBaseURL(spawn.port)
 	client := &http.Client{Timeout: defaults.ServerClientTimeout}
-	if !waitForWebServer(client, serverURL, defaults.HealthCheckAttempts, defaults.HealthCheckInterval) {
+	if !waitForWebServer(client, serverURL, webServerReadyWait, defaults.HealthCheckInterval) {
 		fmt.Fprintf(os.Stderr, "Warning: server may not be ready (health check timed out)\n")
 	}
 
@@ -361,7 +375,7 @@ func stopWeb(port int) error {
 
 	// Try HTTP shutdown first
 	client := &http.Client{Timeout: defaults.ServerClientTimeout}
-	shutdownURL := fmt.Sprintf("http://localhost:%d%s", port, defaults.RouteShutdown)
+	shutdownURL := dashboardBaseURL(port) + defaults.RouteShutdown.String()
 	resp, err := client.Post(shutdownURL, defaults.ContentJSON.String(), nil)
 	if err == nil {
 		defer resp.Body.Close()
