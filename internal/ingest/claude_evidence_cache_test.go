@@ -3,7 +3,6 @@ package ingest_test
 import (
 	"context"
 	_ "embed"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -62,10 +62,10 @@ func loadClaudeEvidenceCacheFixtures(t *testing.T) claudeEvidenceCacheFixtures {
 	return fixtures
 }
 
-// openEvidenceStore opens a local store and closes it when the test ends.
+// openEvidenceStore opens a prepared (golden-copy) local store and closes it when the test ends.
 func openEvidenceStore(t *testing.T, dbPath string) *store.Store {
 	t.Helper()
-	database, err := store.Open(dbPath)
+	database, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open the local store: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestClaudeAdapter_EvidenceCacheSkipsUnchangedTranscripts(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
-			database := openEvidenceStore(t, filepath.Join(t.TempDir(), "peasant.db"))
+			database := openEvidenceStore(t, storetest.CopyGoldenDB(t))
 
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
 			writeClaudeEvidenceFiles(t, fs, fixture.Files)

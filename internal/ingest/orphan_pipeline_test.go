@@ -26,6 +26,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -351,8 +352,8 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err := fs.MkdirAll(env.outputDir, 0o755); err != nil {
 		t.Fatalf("create output directory %q: %v", env.outputDir, err)
 	}
-	dbPath := filepath.Join(t.TempDir(), "peasant.db")
-	db, err := store.Open(dbPath)
+	dbPath := storetest.CopyGoldenDB(t)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +467,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err := db.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}
-	reopened, err := store.Open(dbPath)
+	reopened, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}

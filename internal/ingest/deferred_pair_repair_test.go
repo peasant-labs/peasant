@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -360,7 +361,7 @@ func TestDeferredPairRepairDetection(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
 			memfs := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "deferred-pair.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -464,7 +465,7 @@ func TestDeferredPairRepairSelectionReads(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
 			memfs := testutil.NewMemFS()
-			database, err := store.Open(filepath.Join(t.TempDir(), "deferred-pair-reads.db"))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

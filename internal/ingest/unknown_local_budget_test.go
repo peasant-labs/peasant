@@ -91,8 +91,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 					}
 					opts = append(opts, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locks))
 				}
-				opts = append([]store.OpenOption{store.WithSkipMigrations()}, opts...)
-				db, err := store.Open(dbPath, opts...)
+				db, err := store.Open(dbPath, append([]store.OpenOption{store.WithSkipMigrations()}, opts...)...)
 				if err != nil {
 					t.Fatal(err)
 				}
