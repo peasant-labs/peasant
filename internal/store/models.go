@@ -49,32 +49,60 @@ func (s *Store) SyncModels(ctx context.Context, models []ingest.ModelInfo) error
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
 
+	// One prepare for the whole loop: the statement text is constant, so the
+	// parse happens once and each model rebinds the same 15 parameters.
+	stmt, err := conn.Prepare(sqlUpsertModel)
+	if err != nil {
+		return fmt.Errorf("store: prepare model upsert: %w", err)
+	}
+	defer stmt.Finalize()
+
 	for i := range models {
 		m := &models[i]
-		if err = sqlitex.ExecuteTransient(conn, sqlUpsertModel, &sqlitex.ExecOptions{
-			Args: []any{
-				m.ModelID,
-				m.ProviderKey,
-				m.DisplayName,
-				derefString2(m.Family),
-				derefInt(m.ContextWindow),
-				derefInt(m.MaxOutput),
-				boolToInt(m.Reasoning),
-				boolToInt(m.ToolCall),
-				derefFloat64(m.CostInputPerMTok),
-				derefFloat64(m.CostOutputPerMTok),
-				derefFloat64(m.CostReasoningPerMTok),
-				derefFloat64(m.CostCacheReadPerMTok),
-				derefFloat64(m.CostCacheWritePerMTok),
-				derefString2(m.ReleaseDate),
-				m.LastSynced,
-			},
-		}); err != nil {
-			return fmt.Errorf("store: upsert model %s/%s: %w", m.ModelID, m.ProviderKey, err)
+		bindModelUpsert(stmt, m)
+		_, stepErr := stmt.Step()
+		resetErr := stmt.Reset()
+		clearErr := stmt.ClearBindings()
+		switch {
+		case stepErr != nil:
+			return fmt.Errorf("store: upsert model %s/%s: %w", m.ModelID, m.ProviderKey, stepErr)
+		case resetErr != nil:
+			return fmt.Errorf("store: reset model upsert after %s/%s: %w", m.ModelID, m.ProviderKey, resetErr)
+		case clearErr != nil:
+			return fmt.Errorf("store: clear model upsert bindings after %s/%s: %w", m.ModelID, m.ProviderKey, clearErr)
 		}
 	}
 
 	return nil
+}
+
+// bindModelUpsert binds one model row to the reused upsert statement.
+// Parameter order must match sqlUpsertModel.
+func bindModelUpsert(stmt *sqlite.Stmt, m *ingest.ModelInfo) {
+	stmt.BindText(1, m.ModelID)
+	stmt.BindText(2, m.ProviderKey)
+	stmt.BindText(3, m.DisplayName)
+	bindNullableString(stmt, 4, m.Family)
+	bindNullableInt(stmt, 5, m.ContextWindow)
+	bindNullableInt(stmt, 6, m.MaxOutput)
+	stmt.BindInt64(7, int64(boolToInt(m.Reasoning)))
+	stmt.BindInt64(8, int64(boolToInt(m.ToolCall)))
+	bindNullableFloat64(stmt, 9, m.CostInputPerMTok)
+	bindNullableFloat64(stmt, 10, m.CostOutputPerMTok)
+	bindNullableFloat64(stmt, 11, m.CostReasoningPerMTok)
+	bindNullableFloat64(stmt, 12, m.CostCacheReadPerMTok)
+	bindNullableFloat64(stmt, 13, m.CostCacheWritePerMTok)
+	bindNullableString(stmt, 14, m.ReleaseDate)
+	stmt.BindText(15, m.LastSynced)
+}
+
+// bindNullableFloat64 binds NULL for a nil pointer, else the float value.
+func bindNullableFloat64(stmt *sqlite.Stmt, param int, value *float64) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindFloat(param, *value)
 }
 
 // GetModel returns a single model by ID and provider key, or nil if not found.
