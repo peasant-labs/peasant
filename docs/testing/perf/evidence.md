@@ -680,3 +680,56 @@ the cache alone took the focused wall to 14.4 s, and packing takes it to
 package already runs other tests in parallel around this one; the before
 package run saw higher load, so its delta is an upper bound. The
 parallel-unsafe guard (`go test ./internal/testutil`) stays green.
+
+## T1 — no-race partition: single-threaded byte tests
+
+Change: the nine tests below move to the gate's no-race pass as `single-threaded-bytes`
+registry entries; each entry carries the short-form argument (subject; concurrency actually
+exercised per a bounded code read; why the race detector is not this test's oracle; retained
+race coverage; residual risk) in `no-race-partition.yaml`, repeated in the taxonomy's
+detector-tax section. The two build-topology guards and the large-record harness test joined
+the same wave earlier. No test code changed.
+
+Measurement: focused Class A, one discarded warmup per pass, serial; `wall / user / sys` in
+seconds from GNU `time -v`; the before column ran with `-race`, the after column is the
+command shown per row; L is the 1-minute load average before each measured run (32 cores).
+The box ran other work concurrently; every pair improved anyway.
+
+| test | after command | before wall/user/sys | after wall/user/sys | L |
+|---|---|---|---|---|
+| `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` | `go test -count=1 -timeout=0 -run '^TestResolveStoredOriginsWritesAVerdictIntoEveryRow$' ./internal/ingest` | 9.25 / 7.11 / 0.90 | 2.75 / 1.47 / 0.62 | 3.15 -> 3.43 |
+| `TestUnknownPrivateEncoding` | `go test -count=1 -timeout=0 -run '^TestUnknownPrivateEncoding$' ./internal/ingest` | 5.87 / 4.36 / 0.83 | 1.59 / 1.39 / 0.54 | 3.48 -> 4.63 |
+| `TestNativeCoverageMatrix` | `go test -count=1 -timeout=0 -run '^TestNativeCoverageMatrix$' ./internal/ingest` | 9.32 / 4.95 / 0.97 | 3.87 / 1.37 / 0.58 | 5.46 -> 6.50 |
+| `TestMountedKickstartStoredGateAlignsViewerAndPush` | `go test -count=1 -timeout=0 -run '^TestMountedKickstartStoredGateAlignsViewerAndPush$' ./cmd/peasant` | 4.45 / 2.49 / 0.90 | 2.04 / 1.35 / 0.67 | 6.62 -> 7.69 |
+| `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` | `go test -count=1 -timeout=0 -run '^TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection$' ./cmd/peasant` | 3.60 / 2.32 / 0.80 | 1.66 / 1.41 / 0.65 | 8.12 -> 8.19 |
+| `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` | `go test -count=1 -timeout=0 -run '^TestMountedLegacySelectedConversion_ConsentCancellationAndRerun$' ./cmd/peasant` | 4.87 / 2.34 / 0.99 | 2.45 / 1.30 / 0.75 | 10.57 -> 13.53 |
+| `TestPublicationWizardAndReportUseDatabaseReadiness` | `go test -count=1 -timeout=0 -run '^TestPublicationWizardAndReportUseDatabaseReadiness$' ./cmd/peasant` | 3.37 / 2.00 / 0.78 | 1.53 / 1.24 / 0.64 | 17.33 -> 16.43 |
+| `TestModelsSync_500_StaticFallback` | `go test -count=1 -timeout=0 -run '^TestModelsSync_500_StaticFallback$' ./cmd/peasant` | 6.52 / 5.40 / 0.89 | 1.34 / 1.33 / 0.66 | 14.66 -> 13.96 |
+| `TestKickstartRescan_FallsBackWithoutCompatibleDatabase` | `go test -count=1 -timeout=0 -run '^TestKickstartRescan_FallsBackWithoutCompatibleDatabase$' ./cmd/peasant` | 2.77 / 1.61 / 0.78 | 1.46 / 1.27 / 0.57 | 13.16 -> 12.35 |
+
+Canonical subset proof: `RACE=1 go run ./cmd/testgate run -pkgs ./internal/ingest,./cmd/peasant`
+ran the moved entries of these packages in the no-race pass (6 `internal/ingest`, 7
+`cmd/peasant`), with none missing or duplicated. Screen and result:
+
+    all four rules passed: every test ran exactly once across the passes
+    testgate: PASS
+
+race pass 12m18.461s, no-race pass 1m35.015s, calibration L=0.952.
+
+Cost drift: focused re-measurements of the registry's other entries (same command shape, one
+discarded warmup) refreshed the pairs below where the wall moved by more than 10 % of the
+recorded value; sub-second entries were measured three times and refreshed from the median
+(their focused walls include process startup):
+
+| entry | mode | old wall/cpu (ms) | new wall/cpu (ms) | wall delta |
+|---|---|---|---|---|
+| `TestRedactionModuleBoundary` | no-race | 634 / 1014 | 860 / 1290 | +35.6% |
+| `TestRedactionBoundaryFixtureStrictDecoding` | no-race | 583 / 934 | 810 / 1240 | +38.9% |
+| `TestRedactionScannerHoldsALineAtTheRecordLimit` | no-race | 895 / 1240 | 1110 / 1500 | +24.0% |
+| `TestRedactionEngineHandlesRecordOverTheOldLimit` | no-race | 25700 / 26013 | 22870 / 23290 | -11.0% |
+| `TestBuildSnapshotDetailBytesSerializesInsideSnapshotCallback` | no-race | 773 / 1331 | 900 / 1370 | +16.4% |
+| `TestOpenCodeNativeCLI` | race (protected) | 39216 / 53162 | 17210 / 16300 | -56.1% |
+
+Unchanged within 10 %: the e2e seed-unset build, the capabilities matrix, both
+build-topology guards, and the large-record test. `TestOpenCodeNativeCLI` stays race-covered
+(protected); its pair was refreshed from its focused `-race` run.

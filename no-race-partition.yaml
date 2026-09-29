@@ -27,7 +27,7 @@ partition:
       Reads the module graph through `go mod edit`/`go list -m` and walks the
       source tree for forbidden imports; the production path is the go tool and
       the AST, with no shared-memory concurrency subject of its own.
-    cost: { wall_ms: 634, cpu_ms: 1014 }
+    cost: { wall_ms: 860, cpu_ms: 1290 }
 
   - package: internal/moduleboundary
     test: TestRedactionBoundaryFixtureStrictDecoding
@@ -36,7 +36,7 @@ partition:
     justification: >-
       Strict-decodes the embedded boundary fixture in-process; pure byte work,
       no goroutines or shared state.
-    cost: { wall_ms: 583, cpu_ms: 934 }
+    cost: { wall_ms: 810, cpu_ms: 1240 }
 
   - package: internal/moduleboundary
     test: TestRedactionScannerHoldsALineAtTheRecordLimit
@@ -45,7 +45,7 @@ partition:
     justification: >-
       Redacts one at-limit record through the pinned engine; single-threaded
       byte work on a private input.
-    cost: { wall_ms: 895, cpu_ms: 1240 }
+    cost: { wall_ms: 1110, cpu_ms: 1500 }
 
   - package: internal/moduleboundary
     test: TestRedactionEngineHandlesRecordOverTheOldLimit
@@ -55,7 +55,7 @@ partition:
       Redacts a record over the retired 10 MiB limit through the real engine.
       The size is the invariant, so it stays; the work is single-threaded bytes
       with no concurrency subject, and the race detector only inflates it.
-    cost: { wall_ms: 25700, cpu_ms: 26013 }
+    cost: { wall_ms: 22870, cpu_ms: 23290 }
 
   - package: internal/e2e
     test: TestPeasantBinSeamUnsetBuildsGoBinary
@@ -91,7 +91,7 @@ partition:
       The deterministic source oracle for the snapshot-lock boundary: it parses
       production source and asserts where serialization lives. It reads bytes
       and the AST; it runs no production goroutines.
-    cost: { wall_ms: 773, cpu_ms: 1331 }
+    cost: { wall_ms: 900, cpu_ms: 1370 }
 
   - package: internal/ingest
     test: TestResolveStoredOriginsWritesAVerdictIntoEveryRow
@@ -288,4 +288,4 @@ protected:
       the enclosing suite.
     build_flags: ["-race=true"]
     exec_command_site: 'internal/ingest/opencode_native_cli_test.go#TestOpenCodeNativeCLI#exec.CommandContext(ctx, "go", "build", nativeCLIRaceFlag'
-    cost: { wall_ms: 39216, cpu_ms: 53162 }
+    cost: { wall_ms: 17210, cpu_ms: 16300 }
