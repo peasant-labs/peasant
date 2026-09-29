@@ -164,7 +164,9 @@ func seedSyncMirrorCase(t *testing.T, c syncPublicationMirrorCase) *store.Store 
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(filepath.Join(dir, "mirror.db"), store.WithPoolSize(2), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+	destPath := filepath.Join(dir, "mirror.db")
+	storetest.CopyGoldenTo(t, destPath)
+	db, err := store.Open(destPath, store.WithSkipMigrations(), store.WithPoolSize(2), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
 	}

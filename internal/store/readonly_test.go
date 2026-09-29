@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -17,8 +18,8 @@ import (
 // rewriting the database file. The previous implementation refused any live WAL
 // and buffered the whole file in memory first.
 func TestOpenReadOnlyReadsWithLiveWriter(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "peasant.db")
-	writer, err := store.Open(path)
+	path := storetest.CopyGoldenDB(t)
+	writer, err := store.Open(path, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open writer: %v", err)
 	}
@@ -49,8 +50,8 @@ func TestOpenReadOnlyReadsWithLiveWriter(t *testing.T) {
 
 // A schema this build does not understand is refused without migrating.
 func TestOpenReadOnlyRefusesOtherSchema(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "peasant.db")
-	s, err := store.Open(path)
+	path := storetest.CopyGoldenDB(t)
+	s, err := store.Open(path, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

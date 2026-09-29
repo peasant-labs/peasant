@@ -317,8 +317,11 @@ func openBarrierGenerationStore(t *testing.T, attempts chan struct{}) (*store.St
 	if err != nil {
 		t.Fatal(err)
 	}
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
 	s, err := store.Open(
-		filepath.Join(dir, "generations.db"),
+		destPath,
+		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, &attemptBarrierLocker{SessionLocker: locker, attempts: attempts}),

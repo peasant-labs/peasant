@@ -261,7 +261,7 @@ func assertExactAssociations(t *testing.T, surface string, got, want []schema.Pu
 }
 func openLocalPublicationStore(t *testing.T, path string) *store.Store {
 	t.Helper()
-	local, err := store.Open(path, store.WithPoolSize(1))
+	local, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

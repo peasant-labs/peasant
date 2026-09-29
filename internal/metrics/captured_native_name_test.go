@@ -4,12 +4,12 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -101,11 +101,7 @@ func TestCapturedInputAppliesTheRecordedNativeSessionName(t *testing.T) {
 	t.Parallel()
 	for _, tc := range loadCapturedNativeNameCases(t) {
 		t.Run(tc.Name, func(t *testing.T) {
-			db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
+			db := storetest.OpenWith(t, store.WithPoolSize(1))
 			if _, isCaptured := any(db).(ingest.MetricInputStore); !isCaptured {
 				t.Fatal("the production store no longer offers the stored-input path, so this test would silently measure the older list-entries path")
 			}

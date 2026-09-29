@@ -2,7 +2,9 @@
 // SQLite database so a parallel test pays only a file copy and a connection
 // open instead of re-running the migration-state check. The golden DB is shared
 // by active tests and removed when the last user of that shared template
-// finishes.
+// finishes. This package is the only sanctioned way for tests to open a store:
+// the no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
+// store.Open in _test.go outside this package and the migration suite.
 package storetest
 
 import (
