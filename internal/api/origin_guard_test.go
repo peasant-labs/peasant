@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,6 +32,18 @@ type originGuardCase struct {
 	Status       int    `yaml:"status"`
 	Code         string `yaml:"code"`
 }
+
+// The closed sets a fixture case may name, so a typo cannot turn a case into
+// a different request that happens to get the same status.
+var (
+	originGuardMethods = map[string]struct{}{
+		http.MethodGet: {}, http.MethodHead: {}, http.MethodOptions: {},
+		http.MethodPost: {}, http.MethodPut: {}, http.MethodPatch: {}, http.MethodDelete: {},
+	}
+	originGuardFetchSites = map[string]struct{}{
+		"": {}, "cross-site": {}, "same-site": {}, "same-origin": {}, "none": {},
+	}
+)
 
 type originGuardFixture struct {
 	RequiredNames []string          `yaml:"requiredNames"`
@@ -63,6 +76,15 @@ func loadOriginGuardFixture(source []byte) (originGuardFixture, error) {
 		if c.Name == "" || c.Method == "" || c.Path == "" || c.Host == "" || c.Status == 0 {
 			return fixture, fmt.Errorf("origin guard fixture has an incomplete case %q", c.Name)
 		}
+		if _, ok := originGuardMethods[c.Method]; !ok {
+			return fixture, fmt.Errorf("origin guard fixture case %q names unknown method %q", c.Name, c.Method)
+		}
+		if _, ok := originGuardFetchSites[c.SecFetchSite]; !ok {
+			return fixture, fmt.Errorf("origin guard fixture case %q names unknown Sec-Fetch-Site %q", c.Name, c.SecFetchSite)
+		}
+		if c.Upgrade && (c.Method != http.MethodGet || c.Path != defaults.RouteWS.String()) {
+			return fixture, fmt.Errorf("origin guard fixture case %q upgrades a request that is not GET %s", c.Name, defaults.RouteWS)
+		}
 		if (c.Status == http.StatusForbidden) != (c.Code != "") {
 			return fixture, fmt.Errorf("origin guard fixture case %q must name a code exactly when it expects 403", c.Name)
 		}
@@ -86,25 +108,7 @@ func loadOriginGuardFixture(source []byte) (originGuardFixture, error) {
 // WebSocket hub and no store, and stops it when the test ends.
 func startOriginGuardServer(t *testing.T) *Server {
 	t.Helper()
-	server := NewServer(ServerConfig{Port: 0, Hub: NewHub(&mockDataProvider{})})
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := server.Listen(ctx); err != nil {
-		cancel()
-		t.Fatalf("listen origin guard server: %v", err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("stop origin guard server: %v", err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("origin guard server did not stop")
-		}
-	})
+	server, _ := startHelperGroupServerHandle(t, ServerConfig{Hub: NewHub(&mockDataProvider{})})
 	return server
 }
 
@@ -192,31 +196,64 @@ func TestServerListenBindsLoopbackOnly(t *testing.T) {
 		assertHealthAt(t, net.JoinHostPort("::1", port))
 	}
 
-	interfaceIPs := nonLoopbackInterfaceIPs(t)
-	if len(interfaceIPs) == 0 {
-		t.Log("this host has no non-loopback interface address; only the loopback reachability was checked")
-	}
-	for _, ip := range interfaceIPs {
-		target := net.JoinHostPort(ip.String(), port)
-		conn, err := net.DialTimeout("tcp", target, 2*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			t.Errorf("server accepted a connection at non-loopback address %s", target)
+	t.Run("non-loopback addresses refuse", func(t *testing.T) {
+		interfaceIPs := nonLoopbackInterfaceIPs(t)
+		if len(interfaceIPs) == 0 {
+			t.Skip("this host has no non-loopback interface address")
 		}
-	}
+		for _, ip := range interfaceIPs {
+			target := net.JoinHostPort(ip.String(), port)
+			conn, err := net.DialTimeout("tcp", target, 2*time.Second)
+			if err == nil {
+				_ = conn.Close()
+				t.Errorf("server accepted a connection at non-loopback address %s", target)
+			}
+		}
+	})
 }
 
 // TestServerListenRefusesPortBusyOnIPv6Loopback proves a requested port that
-// another process holds on the IPv6 loopback fails the bind. Otherwise a
+// another process serves on the IPv6 loopback fails the bind. Otherwise a
 // browser that resolves localhost to ::1 would reach that process.
 func TestServerListenRefusesPortBusyOnIPv6Loopback(t *testing.T) {
 	t.Parallel()
 	if !hostHasIPv6Loopback(t) {
 		t.Skip("this host has no IPv6 loopback")
 	}
-	holder, err := net.Listen("tcp6", "[::1]:0")
+	// Another process may hold the same port number on the IPv4 loopback, and
+	// then the bind fails there first. Choose a new port when that happens.
+	for attempt := 1; attempt <= 5; attempt++ {
+		holder, err := net.Listen("tcp6", "[::1]:0")
+		if err != nil {
+			t.Fatalf("hold an IPv6 loopback port: %v", err)
+		}
+		port := holder.Addr().(*net.TCPAddr).Port
+		err = NewServer(ServerConfig{Port: port}).Listen(context.Background())
+		_ = holder.Close()
+		if err == nil {
+			t.Fatalf("Listen on port %d succeeded while the IPv6 loopback held it", port)
+		}
+		if strings.Contains(err.Error(), "listen "+net.JoinHostPort(defaults.LoopbackIPv4, strconv.Itoa(port))) {
+			continue
+		}
+		want := "listen " + net.JoinHostPort(defaults.LoopbackIPv6, strconv.Itoa(port))
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Listen error = %v, want it to name %q", err, want)
+		}
+		return
+	}
+	t.Fatal("every chosen port was also held on the IPv4 loopback")
+}
+
+// TestServerListenRefusesPortServedOnWildcardAddress proves a requested port
+// that another process serves on the wildcard address fails the bind. On
+// macOS a loopback bind succeeds beside such a listener, so the new server
+// would start while the other one still listens on every interface.
+func TestServerListenRefusesPortServedOnWildcardAddress(t *testing.T) {
+	t.Parallel()
+	holder, err := net.Listen("tcp4", "0.0.0.0:0")
 	if err != nil {
-		t.Fatalf("hold an IPv6 loopback port: %v", err)
+		t.Fatalf("hold a wildcard port: %v", err)
 	}
 	defer holder.Close()
 	port := holder.Addr().(*net.TCPAddr).Port
@@ -227,11 +264,33 @@ func TestServerListenRefusesPortBusyOnIPv6Loopback(t *testing.T) {
 		for _, ln := range server.lns {
 			_ = ln.Close()
 		}
-		t.Fatalf("Listen on port %d succeeded while the IPv6 loopback held it", port)
+		t.Fatalf("Listen on port %d succeeded while a wildcard listener served it", port)
 	}
-	want := "listen " + net.JoinHostPort("::1", strconv.Itoa(port))
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("Listen error = %v, want it to name %q", err, want)
+	want := fmt.Sprintf("port %d", port)
+	if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "peasant web stop") {
+		t.Fatalf("Listen error = %v, want it to name %q and `peasant web stop`", err, want)
+	}
+}
+
+// TestServerListenWaitsForPortRelease proves a server that is still shutting
+// down, as right after `peasant web stop`, does not fail the next start when
+// it releases the port within the wait.
+func TestServerListenWaitsForPortRelease(t *testing.T) {
+	t.Parallel()
+	holder, err := net.Listen("tcp4", net.JoinHostPort(defaults.LoopbackIPv4, "0"))
+	if err != nil {
+		t.Fatalf("hold a loopback port: %v", err)
+	}
+	port := holder.Addr().(*net.TCPAddr).Port
+	release := time.AfterFunc(defaults.ServerPortReleaseWait/4, func() { _ = holder.Close() })
+	defer release.Stop()
+
+	server := NewServer(ServerConfig{Port: port})
+	if err := server.Listen(context.Background()); err != nil {
+		t.Fatalf("Listen on port %d after its holder released it: %v", port, err)
+	}
+	for _, ln := range server.lns {
+		_ = ln.Close()
 	}
 }
 

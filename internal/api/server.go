@@ -233,7 +233,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	}
 
 	s.server = &http.Server{
-		Handler: requestLogger(localWriteGuard(mux)),
+		Handler: requestLogger(localRequestGuard(mux)),
 	}
 
 	lns, err := listenLoopback(s.cfg.Port)

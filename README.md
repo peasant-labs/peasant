@@ -187,11 +187,16 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
 
 The server listens on the loopback interface only: `127.0.0.1`, and `::1` when the host has an
-IPv6 loopback. Other machines cannot reach it. A state-changing request (any method other than
-`GET`, `HEAD`, or `OPTIONS`) and a WebSocket connection must name the server by a loopback
-`Host` (`localhost`, `127.0.0.1`, or `[::1]`). When the request carries an `Origin` header, that
-origin must be the dashboard's own origin. Other requests get `403`. Local clients that send no
-`Origin` header are accepted, such as `curl`, `peasant web stop`, and the TUI.
+IPv6 loopback. Other machines cannot reach it. `peasant web start` refuses to start while another
+process already accepts connections on the port, such as a dashboard started by an earlier
+version; run `peasant web stop` first.
+
+Every request must name the server by a loopback `Host` (`localhost`, `127.0.0.1`, or `[::1]`).
+A state-changing request (any method other than `GET`, `HEAD`, or `OPTIONS`) and a WebSocket
+connection that carry an `Origin` header must come from the dashboard's own origin. Other
+requests get `403`. Local clients that send no `Origin` header are accepted, such as `curl`,
+`peasant web stop`, and the TUI. A browser request without an `Origin` whose `Sec-Fetch-Site`
+header says it came from another origin is still refused.
 
 ### `peasant tui` flags (deprecated)
 

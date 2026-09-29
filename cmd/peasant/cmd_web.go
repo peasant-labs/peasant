@@ -211,6 +211,13 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 
 // runWebBackground forks the server as a background process.
 func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mockDataStore string, experimental bool) error {
+	// The readiness probe below accepts any answer on the port, so check the
+	// port first. Otherwise an earlier server that still holds it would answer
+	// the probe and be reported as the new one.
+	if err := api.CheckLoopbackPortFree(port); err != nil {
+		return fmt.Errorf("web start: %w", err)
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot find executable: %w", err)

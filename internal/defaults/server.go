@@ -13,6 +13,14 @@ const (
 	ServerFlushDelay      = 100 * time.Millisecond
 	ServerClientTimeout   = 2 * time.Second
 	ServerWriteTimeout    = 10 * time.Second
+	// ServerPortReleaseWait bounds how long starting a server waits for another
+	// process to stop accepting connections on the requested port, so a server
+	// that `peasant web stop` just asked to shut down can release it first.
+	ServerPortReleaseWait = time.Second
+	// ServerPortProbeInterval is the pause between two checks of the port.
+	ServerPortProbeInterval = 100 * time.Millisecond
+	// ServerPortProbeTimeout bounds one connection attempt to a loopback address.
+	ServerPortProbeTimeout = 500 * time.Millisecond
 )
 
 // Server buffer sizes and limits.
