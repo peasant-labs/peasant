@@ -486,7 +486,10 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	passes = append(passes, testgate.PassSummary{
 		Pass: testgate.ModeNoRace, Wall: walls[testgate.ModeNoRace],
 		User: passCPU[testgate.ModeNoRace][0], System: passCPU[testgate.ModeNoRace][1],
-		Serialized: true, Units: len(noRaceRecords),
+		// The partition pass (RACE=1) is serialized for per-test CPU
+		// attribution. The RACE=0 single pass runs packages concurrently, so
+		// its per-unit CPU is best-effort and its wall is the overlapped one.
+		Serialized: race, Units: len(noRaceRecords),
 	})
 	classTable := testgate.BuildClassTable(passes, append(append([]testgate.Record{}, raceRecords...), noRaceRecords...))
 
