@@ -51,3 +51,62 @@ warmup, serial, L=0.957 (base-gate calibration), GOMAXPROCS=32.
 Carried reference (superseded by the measured baseline above): retention test
 243.6 s; #1 93.0 s; #2 91.0 s; #3 51.9 s; #4 48.2 s; #8 61.4 s; #10 25.3 s;
 #11 19.3 s (all focused-and-alone, race, prior reference measurement).
+
+## Prepared-path conversion (cmd suites)
+
+Change: dry-run fixtures and every remaining cmd-suite database setup start
+from a copy of the pre-migrated golden database on the exact path the command
+opens, so the version check finds no pending migrations; test-owned opens
+take the skip-migrations option on the at-head copy, production command opens
+are untouched. Large fixture payloads are built once per test and shared
+read-only across subtests (no fixture size reduced). No assertion changed; no
+NotExist expectation seeded.
+
+After-SHA: `4e21be8a` (survey merge over the conversion commits).
+After command per row (quiet box, one discarded warmup, serial,
+GOMAXPROCS=32):
+`nix develop --command /run/current-system/sw/bin/time -v go test -race
+-count=1 -timeout=0 -run '^<Test>$' ./cmd/peasant`.
+L companion
+(`nix develop --command go run ./cmd/testgate run -pkgs
+./internal/testkit/coveragemap,./cmd/testgate -race=false`):
+L=0.928 at window start, L=0.952 at window end.
+
+| test | class | before wall / user / sys (s) | after wall / user / sys (s) | L |
+|---|---|---|---|---|
+| `TestPiNativeRegistryProjection` (cmd) | T3+T4 | 53.2 / 49.0 / 1.9 | 53.95 / 49.52 / 1.77 | 0.928–0.952 |
+| `TestPiDatabasePublicationThroughCLI` (cmd) | T4+T3 | 35.4 / 33.4 / 1.6 | 37.62 / 35.76 / 1.31 | 0.928–0.952 |
+| `TestPiHarvestCommonModes` (cmd) | T3+T4 | 22.3 / 19.8 / 1.5 | 22.31 / 19.72 / 1.43 | 0.928–0.952 |
+| `TestMountedKickstartStoredGateAlignsViewerAndPush` (cmd) | T3 | 17.1 / 14.4 / 1.2 | 16.55 / 14.20 / 1.04 | 0.928–0.952 |
+| `TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope` (cmd) | T3 | 14.7 / 12.0 / 1.4 | 14.29 / 11.65 / 1.35 | 0.928–0.952 |
+| `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` (cmd) | T3 | 14.1 / 12.4 / 1.1 | 14.35 / 12.55 / 0.96 | 0.928–0.952 |
+| `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` (cmd) | T3 | 13.6 / 11.2 / 1.1 | 13.48 / 11.30 / 1.03 | 0.928–0.952 |
+| `TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary` (cmd) | T3+T4 | 9.8 / 8.1 / 1.0 | 9.88 / 8.32 / 0.91 | 0.928–0.952 |
+
+Before column = the survey baseline above (base `da7abd7f`, L=0.957).
+All eight converted tests pass focused race runs; every delta is within
+run-to-run noise (worst +6.3 %, best −3.2 %).
+
+T4 invariant sizes (before → after, unchanged; each pinned by the named
+assertion):
+
+| payload | size | pinning assertion |
+|---|---|---|
+| publication repetitions | 4200 → 4200 | shared-payload repetition count in `TestPiDatabasePublicationThroughCLI` |
+| publication payload text | 84085 B → 84085 B | redaction + tail containment over the published parts |
+| native boundary metadata | 51175 B, 65537 B → unchanged | selected-subtree byte assertion per case |
+| native boundary padding | 1404 B → unchanged | same selected-subtree assertion |
+| selected metadata subtree | 52620 B → unchanged | `SelectedMetadataBytes` equality per case |
+| harvest long-text expansion | 84000 B (4000 reps) → unchanged | per-case overlay repetition count |
+
+Mechanism check (profile run of `TestPiDatabasePublicationThroughCLI`,
+Class B, wall not quoted): `go tool pprof -top` shows no
+`sqlitemigration.Migrate` node in the top 100 — the per-open migration
+replay is gone. `store.Open` totals 3.63 s cum (10.21 %), of which 3.47 s
+is the single per-process golden-template build (`storetest.ensureGolden`);
+all remaining opens (harvest + read-back) share ~0.16 s. The focused delta
+stays ~neutral because the template build replaces the per-open replays
+inside one process; the persistent-template cache now in design is what
+removes that remaining one-per-process cost. The detector still dominates
+the profile (`racecall` 38.64 % flat), as expected with the partition
+deferred.
