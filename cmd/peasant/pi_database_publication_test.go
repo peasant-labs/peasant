@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -49,15 +50,30 @@ func TestPiDatabasePublicationThroughCLI(t *testing.T) {
 	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "Pi database CLI publication"); err != nil {
 		t.Fatal(err)
 	}
+	// Build the large native payload once per test and share it read-only
+	// across cases: each case derives its source from the same encoded text
+	// through a fresh ReplaceAll, and the subtests run serially, so no case
+	// can mutate what another reads. The count below pins the 4200-repetition
+	// fixture size the redaction and tail assertions depend on.
+	payloadText := strings.Repeat(fixture.Prefix, fixture.Repetitions) + fixture.Tail + " " + fixture.Secret + " " + fixture.PII
+	if got := strings.Count(payloadText, fixture.Prefix); got != fixture.Repetitions {
+		t.Fatalf("shared publication payload holds %d repetitions, want %d", got, fixture.Repetitions)
+	}
+	encodedPayload, err := json.Marshal(payloadText)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			root := t.TempDir()
-			text := strings.Repeat(fixture.Prefix, fixture.Repetitions) + fixture.Tail + " " + fixture.Secret + " " + fixture.PII
-			encoded, err := json.Marshal(text)
-			if err != nil {
-				t.Fatal(err)
+			// Prepared path for the harvest's version check; each case
+			// harvests into its own fresh root exactly once.
+			publicationDBPath := defaults.ResolveDBFilePathWith(root).String()
+			if err := os.MkdirAll(filepath.Dir(publicationDBPath), 0o755); err != nil {
+				t.Fatalf("create publication data directory: %v", err)
 			}
-			data := strings.ReplaceAll(fixture.Source, "TEXT", string(encoded))
+			storetest.CopyGoldenTo(t, publicationDBPath)
+			data := strings.ReplaceAll(fixture.Source, "TEXT", string(encodedPayload))
 			if c.IncompleteTail {
 				data += `{"type":"message"`
 			}
@@ -69,7 +85,7 @@ func TestPiDatabasePublicationThroughCLI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("native harvest: %v %s", err, output)
 			}
-			db, err := store.Open(string(defaults.ResolveDBFilePathWith(root)))
+			db, err := store.Open(string(defaults.ResolveDBFilePathWith(root)), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -85,6 +85,19 @@ func loadPiCommonModesFixture(t *testing.T) piCommonModesFixture {
 func TestPiHarvestCommonModes(t *testing.T) {
 	t.Parallel()
 	fixture := loadPiCommonModesFixture(t)
+	// Build each distinct long-text expansion once per test and share the
+	// read-only copies across cases: per-case source assembly only reads them
+	// through ReplaceAll, and the subtests run serially, so no case can mutate
+	// what another reads. The overlay assertion inside each long-text case
+	// pins the expansion size.
+	longTextExpansions := make(map[int]string)
+	for _, tc := range fixture.Cases {
+		if tc.LongText > 0 {
+			if _, ok := longTextExpansions[tc.LongText]; !ok {
+				longTextExpansions[tc.LongText] = strings.Repeat("native pipeline body ", tc.LongText)
+			}
+		}
+	}
 	seen := make(map[string]bool)
 	for _, tc := range fixture.Cases {
 		if seen[tc.Name] || tc.Name == "" {
@@ -94,7 +107,7 @@ func TestPiHarvestCommonModes(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			sourceText := fixture.Source
 			if tc.LongText > 0 {
-				sourceText = strings.ReplaceAll(sourceText, "native pipeline body", strings.Repeat("native pipeline body ", tc.LongText))
+				sourceText = strings.ReplaceAll(sourceText, "native pipeline body", longTextExpansions[tc.LongText])
 			}
 			root := t.TempDir()
 			source := filepath.Join(root, "recording.jsonl")
