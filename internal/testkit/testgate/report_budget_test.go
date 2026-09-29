@@ -1,11 +1,101 @@
 package testgate
 
 import (
+	"bytes"
+	_ "embed"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/budget_cases.yaml
+var budgetCasesYAML []byte
+
+// budgetEnforcementCase is one LoadBudget enforcement case: either the budget
+// loads with the expected seconds and enforcement, or loading fails naming
+// the expected fragment.
+type budgetEnforcementCase struct {
+	Name            string `yaml:"name"`
+	Body            string `yaml:"body"`
+	WantFound       bool   `yaml:"want_found"`
+	WantSeconds     int    `yaml:"want_seconds"`
+	WantEnforcement string `yaml:"want_enforcement"`
+	WantErrContains string `yaml:"want_err_contains"`
+}
+
+type budgetCasesFile struct {
+	RequiredNames []string                `yaml:"required_names"`
+	Cases         []budgetEnforcementCase `yaml:"cases"`
+}
+
+func loadBudgetCases(t *testing.T) budgetCasesFile {
+	t.Helper()
+	var file budgetCasesFile
+	decoder := yaml.NewDecoder(bytes.NewReader(budgetCasesYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&file); err != nil {
+		t.Fatalf("decode budget cases fixture: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		t.Fatalf("budget cases fixture must contain exactly one YAML document, got %v", err)
+	}
+	if len(file.RequiredNames) == 0 {
+		t.Fatal("budget cases fixture declares no required_names manifest")
+	}
+	present := map[string]bool{}
+	for _, c := range file.Cases {
+		if c.Name == "" || present[c.Name] {
+			t.Fatalf("budget cases fixture has an empty or duplicate case %q", c.Name)
+		}
+		present[c.Name] = true
+	}
+	for _, want := range file.RequiredNames {
+		if !present[want] {
+			t.Fatalf("required budget case %q is missing from the fixture", want)
+		}
+	}
+	return file
+}
+
+// TestLoadBudget_Enforcement proves the enforcement field is parsed when
+// present, defaults to blocking when absent, and fails closed on any other
+// value — while the seconds and version guards still fire underneath it.
+func TestLoadBudget_Enforcement(t *testing.T) {
+	file := loadBudgetCases(t)
+	for _, tc := range file.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "budget.yaml")
+			if err := os.WriteFile(path, []byte(tc.Body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			b, found, err := LoadBudget(path)
+			if tc.WantErrContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.WantErrContains) {
+					t.Fatalf("load error = %v, want an error containing %q", err, tc.WantErrContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if found != tc.WantFound {
+				t.Fatalf("found = %v, want %v", found, tc.WantFound)
+			}
+			if b.Seconds != tc.WantSeconds {
+				t.Fatalf("seconds = %d, want %d", b.Seconds, tc.WantSeconds)
+			}
+			if string(b.Enforcement) != tc.WantEnforcement {
+				t.Fatalf("enforcement = %q, want %q", b.Enforcement, tc.WantEnforcement)
+			}
+		})
+	}
+}
 
 func TestLoadBudget_Found(t *testing.T) {
 	dir := t.TempDir()

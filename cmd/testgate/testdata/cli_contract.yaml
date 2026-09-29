@@ -17,6 +17,7 @@ required_names:
   - pkg-flag
   - batches-flag
   - parallel-flag
+  - cpuprofile-top-flag
   - pretest-flag
   - profiles-flag
   - trace-flag
@@ -45,6 +46,7 @@ checks:
   - { name: pkg-flag,           contains: "-pkg DIR" }
   - { name: batches-flag,       contains: "-n N" }
   - { name: parallel-flag,      contains: "-parallel N" }
+  - { name: cpuprofile-top-flag, contains: "-cpuprofile-top N" }
   - { name: pretest-flag,       contains: "-pretest" }
   - { name: profiles-flag,      contains: "-profiles" }
   - { name: trace-flag,         contains: "-trace" }
