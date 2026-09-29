@@ -82,8 +82,8 @@ func loadOriginGuardFixture(source []byte) (originGuardFixture, error) {
 	return fixture, nil
 }
 
-// startOriginGuardServer mounts the production server with a WebSocket hub and
-// no store, and returns its IPv4 loopback address.
+// startOriginGuardServer listens and serves the production server with a
+// WebSocket hub and no store, and stops it when the test ends.
 func startOriginGuardServer(t *testing.T) *Server {
 	t.Helper()
 	server := NewServer(ServerConfig{Port: 0, Hub: NewHub(&mockDataProvider{})})
