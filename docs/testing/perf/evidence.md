@@ -521,3 +521,112 @@ unchanged.
 Smoke (every Test func in the 40 converted files, 264 names, non-race, same box):
 `go test -count=1 -run "^(<264 names>)$" ./cmd/peasant/...` → ok, 17.98 s package /
 19 s wall after; 20.49 s / 24 s wall on the unconverted base (single runs, noisy box).
+
+## Store-open seam enforcement (ast-grep ban on migrating test opens)
+
+Rule: `ast-grep/no-migrating-store-open-in-tests.yml`, auto-loaded through
+`sgconfig.yml` `ruleDirs`, so the `ast-grep scan --config sgconfig.yml .` step of
+`make check` (and therefore CI) enforces it. It flags any `store.Open(...)` call in a
+`*_test.go` file whose arguments do not contain `store.WithSkipMigrations()`, and
+ignores `internal/store/migrations_test.go`, `internal/store/migration*_test.go`
+(the migration suite) and `internal/store/storetest/**` (the seam implementation).
+
+**Binary version matters.** The pinned devShell binary is ast-grep 0.45.0, which
+honours `// ast-grep-ignore: <rule-id> -- <reason>` (trailing reason text). The
+host's `/run/current-system/sw/bin/ast-grep` 0.42.1 does not: it treats the
+reason as part of the rule id, reports all 10 suppressions as unused, and fails
+the scan with 10 errors. Run the scan inside the devShell (`nix develop`), as
+`make check` and CI do.
+
+### Scan counts
+
+| point | flagged sites | files |
+|---|---|---|
+| branch point (validated rule, scratch config) | 209 | 134 |
+| after all conversions (committed rule) | 0 | 0 |
+
+Before, by package: `cmd/peasant` 92, `internal/ingest` 55, `internal/store` 29,
+`internal/api` 11, `internal/metrics` 8, `internal/push` 6, `internal/e2e` 5,
+`internal/transcript` 2, `internal/export` 1.
+
+Final scan (ast-grep 0.45.0, worktree root):
+
+```
+$ ast-grep scan --config sgconfig.yml .
+$ echo $?
+0
+```
+
+No output, no findings, no unused-suppression hints. The scoped
+`ast-grep scan --config sgconfig.yml cmd internal` gives the same result.
+
+### Rule checks (scratch tree under /tmp/opencode, not committed)
+
+| case | result |
+|---|---|
+| `store.Open(p)` in `b_test.go` | fires |
+| `store.Open(p, store.WithSkipMigrations())` | silent |
+| `store.Open(p, store.WithPoolSize(1), store.WithSkipMigrations())` | silent |
+| same skip-less open in `prod.go` (not a test file) | silent |
+| skip-less open in `internal/store/migrations_test.go`, `internal/store/migration_v5_test.go`, `internal/store/storetest/x_test.go` | silent (ignored) |
+| skip-less open in `internal/store/other_test.go` | fires |
+| suppression line above one call, a second unsuppressed call directly after it | first silent, second fires |
+| suppression forms: preceding line with `-- reason`, bare, reason on its own earlier comment line, trailing same-line | all silent on 0.45.0 |
+
+### Exception manifest (per-call suppressions)
+
+Each suppressed open is one where the migrating open is itself what the test
+checks. A golden copy with the skip would bypass the code under test.
+
+| file:line | class | exception |
+|---|---|---|
+| `internal/store/store_test.go:94` | B | a fresh open creates the database and schema from nothing |
+| `internal/store/store_test.go:140` | B | first open of the idempotent-reopen pair creates the database |
+| `internal/store/store_test.go:161` | B | second open must replay the migrating path on an existing file |
+| `internal/store/mixed_index_formats_test.go:99` | C | custom formats and conversion edges registered at open (persist/convert/rollback) |
+| `internal/store/mixed_index_formats_test.go:157` | C | reopen with the custom handler (stable reads after reopen) |
+| `internal/store/mixed_index_formats_test.go:240` | C | reopen with the default registry reaches the unsupported-format refusal, which only the non-skip open path runs |
+| `internal/store/mixed_index_formats_test.go:461` | C | invalid registry edges must fail the open itself and leave the path uncreated |
+| `internal/store/mixed_index_formats_test.go:514` | C | pipeline upgrade case registers its declaring harness format at open |
+| `internal/store/index_input_transactions_test.go:81` | C | conditional conversion transactions register a fault-scoped handler and edge at open |
+| `internal/store/publication_projection_test.go:66` | benchmark setup | `storetest` takes `*testing.T`, so it cannot serve a `*testing.B`; the one open runs outside the timed section |
+
+Class A (migration suite) is exempt by the rule's ignores, not by suppressions.
+Class E (first-run CLI cases) never shows up in the scan, because the command does
+the open, not the test. That list is in the `cmd/peasant` conversion section
+above.
+
+The `storetest` package doc (`internal/store/storetest/golden.go`) says that the
+package is the only sanctioned way for tests to open a store, and it names this
+rule.
+
+### Focused smoke (one converted test per package, `-race -count=1`)
+
+| package | test | go-reported time |
+|---|---|---|
+| `internal/store` | `TestArtifactMirrorStopsOnOuterTransactionLoss` | ok 3.06 s |
+| `internal/ingest` | `TestPipelineRetainedAdapterMaintenance` | ok 4.35 s (goleak `VerifyTestMain` clean) |
+| `cmd/peasant` | `TestCLI_AnnotateImportRoundTrip` | ok 1.47 s |
+| `internal/api` | `TestActiveSnapshotSharePublicationConverges` | ok 3.07 s |
+| `internal/metrics` | `TestMetricsRecomputesChangedInputAndReusesEqualProof` | ok 1.18 s |
+| `internal/push` | `TestDatabasePublicationWithoutSourcesOrSidecars` | ok 5.66 s |
+| `internal/e2e` (`-tags=e2e`) | `TestGitHooksSubstrate_SeedsRepositoryIdentity` | PASS 2.27 s, ok 3.33 s, 9.2 s wall |
+| `internal/transcript` | `TestPiProjectionSQLiteOutbound` | ok 13.28 s |
+| `internal/export` | `TestGenerationDetailBarrier` | ok 2.67 s |
+
+Command shape: `go test -count=1 -race -run '^<Test>$' ./<pkg>`, in the devShell.
+
+### Taxonomy note
+
+"Store-open seam" is the name used in this document for test-only work. That
+work routes test database opens through the pre-migrated golden template
+(`storetest`) and bans the migrating open with the ast-grep rule. Exception classes:
+
+- A: migration suite
+- B: fresh-open creation and idempotence
+- C: open-time format registration or refusal
+- D: no-database cases
+- E: first-run CLI coverage
+- F: e2e fixture builders
+
+Production opens (CLI, server, prune) are unchanged and still migrate.
