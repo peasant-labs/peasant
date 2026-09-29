@@ -186,6 +186,13 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
 
+The server listens on the loopback interface only: `127.0.0.1`, and `::1` when the host has an
+IPv6 loopback. Other machines cannot reach it. A state-changing request (any method other than
+`GET`, `HEAD`, or `OPTIONS`) and a WebSocket connection must name the server by a loopback
+`Host` (`localhost`, `127.0.0.1`, or `[::1]`). When the request carries an `Origin` header, that
+origin must be the dashboard's own origin. Other requests get `403`. Local clients that send no
+`Origin` header are accepted, such as `curl`, `peasant web stop`, and the TUI.
+
 ### `peasant tui` flags (deprecated)
 
 `peasant tui` is deprecated. Use `peasant web` for the dashboard, sessions, and trends. Use `peasant annotate` for annotations. The command still runs and prints a notice. It will be removed after one release carries the notice.

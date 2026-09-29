@@ -77,12 +77,6 @@ const (
 // DevProxy is the default dev-mode proxy address for the Next.js dev server.
 const DevProxy = "localhost:3000"
 
-// WSOriginPattern is a typed WebSocket origin pattern.
-type WSOriginPattern string
-
-// WSAllowedOrigins is the default set of allowed WebSocket origins.
-var WSAllowedOrigins = []WSOriginPattern{"*"}
-
 // Health check polling parameters for readiness probes.
 const (
 	HealthCheckAttempts = 50

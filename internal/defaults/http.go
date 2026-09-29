@@ -22,5 +22,18 @@ const (
 	ContentHTML ContentType = "text/html"
 )
 
+// HeaderOrigin is the HTTP Origin request header key.
+const HeaderOrigin = "Origin"
+
+// HeaderSecFetchSite is the Fetch Metadata request header a browser sets to
+// say how the requesting page relates to the target.
+const HeaderSecFetchSite = "Sec-Fetch-Site"
+
+// The loopback addresses the local web server binds.
+const (
+	LoopbackIPv4 = "127.0.0.1"
+	LoopbackIPv6 = "::1"
+)
+
 // LocalhostAddrs is the set of addresses considered localhost for access control.
-var LocalhostAddrs = []string{"127.0.0.1", "::1", "localhost"}
+var LocalhostAddrs = []string{LoopbackIPv4, LoopbackIPv6, "localhost"}

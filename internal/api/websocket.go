@@ -216,15 +216,16 @@ func (h *Hub) RefreshQuality(ctx context.Context) {
 	})
 }
 
-// HandleUpgrade upgrades an HTTP request to a WebSocket connection.
+// HandleUpgrade upgrades an HTTP request to a WebSocket connection. It accepts
+// only a handshake that came from this local server: a loopback Host and, when
+// the handshake carries one, the server's own Origin. websocket.Accept then
+// applies its default same-host Origin check as well.
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
-	origins := make([]string, len(defaults.WSAllowedOrigins))
-	for i, o := range defaults.WSAllowedOrigins {
-		origins[i] = string(o)
+	if refusal, refused := refuseNonLocalRequest(r); refused {
+		writeLocalRequestRefusal(w, r, refusal, "internal/api.Hub.HandleUpgrade", "No WebSocket connection was opened.")
+		return
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: origins, // local-only; accept all origins
-	})
+	ws, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		slog.Warn("ws: upgrade failed", "error", err)
 		return
