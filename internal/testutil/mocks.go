@@ -1244,6 +1244,20 @@ func (s *StubPushStore) RecordPublicationAttempt(_ context.Context, diagnostic s
 	return nil
 }
 
+// LatestPublicationAttempt returns the most recently recorded attempt for one
+// publication identity, or nil when none was recorded.
+func (s *StubPushStore) LatestPublicationAttempt(_ context.Context, origin, owner string, projectHash schema.ProjectHash, sessionID string) (*store.PublicationAttemptDiagnostic, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.PublicationAttempts) - 1; i >= 0; i-- {
+		attempt := s.PublicationAttempts[i]
+		if attempt.VillageOrigin == origin && attempt.OwnerUserID == owner && attempt.ProjectHash == projectHash && attempt.SessionID == sessionID {
+			return &attempt, nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *StubPushStore) UnpushedSessions(_ context.Context) ([]ingest.PushSessionRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

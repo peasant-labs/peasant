@@ -315,6 +315,13 @@ func BuildPushCommand() *cobra.Command {
 				if visibility != "" && !schema.Visibility(visibility).IsValid() {
 					return fmt.Errorf("invalid --visibility %q (valid: %s)", visibility, config.VisibilityMenu())
 				}
+				// The flag also changes transcripts that are already published, so
+				// a value this version would downgrade is refused rather than
+				// applied as private: on a transcript shared with collectives that
+				// would take their access away, the opposite of what was asked.
+				if visibility != "" && config.EffectiveVisibility(schema.Visibility(visibility), cfg).Downgraded() {
+					return fmt.Errorf("--visibility %s cannot be applied by this version: it would publish and change transcripts as private instead; an update already keeps the visibility and collective shares a transcript has on the village, so omit --visibility to keep them, or pass one of %s", visibility, implementedVisibilityChoices())
+				}
 
 				runCfg := push.PipelineConfig{
 					DryRun:         dryRun,
@@ -604,13 +611,23 @@ func BuildPushCommand() *cobra.Command {
 				// Complete transcript publishing before starting annotation publishing.
 				// Each stage retains its existing internal concurrency; the barrier makes
 				// transcript-backed annotation targets visible before validation runs.
+				var transcriptResult *push.PushResult
 				result, transcErr, annSummary, annErr := runPushStages(
 					runCtx,
 					func(ctx context.Context) (*push.PushResult, error) {
-						return pipeline.Run(ctx)
+						published, err := pipeline.Run(ctx)
+						transcriptResult = published
+						return published, err
 					},
 					func(ctx context.Context) (*push.AnnotationPushSummary, error) {
-						return push.PushAnnotationsSelected(ctx, client, db, annSelection, dryRun, resolvedConcurrency)
+						selection := annSelection
+						if runCfg.FilterSessionIDs != nil {
+							// The chooser narrowed this run to sessions picked one by
+							// one, so annotations go only with the ones the village now
+							// holds, exactly as they do from the Share wizard.
+							selection = annSelection.WithinPublishedSessions(transcriptResult)
+						}
+						return push.PushAnnotationsSelected(ctx, client, db, selection, dryRun, resolvedConcurrency)
 					},
 				)
 				if annSummary != nil {
@@ -782,7 +799,7 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
-	cmd.Flags().StringVar(&visibility, "visibility", "", "Override visibility for this run (public, private, group). Also changes sessions already published, which otherwise keep the visibility they have on the village")
+	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes sessions already published, which otherwise keep the visibility they have on the village", implementedVisibilityChoices()))
 	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also changes sessions already published, which otherwise keep the license they have on the village", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
@@ -1364,6 +1381,16 @@ func firstPushStageError(transcriptErr, annotationErr error) error {
 		return transcriptErr
 	}
 	return annotationErr
+}
+
+// implementedVisibilityChoices lists the visibilities --visibility accepts:
+// the ones this version can apply, from the shared policy.
+func implementedVisibilityChoices() string {
+	names := make([]string, len(config.ImplementedVisibilities))
+	for i, visibility := range config.ImplementedVisibilities {
+		names[i] = visibility.String()
+	}
+	return strings.Join(names, ", ")
 }
 
 // sourceHarnessHelp builds the --source-harness flag help text by deriving

@@ -15,8 +15,8 @@
 # no target session is withheld, whatever project it names.
 #
 # Every case must account for all five candidates: leaving one unlisted would let
-# a silent publish pass unnoticed.
-expectedCaseCount: 3
+# a silent publish pass unnoticed. Deleting a case fails
+# annotation_repository_scope.manifest.yaml, and every scope needs a case.
 cases:
   - name: a selection alone publishes everything it cannot attribute to a session
     scope: selection-only

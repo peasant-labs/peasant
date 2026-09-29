@@ -154,9 +154,25 @@ type AnnotationSelection struct {
 	// only when its target names one of those sessions. A push of sessions the
 	// user chose one by one needs it, because an annotation with no target
 	// session, such as a project label or a review of another annotation, can
-	// describe sessions outside that choice. A project in
-	// RepositoryProjectHashes is still admitted.
+	// describe sessions outside that choice.
 	SessionsOnly bool
+}
+
+// WithinPublishedSessions narrows the selection to the sessions a run left on
+// the village: uploaded, or already there unchanged. A session that failed or
+// was held back has nothing on the village to annotate, and an annotation that
+// names no session is withheld. The label keys (IDs, content hashes) are kept.
+func (s AnnotationSelection) WithinPublishedSessions(result *PushResult) AnnotationSelection {
+	sessions := map[string]bool{}
+	if result != nil {
+		for _, session := range result.Sessions {
+			switch session.Status {
+			case PushStatusNew, PushStatusUpdated, PushStatusSkipped:
+				sessions[session.SessionID] = true
+			}
+		}
+	}
+	return AnnotationSelection{IDs: s.IDs, ContentHashes: s.ContentHashes, SessionIDs: sessions, SessionsOnly: true}
 }
 
 var _ ingest.AnnotationReadSelection = AnnotationSelection{}
@@ -235,7 +251,7 @@ func (s AnnotationSelection) unresolvedAnchorMatches(row ingest.AnnotationTarget
 
 // attributionRequired reports whether a row with no target session must prove
 // it belongs to the scope: under a repository scope, or when SessionIDs is the
-// whole scope.
+// whole scope, where nothing can prove it.
 func (s AnnotationSelection) attributionRequired() bool {
 	return len(s.RepositoryProjectHashes) > 0 || s.SessionsOnly
 }
@@ -266,6 +282,9 @@ func (s AnnotationSelection) sessionMatches(row ingest.AnnotationPushRow) bool {
 			return row.SessionID != nil && s.SessionIDs[*row.SessionID]
 		}
 	case schema.TargetProject:
+		if s.SessionsOnly {
+			return false
+		}
 		if attributed {
 			return row.ProjectHash != nil && s.RepositoryProjectHashes[*row.ProjectHash]
 		}
@@ -281,8 +300,8 @@ func (s AnnotationSelection) sessionMatches(row ingest.AnnotationPushRow) bool {
 // PushAnnotations sends all system-origin annotations to the village.
 //
 // Equivalent to PushAnnotationsSelected with an empty selection (push
-// everything) at the default concurrency. Retained for callers that do not
-// narrow the set.
+// everything) at the default concurrency. It has no production caller: every
+// publishing path passes the selection it is scoped to.
 func PushAnnotations(
 	ctx context.Context,
 	client *village.VillageClient,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,12 +63,30 @@ func (l audienceLicense) license() schema.License {
 	return schema.License(l)
 }
 
+// audienceChange is what changes locally between the two publications.
+type audienceChange string
+
+const (
+	// audienceChangeNone leaves the session exactly as it was published.
+	audienceChangeNone audienceChange = "none"
+	// audienceChangeContent changes the transcript content.
+	audienceChangeContent audienceChange = "content"
+	// audienceChangeAssociation adds a commit association: the publication
+	// changes and its content does not.
+	audienceChangeAssociation audienceChange = "association"
+)
+
+var allAudienceChanges = []audienceChange{audienceChangeNone, audienceChangeContent, audienceChangeAssociation}
+
 type audienceRun struct {
 	Door  audienceDoor `yaml:"door"`
 	Flags []string     `yaml:"flags"`
+	// FailVisibilityUpdates has the Village refuse this run's owner updates.
+	FailVisibilityUpdates bool `yaml:"failVisibilityUpdates"`
 }
 
 type audienceExpectation struct {
+	Failed            *bool               `yaml:"failed"`
 	Published         *bool               `yaml:"published"`
 	License           audienceLicense     `yaml:"license"`
 	VisibilityUpdates []schema.Visibility `yaml:"visibilityUpdates"`
@@ -82,7 +101,8 @@ type audienceCase struct {
 	} `yaml:"configured"`
 	First        audienceRun         `yaml:"first"`
 	ExpectFirst  audienceExpectation `yaml:"expectFirst"`
-	Edited       *bool               `yaml:"edited"`
+	OwnerShares  *bool               `yaml:"ownerShares"`
+	Change       audienceChange      `yaml:"change"`
 	Update       audienceRun         `yaml:"update"`
 	ExpectUpdate audienceExpectation `yaml:"expectUpdate"`
 }
@@ -120,18 +140,18 @@ func loadRepublishAudienceFixture(t *testing.T) []audienceCase {
 				t.Fatalf("%s case %q gives the %s door flags; only the cli door takes them", republishAudienceFixturePath, c.Name, run.Door)
 			}
 		}
-		if !c.Configured.Visibility.IsValid() || !c.Configured.License.valid() || c.Edited == nil {
-			t.Fatalf("%s case %q needs a valid configured visibility and license (or none) and an explicit edited", republishAudienceFixturePath, c.Name)
+		if !c.Configured.Visibility.IsValid() || !c.Configured.License.valid() || c.OwnerShares == nil || !slices.Contains(allAudienceChanges, c.Change) {
+			t.Fatalf("%s case %q needs a valid configured visibility and license (or none), an explicit ownerShares, and a change of none, content, or association", republishAudienceFixturePath, c.Name)
 		}
 		for label, expect := range map[string]audienceExpectation{"expectFirst": c.ExpectFirst, "expectUpdate": c.ExpectUpdate} {
-			if expect.Published == nil || !expect.License.valid() || expect.VisibilityUpdates == nil || !expect.Visibility.IsValid() {
-				t.Fatalf("%s case %q %s must state published, license (or none), visibilityUpdates (or []), and visibility; a missing value would assert nothing", republishAudienceFixturePath, c.Name, label)
+			if expect.Failed == nil || expect.Published == nil || !expect.License.valid() || expect.VisibilityUpdates == nil || !expect.Visibility.IsValid() {
+				t.Fatalf("%s case %q %s must state failed, published, license (or none), visibilityUpdates (or []), and visibility; a missing value would assert nothing", republishAudienceFixturePath, c.Name, label)
 			}
 			if !*expect.Published && (expect.License != audienceLicenseNone || len(expect.VisibilityUpdates) > 0) {
 				t.Fatalf("%s case %q %s expects a license or an owner update from a run that publishes nothing", republishAudienceFixturePath, c.Name, label)
 			}
 		}
-		if c.ExpectUpdate.Visibility == schema.VisibilityGroup && len(c.ExpectUpdate.VisibilityUpdates) == 0 {
+		if *c.OwnerShares && !*c.ExpectUpdate.Failed && c.ExpectUpdate.Visibility == schema.VisibilityGroup && len(c.ExpectUpdate.VisibilityUpdates) == 0 {
 			keptByDoor = append(keptByDoor, c.Update.Door)
 		}
 	}
@@ -176,15 +196,28 @@ func runRepublishAudienceCase(t *testing.T, c audienceCase) {
 		filepath.Join(dir, "peasant-sync"), c.Configured.Visibility, license))
 	doors := startAudienceDoors(t, dir, cfgPath)
 
-	doors.run(t, c.First)
-	village.expect(t, "first publication", c.ExpectFirst, doors)
+	village.refuseVisibilityUpdates(c.First.FailVisibilityUpdates)
+	failed, said := doors.run(t, c.First)
+	village.expect(t, "first publication", c.ExpectFirst, failed, said, doors)
 
-	village.shareWithCollectives()
-	if *c.Edited {
-		seedEntryCarrying(t, dir, audienceSessionID, "the second draft of this session")
+	if *c.OwnerShares {
+		village.shareWithCollectives()
 	}
-	doors.run(t, c.Update)
-	village.expect(t, "update", c.ExpectUpdate, doors)
+	switch c.Change {
+	case audienceChangeContent:
+		seedEntryCarrying(t, dir, audienceSessionID, "the second draft of this session")
+	case audienceChangeAssociation:
+		sessionID, err := ingest.NewSessionID(audienceSessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := doors.db.UpsertSessionCommits(t.Context(), sessionID, []ingest.CommitInfo{{Hash: strings.Repeat("c", 40), Message: "a commit the session made"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	village.refuseVisibilityUpdates(c.Update.FailVisibilityUpdates)
+	failed, said = doors.run(t, c.Update)
+	village.expect(t, "update", c.ExpectUpdate, failed, said, doors)
 }
 
 // audienceDoors holds what the three doors need: the configuration and data
@@ -224,42 +257,55 @@ func startAudienceDoors(t *testing.T, dir, cfgPath string) *audienceDoors {
 	return &audienceDoors{dir: dir, cfgPath: cfgPath, shareURL: "http://" + server.Addr().String(), db: db}
 }
 
-func (d *audienceDoors) run(t *testing.T, run audienceRun) {
+// run publishes through one door and reports whether the door reported a
+// failure, with what it said. The corpus says whether a failure is expected.
+func (d *audienceDoors) run(t *testing.T, run audienceRun) (failed bool, said string) {
 	t.Helper()
 	switch run.Door {
 	case audienceDoorWeb:
-		// The body web/src/lib/share/push.ts sends.
+		// The body web/src/lib/share/push.ts sends. Bounded, because the gate
+		// runs with no test timeout and a hung loopback request would hang it.
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		defer cancel()
 		body := fmt.Sprintf(`{"sessionIds":[%q],"redactionLevel":"standard","visibility":"public"}`, audienceSessionID)
-		response, err := http.Post(d.shareURL+defaults.RouteSyncPush.String(), "application/json", strings.NewReader(body))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, d.shareURL+defaults.RouteSyncPush.String(), strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
 		var result struct {
 			Errors int `json:"errors"`
 		}
-		if err := json.NewDecoder(response.Body).Decode(&result); err != nil || response.StatusCode != http.StatusOK || result.Errors != 0 {
-			t.Fatalf("Share push: status=%d result=%+v err=%v", response.StatusCode, result, err)
+		if err == nil {
+			err = json.Unmarshal(raw, &result)
 		}
+		if err != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("Share push: status=%d body=%s err=%v", response.StatusCode, raw, err)
+		}
+		return result.Errors > 0, string(raw)
 	case audienceDoorHook:
 		argv := githooks.RepositoryArgv("", githooks.Binding{ConfigPath: d.cfgPath, ConfigDir: d.dir, DataDir: d.dir, StateDir: d.dir, Timeout: time.Minute})
-		d.execute(t, argv[1:])
-	case audienceDoorCLI:
+		return d.execute(argv[1:])
+	default:
 		args := []string{"--config", d.cfgPath, "--config-dir", d.dir, "--data-dir", d.dir, "--state-dir", d.dir, "village", "push", "--non-interactive"}
-		d.execute(t, append(args, run.Flags...))
+		return d.execute(append(args, run.Flags...))
 	}
 }
 
-func (d *audienceDoors) execute(t *testing.T, args []string) {
-	t.Helper()
+func (d *audienceDoors) execute(args []string) (failed bool, said string) {
 	root := buildRootCommand()
-	var stdout, stderr bytes.Buffer
-	root.SetOut(&stdout)
-	root.SetErr(&stderr)
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetErr(&output)
 	root.SetArgs(args)
-	if err := root.Execute(); err != nil {
-		t.Fatalf("peasant %s: %v\nstdout: %s\nstderr: %s", strings.Join(args, " "), err, &stdout, &stderr)
-	}
+	err := root.Execute()
+	return err != nil, fmt.Sprintf("peasant %s: err=%v\n%s", strings.Join(args, " "), err, &output)
 }
 
 // audienceVillage is a Village that keeps one transcript's audience the way the
@@ -274,8 +320,9 @@ type audienceVillage struct {
 	visibility  schema.Visibility
 	license     *schema.License
 	fingerprint schema.PublishRequestFingerprint
-	published   []schema.License // the license each publish request carried
-	updates     []schema.Visibility
+	published   []schema.License    // the license each publish request carried
+	updates     []schema.Visibility // every owner visibility update received
+	refuse      bool                // answer owner visibility updates with 503
 	observedAt  struct{ published, updates int }
 }
 
@@ -365,9 +412,21 @@ func (v *audienceVillage) update(t *testing.T, w http.ResponseWriter, r *http.Re
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.updates = append(v.updates, schema.Visibility(*request.Visibility))
+	if v.refuse {
+		http.Error(w, `{"error":"owner update unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	v.visibility = schema.Visibility(*request.Visibility)
-	v.updates = append(v.updates, v.visibility)
 	_ = json.NewEncoder(w).Encode(schema.OwnerTranscriptUpdateResponse{TranscriptID: id, TranscriptURL: "https://village.example/transcripts/" + id.String(), Visibility: *request.Visibility, Tags: []string{}, UpdatedAt: 2})
+}
+
+// refuseVisibilityUpdates makes the Village answer owner visibility updates
+// with a transient failure until it is called again with false.
+func (v *audienceVillage) refuseVisibilityUpdates(refuse bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.refuse = refuse
 }
 
 // shareWithCollectives is the owner sharing the transcript with collectives on
@@ -381,8 +440,11 @@ func (v *audienceVillage) shareWithCollectives() {
 // expect compares what the Village observed since the previous run with the
 // corpus, and checks that the local receipt records the audience the Village
 // reported.
-func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpectation, doors *audienceDoors) {
+func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpectation, failed bool, said string, doors *audienceDoors) {
 	t.Helper()
+	if failed != *want.Failed {
+		t.Errorf("%s: the door reported failed=%v; want %v\n%s", label, failed, *want.Failed, said)
+	}
 	v.mu.Lock()
 	published := v.published[v.observedAt.published:]
 	updates := v.updates[v.observedAt.updates:]
@@ -402,7 +464,7 @@ func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpect
 	if visibility != want.Visibility {
 		t.Errorf("%s: the transcript is %s on the Village; want %s", label, visibility, want.Visibility)
 	}
-	if !*want.Published {
+	if !*want.Published || failed {
 		return
 	}
 	input, err := doors.db.LoadPublicationInput(t.Context(), ingest.SessionID(audienceSessionID))

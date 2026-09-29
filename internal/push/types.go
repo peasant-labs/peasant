@@ -22,11 +22,13 @@ type PipelineConfig struct {
 	// ChangeVisibility is set.
 	Visibility schema.Visibility
 	// ChangeVisibility says the caller asked for a visibility change, so an
-	// update also moves a transcript the village already holds to Visibility.
-	// Only an explicit request sets it (the --visibility flag). A configured
-	// default, or the visibility the Share wizard opens a publication at, is
-	// not one: the owner may have shared the transcript with collectives on the
-	// village since, and nothing on this machine knows that.
+	// update also moves a transcript the village already holds to Visibility,
+	// and an unchanged session is uploaded rather than skipped on a receipt
+	// that may be stale. Only an explicit request sets it (the --visibility
+	// flag), and it takes effect only with a Visibility to change to. A
+	// configured default, or the visibility the Share wizard opens a
+	// publication at, is not one: the owner may have shared the transcript with
+	// collectives on the village since, and nothing on this machine knows that.
 	ChangeVisibility bool
 	// License overrides config push.license for this run (--license flag).
 	// Empty string means "use whatever is in config". A first publish sends it;
@@ -34,7 +36,8 @@ type PipelineConfig struct {
 	// unless ChangeLicense is set.
 	License schema.License
 	// ChangeLicense says the caller asked for a license change, so an update
-	// also sends License. Only an explicit request sets it (the --license flag).
+	// also sends License. Only an explicit request sets it (the --license flag),
+	// and it takes effect only with a License to send.
 	ChangeLicense bool
 	// Concurrency is the maximum number of parallel uploads.
 	// 0 means DefaultConcurrency.

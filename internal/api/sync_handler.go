@@ -850,7 +850,7 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	// session this request published. The user chose those sessions; an
 	// annotation on any other session, or on no session at all, is outside what
 	// they chose to share.
-	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, publishedAnnotationScope(result), false, push.DefaultConcurrency)
+	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, push.AnnotationSelection{}.WithinPublishedSessions(result), false, push.DefaultConcurrency)
 
 	// Build response.
 	resp := pushResponse{
@@ -874,20 +874,6 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 
 	data, _ := json.Marshal(resp)
 	w.Write(data)
-}
-
-// publishedAnnotationScope limits the annotation push to the sessions the village
-// now holds from this run: uploaded, or already there unchanged. A session that
-// failed or was held back has nothing on the village to annotate.
-func publishedAnnotationScope(result *push.PushResult) push.AnnotationSelection {
-	sessions := make(map[string]bool, len(result.Sessions))
-	for _, session := range result.Sessions {
-		switch session.Status {
-		case push.PushStatusNew, push.PushStatusUpdated, push.PushStatusSkipped:
-			sessions[session.SessionID] = true
-		}
-	}
-	return push.AnnotationSelection{SessionIDs: sessions, SessionsOnly: true}
 }
 
 func invalidSyncRedactionsLevelMessage(level redact.RedactionLevel) string {

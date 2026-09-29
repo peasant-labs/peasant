@@ -21,6 +21,9 @@ import (
 //go:embed testdata/annotation_repository_scope.yaml
 var annotationRepositoryScopeFixtureData []byte
 
+//go:embed testdata/annotation_repository_scope.manifest.yaml
+var annotationRepositoryScopeManifestData []byte
+
 const annotationRepositoryScopeFixturePath = "internal/push/testdata/annotation_repository_scope.yaml"
 
 // annotationTarget is what a candidate annotation points at. The set is closed
@@ -59,8 +62,7 @@ const (
 var allScopeStates = [...]scopeState{scopeActive, scopeInactive, scopeSessionsOnly}
 
 type annotationScopeDocument struct {
-	ExpectedCaseCount int                   `yaml:"expectedCaseCount"`
-	Cases             []annotationScopeCase `yaml:"cases"`
+	Cases []annotationScopeCase `yaml:"cases"`
 }
 
 type annotationScopeCase struct {
@@ -79,12 +81,11 @@ func loadAnnotationScopeFixture(data []byte) (annotationScopeDocument, error) {
 				"impact=what a repository-scoped push publishes cannot be trusted; fix=match the typed schema: %w",
 			annotationRepositoryScopeFixturePath, err)
 	}
-	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {
+	if len(document.Cases) == 0 {
 		return document, fmt.Errorf(
-			"annotation repository scope fixture rule failed: declared and actual case counts must match and be non-zero, got "+
-				"expectedCaseCount=%d cases=%d; where=%s loader=case-count validation; when=test fixture loading; "+
-				"impact=what a repository-scoped push publishes cannot be trusted; fix=set expectedCaseCount to the number of cases present",
-			document.ExpectedCaseCount, len(document.Cases), annotationRepositoryScopeFixturePath)
+			"annotation repository scope fixture rule failed: the corpus carries no cases; where=%s loader=case validation; "+
+				"when=test fixture loading; impact=what a repository-scoped push publishes cannot be trusted; fix=restore the cases",
+			annotationRepositoryScopeFixturePath)
 	}
 	seen := make(map[string]bool, len(document.Cases))
 	for index, testCase := range document.Cases {
@@ -151,8 +152,7 @@ func annotationScopeContains[T comparable](values []T, want T) bool {
 
 func TestLoadAnnotationScopeFixture_RejectsUnaccountedTarget(t *testing.T) {
 	t.Parallel()
-	_, err := loadAnnotationScopeFixture([]byte(`expectedCaseCount: 1
-cases:
+	_, err := loadAnnotationScopeFixture([]byte(`cases:
   - name: forgets one
     scope: repository-scoped
     published: [selected-session]
@@ -165,8 +165,7 @@ cases:
 
 func TestLoadAnnotationScopeFixture_RejectsPublishingAnotherSession(t *testing.T) {
 	t.Parallel()
-	_, err := loadAnnotationScopeFixture([]byte(`expectedCaseCount: 1
-cases:
+	_, err := loadAnnotationScopeFixture([]byte(`cases:
   - name: publishes another session
     scope: repository-scoped
     published: [selected-session, other-session, scoped-project, other-project, unattributable]
@@ -203,6 +202,20 @@ func TestPushAnnotationsSelected_RepositoryScopeGatesUnattributable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(annotationRepositoryScopeManifestData, "annotation repository scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(document.Cases))
+	scopes := make([]scopeState, 0, len(document.Cases))
+	for _, testCase := range document.Cases {
+		names = append(names, testCase.Name)
+		scopes = append(scopes, testCase.Scope)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "annotation repository scope"); err != nil {
+		t.Fatal(err)
+	}
+	testutil.RequireClosedSetCoverage(t, "annotation repository scope", "scope", allScopeStates[:], scopes)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()

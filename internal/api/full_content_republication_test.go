@@ -41,7 +41,7 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			ExpectedLicense      string `yaml:"expectedLicense"`
 		}
 	}
-	if err := testutil.DecodeFixtureYAML(fullRepublicationYAML, &fixtures); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(fullRepublicationYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
@@ -189,9 +189,9 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 				t.Fatal(err)
 			}
 			testutil.SeedReadyPublication(t, db, &input.Metadata, []schema.SessionEntry{{SessionID: ingest.SessionID(id), EntryIndex: 1, Harness: defaults.HarnessClaudeCode, Role: schema.RoleAssistant, EntryType: schema.EntryTypeText, ContentPreview: &full}})
-			// Repair passes verified current owner metadata explicitly. A normal
-			// push changes a published transcript only when it asks explicitly;
-			// a changed configuration applies to first publications.
+			// Repair passes no flags, so the update keeps the current access and
+			// license whatever the configuration now says. Only an explicit
+			// request changes a published transcript.
 			run(requestedVisibility, requestedLicense, f.Explicit)
 			after, err := db.Publication(t.Context(), remote.URL, creds.UserID, testutil.TestProjectHash, id)
 			if err != nil || after == nil {

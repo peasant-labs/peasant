@@ -1,30 +1,37 @@
 # Who can read a transcript after its session is published again.
 #
-# Every case publishes one session for the first time, lets its owner share the
-# transcript with collectives on the Village, which makes it collective-only
-# (visibility group), and then publishes the session again. Each publication
-# goes through one of the three doors a person uses, driven for real by
+# Every case publishes one session for the first time and then publishes it
+# again. In between, its owner may share the transcript with collectives on the
+# Village (ownerShares), which makes it collective-only (visibility group), and
+# the session may change locally (change: content, or a new commit association,
+# which changes the publication but not its content). Each publication goes
+# through one of the three doors a person uses, driven for real by
 # cmd/peasant/republish_audience_test.go:
 #
 #   web   the Share wizard: POST /api/v1/sync/push on the running local server,
 #         with the body web/src/lib/share/push.ts sends (visibility public);
-#   hook  the upload command a managed Git hook runs, from githooks;
+#   hook  the upload command a managed Git hook runs, from githooks, without
+#         the --repository scope, which narrows the candidates and nothing else;
 #   cli   peasant village push --non-interactive, plus the case's flags.
 #
 # The fixture sits beside the push pipeline because the pipeline decides; only
 # cmd/peasant can reach all three doors, so the driver lives there.
 #
 # The Village double keeps the visibility a transcript had before a republish,
-# which is what peasant-labs/village#254 makes the real Village do. Every
-# expectation is what the Village observes in one run:
+# which is what peasant-labs/village#254 makes the real Village do. A run with
+# failVisibilityUpdates has the Village refuse its owner visibility updates.
+# Every expectation is what one run did and what the Village observed:
 #
+#   failed             whether the door reported a failure;
 #   published          whether a publish request arrived at all;
 #   license            the license that request carried, or none;
 #   visibilityUpdates  every owner visibility update it received, in order;
 #   visibility         who can read the transcript afterwards.
 #
-# A first publish still opens at the requested visibility. An update changes
-# neither visibility nor license unless the cli door asks for it with a flag.
+# A first publish still opens at the requested visibility, also when it is
+# retried after its owner visibility update failed. An update changes neither
+# visibility nor license unless the cli door asks for it with a flag, and a flag
+# always reaches the Village, even for an unchanged session.
 #
 # Deleting a case fails republish-audience.manifest.yaml, and the driver
 # requires each door to keep a collective-only transcript collective-only.
@@ -32,59 +39,111 @@ cases:
   - name: web-update-keeps-collective-only
     configured: {visibility: private, license: CC-BY-4.0}
     first: {door: web}
-    expectFirst: {published: true, license: CC-BY-4.0, visibilityUpdates: [public], visibility: public}
-    edited: true
+    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [public], visibility: public}
+    ownerShares: true
+    change: content
     update: {door: web}
-    expectUpdate: {published: true, license: none, visibilityUpdates: [], visibility: group}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group}
 
   - name: hook-update-keeps-collective-only
     configured: {visibility: public, license: CC-BY-4.0}
     first: {door: hook}
-    expectFirst: {published: true, license: CC-BY-4.0, visibilityUpdates: [public], visibility: public}
-    edited: true
+    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [public], visibility: public}
+    ownerShares: true
+    change: content
     update: {door: hook}
-    expectUpdate: {published: true, license: none, visibilityUpdates: [], visibility: group}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group}
 
   - name: cli-update-keeps-collective-only
     configured: {visibility: private, license: CC-BY-4.0}
     first: {door: cli}
-    expectFirst: {published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
-    edited: true
+    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
+    ownerShares: true
+    change: content
     update: {door: cli}
-    expectUpdate: {published: true, license: none, visibilityUpdates: [], visibility: group}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group}
 
   # The receipt says public and the configuration says private. Neither is a
   # reason to upload an unchanged session, and the hook must not narrow it.
   - name: hook-leaves-an-unchanged-web-publication-alone
     configured: {visibility: private, license: none}
     first: {door: web}
-    expectFirst: {published: true, license: none, visibilityUpdates: [public], visibility: public}
-    edited: false
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public}
+    ownerShares: true
+    change: none
     update: {door: hook}
-    expectUpdate: {published: false, license: none, visibilityUpdates: [], visibility: group}
+    expectUpdate: {failed: false, published: false, license: none, visibilityUpdates: [], visibility: group}
 
   # The first publish set the configured license; the update would send none.
   # The Village keeps that license either way, so there is nothing to upload.
   - name: cli-leaves-an-unchanged-licensed-publication-alone
     configured: {visibility: private, license: CC-BY-4.0}
     first: {door: cli}
-    expectFirst: {published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
-    edited: false
+    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
+    ownerShares: true
+    change: none
     update: {door: cli}
-    expectUpdate: {published: false, license: none, visibilityUpdates: [], visibility: group}
+    expectUpdate: {failed: false, published: false, license: none, visibilityUpdates: [], visibility: group}
+
+  # The same licensed publication with a new commit association: the operation
+  # changed while the content did not, so it must be uploaded.
+  - name: cli-uploads-a-new-association-of-a-licensed-publication
+    configured: {visibility: private, license: CC-BY-4.0}
+    first: {door: cli}
+    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
+    ownerShares: true
+    change: association
+    update: {door: cli}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group}
 
   - name: cli-visibility-flag-changes-a-published-transcript
     configured: {visibility: private, license: none}
     first: {door: cli}
-    expectFirst: {published: true, license: none, visibilityUpdates: [], visibility: private}
-    edited: true
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: private}
+    ownerShares: true
+    change: content
     update: {door: cli, flags: [--visibility, public]}
-    expectUpdate: {published: true, license: none, visibilityUpdates: [public], visibility: public}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public}
+
+  # The local receipt still says public, as the flag asks, but the Village now
+  # holds the transcript for collectives only. The flag reaches the Village.
+  - name: cli-visibility-flag-reaches-an-unchanged-transcript
+    configured: {visibility: private, license: none}
+    first: {door: web}
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public}
+    ownerShares: true
+    change: none
+    update: {door: cli, flags: [--visibility, public]}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public}
+
+  # This version cannot apply group; it would narrow the transcript to private
+  # instead, so the flag is refused before anything is sent.
+  - name: cli-refuses-a-visibility-it-cannot-apply
+    configured: {visibility: private, license: none}
+    first: {door: cli}
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: private}
+    ownerShares: true
+    change: content
+    update: {door: cli, flags: [--visibility, group]}
+    expectUpdate: {failed: true, published: false, license: none, visibilityUpdates: [], visibility: group}
 
   - name: cli-license-flag-changes-a-published-transcript
     configured: {visibility: private, license: CC-BY-4.0}
     first: {door: cli}
-    expectFirst: {published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
-    edited: true
+    expectFirst: {failed: false, published: true, license: CC-BY-4.0, visibilityUpdates: [], visibility: private}
+    ownerShares: true
+    change: content
     update: {door: cli, flags: [--license, CC-BY-SA-4.0]}
-    expectUpdate: {published: true, license: CC-BY-SA-4.0, visibilityUpdates: [], visibility: group}
+    expectUpdate: {failed: false, published: true, license: CC-BY-SA-4.0, visibilityUpdates: [], visibility: group}
+
+  # The first publish lands private and its owner visibility update fails, so
+  # no receipt is written. The Village answers the retry as an update, and the
+  # retry still finishes the first publish.
+  - name: web-retry-finishes-a-first-publish-whose-visibility-update-failed
+    configured: {visibility: private, license: none}
+    first: {door: web, failVisibilityUpdates: true}
+    expectFirst: {failed: true, published: true, license: none, visibilityUpdates: [public], visibility: private}
+    ownerShares: false
+    change: none
+    update: {door: web}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public}

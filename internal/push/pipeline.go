@@ -124,6 +124,7 @@ type PipelineStore interface {
 	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
+	LatestPublicationAttempt(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationAttemptDiagnostic, error)
 }
 
 // NewPipeline creates a push Pipeline with the given dependencies.
@@ -419,13 +420,13 @@ func (p *Pipeline) countRunTotals(rec perf.Recorder, result *PushResult, selecte
 	rec.Count(perf.CounterPushSessionsSkipped, int64(skipped), perf.UnitCount, nil)
 }
 
-// resolveVisibility returns the visibility this run will actually publish at.
+// resolveVisibility returns the visibility this run publishes a first
+// publication at, and the one an explicit visibility change moves an update to.
 //
 // It defers to the shared resolver rather than repeating the precedence, so the
 // value the pipeline acts on can never differ from the value the command
-// disclosed to the user. That matters even while the publish contract carries no
-// visibility at all: the moment it does, this is the value that would go on the
-// wire, and it has to be the one that was announced.
+// disclosed to the user. An update the caller did not ask to change keeps the
+// audience the transcript has on the village instead.
 func (p *Pipeline) resolveVisibility() schema.Visibility {
 	return config.EffectiveVisibility(p.runCfg.Visibility, p.cfg).Effective
 }
@@ -435,12 +436,25 @@ func (p *Pipeline) resolveVisibility() schema.Visibility {
 // kickstart). Unlike visibility there is NO forced fallback: an unset license
 // returns "" so MapMetadata omits the field and the village stores NULL — peasant
 // never imposes a license the contributor did not choose. An update sends it only
-// when runCfg.ChangeLicense is set.
+// when the caller asked for a license change.
 func (p *Pipeline) resolveLicense() schema.License {
 	if p.runCfg.License != "" {
 		return p.runCfg.License
 	}
 	return p.cfg.Push.License
+}
+
+// changesVisibility reports whether the caller asked for a visibility change,
+// which is what lets an update move a published transcript. The request names
+// its own value; a change flag without one would silently mean the configured
+// default, which is exactly what an update must not apply.
+func (p *Pipeline) changesVisibility() bool {
+	return p.runCfg.ChangeVisibility && p.runCfg.Visibility != ""
+}
+
+// changesLicense is changesVisibility for the content license.
+func (p *Pipeline) changesLicense() bool {
+	return p.runCfg.ChangeLicense && p.runCfg.License != ""
 }
 
 // getTargetSessions determines which sessions to push based on flags and config.
@@ -989,7 +1003,7 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
 	}
-	if previous != nil && !p.runCfg.ChangeLicense {
+	if previous != nil && !p.changesLicense() {
 		license = ""
 	}
 
@@ -1148,7 +1162,9 @@ func (p *Pipeline) pushSession(
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("fingerprint authoritative publication operation: %w", err)}
 	}
-	if !p.runCfg.Force && sess.PushedAt != nil && previous != nil && p.alreadyHeld(previous.Receipt, request, expectedFingerprint, visibility) {
+	// An explicit change always reaches the village: the receipt can be stale,
+	// because the owner may have changed the transcript there since.
+	if !p.runCfg.Force && !p.changesVisibility() && !p.changesLicense() && sess.PushedAt != nil && previous != nil && alreadyHeld(previous.Receipt, operation, expectedFingerprint) {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusSkipped}
 	}
 	stage.next(perf.StagePushPublish)
@@ -1188,7 +1204,14 @@ func (p *Pipeline) pushSession(
 	// audience the transcript has on the village, which its owner may have
 	// shared with collectives there, unless the caller asked for a visibility
 	// change. The village's own answer says which of the two this upload was.
-	if (receipt.Created || p.runCfg.ChangeVisibility) && (visibility == schema.VisibilityPrivate || visibility == schema.VisibilityPublic) {
+	firstPublish := receipt.Created
+	if !firstPublish && previous == nil && !p.changesVisibility() {
+		firstPublish, err = p.unfinishedFirstPublish(ctx, projectHash, sess.SessionID)
+		if err != nil {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publication content succeeded but its earlier attempts could not be read, so its visibility was not converged and no local terminal receipt was advanced; retry this session: %w", err)}
+		}
+	}
+	if (firstPublish || p.changesVisibility()) && (visibility == schema.VisibilityPrivate || visibility == schema.VisibilityPublic) {
 		desired := schema.TranscriptUpdateVisibility(visibility)
 		if schema.Visibility(receipt.Visibility) != visibility {
 			stage.next(perf.StagePushVisibilityUpdate)
@@ -1244,40 +1267,46 @@ func (p *Pipeline) pushSession(
 	}
 }
 
-// alreadyHeld reports whether the village already holds what this request would
-// leave it holding, so uploading it again would change nothing.
+// alreadyHeld reports whether the village already holds what this operation
+// would leave it holding, so uploading it again would change nothing. It is
+// consulted only when the caller asked for no change, so visibility takes no
+// part: an update leaves the audience alone, and a receipt whose visibility
+// differs from the configured default is no reason to upload.
 //
-// Visibility counts only when the caller asked for a visibility change. An
-// update otherwise leaves the audience alone, so a receipt whose visibility
-// differs from the configured default, because the owner shared the transcript
-// with collectives, is no reason to upload.
-//
-// An update that sends no license keeps the one the village holds. That leaves
-// the village exactly where the recorded operation left it when that operation
-// set the license the receipt reports, so the fingerprint of that request
-// counts as a match too. Without it every transcript first published with a
-// license would upload once more for nothing.
-func (p *Pipeline) alreadyHeld(receipt schema.AuthoritativePublishResponse, request schema.AuthoritativePublishRequest, fingerprint schema.PublishRequestFingerprint, visibility schema.Visibility) bool {
-	if receipt.Validate() != nil || receipt.ContentHash != request.ContentHash {
-		return false
-	}
-	if p.runCfg.ChangeVisibility && schema.Visibility(receipt.Visibility) != visibility {
+// An operation that sends no license keeps the one the village holds. That
+// leaves the village exactly where the recorded operation left it when that
+// operation set the license the receipt reports, so the same operation with
+// that license counts as a match too. Without it every transcript first
+// published with a license would upload once more for nothing.
+func alreadyHeld(receipt schema.AuthoritativePublishResponse, operation schema.CanonicalPublishOperation, fingerprint schema.PublishRequestFingerprint) bool {
+	if receipt.Validate() != nil || receipt.ContentHash != operation.ContentHash {
 		return false
 	}
 	if receipt.RequestOperationFingerprint == fingerprint {
 		return true
 	}
-	if request.License != "" || receipt.Applied.License == nil {
+	if operation.License.Kind != schema.PublishOperationPreserve || receipt.Applied.License == nil {
 		return false
 	}
-	licensed := request
-	licensed.License = *receipt.Applied.License
-	operation, err := schema.CanonicalizePublishRequest(licensed)
-	if err != nil {
-		return false
-	}
-	recorded, err := schema.FingerprintPublishOperation(operation)
+	licensed := operation
+	licensed.License = schema.PublishLicenseOperation{Kind: schema.PublishOperationReplace, License: receipt.Applied.License}
+	recorded, err := schema.FingerprintPublishOperation(licensed)
 	return err == nil && recorded == receipt.RequestOperationFingerprint
+}
+
+// unfinishedFirstPublish reports whether an upload the village answered as an
+// update is the retry of a first publish that never converged its visibility.
+// The village created the transcript on the earlier attempt, so it no longer
+// says created; what says so here is that no terminal receipt was ever written
+// and the last attempt failed at the owner visibility update, which only a
+// first publish or an explicit change sends. A retry finishes what that
+// attempt started.
+func (p *Pipeline) unfinishedFirstPublish(ctx context.Context, projectHash schema.ProjectHash, sessionID string) (bool, error) {
+	attempt, err := p.store.LatestPublicationAttempt(ctx, p.creds.VillageURL, p.creds.UserID, projectHash, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return attempt != nil && attempt.Stage == store.PublicationAttemptStageVisibility, nil
 }
 
 // preflightOutcome separates the candidates a run may still publish from the

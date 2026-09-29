@@ -1,15 +1,16 @@
 requiredNames:
   - repair-preserves-current-public-access-and-license
   - explicit-push-applies-private-and-license-change
-  - configured-change-keeps-current-access-and-license
 cases:
-  # The repair procedure passes the verified current values explicitly.
+  # The repair procedure passes no --visibility or --license: an update keeps
+  # the current access and license even when the configuration now names
+  # others, and sends neither a license nor an owner update.
   - name: repair-preserves-current-public-access-and-license
     currentVisibility: public
     currentLicense: CC-BY-4.0
-    requestedVisibility: public
-    requestedLicense: CC-BY-4.0
-    explicit: true
+    requestedVisibility: private
+    requestedLicense: CC-BY-SA-4.0
+    explicit: false
     expectedOwnerUpdates: 0
     expectedVisibility: public
     expectedLicense: CC-BY-4.0
@@ -23,14 +24,3 @@ cases:
     expectedOwnerUpdates: 1
     expectedVisibility: private
     expectedLicense: CC-BY-SA-4.0
-  # A changed configuration applies to first publications only: the update
-  # sends no license and no owner update, and the Village keeps both.
-  - name: configured-change-keeps-current-access-and-license
-    currentVisibility: public
-    currentLicense: CC-BY-4.0
-    requestedVisibility: private
-    requestedLicense: CC-BY-SA-4.0
-    explicit: false
-    expectedOwnerUpdates: 0
-    expectedVisibility: public
-    expectedLicense: CC-BY-4.0
