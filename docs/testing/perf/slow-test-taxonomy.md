@@ -4,9 +4,10 @@ Durable survey record for the race-enabled tests at or above 60 s of packed
 occupancy, plus the retention test that is invisible to that lens, plus the
 five confirmed findings of the later >30 s screening pass. Every number
 carries the exact command that produced it and the SHA it was run at, or is
-labelled carried. Raw artifacts (gate streams, pprof files, focused-run logs)
-stay under `.agents.local/` until the epoch closes; the commands below let any
-number be re-derived.
+labelled carried. Every inventory row carries a measured/inferred mark. Raw
+artifacts (gate streams, pprof files, focused-run logs) stay under
+`.agents.local/` as untracked sidecars; the closing sums live in the evidence
+record, and the commands below let any number be re-derived.
 
 ## Protocol
 
@@ -51,7 +52,7 @@ the carried top-5 ingest profile is pasted below; per-test rollup rows for the
 measured set follow in the classification section.
 
 **Compute cap.** Four race-mode heavy passes are budgeted epoch-wide: the base
-sweep, the final integration gate, the wave-A registry-proof subset run, and
+sweep, the final integration gate, the partition registry-proof subset run, and
 the api-scoped screen-proof run. Everything else is focused, profile-only, or
 per-change before/after pairs.
 
@@ -71,43 +72,43 @@ the inventory stands at 31 rows with no promotion.
 
 | # | lens P (s) | lens F (s) | pkg | test (file) | class | elig | fix | mark |
 |---|---|---|---|---|---|---|---|---|
-| 0 | 0.0 (parent) | 229.9 | ingest | `TestUnknownLocalRetentionBeyondTransferBudget` (`unknown_local_budget_test.go:31`) | T1 (see note) | A | one-line skip (before/after decides) | measured |
+| 0 | 0.0 (parent) | 229.9 | ingest | `TestUnknownLocalRetentionBeyondTransferBudget` (`unknown_local_budget_test.go:31`) | T1 (see note) | A | one-line skip; focused 229.9 → 210.1 s (see evidence) | measured |
 | 1 | 346.9 | 78.0 | ingest | `TestPiCapturedAdmission` (`pi_capture_test.go:77`) | T3 | A | ingest golden+skip | measured |
 | 2 | 343.4 | 75.7 | ingest | `TestPublicationCaptureNormalIngestRecovery` (`publication_capture_test.go:105`) | T3 | A | ingest golden+skip | measured |
 | 3 | 318.5 | 43.5 | ingest | `TestNormalIngestStoresAuthoritativeContent` (`content_capture_test.go:197`) | T3 | A | ingest golden+skip | measured |
-| 4 | 313.9 | 41.1 | ingest | `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (`origin_backfill_test.go:481`) | T3 | S | ingest golden+skip + wave-A entry | measured |
+| 4 | 313.9 | 41.1 | ingest | `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (`origin_backfill_test.go:481`) | T3 | S | ingest golden+skip + partition entry | measured |
 | 5 | 294.0 | 31.0 | ingest | `TestOrdinaryHarvestSettlesStaleIndexSessions` (`stale_index_settling_test.go:86`) | T3 | A | ingest golden+skip | measured |
 | 6 | 282.3 | 43.1 | ingest | `TestPiUnknownPersistence` (`pi_unknown_test.go:193`) | T3+T4 | A | ingest golden+skip + payload share | measured |
 | 7 | 277.1 | 28.3 | ingest | `TestRetainedContentBackfill` (`content_backfill_test.go:25`) | T3 | A | ingest golden+skip (+ seed batching) | measured |
 | 8 | 273.6 | 53.2 | cmd | `TestPiNativeRegistryProjection` (`pi_native_integration_test.go:187`) | T3+T4 | A | cmd golden+skip + payload share | measured |
 | 9 | 269.5 | 106.6 | ingest | `TestNativeUnknownSourceToPublication` (`native_unknown_public_test.go:110`) | T3 | A | ingest golden+skip | measured |
 | 10 | 262.4 | 22.3 | cmd | `TestPiHarvestCommonModes` (`pi_ingestion_test.go:85`) | T3+T4 | A | cmd golden+skip + payload share | measured |
-| 11 | 249.4 | 17.1 | cmd | `TestMountedKickstartStoredGateAlignsViewerAndPush` (`cmd_kickstart_stored_gate_alignment_test.go:587`) | T3 | S | cmd golden+skip + wave-A entry | measured |
+| 11 | 249.4 | 17.1 | cmd | `TestMountedKickstartStoredGateAlignsViewerAndPush` (`cmd_kickstart_stored_gate_alignment_test.go:587`) | T3 | S | cmd golden+skip + partition entry | measured |
 | 12 | 241.8 | 17.8 | ingest | `TestContentRecoveryScope` (`content_recovery_scope_test.go:148`) | T3 | A | ingest golden+skip | measured |
 | 13 | 233.4 | 18.0 | ingest | `TestPipelineRetainedAdapterMaintenance` (`adapter_maintenance_test.go:108`) | T3 | A | ingest golden+skip | measured |
-| 14 | 209.3 | 14.1 | cmd | `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` (`index_format_queries_test.go:81`) | T3 | S | cmd golden+skip + wave-A entry | measured |
-| 15 | 194.2 | 14.0 | ingest | `TestUnknownPrivateEncoding` (`unknown_private_encoding_test.go:21`) | T3 | S | ingest golden+skip + wave-A entry | measured |
-| 16 | 182.3 | 13.6 | cmd | `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` (`cmd_kickstart_selected_conversion_mount_test.go:261`) | T3 | S | cmd golden+skip + wave-A entry | measured |
+| 14 | 209.3 | 14.1 | cmd | `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` (`index_format_queries_test.go:81`) | T3 | S | cmd golden+skip + partition entry | measured |
+| 15 | 194.2 | 14.0 | ingest | `TestUnknownPrivateEncoding` (`unknown_private_encoding_test.go:21`) | T3 | S | ingest golden+skip + partition entry | measured |
+| 16 | 182.3 | 13.6 | cmd | `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` (`cmd_kickstart_selected_conversion_mount_test.go:261`) | T3 | S | cmd golden+skip + partition entry | measured |
 | 17 | 174.4 | 14.7 | cmd | `TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope` (`opencode_legacy_sqlite_recovery_test.go:397`) | T3 | A | cmd golden+skip | measured |
 | 18 | 156.0 | 13.1 | ingest | `TestConcreteParserFailurePreservesOtherSessions` (`indexer_completion_pipeline_test.go:19`) | T3 | A | ingest golden+skip | measured |
 | 19 | 132.8 | 35.4 | cmd | `TestPiDatabasePublicationThroughCLI` (`pi_database_publication_test.go:25`) | T4+T3 | A | cmd golden+skip + payload share | measured |
 | 20 | 123.7 | 9.8 | cmd | `TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary` (`cmd_kickstart_selection_runner_test.go:187`) | T3+T4 | A | cmd golden+skip | measured |
-| 21 | 119.8 | — (inferred light) | cmd | `TestPublicationWizardAndReportUseDatabaseReadiness` (`publication_readiness_test.go:22`) | T3 | S | wave-A entry only | inferred |
+| 21 | 119.8 | — (inferred light) | cmd | `TestPublicationWizardAndReportUseDatabaseReadiness` (`publication_readiness_test.go:22`) | T3 | S | partition entry only | inferred |
 | 22 | 107.9 | 22.0 (warm re-measure) | ingest | `TestWritePathDurability` (`write_path_durability_test.go:87`) | T1/T2/T3 | A | excluded — below the 30 s bar on re-measure | measured |
-| 23 | 78.1 | 10.2 | cmd | `TestModelsSync_500_StaticFallback` (`cmd_models_test.go:328`) | T2 | S | prepared-statement reuse + wave-A entry | measured |
+| 23 | 78.1 | 10.2 | cmd | `TestModelsSync_500_StaticFallback` (`cmd_models_test.go:328`) | T2 | S | prepared-statement reuse + partition entry | measured |
 | 24 | 74.2 | — (inferred light) | cmd | `TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState` (`opencode_legacy_sqlite_mount_test.go:221`) | T3 | A | tail (no fix this epoch) | inferred |
-| 25 | 70.0 | 26.4 | ingest | `TestNativeCoverageMatrix` (`native_coverage_test.go:192`) | T3 | S | one-line skip + wave-A entry | measured |
+| 25 | 70.0 | 26.4 | ingest | `TestNativeCoverageMatrix` (`native_coverage_test.go:192`) | T3 | S | one-line skip + partition entry | measured |
 | 26 | 66.6 | — (inferred light) | ingest | `TestWritePathMirrorsInPagesOf256` (`write_path_columns_test.go:230`) | T1/T2/T6 | A | tail (no fix this epoch) | inferred |
 | 27 | 66.3 | — (inferred light) | cmd | `TestOpenCodeSessionClockFixturesMountedHarvest` (`opencode_session_clock_mount_test.go:91`) | T3 | A | tail (no fix this epoch) | inferred |
 | 28 | 64.2 | — (inferred light) | ingest | `TestControlRecordIngestExportAndPublication` (`control_record_ingest_test.go:67`) | T3 | A | tail (no fix this epoch) | inferred |
 | 29 | 61.5 | 52.4 (warm; screen 63.1) | api | `TestHelperGroupListingThroughRegisteredRoutes` (`helper_group_listing_test.go:176`) | T6 | A | fix set under the >30 s bar (supersedes the tail/proof-point-only reading); T6 packing applied — focused 14.4 → 8.0 s (see evidence) | measured |
-| 30 | 61.4 | — (inferred light) | cmd | `TestKickstartRescan_FallsBackWithoutCompatibleDatabase` (`cmd_kickstart_rescan_test.go:491`) | T3 | S | wave-A entry only (subject is the missing-DB fallback; never converted) | inferred |
-| 31 | — (screening addition) | 46.6 (race before-wall; screen 52.9, warm 48.6) | ingest | `TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (`large_record_harness_test.go:121`) | T1 | S | wave-A entry (pending — the partition change carries the argument and registry row) | measured |
-| 32 | — (screening addition) | 42.7 (warm; screen 45.0) | ingest | `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (`opencode_candidates_test.go:1207`) | partition, toolchain/static-analysis character | — (assigned with the partition entry) | wave-A entry (pending — the partition change) | measured |
-| 33 | — (screening addition) | 31.9 (warm; screen 33.0) | ingest | `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (`opencode_candidates_test.go:1166`) | partition, toolchain/static-analysis character | — (assigned with the partition entry) | wave-A entry (pending — the partition change) | measured |
-| 34 | — (screening addition) | 32.4 (warm; screen 36.5) | store | `TestPublicationFullCaptureEligibilityAndBundle` (`publication_full_capture_test.go:58`) | T3 | A | seam conversion landed; wall-neutral pending the final warm pair (see evidence) | measured |
+| 30 | 61.4 | — (inferred light) | cmd | `TestKickstartRescan_FallsBackWithoutCompatibleDatabase` (`cmd_kickstart_rescan_test.go:491`) | T3 | S | partition entry only (subject is the missing-DB fallback; never converted) | inferred |
+| 31 | — (screening addition) | 46.6 (race before-wall; screen 52.9, warm 48.6) | ingest | `TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (`large_record_harness_test.go:121`) | T1 | S | partition entry — argument and registry cost pair; no-race 5.2 s (see evidence) | measured |
+| 32 | — (screening addition) | 42.7 (warm; screen 45.0) | ingest | `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (`opencode_candidates_test.go:1207`) | static-analysis (partition) | S | partition entry — registry justification; no-race 31.4 s | measured |
+| 33 | — (screening addition) | 31.9 (warm; screen 33.0) | ingest | `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (`opencode_candidates_test.go:1166`) | static-analysis (partition) | S | partition entry — registry justification; no-race 23.4 s | measured |
+| 34 | — (screening addition) | 32.4 (warm; screen 36.5) | store | `TestPublicationFullCaptureEligibilityAndBundle` (`publication_full_capture_test.go:58`) | T3 | A | seam conversion landed; warm re-measure 34.5 → 4.96 s (see evidence) | measured |
 
-Elig: S = no goroutines on the exercised production path (admits wave A);
+Elig: S = no goroutines on the exercised production path (admits the partition pass);
 A = production concurrency exercised but not the subject (keeps the detector
 tax). Rows 0–20 plus 23/25 are measured; the remaining survey tail is
 structural (code read + carried walls + existing profiles). Screening rows 29
@@ -198,7 +199,7 @@ Measured classification outcome (rules above applied to the pasted table):
   root cum 26.0–74.1 % (lowest: #9 at 26.0 %, #6 at 29.5 %; `store.Open` cum
   tracks it within a few points). Nearly all carry a T2 secondary
   (`PrepareTransient` cum 11–26 %) and a T1 secondary (detector boundary +
-  adjacency 72–82 % flat, deferred with wave B).
+  adjacency 72–82 % flat, deferred with the pipeline-body partition).
 - **T2 primary (#23):** migration root only 15.0 % cum while
   `PrepareTransient` reaches 45.9 % cum — the models-sync prepared-reuse fix.
 - **T4 primary (#19):** migration root 10.5 % cum; cost sits in the harvest CLI
@@ -429,13 +430,16 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
 
 ## Fix classes and their closure
 
-- **T1 — detector tax on bulk bytes (wave A only).** Nine STRONG-eligible tests
-  move to the no-race pass with a written short-form soundness argument each
-  (subject; concurrency actually exercised; why the detector is not this test's
-  oracle; retained race coverage; residual risk). No registry contract change;
-  pipeline partition is deferred. Arguments (each mirrored verbatim in the
-  entry's `justification` in `no-race-partition.yaml`; the row screened as
-  #31 is admitted by its own partition change and argued there):
+- **T1 — detector tax on bulk bytes (partition pass only).** Twelve entries move
+  to the no-race pass this epoch: the nine STRONG-eligible tests below, each with
+  a written short-form soundness argument (subject; concurrency actually
+  exercised; why the detector is not this test's oracle; retained race coverage;
+  residual risk), plus three screening-confirmed additions admitted by the same
+  registry change — the large-record harness test (#31) and the two
+  build-topology guards (#32/#33), summarized after the nine. Every
+  justification is mirrored verbatim in the entry's `justification` in
+  `no-race-partition.yaml`. No registry contract change; the bulk-byte parents
+  inside the ingest pipeline stay in the race pass (detector tax deferred). Arguments:
   - **#4 `TestResolveStoredOriginsWritesAVerdictIntoEveryRow`** (`internal/ingest`; initial cost 41510 ms wall / 39750 ms CPU). Subject: the stored-origin backfill writes one verdict per row and a second pass rewrites nothing. Concurrency: none on the path; each fixture subtest builds its own golden-copy store and calls OriginResolver.ResolveStoredOrigins sequentially, with no goroutines, channels, or state shared across subtests (the pipeline worker pool is not reached). The detector is not the oracle: the invariant is row contents and pass counts, and the cost is store open plus SQL work taxed by instrumentation. Retained race coverage: TestConcurrentReadAcrossActivation, TestClose_ConcurrentReadersDoNotPanic (store). Residual risk: a future change that parallelises the backfill must add its own race-run test.
   - **#11 `TestMountedKickstartStoredGateAlignsViewerAndPush`** (`cmd/peasant`; initial cost 16550 ms wall / 15240 ms CPU). Subject: the kickstart stored-selection gate and the viewer/push surfaces agree on the same candidates. Concurrency: none; runModel is replaced so the model is driven synchronously and returned commands are drained in a serial queue, flowIngest is a counter stub, and each subtest owns its temp world. The detector is not the oracle: the assertions are gate state, config bytes, and candidate sets. Retained race coverage: n/a for the gate (no concurrent path); the real bubbletea runtime is not mounted here. Residual risk: races inside the live program loop are not observed by this test in either pass.
   - **#14 `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection`** (`cmd/peasant`; initial cost 14350 ms wall / 13510 ms CPU). Subject: index-format query commands refuse unsupported scoped candidates before emitting any projection. Concurrency: none; each subtest seeds a private golden-copy store with pool size 1, then runs the root cobra command in-process once. The detector is not the oracle: the invariant is the typed refusal and empty stdout. Retained race coverage: n/a (single-connection command path); store pool concurrency stays under TestClose_ConcurrentReadersDoNotPanic. Residual risk: a command that later fans reads out across goroutines would need its own race-run test.
@@ -445,6 +449,9 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
   - **#23 `TestModelsSync_500_StaticFallback`** (`cmd/peasant`; initial cost 6700 ms wall / 6480 ms CPU). Subject: a 500 from the model catalogue falls back to the static snapshot, names its vintage, and preserves last_synced. Concurrency: only the httptest server goroutine answering one request with retries disabled; the sync command runs in-process on the caller goroutine and shares no memory with the handler. The detector is not the oracle: the invariant is output text and stored rows. Retained race coverage: TestModelsSync_200_RoundTrip, TestModelsSync_CanceledContext_Propagates, TestModelsSync_500_StaticFallback_ProviderFilter stay in the race pass over the same client/server shape. Residual risk: low; the same HTTP interaction remains race-checked by its siblings.
   - **#25 `TestNativeCoverageMatrix`** (`internal/ingest`; initial cost 24900 ms wall / 22200 ms CPU). Subject: native generation activation certifies coverage correctly and refuses duplicate or incomplete evidence without serving entries. Concurrency: none; each subtest opens a private golden-copy store and calls AssessCapture, ActivateNativeGeneration, and ExportSession sequentially under a file session lock it alone holds. The detector is not the oracle: the invariant is disposition, active generation, and served entries. Retained race coverage: TestConcurrentReadAcrossActivation (store), TestConcurrentPairReadsFailClosed (ingest). Residual risk: concurrent activation versus reads is covered only by the retained tests.
   - **#30 `TestKickstartRescan_FallsBackWithoutCompatibleDatabase`** (`cmd/peasant`; initial cost 6170 ms wall / 5750 ms CPU). Subject: a missing or version-mismatched database yields no reusable sessions, and discovery then resolves every session. Concurrency: none; loadKnownSessions opens at most one pool-size-1 store, and ftueDiscoverWith runs adapters in a loop over an in-memory filesystem with a nil spinner, so the spinner goroutine never starts. The detector is not the oracle: the invariant is nil reuse plus resolved git fields and lookup counts. Retained race coverage: TestKickstartRescan_ReusesRecordedSessions stays in the race pass. Residual risk: negligible.
+  - **#31 `TestLargeRecordsAreHandledUniformlyAcrossHarnesses`** (`internal/ingest`; measured warm 5.22 s wall / 5.59 s CPU, race before-wall 46.6 s). Subject: over-limit JSONL records are filtered, indexed, and metadata-extracted for every harness synchronously, and the record sizes are the invariant. Concurrency: none on the exercised path — no goroutines, channels, atomics, store opens, or SQL; the `t.Parallel` present is suite scheduling. The detector is not the oracle: the moved assertions are deterministic byte outcomes (placeholder counts and marker presence) over bulk byte work. Retained race coverage: the filter, scanner, indexers, and adapters stay race-checked by the rest of the ingest suite. Residual risk: negligible; record sizes stay bounded by the 256 MiB production limit.
+  - **#32 `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology`** (`internal/ingest`; measured no-race 31.4 s wall, warm race 42.7 s). Subject: the private-execution guard across build topologies — it copies production source into isolated packages, inventories each build configuration with `go list`, and parses/type-checks the files to assert which SQLite callables are reachable. Concurrency: the go tool only lists files and export data; the oracle is the AST and types, and no production goroutines run. The detector is not the oracle: this is a static-analysis check. Retained race coverage: the guard and the SQLite paths it inspects stay race-checked by the ingest suite. Residual risk: a race inside the checker helpers, which are sequential over private per-case directories.
+  - **#33 `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses`** (`internal/ingest`; measured no-race 23.4 s wall, warm race 31.9 s). Subject: each build-tagged production configuration is resolved with `go list`, a fixture-owned bypass file is written and type-checked with the configuration's sources, and the guard is asserted to reject it. Concurrency: none — the oracle is the AST and type information, and no production goroutines run. The detector is not the oracle: static analysis. Retained race coverage: the guard and the tagged production sources stay race-checked by the ingest suite. Residual risk: a race inside the sequential checker helpers over private temp files.
 - **T2 — SQL statement and seed volume.** `Store.SyncModels` prepared reuse;
   static-text transient → cached `sqlitex.Execute` at the named constant-text
   call sites; seed-loop batching in `content_backfill_test.go`. Dynamic-text
@@ -463,17 +470,22 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
   4200-repetition payload (#19), fixed large metadata strings (#8), `longText`
   case (#10), padding strings (#6). No invariant-sized fixture is reduced.
   Invariant sizes before/after live in `evidence.md`.
-- **T5 — subprocess.** Inapplicable: no subprocess use drives any of the 35
-  rows (structural line; no fix).
+- **T5 — subprocess — CLOSED (measured-inapplicable, no fix).** No subprocess
+  drives any of the 35 inventory rows. The two subprocess registry entries (the
+  e2e seam build and the web-capabilities matrix) are pre-existing partition
+  members whose child build *is* the assertion; they are not fix-set cost
+  drivers and were neither converted nor repartitioned this epoch. The 35-row
+  structural read is the closure.
 - **T6 — packing.** Proof point `helper_group_listing_test.go:176` (26
-  independent cases, already golden; focused wall now measured at 52.4 s warm,
-  screen 63.1 s — the fix-set pair is recorded in the evidence record);
+  independent cases, already golden; focused wall 52.4 s warm before the
+  template cache, 14.4 s at the post-cache branch point, 8.0 s after packing —
+  the pair is recorded in the evidence record);
   further `t.Parallel()` only where the
   post-cut measurement shows an admissible CPU-bound residual, the
   parallel-unsafe guard does not name it, and no process-global sink exists.
   Never pin `-parallel`.
-- **T7 — test-structure breadth.** Structural only: giant fixture tables stay
-  whole this epoch; breadth is recorded per row, not split (no fix).
-- **T8 — engine/dependency.** Inapplicable on the pure-Go stack: the SQLite
-  engine is transpiled Go under the same detector; no CGO swap, no checkptr
-  change (structural line; no fix).
+- **T7 — test-structure breadth — CLOSED (structural, no fix).** Giant fixture
+  tables stay whole this epoch; breadth is recorded per row, not split.
+- **T8 — engine/dependency — CLOSED (structural-inapplicable, no fix).** The
+  stack is pure-Go under the same detector (transpiled SQLite): no CGO swap and
+  no checkptr change is in scope, so the class declares no lever.
