@@ -62,6 +62,7 @@ type exitFixture struct {
 var builderByName = map[string]func() *cobra.Command{
 	"Harvest":   BuildHarvestCommand,
 	"Web":       BuildWebCommand,
+	"Open":      BuildOpenCommand,
 	"Push":      BuildPushCommand,
 	"Metrics":   BuildMetricsCommand,
 	"Models":    BuildModelsCommand,

@@ -1,0 +1,195 @@
+# open-output.yaml - golden output of `peasant open` for each outcome.
+#
+# Each run builds a synthetic world: a Git repository with a base commit weeks
+# before the session and two commits inside it, one Claude Code transcript
+# whose cwd is that repository and that runs `git commit`, and a config that
+# points the claude-code source at it. The command runs
+# through the production harvest, store, and output path. Only the web server
+# start and the browser are replaced, and the health probe is the production
+# probe against a local test server.
+#
+# Every run of every case also asserts the contract that holds for all
+# outcomes: at most two output lines, never the dashboard root, exit 0 with a
+# {"continue":false,"stopReason":...} object in hook mode, and a non-zero exit
+# with one line on stderr for a plain-mode failure.
+#
+# Placeholders in expected output: {session_id}, {port}, {project_hash}.
+#
+# Case fields:
+#   session          known (the source holds the transcript) | unknown |
+#                    missing (no --session value)
+#   prompt           the first user prompt; the stored title is generated from it
+#   recorded_before  harvest the session once before the measured run
+#   published        store a publication receipt before the measured run
+#   config           valid | refused-redaction-level
+#   server           running | starts | start-error | never-ready
+#   start_error      the error the replaced server start returns (start-error)
+#   modes            hook and/or plain; each mode runs in a fresh world
+#   want.failed      the run fails; lines then holds the one failure line
+#   want.lines       exact lines (the stopReason lines in hook mode)
+#   want.hook_stdout exact hook-mode stdout without its trailing newline, when pinned
+#   want.plain_stdout exact plain-mode stdout, when pinned
+#   want.commits     session_commits holds exactly the two session commits;
+#                    otherwise it holds none
+#   want.started     the command started the web server
+
+# Every case is named here; a case missing from either list fails the load.
+requiredNames:
+  - new-session
+  - refreshed-session
+  - published-session
+  - title-with-quotes
+  - harvest-failure
+  - server-start-failure
+  - server-never-ready
+  - unknown-session
+  - missing-session
+  - hook-mode
+  - plain-mode
+
+# A complete Village receipt, stored as-is for the published cases.
+publication:
+  origin: https://api.village.example
+  owner: owner-1
+  receipt_json: '{"transcriptId":"99d59925-36bc-424c-a789-8be54d9702ba","transcriptUrl":"https://village.example/transcripts/99d59925-36bc-424c-a789-8be54d9702ba","visibility":"private","contentHash":"a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a","requestOperationFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","applied":{"license":null,"associations":[],"normalizedValues":{"rootHarness":"claude-code","entryHarnesses":[],"derivedTitle":null,"visibility":"private","schemaVersion":"9"}},"blobKey":"transcripts/x","blobSizeBytes":0,"publishedAt":1,"updatedAt":1,"created":true}'
+
+cases:
+  - name: new-session
+    session: known
+    prompt: Fix the login redirect
+    config: valid
+    server: starts
+    modes: [hook]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+      started: true
+
+  - name: refreshed-session
+    session: known
+    prompt: Fix the login redirect
+    recorded_before: true
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: published-session
+    session: known
+    prompt: Fix the login redirect
+    recorded_before: true
+    published: true
+    config: valid
+    server: running
+    modes: [hook]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: title-with-quotes
+    session: known
+    prompt: 'Rename the "open" flag to "view" & back'
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      lines:
+        - 'peasant: opened "Rename the "open" flag to "view" & back" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      hook_stdout: '{"continue":false,"stopReason":"peasant: opened \"Rename the \"open\" flag to \"view\" & back\" · not published\nhttp://localhost:{port}/projects/{project_hash}/{session_id}"}'
+      commits: true
+
+  - name: harvest-failure
+    session: known
+    prompt: Fix the login redirect
+    config: refused-redaction-level
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `peasant harvest --session {session_id} --detect-commits` to see the full report'
+
+  - name: server-start-failure
+    session: known
+    prompt: Fix the login redirect
+    config: valid
+    server: start-error
+    start_error: 'failed to start background server: fork/exec peasant: permission denied'
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard start failed: failed to start background server: fork/exec peasant: permission denied; fix: run `peasant web start --foreground --port {port}` to see why, or pass --port with a free port'
+      commits: true
+
+  - name: server-never-ready
+    session: known
+    prompt: Fix the login redirect
+    config: valid
+    server: never-ready
+    modes: [hook]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard start failed: the server was started, but http://localhost:{port}/api/v1/health did not answer within 30ms; fix: run `peasant web start --foreground --port {port}` to see why, or pass --port with a free port'
+      commits: true
+      started: true
+
+  - name: unknown-session
+    session: unknown
+    prompt: Fix the login redirect
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: session lookup failed: session {session_id} is not recorded, and no configured source holds a transcript with that id; fix: check the id with `peasant sessions list`, or enable the harness that recorded it with `peasant kickstart`'
+
+  - name: missing-session
+    session: missing
+    prompt: Fix the login redirect
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: session check failed: no session id was given; fix: pass the session to open as `peasant open --session <id>`'
+
+  - name: hook-mode
+    session: known
+    prompt: Fix the login redirect
+    config: valid
+    server: running
+    modes: [hook]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      hook_stdout: '{"continue":false,"stopReason":"peasant: opened \"Fix the login redirect\" · not published\nhttp://localhost:{port}/projects/{project_hash}/{session_id}"}'
+      commits: true
+
+  - name: plain-mode
+    session: known
+    prompt: Fix the login redirect
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      plain_stdout: |
+        peasant: opened "Fix the login redirect" · not published
+        http://localhost:{port}/projects/{project_hash}/{session_id}
+      commits: true

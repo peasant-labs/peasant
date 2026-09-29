@@ -13,6 +13,7 @@ import (
 var commands = [...]func() *cobra.Command{
 	BuildTUICommand,
 	BuildWebCommand,
+	BuildOpenCommand,
 	BuildIngestCommand,
 	BuildMetricsCommand,
 	BuildVillageCommand,
