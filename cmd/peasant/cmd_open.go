@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/browser"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
@@ -24,10 +28,11 @@ import (
 type openStep string
 
 const (
-	openStepSession   openStep = "session check"
-	openStepHarvest   openStep = "harvest"
-	openStepLookup    openStep = "session lookup"
-	openStepDashboard openStep = "dashboard start"
+	openStepSession        openStep = "session check"
+	openStepHarvest        openStep = "harvest"
+	openStepLookup         openStep = "session lookup"
+	openStepDashboardStart openStep = "dashboard start"
+	openStepDashboardCheck openStep = "dashboard check"
 )
 
 // publishState is the publication state the first output line reports. It is
@@ -69,14 +74,15 @@ type hookStop struct {
 }
 
 // openDependencies are the side effects of `peasant open` outside the harvest
-// and the store: the web server it may start, the health probe that decides
-// whether one runs, and the browser it opens.
+// and the store: the web server it may start, the HTTP client that probes it,
+// and the browser it opens.
 type openDependencies struct {
-	// startServer forks the web server on port. It does not wait for it.
-	startServer   func(cmd *cobra.Command, port int) error
+	// startServer forks the server the spawn describes and returns its PID
+	// file. It does not wait for the server to answer.
+	startServer   func(spawn webServerSpawn) (pidFile string, err error)
 	openBrowser   func(url string) error
-	health        *http.Client
-	readyAttempts int
+	client        *http.Client
+	readyWait     time.Duration
 	readyInterval time.Duration
 }
 
@@ -84,13 +90,13 @@ type openDependencies struct {
 // opens its transcript in the local web dashboard.
 func BuildOpenCommand() *cobra.Command {
 	return buildOpenCommand(openDependencies{
-		startServer: func(cmd *cobra.Command, port int) error {
-			_, _, err := spawnWebServer(webServerSpawnFor(cmd, port))
-			return err
+		startServer: func(spawn webServerSpawn) (string, error) {
+			_, pidFile, err := spawnWebServer(spawn)
+			return pidFile, err
 		},
 		openBrowser:   browser.Open,
-		health:        &http.Client{Timeout: defaults.ServerClientTimeout},
-		readyAttempts: defaults.HealthCheckAttempts,
+		client:        &http.Client{Timeout: defaults.ServerClientTimeout},
+		readyWait:     webServerReadyWait,
 		readyInterval: defaults.HealthCheckInterval,
 	})
 }
@@ -106,28 +112,32 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 		Short: "Record one session and open its transcript in the web dashboard",
 		Long: "Record one session and open its transcript in the local web dashboard.\n\n" +
 			"open harvests the session with commit detection, starts the web dashboard when it is not running, " +
-			"opens the transcript in the browser, and prints two lines:\n\n" +
+			"checks that the dashboard serves the session, opens the transcript in the browser, and prints two lines on stdout:\n\n" +
 			"  peasant: opened \"<title>\" · not published\n" +
 			"  http://localhost:8690/projects/<project-hash>/<session-id>\n\n" +
 			"The state reads \"published\" when the store holds a publication receipt for the session. " +
-			"A failed step prints one line that names the step and the fix, and the command exits non-zero. " +
+			"open opens the browser itself, so a caller must not open the address again.\n\n" +
+			"A failed step prints one line on stderr and exits 1:\n\n" +
+			"  peasant: <step> failed: <reason>; fix: <action>\n\n" +
+			"The steps are \"session check\", \"harvest\", \"session lookup\", \"dashboard start\" and \"dashboard check\". " +
 			"open never opens the dashboard root in place of the session.\n\n" +
-			"With --hook, open prints the Claude Code hook response {\"continue\":false,\"stopReason\":\"...\"} instead, " +
-			"with the same lines in stopReason, and exits 0 on every outcome.",
+			"With --hook, open prints the Claude Code hook response {\"continue\":false,\"stopReason\":\"...\"} as one line on stdout instead, " +
+			"with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			cmd.SilenceErrors = true
 			stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 			// The harvest and the store report through the command's writers and
-			// the default logger. The lines below are the whole output of this
-			// command, so everything else is muted.
+			// the default loggers. The lines below are the whole output of this
+			// command, so everything else is muted while it runs.
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
-			previousLogger := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			restoreLoggers := muteDefaultLoggers()
 			lines, failure := runOpen(cmd, deps, sessionID, port)
-			slog.SetDefault(previousLogger)
+			restoreLoggers()
+			cmd.SetOut(nil)
+			cmd.SetErr(nil)
 
 			if hook {
 				reason := strings.Join(lines, "\n")
@@ -152,9 +162,23 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 	return cmd
 }
 
+// muteDefaultLoggers sends the default slog logger and the standard log
+// package to nowhere, and returns the function that puts both back. Setting a
+// slog default also redirects the log package, and restoring the slog default
+// alone does not undo that, so the log writer and flags are saved as well.
+func muteDefaultLoggers() (restore func()) {
+	previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return func() {
+		slog.SetDefault(previous)
+		log.SetOutput(writer)
+		log.SetFlags(flags)
+	}
+}
+
 // runOpen records the session, reads what the output reports, makes sure the
-// dashboard answers, and opens the transcript. It returns the two output lines,
-// or the failure of the first step that failed.
+// dashboard serves it, and opens the transcript. It returns the two output
+// lines, or the failure of the first step that failed.
 func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, port int) ([]string, *openFailure) {
 	id, err := ingest.NewSessionID(rawSessionID)
 	if err != nil {
@@ -168,14 +192,14 @@ func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, por
 		return nil, &openFailure{
 			step:   openStepHarvest,
 			reason: firstErrorLine(err),
-			fix:    fmt.Sprintf("run `peasant harvest --session %s --detect-commits` to see the full report", id),
+			fix:    fmt.Sprintf("run `%s` to see the full report", openHarvestCommand(cmd, id)),
 		}
 	}
 	session, failure := lookupOpenSession(cmd, id)
 	if failure != nil {
 		return nil, failure
 	}
-	if failure := ensureDashboard(cmd, deps, port); failure != nil {
+	if failure := ensureDashboard(cmd, deps, port, id); failure != nil {
 		return nil, failure
 	}
 	address := transcriptURL(port, session.projectHash, id)
@@ -185,14 +209,33 @@ func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, por
 	return []string{openedLine(session.title, session.state), address}, nil
 }
 
+// openHarvestArgs is the harvest `open` runs, as `peasant harvest` arguments.
+// The flags the harvest runs with and the command a failure line suggests are
+// both built from it, so the two cannot differ.
+func openHarvestArgs(id ingest.SessionID) []string {
+	return []string{"--session", string(id), "--force", "--detect-commits"}
+}
+
+// openHarvestCommand is the harvest `open` runs, as a command the user can
+// paste: the same arguments, on the configuration and directories of this run.
+func openHarvestCommand(cmd *cobra.Command, id ingest.SessionID) string {
+	return peasantCommand(cmd, append([]string{"harvest"}, openHarvestArgs(id)...)...)
+}
+
+// peasantCommand renders a peasant command line with the configuration and
+// directory flags this run was given, so the command reads the same store.
+func peasantCommand(cmd *cobra.Command, args ...string) string {
+	return githooks.CommandPrefix(hookBinding(cmd)) + " " + strings.Join(args, " ")
+}
+
 // recordOpenSession harvests exactly this session, with commit detection,
 // through the production harvest wiring. It prints nothing.
 func recordOpenSession(cmd *cobra.Command, id ingest.SessionID) error {
-	flags := harvestFlags{
-		force:         true,
-		includeActive: true,
-		detectCommits: true,
-		sessionIDs:    []string{string(id)},
+	var flags harvestFlags
+	parser := &cobra.Command{Use: "harvest"}
+	registerHarvestFlags(parser, &flags, harvestAll)
+	if err := parser.ParseFlags(openHarvestArgs(id)); err != nil {
+		return fmt.Errorf("parse the harvest arguments: %w", err)
 	}
 	return runHarvestWith(cmd, harvestAll, &flags, &ingest.OSFileSystem{}, func(_ *cobra.Command, execution harvestExecution, _ harvestOutputOptions) error {
 		return openHarvestOutcome(execution, id)
@@ -210,6 +253,8 @@ func openHarvestOutcome(execution harvestExecution, id ingest.SessionID) error {
 		return harvestCancellationError(execution.ctxErr)
 	case execution.kind == harvestCompletionFailed:
 		return fmt.Errorf("pipeline failed: %w", execution.runErr)
+	case execution.kind != harvestCompletionSucceeded || execution.result == nil:
+		return fmt.Errorf("the harvest ended without a result for session %s", id)
 	}
 	result := execution.result
 	if result.Summary.StoreError != nil {
@@ -235,7 +280,7 @@ type openedSession struct {
 
 func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID) (openedSession, *openFailure) {
 	storeFailure := func(err error) *openFailure {
-		return &openFailure{step: openStepLookup, reason: firstErrorLine(err), fix: "run `peasant harvest verify` to check the database"}
+		return &openFailure{step: openStepLookup, reason: firstErrorLine(err), fix: fmt.Sprintf("run `%s` to check the database", peasantCommand(cmd, "harvest", "verify"))}
 	}
 	db, cleanup, err := openDB(cmd)
 	if err != nil {
@@ -251,7 +296,8 @@ func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID) (openedSession, 
 		return openedSession{}, &openFailure{
 			step:   openStepLookup,
 			reason: fmt.Sprintf("session %s is not recorded, and no configured source holds a transcript with that id", id),
-			fix:    "check the id with `peasant sessions list`, or enable the harness that recorded it with `peasant kickstart`",
+			fix: fmt.Sprintf("check the id with `%s`, or enable the harness that recorded it with `%s`",
+				peasantCommand(cmd, "sessions", "list"), peasantCommand(cmd, "kickstart")),
 		}
 	}
 	projectHash, err := schema.NewProjectHash(row.ProjectHash)
@@ -259,10 +305,10 @@ func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID) (openedSession, 
 		return openedSession{}, &openFailure{
 			step:   openStepLookup,
 			reason: fmt.Sprintf("session %s is recorded without a valid project: %s", id, firstErrorLine(err)),
-			fix:    fmt.Sprintf("record it again with `peasant harvest --session %s --force`", id),
+			fix:    fmt.Sprintf("record it again with `%s`", openHarvestCommand(cmd, id)),
 		}
 	}
-	published, err := db.HasPublication(ctx, projectHash, string(id))
+	published, err := db.HasPublication(ctx, string(id))
 	if err != nil {
 		return openedSession{}, storeFailure(err)
 	}
@@ -277,27 +323,78 @@ func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID) (openedSession, 
 }
 
 // ensureDashboard makes sure a Peasant web server answers on port, starting one
-// when none does.
-func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int) *openFailure {
+// when none does, and that it serves the session: a server started on another
+// data directory would answer the transcript address with a page that cannot
+// show it.
+func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ingest.SessionID) *openFailure {
 	base := dashboardBaseURL(port)
-	if webServerHealthy(deps.health, base) {
-		return nil
-	}
-	failed := func(reason string) *openFailure {
-		return &openFailure{
-			step:   openStepDashboard,
-			reason: reason,
-			fix:    fmt.Sprintf("run `peasant web start --foreground --port %d` to see why, or pass --port with a free port", port),
+	if !webServerHealthy(cmd.Context(), deps.client, base) {
+		failed := func(reason string) *openFailure {
+			return &openFailure{
+				step:   openStepDashboardStart,
+				reason: reason,
+				fix: fmt.Sprintf("run `%s` to see why, or pass --port with a free port",
+					peasantCommand(cmd, "web", "start", "--foreground", "--port", fmt.Sprint(port))),
+			}
+		}
+		pidFile, err := deps.startServer(webServerSpawnFor(cmd, port))
+		if err != nil {
+			return failed(firstErrorLine(err))
+		}
+		if !waitForWebServer(deps.client, base, deps.readyWait, deps.readyInterval) {
+			// The forked server is gone or never answered; a PID file left behind
+			// would point `peasant web stop` at a process that is not it.
+			if pidFile != "" {
+				_ = os.Remove(pidFile)
+			}
+			return failed(fmt.Sprintf("no Peasant server answered %s%s within %s of the start, and another program may hold port %d", base, defaults.RouteHealth, deps.readyWait, port))
 		}
 	}
-	if err := deps.startServer(cmd, port); err != nil {
-		return failed(firstErrorLine(err))
-	}
-	if !waitForWebServer(deps.health, base, deps.readyAttempts, deps.readyInterval) {
-		wait := time.Duration(deps.readyAttempts) * deps.readyInterval
-		return failed(fmt.Sprintf("the server was started, but %s%s did not answer within %s", base, defaults.RouteHealth, wait))
+	serves, err := dashboardServesSession(cmd.Context(), deps.client, base, id)
+	if err != nil || !serves {
+		reason := fmt.Sprintf("the dashboard on port %d does not serve session %s, so it reads another data directory or mock data", port, id)
+		if err != nil {
+			reason = fmt.Sprintf("the dashboard on port %d did not answer the session lookup: %s", port, firstErrorLine(err))
+		}
+		return &openFailure{
+			step:   openStepDashboardCheck,
+			reason: reason,
+			fix: fmt.Sprintf("stop it with `%s` and run open again, or pass --port with a free port",
+				peasantCommand(cmd, "web", "stop", "--port", fmt.Sprint(port))),
+		}
 	}
 	return nil
+}
+
+// dashboardServesSession asks the running server whether it holds the session,
+// through the link-resolving summaries read the dashboard itself uses. That
+// read applies neither origin nor selection scope, so a recorded session is
+// found whenever the server reads the store this command wrote.
+func dashboardServesSession(ctx context.Context, client *http.Client, base string, id ingest.SessionID) (bool, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+defaults.RouteSessionSummaries.String()+"?ids="+url.QueryEscape(string(id)), nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := client.Do(request)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("%s answered %s", defaults.RouteSessionSummaries, resp.Status)
+	}
+	var envelope struct {
+		Sessions []schema.SessionSummary `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return false, fmt.Errorf("decode the %s answer: %w", defaults.RouteSessionSummaries, err)
+	}
+	for _, summary := range envelope.Sessions {
+		if summary.ID == string(id) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // transcriptURL is the dashboard address of the session's transcript. It always
@@ -319,9 +416,16 @@ func writeHookStop(w io.Writer, reason string) error {
 	return encoder.Encode(hookStop{Continue: false, StopReason: reason})
 }
 
-// oneLine keeps text on one terminal line: line breaks, other whitespace, and
-// control characters become single spaces.
+// oneLine keeps text on one terminal line that reads in order: format
+// characters, such as bidirectional overrides, are dropped, and line breaks,
+// other whitespace, and control characters become single spaces.
 func oneLine(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, text)
 	return strings.Join(strings.FieldsFunc(text, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r)
 	}), " ")

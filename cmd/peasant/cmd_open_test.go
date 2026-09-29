@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,7 +24,9 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
@@ -41,8 +45,11 @@ var openOutputAcceptanceCases = []string{
 const (
 	openTestSessionID        = "5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70"
 	openTestUnknownSessionID = "6b2e1d4f-8c3e-4f9b-8d72-1e5c4f3a2b81"
-	openTestReadyAttempts    = 3
-	openTestReadyInterval    = 10 * time.Millisecond
+	// openTestReadyWait leaves a loaded machine room to answer a started
+	// server's first probe; the never-ready case waits it out once.
+	openTestReadyWait     = time.Second
+	openTestReadyInterval = 10 * time.Millisecond
+	openTestRemote        = "https://github.com/example-org/open-fixture.git"
 )
 
 // The session runs 03:12 to 03:20 on 2024-01-02. The base commit falls weeks
@@ -64,16 +71,18 @@ type openFixturePublication struct {
 }
 
 type openOutputCase struct {
-	Name           string   `yaml:"name"`
-	Session        string   `yaml:"session"`
-	Prompt         string   `yaml:"prompt"`
-	RecordedBefore bool     `yaml:"recorded_before"`
-	Published      bool     `yaml:"published"`
-	Config         string   `yaml:"config"`
-	Server         string   `yaml:"server"`
-	StartError     string   `yaml:"start_error"`
-	Modes          []string `yaml:"modes"`
-	Want           struct {
+	Name                    string   `yaml:"name"`
+	Session                 string   `yaml:"session"`
+	Prompt                  string   `yaml:"prompt"`
+	Transcript              string   `yaml:"transcript"`
+	RecordedBefore          bool     `yaml:"recorded_before"`
+	Published               bool     `yaml:"published"`
+	ReattributeAfterPublish bool     `yaml:"reattribute_after_publish"`
+	Config                  string   `yaml:"config"`
+	Server                  string   `yaml:"server"`
+	StartError              string   `yaml:"start_error"`
+	Modes                   []string `yaml:"modes"`
+	Want                    struct {
 		Failed      bool     `yaml:"failed"`
 		Lines       []string `yaml:"lines"`
 		HookStdout  string   `yaml:"hook_stdout"`
@@ -94,22 +103,32 @@ func loadOpenOutputFixture(t *testing.T) openOutputFixture {
 			t.Fatalf("open output fixture manifest dropped the acceptance case %q", name)
 		}
 	}
+	for _, tc := range fixture.Cases {
+		if len(tc.Modes) == 0 {
+			t.Fatalf("case %q lists no modes, so it would run nothing", tc.Name)
+		}
+		seen := map[string]bool{}
+		for _, mode := range tc.Modes {
+			if (mode != "hook" && mode != "plain") || seen[mode] {
+				t.Fatalf("case %q has an unknown or repeated mode %q", tc.Name, mode)
+			}
+			seen[mode] = true
+		}
+		if want := 2; !tc.Want.Failed && len(tc.Want.Lines) != want {
+			t.Fatalf("success case %q holds %d lines, want %d", tc.Name, len(tc.Want.Lines), want)
+		}
+		if tc.Want.Failed && len(tc.Want.Lines) != 1 {
+			t.Fatalf("failure case %q holds %d lines, want 1", tc.Name, len(tc.Want.Lines))
+		}
+	}
 	return fixture
 }
 
 // TestOpenOutput drives `peasant open` through the production harvest, store,
 // and output path for every fixture case and mode.
-//
-// Commit detection attributes commits by the global Git user email, so the test
-// points Git's global configuration at a file that sets it. That makes the
-// test itself sequential; its runs are parallel with each other.
 func TestOpenOutput(t *testing.T) {
+	t.Parallel()
 	fixture := loadOpenOutputFixture(t)
-	globalConfig := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(globalConfig, []byte("[user]\n\temail = "+testutil.TestEmail+"\n\tname = Test User\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
 	for _, tc := range fixture.Cases {
 		for _, mode := range tc.Modes {
 			t.Run(tc.Name+"/"+mode, func(t *testing.T) {
@@ -128,11 +147,18 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 	if tc.Published {
 		world.publish(t, fixture.Publication)
 	}
+	if tc.ReattributeAfterPublish {
+		world.git(t, nil, "remote", "add", "origin", openTestRemote)
+	}
 
 	stdout, stderr, err := world.open(t, mode)
 
-	sessionID := world.sessionID(t)
-	replacer := strings.NewReplacer("{session_id}", sessionID, "{port}", strconv.Itoa(world.port), "{project_hash}", world.projectHash(t))
+	replacer := strings.NewReplacer(
+		"{session_id}", world.sessionID(t),
+		"{port}", strconv.Itoa(world.port),
+		"{project_hash}", world.projectHash(t),
+		"{peasant}", world.commandPrefix(),
+	)
 	want := make([]string, len(tc.Want.Lines))
 	for i, line := range tc.Want.Lines {
 		want[i] = replacer.Replace(line)
@@ -191,8 +217,6 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 				t.Errorf("plain stdout =\n%s\nwant\n%s", stdout, wantRaw)
 			}
 		}
-	default:
-		t.Fatalf("unknown mode %q", mode)
 	}
 
 	if len(got) > 2 {
@@ -218,14 +242,61 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 	if started := world.started.Load(); started != tc.Want.Started {
 		t.Errorf("server started = %v, want %v", started, tc.Want.Started)
 	}
+	if tc.Want.Started {
+		_, statErr := os.Stat(world.pidFile)
+		switch {
+		case tc.Want.Failed && !errors.Is(statErr, os.ErrNotExist):
+			t.Errorf("a failed start left its PID file behind: %v", statErr)
+		case !tc.Want.Failed && statErr != nil:
+			t.Errorf("a successful start lost its PID file: %v", statErr)
+		}
+	}
 
 	recorded := world.recordedCommits(t)
 	if tc.Want.Commits {
 		if !slices.Equal(recorded, world.commits) {
-			t.Errorf("session_commits = %v, want the repository's commits %v", recorded, world.commits)
+			t.Errorf("session_commits = %v, want the session commits %v", recorded, world.commits)
 		}
 	} else if len(recorded) != 0 {
 		t.Errorf("session_commits = %v, want none", recorded)
+	}
+}
+
+// TestOpenMutesAndRestoresTheDefaultLoggers checks that the harvest's
+// structured logs cannot reach the terminal while open runs, and that the
+// process loggers are back afterwards. It runs outside the parallel phase,
+// because it owns the process-wide loggers while it runs.
+func TestOpenMutesAndRestoresTheDefaultLoggers(t *testing.T) {
+	fixture := loadOpenOutputFixture(t)
+	index := slices.IndexFunc(fixture.Cases, func(tc openOutputCase) bool { return tc.Name == "plain-mode" })
+	world := newOpenWorld(t, fixture.Cases[index])
+
+	var logged bytes.Buffer
+	recorder := slog.New(slog.NewTextHandler(&logged, nil))
+	previous, previousWriter, previousFlags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(recorder)
+	log.SetOutput(&logged)
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	muted := false
+	world.duringBrowserOpen = func() {
+		muted = slog.Default() != recorder && log.Writer() != &logged
+	}
+	if _, stderr, err := world.open(t, "plain"); err != nil {
+		t.Fatalf("open failed: %v; stderr=%q", err, stderr)
+	}
+	if !muted {
+		t.Error("the default loggers were live while open ran")
+	}
+	if slog.Default() != recorder || log.Writer() != &logged {
+		t.Error("open did not restore the default loggers")
+	}
+	if logged.Len() != 0 {
+		t.Errorf("open wrote to the default loggers: %q", logged.String())
 	}
 }
 
@@ -233,57 +304,88 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 // Claude Code source, a Git repository, and a local server the health probe
 // reaches.
 type openWorld struct {
-	tc         openOutputCase
-	root       string
-	configPath string
-	port       int
-	commits    []string
-	healthy    atomic.Bool
-	started    atomic.Bool
-	mu         sync.Mutex
-	opened     []string
+	tc                openOutputCase
+	root              string
+	repo              string
+	configPath        string
+	pidFile           string
+	port              int
+	commits           []string
+	healthy           atomic.Bool
+	serves            atomic.Bool
+	started           atomic.Bool
+	duringBrowserOpen func()
+	mu                sync.Mutex
+	opened            []string
 }
 
 func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	t.Helper()
 	w := &openWorld{tc: tc, root: t.TempDir()}
-	repo := filepath.Join(w.root, "repo")
-	w.commits = openTestRepository(t, repo)
+	w.repo = filepath.Join(w.root, "repo")
+	w.pidFile = filepath.Join(w.root, "state", "web.pid")
+	w.commits = w.createRepository(t)
 
 	sourceRoot := filepath.Join(w.root, "transcripts")
 	transcript := filepath.Join(sourceRoot, "project", openTestSessionID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(transcript), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcript, openTestTranscript(t, repo, tc.Prompt), 0o600); err != nil {
+	if err := os.WriteFile(transcript, openTestTranscript(t, w.repo, tc.Prompt, tc.Transcript), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	config := "version: 1\nsources:\n  claude-code:\n    enabled: true\n    paths: [" + sourceRoot + "]\n" +
-		"  opencode: {enabled: false}\n  cursor: {enabled: false}\n  codex: {enabled: false}\n  strike: {enabled: false}\n  pi: {enabled: false}\n" +
-		"output:\n  basePath: " + filepath.Join(w.root, "output") + "\n"
+	paths := "[" + sourceRoot + "]"
+	redaction := ""
 	switch tc.Config {
 	case "valid":
+	case "invalid-source-path":
+		// A relative path is invalid; the harvest warns about it and goes on.
+		paths = "[" + sourceRoot + ", relative/transcripts]"
 	case "refused-redaction-level":
-		config += "redaction:\n  level: maximum\n"
+		redaction = "redaction:\n  level: maximum\n"
 	default:
 		t.Fatalf("unknown config %q", tc.Config)
 	}
+	config := "version: 1\nsources:\n  claude-code:\n    enabled: true\n    paths: " + paths + "\n" +
+		"  opencode: {enabled: false}\n  cursor: {enabled: false}\n  codex: {enabled: false}\n  strike: {enabled: false}\n  pi: {enabled: false}\n" +
+		"output:\n  basePath: " + filepath.Join(w.root, "output") + "\n" + redaction
 	w.configPath = writeCfg(t, filepath.Join(w.root, "config"), "config.yaml", config)
+
+	// A migrated empty database, so a run does not pay for the migrations.
+	dbPath := string(defaults.ResolveDBFilePathWith(w.dataDir()))
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	storetest.CopyGoldenTo(t, dbPath)
 
 	switch tc.Server {
 	case "running":
+		w.healthy.Store(true)
+		w.serves.Store(true)
+	case "other-data":
 		w.healthy.Store(true)
 	case "starts", "start-error", "never-ready":
 	default:
 		t.Fatalf("unknown server %q", tc.Server)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == defaults.RouteHealth.String() && w.healthy.Load() {
-			rw.WriteHeader(http.StatusOK)
+		if !w.healthy.Load() {
+			rw.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		rw.WriteHeader(http.StatusServiceUnavailable)
+		switch r.URL.Path {
+		case defaults.RouteHealth.String():
+			rw.WriteHeader(http.StatusOK)
+		case defaults.RouteSessionSummaries.String():
+			summaries := []schema.SessionSummary{}
+			if id := r.URL.Query().Get("ids"); w.serves.Load() && id == openTestSessionID {
+				summaries = append(summaries, schema.SessionSummary{ID: id})
+			}
+			_ = json.NewEncoder(rw).Encode(map[string]any{"sessions": summaries})
+		default:
+			rw.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	t.Cleanup(server.Close)
 	address, err := url.Parse(server.URL)
@@ -296,31 +398,54 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	return w
 }
 
+func (w *openWorld) dataDir() string   { return filepath.Join(w.root, "data") }
+func (w *openWorld) configDir() string { return filepath.Join(w.root, "config") }
+func (w *openWorld) stateDir() string  { return filepath.Join(w.root, "state") }
+
+// commandPrefix is how the command renders `peasant` with this run's flags.
+func (w *openWorld) commandPrefix() string {
+	return githooks.CommandPrefix(githooks.Binding{ConfigPath: w.configPath, ConfigDir: w.configDir(), DataDir: w.dataDir(), StateDir: w.stateDir()})
+}
+
 func (w *openWorld) dependencies(t *testing.T) openDependencies {
 	return openDependencies{
-		startServer: func(_ *cobra.Command, port int) error {
-			if port != w.port {
-				t.Errorf("started a server on port %d, want %d", port, w.port)
+		startServer: func(spawn webServerSpawn) (string, error) {
+			if spawn.port != w.port || spawn.configPath != w.configPath || spawn.dataDir != w.dataDir() || spawn.configDir != w.configDir() || spawn.stateDir != w.stateDir() {
+				t.Errorf("the forked server would not read this run's store: %+v", spawn)
 			}
 			switch w.tc.Server {
-			case "running":
+			case "running", "other-data":
 				t.Error("started a server while one was running")
-			case "starts":
-				w.healthy.Store(true)
 			case "start-error":
-				return errors.New(w.tc.StartError)
+				return "", errors.New(w.tc.StartError)
+			}
+			if err := os.MkdirAll(filepath.Dir(w.pidFile), 0o700); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(w.pidFile, []byte("1"), 0o600); err != nil {
+				return "", err
 			}
 			w.started.Store(true)
-			return nil
+			if w.tc.Server == "starts" {
+				w.serves.Store(true)
+				w.healthy.Store(true)
+			}
+			return w.pidFile, nil
 		},
 		openBrowser: func(address string) error {
+			if !w.healthy.Load() || !w.serves.Load() {
+				t.Error("opened the browser before the dashboard served the session")
+			}
+			if w.duringBrowserOpen != nil {
+				w.duringBrowserOpen()
+			}
 			w.mu.Lock()
 			defer w.mu.Unlock()
 			w.opened = append(w.opened, address)
 			return nil
 		},
-		health:        &http.Client{Timeout: defaults.ServerClientTimeout},
-		readyAttempts: openTestReadyAttempts,
+		client:        &http.Client{Timeout: defaults.ServerClientTimeout},
+		readyWait:     openTestReadyWait,
 		readyInterval: openTestReadyInterval,
 	}
 }
@@ -333,9 +458,9 @@ func (w *openWorld) execute(t *testing.T, sub *cobra.Command, args ...string) (s
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs(append([]string{
-		"--data-dir", filepath.Join(w.root, "data"),
-		"--config-dir", filepath.Join(w.root, "config"),
-		"--state-dir", filepath.Join(w.root, "state"),
+		"--data-dir", w.dataDir(),
+		"--config-dir", w.configDir(),
+		"--state-dir", w.stateDir(),
 		"--config", w.configPath,
 	}, args...))
 	err := root.Execute()
@@ -377,7 +502,7 @@ func (w *openWorld) harvest(t *testing.T) {
 
 func (w *openWorld) store(t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(filepath.Join(w.root, "data"))))
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(w.dataDir())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,9 +530,6 @@ func (w *openWorld) publish(t *testing.T, publication openFixturePublication) {
 // placeholder no output may contain when the session was never recorded.
 func (w *openWorld) projectHash(t *testing.T) string {
 	t.Helper()
-	if _, err := os.Stat(string(defaults.ResolveDBFilePathWith(filepath.Join(w.root, "data")))); err != nil {
-		return "<not recorded>"
-	}
 	row, err := w.store(t).SessionByID(context.Background(), openTestSessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -422,9 +544,6 @@ func (w *openWorld) projectHash(t *testing.T) string {
 // exactly its session_commits rows.
 func (w *openWorld) recordedCommits(t *testing.T) []string {
 	t.Helper()
-	if _, err := os.Stat(string(defaults.ResolveDBFilePathWith(filepath.Join(w.root, "data")))); err != nil {
-		return nil
-	}
 	associations, err := w.store(t).ListCurrentSessionCommitAssociations(context.Background(), openTestSessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -443,36 +562,37 @@ func (w *openWorld) openedURLs() []string {
 	return slices.Clone(w.opened)
 }
 
-// openTestRepository creates a repository with a base commit outside the
+func (w *openWorld) git(t *testing.T, env []string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", w.repo}, args...)...)
+	command.Env = append(os.Environ(), env...)
+	out, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// createRepository creates a repository with a base commit outside the
 // session window and commits inside it, and returns the session commits'
 // hashes, sorted.
-func openTestRepository(t *testing.T, dir string) []string {
+func (w *openWorld) createRepository(t *testing.T) []string {
 	t.Helper()
-	git := func(env []string, args ...string) string {
-		t.Helper()
-		command := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		command.Env = append(os.Environ(), env...)
-		out, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(w.repo, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	git(nil, "init", "-q", "-b", "main")
-	git(nil, "config", "user.email", testutil.TestEmail)
-	git(nil, "config", "user.name", "Test User")
-	git(nil, "config", "commit.gpgsign", "false")
+	w.git(t, nil, "init", "-q", "-b", "main")
+	w.git(t, nil, "config", "user.email", testutil.TestEmail)
+	w.git(t, nil, "config", "user.name", "Test User")
+	w.git(t, nil, "config", "commit.gpgsign", "false")
 	commit := func(message, date string) string {
 		t.Helper()
-		if err := os.WriteFile(filepath.Join(dir, "work.txt"), []byte(message+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(w.repo, "work.txt"), []byte(message+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		git(nil, "add", "work.txt")
-		git([]string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, "commit", "-q", "-m", message)
-		return git(nil, "rev-parse", "HEAD")
+		w.git(t, nil, "add", "work.txt")
+		w.git(t, []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, "commit", "-q", "-m", message)
+		return w.git(t, nil, "rev-parse", "HEAD")
 	}
 	commit("base", openTestBaseCommitDate)
 	hashes := make([]string, 0, len(openTestSessionCommitDates))
@@ -485,8 +605,8 @@ func openTestRepository(t *testing.T, dir string) []string {
 
 // openTestTranscript is a Claude Code session in repo that commits once. Commit
 // detection keeps the commits in the session window only when the transcript
-// shows Git activity.
-func openTestTranscript(t *testing.T, repo, prompt string) []byte {
+// shows Git activity. A malformed-record transcript breaks its second record.
+func openTestTranscript(t *testing.T, repo, prompt, shape string) []byte {
 	t.Helper()
 	const model = "claude-sonnet-4-20250514"
 	records := []map[string]any{
@@ -496,12 +616,19 @@ func openTestTranscript(t *testing.T, repo, prompt string) []byte {
 		{"type": "assistant", "sessionId": openTestSessionID, "cwd": repo, "timestamp": "2024-01-02T03:20:00Z", "message": map[string]any{"role": "assistant", "model": model, "content": []map[string]any{{"type": "text", "text": "Committed."}}}},
 	}
 	var out bytes.Buffer
-	for _, record := range records {
+	for i, record := range records {
 		line, err := json.Marshal(record)
 		if err != nil {
 			t.Fatal(err)
 		}
-		out.Write(line)
+		switch {
+		case shape == "malformed-record" && i == 1:
+			out.WriteString(`{"type":"assistant","sessionId":"` + openTestSessionID + `",`)
+		case shape == "valid" || shape == "malformed-record":
+			out.Write(line)
+		default:
+			t.Fatalf("unknown transcript %q", shape)
+		}
 		out.WriteByte('\n')
 	}
 	return out.Bytes()
