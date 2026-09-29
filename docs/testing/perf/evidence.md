@@ -51,3 +51,31 @@ warmup, serial, L=0.957 (base-gate calibration), GOMAXPROCS=32.
 Carried reference (superseded by the measured baseline above): retention test
 243.6 s; #1 93.0 s; #2 91.0 s; #3 51.9 s; #4 48.2 s; #8 61.4 s; #10 25.3 s;
 #11 19.3 s (all focused-and-alone, race, prior reference measurement).
+
+## Screening addition: store publication test (T3 seam conversion, new territory)
+
+`TestPublicationFullCaptureEligibilityAndBundle` (`internal/store`, 20 fixture
+cases) copied the golden DB per subtest but opened it without
+`store.WithSkipMigrations()` (one site). Fix: inline skip added,
+`WithPoolSize(1)` preserved verbatim; no assertion changed. Before: screening
+warm re-measure on the epoch tree (not the `da7abd7f` base above). After:
+measured on a box shared with concurrent validation windows (provisional —
+final warm pair lands after the template cache).
+
+| test | class | exact command | before wall/CPU | after wall/CPU | L |
+|---|---|---|---|---|---|
+| `TestPublicationFullCaptureEligibilityAndBundle` (store) | T3 | `go test -race -count=1 -timeout=0 -run '^TestPublicationFullCaptureEligibilityAndBundle$' ./internal/store` (one discarded warmup at 33.8 s, serial, GNU `time -v`) | 32.4 wall / 29.08 user / 1.25 sys | 34.5 wall / 31.00 user / 1.13 sys | 0.983 → 0.955 |
+
+Wall-neutral within load noise: the test already opened golden copies, so the
+removed per-subtest cost was the migration-state check only (no replay). The
+`-cpuprofile` mechanism check confirms it — the remaining `store.Open` cost
+(22.3 s cum, 72.8% of samples) sits entirely under
+`storetest.ensureGolden → sqlitemigration.Migrate` (21.2 s cum), i.e. the
+once-per-process template build owned by the in-flight persistent-template
+amendment, not this test's opens (profile run, not quoted as a wall). The
+conversion's durable value is enforcement-rule cleanliness (skip-bearing open,
+no suppression). T4 payload share: measured-inapplicable, not applied — the
+read-only mutation audit found no in-place entry writes (writer path reads
+`EntryIndex` only; the backfill already copies before mutating; sequential
+subtests; per-subtest fresh DBs), but the expected win is string-build only
+while per-subtest DB indexing dominates.
