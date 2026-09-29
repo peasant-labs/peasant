@@ -521,3 +521,33 @@ unchanged.
 Smoke (every Test func in the 40 converted files, 264 names, non-race, same box):
 `go test -count=1 -run "^(<264 names>)$" ./cmd/peasant/...` → ok, 17.98 s package /
 19 s wall after; 20.49 s / 24 s wall on the unconverted base (single runs, noisy box).
+
+## T6 — packing proof: helper-group listing route cases
+
+Admissibility: `TestHelperGroupListingThroughRegisteredRoutes`
+(`internal/api/helper_group_listing_test.go`) is CPU-bound and its 26 fixture
+cases are independent — each opens its own golden-copy store
+(`storetest.Open`), starts its own port-0 server, and seeds only that store.
+The test is not named in `internal/testutil/testdata/parallel_unsafe_sites.yaml`,
+and neither the test nor `internal/api` production code touches a
+process-global sink (`slog.SetDefault`, `os.Stdin`, `os.Stderr`, `Setenv`,
+`Chdir`). Change: `t.Parallel()` on each case subtest; the top-level test stays
+serial; `-parallel` is not pinned.
+
+Effective settings: `-p` default, `-parallel` default (= GOMAXPROCS),
+GOMAXPROCS=32 (32 CPUs). Commands, serial, one discarded warmup, GNU
+`/run/current-system/sw/bin/time -v`; load is the 1-minute load average
+(`uptime`) around each measured run. Before = branch point (golden
+template cache present); after = tip with the change.
+
+| test / package | class | exact command | before wall / user / sys (s) | after wall / user / sys (s) | load |
+|---|---|---|---|---|---|
+| `TestHelperGroupListingThroughRegisteredRoutes` (api) | T6 | `go test -race -count=1 -timeout=0 -run '^TestHelperGroupListingThroughRegisteredRoutes$' ./internal/api` | 14.37 / 11.59 / 1.06 | 8.01 / 14.94 / 1.18 | 7.5→7.1 before; 2.1→2.6 after |
+| `internal/api` package | T6 | `go test -race -count=1 -timeout=0 ./internal/api` | 102.19 / 293.83 / 9.30 | 96.34 / 296.87 / 9.16 | 9.1→8.2 before; 2.6→5.5 after |
+
+The earlier 52.4 s warm focused record predates the golden template cache;
+the cache alone took the focused wall to 14.4 s, and packing takes it to
+8.0 s (below the 30 s bar either way). The package gain is small because the
+package already runs other tests in parallel around this one; the before
+package run saw higher load, so its delta is an upper bound. The
+parallel-unsafe guard (`go test ./internal/testutil`) stays green.
