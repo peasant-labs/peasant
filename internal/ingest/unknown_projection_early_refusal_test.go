@@ -23,7 +23,7 @@ func oversizedPayload(size int) json.RawMessage {
 
 // retainedRefusalAllocationBound states the no-copy invariant shared by the
 // allocation proof and the boundary test: a transfer refusal allocates
-// nothing proportional to the payload. The observed deltas are about 1.2-1.5
+// nothing proportional to the payload. The observed deltas are about 1.24-1.46
 // KiB, so 1 MiB stays about 700x+ above the behavior while catching a
 // regression that copies even a fraction of a large payload.
 const retainedRefusalAllocationBound = 1 << 20
@@ -56,7 +56,7 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // payload/4 calibration bound from the probe-off mutation story, and the
 // 1 MiB constant bound that states the real invariant, that the refusal
 // allocates nothing proportional to the payload. The observed deltas are
-// about 1.2-1.5 KiB, so the constant bound stays about 700x+ above the
+// about 1.24-1.46 KiB, so the constant bound stays about 700x+ above the
 // behavior while catching a regression that copies even a fraction of a
 // 64 MiB payload. The closed encoding set is driven by
 // the noMaterializationCases fixture, including the escaped-owned-string,
@@ -107,14 +107,14 @@ func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *tes
 	}
 	for _, encoding := range ingest.RetainedNoMaterializationEncodings {
 		if _, ok := entries[encoding]; !ok {
-			t.Fatalf("allocation proof has no entry for encoding %q, must cover %q", encoding, ingest.RetainedNoMaterializationEncodings)
+			t.Fatalf("allocation proof has no entry for encoding %q, must cover %s", encoding, strings.Join(ingest.RetainedNoMaterializationEncodings, ", "))
 		}
 	}
 	for _, c := range fixtureCases {
 		t.Run(c.Name, func(t *testing.T) {
 			entry, ok := entries[c.Encoding]
 			if !ok {
-				t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
+				t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(ingest.RetainedNoMaterializationEncodings, ", "))
 			}
 			var before, after runtime.MemStats
 			runtime.GC()
@@ -173,7 +173,7 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 		}
 		names[c.Name] = true
 		if !ingest.IsRetainedNoMaterializationEncoding(c.Encoding) {
-			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
+			t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(ingest.RetainedNoMaterializationEncodings, ", "))
 		}
 	}
 	for _, name := range raw.RequiredNames {
@@ -182,6 +182,15 @@ func loadNoMaterializationCases(t *testing.T) []struct {
 		}
 		if !names[name] {
 			t.Fatalf("required fixture %q missing from %s", name, retainedPayloadSizeProbeFixturePath)
+		}
+	}
+	covered := make(map[string]bool, len(raw.Cases))
+	for _, c := range raw.Cases {
+		covered[c.Encoding] = true
+	}
+	for _, encoding := range ingest.RetainedNoMaterializationEncodings {
+		if !covered[encoding] {
+			t.Fatalf("allocation proof never exercises encoding %q", encoding)
 		}
 	}
 	return raw.Cases

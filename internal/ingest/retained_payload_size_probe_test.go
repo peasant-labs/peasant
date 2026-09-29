@@ -154,7 +154,7 @@ func loadRetainedPayloadSizeProbeFixtures(t *testing.T) retainedPayloadSizeProbe
 		}
 		names[c.Name] = true
 		if !IsRetainedNoMaterializationEncoding(c.Encoding) {
-			t.Fatalf("no-materialization case %q encodes %q, must be payloadText, rawPayload, escapedKind, escapedKey, or escapedRootKey", c.Name, c.Encoding)
+			t.Fatalf("no-materialization case %q encodes %q, must be %s", c.Name, c.Encoding, strings.Join(RetainedNoMaterializationEncodings, ", "))
 		}
 	}
 	for _, c := range fixtures.CapBoundaryCases {
@@ -356,6 +356,28 @@ func TestProbeMemberMasksFit(t *testing.T) {
 		if len(keys) >= 64 {
 			t.Fatalf("owned key set %q holds %d names, reaching the 64-bit duplicate-detection mask width", keys, len(keys))
 		}
+	}
+}
+
+// TestProbeRequiredMemberMaskResolves pins the required-member mask list to
+// the closed envelope key set: every required name must resolve there, and an
+// unowned name must fail the mask closed so the probe declines rather than
+// silently shrinking the required set.
+func TestProbeRequiredMemberMaskResolves(t *testing.T) {
+	required := []string{"harness", "namespace", "kind", "position"}
+	for _, name := range required {
+		if _, owned := jsonMemberBit(retainedEnvelopeKeys, name); !owned {
+			t.Fatalf("required envelope member %q does not resolve in retainedEnvelopeKeys %q", name, retainedEnvelopeKeys)
+		}
+	}
+	if _, ok := jsonMemberMask(retainedEnvelopeKeys, required...); !ok {
+		t.Fatalf("required envelope mask does not resolve in retainedEnvelopeKeys %q", retainedEnvelopeKeys)
+	}
+	if _, ok := jsonMemberMask(retainedEnvelopeKeys, append(append([]string{}, required...), "missingMember")...); ok {
+		t.Fatalf("jsonMemberMask accepted an unowned name, must fail closed")
+	}
+	if _, ok := jsonMemberMask(retainedPublicKeys, retainedPublicKeys...); !ok {
+		t.Fatalf("public coordinate mask does not resolve in retainedPublicKeys %q", retainedPublicKeys)
 	}
 }
 

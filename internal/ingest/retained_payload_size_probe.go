@@ -448,8 +448,8 @@ func retainedEnvelopeExceedsTransferLimit(extra string, i int, harness, entryHar
 		}
 		return false, 0, false
 	}
-	required := jsonMemberMask(retainedEnvelopeKeys, "harness", "namespace", "kind", "position")
-	if seen&required != required || !sawPayload {
+	required, maskOK := jsonMemberMask(retainedEnvelopeKeys, "harness", "namespace", "kind", "position")
+	if !maskOK || seen&required != required || !sawPayload {
 		return false, 0, false
 	}
 	return over, i + 1, true
@@ -476,15 +476,19 @@ func jsonMemberBit(keys []string, name string) (uint64, bool) {
 }
 
 // jsonMemberMask returns the combined bits of the named members within a closed
-// key set.
-func jsonMemberMask(keys []string, names ...string) uint64 {
+// key set, failing closed when any name is absent: an unowned name reports
+// ok=false so the probe declines rather than silently shrinking the required
+// set, which would let an over-limit payload mask a missing required member.
+func jsonMemberMask(keys []string, names ...string) (uint64, bool) {
 	var mask uint64
 	for _, name := range names {
-		if bit, ok := jsonMemberBit(keys, name); ok {
-			mask |= bit
+		bit, ok := jsonMemberBit(keys, name)
+		if !ok {
+			return 0, false
 		}
+		mask |= bit
 	}
-	return mask
+	return mask, true
 }
 
 // scanEnvelopeHarness reads the envelope harness member and requires it to name
@@ -730,7 +734,8 @@ func scanRetainedPublicPosition(s string, i int) (end int, ok bool) {
 		}
 		return 0, false
 	}
-	if seen != jsonMemberMask(retainedPublicKeys, retainedPublicKeys...) {
+	fullMask, maskOK := jsonMemberMask(retainedPublicKeys, retainedPublicKeys...)
+	if !maskOK || seen != fullMask {
 		return 0, false
 	}
 	if !haveRecordIndex || !havePosition || position < recordIndex {
