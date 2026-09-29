@@ -16,7 +16,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -687,7 +686,7 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 // that Peasant wrote no receipt and advanced no publication cursor for it.
 func assertNothingPublishedLocally(t *testing.T, dir, villageURL string) {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("reopen the database the command used: %v", err)
 	}

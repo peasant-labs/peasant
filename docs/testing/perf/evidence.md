@@ -469,3 +469,55 @@ effect, and the copy destination contributed ~0.4 ms per copy either way.
 - Smokes (goleak `VerifyTestMain` active):
   - `go test -count=1 -run '^(<46 tests in the converted files>)$' ./internal/ingest/` → ok, 38.6 s (42 s wall)
   - `go test -race -count=1 -run '^(TestClaudeAdapter_EvidenceCacheSkipsUnchangedTranscripts|TestControlRecordIngestExportAndPublication|TestCanonicalOpenCodeSelection*|TestOpenCodeContentAwareCanonicalSelection)$' ./internal/ingest/` → ok, 11.5 s (27 s wall)
+## Store-open seam conversions — cmd/peasant
+
+Scan: `ast-grep scan -r <no-migrating-store-open-in-tests rule> cmd/peasant` (rule
+not committed here). **Before: 77 flagged sites in 40 files. After: 0** (no suppressions).
+The dry-run seeding family (`seedClosedStore*`) was already routed through
+`storetest.CopyGoldenTo` and is untouched.
+
+Mechanism: one test helper, `openPreparedStore(t, path, opts...)`
+(`cmd/peasant/prepared_store_test.go`). A missing path is prepared as a golden copy
+(MkdirAll + `CopyGoldenTo`) so commands later find zero pending migrations; an existing
+path (created by a command's production open, or by an earlier seed) is reopened as is.
+Both open with `store.WithSkipMigrations()` plus the caller's options verbatim;
+`EnvPoolSize=1` from TestMain stays in force.
+
+Converted files: cmd_annotate_import, cmd_annotate_prune, cmd_annotate,
+cmd_kickstart_conversion_mount, cmd_kickstart_mount, cmd_kickstart_rescan,
+cmd_kickstart_selection_command, cmd_prune, cmd_push_disclosures, cmd_push_hook_advice,
+cmd_push_hook_ergonomics, cmd_push_repository, cmd_push_scope_reuse, cmd_push,
+cmd_redact, cmd_sessions_context, cmd_sessions_list, cmd_sessions, cmd_village_stub,
+cmd_village_transcripts, harvest_index_selection, harvest_metadata_diagnostics,
+ingested_publication, interrupted_pair_install, kickstart_evidence_cache,
+kickstart_metadata_diagnostics, mounted_selection_safety, opencode_canonical_persistence,
+opencode_cwd_wiring, opencode_legacy_sqlite_mount, opencode_session_clock_mount,
+pi_kickstart_journey, prune_exact, publication_readiness, push_door_redaction,
+readonly_run, redaction_policy, source_harness_flag, strike_ingestion,
+zz_two_run_kickstart_demo (all `_test.go`).
+
+Suppressions: none. No site in this package has migration, creation, or open-time
+refusal as its subject.
+
+Intentional fresh-install coverage (a command runs against an empty root and performs the
+production migrating open; the test's own open happens afterwards on the existing file,
+so these stay seed-free):
+- strike_ingestion_test.go: TestStrikeIngestCommandPersistsSessionDetail,
+  TestStrikeIngestCommandAddsChildAfterParentSourceDisappears,
+  TestStrikeIngestKeepsARecordOverTheRetiredPerLineLimit
+- source_harness_flag_test.go: TestSourceHarnessFlagMounted
+- pi_kickstart_journey_test.go: TestPiKickstartMountedDiscoveryThroughStoredImport
+- kickstart_metadata_diagnostics_test.go: TestKickstartLocalIngestForwardsMetadataDiagnostics
+- opencode_canonical_persistence_test.go: TestCanonicalOpenCodeRealStoreDetailAndAnalytics
+- opencode_cwd_wiring_test.go: TestOpenCodeCurrentSQLiteEntersMountedProductionThroughManagedProjection
+- opencode_legacy_sqlite_mount_test.go: TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState
+- opencode_session_clock_mount_test.go: TestOpenCodeSessionClockFixturesMountedHarvest
+- ingested_publication_test.go: TestIngestedPublicationThroughCLIAndRegisteredShare
+- redaction_policy_test.go: callers of readRecordedSlug (harvest first, then inspect)
+
+No-database cases (`os.Stat` NotExist in TestPiHarvestCommonModes) open nothing and are
+unchanged.
+
+Smoke (every Test func in the 40 converted files, 264 names, non-race, same box):
+`go test -count=1 -run "^(<264 names>)$" ./cmd/peasant/...` → ok, 17.98 s package /
+19 s wall after; 20.49 s / 24 s wall on the unconverted base (single runs, noisy box).
