@@ -51,3 +51,41 @@ warmup, serial, L=0.957 (base-gate calibration), GOMAXPROCS=32.
 Carried reference (superseded by the measured baseline above): retention test
 243.6 s; #1 93.0 s; #2 91.0 s; #3 51.9 s; #4 48.2 s; #8 61.4 s; #10 25.3 s;
 #11 19.3 s (all focused-and-alone, race, prior reference measurement).
+
+## Store-open seam defaults (test-surface migration-open conversion)
+
+Per-package race suites after converting 53 `store.Open` sites in 47 files to
+the golden-plus-skip seam (`storetest.Open/OpenWith`, `CopyGoldenDB`/`CopyGoldenTo`
+plus `store.WithSkipMigrations`), with 10 per-call suppressions carrying class
+reasons (3× fresh-open creation/idempotence, 6× open-time format-registration,
+1× benchmark setup outside the measured section). Command per row:
+`go test -race -count=1 ./<pkg>`, serial, one package at a time. `<time>` is
+GNU time 1.10 with `-v` at `/run/current-system/sw/bin/time` (`/usr/bin/time`
+is absent on this box). L from the documented companion
+(`RACE=0 go run ./cmd/testgate run -pkgs
+./internal/testkit/coveragemap,./cmd/testgate -race=false`): 0.922 at window
+start, 0.949 at window end.
+
+| package | result | wall (s) | user (s) | sys (s) | conversions |
+|---|---|---|---|---|---|
+| `internal/store` | PASS | 407.68 | 548.37 | 12.62 | 20 converted, 10 suppressed |
+| `internal/api` | PASS | 225.89 | 415.69 | 11.36 | 11 converted |
+| `internal/metrics` | PASS | 5.69 | 9.24 | 0.82 | 8 converted |
+| `internal/push` | PASS | 56.14 | 90.50 | 5.47 | 6 converted |
+| `internal/transcript` + `internal/export` | PASS | 56.70 combined (transcript 54.631, export 9.838 per go) | 97.91 | 6.01 | 3 converted |
+| `internal/e2e` (untagged unit tests) | PASS | 5.47 | 9.10 | 2.23 | 0 (edited files are `e2e`-tagged) |
+
+E2E disposition: the 5 edited e2e files carry `//go:build e2e` and need the
+full harness (podman Postgres + RustFS + a village checkout providing
+`./cmd/server` + `./cmd/village-setup-demo`, wired via `VILLAGE_BIN` /
+`VILLAGE_REPO`); that infra is not provisioned in this window, so tagged-e2e
+execution is N/A — not a skip of runnable work. The edited files are proven
+instead by `go vet -tags e2e ./internal/e2e/` (clean) plus the untagged
+package suite above (PASS).
+
+Scan delta (scratch config of the validated rule, same tree): 209 flagged
+sites at the branch point → 147 after this change (−62 = 29 store + 33
+api/metrics/push/e2e/transcript/export); the remainder belongs to
+`cmd/peasant`, `internal/ingest`, the migration suite, and the already
+skip-bearing sites owned by other leaves. `ast-grep scan --config sgconfig.yml
+.` exits 0 (the enforcement rule file itself lands with the enforcement leaf).
