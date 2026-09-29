@@ -95,13 +95,16 @@ to replace a publication that its owner has already approved:
 
 For internal callers of the existing pipeline, the same scoped invocation is
 `PipelineConfig{Force: true, FilterSessionIDs: []string{sessionID}, Visibility: currentVisibility,
-License: currentLicense}`. Supply the verified current values explicitly. The authoritative
-publish operation uses the unchanged project/session identity; it does not mutate collective
-shares. Visibility convergence is a separate owner update only when the requested value differs
-from the returned authoritative visibility.
+ChangeVisibility: true, License: currentLicense, ChangeLicense: true}`. Supply the verified
+current values explicitly. The authoritative publish operation uses the unchanged
+project/session identity; it does not mutate collective shares. Visibility convergence is a
+separate owner update only when the requested value differs from the returned authoritative
+visibility.
 
-This is not a new repair API, CLI command, or automatic republish policy. Ordinary pushes still
-honor a user's configured or explicitly supplied license and visibility changes. If the current
-remote license is absent, keep the configuration's license absent too; an empty runtime override
-means “use configuration,” not “remove the remote license.” Do not use this procedure to remove
-an irrevocable license.
+This is not a new repair API, CLI command, or automatic republish policy. An ordinary update
+keeps the visibility and license the transcript has on the Village: the configured
+`push.visibility` and `push.license` apply to a first publication only, and only the
+`--visibility` and `--license` flags change a transcript that is already published. If the
+current remote license is absent, omit `--license`; an empty runtime override means “use
+configuration,” not “remove the remote license.” Do not use this procedure to remove an
+irrevocable license.

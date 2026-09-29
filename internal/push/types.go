@@ -17,11 +17,25 @@ type PipelineConfig struct {
 	// SourceProvider filters sessions to a single model_harness value (e.g. "claude").
 	SourceProvider string
 	// Visibility overrides config push.visibility for this run.
-	// Empty string means "use whatever is in config".
+	// Empty string means "use whatever is in config". A first publish opens at
+	// it; an update keeps the audience the transcript has on the village unless
+	// ChangeVisibility is set.
 	Visibility schema.Visibility
+	// ChangeVisibility says the caller asked for a visibility change, so an
+	// update also moves a transcript the village already holds to Visibility.
+	// Only an explicit request sets it (the --visibility flag). A configured
+	// default, or the visibility the Share wizard opens a publication at, is
+	// not one: the owner may have shared the transcript with collectives on the
+	// village since, and nothing on this machine knows that.
+	ChangeVisibility bool
 	// License overrides config push.license for this run (--license flag).
-	// Empty string means "use whatever is in config".
+	// Empty string means "use whatever is in config". A first publish sends it;
+	// an update sends no license, so Village keeps the one the transcript has,
+	// unless ChangeLicense is set.
 	License schema.License
+	// ChangeLicense says the caller asked for a license change, so an update
+	// also sends License. Only an explicit request sets it (the --license flag).
+	ChangeLicense bool
 	// Concurrency is the maximum number of parallel uploads.
 	// 0 means DefaultConcurrency.
 	Concurrency int

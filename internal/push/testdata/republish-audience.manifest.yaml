@@ -1,0 +1,11 @@
+# Required-name manifest for testdata/republish-audience.yaml. Name-only:
+# testutil.ValidateRequiredNames compares the name sets, so removing a case
+# from the fixture fails until it is removed here too.
+requiredNames:
+  - web-update-keeps-collective-only
+  - hook-update-keeps-collective-only
+  - cli-update-keeps-collective-only
+  - hook-leaves-an-unchanged-web-publication-alone
+  - cli-leaves-an-unchanged-licensed-publication-alone
+  - cli-visibility-flag-changes-a-published-transcript
+  - cli-license-flag-changes-a-published-transcript

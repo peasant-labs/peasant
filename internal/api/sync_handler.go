@@ -802,7 +802,11 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	// Create village client.
 	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 
-	// Resolve visibility.
+	// Resolve the visibility a first publish opens at. The Share wizard sends it
+	// on every push and has no control that changes the audience of a
+	// transcript already published, so it is never a visibility change: an
+	// update keeps the audience the transcript has on the village, which its
+	// owner may have shared with collectives there.
 	visibility := schema.Visibility("private")
 	if req.Visibility != "" {
 		visibility = schema.Visibility(req.Visibility)
@@ -842,8 +846,11 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Also push annotations (best-effort).
-	_, _ = push.PushAnnotations(r.Context(), client, h.store, false)
+	// Also push annotations (best-effort), but only the ones that belong to a
+	// session this request published. The user chose those sessions; an
+	// annotation on any other session, or on no session at all, is outside what
+	// they chose to share.
+	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, publishedAnnotationScope(result), false, push.DefaultConcurrency)
 
 	// Build response.
 	resp := pushResponse{
@@ -867,6 +874,20 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 
 	data, _ := json.Marshal(resp)
 	w.Write(data)
+}
+
+// publishedAnnotationScope limits the annotation push to the sessions the village
+// now holds from this run: uploaded, or already there unchanged. A session that
+// failed or was held back has nothing on the village to annotate.
+func publishedAnnotationScope(result *push.PushResult) push.AnnotationSelection {
+	sessions := make(map[string]bool, len(result.Sessions))
+	for _, session := range result.Sessions {
+		switch session.Status {
+		case push.PushStatusNew, push.PushStatusUpdated, push.PushStatusSkipped:
+			sessions[session.SessionID] = true
+		}
+	}
+	return push.AnnotationSelection{SessionIDs: sessions, SessionsOnly: true}
 }
 
 func invalidSyncRedactionsLevelMessage(level redact.RedactionLevel) string {

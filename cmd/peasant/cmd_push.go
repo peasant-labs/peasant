@@ -322,11 +322,18 @@ func BuildPushCommand() *cobra.Command {
 					SourceProvider: sourceHarness,
 					Visibility:     schema.Visibility(visibility),
 					License:        schema.License(license),
-					JSONOutput:     jsonOutput,
-					Verbose:        verbose,
-					Quiet:          level == outputQuiet,
-					Concurrency:    resolvedConcurrency,
-					CommandBinding: run.binding,
+					// A flag is an explicit request, so it also changes a
+					// transcript the village already holds. Without one an update
+					// keeps the visibility and license the transcript has there;
+					// the configured defaults apply to a first publish only. A
+					// hook passes neither flag.
+					ChangeVisibility: visibility != "",
+					ChangeLicense:    license != "",
+					JSONOutput:       jsonOutput,
+					Verbose:          verbose,
+					Quiet:            level == outputQuiet,
+					Concurrency:      resolvedConcurrency,
+					CommandBinding:   run.binding,
 				}
 				if cmd.Flags().Changed("repository") {
 					// An empty --repository is rejected rather than ignored. The
@@ -775,8 +782,8 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
-	cmd.Flags().StringVar(&visibility, "visibility", "", "Override visibility for this run (public, private, group)")
-	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s)", schema.LicenseMenu()))
+	cmd.Flags().StringVar(&visibility, "visibility", "", "Override visibility for this run (public, private, group). Also changes sessions already published, which otherwise keep the visibility they have on the village")
+	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also changes sessions already published, which otherwise keep the license they have on the village", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")

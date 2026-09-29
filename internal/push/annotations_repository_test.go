@@ -52,9 +52,11 @@ type scopeState string
 const (
 	scopeActive   scopeState = "repository-scoped"
 	scopeInactive scopeState = "selection-only"
+	// scopeSessionsOnly is the Share wizard's scope: only the chosen sessions.
+	scopeSessionsOnly scopeState = "sessions-only"
 )
 
-var allScopeStates = [...]scopeState{scopeActive, scopeInactive}
+var allScopeStates = [...]scopeState{scopeActive, scopeInactive, scopeSessionsOnly}
 
 type annotationScopeDocument struct {
 	ExpectedCaseCount int                   `yaml:"expectedCaseCount"`
@@ -95,7 +97,7 @@ func loadAnnotationScopeFixture(data []byte) (annotationScopeDocument, error) {
 		if !annotationScopeContains(allScopeStates[:], testCase.Scope) {
 			return document, annotationScopeRuleError(index,
 				fmt.Sprintf("unsupported scope %q", testCase.Scope),
-				"fix=use repository-scoped or selection-only")
+				"fix=use repository-scoped, selection-only, or sessions-only")
 		}
 		accounted := make(map[annotationTarget]bool, len(allAnnotationTargets))
 		for _, group := range [][]annotationTarget{testCase.Published, testCase.Withheld} {
@@ -228,8 +230,11 @@ func TestPushAnnotationsSelected_RepositoryScopeGatesUnattributable(t *testing.T
 			selection := push.AnnotationSelection{
 				SessionIDs: map[string]bool{selectedSessionID: true},
 			}
-			if testCase.Scope == scopeActive {
+			switch testCase.Scope {
+			case scopeActive:
 				selection.RepositoryProjectHashes = map[string]bool{scopedProjectHash: true}
+			case scopeSessionsOnly:
+				selection.SessionsOnly = true
 			}
 
 			client := village.NewVillageClient(srv.URL, testAPIKey, nil)
