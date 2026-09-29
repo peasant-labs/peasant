@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/redact"
@@ -213,11 +214,21 @@ func TestPiUnknownPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The padding strings are identical across cases: build the longest once
+	// and share it read-only (Go strings are immutable, so slicing aliases
+	// safely and no case can mutate another's padding).
+	maxPadding := 0
+	for _, tc := range fixture.Cases {
+		if tc.PaddingBytes > maxPadding {
+			maxPadding = tc.PaddingBytes
+		}
+	}
+	sharedPadding := strings.Repeat("z", maxPadding)
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "source.jsonl")
-			padding := strings.Repeat("z", tc.PaddingBytes)
+			padding := sharedPadding[:tc.PaddingBytes]
 			var wantPublic []schema.RetainedUnknownRecord
 			for i := range tc.Expected {
 				want := &tc.Expected[i]
@@ -333,8 +344,8 @@ func TestPiUnknownPersistence(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(capture, retained) {
 				t.Fatalf("retained/native mismatch: %v", err)
 			}
-			dbPath := filepath.Join(root, "index.db")
-			db, err := store.Open(dbPath)
+			dbPath := storetest.CopyGoldenDB(t)
+			db, err := store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -374,7 +385,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(dbPath)
+			db, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
