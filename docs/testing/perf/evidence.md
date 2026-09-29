@@ -443,3 +443,29 @@ cache's own sweeps plus OS tmpfiles for the per-test copies; the `/tmp`
 litter row above (195 → 195 across every L6 run) already measured the
 default path. The family A/B walls stand as quoted: they measured the cache
 effect, and the copy destination contributed ~0.4 ms per copy either way.
+
+## Store-open seam conversions — internal/ingest
+
+- Scan (`ast-grep scan -r <no-migrating-store-open-in-tests rule> internal/ingest`): **36 flagged
+  sites in 28 files before → 0 after**. No suppressions were needed: no remaining `internal/ingest`
+  open is a migration, fresh-open creation, idempotence, close, or open-time-refusal subject.
+- Converted (all to `storetest.CopyGoldenDB(t)` + `store.WithSkipMigrations()`, existing options
+  such as `WithPoolSize(1)`, `WithIndexFormats`, `WithGenerationArtifacts` kept verbatim):
+  captured_source, claude_evidence_cache (`openEvidenceStore`), control_record_ingest (close/reopen
+  on the same path), deferred_pair_repair, harvester_pipeline, index_format_output,
+  index_input_pipeline, metadata_child_compatibility, metadata_read_policy, metrics_refresh,
+  native_refresh_repair (`nativeRepairStore`; its callers in codex_unknown_native and
+  opencode_unknown now pass a golden copy), opencode_acquired_cursor, opencode_selection
+  (close/reopen), opencode_unknown_legacy, orphan_pipeline (close/reopen), pair_repair,
+  pair_snapshot, permanent_refusal_steady_state, pipeline_hostslug_redaction,
+  pipeline_opencode_synthetic_reindex, publication_capture_child, rebuild, refusal_churn,
+  retained_unknown, write_path_columns.
+- Already-skipping spread options inlined so the rule sees the skip: native_unknown_public,
+  unknown_local_budget.
+- opencode_native_cli: the reader of the database the harvest binary created now opens with
+  `WithSkipMigrations` (the production binary still migrates on create).
+- Audit: the golden is schema + salt only, with no seed rows, so "no rows" assertions still hold.
+  No converted test asserts on a per-database salt or on DB file timestamps.
+- Smokes (goleak `VerifyTestMain` active):
+  - `go test -count=1 -run '^(<46 tests in the converted files>)$' ./internal/ingest/` → ok, 38.6 s (42 s wall)
+  - `go test -race -count=1 -run '^(TestClaudeAdapter_EvidenceCacheSkipsUnchangedTranscripts|TestControlRecordIngestExportAndPublication|TestCanonicalOpenCodeSelection*|TestOpenCodeContentAwareCanonicalSelection)$' ./internal/ingest/` → ok, 11.5 s (27 s wall)
