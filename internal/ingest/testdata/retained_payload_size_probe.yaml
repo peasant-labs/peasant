@@ -1,0 +1,829 @@
+requiredNames:
+  - measure_plain
+  - measure_escaped_quote
+  - measure_basic_escapes
+  - measure_surrogate_pair
+  - measure_unpaired_high_surrogate
+  - measure_unpaired_low_surrogate
+  - measure_bmp_escape
+  - measure_raw_multibyte
+  - raw_extent_string
+  - raw_extent_escaped_string
+  - raw_extent_object
+  - raw_extent_array
+  - raw_extent_number
+  - raw_extent_true
+  - raw_extent_nested_object
+  - probe_payload_text_over_limit
+  - probe_payload_text_under_limit
+  - probe_payload_text_escapes_over_limit
+  - probe_raw_payload_over_limit
+  - probe_raw_string_over_limit_under_decoded
+  - probe_raw_object_over_limit
+  - probe_raw_array_over_limit
+  - probe_extension_before_retained_evidence
+  - probe_retained_after_extension_payload
+  - probe_multiple_records_second_over_limit
+  - probe_legacy_without_public_coordinates
+  - probe_unknown_envelope_member
+  - probe_unknown_member_after_payload
+  - probe_both_payload_encodings
+  - probe_both_encodings_text_first
+  - probe_corrupt_envelope_after_over_envelope
+  - probe_non_object_root
+  - probe_missing_retained_array
+  - probe_unknown_harness
+  - probe_harness_mismatch
+  - probe_position_public_null
+  - probe_missing_namespace
+  - probe_null_namespace
+  - probe_empty_namespace
+  - probe_missing_kind
+  - probe_null_kind
+  - probe_empty_kind
+  - probe_missing_harness
+  - probe_missing_position
+  - probe_missing_payload_encoding
+  - probe_duplicate_envelope_member
+  - probe_position_unknown_member
+  - probe_public_unknown_member
+  - probe_public_non_integer_coordinate
+  - probe_public_float_coordinate
+  - probe_duplicate_public_member
+  - probe_position_public_missing_member
+  - probe_duplicate_root_key
+  - probe_duplicate_root_case_alias
+  - probe_trailing_root_content
+  - probe_second_root_document
+  - probe_trailing_comma_in_root
+  - probe_trailing_comma_in_array
+  - probe_trailing_comma_in_envelope
+  - probe_trailing_comma_in_position
+  - probe_trailing_comma_in_public
+  - probe_empty_retained_array
+  - probe_empty_payload_text
+  - probe_public_without_partner_coordinate
+  - probe_null_partner_coordinates
+  - probe_line_zero_with_public
+  - probe_public_position_before_record_index
+  - probe_bad_json_pointer
+  - probe_long_source_entry_ref
+  - probe_line_overflow
+  - probe_lax_extension_trailing_comma
+  - probe_lax_extension_empty_object
+  - probe_lax_extension_leading_zero
+  - probe_blank_source_id_with_line
+  - probe_empty_source_entry_ref_with_line
+  - probe_entry_harness_mismatch
+  - probe_invalid_utf8_namespace_before_payload
+  - probe_invalid_utf8_namespace_after_payload
+  - probe_lone_surrogate_high_in_payload_text
+  - probe_lone_surrogate_low_in_payload_text
+  - probe_lone_surrogate_high_plus_non_low
+  - probe_lone_surrogate_high_plus_non_low_escape
+  - probe_public_leading_zero_record_index
+  - probe_public_leading_zero_position
+  - probe_public_leading_zero_reordered
+  - probe_deep_raw_payload
+  - probe_null_payload_text
+  - probe_null_payload_text_padded
+  - probe_null_payload_text_escaped
+  - probe_null_payload_text_whitespace_escapes
+  - probe_null_payload_text_form_feed_escape
+  - probe_escaped_namespace_over_limit
+  - probe_escaped_kind_over_limit
+  - probe_payload_text_at_limit
+  - probe_payload_text_one_over_limit
+  - probe_raw_extent_at_limit
+  - probe_raw_extent_one_over_limit
+  - probe_escaped_payload_text_key_over_limit
+  - probe_escaped_root_extension_key_over_limit
+  - probe_escaped_duplicate_envelope_key
+  - probe_escaped_case_alias_root_key
+  - probe_case_alias_only_root_key
+  - probe_case_alias_only_root_key_escaped
+  - probe_deep_raw_payload_9997_declined
+  - probe_deep_extension_10000_declined
+  - probe_raw_object_string_brace_over_limit
+  - probe_raw_nested_object_over_limit
+  - probe_raw_surrogate_pair_over_limit
+  - probe_source_id_locator_over_limit
+  - probe_source_entry_ref_locator_over_limit
+  - probe_sequence_locator_over_limit
+  - probe_negative_zero_line_with_locator_over_limit
+  - probe_deep_raw_payload_9996_accepted
+  - probe_deep_extension_9999_accepted
+  - probe_escaped_evidence_root_key_over_limit
+  - probe_undecodable_escaped_envelope_key
+  - probe_truncated_escaped_envelope_key
+  - probe_undecodable_escaped_root_key
+  - no_materialization_payload_text
+  - no_materialization_raw_payload
+  - no_materialization_escaped_kind
+  - no_materialization_escaped_key
+  - no_materialization_escaped_root_key
+  - cap_boundary_payload_text_at_cap
+  - cap_boundary_payload_text_one_over
+  - cap_boundary_raw_payload_at_cap
+  - cap_boundary_raw_payload_one_over
+  - probe_escaped_harness_over_limit
+  - probe_escaped_public_key_over_limit
+  - probe_escaped_raw_payload_key_over_limit
+  - probe_negative_zero_public_coordinate_over_limit
+  - probe_empty_public_source_ref_declined
+  - probe_retained_null_declined
+  - probe_retained_scalar_declined
+  - probe_duplicate_extension_key_declined
+  - probe_non_object_retained_element
+
+# probeHarness is the export harness the probe cases are asked for unless the
+# case overrides it. The probe requires the envelope harness to name a known
+# harness matching the export harness and the carrier entry harness.
+probeHarness: codex
+
+# measureCases drive scanJSONString directly: `raw` is one JSON string literal
+# and `want` is its decoded UTF-8 byte length.
+measureCases:
+  - { name: measure_plain, raw: '"hello"', want: 5 }
+  - { name: measure_escaped_quote, raw: '"a\"b"', want: 3 }
+  - { name: measure_basic_escapes, raw: '"\b\f\n\r\t\/\\"', want: 7 }
+  - { name: measure_surrogate_pair, raw: '"\uD83D\uDE00"', want: 4 }
+  - { name: measure_unpaired_high_surrogate, raw: '"\uD83D"', want: 3 }
+  - { name: measure_unpaired_low_surrogate, raw: '"\uDE00"', want: 3 }
+  - { name: measure_bmp_escape, raw: '"\u00e9"', want: 2 }
+  - { name: measure_raw_multibyte, raw: '"héllo"', want: 6 }
+
+# rawExtentCases drive skipJSONValue directly: `value` is one JSON value and
+# `want` is its raw byte extent, which must equal len(json.RawMessage) from
+# encoding/json. This is the quantity the probe compares to the transfer limit
+# for the legacy raw `payload` encoding, whatever JSON kind the value is.
+rawExtentCases:
+  - { name: raw_extent_string, value: '"1111111111"', want: 12 }
+  - { name: raw_extent_escaped_string, value: '"a\u00e9"', want: 9 }
+  - { name: raw_extent_object, value: '{"a":"1111111111"}', want: 18 }
+  - { name: raw_extent_array, value: '[1,2,3,4,5,6,7,8,9]', want: 19 }
+  - { name: raw_extent_number, value: '123456789', want: 9 }
+  - { name: raw_extent_true, value: 'true', want: 4 }
+  - { name: raw_extent_nested_object, value: '{"a":{"b":1}}', want: 13 }
+
+# probeCases drive storedRetainedExtraExceedsTransferLimit over one stored Extra
+# root string. `limit` is the transfer limit the case exercises; a small value
+# keeps every case cheap. `harness`, when set, overrides probeHarness;
+# `entryHarness`, when set, carries a different harness on the entry itself so
+# the entry-harness arm is exercised with distinct values. wantOver is the probe
+# verdict. `declined: true` marks a shape the probe refuses to measure so the
+# authoritative path owns the refusal; an unmarked wantOver:false case is a
+# canonical record that stays under the limit. `decoderAccepts: true` on a
+# declined row additionally pins that the authoritative decode accepts the
+# shape (the probe is conservative there); `decoderRefuses: true` pins that the
+# authoritative decode refuses it. Both flags are declined rows only. Cases
+# with wantOver true are canonical records with an over-limit payload: each
+# carries a non-public locator beside public (a non-zero line or sequence, a
+# non-blank sourceId, or a valid sourceEntryRef) so the authoritative path
+# would accept them apart from size, including canonical escaped spellings of
+# owned strings and member names. Templates carry tokens the test replaces: {{FF}} is one raw
+# 0xFF byte (invalid UTF-8, which YAML cannot spell literally), {{DEEP}} is a
+# 12,001-deep raw array, {{DEEP9997}} is a 9,997-deep raw array one past the
+# probe's conservative raw-payload budget (declined by the probe, accepted by
+# the decoder), {{DEEP9996}} is a 9,996-deep raw array exactly at the probe's
+# raw-payload budget (accepted by both), {{DEEP9999}} is a 9,999-deep raw
+# array exactly at the extension budget (accepted by both), and {{DEEP10000}}
+# is a 10,000-deep raw array one past the extension budget (declined by
+# the probe, refused by the decoder). The depth spellings are expanded from
+# localRawEvidenceDepth, the shared authoritative ceiling, in the test rather
+# than from the probe's own budget constants, so narrowing a probe budget
+# without moving the authority turns the accepted boundary row red instead of
+# silently retargeting it. The
+# measureCases unpaired-surrogate rows pin the measurement helper only; the
+# probe declines those shapes via its whole-document pre-scan, pinned by the
+# probe_lone_surrogate rows below. Deliberate size-precedence shapes (invalid
+# payload content, cross-record corruption) are not pinned here; they are
+# asserted end to end in TestProjectRetainedUnknownPrecedence.
+probeCases:
+  - name: probe_payload_text_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_payload_text_under_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"}]}'
+    wantOver: false
+  - name: probe_payload_text_escapes_over_limit
+    limit: 3
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"11\u00311"}]}'
+    wantOver: true
+  - name: probe_raw_payload_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":123456789}]}'
+    wantOver: true
+  - name: probe_raw_string_over_limit_under_decoded
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":"aaaaaaa"}]}'
+    wantOver: true
+  - name: probe_raw_object_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{"a":"1111111111"}}]}'
+    wantOver: true
+  - name: probe_raw_array_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":[1,2,3,4,5,6,7,8,9]}]}'
+    wantOver: true
+  - name: probe_extension_before_retained_evidence
+    limit: 8
+    extra: '{"other":{"a":1},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_retained_after_extension_payload
+    limit: 8
+    extra: '{"other":{"payloadText":"1111111111"},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"}]}'
+    wantOver: false
+  - name: probe_multiple_records_second_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"},{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_legacy_without_public_coordinates
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_unknown_envelope_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_unknown_member_after_payload
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111","bogus":1}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_both_payload_encodings
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":"x","payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_both_encodings_text_first
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111","payload":"x"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_corrupt_envelope_after_over_envelope
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"},{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_non_object_root
+    limit: 8
+    extra: '[1,2,3]'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_missing_retained_array
+    limit: 8
+    extra: '{"other":1}'
+    wantOver: false
+  - name: probe_unknown_harness
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"bogus","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_harness_mismatch
+    limit: 8
+    harness: codex
+    extra: '{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_position_public_null
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":null},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_missing_namespace
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_namespace
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":null,"kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_empty_namespace
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_missing_kind
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_kind
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":null,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_empty_kind
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_missing_harness
+    limit: 8
+    extra: '{"retainedUnknown":[{"namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_missing_position
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_missing_payload_encoding
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}}}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_duplicate_envelope_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_position_unknown_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0},"bogus":1},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_unknown_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0,"bogus":1}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_non_integer_coordinate
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":"0","position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_float_coordinate
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":1.5,"position":1}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_duplicate_public_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","sourceRef":"t","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_position_public_missing_member
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s"}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_duplicate_root_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}],"retainedUnknown":[]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_duplicate_root_case_alias
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}],"RetainedUnknown":[]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_trailing_root_content
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"0123456789}]}x'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_second_root_document
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}{}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_trailing_comma_in_root
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}],}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_trailing_comma_in_array
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"},]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_trailing_comma_in_envelope
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111",}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_trailing_comma_in_position
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0},"line":1,},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_trailing_comma_in_public
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0,}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_empty_retained_array
+    limit: 8
+    extra: '{"retainedUnknown":[]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_empty_payload_text
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":""}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_without_partner_coordinate
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_partner_coordinates
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":null,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_line_zero_with_public
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":0,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_position_before_record_index
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":5,"position":1}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_bad_json_pointer
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"jsonPointer":"bogus","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_long_source_entry_ref
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"sourceEntryRef":"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_line_overflow
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":9223372036854775808,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lax_extension_trailing_comma
+    limit: 8
+    extra: '{"other":[1,2,],"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lax_extension_empty_object
+    limit: 8
+    extra: '{"other":{"a":},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lax_extension_leading_zero
+    limit: 8
+    extra: '{"other":01,"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_blank_source_id_with_line
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"sourceId":"  ","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"}]}'
+    wantOver: false
+  - name: probe_empty_source_entry_ref_with_line
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"sourceEntryRef":"","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"}]}'
+    wantOver: false
+  - name: probe_entry_harness_mismatch
+    limit: 8
+    entryHarness: claude-code
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_invalid_utf8_namespace_before_payload
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"a{{FF}}b","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_invalid_utf8_namespace_after_payload
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111","namespace":"a{{FF}}b"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lone_surrogate_high_in_payload_text
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"01234567\uD800"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lone_surrogate_low_in_payload_text
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"01234567\uDE00"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lone_surrogate_high_plus_non_low
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"01234567\uD800A"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_lone_surrogate_high_plus_non_low_escape
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"01234567\uD800\u0041"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_leading_zero_record_index
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":00,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_leading_zero_position
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":01}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_public_leading_zero_reordered
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"position":0,"recordIndex":00,"sourceRef":"s"}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_deep_raw_payload
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP}}}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_payload_text
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"null"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_payload_text_padded
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"  null  "}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_payload_text_escaped
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"\u006eull"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_payload_text_whitespace_escapes
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"\n\r\tnull"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_null_payload_text_form_feed_escape
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"\fnull"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_escaped_namespace_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"a\"b","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_kind_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future\u0026more","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_payload_text_at_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"12345678"}]}'
+    wantOver: false
+  - name: probe_payload_text_one_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"123456789"}]}'
+    wantOver: true
+  - name: probe_raw_extent_at_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":12345678}]}'
+    wantOver: false
+  - name: probe_raw_extent_one_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":123456789}]}'
+    wantOver: true
+  - name: probe_escaped_payload_text_key_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\u006CoadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_root_extension_key_over_limit
+    limit: 8
+    extra: '{"a\u0026b":1,"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_duplicate_envelope_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","ki\u006Ed":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_escaped_case_alias_root_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}],"Retained\u0055nknown":[]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_case_alias_only_root_key
+    limit: 8
+    extra: '{"RetainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_case_alias_only_root_key_escaped
+    limit: 8
+    extra: '{"Retained\u0055nknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_deep_raw_payload_9997_declined
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP9997}}}]}'
+    wantOver: false
+    declined: true
+    decoderAccepts: true
+  - name: probe_deep_extension_10000_declined
+    limit: 8
+    extra: '{"other":{{DEEP10000}},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_raw_object_string_brace_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{"k":"x}x"}}]}'
+    wantOver: true
+  - name: probe_raw_nested_object_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{"a":{"b":"1111111111"}}}]}'
+    wantOver: true
+  - name: probe_raw_surrogate_pair_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":"\uD83D\uDE00"}]}'
+    wantOver: true
+  - name: probe_source_id_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"sourceId":"s1","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_source_entry_ref_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"sourceEntryRef":"SOURCE","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_sequence_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"sequence":3,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_negative_zero_line_with_locator_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":-0,"sourceId":"s1","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_deep_raw_payload_9996_accepted
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP9996}}}]}'
+    wantOver: true
+  - name: probe_deep_extension_9999_accepted
+    limit: 8
+    extra: '{"other":{{DEEP9999}},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111"}]}'
+    wantOver: false
+  - name: probe_escaped_evidence_root_key_over_limit
+    limit: 8
+    extra: '{"retainedUnk\u006Eown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_undecodable_escaped_envelope_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\uZZloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_truncated_escaped_envelope_key
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\u12":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_undecodable_escaped_root_key
+    limit: 8
+    extra: '{"retainedUnk\uZZown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_escaped_harness_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"cod\u0065x","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_public_key_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"publ\u0069c":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_escaped_raw_payload_key_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"paylo\u0061d":123456789}]}'
+    wantOver: true
+  - name: probe_negative_zero_public_coordinate_over_limit
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":-0,"position":-0}},"payloadText":"1111111111"}]}'
+    wantOver: true
+  - name: probe_empty_public_source_ref_declined
+    limit: 8
+    extra: '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_retained_null_declined
+    limit: 8
+    extra: '{"retainedUnknown":null}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_retained_scalar_declined
+    limit: 8
+    extra: '{"retainedUnknown":1}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_duplicate_extension_key_declined
+    limit: 8
+    extra: '{"other":{"a":1,"a":2},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"1111111111"}]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+  - name: probe_non_object_retained_element
+    limit: 8
+    extra: '{"retainedUnknown":[1]}'
+    wantOver: false
+    declined: true
+    decoderRefuses: true
+
+# noMaterializationCases drive the allocation proof in
+# TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing: each
+# name is a required closed set over the stored encodings, including the
+# escaped-owned-string shape, the escaped-owned-key shape, and the escaped
+# evidence-root-key shape that once lost the early refusal.
+noMaterializationCases:
+  - { name: no_materialization_payload_text, encoding: payloadText }
+  - { name: no_materialization_raw_payload, encoding: rawPayload }
+  - { name: no_materialization_escaped_kind, encoding: escapedKind }
+  - { name: no_materialization_escaped_key, encoding: escapedKey }
+  - { name: no_materialization_escaped_root_key, encoding: escapedRootKey }
+
+# capBoundaryCases drive TestProjectRetainedUnknownAcceptsAtCapPayloads through
+# the public entry at the published cap: each name is a required closed set
+# over the stored encodings crossed with the at-cap and one-over positions.
+# The 8 MiB literals are built in Go; the fixture owns the case inventory so
+# the boundary matrix cannot shrink without failing the required-name manifest.
+capBoundaryCases:
+  - { name: cap_boundary_payload_text_at_cap, encoding: payloadText, position: atCap }
+  - { name: cap_boundary_payload_text_one_over, encoding: payloadText, position: oneOver }
+  - { name: cap_boundary_raw_payload_at_cap, encoding: rawPayload, position: atCap }
+  - { name: cap_boundary_raw_payload_one_over, encoding: rawPayload, position: oneOver }
