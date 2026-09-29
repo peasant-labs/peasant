@@ -62,10 +62,11 @@ func loadClaudeEvidenceCacheFixtures(t *testing.T) claudeEvidenceCacheFixtures {
 	return fixtures
 }
 
-// openEvidenceStore opens a prepared (golden-copy) local store and closes it when the test ends.
+// openEvidenceStore opens the local store at dbPath, preparing it from the
+// golden database when missing, and closes it when the test ends.
 func openEvidenceStore(t *testing.T, dbPath string) *store.Store {
 	t.Helper()
-	database, err := store.Open(dbPath, store.WithSkipMigrations())
+	database, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open the local store: %v", err)
 	}
