@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -103,7 +104,8 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(hs.dbPath()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(hs.dbPath())
+	storetest.CopyGoldenTo(t, hs.dbPath())
+	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

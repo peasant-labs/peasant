@@ -249,8 +249,11 @@ func ppeOpenStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	destPath := filepath.Join(dir, "generations.db")
+	storetest.CopyGoldenTo(t, destPath)
 	db, err := store.Open(
-		filepath.Join(dir, "generations.db"),
+		destPath,
+		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),

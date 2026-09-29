@@ -188,7 +188,7 @@ func openStoreWithSession(t *testing.T) (s *store.Store, sessionID string) {
 	sessionID = uuid.New().String()
 	insertAnnotationTestSession(t, dbPath, sessionID)
 
-	s, err := store.Open(dbPath)
+	s, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("openStoreWithSession: store.Open: %v", err)
 	}
