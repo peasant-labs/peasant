@@ -53,9 +53,19 @@ type astGrepMatch struct {
 	RuleID string `json:"ruleId"`
 }
 
-// runAstGrep runs `ast-grep scan --config <configAbsPath> --json=compact .`
-// with dir as the subprocess's working directory, and decodes the result
-// into []gates.KeyMatch.
+// runAstGrep runs `ast-grep scan --config <configAbsPath> --json=compact
+// --off=unused-suppression .` with dir as the subprocess's working
+// directory, and decodes the result into []gates.KeyMatch.
+//
+// The scan turns ast-grep's built-in unused-suppression report off: this gate
+// deliberately loads only the key rules, so a suppression comment naming a
+// rule outside this config (for example the repo-wide test-file migration-open
+// ban in ast-grep/) is reported by ast-grep as an unused suppression - a
+// diagnostic that is not a key-string hit and would otherwise be counted
+// against the key allowlist. ast-grep only reports unused suppressions
+// meaningfully when a scan enables every rule; the repo-wide `ast-grep scan
+// --config sgconfig.yml .` step in make check remains the place that polices
+// stale suppressions.
 //
 // dir MUST be the root the rule configs' `files`/`ignores` globs (and the
 // paths ast-grep reports back) are relative to - verified empirically that
@@ -82,7 +92,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 			astGrepBin, err)
 	}
 
-	cmd := exec.Command(astGrepBin, "scan", "--config", configAbsPath, "--json=compact", ".")
+	cmd := exec.Command(astGrepBin, "scan", "--config", configAbsPath, "--json=compact", "--off=unused-suppression", ".")
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
