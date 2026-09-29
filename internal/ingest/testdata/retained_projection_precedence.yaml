@@ -1,0 +1,381 @@
+requiredNames:
+  - oversized_with_missing_coordinates_keeps_legacy_refusal
+  - oversized_unknown_member_before_payload_keeps_integrity_refusal
+  - oversized_unknown_member_after_payload_keeps_integrity_refusal
+  - oversized_both_encodings_raw_then_text_keeps_integrity_refusal
+  - oversized_both_encodings_text_then_raw_keeps_integrity_refusal
+  - oversized_unknown_harness_keeps_integrity_refusal
+  - oversized_harness_mismatch_keeps_integrity_refusal
+  - oversized_public_null_keeps_integrity_refusal
+  - oversized_missing_namespace_keeps_integrity_refusal
+  - oversized_null_namespace_keeps_integrity_refusal
+  - oversized_empty_namespace_keeps_integrity_refusal
+  - oversized_missing_kind_keeps_integrity_refusal
+  - oversized_null_kind_keeps_integrity_refusal
+  - oversized_empty_kind_keeps_integrity_refusal
+  - oversized_missing_harness_keeps_integrity_refusal
+  - oversized_missing_position_keeps_integrity_refusal
+  - oversized_missing_payload_encoding_keeps_integrity_refusal
+  - oversized_position_unknown_member_keeps_integrity_refusal
+  - oversized_public_unknown_member_keeps_integrity_refusal
+  - oversized_public_string_coordinate_keeps_integrity_refusal
+  - oversized_public_float_coordinate_keeps_integrity_refusal
+  - oversized_duplicate_public_member_keeps_integrity_refusal
+  - oversized_public_missing_member_keeps_integrity_refusal
+  - oversized_duplicate_envelope_member_keeps_integrity_refusal
+  - oversized_duplicate_root_key_keeps_integrity_refusal
+  - oversized_duplicate_root_case_alias_keeps_integrity_refusal
+  - oversized_alias_only_root_key_before_over_entry_keeps_integrity_refusal
+  - oversized_over_entry_before_alias_only_root_key_keeps_integrity_refusal
+  - oversized_corrupt_envelope_after_over_envelope_keeps_integrity_refusal
+  - oversized_entry_before_corrupt_entry_keeps_integrity_refusal
+  - oversized_corrupt_entry_before_oversized_entry_keeps_integrity_refusal
+  - oversized_public_without_partner_coordinate_keeps_integrity_refusal
+  - oversized_line_zero_with_public_keeps_integrity_refusal
+  - oversized_null_partner_coordinates_keeps_integrity_refusal
+  - oversized_position_before_record_index_keeps_integrity_refusal
+  - oversized_bad_json_pointer_keeps_integrity_refusal
+  - oversized_long_source_entry_ref_keeps_integrity_refusal
+  - oversized_line_overflow_keeps_integrity_refusal
+  - oversized_trailing_root_content_keeps_integrity_refusal
+  - oversized_second_root_document_keeps_integrity_refusal
+  - oversized_trailing_comma_in_root_keeps_integrity_refusal
+  - oversized_trailing_comma_in_array_keeps_integrity_refusal
+  - oversized_trailing_comma_in_envelope_keeps_integrity_refusal
+  - oversized_lax_extension_trailing_comma_keeps_integrity_refusal
+  - oversized_lax_extension_empty_object_keeps_integrity_refusal
+  - oversized_lax_extension_leading_zero_keeps_integrity_refusal
+  - oversized_empty_payload_text_keeps_integrity_refusal
+  - oversized_empty_array_entry_keeps_integrity_refusal
+  - oversized_entry_harness_mismatch_keeps_integrity_refusal
+  - oversized_export_harness_mismatch_keeps_integrity_refusal
+  - oversized_canonical_record_is_refused_for_size
+  - oversized_raw_string_record_is_refused_for_size
+  - oversized_malformed_payload_content_is_refused_for_size
+  - oversized_duplicate_key_payload_text_is_refused_for_size
+  - oversized_raw_invalid_syntax_is_refused_for_size
+  - oversized_raw_duplicate_key_is_refused_for_size
+  - oversized_duplicate_pointers_across_records_is_refused_for_size
+  - oversized_non_monotonic_positions_across_records_is_refused_for_size
+  - oversized_invalid_utf8_namespace_before_payload_keeps_integrity_refusal
+  - oversized_invalid_utf8_namespace_after_payload_keeps_integrity_refusal
+  - oversized_lone_surrogate_in_payload_text_keeps_integrity_refusal
+  - oversized_lone_surrogate_entry_before_over_entry_keeps_integrity_refusal
+  - oversized_over_entry_before_lone_surrogate_entry_keeps_integrity_refusal
+  - oversized_public_leading_zero_record_index_keeps_integrity_refusal
+  - oversized_public_leading_zero_position_reordered_keeps_integrity_refusal
+  - oversized_deep_raw_payload_with_over_companion_keeps_integrity_refusal
+  - oversized_over_entry_before_deep_payload_entry_keeps_integrity_refusal
+  - oversized_null_payload_text_with_over_companion_keeps_integrity_refusal
+  - oversized_over_entry_before_null_text_entry_keeps_integrity_refusal
+  - oversized_deep_payload_text_with_over_companion_is_refused_for_size
+  - oversized_over_entry_before_deep_text_entry_is_refused_for_size
+  - oversized_double_escaped_surrogate_content_is_refused_for_size
+  - oversized_escaped_payload_text_key_is_refused_for_size
+  - oversized_escaped_root_extension_key_is_refused_for_size
+
+# payloadBytes is the total byte size of the over-limit payload literal the
+# loader builds per token below. The 8 MiB payload cannot be written literally,
+# so each template carries a token the test replaces with the built literal:
+#   {{OVER}}             a JSON string of digit ones over the limit, whose
+#                        decoded text is itself a valid JSON document, so the
+#                        authoritative path would accept the record apart from
+#                        size and every integrity row names its true refusal;
+#   {{OVER_INVALID}}     a JSON string of letter x over the limit, whose decoded
+#                        text is not valid JSON (the deliberate content change);
+#   {{OVER_RAW_INVALID}} a bracket-balanced but lexically invalid raw value over
+#                        the limit (the deliberate raw-syntax change);
+#   {{OVER_DUPLICATE_KEY}} a JSON string over the limit whose decoded text is
+#                        valid JSON with a repeated member name: the probe
+#                        measures the decoded length while the authoritative
+#                        path refuses the duplicate key (the deliberate
+#                        duplicate-key change for the modern encoding);
+#   {{OVER_RAW_DUPLICATE_KEY}} the same duplicate-key shape as a legacy raw
+#                        value over the limit, measured by extent (the
+#                        deliberate duplicate-key change for the raw encoding);
+#   {{OVER_DEEP_TEXT}}   a JSON string over the limit whose decoded text nests
+#                        10,001 arrays deep, one beyond the shared local depth
+#                        ceiling: the probe measures its decoded length while
+#                        the authoritative path refuses its depth (the
+#                        deliberate depth change);
+#   {{OVER_DOUBLE_ESCAPED_SURROGATE}} a stored payloadText literal over the
+#                        limit whose decoded text carries an unpaired surrogate
+#                        escape: the escape is double-escaped in storage, so
+#                        the stored-level pre-scan cannot see it while the
+#                        authoritative path refuses the decoded content (the
+#                        deliberate double-escaped content change);
+#   {{FF}}               one raw 0xFF byte (invalid UTF-8, which YAML cannot
+#                        spell literally);
+#   {{DEEP}}             a 12,001-deep raw array, beyond the local depth budget.
+payloadBytes: 8388672
+
+# precedenceCases drive ingest.ProjectRetainedUnknown over stored Extra
+# templates at the real transfer limit. `extras` holds one template per carrier
+# entry. `want` is the required outcome: `integrity` (an EvidenceIntegrityError,
+# never the transfer refusal), `legacy` (the missing-coordinate refusal, never
+# the transfer refusal), or `size` (the 8 MiB transfer refusal: the motivating
+# path or a deliberate precedence change named in the probe header).
+# `authoritative` names the CollectRetainedUnknown outcome for size rows:
+# accepts for canonical rows, integrity for the deliberate set marked with
+# deliberateSizePrecedence. `exportHarness` and `entryHarness` default to codex;
+# setting one exercises the two-harness contract with distinct values.
+precedenceCases:
+  - name: oversized_with_missing_coordinates_keeps_legacy_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1},"payloadText":{{OVER}}}]}']
+    want: legacy
+  - name: oversized_unknown_member_before_payload_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_unknown_member_after_payload_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}},"bogus":1}]}']
+    want: integrity
+  - name: oversized_both_encodings_raw_then_text_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":"x","payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_both_encodings_text_then_raw_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}},"payload":"x"}]}']
+    want: integrity
+  - name: oversized_unknown_harness_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"bogus","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_harness_mismatch_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"claude-code","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_public_null_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":null},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_missing_namespace_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_null_namespace_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":null,"kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_empty_namespace_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_missing_kind_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_null_kind_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":null,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_empty_kind_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_missing_harness_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_missing_position_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_missing_payload_encoding_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}}}]}']
+    want: integrity
+  - name: oversized_position_unknown_member_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0},"bogus":1},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_public_unknown_member_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0,"bogus":1}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_public_string_coordinate_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":"0","position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_public_float_coordinate_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":1.5,"position":1}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_duplicate_public_member_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","sourceRef":"t","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_public_missing_member_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s"}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_duplicate_envelope_member_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_duplicate_root_key_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}],"retainedUnknown":[]}']
+    want: integrity
+  - name: oversized_duplicate_root_case_alias_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}],"RetainedUnknown":[]}']
+    want: integrity
+  - name: oversized_alias_only_root_key_before_over_entry_keeps_integrity_refusal
+    extras: ['{"RetainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_over_entry_before_alias_only_root_key_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"RetainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_corrupt_envelope_after_over_envelope_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}},{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":2,"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_entry_before_corrupt_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_corrupt_entry_before_oversized_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","bogus":1,"position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_public_without_partner_coordinate_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_line_zero_with_public_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":0,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_null_partner_coordinates_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":null,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_position_before_record_index_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":5,"position":1}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_bad_json_pointer_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"jsonPointer":"bogus","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_long_source_entry_ref_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"sourceEntryRef":"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_line_overflow_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":9223372036854775808,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_trailing_root_content_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}x']
+    want: integrity
+  - name: oversized_second_root_document_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}{}']
+    want: integrity
+  - name: oversized_trailing_comma_in_root_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}],}']
+    want: integrity
+  - name: oversized_trailing_comma_in_array_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}},]}']
+    want: integrity
+  - name: oversized_trailing_comma_in_envelope_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}},}]}']
+    want: integrity
+  - name: oversized_lax_extension_trailing_comma_keeps_integrity_refusal
+    extras: ['{"other":[1,2,],"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_lax_extension_empty_object_keeps_integrity_refusal
+    extras: ['{"other":{"a":},"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_lax_extension_leading_zero_keeps_integrity_refusal
+    extras: ['{"other":01,"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_empty_payload_text_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":""},{"harness":"codex","namespace":"record","kind":"future","position":{"line":2,"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_empty_array_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_entry_harness_mismatch_keeps_integrity_refusal
+    entryHarness: claude-code
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_export_harness_mismatch_keeps_integrity_refusal
+    exportHarness: claude-code
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+  - name: oversized_canonical_record_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: accepts
+  - name: oversized_raw_string_record_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{OVER}}}]}']
+    want: size
+    authoritative: accepts
+  - name: oversized_malformed_payload_content_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_INVALID}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_duplicate_key_payload_text_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DUPLICATE_KEY}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_raw_invalid_syntax_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{OVER_RAW_INVALID}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_raw_duplicate_key_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{OVER_RAW_DUPLICATE_KEY}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_duplicate_pointers_across_records_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"jsonPointer":"/a","public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"\"ab\""},{"harness":"codex","namespace":"record","kind":"future","position":{"line":2,"jsonPointer":"/a","public":{"sourceRef":"s","recordIndex":0,"position":1}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_non_monotonic_positions_across_records_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":1,"position":1}},"payloadText":"\"ab\""},{"harness":"codex","namespace":"record","kind":"future","position":{"line":2,"public":{"sourceRef":"s","recordIndex":0,"position":2}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_invalid_utf8_namespace_before_payload_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"a{{FF}}b","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_invalid_utf8_namespace_after_payload_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}},"namespace":"a{{FF}}b"}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_lone_surrogate_in_payload_text_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"11111\uD80011111"}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_lone_surrogate_entry_before_over_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"abc\uDE00"}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_over_entry_before_lone_surrogate_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"abc\uD800"}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_public_leading_zero_record_index_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":00,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_public_leading_zero_position_reordered_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"position":01,"recordIndex":0,"sourceRef":"s"}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_deep_raw_payload_with_over_companion_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_over_entry_before_deep_payload_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payload":{{DEEP}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_null_payload_text_with_over_companion_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"null"}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_over_entry_before_null_text_entry_keeps_integrity_refusal
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":"  null  "}]}']
+    want: integrity
+    authoritative: integrity
+  - name: oversized_deep_payload_text_with_over_companion_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DEEP_TEXT}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_over_entry_before_deep_text_entry_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}', '{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DEEP_TEXT}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_double_escaped_surrogate_content_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER_DOUBLE_ESCAPED_SURROGATE}}}]}']
+    want: size
+    authoritative: integrity
+    deliberateSizePrecedence: true
+  - name: oversized_escaped_payload_text_key_is_refused_for_size
+    extras: ['{"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"pay\u006CoadText":{{OVER}}}]}']
+    want: size
+    authoritative: accepts
+  - name: oversized_escaped_root_extension_key_is_refused_for_size
+    extras: ['{"a\u0026b":1,"retainedUnknown":[{"harness":"codex","namespace":"record","kind":"future","position":{"line":1,"public":{"sourceRef":"s","recordIndex":0,"position":0}},"payloadText":{{OVER}}}]}']
+    want: size
+    authoritative: accepts
