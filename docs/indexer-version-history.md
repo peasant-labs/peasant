@@ -18,6 +18,7 @@ Actual per-capture producer stamps are separate evidence.
 | Strike | unchanged at 1 | 16 → 17 | Retain unknown events and nested blocks through authoritative and retained indexing while keeping tool/process validation. |
 | Pi | 1 → 2 | 16 → 17 | Native admission and metadata extraction now tolerate additive fields and unknown graph nodes; active-path indexing retains redacted unknown entry/role/block evidence. Format remains 1. |
 | Codex | unchanged at 1 | 16 → 17 | Retained rollout indexing preserves unknown envelope/event/response/block evidence with actual traversal positions; raw acquisition is unchanged. |
+| Codex | unchanged at 1 | 17 → 18 | Represent current control and lifecycle records as bounded system entries so otherwise complete retained rollouts certify. |
 | OpenCode | 1 → 2 | 16 → 17 | Legacy acquisition now retains opaque orphan parts instead of omitting them; retained indexing preserves unknown parts, inline blocks and tool-output children. |
 | Claude Code | 1 → 3 | 18 → 19 | Adapter metadata extraction now proves transcript ownership and admits fork, agent-file and continuation transcripts while refusing disconnected history boundaries; both targets also advance with the thinking-level back-fill so settled sessions re-extract and re-index with their recorded thinking-level history, and the stored seed the push and export paths carry is written only at extraction. |
 | Cursor | unchanged at 1 | 17 → 18 | Admit successful Cursor turn-ending controls so a completed turn's ending is indexed instead of dropped. |
@@ -42,6 +43,7 @@ baseline.
 |---|---|---|---|---|
 | Claude Code | 2 → 3 | 18 → 20 | 2 (unchanged) | The managed producer builds a format-2 generation from the stored transcript with shared V2 counts, measured submissions, typed prior aliases and the retained-unknown projection; the thinking-level back-fill then advances both targets so settled managed sessions re-extract and re-index with their recorded thinking-level history; the format-1 producer is unchanged. |
 | Codex | unchanged at 2 | 17 → 18 | 2 (unchanged) | Native history replay retains unknown source evidence, canonical item bodies and nested blocks with ownership/traversal coordinates; raw acquisition is unchanged. |
+| Codex | unchanged at 2 | 18 → 19 | 2 (unchanged) | Account for current world-state and control/lifecycle records in native replay instead of retaining them as unknown evidence. |
 | OpenCode | 2 → 3 | 17 → 18 | 2 (unchanged) | Current row normalization retains unknown rows and blocks before projection; native indexing carries them through selected main/earlier evidence. |
 | Codex | 2 → 3 | 18 → 20 | 2 (unchanged) | The thinking-level back-fill advances the adapter; the indexer also advances to recover inherited-pair Codex results and to admit and retain native delivery discriminators. |
 | OpenCode | 3 → 4 | 18 → 19 | 2 (unchanged) | The thinking-level back-fill advances both targets so native sessions re-extract and re-index with their recorded thinking-level history. |

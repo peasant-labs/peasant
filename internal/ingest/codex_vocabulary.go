@@ -17,6 +17,8 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("turn_context", indexformat.OutcomeIgnored),
 				recordKindLiteral("event_msg", indexformat.OutcomeIgnored),
 				recordKindLiteral("response_item", indexformat.OutcomeIgnored),
+				recordKindLiteral(codexTypeCompacted, indexformat.OutcomeControl),
+				recordKindLiteral(codexTypeWorldState, indexformat.OutcomeControl),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(codexStrictEnvelopeKinds())
@@ -37,6 +39,10 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("user_message", indexformat.OutcomeIgnored),
 				recordKindLiteral("agent_message", indexformat.OutcomeIgnored),
 				recordKindLiteral("agent_reasoning", indexformat.OutcomeIgnored),
+				recordKindLiteral(codexEventSubAgentActivity, indexformat.OutcomeControl),
+				recordKindLiteral(codexEventPatchApplyEnd, indexformat.OutcomeControl),
+				recordKindLiteral(codexEventThreadSettingsApplied, indexformat.OutcomeControl),
+				recordKindLiteral(codexEventWebSearchEnd, indexformat.OutcomeControl),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(codexStrictEventMsgKinds())
@@ -115,6 +121,7 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("event_msg", indexformat.OutcomeIgnored),
 				recordKindLiteral("response_item", indexformat.OutcomeIgnored),
 				recordKindLiteral("compacted", indexformat.OutcomeIgnored),
+				recordKindLiteral("world_state", indexformat.OutcomeIgnored),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(codexNativeEnvelopeKinds())
@@ -142,6 +149,10 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("task_complete", indexformat.OutcomeIgnored),
 				recordKindLiteral("thread_rolled_back", indexformat.OutcomeIgnored),
 				recordKindLiteral("turn_aborted", indexformat.OutcomeIgnored),
+				recordKindLiteral(codexEventSubAgentActivity, indexformat.OutcomeIgnored),
+				recordKindLiteral(codexEventPatchApplyEnd, indexformat.OutcomeIgnored),
+				recordKindLiteral(codexEventThreadSettingsApplied, indexformat.OutcomeIgnored),
+				recordKindLiteral(codexEventWebSearchEnd, indexformat.OutcomeIgnored),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(recordKindProductionMapKeys(codexNativeEventDispatch))

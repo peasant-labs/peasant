@@ -7,6 +7,10 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Fixed
+- Codex captures account for current control and lifecycle records so complete
+  rollouts can be exported and published (#408).
+
 ## [0.13.3] - 2026-10-28
 
 ### Changed

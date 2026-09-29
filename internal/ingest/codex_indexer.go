@@ -324,10 +324,19 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 			}
 		}
 
-		// Only response_item lines become indexed entries. session_meta /
-		// turn_context drive ExtractMetadata; event_msg.{token_count,
-		// task_*} are session-level signals or UI mirrors of response_item
-		// content and would double-count if indexed.
+		if entry, ok, err := codexControlRecordEntry(sessionID, entryIndex, env, len(trimmed), idx.fullContent); err != nil {
+			if completion != nil {
+				return nil, err
+			}
+		} else if ok {
+			entries = append(entries, entry)
+			if completion != nil {
+				completion.recognized++
+			}
+			entryIndex++
+			continue
+		}
+		// Remaining non-response lines are metadata or conversation mirrors.
 		if env.Type == codexTypeTurnContext {
 			currentLevel = thinkingLevelMapping{}
 			var tc codexTurnContext
