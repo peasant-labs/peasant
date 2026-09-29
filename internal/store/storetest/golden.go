@@ -2,7 +2,9 @@
 // SQLite database so a parallel test pays only a file copy and a connection
 // open instead of re-running the migration-state check. The golden DB is shared
 // by active tests and removed when the last user of that shared template
-// finishes.
+// finishes. This package is the only sanctioned way for tests to open a store:
+// the no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
+// store.Open in _test.go outside this package and the migration suite.
 //
 // The template is cached per checkout under `.testcache/golden/` (gitignored,
 // keyed by schema fingerprint) so focused runs reuse it across processes; the
@@ -10,9 +12,7 @@
 // process reads it once into memory, so copies never touch the cache file's
 // lifetime. Point golden copies at a RAM disk with PEASANT_STORETEST_TMPDIR
 // where /dev/shm is absent or small. Delete the cache with `rm -rf
-// .testcache/`; it is the only sanctioned store-open surface for tests that
-// need a migrated database (see the ast-grep rule that bans skip-less
-// store.Open in _test.go outside the migration suite and this package).
+// .testcache/`.
 package storetest
 
 import (
