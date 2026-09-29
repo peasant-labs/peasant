@@ -21,6 +21,7 @@ import (
 var openCodeUnknownYAML []byte
 
 func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
+	t.Parallel()
 	var fixture struct {
 		Required []string `yaml:"required_names"`
 		Cases    []struct {
