@@ -24,6 +24,9 @@ type publicationFixtureFile struct {
 	Attempts   []publicationAttemptFixture   `yaml:"attempts"`
 	Rejections []publicationRejectionFixture `yaml:"rejections"`
 	Rollback   publicationRollbackFixture    `yaml:"rollback"`
+	// UnpublishedSibling is a session in the first record's project that holds
+	// no receipt.
+	UnpublishedSibling string `yaml:"unpublished_sibling"`
 }
 type publicationRejectionFixture struct {
 	Name                string                        `yaml:"name"`
@@ -208,6 +211,40 @@ func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
 	}
 	if got, readErr := s.Publication(context.Background(), row.Origin, row.Owner, record.ProjectHash, row.SessionID); readErr != nil || got == nil {
 		t.Fatalf("atomic retry receipt=%+v err=%v", got, readErr)
+	}
+}
+
+// TestHasPublicationReadsTheReceiptOfTheSession checks the receipt read
+// `peasant open` reports: the session's own receipt counts, and a receipt of
+// another session in the same project does not.
+func TestHasPublicationReadsTheReceiptOfTheSession(t *testing.T) {
+	t.Parallel()
+	fixture := loadPublicationFixture(t)
+	s := openTestStore(t)
+	defer s.Close()
+	row := fixture.Records[0]
+	record := publicationRecordFromFixture(t, row)
+	storetest.SeedSessionInProject(t, s, row.SessionID, record.ProjectHash)
+	storetest.SeedSessionInProject(t, s, fixture.UnpublishedSibling, record.ProjectHash)
+	has := func(sessionID string) bool {
+		t.Helper()
+		found, err := s.HasPublication(context.Background(), sessionID)
+		if err != nil {
+			t.Fatalf("check receipt: %v", err)
+		}
+		return found
+	}
+	if has(row.SessionID) {
+		t.Fatal("a session with no receipt reads as published")
+	}
+	if err := s.SavePublication(context.Background(), record); err != nil {
+		t.Fatalf("save receipt: %v", err)
+	}
+	if !has(row.SessionID) {
+		t.Fatal("a session with a stored receipt reads as not published")
+	}
+	if has(fixture.UnpublishedSibling) {
+		t.Fatal("a receipt of one session reads as published for another session in the same project")
 	}
 }
 

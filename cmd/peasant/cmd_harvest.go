@@ -217,6 +217,16 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem) error {
+	return runHarvestWith(cmd, mode, flags, filesystem, outputHarvest)
+}
+
+// harvestReport consumes one committed harvest execution. The harvest command
+// prints its summary; `peasant open` reads the outcome of its one session.
+type harvestReport func(cmd *cobra.Command, execution harvestExecution, options harvestOutputOptions) error
+
+// runHarvestWith runs one harvest through the production wiring and hands the
+// committed execution to report.
+func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem, report harvestReport) error {
 	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
 	ctx, cancelOperation := context.WithCancel(signalCtx)
@@ -255,7 +265,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, files
 
 	// Notify the user when no config file exists.
 	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
-		fmt.Fprintf(os.Stderr, "notice: no config found at %s — using defaults. Run 'peasant kickstart' to configure.\n", configPath)
+		fmt.Fprintf(cmd.ErrOrStderr(), "notice: no config found at %s — using defaults. Run 'peasant kickstart' to configure.\n", configPath)
 	}
 
 	// 3. An index selector does not override or discover native source paths.
@@ -313,7 +323,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, files
 	adapters := ingest.DefaultAdapterRegistry
 
 	// 5. Build source configs from config.
-	sources := buildSourceConfigs(cfg)
+	sources := buildSourceConfigsTo(cfg, cmd.ErrOrStderr())
 
 	// 6. Build pipeline config.
 	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
@@ -509,7 +519,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, files
 	}
 	execution := executeHarvest(ctx, pipeline, progState, renderer)
 	stopProgress()
-	return outputHarvest(cmd, execution, harvestOutputOptions{
+	return report(cmd, execution, harvestOutputOptions{
 		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
 		sources: sources, customPatternCount: customPatternCount,
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
@@ -1178,6 +1188,12 @@ func resolveConfiguredSource(cfg *config.Config, harness defaults.Harness) (inge
 
 // buildSourceConfigs converts every registered provider's config into pipeline sources.
 func buildSourceConfigs(cfg *config.Config) map[defaults.Harness]ingest.SourceConfig {
+	return buildSourceConfigsTo(cfg, os.Stderr)
+}
+
+// buildSourceConfigsTo is buildSourceConfigs with its skipped-path warnings
+// written to warnings.
+func buildSourceConfigsTo(cfg *config.Config, warnings io.Writer) map[defaults.Harness]ingest.SourceConfig {
 	sources := map[defaults.Harness]ingest.SourceConfig{}
 	for harness := range ingest.DefaultAdapterRegistry {
 		source, issues, ok := resolveConfiguredSource(cfg, harness)
@@ -1185,7 +1201,7 @@ func buildSourceConfigs(cfg *config.Config) map[defaults.Harness]ingest.SourceCo
 			continue
 		}
 		for _, issue := range issues {
-			fmt.Fprintf(os.Stderr, "warning: skipping invalid %s source path %q: %v\n", harness, issue.path, issue.err)
+			fmt.Fprintf(warnings, "warning: skipping invalid %s source path %q: %v\n", harness, issue.path, issue.err)
 		}
 		sources[harness] = source
 	}
