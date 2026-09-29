@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -148,7 +149,9 @@ func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, b
 	if err == nil || !strings.Contains(err.Error(), wantReason) {
 		t.Fatal("native index operation did not enforce the selected-metadata bound")
 	}
-	db, err := store.Open(filepath.Join(t.TempDir(), "index.db"))
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+	storetest.CopyGoldenTo(t, dbPath)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,14 +196,33 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 	if err := testutil.DecodeNamedFixtureYAML(piSourceFixtures, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	// Build each distinct large boundary string once per test and share the
+	// read-only copies across cases: per-case source assembly only reads them
+	// through ReplaceAll, and the subtests run serially, so no case can mutate
+	// what another reads. The selected-subtree byte assertion inside each case
+	// pins the boundary sizes the suite depends on.
+	metadataStrings := make(map[int]string)
+	paddingStrings := make(map[int]string)
+	for _, tc := range fixture.Cases {
+		if tc.MetadataStringBytes > 0 {
+			if _, ok := metadataStrings[tc.MetadataStringBytes]; !ok {
+				metadataStrings[tc.MetadataStringBytes] = strings.Repeat("x", tc.MetadataStringBytes)
+			}
+		}
+		if tc.PaddingStringBytes > 0 {
+			if _, ok := paddingStrings[tc.PaddingStringBytes]; !ok {
+				paddingStrings[tc.PaddingStringBytes] = strings.Repeat("p", tc.PaddingStringBytes)
+			}
+		}
+	}
 	seen := make(map[string]bool)
 	for _, tc := range fixture.Cases {
 		tc.Source = strings.ReplaceAll(tc.Source, "pi-native-fixture", testutil.TestSessionUUID)
 		if tc.MetadataStringBytes > 0 {
-			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-string", strings.Repeat("x", tc.MetadataStringBytes))
+			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-string", metadataStrings[tc.MetadataStringBytes])
 		}
 		if tc.PaddingStringBytes > 0 {
-			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-padding", strings.Repeat("p", tc.PaddingStringBytes))
+			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-padding", paddingStrings[tc.PaddingStringBytes])
 		}
 		if tc.InvalidUTF8Namespace {
 			tc.Source = strings.ReplaceAll(tc.Source, "invalid-utf8-namespace", string([]byte{0xff}))
@@ -281,7 +303,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.AssertOrdinaryLongContent {
-				payload := strings.Repeat("x", tc.MetadataStringBytes)
+				payload := metadataStrings[tc.MetadataStringBytes]
 				thinking, arguments, output, placeholders := false, false, false, 0
 				for _, entry := range entries {
 					if entry.ContentPreview != nil {
@@ -302,7 +324,8 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				}
 			}
 			dbPath := filepath.Join(t.TempDir(), "index.db")
-			db, err := store.Open(dbPath)
+			storetest.CopyGoldenTo(t, dbPath)
+			db, err := store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -323,7 +346,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(dbPath)
+			db, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

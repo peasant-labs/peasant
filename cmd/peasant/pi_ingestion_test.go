@@ -85,6 +85,19 @@ func loadPiCommonModesFixture(t *testing.T) piCommonModesFixture {
 func TestPiHarvestCommonModes(t *testing.T) {
 	t.Parallel()
 	fixture := loadPiCommonModesFixture(t)
+	// Build each distinct long-text expansion once per test and share the
+	// read-only copies across cases: per-case source assembly only reads them
+	// through ReplaceAll, and the subtests run serially, so no case can mutate
+	// what another reads. The overlay assertion inside each long-text case
+	// pins the expansion size.
+	longTextExpansions := make(map[int]string)
+	for _, tc := range fixture.Cases {
+		if tc.LongText > 0 {
+			if _, ok := longTextExpansions[tc.LongText]; !ok {
+				longTextExpansions[tc.LongText] = strings.Repeat("native pipeline body ", tc.LongText)
+			}
+		}
+	}
 	seen := make(map[string]bool)
 	for _, tc := range fixture.Cases {
 		if seen[tc.Name] || tc.Name == "" {
@@ -94,7 +107,7 @@ func TestPiHarvestCommonModes(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			sourceText := fixture.Source
 			if tc.LongText > 0 {
-				sourceText = strings.ReplaceAll(sourceText, "native pipeline body", strings.Repeat("native pipeline body ", tc.LongText))
+				sourceText = strings.ReplaceAll(sourceText, "native pipeline body", longTextExpansions[tc.LongText])
 			}
 			root := t.TempDir()
 			source := filepath.Join(root, "recording.jsonl")
@@ -108,11 +121,18 @@ func TestPiHarvestCommonModes(t *testing.T) {
 			base := []string{"--source-harness", schema.HarnessPi.String(), "--source-path", source, "--output", output, "--include-active", "--json"}
 			forecast := slices.Contains(tc.First, "--dry-run") || slices.Contains(tc.Second, "--dry-run")
 			seededDigest := ""
-			if forecast {
+			if forecast || tc.Stored {
 				// A forecast inspects an existing checkpointed database and
 				// creates none, so the state it reads exists before the run and is
-				// fingerprinted here to prove the run left it alone.
-				seededDigest = databaseDigest(t, seedClosedStore(t, root))
+				// fingerprinted here to prove the run left it alone. A case that
+				// stores rows harvests into the same prepared path, so the
+				// command's version check finds no pending migrations. Only the
+				// logs-only case expects no database at all, and it stays
+				// unseeded so its os.Stat NotExist assertion keeps holding.
+				seededDBPath := seedClosedStore(t, root)
+				if forecast {
+					seededDigest = databaseDigest(t, seededDBPath)
+				}
 			}
 			result, err := executeHarvestCmd(t, root, append(append([]string{}, tc.First...), base...))
 			if err != nil {
@@ -175,7 +195,7 @@ func TestPiHarvestCommonModes(t *testing.T) {
 				}
 				return
 			}
-			db, err := store.Open(dbPath)
+			db, err := store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
