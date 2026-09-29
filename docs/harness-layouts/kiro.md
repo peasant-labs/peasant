@@ -31,6 +31,7 @@ capture. The probes do not merge a session across generations.
 | `kiro-cli` | Windows | `%LOCALAPPDATA%\kiro-cli` and `%APPDATA%\kiro-cli`               |
 | `kiro-cli` | Linux   | `~/.local/share/amazon-q` (Amazon Q Developer CLI)               |
 | `kiro-cli` | macOS   | `~/Library/Application Support/amazon-q` (Amazon Q Developer CLI) |
+| `kiro-cli` | Windows | `%LOCALAPPDATA%\amazon-q` and `%APPDATA%\amazon-q` (Amazon Q Developer CLI) |
 
 `KIRO_HOME` moves `~/.kiro`, and `XDG_DATA_HOME` moves `~/.local/share`. The default roots do
 not follow either variable. Pass the moved directory with `--path`.
@@ -156,7 +157,8 @@ The transcript holds one `{version, kind, data}` record per line. `kind` is `Pro
 `AssistantMessage`, `ToolResults`, or `Clear`. `data.content[]` holds `{kind, data}` blocks.
 The block kind is `text`, `thinking`, `toolUse` (`{toolUseId, name, input}`), or
 `toolResult` (`{toolUseId, content, status}`). `Prompt` records carry `data.meta.timestamp` in
-epoch seconds. The census counts `kind`.
+epoch seconds. Kiro Crew's usage reader also looks for a top-level `timestamp`, so the probe
+reads both. The census counts `kind`.
 
 Metadata: SessionID from `session_id`, Title from `title`, ProjectPath from `cwd`, and Models
 from `rts_model_state.model_info.model_id`. The time range comes from `created_at`,
@@ -195,16 +197,28 @@ User turns count the `Prompt` variant, or plain text content. Assistant messages
 
 ## Known gaps and uncertainties
 
-- Kiro and Kiro CLI are closed source. The only primary storage source is the open-source
-  Amazon Q Developer CLI. It defines the `conversations` table, the `ConversationState` JSON,
-  and `dirs::data_local_dir()/amazon-q/data.sqlite3`. The `kiro-cli` directory name, the
-  `conversations_v2` table, the CLI 2.x JSONL store, and every IDE format come from
-  third-party readers and user reports, not from Kiro documentation.
+- Kiro and Kiro CLI are closed source. Two open-source projects are primary sources:
+  - The Amazon Q Developer CLI defines the `conversations` table, the `ConversationState`
+    JSON, and `dirs::data_local_dir()/amazon-q/data.sqlite3`.
+  - Kiro Crew, the Kiro team's Apache-2.0 workspace that drives `kiro-cli`, confirms these
+    Kiro CLI facts in its production code:
+    - The transcript store is `<KIRO_HOME or ~/.kiro>/sessions/cli`, with a `<sid>.json`
+      header and a `<sid>.jsonl` transcript (`config/paths.py`, `session_map.py`).
+    - The `data.sqlite3` roots for `kiro-cli` and `amazon-q` on each OS are the ones listed
+      above (`identity_stores.py`).
+    - The transcript records are `{kind, data: {content: [{kind, data}]}}`, with the kinds
+      `Prompt`, `AssistantMessage`, and `ToolResults`, and `toolResult` blocks that carry
+      `toolUseId` (`acp/client.py`, `dashboard/handlers/usage.py`).
+  - Still from third-party readers only: the `conversations_v2` table, the header fields,
+    the `Clear` kind, and every IDE format.
 - The Kiro documentation confirms only that sessions live under `~/.kiro` (`KIRO_HOME`), that
   session IDs are UUIDs, that sessions are stored per directory, and that CLI 3.0 changed the
   session format.
-- The Windows `data.sqlite3` location is not published. `%LOCALAPPDATA%` follows the Amazon Q
-  code, and `%APPDATA%` follows one third-party reader. Both are declared.
+- Kiro does not publish the Windows `data.sqlite3` location. Kiro Crew probes
+  `%LOCALAPPDATA%\kiro-cli` first, as the location the current generation writes, and keeps
+  `%USERPROFILE%\AppData\Roaming\kiro-cli` as a legacy fallback. Both are declared in that
+  order. The default roots use the home-relative `AppData\Local` and do not follow a moved
+  `LOCALAPPDATA`.
 - No source publishes the fields of `workspace-sessions/<encoded>/sessions.json`. The probe
   records its shape and treats a top-level array, or a `sessions[]` array, as its records.
 - The meaning of the constant execution directory `414d1636299d2b9e4ce7e17fb11f63e9` is not
@@ -241,3 +255,8 @@ User turns count the `Prompt` variant, or plain text content. Assistant messages
 - CLI and IDE session files: <https://vshulcz.github.io/deja-vu/guide/delete-kiro-session-history.html>,
   <https://github.com/aws-samples/sample-kiro-cli-multiagent-development/blob/main/docs/observability.md>
 - Default paths per OS: <https://github.com/pajaydev/kiro-history>, <https://openusage.sh/docs/providers/kiro/>
+- Kiro Crew source at `2e09b10`: <https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/config/paths.py>,
+  <https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/identity_stores.py>,
+  <https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/session_map.py>,
+  <https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/acp/client.py>,
+  <https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/dashboard/handlers/usage.py>
