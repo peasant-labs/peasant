@@ -43,7 +43,7 @@ peasant village push [flags]
       --force                         Re-push all sessions (including already-pushed ones)
   -h, --help                          help for push
       --json                          Output as JSON instead of human-readable
-      --license string                Override the content license for this run (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0). Also changes sessions already published, which otherwise keep the license they have on the village
+      --license string                Override the content license for this run (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0). Also changes sessions already published. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt on this machine is sent the configured license
       --non-interactive               Run without the interactive wizard or public-consent prompt (for CI/scripts)
       --profile-output string         Write a local JSON v1 push profile to this file (local diagnostic only, mode 0600). Parent directory must exist. Enables profiling; prints path and bottleneck hints to stderr unless --quiet. Works with --json and --timing.
       --profile-trace string          Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.

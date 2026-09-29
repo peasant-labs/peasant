@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -83,14 +84,19 @@ type audienceRun struct {
 	Flags []string     `yaml:"flags"`
 	// FailVisibilityUpdates has the Village refuse this run's owner updates.
 	FailVisibilityUpdates bool `yaml:"failVisibilityUpdates"`
+	// LosePublishResponse has the Village commit this run's upload and then
+	// answer with a gateway failure, as when the answer is lost on the way.
+	LosePublishResponse bool `yaml:"losePublishResponse"`
 }
 
 type audienceExpectation struct {
 	Failed            *bool               `yaml:"failed"`
+	Says              string              `yaml:"says"`
 	Published         *bool               `yaml:"published"`
 	License           audienceLicense     `yaml:"license"`
 	VisibilityUpdates []schema.Visibility `yaml:"visibilityUpdates"`
 	Visibility        schema.Visibility   `yaml:"visibility"`
+	VillageLicense    audienceLicense     `yaml:"villageLicense"`
 }
 
 type audienceCase struct {
@@ -144,11 +150,11 @@ func loadRepublishAudienceFixture(t *testing.T) []audienceCase {
 			t.Fatalf("%s case %q needs a valid configured visibility and license (or none), an explicit ownerShares, and a change of none, content, or association", republishAudienceFixturePath, c.Name)
 		}
 		for label, expect := range map[string]audienceExpectation{"expectFirst": c.ExpectFirst, "expectUpdate": c.ExpectUpdate} {
-			if expect.Failed == nil || expect.Published == nil || !expect.License.valid() || expect.VisibilityUpdates == nil || !expect.Visibility.IsValid() {
-				t.Fatalf("%s case %q %s must state failed, published, license (or none), visibilityUpdates (or []), and visibility; a missing value would assert nothing", republishAudienceFixturePath, c.Name, label)
+			if expect.Failed == nil || expect.Published == nil || !expect.License.valid() || expect.VisibilityUpdates == nil || !expect.Visibility.IsValid() || !expect.VillageLicense.valid() {
+				t.Fatalf("%s case %q %s must state failed, published, license (or none), visibilityUpdates (or []), visibility, and villageLicense (or none); a missing value would assert nothing", republishAudienceFixturePath, c.Name, label)
 			}
-			if !*expect.Published && (expect.License != audienceLicenseNone || len(expect.VisibilityUpdates) > 0) {
-				t.Fatalf("%s case %q %s expects a license or an owner update from a run that publishes nothing", republishAudienceFixturePath, c.Name, label)
+			if !*expect.Published && expect.License != audienceLicenseNone {
+				t.Fatalf("%s case %q %s expects a license on a publish request from a run that sends none", republishAudienceFixturePath, c.Name, label)
 			}
 		}
 		if *c.OwnerShares && !*c.ExpectUpdate.Failed && c.ExpectUpdate.Visibility == schema.VisibilityGroup && len(c.ExpectUpdate.VisibilityUpdates) == 0 {
@@ -196,7 +202,7 @@ func runRepublishAudienceCase(t *testing.T, c audienceCase) {
 		filepath.Join(dir, "peasant-sync"), c.Configured.Visibility, license))
 	doors := startAudienceDoors(t, dir, cfgPath)
 
-	village.refuseVisibilityUpdates(c.First.FailVisibilityUpdates)
+	village.setRun(c.First)
 	failed, said := doors.run(t, c.First)
 	village.expect(t, "first publication", c.ExpectFirst, failed, said, doors)
 
@@ -215,7 +221,7 @@ func runRepublishAudienceCase(t *testing.T, c audienceCase) {
 			t.Fatal(err)
 		}
 	}
-	village.refuseVisibilityUpdates(c.Update.FailVisibilityUpdates)
+	village.setRun(c.Update)
 	failed, said = doors.run(t, c.Update)
 	village.expect(t, "update", c.ExpectUpdate, failed, said, doors)
 }
@@ -298,6 +304,11 @@ func (d *audienceDoors) run(t *testing.T, run audienceRun) (failed bool, said st
 	}
 }
 
+// audienceSessionErrors reads the failed-session count from the transcript
+// result line the command prints: the quiet form a hook uses, or the summary.
+// A failed session does not fail the command, so its exit alone cannot say.
+var audienceSessionErrors = regexp.MustCompile(`(?m)^(?:pushed \d+ session\(s\), |Summary: \d+ new, \d+ updated, )(\d+) error\(s\)`)
+
 func (d *audienceDoors) execute(args []string) (failed bool, said string) {
 	root := buildRootCommand()
 	var output bytes.Buffer
@@ -305,7 +316,12 @@ func (d *audienceDoors) execute(args []string) (failed bool, said string) {
 	root.SetErr(&output)
 	root.SetArgs(args)
 	err := root.Execute()
-	return err != nil, fmt.Sprintf("peasant %s: err=%v\n%s", strings.Join(args, " "), err, &output)
+	said = fmt.Sprintf("peasant %s: err=%v\n%s", strings.Join(args, " "), err, &output)
+	if err != nil {
+		return true, said
+	}
+	match := audienceSessionErrors.FindStringSubmatch(output.String())
+	return match != nil && match[1] != "0", said
 }
 
 // audienceVillage is a Village that keeps one transcript's audience the way the
@@ -323,6 +339,7 @@ type audienceVillage struct {
 	published   []schema.License    // the license each publish request carried
 	updates     []schema.Visibility // every owner visibility update received
 	refuse      bool                // answer owner visibility updates with 503
+	loseAnswer  bool                // commit an upload, then answer 504
 	observedAt  struct{ published, updates int }
 }
 
@@ -390,6 +407,10 @@ func (v *audienceVillage) publish(t *testing.T, w http.ResponseWriter, r *http.R
 	receipt.Visibility = v.visibility
 	receipt.Applied.NormalizedValues.Visibility = v.visibility
 	receipt.Applied.License = v.license
+	if v.loseAnswer {
+		http.Error(w, "upstream answer lost", http.StatusGatewayTimeout)
+		return
+	}
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -418,15 +439,15 @@ func (v *audienceVillage) update(t *testing.T, w http.ResponseWriter, r *http.Re
 		return
 	}
 	v.visibility = schema.Visibility(*request.Visibility)
-	_ = json.NewEncoder(w).Encode(schema.OwnerTranscriptUpdateResponse{TranscriptID: id, TranscriptURL: "https://village.example/transcripts/" + id.String(), Visibility: *request.Visibility, Tags: []string{}, UpdatedAt: 2})
+	_ = json.NewEncoder(w).Encode(schema.OwnerTranscriptUpdateResponse{TranscriptID: id, TranscriptURL: "https://village.example/transcripts/" + id.String(), License: v.license, Visibility: *request.Visibility, Tags: []string{}, UpdatedAt: 2})
 }
 
-// refuseVisibilityUpdates makes the Village answer owner visibility updates
-// with a transient failure until it is called again with false.
-func (v *audienceVillage) refuseVisibilityUpdates(refuse bool) {
+// setRun applies the run's failure knobs: refusing owner visibility updates,
+// and losing the answer to an upload the Village committed.
+func (v *audienceVillage) setRun(run audienceRun) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.refuse = refuse
+	v.refuse, v.loseAnswer = run.FailVisibilityUpdates, run.LosePublishResponse
 }
 
 // shareWithCollectives is the owner sharing the transcript with collectives on
@@ -449,9 +470,19 @@ func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpect
 	published := v.published[v.observedAt.published:]
 	updates := v.updates[v.observedAt.updates:]
 	visibility := v.visibility
+	var license schema.License
+	if v.license != nil {
+		license = *v.license
+	}
 	v.observedAt.published, v.observedAt.updates = len(v.published), len(v.updates)
 	v.mu.Unlock()
 
+	if want.Says != "" && !strings.Contains(said, want.Says) {
+		t.Errorf("%s: the door's answer does not say %q:\n%s", label, want.Says, said)
+	}
+	if license != want.VillageLicense.license() {
+		t.Errorf("%s: the transcript carries license %q on the Village; want %q", label, license, want.VillageLicense.license())
+	}
 	if got := len(published) > 0; got != *want.Published {
 		t.Fatalf("%s: the Village received %d publish request(s); want published=%v", label, len(published), *want.Published)
 	}
@@ -464,7 +495,7 @@ func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpect
 	if visibility != want.Visibility {
 		t.Errorf("%s: the transcript is %s on the Village; want %s", label, visibility, want.Visibility)
 	}
-	if !*want.Published || failed {
+	if failed || (!*want.Published && len(want.VisibilityUpdates) == 0) {
 		return
 	}
 	input, err := doors.db.LoadPublicationInput(t.Context(), ingest.SessionID(audienceSessionID))

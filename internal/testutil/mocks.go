@@ -1195,8 +1195,11 @@ type StubPushStore struct {
 
 	UnpushedErr        error
 	SavePublicationErr error
-	InsertLogErr       error
-	HeldErr            error
+	// LatestPublicationAttemptErr is returned by LatestPublicationAttempt when
+	// non-nil.
+	LatestPublicationAttemptErr error
+	InsertLogErr                error
+	HeldErr                     error
 	// GetQualityMetricsErr is returned by GetQualityMetrics when non-nil.
 	GetQualityMetricsErr error
 	// ListEntriesErr is returned by ListEntries when non-nil.
@@ -1249,6 +1252,9 @@ func (s *StubPushStore) RecordPublicationAttempt(_ context.Context, diagnostic s
 func (s *StubPushStore) LatestPublicationAttempt(_ context.Context, origin, owner string, projectHash schema.ProjectHash, sessionID string) (*store.PublicationAttemptDiagnostic, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.LatestPublicationAttemptErr != nil {
+		return nil, s.LatestPublicationAttemptErr
+	}
 	for i := len(s.PublicationAttempts) - 1; i >= 0; i-- {
 		attempt := s.PublicationAttempts[i]
 		if attempt.VillageOrigin == origin && attempt.OwnerUserID == owner && attempt.ProjectHash == projectHash && attempt.SessionID == sessionID {

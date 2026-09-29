@@ -12,8 +12,9 @@ import (
 //go:embed testdata/published_session_scope.yaml
 var publishedSessionScopeFixture []byte
 
-// allPushStatuses enumerates every status the pipeline can report, derived
-// from the type itself so a new status cannot be missed.
+// allPushStatuses enumerates every status the pipeline can report, from the
+// type's own String cases, so a new named status is listed without an edit
+// here.
 func allPushStatuses() []push.PushStatus {
 	var statuses []push.PushStatus
 	for status := push.PushStatus(0); status.String() != "unknown"; status++ {
@@ -61,6 +62,10 @@ func TestWithinPublishedSessions_KeepsOnlySessionsTheVillageHolds(t *testing.T) 
 		if scope.SessionIDs["session-"+status] {
 			t.Errorf("a %s session has nothing on the Village to annotate; scope = %v", status, scope.SessionIDs)
 		}
+	}
+	narrowed := push.AnnotationSelection{SessionIDs: map[string]bool{"session-new": true}}.WithinPublishedSessions(result)
+	if len(narrowed.SessionIDs) != 1 || !narrowed.SessionIDs["session-new"] {
+		t.Errorf("a selection that already names sessions must keep only those it names; got %v", narrowed.SessionIDs)
 	}
 	if empty := (push.AnnotationSelection{}).WithinPublishedSessions(nil); !empty.SessionsOnly || empty.SessionIDs == nil || len(empty.SessionIDs) != 0 {
 		t.Errorf("a run with no result must scope to no session at all; got %+v", empty)

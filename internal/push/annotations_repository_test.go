@@ -55,7 +55,8 @@ type scopeState string
 const (
 	scopeActive   scopeState = "repository-scoped"
 	scopeInactive scopeState = "selection-only"
-	// scopeSessionsOnly is the Share wizard's scope: only the chosen sessions.
+	// scopeSessionsOnly is the scope of the Share wizard and the CLI chooser:
+	// only the chosen sessions.
 	scopeSessionsOnly scopeState = "sessions-only"
 )
 

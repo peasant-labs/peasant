@@ -13,3 +13,6 @@ requiredNames:
   - cli-refuses-a-visibility-it-cannot-apply
   - cli-license-flag-changes-a-published-transcript
   - web-retry-finishes-a-first-publish-whose-visibility-update-failed
+  - cli-license-flag-relicenses-an-unchanged-transcript
+  - hook-retry-finishes-a-first-publish-whose-answer-was-lost
+  - web-retry-keeps-an-owner-share-made-meanwhile

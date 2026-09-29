@@ -394,10 +394,12 @@ type PushConfig struct {
 	// keep-local. It is a stored preference only and never triggers a publish.
 	SharePreference SharePreference `yaml:"sharePreference,omitempty"`
 	// License is the default content license a transcript's first publication
-	// carries (chosen during kickstart). An update of a published transcript
-	// keeps the license it has on the village. Empty ⇒ no license is sent ⇒ the
-	// village stores NULL. Overridable per-run with the --license flag, which
-	// also changes published transcripts.
+	// carries (chosen during kickstart). An update of a transcript this machine
+	// has published keeps the license it has on the village; without the local
+	// publication receipt an update cannot be told from a first publication and
+	// carries this license too. Empty ⇒ no license is sent ⇒ the village stores
+	// NULL. Overridable per-run with the --license flag, which also changes
+	// published transcripts.
 	License License `yaml:"license,omitempty"`
 	// Fields controls which metadata fields are included in push payloads.
 	Fields PushFieldVisibility `yaml:"fields"`

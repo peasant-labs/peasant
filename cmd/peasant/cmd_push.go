@@ -312,15 +312,19 @@ func BuildPushCommand() *cobra.Command {
 				// contract set. It used to accept any string, so a typo was taken as
 				// a visibility, silently resolved to the default, and reported as
 				// applied: a consent boundary answering a question nobody asked.
-				if visibility != "" && !schema.Visibility(visibility).IsValid() {
-					return fmt.Errorf("invalid --visibility %q (valid: %s)", visibility, config.VisibilityMenu())
-				}
 				// The flag also changes transcripts that are already published, so
 				// a value this version would downgrade is refused rather than
 				// applied as private: on a transcript shared with collectives that
 				// would take their access away, the opposite of what was asked.
-				if visibility != "" && config.EffectiveVisibility(schema.Visibility(visibility), cfg).Downgraded() {
-					return fmt.Errorf("--visibility %s cannot be applied by this version: it would publish and change transcripts as private instead; an update already keeps the visibility and collective shares a transcript has on the village, so omit --visibility to keep them, or pass one of %s", visibility, implementedVisibilityChoices())
+				// The pipeline refuses it too; this answers before any work.
+				if visibility != "" {
+					requested := schema.Visibility(visibility)
+					if !requested.IsValid() {
+						return fmt.Errorf("invalid --visibility %q (valid: %s)", visibility, config.ImplementedVisibilityMenu())
+					}
+					if config.EffectiveVisibility(requested, cfg).Downgraded() {
+						return fmt.Errorf("invalid --visibility %q: %w", visibility, config.VisibilityChangeRefusal(requested))
+					}
 				}
 
 				runCfg := push.PipelineConfig{
@@ -611,22 +615,13 @@ func BuildPushCommand() *cobra.Command {
 				// Complete transcript publishing before starting annotation publishing.
 				// Each stage retains its existing internal concurrency; the barrier makes
 				// transcript-backed annotation targets visible before validation runs.
-				var transcriptResult *push.PushResult
 				result, transcErr, annSummary, annErr := runPushStages(
 					runCtx,
 					func(ctx context.Context) (*push.PushResult, error) {
-						published, err := pipeline.Run(ctx)
-						transcriptResult = published
-						return published, err
+						return pipeline.Run(ctx)
 					},
-					func(ctx context.Context) (*push.AnnotationPushSummary, error) {
-						selection := annSelection
-						if runCfg.FilterSessionIDs != nil {
-							// The chooser narrowed this run to sessions picked one by
-							// one, so annotations go only with the ones the village now
-							// holds, exactly as they do from the Share wizard.
-							selection = annSelection.WithinPublishedSessions(transcriptResult)
-						}
+					func(ctx context.Context, published *push.PushResult) (*push.AnnotationPushSummary, error) {
+						selection := annotationSelectionForRun(annSelection, runCfg.FilterSessionIDs != nil, published)
 						return push.PushAnnotationsSelected(ctx, client, db, selection, dryRun, resolvedConcurrency)
 					},
 				)
@@ -799,8 +794,8 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
-	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes sessions already published, which otherwise keep the visibility they have on the village", implementedVisibilityChoices()))
-	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also changes sessions already published, which otherwise keep the license they have on the village", schema.LicenseMenu()))
+	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes sessions already published, which otherwise keep the visibility they have on the village", config.ImplementedVisibilityMenu()))
+	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also changes sessions already published. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt on this machine is sent the configured license", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
@@ -1367,11 +1362,23 @@ func raisedBudget(budget time.Duration) time.Duration {
 func runPushStages(
 	ctx context.Context,
 	transcriptStage func(context.Context) (*push.PushResult, error),
-	annotationStage func(context.Context) (*push.AnnotationPushSummary, error),
+	annotationStage func(context.Context, *push.PushResult) (*push.AnnotationPushSummary, error),
 ) (result *push.PushResult, transcriptErr error, annotationSummary *push.AnnotationPushSummary, annotationErr error) {
 	result, transcriptErr = transcriptStage(ctx)
-	annotationSummary, annotationErr = annotationStage(ctx)
+	annotationSummary, annotationErr = annotationStage(ctx, result)
 	return
+}
+
+// annotationSelectionForRun decides which annotations a CLI push publishes.
+// When the chooser narrowed the run to sessions picked one by one, annotations
+// go only with the ones the village now holds, exactly as they do from the
+// Share wizard. Otherwise the selection built from the configuration and flags
+// stands.
+func annotationSelectionForRun(selection push.AnnotationSelection, chooserNarrowed bool, published *push.PushResult) push.AnnotationSelection {
+	if chooserNarrowed {
+		return selection.WithinPublishedSessions(published)
+	}
+	return selection
 }
 
 // firstPushStageError retains the existing transcript-before-annotation error
@@ -1381,16 +1388,6 @@ func firstPushStageError(transcriptErr, annotationErr error) error {
 		return transcriptErr
 	}
 	return annotationErr
-}
-
-// implementedVisibilityChoices lists the visibilities --visibility accepts:
-// the ones this version can apply, from the shared policy.
-func implementedVisibilityChoices() string {
-	names := make([]string, len(config.ImplementedVisibilities))
-	for i, visibility := range config.ImplementedVisibilities {
-		names[i] = visibility.String()
-	}
-	return strings.Join(names, ", ")
 }
 
 // sourceHarnessHelp builds the --source-harness flag help text by deriving

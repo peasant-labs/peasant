@@ -111,7 +111,9 @@ const (
 	PushStatusNew PushStatus = iota
 	// PushStatusUpdated means the session was re-uploaded and the server already had it (HTTP 200).
 	PushStatusUpdated
-	// PushStatusSkipped means the session was intentionally not uploaded.
+	// PushStatusSkipped means the session was not uploaded because the village
+	// already holds it unchanged. Annotation scoping relies on that: a skipped
+	// session is on the village.
 	PushStatusSkipped
 	// PushStatusError means the upload attempt failed.
 	PushStatusError

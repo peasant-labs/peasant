@@ -35,7 +35,7 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			CurrentLicense       string `yaml:"currentLicense"`
 			RequestedVisibility  string `yaml:"requestedVisibility"`
 			RequestedLicense     string `yaml:"requestedLicense"`
-			Explicit             bool   `yaml:"explicit"`
+			Explicit             *bool  `yaml:"explicit"`
 			ExpectedOwnerUpdates int    `yaml:"expectedOwnerUpdates"`
 			ExpectedVisibility   string `yaml:"expectedVisibility"`
 			ExpectedLicense      string `yaml:"expectedLicense"`
@@ -65,8 +65,8 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			requestedLicense := schema.License(f.RequestedLicense)
 			expectedVisibility := schema.Visibility(f.ExpectedVisibility)
 			expectedLicense := schema.License(f.ExpectedLicense)
-			if !currentVisibility.IsValid() || !requestedVisibility.IsValid() || !expectedVisibility.IsValid() || !currentLicense.IsValid() || !requestedLicense.IsValid() || !expectedLicense.IsValid() {
-				t.Fatal("invalid access fixture")
+			if f.Explicit == nil || !currentVisibility.IsValid() || !requestedVisibility.IsValid() || !expectedVisibility.IsValid() || !currentLicense.IsValid() || !requestedLicense.IsValid() || !expectedLicense.IsValid() {
+				t.Fatal("invalid access fixture: every case states explicit and valid visibilities and licenses")
 			}
 			var mu sync.Mutex
 			var previousIdentity json.RawMessage
@@ -120,10 +120,10 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 							}
 						}
 						_, sent := request["license"]
-						if f.Explicit && (!sent || *receipt.Applied.License != requestedLicense) {
+						if *f.Explicit && (!sent || *receipt.Applied.License != requestedLicense) {
 							t.Error("explicitly requested license ignored")
 						}
-						if !f.Explicit && sent {
+						if !*f.Explicit && sent {
 							t.Error("an update sent the configured default license")
 						}
 					}
@@ -192,7 +192,7 @@ func TestFullContentRepublicationPreservesIdentityAndExplicitMetadata(t *testing
 			// Repair passes no flags, so the update keeps the current access and
 			// license whatever the configuration now says. Only an explicit
 			// request changes a published transcript.
-			run(requestedVisibility, requestedLicense, f.Explicit)
+			run(requestedVisibility, requestedLicense, *f.Explicit)
 			after, err := db.Publication(t.Context(), remote.URL, creds.UserID, testutil.TestProjectHash, id)
 			if err != nil || after == nil {
 				t.Fatalf("missing replacement receipt: %v", err)

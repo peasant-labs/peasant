@@ -751,6 +751,25 @@ func EffectiveVisibility(requested Visibility, cfg *Config) VisibilityPolicy {
 	return VisibilityPolicy{Configured: configured, Effective: effective}
 }
 
+// ImplementedVisibilityMenu returns the visibilities this version can apply,
+// as a comma-separated string, for a request that must name one of them.
+func ImplementedVisibilityMenu() string {
+	values := make([]string, 0, len(ImplementedVisibilities))
+	for _, visibility := range ImplementedVisibilities {
+		values = append(values, visibility.String())
+	}
+	return strings.Join(values, ", ")
+}
+
+// VisibilityChangeRefusal explains why an explicit visibility change this
+// version cannot apply is refused rather than downgraded. A change also moves
+// transcripts that are already published, and the fallback would take access
+// away from the collectives a transcript is shared with.
+func VisibilityChangeRefusal(requested Visibility) error {
+	return fmt.Errorf("%s visibility cannot be applied by this version: it would publish and change transcripts as %s instead, taking access away from the collectives a transcript is shared with; an update already keeps the visibility and collective shares a transcript has on the village, so leave the visibility unchanged to keep them, or ask for one of %s",
+		requested, FallbackVisibility, ImplementedVisibilityMenu())
+}
+
 // VisibilityMenu returns the accepted visibility values as a comma-separated
 // string, derived from the contract's closed set so a flag's validation message
 // can never drift from what the contract actually accepts. It mirrors

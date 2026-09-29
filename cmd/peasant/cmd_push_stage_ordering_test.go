@@ -352,7 +352,7 @@ func TestRunPushStages(t *testing.T) {
 				return result, err
 			}
 
-			annotationStage := func(ctx context.Context) (*push.AnnotationPushSummary, error) {
+			annotationStage := func(ctx context.Context, _ *push.PushResult) (*push.AnnotationPushSummary, error) {
 				select {
 				case <-transcriptReturned:
 				default:

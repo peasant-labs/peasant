@@ -140,7 +140,8 @@ type AnnotationSelection struct {
 	// applied to the annotation path (so a narrowed `selection` narrows
 	// annotations too, not just sessions). nil = no session filter. Annotations
 	// not tied to a session are not excluded by this gate on its own; an active
-	// repository scope still applies its independent attribution rule.
+	// repository scope still applies its independent attribution rule, and
+	// SessionsOnly withholds them.
 	SessionIDs map[string]bool
 	// RepositoryProjectHashes, when non-empty, is the set of canonical project
 	// identities a repository-scoped push covers. It closes the one hole the
@@ -161,14 +162,17 @@ type AnnotationSelection struct {
 // WithinPublishedSessions narrows the selection to the sessions a run left on
 // the village: uploaded, or already there unchanged. A session that failed or
 // was held back has nothing on the village to annotate, and an annotation that
-// names no session is withheld. The label keys (IDs, content hashes) are kept.
+// names no session is withheld. The label keys (IDs, content hashes) are kept,
+// and a session outside the selection's own SessionIDs stays outside.
 func (s AnnotationSelection) WithinPublishedSessions(result *PushResult) AnnotationSelection {
 	sessions := map[string]bool{}
 	if result != nil {
 		for _, session := range result.Sessions {
 			switch session.Status {
 			case PushStatusNew, PushStatusUpdated, PushStatusSkipped:
-				sessions[session.SessionID] = true
+				if s.SessionIDs == nil || s.SessionIDs[session.SessionID] {
+					sessions[session.SessionID] = true
+				}
 			}
 		}
 	}
@@ -282,9 +286,9 @@ func (s AnnotationSelection) sessionMatches(row ingest.AnnotationPushRow) bool {
 			return row.SessionID != nil && s.SessionIDs[*row.SessionID]
 		}
 	case schema.TargetProject:
-		if s.SessionsOnly {
-			return false
-		}
+		// Only a repository scope names projects a row can prove it belongs
+		// to; under SessionsOnly the set is empty, so every project row is
+		// withheld.
 		if attributed {
 			return row.ProjectHash != nil && s.RepositoryProjectHashes[*row.ProjectHash]
 		}
