@@ -72,6 +72,8 @@ func carrierEntry(t *testing.T, position ingest.UnknownSourcePosition, payload j
 // reproducible with the one-line probe-off mutation documented here, not from
 // this committed test alone.
 func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *testing.T) {
+	// Deliberately not parallel: the allocation bound below reads process-wide
+	// memory stats, so another test allocating in the same process masks it.
 	const payloadBytes = 64 << 20
 	overDigits := `"` + strings.Repeat("1", payloadBytes-2) + `"`
 	rawLiteral := `"` + strings.Repeat("x", payloadBytes-2) + `"`
@@ -274,6 +276,8 @@ func TestProjectRetainedUnknownRefusalMessageStable(t *testing.T) {
 // literals are built in Go; the allocation bound is asserted on the refusal
 // side of each encoding.
 func TestProjectRetainedUnknownAcceptsAtCapPayloads(t *testing.T) {
+	// Deliberately not parallel: the allocation bound below reads process-wide
+	// memory stats, so another test allocating in the same process masks it.
 	const capBytes = 8 << 20
 	// A payloadText value carries two quote bytes around its decoded text, so
 	// capBytes-2 content bytes decode to exactly the cap; a legacy raw value
@@ -463,6 +467,7 @@ var deliberateSizePrecedenceNames = []string{
 const overDeepPayloadTextDepth = 10001
 
 func TestProjectRetainedUnknownPrecedence(t *testing.T) {
+	t.Parallel()
 	fixtures := loadRetainedProjectionPrecedenceFixtures(t)
 	if fixtures.PayloadBytes <= 0 {
 		t.Fatalf("precedence fixture %s needs a positive payloadBytes", retainedProjectionPrecedenceFixturePath)
