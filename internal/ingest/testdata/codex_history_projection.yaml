@@ -1,4 +1,25 @@
 cases:
+  - name: world-state-known-control-envelope
+    phases:
+      - authority:
+          stableThreadID: 11111111-1111-4111-8111-111111111111
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T00:00:01Z","type":"world_state","payload":{"full":true,"state":{"mode":"synthetic"}}}
+            {"timestamp":"2024-01-02T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"request"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: []
+
   - name: copied-prefix-S-boundary
     phases:
       - authority:

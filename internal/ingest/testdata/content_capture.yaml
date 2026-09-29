@@ -57,6 +57,13 @@ required_names:
   - claude-control-tool-reference
   - claude-unknown-record-kind
   - codex-reasoning-full-text
+  - codex-control-world-state
+  - codex-control-world-state-oversized
+  - codex-control-sub-agent-activity
+  - codex-control-patch-apply-end
+  - codex-control-thread-settings-applied
+  - codex-control-compacted
+  - codex-control-web-search-end
 cases:
   - name: cursor-user-literal-query-whitespace
     harness: cursor
@@ -194,6 +201,81 @@ cases:
   # The payload assertions decode Extra: an exact key set proves the transcript
   # envelope was stripped, and absent keys prove a capped payload dropped its
   # original data.
+  - name: codex-control-world-state
+    harness: codex
+    control: true
+    source: '{"type":"world_state","payload":{"state":{"mode":"synthetic"}}}'
+    want_part_type: world_state
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [state]
+    want_extra_members:
+      state: '{"mode":"synthetic"}'
+  - name: codex-control-world-state-oversized
+    harness: codex
+    control: true
+    oversized: true
+    source: '{"type":"world_state","payload":{"state":TEXT}}'
+    want_part_type: world_state
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [kind, rawBytes]
+    want_extra_members:
+      kind: world_state
+    want_raw_bytes_min: 9000
+  - name: codex-control-sub-agent-activity
+    harness: codex
+    control: true
+    source: '{"type":"event_msg","payload":{"type":"sub_agent_activity","kind":"started","agent_path":"/root/worker"}}'
+    want_part_type: sub_agent_activity
+    want_role: system
+    want_preview: "Sub-agent activity: started /root/worker"
+    want_extra_keys: [agent_path, kind]
+    want_extra_members:
+      agent_path: /root/worker
+      kind: started
+  - name: codex-control-patch-apply-end
+    harness: codex
+    control: true
+    source: '{"type":"event_msg","payload":{"type":"patch_apply_end","call_id":"call-1","status":"completed"}}'
+    want_part_type: patch_apply_end
+    want_role: system
+    want_preview: "Patch application completed"
+    want_extra_keys: [call_id, status]
+    want_extra_members:
+      call_id: call-1
+      status: completed
+  - name: codex-control-thread-settings-applied
+    harness: codex
+    control: true
+    source: '{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"synthetic-model"}}}'
+    want_part_type: thread_settings_applied
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [thread_settings]
+    want_extra_members:
+      thread_settings: '{"model":"synthetic-model"}'
+  - name: codex-control-compacted
+    harness: codex
+    control: true
+    source: '{"type":"compacted","payload":{"summary":"synthetic summary"}}'
+    want_part_type: compacted
+    want_role: system
+    want_preview: "Context compacted"
+    want_extra_keys: [summary]
+    want_extra_members:
+      summary: synthetic summary
+  - name: codex-control-web-search-end
+    harness: codex
+    control: true
+    source: '{"type":"event_msg","payload":{"type":"web_search_end","call_id":"search-1","query":"synthetic query"}}'
+    want_part_type: web_search_end
+    want_role: system
+    want_preview: "Web search completed: synthetic query"
+    want_extra_keys: [call_id, query]
+    want_extra_members:
+      call_id: search-1
+      query: synthetic query
   - name: claude-control-permission-mode
     harness: claude-code
     control: true

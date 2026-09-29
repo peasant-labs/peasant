@@ -9,6 +9,7 @@
 # Unknown evidence with source traversal coordinates is full but partial.
 required_names:
   - control-records-certify
+  - codex-control-records-certify
   - unknown-record-refused
 cases:
   - name: control-records-certify
@@ -24,6 +25,29 @@ cases:
     control_preview: "permission mode: acceptEdits"
     control_extra_members:
       permissionMode: acceptEdits
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true
+  - name: codex-control-records-certify
+    harness: codex
+    transcript: |
+      {"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"SESSION_ID","cwd":"/synthetic/workspace","model_provider":"openai"}}
+      {"timestamp":"2026-01-01T00:00:00.500Z","type":"turn_context","payload":{"model":"synthetic-model","effort":"medium"}}
+      {"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the fixture"}]}}
+      {"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the fixture now."}]}}
+      {"timestamp":"2026-01-01T00:00:03Z","type":"world_state","payload":{"state":{"mode":"synthetic"}}}
+      {"timestamp":"2026-01-01T00:00:04Z","type":"event_msg","payload":{"type":"sub_agent_activity","kind":"started","agent_path":"/root/worker"}}
+      {"timestamp":"2026-01-01T00:00:05Z","type":"event_msg","payload":{"type":"patch_apply_end","call_id":"patch-1","status":"completed"}}
+      {"timestamp":"2026-01-01T00:00:06Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"synthetic-model"}}}
+      {"timestamp":"2026-01-01T00:00:07Z","type":"compacted","payload":{"summary":"synthetic summary"}}
+      {"timestamp":"2026-01-01T00:00:08Z","type":"event_msg","payload":{"type":"web_search_end","call_id":"search-1","query":"synthetic query"}}
+    capture_status: complete
+    capture_format: full
+    failure_code: ""
+    control_part_type: compacted
+    control_preview: "Context compacted"
+    control_extra_members:
+      summary: synthetic summary
     export_accepted: true
     publication_ready: true
     preflight_accepts: true

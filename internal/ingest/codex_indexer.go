@@ -17,8 +17,8 @@ import (
 //
 // Each rollout line carries {timestamp, type, payload}. The indexer emits one
 // SessionEntry per response_item it recognises (messages, function/tool calls,
-// reasoning); session_meta, turn_context, and event_msg lines are
-// handled by CodexAdapter.ExtractMetadata and skipped here.
+// reasoning), plus represented control/lifecycle records. Metadata-only
+// records and response-item mirrors are skipped.
 //
 // Unlike Claude (where one assistant message embeds an array of content
 // blocks that decompose into depth=1 child entries), Codex response_items are
@@ -292,7 +292,6 @@ func (idx *CodexIndexer) parseRollout(sessionID SessionID, data []byte) ([]schem
 
 func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
 	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
-
 	var entries []schema.SessionEntry
 	entryIndex := 0
 	var traversalPosition int64
@@ -368,10 +367,20 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 			}
 		}
 
-		// Only response_item lines become indexed entries. session_meta /
-		// turn_context drive ExtractMetadata; event_msg.{token_count,
-		// task_*} are session-level signals or UI mirrors of response_item
-		// content and would double-count if indexed.
+		if entry, ok, err := codexControlRecordEntry(sessionID, entryIndex, env, len(trimmed), idx.fullContent); err != nil {
+			if completion != nil {
+				return nil, err
+			}
+		} else if ok {
+			entries = append(entries, entry)
+			if completion != nil {
+				completion.recognized++
+			}
+			entryIndex++
+			continue
+		}
+		// Remaining non-response lines are metadata/control records handled by
+		// extraction, or event mirrors that would duplicate response items.
 		if env.Type != codexTypeResponse {
 			continue
 		}

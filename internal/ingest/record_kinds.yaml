@@ -203,9 +203,9 @@ harnesses:
           - &tool {kind: toolCall, status: represented, preview: no, payload: tool name and arguments}
   codex:
     adapter_version: 1
-    indexer_version: 17
+    indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
+    native_versions: {adapter_version: 2, indexer_version: 19, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
@@ -223,6 +223,8 @@ harnesses:
           - {<<: *ignored, kind: turn_context}
           - &structural {kind: event_msg, status: represented, preview: no, payload: state on owning entry; no independent row}
           - {<<: *structural, kind: response_item}
+          - &control {kind: compacted, status: represented, preview: yes, payload: bounded control extra (oversized known controls retain identity only)}
+          - {<<: *control, kind: world_state}
       - context: retained-format-1
         namespace: event
         sources:
@@ -236,6 +238,10 @@ harnesses:
           - {<<: *ignored, kind: user_message, reason: Mirrored content is represented by response items.}
           - {<<: *ignored, kind: agent_message, reason: Mirrored content is represented by response items.}
           - {<<: *ignored, kind: agent_reasoning, reason: Mirrored content is represented by response items.}
+          - {<<: *control, kind: sub_agent_activity}
+          - {<<: *control, kind: patch_apply_end}
+          - {<<: *control, kind: thread_settings_applied}
+          - {<<: *control, kind: web_search_end}
       - context: retained-format-1
         namespace: response_item
         sources:
@@ -279,6 +285,7 @@ harnesses:
           - {<<: *structural, kind: event_msg}
           - {<<: *structural, kind: response_item}
           - {<<: *structural, kind: compacted}
+          - {<<: *structural, kind: world_state}
       - context: native-generation
         namespace: event
         sources:
@@ -299,6 +306,10 @@ harnesses:
           - {<<: *structural, kind: task_complete}
           - {<<: *structural, kind: thread_rolled_back}
           - {<<: *structural, kind: turn_aborted}
+          - {<<: *structural, kind: sub_agent_activity}
+          - {<<: *structural, kind: patch_apply_end}
+          - {<<: *structural, kind: thread_settings_applied}
+          - {<<: *structural, kind: web_search_end}
       - context: native-generation
         namespace: response_item
         sources:

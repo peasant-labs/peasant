@@ -163,7 +163,7 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 				}
 				if fixture.Control {
 					// Control records carry no conversation text; their entry
-					// shape is asserted by TestClaudeControlRecordEntryShape.
+					// shape is asserted by TestControlRecordEntryShape.
 					return
 				}
 				found := false
@@ -395,10 +395,10 @@ func TestNativeOpenCodeUnknownSurvivesManagedProjection(t *testing.T) {
 	}
 }
 
-// TestClaudeControlRecordEntryShape certifies a Claude control record and
+// TestControlRecordEntryShape certifies a represented control record and
 // asserts the observable entry it produces: its provider kind, role, retained
 // payload and preview. The fixture declares one case per represented kind.
-func TestClaudeControlRecordEntryShape(t *testing.T) {
+func TestControlRecordEntryShape(t *testing.T) {
 	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control {
@@ -426,6 +426,14 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 			if fixture.WantRole != "" && entry.Role != ingest.Role(fixture.WantRole) {
 				t.Fatalf("role = %q, want %q", entry.Role, fixture.WantRole)
 			}
+			if fixture.Harness == ingest.HarnessCodex {
+				if entry.EntryType != ingest.EntryTypeSystem {
+					t.Fatalf("entry type = %q, want %q", entry.EntryType, ingest.EntryTypeSystem)
+				}
+				if entry.RawByteLength == nil || *entry.RawByteLength == 0 {
+					t.Fatalf("raw byte length = %v, want a recorded source length", entry.RawByteLength)
+				}
+			}
 			if fixture.WantPartType != "" && (entry.PartType == nil || *entry.PartType != fixture.WantPartType) {
 				t.Fatalf("part type = %v, want %q", entry.PartType, fixture.WantPartType)
 			}
@@ -443,11 +451,11 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 	}
 }
 
-// TestClaudeControlRecordTolerantPreviewBound drives the bounded-preview index
+// TestControlRecordTolerantPreviewBound drives the bounded-preview index
 // path for control records whose generated preview can exceed the preview
 // bound. The preview must obey the bound and the retained payload must fall
 // back to its identity object once it exceeds the payload cap.
-func TestClaudeControlRecordTolerantPreviewBound(t *testing.T) {
+func TestControlRecordTolerantPreviewBound(t *testing.T) {
 	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control || !fixture.Tolerant {
