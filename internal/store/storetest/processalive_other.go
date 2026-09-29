@@ -2,10 +2,7 @@
 
 package storetest
 
-import (
-	"strconv"
-	"strings"
-)
+import "time"
 
 // processAlive is conservative on platforms where the helper cannot probe a
 // PID without signalling it: an unknown process is assumed alive, so the
@@ -14,17 +11,10 @@ import (
 // litter on every platform that offers it.
 func processAlive(_ int) bool { return true }
 
-// parseOwnerPID extracts the pid from a managed-root entry named pid-<pid>.
-// It reports false for any other name so the sweep never touches entries the
-// helper did not create.
-func parseOwnerPID(name string) (int, bool) {
-	pid, ok := strings.CutPrefix(name, "pid-")
-	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(pid)
-	if err != nil || n <= 0 {
-		return 0, false
-	}
-	return n, true
+// reapableOwner is age-only where liveness cannot be probed: with no
+// dead/alive signal the bias is leak-not-reap, so only entries older than a
+// full day qualify. No test suite spans that, while killed-run litter is
+// still eventually reclaimed.
+func reapableOwner(_ int, modTime, now time.Time) bool {
+	return now.Sub(modTime) >= ownerUnknownMaxAge
 }

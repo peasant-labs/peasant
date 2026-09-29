@@ -138,7 +138,7 @@ func adoptCachedGolden(t *testing.T) (path string, ok bool) {
 		return "", false
 	}
 	final := filepath.Join(dir, goldenStamp())
-	if cachedTemplateValid(final) {
+	if cachedTemplateValid(dir, final) {
 		return final, true
 	}
 	return buildCachedGolden(t, dir, final)
@@ -201,22 +201,29 @@ func goldenStamp() string {
 
 // cachedTemplateValid stats the stamped file and validates it with the
 // read-only, non-migrating store.SchemaVersionAt check. The check runs
-// against a private scratch copy, never the cached file itself: a read-only
-// open of a WAL-mode database creates -shm/-wal sidecars beside the file
-// (verified by probe), and the shared template must stay sidecar-free. Any
-// error means "absent or corrupt" — the caller takes the lock path, which
-// re-checks under the lock.
-func cachedTemplateValid(final string) bool {
+// against a private scratch copy inside the cache dir, never the cached file
+// itself: a read-only open of a WAL-mode database creates -shm/-wal sidecars
+// beside the file (verified by probe), and the shared template must stay
+// sidecar-free. The scratch carries a build-* prefix so the under-lock
+// reclaim and the age sweep cover a copy orphaned by a SIGKILLed validator.
+// Any error means "absent or corrupt" — the caller takes the lock path,
+// which re-checks under the lock.
+func cachedTemplateValid(dir, final string) bool {
 	if _, err := os.Stat(final); err != nil {
 		return false
 	}
-	scratch, err := os.CreateTemp("", "storetest-golden-validate-*")
+	scratch, err := os.CreateTemp(dir, "build-validate-*")
 	if err != nil {
 		return false
 	}
 	scratchName := scratch.Name()
 	_ = scratch.Close()
+	// A read-only open of a WAL-mode database creates -shm/-wal sidecars
+	// beside the scratch (the same probe result that keeps validation off
+	// the shared file), so all three paths are removed, not just the copy.
 	defer os.Remove(scratchName)
+	defer os.Remove(scratchName + "-shm")
+	defer os.Remove(scratchName + "-wal")
 	data, err := os.ReadFile(final)
 	if err != nil {
 		return false
@@ -244,7 +251,11 @@ func buildCachedGolden(t *testing.T, dir, final string) (string, bool) {
 	defer func() {
 		_ = release()
 	}()
-	if cachedTemplateValid(final) {
+	// Holding the exclusive lock proves no live builder exists (every build
+	// happens under this lock), so any build-* entry is orphaned — a SIGKILLed
+	// builder's worst trace — and is reclaimed at any age before rebuilding.
+	reclaimBuildDirs(dir)
+	if cachedTemplateValid(dir, final) {
 		return final, true
 	}
 	buildDir, err := os.MkdirTemp(dir, "build-*")
@@ -268,7 +279,7 @@ func buildCachedGolden(t *testing.T, dir, final string) (string, bool) {
 		_ = os.RemoveAll(buildDir)
 		t.Fatalf("storetest: close golden DB: %v", err)
 	}
-	published, ok := publishGolden(built, final)
+	published, ok := publishGolden(dir, built, final)
 	if !ok {
 		return "", false
 	}
@@ -284,20 +295,20 @@ func buildCachedGolden(t *testing.T, dir, final string) (string, bool) {
 // moved by atomic rename on the same filesystem. A lost rename race adopts
 // the winner's file when it validates; any other rename failure falls back
 // to a private build.
-func publishGolden(built, final string) (string, bool) {
+func publishGolden(dir, built, final string) (string, bool) {
 	if err := os.Chmod(built, 0o444); err != nil {
 		return "", false
 	}
 	if err := os.Rename(built, final); err != nil {
 		// Another builder may have won the race: adopt its file when valid.
-		if cachedTemplateValid(final) {
+		if cachedTemplateValid(dir, final) {
 			return final, true
 		}
 		// A corrupt or locked target blocks every future build; clear it and
 		// retry once before giving up to the private path.
 		removePublished(final)
 		if err := os.Rename(built, final); err != nil {
-			if cachedTemplateValid(final) {
+			if cachedTemplateValid(dir, final) {
 				return final, true
 			}
 			return "", false
@@ -311,6 +322,25 @@ func publishGolden(built, final string) (string, bool) {
 func removePublished(path string) {
 	_ = os.Chmod(path, 0o666)
 	_ = os.Remove(path)
+}
+
+// reclaimBuildDirs removes every build-* entry at any age. Callers must hold
+// the template-build lock: exclusivity proves no live builder exists, so
+// every leftover is a killed run's trace (a torn build dir or an orphaned
+// validate scratch) and is safe to remove. Best-effort; failures surface as
+// an age-swept leftover on the next successful build, never as a test
+// failure.
+func reclaimBuildDirs(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !isBuildDir(entry.Name()) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+	}
 }
 
 // sweepCache reaps bounded debris after a successful build: build-* dirs

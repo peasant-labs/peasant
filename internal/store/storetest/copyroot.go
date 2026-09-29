@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,16 +25,38 @@ import (
 // tmpfs, writable, >= 256 MiB free) > t.TempDir(). Empty means unset.
 const EnvStoretestTmpDir = "PEASANT_STORETEST_TMPDIR"
 
-// shmRoot is the RAM-backed candidate for the managed copy root on unix
-// platforms that provide POSIX shared memory there. macOS has no /dev/shm
-// (the probe reports "no") and small-container /dev/shm mounts fail the free
-// check, so both fall back without error.
-const shmRoot = "/dev/shm/peasant-storetest"
+// defaultShmRoot is the RAM-backed candidate for the managed copy root on
+// unix platforms that provide POSIX shared memory under /dev/shm. macOS has
+// no /dev/shm (the probe reports "no") and small-container /dev/shm mounts
+// fail the free check, so both fall back without error.
+//
+// The root is scoped per user (UID suffix) and carries a scheme version: the
+// machine-global /dev/shm is shared by every test process on the box (any
+// worktree, any build, any user), so users must neither collide nor hit each
+// other's permissions, and a future naming-scheme change must not make a new
+// sweeper reap an old layout. Old storetest code never touches this root (it
+// used t.TempDir/TMPDIR only), so there is no version skew with released
+// code. Deliberately sharing one override root across PID namespaces is
+// unsupported: a PID dead in one namespace may be alive in another, and only
+// the age floor guards that case.
+func defaultShmRoot() string {
+	return "peasant-storetest-v1-u" + strconv.Itoa(os.Getuid())
+}
 
-// ownerSweepAge is the age rule for the managed-root hygiene sweep: entries
-// older than this are reaped even when liveness is unknown (non-unix), and
-// dead-owner entries are reaped regardless of age on unix.
-const ownerSweepAge = time.Hour
+// ownerAgeFloor is the conservative age floor for reaping a dead owner's
+// shelf: an entry is removed only when its owner PID is provably dead AND the
+// entry is past this age. The floor protects against PID reuse (a fresh
+// shelf for a recycled PID is never old enough to reap) and against
+// processes that are still starting. False-alive leaks (self-healing: reboot
+// clears tmpfs, and the next sweep retries); false-dead deletes a live
+// database, which is unacceptable — so the liveness check always wins ties.
+const ownerAgeFloor = 10 * time.Minute
+
+// ownerUnknownMaxAge is the age-only reap rule where liveness cannot be
+// probed (!unix: processAlive always reports alive). With no dead/alive
+// signal the bias is leak-not-reap, so the age is a full day: no test suite
+// spans it, while killed-run litter is still eventually reclaimed.
+const ownerUnknownMaxAge = 24 * time.Hour
 
 var (
 	copyRootMu    sync.Mutex
@@ -52,7 +76,7 @@ func resolveManagedRootForConfig(override string, tmpfs bool) (string, bool) {
 		return override, true
 	}
 	if tmpfs {
-		return shmRoot, true
+		return filepath.Join("/dev/shm", defaultShmRoot()), true
 	}
 	return "", false
 }
@@ -171,10 +195,12 @@ func ownerDir(root string) string {
 	return filepath.Join(root, fmt.Sprintf("pid-%d", os.Getpid()))
 }
 
-// sweepDeadOwners removes pid-* shelves whose owner is definitely dead, plus
-// any pid-* shelf older than ownerSweepAge (the age rule that governs where
-// liveness is unknown). It touches only entries matching the helper's own
-// pid-* naming — never other files in a user-provided override root.
+// sweepDeadOwners removes pid-* shelves whose owner is provably dead past
+// the age floor (or past the unknown-liveness age where PID probing is
+// unavailable). It touches only entries matching the helper's own pid-*
+// naming — never other files in a user-provided override root. Every error
+// (vanished entries, permission failures) is best-effort: the sweep never
+// fails a test.
 func sweepDeadOwners(root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -194,11 +220,29 @@ func sweepDeadOwners(root string) {
 		}
 		info, err := entry.Info()
 		if err != nil {
+			// ENOENT race with a concurrently exiting owner: nothing to reap.
 			continue
 		}
-		if processAlive(pid) && now.Sub(info.ModTime()) < ownerSweepAge {
+		if !reapableOwner(pid, info.ModTime(), now) {
 			continue
 		}
+		// Best-effort: an EPERM here (a shelf another user owns inside a
+		// shared override root) leaks rather than fails.
 		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
 	}
+}
+
+// parseOwnerPID extracts the pid from a managed-root entry named pid-<pid>.
+// It reports false for any other name so the sweep never touches entries the
+// helper did not create.
+func parseOwnerPID(name string) (int, bool) {
+	pid, ok := strings.CutPrefix(name, "pid-")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(pid)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
