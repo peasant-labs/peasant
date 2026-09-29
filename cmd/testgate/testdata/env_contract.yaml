@@ -1,14 +1,19 @@
 # Frozen budget/env contract cases for cmd/testgate.
 #
 # budget precedence: budget.yaml (when present) > TEST_BUDGET (seconds) > none.
+# An absent enforcement field defaults to blocking; only a committed fixture
+# can carry warn (the TEST_BUDGET fallback is always blocking).
 # CHECK_START_NS: a positive Unix-ns integer; empty or malformed is "unset".
 # budget verdict: an absent budget never fails; L > 4 is INCONCLUSIVE and does
-# not fail; otherwise combined_wall / L over the budget fails, under it passes.
-# required_names is a deletion-protection manifest.
+# not fail; otherwise combined_wall / L over the budget fails under blocking
+# enforcement and warns (fail false, warn true) under warn enforcement, under
+# it passes. required_names is a deletion-protection manifest.
 required_names:
   - budget-file-wins
   - budget-env-fallback
   - budget-none
+  - budget-file-warn
+  - budget-file-default-blocking
   - check-start-valid
   - check-start-unset
   - check-start-malformed
@@ -16,14 +21,19 @@ required_names:
   - verdict-inconclusive
   - verdict-over-budget
   - verdict-within-budget
+  - verdict-warn-over-budget
+  - verdict-warn-within-budget
   - budget-subset-not-applicable
   - budget-subset-ignores-wall
   - budget-full-enforced
+  - budget-full-warn
 
 budget_cases:
-  - { name: budget-file-wins,   file_seconds: 120, env_seconds: 90, want_present: true,  want_seconds: 120, want_basis: "reference-machine wall" }
-  - { name: budget-env-fallback, file_seconds: 0,  env_seconds: 90, want_present: true,  want_seconds: 90,  want_basis: "TEST_BUDGET" }
+  - { name: budget-file-wins,   file_seconds: 120, file_enforcement: blocking, env_seconds: 90, want_present: true,  want_seconds: 120, want_basis: "reference-machine wall", want_enforcement: blocking }
+  - { name: budget-env-fallback, file_seconds: 0, env_seconds: 90, want_present: true,  want_seconds: 90,  want_basis: "TEST_BUDGET", want_enforcement: blocking }
   - { name: budget-none,        file_seconds: 0,   env_seconds: 0,  want_present: false }
+  - { name: budget-file-warn,   file_seconds: 120, file_enforcement: warn, env_seconds: 0, want_present: true,  want_seconds: 120, want_basis: "reference-machine wall", want_enforcement: warn }
+  - { name: budget-file-default-blocking, file_seconds: 120, env_seconds: 0, want_present: true,  want_seconds: 120, want_basis: "reference-machine wall", want_enforcement: blocking }
 
 check_start_cases:
   - { name: check-start-valid,     value: "1700000000000000000", want_present: true }
@@ -31,15 +41,18 @@ check_start_cases:
   - { name: check-start-malformed, value: "not-a-number",        want_present: false }
 
 budget_verdict_cases:
-  - { name: verdict-no-budget,    present: false, cal_l: 1.0, wall_ms: 999999, seconds: 1,   want_fail: false }
-  - { name: verdict-inconclusive, present: true,  cal_l: 5.0, wall_ms: 999999, seconds: 1,   want_fail: false }
-  - { name: verdict-over-budget,  present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, want_fail: true }
-  - { name: verdict-within-budget, present: true, cal_l: 1.0, wall_ms: 50000,  seconds: 100, want_fail: false }
+  - { name: verdict-no-budget,    present: false, cal_l: 1.0, wall_ms: 999999, seconds: 1,   enforcement: blocking, want_fail: false, want_warn: false, want_note: "none committed" }
+  - { name: verdict-inconclusive, present: true,  cal_l: 5.0, wall_ms: 999999, seconds: 1,   enforcement: blocking, want_fail: false, want_warn: false, want_note: "INCONCLUSIVE" }
+  - { name: verdict-over-budget,  present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, enforcement: blocking, want_fail: true,  want_warn: false, want_note: "FAIL" }
+  - { name: verdict-within-budget, present: true, cal_l: 1.0, wall_ms: 50000,  seconds: 100, enforcement: blocking, want_fail: false, want_warn: false, want_note: "PASS" }
+  - { name: verdict-warn-over-budget,  present: true, cal_l: 1.0, wall_ms: 200000, seconds: 100, enforcement: warn, want_fail: false, want_warn: true,  want_note: "WARN (non-blocking)" }
+  - { name: verdict-warn-within-budget, present: true, cal_l: 1.0, wall_ms: 50000, seconds: 100, enforcement: warn, want_fail: false, want_warn: false, want_note: "PASS (warn-only mode: a miss would not fail the gate)" }
 
 # Subset runs have no whole-suite budget: the line must say so and never fail,
 # even against a present budget and an over-budget wall. A full run keeps the
-# existing verdict.
+# existing verdict: blocking fails, warn demotes the miss to a WARN line.
 budget_mode_cases:
-  - { name: budget-subset-not-applicable, subset: true,  planned: 2, total: 512, present: true,  cal_l: 1.0, wall_ms: 999999, seconds: 1,   want_fail: false, want_note: "not applicable (subset run: 2 of 512 packages)" }
-  - { name: budget-subset-ignores-wall,   subset: true,  planned: 1, total: 512, present: true,  cal_l: 1.0, wall_ms: 500000, seconds: 100, want_fail: false, want_note: "not applicable (subset run: 1 of 512 packages)" }
-  - { name: budget-full-enforced,         subset: false, planned: 0, total: 0,   present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, want_fail: true,  want_note: "FAIL" }
+  - { name: budget-subset-not-applicable, subset: true,  planned: 2, total: 512, present: true,  cal_l: 1.0, wall_ms: 999999, seconds: 1,   enforcement: blocking, want_fail: false, want_warn: false, want_note: "not applicable (subset run: 2 of 512 packages)" }
+  - { name: budget-subset-ignores-wall,   subset: true,  planned: 1, total: 512, present: true,  cal_l: 1.0, wall_ms: 500000, seconds: 100, enforcement: warn,     want_fail: false, want_warn: false, want_note: "not applicable (subset run: 1 of 512 packages)" }
+  - { name: budget-full-enforced,         subset: false, planned: 0, total: 0,   present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, enforcement: blocking, want_fail: true,  want_warn: false, want_note: "FAIL" }
+  - { name: budget-full-warn,             subset: false, planned: 0, total: 0,   present: true,  cal_l: 1.0, wall_ms: 200000, seconds: 100, enforcement: warn,     want_fail: false, want_warn: true,  want_note: "WARN (non-blocking)" }
