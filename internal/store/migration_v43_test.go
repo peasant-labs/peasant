@@ -24,6 +24,9 @@ type publicationFixtureFile struct {
 	Attempts   []publicationAttemptFixture   `yaml:"attempts"`
 	Rejections []publicationRejectionFixture `yaml:"rejections"`
 	Rollback   publicationRollbackFixture    `yaml:"rollback"`
+	// UnpublishedSibling is a session in the first record's project that holds
+	// no receipt.
+	UnpublishedSibling string `yaml:"unpublished_sibling"`
 }
 type publicationRejectionFixture struct {
 	Name                string                        `yaml:"name"`
@@ -211,40 +214,37 @@ func TestSavePublicationRollsBackReceiptWhenCursorUpdateFails(t *testing.T) {
 	}
 }
 
-// TestHasPublicationReadsTheReceiptOfTheSessionInItsProject checks the receipt
-// read `peasant open` reports: a receipt from any Village and owner counts, and
-// only for the project the receipt names.
-func TestHasPublicationReadsTheReceiptOfTheSessionInItsProject(t *testing.T) {
+// TestHasPublicationReadsTheReceiptOfTheSession checks the receipt read
+// `peasant open` reports: the session's own receipt counts, and a receipt of
+// another session in the same project does not.
+func TestHasPublicationReadsTheReceiptOfTheSession(t *testing.T) {
 	t.Parallel()
 	fixture := loadPublicationFixture(t)
 	s := openTestStore(t)
 	defer s.Close()
-	row, otherProject := fixture.Records[0], fixture.Records[1]
+	row := fixture.Records[0]
 	record := publicationRecordFromFixture(t, row)
 	storetest.SeedSessionInProject(t, s, row.SessionID, record.ProjectHash)
-	has := func(projectHash string) bool {
+	storetest.SeedSessionInProject(t, s, fixture.UnpublishedSibling, record.ProjectHash)
+	has := func(sessionID string) bool {
 		t.Helper()
-		hash, err := schema.NewProjectHash(projectHash)
-		if err != nil {
-			t.Fatal(err)
-		}
-		found, err := s.HasPublication(context.Background(), hash, row.SessionID)
+		found, err := s.HasPublication(context.Background(), sessionID)
 		if err != nil {
 			t.Fatalf("check receipt: %v", err)
 		}
 		return found
 	}
-	if has(row.ProjectHash) {
+	if has(row.SessionID) {
 		t.Fatal("a session with no receipt reads as published")
 	}
 	if err := s.SavePublication(context.Background(), record); err != nil {
 		t.Fatalf("save receipt: %v", err)
 	}
-	if !has(row.ProjectHash) {
+	if !has(row.SessionID) {
 		t.Fatal("a session with a stored receipt reads as not published")
 	}
-	if has(otherProject.ProjectHash) {
-		t.Fatal("a receipt for one project reads as published in another")
+	if has(fixture.UnpublishedSibling) {
+		t.Fatal("a receipt of one session reads as published for another session in the same project")
 	}
 }
 
