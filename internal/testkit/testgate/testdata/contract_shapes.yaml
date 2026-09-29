@@ -27,6 +27,7 @@ required_names:
   - testgate.Entry
   - testgate.Registry
   - testgate.Budget
+  - testgate.BudgetEnforcement
   - testgate.Finding
 
 shapes:
@@ -90,6 +91,8 @@ shapes:
       - { name: InvocationErrors, type: "[]string", tag: 'json:"invocation_errors"' }
       - { name: ClassTable,       type: "[]testgate.ClassRow", tag: 'json:"class_table"' }
       - { name: PreTestSteps,     type: "[]testgate.ReportRecord", tag: 'json:"pre_test_steps,omitempty"' }
+      - { name: BudgetEnforcement, type: testgate.BudgetEnforcement, tag: 'json:"budget_enforcement,omitempty"' }
+      - { name: BudgetWarn,       type: bool, tag: 'json:"budget_warn,omitempty"' }
 
   - name: testgate.PassReport
     fields:
@@ -190,9 +193,10 @@ shapes:
   # --- budget schema (budget.yaml) ------------------------------------------
   - name: testgate.Budget
     fields:
-      - { name: Version, type: int, tag: 'yaml:"version"' }
-      - { name: Seconds, type: int, tag: 'yaml:"seconds"' }
-      - { name: Basis,   type: string, tag: 'yaml:"basis"' }
+      - { name: Version,     type: int, tag: 'yaml:"version"' }
+      - { name: Seconds,     type: int, tag: 'yaml:"seconds"' }
+      - { name: Basis,       type: string, tag: 'yaml:"basis"' }
+      - { name: Enforcement, type: testgate.BudgetEnforcement, tag: 'yaml:"enforcement"' }
 
   # --- Screen finding shape that drives the exit verdict --------------------
   - name: testgate.Finding
@@ -215,3 +219,5 @@ enums:
     members: [fmt, lint, ast-grep-scan, ast-grep-gate-test, release-guard]
   - name: testgate.PassModeValues
     members: [race, no-race]
+  - name: testgate.BudgetEnforcement
+    members: [blocking, warn]

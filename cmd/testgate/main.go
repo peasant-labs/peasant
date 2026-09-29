@@ -404,7 +404,7 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		return 2
 	}
 
-	budgetSeconds, budgetBasis, budgetPresent, err := resolveBudget(root)
+	budget, budgetPresent, err := resolveBudget(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "testgate: %v\n", err)
 		return 2
@@ -526,7 +526,7 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 	}
 	fmt.Printf("calibration L:          %.3f\n", calL)
 	printControls(concurrency, race)
-	budgetText, budgetFail := budgetVerdict(subset, len(plan.Packages), totalPackages, calL, testWall, budgetSeconds, budgetBasis, budgetPresent)
+	budgetText, budgetFail, budgetWarn := budgetVerdict(subset, len(plan.Packages), totalPackages, calL, testWall, budget, budgetPresent)
 	fmt.Println(budgetText)
 
 	fmt.Println()
@@ -569,6 +569,10 @@ func runGate(root string, reg testgate.Registry, outDir string, concurrency int,
 		InvocationErrors: invocationErrors,
 		ClassTable:       classTable,
 		PreTestSteps:     preTestRecords,
+	}
+	if budgetPresent {
+		report.BudgetEnforcement = budget.Enforcement
+		report.BudgetWarn = budgetWarn
 	}
 	if haveCheckStart {
 		report.PreTestWallMS = testStart.Sub(checkStart).Milliseconds()
@@ -705,57 +709,65 @@ func printControls(concurrency int, race bool) {
 }
 
 // budgetVerdict renders the budget line and returns whether the gate should
-// fail on a budget miss. A miss fails closed, except that L > 4 is INCONCLUSIVE
-// (loud, exit 0) because a loaded box cannot be quoted against a reference
-// budget. A subset run has no whole-suite budget: its line says so loudly and
-// never fails, because a subset wall is not comparable to the full-suite bar.
-func budgetVerdict(subset bool, planned, total int, calL float64, testWall time.Duration, seconds int, basis string, present bool) (string, bool) {
+// fail on a budget miss, plus whether the miss was demoted to a warning. A
+// miss fails closed under blocking enforcement, except that L > 4 is
+// INCONCLUSIVE (loud, exit 0) because a loaded box cannot be quoted against a
+// reference budget. Under warn enforcement a miss prints an unmissable
+// WARN (non-blocking) line — never a PASS — and leaves the exit code green.
+// A subset run has no whole-suite budget: its line says so loudly and never
+// fails, because a subset wall is not comparable to the full-suite bar.
+func budgetVerdict(subset bool, planned, total int, calL float64, testWall time.Duration, budget testgate.Budget, present bool) (line string, fail bool, warn bool) {
 	if subset {
-		return fmt.Sprintf("budget:                 not applicable (subset run: %d of %d packages)", planned, total), false
+		return fmt.Sprintf("budget:                 not applicable (subset run: %d of %d packages)", planned, total), false, false
 	}
 	if !present {
-		return "budget:                 none committed (a later commit pins the reference value); raw walls only", false
+		return "budget:                 none committed (a later commit pins the reference value); raw walls only", false, false
 	}
 	tag := ""
-	if basis != "" {
-		tag = " (" + basis + ")"
+	if budget.Basis != "" {
+		tag = " (" + budget.Basis + ")"
 	}
 	if calL > 4 {
-		return fmt.Sprintf("budget:                 %ds reference%s; INCONCLUSIVE under load (L=%.3f), not failed", seconds, tag, calL), false
+		return fmt.Sprintf("budget:                 %ds reference%s; INCONCLUSIVE under load (L=%.3f), not failed", budget.Seconds, tag, calL), false, false
 	}
 	normalized := time.Duration(float64(testWall) / calL)
-	verdict := "PASS"
-	fail := false
-	if normalized > time.Duration(seconds)*time.Second {
-		verdict = "FAIL"
-		fail = true
+	if normalized <= time.Duration(budget.Seconds)*time.Second {
+		if budget.Enforcement == testgate.EnforcementWarn {
+			return fmt.Sprintf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> PASS (warn-only mode: a miss would not fail the gate)", budget.Seconds, tag, round(normalized), round(testWall)), false, false
+		}
+		return fmt.Sprintf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> PASS", budget.Seconds, tag, round(normalized), round(testWall)), false, false
 	}
-	return fmt.Sprintf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> %s", seconds, tag, round(normalized), round(testWall), verdict), fail
+	if budget.Enforcement == testgate.EnforcementWarn {
+		return fmt.Sprintf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> WARN (non-blocking): over budget; gate stays green", budget.Seconds, tag, round(normalized), round(testWall)), false, true
+	}
+	return fmt.Sprintf("budget:                 %ds reference%s; normalized test wall %s (%s / L) -> FAIL", budget.Seconds, tag, round(normalized), round(testWall)), true, false
 }
 
 // printBudget prints the full-run budget line and returns whether the gate
-// should fail. It is the subset-free view of budgetVerdict.
-func printBudget(calL float64, testWall time.Duration, seconds int, basis string, present bool) bool {
-	line, fail := budgetVerdict(false, 0, 0, calL, testWall, seconds, basis, present)
+// should fail and whether the miss was demoted to a warning. It is the
+// subset-free view of budgetVerdict.
+func printBudget(calL float64, testWall time.Duration, budget testgate.Budget, present bool) (bool, bool) {
+	line, fail, warn := budgetVerdict(false, 0, 0, calL, testWall, budget, present)
 	fmt.Println(line)
-	return fail
+	return fail, warn
 }
 
 // resolveBudget reads budget.yaml, then TEST_BUDGET, then reports no budget.
 // A malformed budget fixture is an error so a bad value cannot silently disable
-// the check.
-func resolveBudget(root string) (int, string, bool, error) {
+// the check. The environment fallback carries blocking enforcement: only a
+// committed fixture can demote the gate to warn-only.
+func resolveBudget(root string) (testgate.Budget, bool, error) {
 	b, found, err := testgate.LoadBudget(filepath.Join(root, "budget.yaml"))
 	if err != nil {
-		return 0, "", false, err
+		return testgate.Budget{}, false, err
 	}
 	if found {
-		return b.Seconds, b.Basis, true, nil
+		return b, true, nil
 	}
 	if n := budgetFromEnv(); n > 0 {
-		return n, "TEST_BUDGET", true, nil
+		return testgate.Budget{Seconds: n, Basis: "TEST_BUDGET", Enforcement: testgate.EnforcementBlocking}, true, nil
 	}
-	return 0, "", false, nil
+	return testgate.Budget{}, false, nil
 }
 
 func budgetFromEnv() int {
