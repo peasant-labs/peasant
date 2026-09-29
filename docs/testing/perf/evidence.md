@@ -54,7 +54,7 @@ Carried reference (superseded by the measured baseline above): retention test
 
 ## T3 (+T4 #6) — ingest golden pre-migrated DB + skip conversions
 
-After state: the fourteen ingest files named in the slice route every
+After state: the fourteen ingest files named in this change route every
 `store.Open` onto the golden template (`storetest.OpenWith` for whole-life
 stores; `storetest.CopyGoldenDB` + `store.Open(path,
 store.WithSkipMigrations(), ...)` for paths reopened across close/reopen; the
@@ -205,8 +205,8 @@ removed per-subtest cost was the migration-state check only (no replay). The
 `-cpuprofile` mechanism check confirms it — the remaining `store.Open` cost
 (22.3 s cum, 72.8% of samples) sits entirely under
 `storetest.ensureGolden → sqlitemigration.Migrate` (21.2 s cum), i.e. the
-once-per-process template build owned by the in-flight persistent-template
-amendment, not this test's opens (profile run, not quoted as a wall). The
+once-per-process template build that the template cache removes, not this
+test's opens (profile run, not quoted as a wall). The
 conversion's durable value is enforcement-rule cleanliness (skip-bearing open,
 no suppression). T4 payload share: measured-inapplicable, not applied — the
 read-only mutation audit found no in-place entry writes (writer path reads
@@ -228,11 +228,10 @@ prior value in each cell is kept as the cold record.
 The remaining four confirmed >30 s screening findings. Walls in this section
 were taken on the epoch tree (`09d9e93c`), not the `da7abd7f` survey base; the
 row shape above still holds (test → class → exact command → before wall/CPU →
-after wall/CPU → L). After-columns marked pending are quoted by their owning
-change — the partition entries and the fix-set pair — and are not duplicated
-here. The store publication test's conversion pair is recorded in the section
-above and is not repeated; its final warm pair lands after the
-persistent-template amendment rebuilds the once-per-process template build.
+after wall/CPU → L). After-columns point to their owning section; the store
+publication test's conversion pair is recorded in the section
+above and is not repeated, and its post-cache warm pair is the 4.96 s cell
+there.
 
 `TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (ingest) is T1,
 eligibility STRONG: the recorded read shows synchronous in-process byte work
@@ -250,9 +249,9 @@ registry's single writer.
 | test | class | exact command | before wall/CPU | after wall/CPU | L |
 |---|---|---|---|---|---|
 | `TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (ingest) | T1 | `go test -race -count=1 -timeout=0 -run '^TestLargeRecordsAreHandledUniformlyAcrossHarnesses$' ./internal/ingest` (before with `-race`; after without; one discarded warmup each, serial, GNU `time -v`, epoch tree, GOMAXPROCS=32) | 46.56 wall / 43.14 user / 3.75 sys | 5.22 wall / 5.59 user / 0.83 sys | 0.961 → 0.967 |
-| `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 45.0 / warm 42.72 wall (73.44 user / 30.52 sys) | pending — partition entry (after-wall quoted there) | not recorded (screening re-measure; the entry pair carries L) |
-| `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 33.0 / warm 31.94 wall (54.17 user / 22.57 sys) | pending — partition entry (after-wall quoted there) | not recorded (screening re-measure; the entry pair carries L) |
-| `TestHelperGroupListingThroughRegisteredRoutes` (api) | T6 | `go test -race -count=1 -timeout=0 -run '^TestHelperGroupListingThroughRegisteredRoutes$' ./internal/api` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 63.1 / warm 52.35 wall (47.87 user / 1.47 sys) | pending — fix-set pair (after-wall quoted there) | not recorded (screening re-measure; the pair carries L) |
+| `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 45.0 / warm 42.72 wall (73.44 user / 30.52 sys) | 31.4 wall / 94.5 cpu (partition registry cost pair) | not recorded (screening re-measure; the partition entry carries the pair) |
+| `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (ingest) | partition, toolchain/static-analysis character | `go test -race -count=1 -timeout=0 -run '^TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses$' ./internal/ingest` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 33.0 / warm 31.94 wall (54.17 user / 22.57 sys) | 23.4 wall / 69.0 cpu (partition registry cost pair) | not recorded (screening re-measure; the partition entry carries the pair) |
+| `TestHelperGroupListingThroughRegisteredRoutes` (api) | T6 | `go test -race -count=1 -timeout=0 -run '^TestHelperGroupListingThroughRegisteredRoutes$' ./internal/api` (warm serial re-measure, GNU `time -v`, epoch tree) | screen 63.1 / warm 52.35 wall (47.87 user / 1.47 sys) | 8.01 wall / 14.94 user / 1.18 sys (post-cache focused pair) | load 2.1→2.6 (post-cache run; the T6 section carries it) |
 ## T2 — SQL statement and seed reductions
 
 Change: `SyncModels` prepares its 15-column upsert once and rebinds it per
@@ -337,7 +336,7 @@ sites at the branch point → 147 after this change (−62 = 29 store + 33
 api/metrics/push/e2e/transcript/export); the remainder belongs to
 `cmd/peasant`, `internal/ingest`, the migration suite, and the already
 skip-bearing sites owned by other leaves. `ast-grep scan --config sgconfig.yml
-.` exits 0 (the enforcement rule file itself lands with the enforcement leaf).
+.` exits 0 (the enforcement rule file itself lands with the store-open seam enforcement change).
 
 ## T3 focus restoration: storetest template cache
 
@@ -347,7 +346,7 @@ test's own work. The cache (`internal/store/storetest/golden.go` rewritten;
 new `internal/filelock` leaf; `store.SchemaFingerprint()` stamp;
 tmpfs-preferred managed copy root; read-once template buffer) makes the
 template reusable across processes. A tree is the epoch integration branch at
-`764aa87f` (with the seam-default conversions), B tree is the L6 worktree at
+`764aa87f` (with the seam-default conversions), B tree is the template-cache worktree at
 `7aa9a7f0`; the three family test files are byte-identical between the trees,
 and the only other A/B delta is `storetest` itself, so the pairs are
 attributable to the cache. Serial, quiet box, one discarded build-cache
@@ -387,7 +386,7 @@ Design evidence rows:
   keep/drop decision rests on hygiene (dead-owner sweep, no `/tmp` pile), not
   speed. The first-use sweep cost is reported, not amortized away.
 - Row 7 (hygiene): `storetest-golden-*` count under `/tmp` is 195 before and
-  195 after every L6 run — no new `TMPDIR` litter (managed roots only; the
+  195 after every template-cache run — no new `TMPDIR` litter (managed roots only; the
   195 are other trees' per-process builds, still unconverted).
 - Row 7b (killed-run proof): SIGKILL of a race test process ~1 s into a cold
   template build (`signal: killed`, orphaned `build-*` dir + reused lock
@@ -461,7 +460,7 @@ seam are removed; the template cache itself (stamp, lock, sweeps, space
 guard, read-once buffer) is unchanged, as are the `!unix` age-only sweep and
 the override validation. Copy hygiene without tmpfs rests on the template
 cache's own sweeps plus OS tmpfiles for the per-test copies; the `/tmp`
-litter row above (195 → 195 across every L6 run) already measured the
+litter row above (195 → 195 across every template-cache run) already measured the
 default path. The family A/B walls stand as quoted: they measured the cache
 effect, and the copy destination contributed ~0.4 ms per copy either way.
 
@@ -688,7 +687,7 @@ registry entries; each entry carries the short-form argument (subject; concurren
 exercised per a bounded code read; why the race detector is not this test's oracle; retained
 race coverage; residual risk) in `no-race-partition.yaml`, repeated in the taxonomy's
 detector-tax section. The two build-topology guards and the large-record harness test joined
-the same wave earlier. No test code changed.
+the same partition pass earlier. No test code changed.
 
 Measurement: focused Class A, one discarded warmup per pass, serial; `wall / user / sys` in
 seconds from GNU `time -v`; the before column ran with `-race`, the after column is the
@@ -733,3 +732,114 @@ recorded value; sub-second entries were measured three times and refreshed from 
 Unchanged within 10 %: the e2e seed-unset build, the capabilities matrix, both
 build-topology guards, and the large-record test. `TestOpenCodeNativeCLI` stays race-covered
 (protected); its pair was refreshed from its focused `-race` run.
+
+## Epoch close — final gate, class aggregates, and collateral screen
+
+This section closes the record. It adds only sums over the rows above, the final
+gate's own numbers, and the collateral screen; every per-row number keeps its
+exact command and SHA in its own section.
+
+### Final gate and its base pair
+
+Final gate, head `fc7d9c95`, 2026-09-29: `make check RACE=1` exited 0, the
+four-rule screen printed `all four rules passed: every test ran exactly once
+across the passes`, and the gate printed `testgate: PASS`. The budget line is
+warn-only — normalized test wall **16m42.353s** (15m52.881s combined, `L`=0.951)
+against the 120s reference → `WARN (non-blocking)`; `make check` stays green by
+construction (`budget.yaml` `enforcement: warn`). Capture:
+`.agents.local/testgate/20260929T222011Z/` (`report.json` plus the per-package
+race/no-race `go test -json` streams). The run reported no failed test, no
+screen finding, and no invocation error.
+
+Base pair (survey S2), head `da7abd7f`, 2026-09-29: capture
+`gate/20260929T052214Z-base-da7abd7f/` under the survey sidecar in
+`.agents.local/`.
+
+| window | race pass | no-race pass | combined | tests (race / no-race) | L | normalized |
+|---|---|---|---|---|---|---|
+| base `da7abd7f` | 1192.5 s | 60.2 s | 1252.8 s | 3713 / 7 | 0.957 | 21m49s |
+| final `fc7d9c95` | 823.1 s | 129.6 s | 952.9 s | 3711 / 19 | 0.951 | 16m42s |
+| delta | −369.4 s (−31.0%) | +69.4 s | −299.9 s (−23.9%) | | | −23.4% |
+
+The no-race pass grows by design: twelve detector-taxed tests moved into it
+(the seven pre-existing partition entries become nineteen). The race pass falls
+by more than that, because the moved tests were among its detector-taxed bulk.
+
+### Class aggregates (focused, Class A — sums of the per-row walls quoted above)
+
+| class | measured set | before | after | L companion |
+|---|---|---|---|---|
+| T3 — DB-setup conversion (golden + skip) | 22 converted tests (#0, #1–#20, #25; #19 is T4-primary and #6 carries a T4 share, kept here because their opens were converted) | 946.7 s | 563.9 s (−40.4%) | 0.945–0.951 (ingest window), 0.928–0.952 (cmd window) |
+| T1 — no-race partition | 12 moved entries: the T1 table's nine plus the large-record test and the two build-topology guards (#31/#32/#33) | 171.2 s (race) | 78.7 s (no-race) | 0.952 (partition subset-proof run); per-row 1-min loadavg |
+| T2 — SQL statement / seed volume | 3 rows (#23, #7, #4) | 79.6 s | 74.0 s (−7.0%) | 0.952 / 0.951 |
+| T4 — fixture/payload construction | 6 invariant payloads (no wall sum; construction is the invariant) | unchanged | unchanged | rows in the T3/T4 tables (0.945–0.952) |
+| T6 — packing | #29 and the `internal/api` package | 14.37 s / 102.19 s | 8.01 s / 96.34 s | 0.949 (api subset run) |
+
+Fix-set lens-F aggregate: the 23 tests that carry a lens-F baseline sum
+**956.9 s** (the baseline cells above, `L`=0.957; the survey states 957.1 s
+rounded) before and **570.6 s** on their current after values — a 40.4% drop.
+Eighteen of those cells are warm after the template
+cache; the five cold cells (#0, #6, #9, #23, #25) keep their post-conversion
+cold records. This is a sum of serial focused runs, not a synchronized suite
+run; the suite-level pair is the gate table above. The five extended-bar
+additions sit outside those 23: #29 (T6 below), the large-record test and the
+two build-topology guards (T1), and the store publication test (T3 section).
+
+### Fixture invariant sizes (unchanged)
+
+The T4 rule is "build once, share read-only; never reduce an invariant-sized
+fixture". Sizes before → after are in the T4 table above:
+
+- publication repetitions 4200 → 4200; publication payload text 84085 B → 84085 B;
+- native boundary metadata 51175 B, 65537 B → unchanged; boundary padding 1404 B → unchanged;
+- selected metadata subtree 52620 B → unchanged; harvest long-text expansion 84000 B (4000 reps) → unchanged;
+- #6 padding strings 12000 B per case → unchanged (15 identical cases share one built string);
+- #31 record sizes are the invariant: 10 MiB whole-record cases across five harnesses against the 256 MiB production limit.
+
+### Retention test (#0) before / after
+
+`TestUnknownLocalRetentionBeyondTransferBudget` (`internal/ingest`): carried
+prior reference **243.6 s**; measured at the base `da7abd7f` **229.9 s** wall
+(378.8 user / 26.6 sys, `L`=0.957); after its store-open conversion **210.1 s**
+wall (347.3 user / 25.3 sys, `L`=0.945–0.951) — an 8.6% drop, and still the
+suite's largest single test. It was not run as a fourth template-cache pair:
+the test is a 230 s-class run and the cache mechanism is already spanned by the
+three family pairs across three packages (stated in that section, not dropped);
+its cost is detector-dominated (82.3% detector flat), so the cache is not its
+lever. The remaining lever is the deferred pipeline-body partition.
+
+### L companions (every window)
+
+| window | L (or load) companion |
+|---|---|
+| survey baseline (lens F) | 0.957 (base-gate calibration) |
+| T3 ingest conversion | 0.945 start – 0.951 end; companion `RACE=0 go run ./cmd/testgate run -pkgs ./internal/testkit/coveragemap,./cmd/testgate -race=false` |
+| prepared-path cmd conversion | 0.928 start – 0.952 end (same companion) |
+| store publication screening | 0.983 → 0.955 |
+| partition/fix-set screening rows | large-record 0.961 → 0.967; the three >30 s screen rows are warm serial re-measures with no gate-`L` recorded (1-min loadavg noted per row) |
+| T2 SQL/seed | 0.952 start / 0.951 end |
+| store-open seam defaults | 0.922 start – 0.949 end |
+| template cache A/B | 0.951 (A) – 0.982 (B), 0.952 bracketing the final-code B re-runs |
+| partition T1 pairs | per-row 1-min loadavg (3.15–17.33); subset-proof run calibration 0.952 |
+| T6 packing | per-row load 7.5→7.1 (before) / 2.1→2.6 (after); api subset run `L`=0.949 |
+| warm re-measure batch | per-row 1-min loadavg (`L1`), integration head `8e623e39` |
+| final gate / base gate | 0.951 / 0.957 |
+
+### Collateral screen (base vs final, per-test `Elapsed` / `L`)
+
+The screen compares the base and final per-package race streams by per-test
+normalized wall (`Elapsed` / that run's printed `L`) and flags a test whose
+normalized wall grew more than 20% **and** more than 5 s over a non-zero
+baseline. Five flags, each re-measured focused and resolved as load noise:
+
+| test | base reading | focused re-measure | verdict |
+|---|---|---|---|
+| `cmd/peasant` sessions-list invalid-harness | 9.96 s | 4.00 s | load (the 28.5 s gate reading was the queue) |
+| `internal/push` invalid-license | 11.37 s | 4.16 s | load |
+| `internal/push` individual-method-error | 10.55 s | 4.03 s | load |
+| `internal/store` open-twice-idempotent | 2.72 s | 3.96 s | +1.24 s, under the 5 s absolute threshold |
+| `internal/testkit` registry validator | 3.83 s | 5.92 s | +2.09 s, under the threshold (it now walks 20 entries vs 8) |
+
+No focused re-measure grew by 5 s or more. State it as a screen, not a proof:
+moving tests out of the race pass changes the packing of the tests that remain
+in the same package.

@@ -161,20 +161,35 @@ the gate. The switch is a one-line `enforcement` change in `budget.yaml`.
 
 The committed budget is **120s** under **`enforcement: warn`**, and the suite
 does **not** meet it, so `make check` prints a `WARN (non-blocking)` budget
-line **by construction** and stays green. Measured on the consolidated tree
-(2026-09-27): race pass 12m44s–14m52s, combined 13m39s–15m51s, L-normalised
-822s–941s at `L` 0.996–1.011. The per-family report, the CPU numerator
-(5842.8s; 32-core floor 182.6s) and the full lever analysis are on peasant#389.
+line **by construction** and stays green. Final consolidated measurement
+(2026-09-29, head `fc7d9c95`): race pass **13m43s** (823.1s), no-race pass
+**2m10s** (129.6s), combined **15m53s** (952.9s), L-normalised **16m42s** at
+`L` 0.951. Against the pre-epoch base `da7abd7f` (race 19m53s, no-race 1m00s,
+combined 20m53s, L-normalised 21m49s at `L` 0.957) the combined wall fell
+**24%** and the race pass **31%**; the no-race pass grew from 7 to 19 tests as
+twelve detector-taxed tests moved into it. Per-class (focused, Class A): T3 DB-setup
+conversion 946.7s → 563.9s over 22 tests; T1 no-race partition 171.2s race →
+78.7s no-race over 12 moved entries; T2 SQL/seed 79.6s → 74.0s; T4 payload
+shares reduce no fixture invariant; T6 packing `internal/api` 102.2s → 96.3s
+(the helper-group listing 14.4s → 8.0s). The combined CPU numerator is 3353.0s
+(race 2999.9s), a 32-core floor of 104.8s. The per-test before/after pairs, the
+gate captures, and every L companion are in
+[`docs/testing/perf/`](docs/testing/perf/) — `slow-test-taxonomy.md` (cost
+drivers and fix classes) and `evidence.md` (before/after evidence).
 
 The binding constraint and the remaining levers, measured rather than assumed:
 
 - the largest single test — `TestUnknownLocalRetentionBeyondTransferBudget` in
-  `internal/ingest` — costs **243.6s** focused and alone, so no batching or sharding
-  can put the suite below it until that test's cost falls;
-- no cost class has a positive `wall − CPU` gap, so there is no blocked time left to
-  reclaim; the remaining work is *fewer CPU seconds under instrumentation*;
-- achieved packing still leaves headroom: `internal/api` 2.02×, `internal/store`
-  1.40×, `internal/ingest` 2.90× of 32 hardware threads.
+  `internal/ingest` — costs **210.1s** focused and alone after its store-open
+  conversion (229.9s measured at the base; 243.6s carried prior reference), so no
+  batching or sharding can put the suite below it until that test's cost falls
+  further;
+- no cost class carries a material positive `wall − CPU` gap (the largest is
+  +0.27s on the toolchain class), so there is no blocked time left to reclaim;
+  the remaining work is *fewer CPU seconds under instrumentation*;
+- achieved packing still leaves headroom: per-package CPU/wall in the final race
+  pass is ~7.0× (`internal/api`), ~6.4× (`internal/store`), ~3.6×
+  (`internal/ingest`) of the 32 hardware threads.
 
 Do not close a budget miss by raising the value. The
 bar is a target and the miss is the measurement; while the suite is over it the
@@ -241,7 +256,8 @@ resolves to a real declaration and the required-name manifest matches both ways.
 ## Coverage map for the consolidation
 
 The consolidation records every moved, deleted, retained, or deferred name in a
-coverage map, closed against an inventory generated at the slice branch point:
+coverage map, closed against an inventory generated when the consolidation's
+branch was cut:
 
 - `internal/testkit/coveragemap` declares `Inventory` and `CoverageMap`, the destination
   closed set (`retained-in-place`, `moved:<file>`, `deleted:<rationale-ref>`,
@@ -251,7 +267,7 @@ coverage map, closed against an inventory generated at the slice branch point:
   admissible.
 - Every inventory name appears in the map exactly once, a `moved` target must
   exist, and a `deleted` or `followup` entry must name its rationale or task. An
-  entry is written by the slice that performs the move, in the same commit.
+  entry is written by the change that performs the move, in the same commit.
 
 ## Test performance: keeping `cmd/peasant` fast (and parallel)
 
@@ -420,7 +436,7 @@ test non-parallel).
 |---------|----------|--------------------|------------|-----|
 | `PEASANT_DB_POOL_SIZE` | `store.EnvPoolSize` | `10` (`store.DefaultPoolSize`) | `1` cmd/peasant · `2` store | Avoid the default 10-connection pool (each re-parsing the schema) per `store.Open`. `internal/store` uses **2**, not 1 — pool=1 deadlocks its tests that take a 2nd connection while holding the 1st. |
 | `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB (`64*1024*1024`) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
-| `PEASANT_STORETEST_TMPDIR` | `storetest.EnvStoretestTmpDir` | (unset → `t.TempDir()` copies) | (unset) | Opt-in: route golden copies through a managed root (e.g. a macOS hdiutil RAM disk) with per-process shelves and dead-owner sweeping. The default `t.TempDir()` showed no measured copy-speed difference (L6 micro: 100 copies 36.6 ms vs 44.8 ms tmpfs — noise). |
+| `PEASANT_STORETEST_TMPDIR` | `storetest.EnvStoretestTmpDir` | (unset → `t.TempDir()` copies) | (unset) | Opt-in: route golden copies through a managed root (e.g. a macOS hdiutil RAM disk) with per-process shelves and dead-owner sweeping. The default `t.TempDir()` showed no measured copy-speed difference (the copy micro-measurement: 100 copies 36.6 ms vs 44.8 ms tmpfs — noise). |
 
 Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
 `internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`),
