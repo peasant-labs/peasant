@@ -76,19 +76,19 @@ absent in this container). Before column = the survey baseline above
 |---|---|---|---|---|
 | `TestUnknownLocalRetentionBeyondTransferBudget` (ingest) | T3 | 229.9 / 378.8 / 26.6 | 210.1 / 347.3 / 25.3 | 0.945–0.951 |
 | `TestNativeUnknownSourceToPublication` (ingest) | T3 | 106.6 / 96.4 / 3.5 | 99.3 / 90.7 / 3.3 | 0.945–0.951 |
-| `TestPiCapturedAdmission` (ingest) | T3 | 78.0 / 73.9 / 2.2 | 82.0 / 76.0 / 2.2 (rerun 82.0) | 0.945–0.951 |
-| `TestPublicationCaptureNormalIngestRecovery` (ingest) | T3 | 75.7 / 68.2 / 2.1 | 79.2 / 71.1 / 2.4 (rerun 78.8) | 0.945–0.951 |
-| `TestNormalIngestStoresAuthoritativeContent` (ingest) | T3 | 43.5 / 40.1 / 1.5 | 47.2 / 41.7 / 1.7 (rerun 45.9) | 0.945–0.951 |
+| `TestPiCapturedAdmission` (ingest) | T3 | 78.0 / 73.9 / 2.2 | **warm 19.06 / 16.05 / 1.39** (L1 3.22; cold record: 82.0 / 76.0 / 2.2 (rerun 82.0) — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestPublicationCaptureNormalIngestRecovery` (ingest) | T3 | 75.7 / 68.2 / 2.1 | **warm 33.88 / 27.76 / 1.79** (L1 4.88; cold record: 79.2 / 71.1 / 2.4 (rerun 78.8) — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestNormalIngestStoresAuthoritativeContent` (ingest) | T3 | 43.5 / 40.1 / 1.5 | **warm 16.30 / 13.01 / 1.09** (L1 5.10; cold record: 47.2 / 41.7 / 1.7 (rerun 45.9) — cache state changed (cold -> warm)) | 0.945–0.951 |
 | `TestPiUnknownPersistence` (ingest) | T3+T4 | 43.1 / 40.2 / 1.6 | 41.7 / 38.8 / 1.5 | 0.945–0.951 |
-| `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (ingest) | T3 | 41.1 / 38.0 / 1.3 | 44.3 / 39.8 / 1.4 (rerun 42.9) | 0.945–0.951 |
-| `TestOrdinaryHarvestSettlesStaleIndexSessions` (ingest) | T3 | 31.0 / 28.5 / 1.3 | 33.3 / 29.9 / 1.4 (rerun 32.7) | 0.945–0.951 |
-| `TestRetainedContentBackfill` (ingest) | T3 | 28.3 / 26.0 / 1.2 | 28.0 / 26.2 / 1.2 | 0.945–0.951 |
+| `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (ingest) | T3 | 41.1 / 38.0 / 1.3 | **warm 8.95 / 6.80 / 0.92** (L1 6.41; cold record: 44.3 / 39.8 / 1.4 (rerun 42.9) — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestOrdinaryHarvestSettlesStaleIndexSessions` (ingest) | T3 | 31.0 / 28.5 / 1.3 | **warm 7.95 / 6.34 / 0.92** (L1 5.65; cold record: 33.3 / 29.9 / 1.4 (rerun 32.7) — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestRetainedContentBackfill` (ingest) | T3 | 28.3 / 26.0 / 1.2 | **warm 12.12 / 11.03 / 0.89** (L1 4.85; cold record: 28.0 / 26.2 / 1.2 — cache state changed (cold -> warm)) | 0.945–0.951 |
 | `TestNativeCoverageMatrix` (ingest) | T3 | 26.4 / 21.9 / 1.2 | 24.9 / 21.1 / 1.1 | 0.945–0.951 |
-| `TestPipelineRetainedAdapterMaintenance` (ingest) | T3 | 18.0 / 16.1 / 1.2 | 18.4 / 16.4 / 1.1 | 0.945–0.951 |
-| `TestContentRecoveryScope` (ingest) | T3 | 17.8 / 15.8 / 1.0 | 17.9 / 15.9 / 0.9 | 0.945–0.951 |
-| `TestUnknownPrivateEncoding` (ingest) | T3 | 14.0 / 12.2 / 1.0 | 15.2 / 13.3 / 0.9 (rerun 15.3) | 0.945–0.951 |
-| `TestConcreteParserFailurePreservesOtherSessions` (ingest) | T3 | 13.1 / 11.6 / 0.9 | 13.5 / 11.8 / 0.9 | 0.945–0.951 |
-| `TestContentStageDetectsTornPair` (ingest) | T3 | — (no baseline row; converted with its file) | 4.3 / 3.3 / 0.7 | 0.945–0.951 |
+| `TestPipelineRetainedAdapterMaintenance` (ingest) | T3 | 18.0 / 16.1 / 1.2 | **warm 5.44 / 4.07 / 0.90** (L1 4.71; cold record: 18.4 / 16.4 / 1.1 — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestContentRecoveryScope` (ingest) | T3 | 17.8 / 15.8 / 1.0 | **warm 4.85 / 3.65 / 0.73** (L1 4.59; cold record: 17.9 / 15.9 / 0.9 — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestUnknownPrivateEncoding` (ingest) | T3 | 14.0 / 12.2 / 1.0 | **warm 5.52 / 4.34 / 0.74** (L1 4.34; cold record: 15.2 / 13.3 / 0.9 (rerun 15.3) — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestConcreteParserFailurePreservesOtherSessions` (ingest) | T3 | 13.1 / 11.6 / 0.9 | **warm 3.62 / 2.47 / 0.73** (L1 3.90; cold record: 13.5 / 11.8 / 0.9 — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestContentStageDetectsTornPair` (ingest) | T3 | — (no baseline row; converted with its file) | **warm 2.60 / 1.63 / 0.71** (L1 3.77; cold record: 4.3 / 3.3 / 0.7 — cache state changed (cold -> warm)) | 0.945–0.951 |
 
 Reading the table. Every converted test passes focused race runs (hence
 validates the conversion) with goleak clean via the package `TestMain`. The
@@ -116,6 +116,12 @@ file asserts a migration-path-only refusal or a store-path `NotExist`; the two
 `IsNotExist` hits in the converted files concern managed-output sidecars, not
 store paths. Migration coverage stays in the dedicated `internal/store`
 migration tests, untouched by this change.
+Warm re-measure (cache state changed (cold -> warm)): the bold warm cells above were
+re-measured on integration head `8e623e39` (template cache and store-open seam
+conversions merged), same command shape, one discarded warmup per test, serial,
+nproc 32; `L1` is the 1-minute `/proc/loadavg` before the measured run. The
+prior value in each cell is kept as the cold record.
+
 ## Prepared-path conversion (cmd suites)
 
 Change: dry-run fixtures and every remaining cmd-suite database setup start
@@ -138,14 +144,14 @@ L=0.928 at window start, L=0.952 at window end.
 
 | test | class | before wall / user / sys (s) | after wall / user / sys (s) | L |
 |---|---|---|---|---|
-| `TestPiNativeRegistryProjection` (cmd) | T3+T4 | 53.2 / 49.0 / 1.9 | 53.95 / 49.52 / 1.77 | 0.928–0.952 |
-| `TestPiDatabasePublicationThroughCLI` (cmd) | T4+T3 | 35.4 / 33.4 / 1.6 | 37.62 / 35.76 / 1.31 | 0.928–0.952 |
-| `TestPiHarvestCommonModes` (cmd) | T3+T4 | 22.3 / 19.8 / 1.5 | 22.31 / 19.72 / 1.43 | 0.928–0.952 |
-| `TestMountedKickstartStoredGateAlignsViewerAndPush` (cmd) | T3 | 17.1 / 14.4 / 1.2 | 16.55 / 14.20 / 1.04 | 0.928–0.952 |
-| `TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope` (cmd) | T3 | 14.7 / 12.0 / 1.4 | 14.29 / 11.65 / 1.35 | 0.928–0.952 |
-| `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` (cmd) | T3 | 14.1 / 12.4 / 1.1 | 14.35 / 12.55 / 0.96 | 0.928–0.952 |
-| `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` (cmd) | T3 | 13.6 / 11.2 / 1.1 | 13.48 / 11.30 / 1.03 | 0.928–0.952 |
-| `TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary` (cmd) | T3+T4 | 9.8 / 8.1 / 1.0 | 9.88 / 8.32 / 0.91 | 0.928–0.952 |
+| `TestPiNativeRegistryProjection` (cmd) | T3+T4 | 53.2 / 49.0 / 1.9 | **warm 9.60 / 7.79 / 1.16** (L1 3.45; cold record: 53.95 / 49.52 / 1.77 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestPiDatabasePublicationThroughCLI` (cmd) | T4+T3 | 35.4 / 33.4 / 1.6 | **warm 33.46 / 31.85 / 1.27** (L1 3.08; cold record: 37.62 / 35.76 / 1.31 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestPiHarvestCommonModes` (cmd) | T3+T4 | 22.3 / 19.8 / 1.5 | **warm 6.46 / 4.81 / 1.17** (L1 2.83; cold record: 22.31 / 19.72 / 1.43 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestMountedKickstartStoredGateAlignsViewerAndPush` (cmd) | T3 | 17.1 / 14.4 / 1.2 | **warm 4.13 / 2.39 / 0.86** (L1 2.86; cold record: 16.55 / 14.20 / 1.04 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope` (cmd) | T3 | 14.7 / 12.0 / 1.4 | **warm 6.48 / 4.31 / 1.26** (L1 4.19; cold record: 14.29 / 11.65 / 1.35 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection` (cmd) | T3 | 14.1 / 12.4 / 1.1 | **warm 3.28 / 2.14 / 0.82** (L1 3.85; cold record: 14.35 / 12.55 / 0.96 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestMountedLegacySelectedConversion_ConsentCancellationAndRerun` (cmd) | T3 | 13.6 / 11.2 / 1.1 | **warm 3.49 / 2.02 / 0.85** (L1 3.86; cold record: 13.48 / 11.30 / 1.03 — cache state changed (cold -> warm)) | 0.928–0.952 |
+| `TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary` (cmd) | T3+T4 | 9.8 / 8.1 / 1.0 | **warm 3.30 / 2.14 / 0.86** (L1 3.63; cold record: 9.88 / 8.32 / 0.91 — cache state changed (cold -> warm)) | 0.928–0.952 |
 
 Before column = the survey baseline above (base `da7abd7f`, L=0.957).
 All eight converted tests pass focused race runs; every delta is within
@@ -174,6 +180,12 @@ inside one process; the persistent-template cache now in design is what
 removes that remaining one-per-process cost. The detector still dominates
 the profile (`racecall` 38.64 % flat), as expected with the partition
 deferred.
+Warm re-measure (cache state changed (cold -> warm)): the bold warm cells above were
+re-measured on integration head `8e623e39` (template cache and store-open seam
+conversions merged), same command shape, one discarded warmup per test, serial,
+nproc 32; `L1` is the 1-minute `/proc/loadavg` before the measured run. The
+prior value in each cell is kept as the cold record.
+
 ## Screening addition: store publication test (T3 seam conversion, new territory)
 
 `TestPublicationFullCaptureEligibilityAndBundle` (`internal/store`, 20 fixture
@@ -186,7 +198,7 @@ final warm pair lands after the template cache).
 
 | test | class | exact command | before wall/CPU | after wall/CPU | L |
 |---|---|---|---|---|---|
-| `TestPublicationFullCaptureEligibilityAndBundle` (store) | T3 | `go test -race -count=1 -timeout=0 -run '^TestPublicationFullCaptureEligibilityAndBundle$' ./internal/store` (one discarded warmup at 33.8 s, serial, GNU `time -v`) | 32.4 wall / 29.08 user / 1.25 sys | 34.5 wall / 31.00 user / 1.13 sys | 0.983 → 0.955 |
+| `TestPublicationFullCaptureEligibilityAndBundle` (store) | T3 | `go test -race -count=1 -timeout=0 -run '^TestPublicationFullCaptureEligibilityAndBundle$' ./internal/store` (one discarded warmup at 33.8 s, serial, GNU `time -v`) | 32.4 wall / 29.08 user / 1.25 sys | **warm 4.96 / 3.07 / 0.89** (L1 3.85; cold record: 34.5 wall / 31.00 user / 1.13 sys — cache state changed (cold -> warm)) | 0.983 → 0.955 |
 
 Wall-neutral within load noise: the test already opened golden copies, so the
 removed per-subtest cost was the migration-state check only (no replay). The
@@ -200,7 +212,16 @@ no suppression). T4 payload share: measured-inapplicable, not applied — the
 read-only mutation audit found no in-place entry writes (writer path reads
 `EntryIndex` only; the backfill already copies before mutating; sequential
 subtests; per-subtest fresh DBs), but the expected win is string-build only
-while per-subtest DB indexing dominates.
+while per-subtest DB indexing dominates. The warm cell reconciles with the
+template-cache section below (row 4, B-storepub: `ensureGolden` 0.01 s cum; row 5
+is a concurrent cold-cache run, not a focused warm pair) — one warm number, not a
+duplicate row.
+
+Warm re-measure (cache state changed (cold -> warm)): the bold warm cells above were
+re-measured on integration head `8e623e39` (template cache and store-open seam
+conversions merged), same command shape, one discarded warmup per test, serial,
+nproc 32; `L1` is the 1-minute `/proc/loadavg` before the measured run. The
+prior value in each cell is kept as the cold record.
 
 ## Screening additions: partition and fix-set pointers
 
