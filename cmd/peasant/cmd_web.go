@@ -330,8 +330,13 @@ func stopWeb(port int) error {
 	return nil
 }
 
+// pidFilePath names the file holding the backgrounded server's process id. The
+// port is separated by a dash rather than a colon: Windows forbids a colon in a
+// path component, where it instead opens an NTFS alternate data stream, so a
+// colon here left `web start` unable to write the file and `web stop` unable to
+// find it.
 func pidFilePath(port int) string {
-	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web:%d.pid", port))
+	return filepath.Join(defaults.State.DirPath.String(), fmt.Sprintf("web-%d.pid", port))
 }
 
 // configureVerboseLogging sets the default slog level to Debug,
