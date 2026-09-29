@@ -55,7 +55,7 @@ func main() {
 	batchesFlag := fs.Int("n", 0, "profile: concurrent batches (default: half the cores, a quarter under -race)")
 	parallelFlag := fs.Int("parallel", 1, "profile: per-batch -parallel; 0 leaves it unpinned (isolated run)")
 	priorFlag := fs.String("prior", "", "profile: prior go test -json stream used for LPT batch weights")
-	cpuTopFlag := fs.Int("cpuprofile-top", 0, "profile: re-profile the N slowest tests with -cpuprofile")
+	cpuTopFlag := fs.Int("cpuprofile-top", 10, "profile: re-profile the N slowest tests with -cpuprofile (0 disables)")
 	pretestFlag := fs.Bool("pretest", false, "profile: measure the five pre-test steps instead of a package")
 	profilesFlag := fs.Bool("profiles", false, "profile: write Class B block/mutex/cpu profiles per batch")
 	traceFlag := fs.Bool("trace", false, "profile: also write a runtime trace per batch (perturbs block.out)")
@@ -155,6 +155,9 @@ flags:
   -n N             profile: concurrent batches
   -parallel N      profile: per-batch -parallel; 0 is unpinned (isolated run)
   -prior FILE      profile: prior go test -json stream for LPT weights
+  -cpuprofile-top N
+                   profile: re-profile the N slowest tests with -cpuprofile
+                   (default 10; 0 disables)
   -profiles        profile: write Class B block/mutex/cpu profiles
   -trace           profile: also write a runtime trace (perturbs block.out)
   -pretest         profile: measure the five pre-test steps

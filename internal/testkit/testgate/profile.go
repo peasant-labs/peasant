@@ -156,8 +156,10 @@ type BatchProfileConfig struct {
 	Timeout    time.Duration
 	Batches    int
 	Prior      map[string]time.Duration
-	// CPUProfileTop re-runs the N slowest top-level tests one at a time with
-	// -cpuprofile, writing one pprof per test. 0 disables it.
+	// CPUProfileTop re-runs the N slowest top-level tests with -cpuprofile,
+	// writing one pprof per test. The re-runs use the batch count as their
+	// concurrency bound, so the offered load is consistent with the batches.
+	// 0 disables it.
 	CPUProfileTop int
 	// Parallel is the per-batch -parallel value. 0 leaves it unpinned (uses
 	// GOMAXPROCS), which is how an isolated package run is measured; a batched
@@ -299,7 +301,7 @@ func RunBatchProfile(ctx context.Context, cfg BatchProfileConfig) (*BatchProfile
 	})
 
 	if cfg.CPUProfileTop > 0 {
-		profiles, perrs := runCPUProfiles(ctx, cfg, res.Tests)
+		profiles, perrs := runCPUProfiles(ctx, cfg, res.Tests, plan.BatchCount)
 		res.CPUProfiles = profiles
 		res.Errors = append(res.Errors, perrs...)
 	}
@@ -420,47 +422,101 @@ func runOneBatch(ctx context.Context, cfg BatchProfileConfig, batch Batch) (Batc
 	return br, timings, errs
 }
 
-// runCPUProfiles re-runs the slowest tests one at a time so each profile is
-// that test's work and nothing else. A test whose cost is sleep or I/O shows up
-// nearly empty, which is itself the wall-vs-CPU finding.
-func runCPUProfiles(ctx context.Context, cfg BatchProfileConfig, tests []TestTiming) ([]string, []string) {
+// runCPUProfiles re-runs the slowest tests so each profile is that test's work
+// and nothing else. The re-runs are bounded by the batch count and each runs in
+// its own working directory, so no two profiles observe each other's build or
+// output. A test whose cost is sleep or I/O shows up nearly empty, which is
+// itself the wall-vs-CPU finding.
+//
+// Profiles and errors are reported in the input's slowest-first order,
+// regardless of the order the concurrent re-runs finish in.
+func runCPUProfiles(ctx context.Context, cfg BatchProfileConfig, tests []TestTiming, concurrency int) ([]string, []string) {
 	dir := filepath.Join(cfg.OutDir, "cpuprofile")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, []string{fmt.Sprintf("create cpuprofile dir: %v", err)}
 	}
-	var profiles, errs []string
-	for i, t := range tests {
-		if i >= cfg.CPUProfileTop {
-			break
-		}
-		slug := profileSlugRE.ReplaceAllString(t.Test, "_")
-		profilePath := filepath.Join(dir, slug+".pprof")
-		args := []string{"test", "-count=1", "-timeout", cfg.Timeout.String()}
-		if cfg.Parallel > 0 {
-			args = append(args, fmt.Sprintf("-parallel=%d", cfg.Parallel))
-		}
-		args = append(args, "-cpuprofile", profilePath, "-run", "^"+regexp.QuoteMeta(t.Test)+"$", cfg.Package)
-		if cfg.Race {
-			args = append(args, "-race")
-		}
-		cmd := exec.CommandContext(ctx, cfg.GoBin, args...)
-		cmd.Dir = cfg.Root
-		cmd.Env = cfg.Env
-		logPath := filepath.Join(dir, slug+".log")
-		logFile, err := os.Create(logPath)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("create %s: %v", logPath, err))
-			continue
-		}
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-		if err := cmd.Run(); err != nil {
-			errs = append(errs, fmt.Sprintf("cpuprofile %s: %v", t.Test, err))
-		}
-		_ = logFile.Close()
-		profiles = append(profiles, profilePath)
+	if concurrency < 1 {
+		concurrency = 1
 	}
-	return profiles, errs
+
+	selected := tests
+	if len(selected) > cfg.CPUProfileTop {
+		selected = selected[:cfg.CPUProfileTop]
+	}
+	profiles := make([]string, len(selected))
+	errs := make([][]string, len(selected))
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, concurrency)
+	for i, t := range selected {
+		wg.Add(1)
+		go func(i int, t TestTiming) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			profile, perrs := runOneCPUProfile(ctx, cfg, dir, t)
+			mu.Lock()
+			profiles[i] = profile
+			errs[i] = perrs
+			mu.Unlock()
+		}(i, t)
+	}
+	wg.Wait()
+
+	var outProfiles, outErrs []string
+	for i := range selected {
+		if profiles[i] != "" {
+			outProfiles = append(outProfiles, profiles[i])
+		}
+		outErrs = append(outErrs, errs[i]...)
+	}
+	return outProfiles, outErrs
+}
+
+// runOneCPUProfile re-runs one test with -cpuprofile, writing
+// cpuprofile/<slug>.pprof and <slug>.log. A profiling flag makes `go test`
+// write the test binary into its working directory (verified against
+// go1.26.5), so the run executes from a private directory inside the module and
+// removes it afterwards; a shared directory would let concurrent re-runs
+// overwrite each other's binary.
+func runOneCPUProfile(ctx context.Context, cfg BatchProfileConfig, dir string, t TestTiming) (string, []string) {
+	slug := profileSlugRE.ReplaceAllString(t.Test, "_")
+	profilePath := filepath.Join(dir, slug+".pprof")
+
+	runDir := cfg.Root
+	pkgPath := cfg.Package
+	if tmp, err := os.MkdirTemp(cfg.Root, ".testgate-profile-"); err == nil {
+		runDir = tmp
+		defer os.RemoveAll(tmp)
+		pkgPath = filepath.Join(cfg.Root, filepath.FromSlash(strings.TrimPrefix(cfg.Package, "./")))
+	}
+
+	args := []string{"test", "-count=1", "-timeout", cfg.Timeout.String()}
+	if cfg.Parallel > 0 {
+		args = append(args, fmt.Sprintf("-parallel=%d", cfg.Parallel))
+	}
+	args = append(args, "-cpuprofile", profilePath, "-run", "^"+regexp.QuoteMeta(t.Test)+"$", pkgPath)
+	if cfg.Race {
+		args = append(args, "-race")
+	}
+	cmd := exec.CommandContext(ctx, cfg.GoBin, args...)
+	cmd.Dir = runDir
+	cmd.Env = cfg.Env
+
+	logPath := filepath.Join(dir, slug+".log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return "", []string{fmt.Sprintf("create %s: %v", logPath, err)}
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	runErr := cmd.Run()
+	_ = logFile.Close()
+	if runErr != nil {
+		return profilePath, []string{fmt.Sprintf("cpuprofile %s: %v", t.Test, runErr)}
+	}
+	return profilePath, nil
 }
 
 // runRegexLiteral builds an anchored alternation for the planner's batch. It

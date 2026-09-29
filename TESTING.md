@@ -125,7 +125,10 @@ Run classes (keep them separate):
   -outputdir <d>`. This is the only quotable wall.
 - **attribution (profiles ON; wall not quotable):** add `-blockprofile`,
   `-mutexprofile`, `-cpuprofile`, `-trace`. `-cpuprofile` does not profile child
-  processes, so it is for intra-binary attribution only.
+  processes, so it is for intra-binary attribution only. `testgate profile`
+  additionally re-profiles the 10 slowest top-level tests with a per-test
+  `-cpuprofile` by default (`-cpuprofile-top N`, `0` disables); the re-runs are
+  semaphore-limited to the batch count and do not observe one another.
 - **interactive debug:** `-v -fullpath -run <target>`.
 
 Do not pin `-parallel`: it defaults to `GOMAXPROCS` (cgroup-aware) and pinning
