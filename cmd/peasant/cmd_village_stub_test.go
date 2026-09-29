@@ -11,7 +11,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/pull"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -211,7 +210,7 @@ func pullDirFor(t *testing.T, dir, villageURL string, id schema.TranscriptID) st
 // pulled_transcripts rows — used to assert ZERO DB mutation in the dry-run test.
 func countPulledRows(t *testing.T, dir string) int {
 	t.Helper()
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

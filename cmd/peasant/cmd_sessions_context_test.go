@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
 )
@@ -35,7 +34,7 @@ func seedContextTestSession(t *testing.T, dir, sessionID string, numEntries int)
 		t.Fatalf("seedContextTestSession: create data dir: %v", err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seedContextTestSession: open store: %v", err)
 	}
@@ -422,7 +421,7 @@ func seedContextGoldenSession(t *testing.T, dir, sessionID string) {
 		t.Fatalf("seedContextGoldenSession: create data dir: %v", err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("seedContextGoldenSession: open store: %v", err)
 	}

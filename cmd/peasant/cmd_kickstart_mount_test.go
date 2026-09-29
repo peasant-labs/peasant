@@ -72,7 +72,7 @@ func TestKickstartPreview_ImportedEmptySessionShowsRawSource(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create data directory: %v", err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -317,7 +317,7 @@ func seedKickstartStore(t *testing.T, dataHome string, recorded []testutil.TurnF
 	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
 		t.Fatalf("create data directory: %v", err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

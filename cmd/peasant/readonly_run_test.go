@@ -24,7 +24,7 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath)
+	db, err := openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 
 	// A live WAL is a normal state, not something dry-run refuses: the read-only
 	// open participates in the -shm but never rewrites the database file.
-	db, err = store.Open(dbPath)
+	db, err = openPreparedStore(t, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
