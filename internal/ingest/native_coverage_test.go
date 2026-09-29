@@ -207,7 +207,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locks))
+			db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locks))
 			if err != nil {
 				t.Fatal(err)
 			}

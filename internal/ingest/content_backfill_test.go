@@ -13,7 +13,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -53,10 +53,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			fs := testutil.NewMemFS()
-			database, err := store.Open(t.TempDir() + "/capture.db")
-			if err != nil {
-				t.Fatal(err)
-			}
+			database := storetest.OpenWith(t)
 			defer database.Close()
 			count := max(1, fixture.Count)
 			var ids []ingest.SessionID
@@ -269,10 +266,7 @@ func TestContentStageDetectsTornPair(t *testing.T) {
 	t.Run("content_stage_detects_torn_pair", func(t *testing.T) {
 		ctx := context.Background()
 		fs := testutil.NewMemFS()
-		database, err := store.Open(filepath.Join(t.TempDir(), "torn.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		database := storetest.OpenWith(t)
 		defer database.Close()
 
 		meta := makeMinimalMeta(t, "ses_tornpair00001")
