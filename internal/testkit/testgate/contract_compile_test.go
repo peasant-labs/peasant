@@ -45,6 +45,9 @@ var (
 	_ Severity = SeverityReport
 	_ Severity = SeverityFail
 
+	_ BudgetEnforcement = EnforcementBlocking
+	_ BudgetEnforcement = EnforcementWarn
+
 	_ PassMode = ModeRace
 	_ PassMode = ModeNoRace
 )
@@ -64,7 +67,7 @@ var (
 		SchemaVersion: 0, Module: "", Race: false, Concurrency: 0, GOMAXPROCS: 0,
 		ListWallMS: 0, PassA: nil, PassB: nil, CombinedWallMS: 0, PreTestWallMS: 0,
 		Calibration: Calibration{}, Records: nil, Findings: nil, FailedTests: nil, InvocationErrors: nil,
-		ClassTable: nil, PreTestSteps: nil,
+		ClassTable: nil, PreTestSteps: nil, BudgetEnforcement: EnforcementBlocking, BudgetWarn: false,
 	}
 	_ = PassReport{Name: "", WallMS: 0, Packages: 0, Tests: 0, UserMS: 0, SystemMS: 0, GapMS: 0}
 	_ = Calibration{L: 0, ProbeMS: 0, ReferenceMS: 0, Inconclusive: false}
@@ -79,7 +82,7 @@ var (
 	_ = Cost{WallMS: 0, CPUMs: 0}
 	_ = Entry{Package: "", Test: "", Class: ClassRace, Evidence: "", Justification: "", Cost: Cost{}, BuildFlags: nil, ExecCommandSite: ""}
 	_ = Registry{Version: 0, Partition: nil, Protected: nil}
-	_ = Budget{Version: 0, Seconds: 0, Basis: ""}
+	_ = Budget{Version: 0, Seconds: 0, Basis: "", Enforcement: EnforcementBlocking}
 
 	_ = Finding{Rule: "", Severity: SeverityFail, What: "", Why: "", Where: "", When: "", Means: "", Fix: ""}
 )

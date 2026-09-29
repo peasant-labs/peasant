@@ -51,12 +51,14 @@ type cliContractFile struct {
 }
 
 type budgetCase struct {
-	Name        string `yaml:"name"`
-	FileSeconds int    `yaml:"file_seconds"`
-	EnvSeconds  int    `yaml:"env_seconds"`
-	WantPresent bool   `yaml:"want_present"`
-	WantSeconds int    `yaml:"want_seconds"`
-	WantBasis   string `yaml:"want_basis"`
+	Name            string `yaml:"name"`
+	FileSeconds     int    `yaml:"file_seconds"`
+	FileEnforcement string `yaml:"file_enforcement"`
+	EnvSeconds      int    `yaml:"env_seconds"`
+	WantPresent     bool   `yaml:"want_present"`
+	WantSeconds     int    `yaml:"want_seconds"`
+	WantBasis       string `yaml:"want_basis"`
+	WantEnforcement string `yaml:"want_enforcement"`
 }
 
 type checkStartCase struct {
@@ -71,7 +73,10 @@ type budgetVerdictCase struct {
 	CalL     float64 `yaml:"cal_l"`
 	WallMS   int64   `yaml:"wall_ms"`
 	Seconds  int     `yaml:"seconds"`
+	Enforce  string  `yaml:"enforcement"`
 	WantFail bool    `yaml:"want_fail"`
+	WantWarn bool    `yaml:"want_warn"`
+	WantNote string  `yaml:"want_note"`
 }
 
 type budgetModeCase struct {
@@ -83,7 +88,9 @@ type budgetModeCase struct {
 	CalL     float64 `yaml:"cal_l"`
 	WallMS   int64   `yaml:"wall_ms"`
 	Seconds  int     `yaml:"seconds"`
+	Enforce  string  `yaml:"enforcement"`
 	WantFail bool    `yaml:"want_fail"`
+	WantWarn bool    `yaml:"want_warn"`
 	WantNote string  `yaml:"want_note"`
 }
 
@@ -335,12 +342,15 @@ func TestBudget_ResolutionPrecedence(t *testing.T) {
 			root := t.TempDir()
 			if tc.FileSeconds > 0 {
 				body := fmt.Sprintf("version: 1\nseconds: %d\nbasis: reference-machine wall\n", tc.FileSeconds)
+				if tc.FileEnforcement != "" {
+					body += fmt.Sprintf("enforcement: %s\n", tc.FileEnforcement)
+				}
 				if err := os.WriteFile(filepath.Join(root, "budget.yaml"), []byte(body), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
 			t.Setenv("TEST_BUDGET", strconv.Itoa(tc.EnvSeconds))
-			seconds, basis, present, err := resolveBudget(root)
+			budget, present, err := resolveBudget(root)
 			if err != nil {
 				t.Fatalf("resolveBudget: %v", err)
 			}
@@ -350,11 +360,14 @@ func TestBudget_ResolutionPrecedence(t *testing.T) {
 			if !tc.WantPresent {
 				return
 			}
-			if seconds != tc.WantSeconds {
-				t.Fatalf("seconds = %d, want %d", seconds, tc.WantSeconds)
+			if budget.Seconds != tc.WantSeconds {
+				t.Fatalf("seconds = %d, want %d", budget.Seconds, tc.WantSeconds)
 			}
-			if basis != tc.WantBasis {
-				t.Fatalf("basis = %q, want %q", basis, tc.WantBasis)
+			if budget.Basis != tc.WantBasis {
+				t.Fatalf("basis = %q, want %q", budget.Basis, tc.WantBasis)
+			}
+			if string(budget.Enforcement) != tc.WantEnforcement {
+				t.Fatalf("enforcement = %q, want %q", budget.Enforcement, tc.WantEnforcement)
 			}
 		})
 	}
@@ -380,23 +393,51 @@ func TestBudget_VerdictSemantics(t *testing.T) {
 	file := loadEnvContract(t)
 	for _, tc := range file.BudgetVerdictCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			fail := printBudget(tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, tc.Seconds, "fixture", tc.Present)
+			budget := testgate.Budget{Seconds: tc.Seconds, Basis: "fixture", Enforcement: testgate.BudgetEnforcement(tc.Enforce)}
+			if budget.Enforcement == "" {
+				budget.Enforcement = testgate.EnforcementBlocking
+			}
+			line, fail, warn := budgetVerdict(false, 0, 0, tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, budget, tc.Present)
 			if fail != tc.WantFail {
-				t.Fatalf("printBudget fail = %v, want %v", fail, tc.WantFail)
+				t.Fatalf("budgetVerdict fail = %v, want %v (line %q)", fail, tc.WantFail, line)
+			}
+			if warn != tc.WantWarn {
+				t.Fatalf("budgetVerdict warn = %v, want %v (line %q)", warn, tc.WantWarn, line)
+			}
+			if !strings.Contains(line, tc.WantNote) {
+				t.Fatalf("budget line %q does not contain %q", line, tc.WantNote)
+			}
+			// A demoted miss must never read as a PASS.
+			if warn && strings.Contains(line, "PASS") {
+				t.Fatalf("warn-mode miss line reads as a PASS: %q", line)
+			}
+			// printBudget is the subset-free view of the same verdict: its
+			// fail/warn decision must agree.
+			pFail, pWarn := printBudget(tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, budget, tc.Present)
+			if pFail != fail || pWarn != warn {
+				t.Fatalf("printBudget = (%v, %v), budgetVerdict = (%v, %v)", pFail, pWarn, fail, warn)
 			}
 		})
 	}
 }
 
 // TestBudget_SubsetModeIsNotApplicable proves a subset run states the budget is
-// not applicable and never fails on it, while a full run keeps the verdict.
+// not applicable and never fails on it, while a full run keeps the verdict —
+// blocking fails the gate on a miss, warn demotes it to a WARN line.
 func TestBudget_SubsetModeIsNotApplicable(t *testing.T) {
 	file := loadEnvContract(t)
 	for _, tc := range file.BudgetModeCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			line, fail := budgetVerdict(tc.Subset, tc.Planned, tc.Total, tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, tc.Seconds, "fixture", tc.Present)
+			budget := testgate.Budget{Seconds: tc.Seconds, Basis: "fixture", Enforcement: testgate.BudgetEnforcement(tc.Enforce)}
+			if budget.Enforcement == "" {
+				budget.Enforcement = testgate.EnforcementBlocking
+			}
+			line, fail, warn := budgetVerdict(tc.Subset, tc.Planned, tc.Total, tc.CalL, time.Duration(tc.WallMS)*time.Millisecond, budget, tc.Present)
 			if fail != tc.WantFail {
 				t.Fatalf("budgetVerdict fail = %v, want %v (line %q)", fail, tc.WantFail, line)
+			}
+			if warn != tc.WantWarn {
+				t.Fatalf("budgetVerdict warn = %v, want %v (line %q)", warn, tc.WantWarn, line)
 			}
 			if !strings.Contains(line, tc.WantNote) {
 				t.Fatalf("budget line %q does not contain %q", line, tc.WantNote)
