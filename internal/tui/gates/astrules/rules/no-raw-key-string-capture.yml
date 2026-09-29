@@ -21,7 +21,7 @@ note: >
   specifies (a bare call expression, "$MSG.String()"), and
   "msg.String()[0]" is a DIFFERENT node kind - an index expression whose
   operand happens to be that call - so the pattern simply does not match
-  it. Verified empirically (ast-grep 0.40.5 and 0.43.0).
+  it. Verified empirically (ast-grep 0.45.0 and 0.43.0).
 rule:
   pattern: $K := msg.String()
 files:
