@@ -74,6 +74,8 @@ func init() {
 			{OS: []OS{OSWindows}, Path: "{config}/kiro-cli"},
 			{OS: []OS{OSLinux}, Path: "{home}/.local/share/amazon-q"},
 			{OS: []OS{OSDarwin}, Path: "{config}/amazon-q"},
+			{OS: []OS{OSWindows}, Path: "{home}/AppData/Local/amazon-q"},
+			{OS: []OS{OSWindows}, Path: "{config}/amazon-q"},
 		},
 		Artifacts: []Artifact{kiroCLISessionHeader, kiroCLISessionTranscript, kiroCLIConversationRow, kiroCLIConversationValue},
 		Sources: []string{
@@ -89,6 +91,10 @@ func init() {
 			"https://github.com/getagentseal/codeburn/blob/main/src/providers/kiro.ts",
 			"https://openusage.sh/docs/providers/kiro/",
 			"https://github.com/pajaydev/kiro-history",
+			"https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/config/paths.py",
+			"https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/identity_stores.py",
+			"https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/acp/client.py",
+			"https://github.com/kirodotdev/KiroCrew/blob/2e09b10304baee7c245b10992a3be1dc4374cb1f/src/kiro_crew/dashboard/handlers/usage.py",
 		},
 		Probe: kiroCLIProbe{},
 	})
@@ -181,6 +187,7 @@ func (p kiroCLIProbe) Capture(_ context.Context, src Source, ref SessionRef) (Ca
 			}
 			err = ShapeJSONL(file, rec, KindField("kind"), func(record any) {
 				meta.Observe(TimeField(record, "data", "meta", "timestamp"), "")
+				meta.Observe(TimeField(record, "timestamp"), "")
 				switch StringField(record, "kind") {
 				case "Prompt":
 					meta.UserTurns++

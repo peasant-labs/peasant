@@ -225,6 +225,32 @@ func TestKiroLayoutsResolveDocumentedRoots(t *testing.T) {
 	}) {
 		t.Fatalf("kiro-cli darwin roots = %v", got)
 	}
+	windows := harnesslayout.Env{GOOS: harnesslayout.OSWindows, Home: "C:/Users/u", ConfigDir: "C:/Users/u/AppData/Roaming"}
+	got := windows.Resolve(cli)
+	for i, want := range []string{
+		"C:/Users/u/.kiro/sessions/cli",
+		"C:/Users/u/AppData/Local/kiro-cli",
+		"C:/Users/u/AppData/Roaming/kiro-cli",
+		"C:/Users/u/AppData/Local/amazon-q",
+		"C:/Users/u/AppData/Roaming/amazon-q",
+	} {
+		if i >= len(got) || filepath.ToSlash(got[i]) != want {
+			t.Fatalf("kiro-cli windows roots = %v, want Local before Roaming for each product", got)
+		}
+	}
+}
+
+func TestKiroCLIReadsTopLevelRecordTimestamp(t *testing.T) {
+	root := t.TempDir()
+	transcript := `{"version":"v1","kind":"Prompt","timestamp":"2026-03-04T05:06:07Z","data":{"content":[{"kind":"text","data":"kiro-cli fixture prompt"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(root, "1a2b3c4d-1111-4222-8333-944455556666.jsonl"), []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capture := kiroTestCapture(t, kiroTestRun(t, harnesslayout.ToolKiroCLI, root), "1a2b3c4d-1111-4222-8333-944455556666")
+	want := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if !capture.Metadata.StartedAt.Equal(want) || capture.Metadata.UserTurns != 1 {
+		t.Fatalf("metadata = %+v, want the top-level timestamp and one user turn", capture.Metadata)
+	}
 }
 
 func kiroTestRun(t *testing.T, tool harnesslayout.Tool, roots ...string) harnesslayout.Report {
