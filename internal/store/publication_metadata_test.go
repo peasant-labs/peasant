@@ -102,7 +102,7 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			path := storetest.CopyGoldenDB(t)
-			s, err := store.Open(path, store.WithPoolSize(1))
+			s, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -308,7 +308,7 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				t.Fatal(err)
 			}
 			s = nil
-			s, err = store.Open(path, store.WithPoolSize(1))
+			s, err = store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

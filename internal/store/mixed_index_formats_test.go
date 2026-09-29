@@ -96,6 +96,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 			if row.Fault != mixedNoEdge {
 				options = append(options, store.WithIndexFormatConversions(mixedConversion(row.Fault)))
 			}
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- Class C format-registration subject: persist/convert/rollback runs against custom formats registered at open on a fresh path.
 			db, err := store.Open(path, options...)
 			if err != nil {
 				t.Fatal(err)
@@ -153,6 +154,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
+				// ast-grep-ignore: no-migrating-store-open-in-tests -- Class C format-registration subject: reopen with the custom handler must replay the migrating path to prove reopen reads are stable.
 				db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}))
 				if err != nil {
 					t.Fatal(err)
@@ -235,6 +237,7 @@ func TestMixedIndexFormatsPersistConvertAndRollback(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
+				// ast-grep-ignore: no-migrating-store-open-in-tests -- Class C open-time refusal subject: reopen with the default registry must replay the migrating path before ListEntries reports the unsupported format.
 				db, err = store.Open(path, store.WithPoolSize(1))
 				if err != nil {
 					t.Fatal(err)
@@ -455,6 +458,7 @@ func TestMixedIndexFormatRegistrationRejectsInvalidEdgesBeforeOpening(t *testing
 				edge.Convert = nil
 				options = append(options, store.WithIndexFormatConversions(edge))
 			}
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- Class C format-registration subject: invalid registry edges must fail the open itself, and the must-not-exist path must stay uncreated.
 			db, err := store.Open(path, options...)
 			if err == nil {
 				db.Close()
@@ -507,6 +511,7 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 		}
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
+			// ast-grep-ignore: no-migrating-store-open-in-tests -- Class C format-registration subject: the pipeline upgrade case registers its declaring harness format at open on a fresh path.
 			db, err := store.Open(filepath.Join(t.TempDir(), "pipeline.db"), store.WithPoolSize(1), store.WithIndexFormats(mixedFormatHandler{}))
 			if err != nil {
 				t.Fatal(err)
