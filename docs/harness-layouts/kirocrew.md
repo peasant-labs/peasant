@@ -9,8 +9,8 @@ cron jobs, and task runs.
 
 Kiro Crew is not a thin wrapper. `kiro-cli` still writes its own replay log for each ACP session, but
 Kiro Crew keeps its own transcript and its own event log for every session in its data home. This
-page covers only the Kiro Crew data home. The `kiro-cli` store (`~/.kiro/sessions/cli/`) belongs to
-the Kiro layout.
+page covers only the Kiro Crew data home. The `kiro-cli` store (`~/.kiro/sessions/cli/`) is the
+`kiro-cli` layout in [`kiro.md`](kiro.md).
 
 The layout was derived from the Kiro Crew source at commit `bc31c3c` (2026-09-28).
 
@@ -117,8 +117,8 @@ arguments and results are recorded only as a hash and a byte count. Message bodi
 ## Gaps
 
 - The `kiro-cli` replay log (`~/.kiro/sessions/cli/<sid>.json` and `.jsonl`) holds the full tool
-  arguments and results. The session map `sid` links it to a Kiro Crew session, but it is part of the
-  Kiro layout and is not captured here.
+  arguments and results. The session map `sid` links it to a Kiro Crew session. Capture it with
+  `peasant layout capture kiro-cli`; see [`kiro.md`](kiro.md). The two captures are not joined.
 - `sessions/.index/session_index.db` is derived from the transcripts and stores folded transcript
   text, so the capture does not open it.
 - Attachments, `subagents/<id>/state.json` and `result.txt`, and the pre-projection
