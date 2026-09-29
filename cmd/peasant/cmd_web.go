@@ -286,8 +286,9 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 	return nil
 }
 
-// stopWeb sends a shutdown request to the running server.
-// Falls back to SIGTERM via PID file if the HTTP request fails.
+// stopWeb sends a shutdown request to the running server. If the HTTP request
+// fails it falls back to stopping the process named by the PID file directly,
+// by whichever mechanism the platform offers (see terminateProcess).
 func stopWeb(port int) error {
 	pidFile := pidFilePath(port)
 
@@ -302,12 +303,12 @@ func stopWeb(port int) error {
 			os.Remove(pidFile)
 			return nil
 		}
-		fmt.Fprintf(os.Stderr, "Unexpected response: %d, falling back to SIGTERM\n", resp.StatusCode)
+		fmt.Fprintf(os.Stderr, "Unexpected response: %d, falling back to %s\n", resp.StatusCode, terminateActionName)
 	} else {
-		fmt.Fprintf(os.Stderr, "HTTP shutdown failed: %v, falling back to SIGTERM\n", err)
+		fmt.Fprintf(os.Stderr, "HTTP shutdown failed: %v, falling back to %s\n", err, terminateActionName)
 	}
 
-	// Fallback: read PID file and send SIGTERM
+	// Fallback: read the PID file and stop the process directly.
 	data, readErr := os.ReadFile(pidFile)
 	if readErr != nil {
 		return fmt.Errorf("cannot contact server and no PID file at %s: %w", pidFile, readErr)
@@ -321,11 +322,11 @@ func stopWeb(port int) error {
 		os.Remove(pidFile)
 		return fmt.Errorf("process %d not found: %w", pid, findErr)
 	}
-	if sigErr := proc.Signal(syscall.SIGTERM); sigErr != nil {
+	if sigErr := terminateProcess(proc); sigErr != nil {
 		os.Remove(pidFile)
-		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, sigErr)
+		return fmt.Errorf("failed to send %s to PID %d: %w", terminateActionName, pid, sigErr)
 	}
-	fmt.Printf("Sent SIGTERM to PID %d\n", pid)
+	fmt.Printf("Sent %s to PID %d\n", terminateActionName, pid)
 	os.Remove(pidFile)
 	return nil
 }
