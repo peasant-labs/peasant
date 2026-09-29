@@ -232,6 +232,50 @@ partition:
       pass. Residual risk: negligible.
     cost: { wall_ms: 6170, cpu_ms: 5750 }
 
+  - package: internal/ingest
+    test: TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology
+    class: static-analysis
+    evidence: '#TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology'
+    justification: >-
+      The source oracle for the private-execution guard across build topologies:
+      it copies production source into isolated packages, inventories each build
+      configuration with `go list`, and parses and type-checks the files to assert
+      which SQLite callables are reachable. The go tool only lists files and export
+      data; the assertion is over the AST and types, and no production goroutines
+      run, so the detector has no shared-memory subject here. The guard itself and
+      the SQLite paths it inspects stay race-covered by the rest of the ingest
+      suite; the residual risk is a race inside the checker helpers, which are
+      sequential over private per-case directories.
+    cost: { wall_ms: 31410, cpu_ms: 94540 }
+
+  - package: internal/ingest
+    test: TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses
+    class: static-analysis
+    evidence: '#TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses'
+    justification: >-
+      Resolves each build-tagged production configuration with `go list`, writes a
+      fixture-owned bypass file, type-checks it with the configuration's sources,
+      and asserts the guard rejects it. The oracle is the AST and type information;
+      no production goroutines run, so the detector has no shared-memory subject.
+      The guard and the tagged production sources stay race-covered by the rest of
+      the ingest suite; the residual risk is a race inside the sequential checker
+      helpers over private temp files.
+    cost: { wall_ms: 23410, cpu_ms: 68970 }
+
+  - package: internal/ingest
+    test: TestLargeRecordsAreHandledUniformlyAcrossHarnesses
+    class: single-threaded-bytes
+    evidence: '#TestLargeRecordsAreHandledUniformlyAcrossHarnesses'
+    justification: >-
+      Filters, indexes, and extracts metadata from over-limit JSONL records for
+      every harness synchronously in-process: no goroutines, channels, atomics,
+      store opens, or SQL on the path. The record sizes are the invariant, so they
+      stay; the race detector only instruments bulk byte touches it cannot observe
+      as sharing. The filter, scanner, indexers, and adapters stay race-covered by
+      the rest of the ingest suite; the moved assertions are deterministic byte
+      outcomes (placeholder counts and marker presence).
+    cost: { wall_ms: 5220, cpu_ms: 6420 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
