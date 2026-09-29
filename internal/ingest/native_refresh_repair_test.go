@@ -84,7 +84,7 @@ func nativeRepairStore(t *testing.T, dbPath, root string) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "native.db")
+	dbPath := storetest.CopyGoldenDB(t)
 	root := filepath.Join(dir, "artifacts")
 	db := nativeRepairStore(t, dbPath, root)
 	defer func() { _ = db.Close() }()
@@ -423,7 +423,7 @@ func TestNativeRefreshRepair(t *testing.T) {
 			}
 			dir := t.TempDir()
 			root := filepath.Join(dir, "artifacts")
-			dbPath := filepath.Join(dir, "native.db")
+			dbPath := storetest.CopyGoldenDB(t)
 			db := nativeRepairStore(t, dbPath, root)
 			defer func() { _ = db.Close() }()
 			fs := testutil.NewMemFS()

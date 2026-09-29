@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -36,7 +37,7 @@ func TestFallbackRunIndexesValidatedGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.Open(t.TempDir() + "/peasant.db")
+	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestTornPairRefusesAndChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.Open(t.TempDir() + "/peasant.db")
+	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

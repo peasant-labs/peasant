@@ -20,6 +20,7 @@ import (
 	metricspkg "github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -397,8 +398,8 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	databasePathStored := filepath.Join(t.TempDir(), "canonical.db")
-	database, err := store.Open(databasePathStored)
+	databasePathStored := storetest.CopyGoldenDB(t)
+	database, err := store.Open(databasePathStored, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +415,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	database, err = store.Open(databasePathStored)
+	database, err = store.Open(databasePathStored, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}

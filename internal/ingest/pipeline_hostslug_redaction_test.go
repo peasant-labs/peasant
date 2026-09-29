@@ -10,6 +10,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 )
@@ -178,7 +179,7 @@ func ingestOneSessionAtMaximum(t *testing.T, slug string, redactor ingest.TextRe
 		ModTime:      time.Now().Add(-time.Hour),
 	}
 
-	database, err := store.Open(filepath.Join(root, "peasant.db"))
+	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
 	if err != nil {
 		t.Fatalf("open the analytics store: %v", err)
 	}
