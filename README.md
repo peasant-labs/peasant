@@ -190,7 +190,8 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 ### `peasant open` output
 
 `peasant open --session <id>` harvests that one session with commit detection, starts the web
-dashboard when it is not running, opens the transcript in the browser, and prints two lines:
+dashboard when it is not running, checks that the dashboard serves the session, opens the
+transcript in the browser, and prints two lines on stdout:
 
 ```
 peasant: opened "<title>" · not published
@@ -198,16 +199,25 @@ http://localhost:8690/projects/<project-hash>/<session-id>
 ```
 
 The state reads `published` when the local store holds a Village publication receipt for the
-session. A session with no generated title prints `peasant: opened an untitled session`. When a
-step fails, the command prints one line that names the step and the fix, for example
-`peasant: harvest failed: <reason>; fix: <command>`, and exits non-zero. It never opens the
-dashboard root in place of the session.
+session. A session with no generated title prints `peasant: opened an untitled session`. The
+command opens the browser itself, so a caller must not open the address again.
+
+When a step fails, the command prints one line on stderr and exits 1:
+
+```
+peasant: <step> failed: <reason>; fix: <action>
+```
+
+The step is one of `session check`, `harvest`, `session lookup`, `dashboard start`, or
+`dashboard check`. A command in the fix carries whichever of `--config`, `--config-dir`,
+`--data-dir`, and `--state-dir` the run was given. The command never opens the dashboard root in place of the
+session.
 
 | Flag | Description |
 |------|-------------|
 | `--session <id>` | The session to record and open (required) |
 | `--port <n>` | Port of the web dashboard (default 8690, as for `peasant web start`) |
-| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` instead, with the same lines in `stopReason`, and exit 0 on every outcome |
+| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
 
 ### `peasant tui` flags (deprecated)
 
