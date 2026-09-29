@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
@@ -148,7 +149,9 @@ func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, b
 	if err == nil || !strings.Contains(err.Error(), wantReason) {
 		t.Fatal("native index operation did not enforce the selected-metadata bound")
 	}
-	db, err := store.Open(filepath.Join(t.TempDir(), "index.db"))
+	dbPath := filepath.Join(t.TempDir(), "index.db")
+	storetest.CopyGoldenTo(t, dbPath)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +305,8 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				}
 			}
 			dbPath := filepath.Join(t.TempDir(), "index.db")
-			db, err := store.Open(dbPath)
+			storetest.CopyGoldenTo(t, dbPath)
+			db, err := store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -323,7 +327,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(dbPath)
+			db, err = store.Open(dbPath, store.WithSkipMigrations())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 )
 
@@ -209,6 +210,15 @@ func TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary(t *test
 			cmd := &cobra.Command{Use: "selection-runner-fixture"}
 			cmd.Flags().String("data-dir", root, "")
 			run, _ := kickstartLocalIngest(cmd, configPath, listings)
+			// The production ingest opens the database at the --data-dir
+			// path; preparing it from the pre-migrated golden copy leaves
+			// that open with no pending migrations. The copy holds no rows,
+			// so the empty-store expectations still read an empty store.
+			selectionRunnerDBPath := defaults.ResolveDBFilePathWith(root).String()
+			if err := os.MkdirAll(filepath.Dir(selectionRunnerDBPath), 0o755); err != nil {
+				t.Fatalf("create selection runner data directory: %v", err)
+			}
+			storetest.CopyGoldenTo(t, selectionRunnerDBPath)
 			result, err := run(context.Background())
 			if err != nil {
 				t.Fatalf("run production kickstart local ingest: %v", err)
@@ -217,7 +227,7 @@ func TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary(t *test
 				t.Fatal("production kickstart local ingest returned no result")
 			}
 
-			db, err := store.Open(defaults.ResolveDBFilePathWith(root).String())
+			db, err := store.Open(defaults.ResolveDBFilePathWith(root).String(), store.WithSkipMigrations())
 			if err != nil {
 				t.Fatalf("open selection runner store: %v", err)
 			}
