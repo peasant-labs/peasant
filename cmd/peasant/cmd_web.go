@@ -57,8 +57,11 @@ func BuildWebCommand() *cobra.Command {
 				cfgPath := resolveConfigPath(cmd)
 				return runWebForeground(cmd, cfgPath, webPort, webDev, mockDataStore, webExperimental)
 			}
-			cfgPath := resolveConfigPath(cmd)
-			return runWebBackground(cfgPath, webPort, webNoBrowser, webVerbose, mockDataStore, webExperimental)
+			spawn := webServerSpawnFor(cmd, webPort)
+			spawn.verbose = webVerbose
+			spawn.mockDataStore = mockDataStore
+			spawn.experimental = webExperimental
+			return runWebBackground(spawn, webNoBrowser)
 		},
 	}
 	webStartCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port to listen on")
@@ -209,24 +212,68 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	return srv.ListenAndServe(ctx)
 }
 
-// runWebBackground forks the server as a background process.
-func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mockDataStore string, experimental bool) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("cannot find executable: %w", err)
-	}
+// webServerSpawn is everything the detached `web start --foreground` child
+// needs to serve the same configuration and data as the command that forked it.
+type webServerSpawn struct {
+	port          int
+	configPath    string
+	dataDir       string
+	configDir     string
+	stateDir      string
+	mockDataStore string
+	verbose       bool
+	experimental  bool
+}
 
-	args := []string{"web", "start", "--foreground", "--port", strconv.Itoa(port), "--config", cfgPath}
-	if mockDataStore != "" {
-		args = append(args, "--mock-data-store", mockDataStore)
+// webServerSpawnFor resolves the configuration and directory overrides of cmd,
+// so a forked server reads the database the forking command wrote.
+func webServerSpawnFor(cmd *cobra.Command, port int) webServerSpawn {
+	return webServerSpawn{
+		port:       port,
+		configPath: resolveConfigPath(cmd),
+		dataDir:    dataDirOverride(cmd),
+		configDir:  configDirOverride(cmd),
+		stateDir:   stateDirOverride(cmd),
 	}
-	if verbose {
+}
+
+func (s webServerSpawn) args() []string {
+	args := []string{"web", "start", "--foreground", "--port", strconv.Itoa(s.port), "--config", s.configPath}
+	for _, override := range []struct{ flag, value string }{
+		{"--data-dir", s.dataDir},
+		{"--config-dir", s.configDir},
+		{"--state-dir", s.stateDir},
+	} {
+		if override.value != "" {
+			args = append(args, override.flag, override.value)
+		}
+	}
+	if s.mockDataStore != "" {
+		args = append(args, "--mock-data-store", s.mockDataStore)
+	}
+	if s.verbose {
 		args = append(args, "--verbose")
 	}
-	if experimental {
+	if s.experimental {
 		args = append(args, "--experimental")
 	}
-	cmd := exec.Command(exe, args...)
+	return args
+}
+
+// dashboardBaseURL is the address the local web dashboard serves on port.
+func dashboardBaseURL(port int) string {
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
+// spawnWebServer forks the server as a detached background process and writes
+// its PID file. It prints nothing and does not wait for the server to answer.
+func spawnWebServer(spawn webServerSpawn) (pid int, pidFile string, err error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, "", fmt.Errorf("cannot find executable: %w", err)
+	}
+
+	cmd := exec.Command(exe, spawn.args()...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -234,37 +281,59 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start background server: %w", err)
+		return 0, "", fmt.Errorf("failed to start background server: %w", err)
 	}
 
-	pid := cmd.Process.Pid
+	pid = cmd.Process.Pid
 
 	// Write PID file
-	pidFile := pidFilePath(port)
+	pidFile = pidFilePath(spawn.port)
 	if err := os.MkdirAll(filepath.Dir(pidFile), defaults.PublicDirPerm); err != nil {
-		return fmt.Errorf("failed to create state dir: %w", err)
+		return pid, "", fmt.Errorf("failed to create state dir: %w", err)
 	}
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), defaults.PublicFilePerm); err != nil {
-		return fmt.Errorf("failed to write PID file: %w", err)
+		return pid, "", fmt.Errorf("failed to write PID file: %w", err)
+	}
+
+	// Detach: parent exits, child continues
+	_ = cmd.Process.Release()
+	return pid, pidFile, nil
+}
+
+// webServerHealthy reports whether a Peasant server answers the health route
+// under baseURL.
+func webServerHealthy(client *http.Client, baseURL string) bool {
+	resp, err := client.Get(baseURL + defaults.RouteHealth.String())
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// waitForWebServer polls the health route until the server answers or the
+// attempts run out.
+func waitForWebServer(client *http.Client, baseURL string, attempts int, interval time.Duration) bool {
+	for range attempts {
+		time.Sleep(interval)
+		if webServerHealthy(client, baseURL) {
+			return true
+		}
+	}
+	return false
+}
+
+// runWebBackground forks the server as a background process.
+func runWebBackground(spawn webServerSpawn, noBrowser bool) error {
+	pid, pidFile, err := spawnWebServer(spawn)
+	if err != nil {
+		return err
 	}
 
 	// Readiness probe: poll health endpoint
-	serverURL := fmt.Sprintf("http://localhost:%d", port)
-	healthURL := serverURL + defaults.RouteHealth.String()
-	ready := false
-	for range defaults.HealthCheckAttempts {
-		time.Sleep(defaults.HealthCheckInterval)
-		resp, err := http.Get(healthURL)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				ready = true
-				break
-			}
-		}
-	}
-
-	if !ready {
+	serverURL := dashboardBaseURL(spawn.port)
+	client := &http.Client{Timeout: defaults.ServerClientTimeout}
+	if !waitForWebServer(client, serverURL, defaults.HealthCheckAttempts, defaults.HealthCheckInterval) {
 		fmt.Fprintf(os.Stderr, "Warning: server may not be ready (health check timed out)\n")
 	}
 
@@ -282,9 +351,6 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 			fmt.Fprintf(os.Stderr, "Open this URL manually: %s\n", serverURL)
 		}
 	}
-
-	// Detach: parent exits, child continues
-	_ = cmd.Process.Release()
 	return nil
 }
 
