@@ -84,7 +84,7 @@ func nativeRepairStore(t *testing.T, dbPath, root string) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+	db, err := openPreparedStore(t, dbPath, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
 	}
