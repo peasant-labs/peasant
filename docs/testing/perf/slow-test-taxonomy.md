@@ -1,7 +1,8 @@
 # Slow-test taxonomy: cost drivers and fix classes
 
 Durable survey record for the race-enabled tests at or above 60 s of packed
-occupancy, plus the retention test that is invisible to that lens. Every number
+occupancy, plus the retention test that is invisible to that lens, plus the
+five confirmed findings of the later >30 s screening pass. Every number
 carries the exact command that produced it and the SHA it was run at, or is
 labelled carried. Raw artifacts (gate streams, pprof files, focused-run logs)
 stay under `.agents.local/` until the epoch closes; the commands below let any
@@ -54,7 +55,7 @@ sweep, the final integration gate, the wave-A registry-proof subset run, and
 the api-scoped screen-proof run. Everything else is focused, profile-only, or
 per-change before/after pairs.
 
-## Inventory (31 rows)
+## Inventory (35 rows)
 
 Lens P is the carried 2026-09-27 packed extraction at the frozen base
 `da7abd7f` (re-extracted and asserted: exactly 30 rows ≥ 60 s, exactly 20 rows
@@ -92,20 +93,27 @@ the inventory stands at 31 rows with no promotion.
 | 19 | 132.8 | 35.4 | cmd | `TestPiDatabasePublicationThroughCLI` (`pi_database_publication_test.go:25`) | T4+T3 | A | cmd golden+skip + payload share | measured |
 | 20 | 123.7 | 9.8 | cmd | `TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary` (`cmd_kickstart_selection_runner_test.go:187`) | T3+T4 | A | cmd golden+skip | measured |
 | 21 | 119.8 | — (inferred light) | cmd | `TestPublicationWizardAndReportUseDatabaseReadiness` (`publication_readiness_test.go:22`) | T3 | S | wave-A entry only | inferred |
-| 22 | 107.9 | — (inferred light) | ingest | `TestWritePathDurability` (`write_path_durability_test.go:87`) | T1/T2/T3 | A | tail (no fix this epoch) | inferred |
+| 22 | 107.9 | 22.0 (warm re-measure) | ingest | `TestWritePathDurability` (`write_path_durability_test.go:87`) | T1/T2/T3 | A | excluded — below the 30 s bar on re-measure | measured |
 | 23 | 78.1 | 10.2 | cmd | `TestModelsSync_500_StaticFallback` (`cmd_models_test.go:328`) | T2 | S | prepared-statement reuse + wave-A entry | measured |
 | 24 | 74.2 | — (inferred light) | cmd | `TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState` (`opencode_legacy_sqlite_mount_test.go:221`) | T3 | A | tail (no fix this epoch) | inferred |
 | 25 | 70.0 | 26.4 | ingest | `TestNativeCoverageMatrix` (`native_coverage_test.go:192`) | T3 | S | one-line skip + wave-A entry | measured |
 | 26 | 66.6 | — (inferred light) | ingest | `TestWritePathMirrorsInPagesOf256` (`write_path_columns_test.go:230`) | T1/T2/T6 | A | tail (no fix this epoch) | inferred |
 | 27 | 66.3 | — (inferred light) | cmd | `TestOpenCodeSessionClockFixturesMountedHarvest` (`opencode_session_clock_mount_test.go:91`) | T3 | A | tail (no fix this epoch) | inferred |
 | 28 | 64.2 | — (inferred light) | ingest | `TestControlRecordIngestExportAndPublication` (`control_record_ingest_test.go:67`) | T3 | A | tail (no fix this epoch) | inferred |
-| 29 | 61.5 | — (inferred light) | api | `TestHelperGroupListingThroughRegisteredRoutes` (`helper_group_listing_test.go:176`) | T6 | A | packing proof point | inferred |
+| 29 | 61.5 | 52.4 (warm; screen 63.1) | api | `TestHelperGroupListingThroughRegisteredRoutes` (`helper_group_listing_test.go:176`) | T6 | A | packing proof point; fix-set pair pending (see evidence) | measured |
 | 30 | 61.4 | — (inferred light) | cmd | `TestKickstartRescan_FallsBackWithoutCompatibleDatabase` (`cmd_kickstart_rescan_test.go:491`) | T3 | S | wave-A entry only (subject is the missing-DB fallback; never converted) | inferred |
+| 31 | — (screening addition) | 46.6 (race before-wall; screen 52.9, warm 48.6) | ingest | `TestLargeRecordsAreHandledUniformlyAcrossHarnesses` (`large_record_harness_test.go:121`) | T1 | S | wave-A entry (pending — the partition change carries the argument and registry row) | measured |
+| 32 | — (screening addition) | 42.7 (warm; screen 45.0) | ingest | `TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology` (`opencode_candidates_test.go:1207`) | partition, toolchain/static-analysis character | — (assigned with the partition entry) | wave-A entry (pending — the partition change) | measured |
+| 33 | — (screening addition) | 31.9 (warm; screen 33.0) | ingest | `TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses` (`opencode_candidates_test.go:1166`) | partition, toolchain/static-analysis character | — (assigned with the partition entry) | wave-A entry (pending — the partition change) | measured |
+| 34 | — (screening addition) | 32.4 (warm; screen 36.5) | store | `TestPublicationFullCaptureEligibilityAndBundle` (`publication_full_capture_test.go:58`) | T3 | A | seam conversion landed; wall-neutral pending the final warm pair (see evidence) | measured |
 
 Elig: S = no goroutines on the exercised production path (admits wave A);
 A = production concurrency exercised but not the subject (keeps the detector
-tax). Rows 0–20 plus 23/25 are measured; the tail is structural (code read +
-carried walls + existing profiles).
+tax). Rows 0–20 plus 23/25 are measured; the remaining survey tail is
+structural (code read + carried walls + existing profiles). Screening rows 29
+and 31–34 are measured (warm serial re-measure; row 31 additionally carries a
+quiet-box race/no-race pair quoted in the evidence record); row 22 carries a
+measured warm exclusion.
 
 ### Focus checkpoint (lens F vs packed-derived 20)
 
@@ -132,7 +140,21 @@ under race (same Class A command, serial, base `da7abd7f`, L=0.957):
 Screen logs under `.agents.local/` (sidecar, re-derivable). The other
 zero-wall candidates were ruled out by code read: skipped tests, golden-DB
 users, MemFS/stub-store tests, and unit/matrix tests with no store or pipeline
-work. The inventory stands at 31 rows.
+work. The inventory stood at 31 rows at that point, before the screening
+additions below.
+
+### Screening additions (rows 29 updated, 31–34 added)
+
+A later screening pass over the packed [30, 60) band and the inferred tail
+confirmed five focused walls above 30 s (concurrent screen, then a warm serial
+re-measure; raw tables `screen-30s-results.tsv` and
+`t3-diagnostic-and-warm-remeasure.txt` in the survey sidecar under
+`.agents.local/`). Four join here as rows 31–34; row 29 is promoted from
+inferred to measured; row 22 stays out on a 22.0 s warm re-measure (excluded,
+below the bar). These rows carry no lens-P value — they stood outside the
+packed extraction — and their walls were taken on the epoch tree (`09d9e93c`),
+not the `da7abd7f` base above. The extended >30 s fix bar supersedes the
+survey-only tail disposition for every confirmed test.
 
 ## Classification
 
@@ -431,10 +453,12 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
   4200-repetition payload (#19), fixed large metadata strings (#8), `longText`
   case (#10), padding strings (#6). No invariant-sized fixture is reduced.
   Invariant sizes before/after live in `evidence.md`.
-- **T5 — subprocess.** Inapplicable: no subprocess use drives any of the 31
+- **T5 — subprocess.** Inapplicable: no subprocess use drives any of the 35
   rows (structural line; no fix).
 - **T6 — packing.** Proof point `helper_group_listing_test.go:176` (26
-  independent cases, already golden); further `t.Parallel()` only where the
+  independent cases, already golden; focused wall now measured at 52.4 s warm,
+  screen 63.1 s — the fix-set pair is recorded in the evidence record);
+  further `t.Parallel()` only where the
   post-cut measurement shows an admissible CPU-bound residual, the
   parallel-unsafe guard does not name it, and no process-global sink exists.
   Never pin `-parallel`.
