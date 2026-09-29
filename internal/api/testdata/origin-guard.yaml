@@ -43,9 +43,11 @@ requiredNames:
   - same-site browser write without an origin is refused
   - delete from a foreign origin is refused
   - put from a foreign origin is refused
+  - patch from a foreign origin is refused
   - shutdown from a foreign origin is refused
   - read from a foreign origin is unaffected
   - head from a foreign origin is unaffected
+  - options from a foreign origin is unaffected
   - read with a foreign host is refused
   - dashboard page with a foreign host is refused
   - dashboard websocket upgrade is accepted
@@ -75,9 +77,11 @@ cases:
   - {name: same-site browser write without an origin is refused, method: POST, path: /api/v1/sync/push, host: "localhost:{port}", secFetchSite: same-site, status: 403, code: request_origin_not_local}
   - {name: delete from a foreign origin is refused, method: DELETE, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: put from a foreign origin is refused, method: PUT, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: patch from a foreign origin is refused, method: PATCH, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: shutdown from a foreign origin is refused, method: POST, path: /api/v1/shutdown, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: read from a foreign origin is unaffected, method: GET, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
   - {name: head from a foreign origin is unaffected, method: HEAD, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
+  - {name: options from a foreign origin is unaffected, method: OPTIONS, path: /api/v1/health, host: "localhost:{port}", origin: "https://site.example", status: 200}
   - {name: read with a foreign host is refused, method: GET, path: /api/v1/health, host: "site.example:{port}", status: 403, code: request_host_not_local}
   - {name: dashboard page with a foreign host is refused, method: GET, path: /, host: "site.example:{port}", origin: "http://site.example:{port}", status: 403, code: request_host_not_local}
   - {name: dashboard websocket upgrade is accepted, method: GET, path: /api/v1/ws, upgrade: true, host: "localhost:{port}", origin: "http://localhost:{port}", status: 101}

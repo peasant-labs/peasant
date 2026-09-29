@@ -181,6 +181,36 @@ func TestOriginGuardFixture(t *testing.T) {
 	}
 }
 
+// TestOriginGuardFixtureRejectsMutations proves the loader refuses a fixture
+// whose cases no longer say what their names claim.
+func TestOriginGuardFixtureRejectsMutations(t *testing.T) {
+	const row = `  - {name: delete from a foreign origin is refused, method: DELETE, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+`
+	if !bytes.Contains(originGuardYAML, []byte(row)) {
+		t.Fatal("the fixture no longer has the row the mutations edit")
+	}
+	mutate := func(from, to string) []byte {
+		return bytes.Replace(originGuardYAML, []byte(from), []byte(to), 1)
+	}
+	mutations := map[string][]byte{
+		"unknown method":         mutate("method: DELETE", "method: DELTE"),
+		"unknown Sec-Fetch-Site": mutate("secFetchSite: cross-site", "secFetchSite: cross-sit"),
+		"upgrade on a POST":      mutate("method: DELETE,", "method: POST, upgrade: true,"),
+		"refusal without a code": mutate(", code: request_origin_not_local}\n", "}\n"),
+		"deleted required case":  mutate(row, ""),
+		"unknown field":          mutate("requiredNames:", "unknown: true\nrequiredNames:"),
+		"trailing document":      append(append([]byte{}, originGuardYAML...), []byte("\n---\nextra: true\n")...),
+	}
+	for name, source := range mutations {
+		if bytes.Equal(source, originGuardYAML) {
+			t.Fatalf("mutation %q did not change the fixture", name)
+		}
+		if _, err := loadOriginGuardFixture(source); err == nil {
+			t.Errorf("mutation %q unexpectedly validated", name)
+		}
+	}
+}
+
 // TestServerListenBindsLoopbackOnly proves the server is reachable at the
 // loopback addresses and at no other address of this host.
 func TestServerListenBindsLoopbackOnly(t *testing.T) {
@@ -212,9 +242,10 @@ func TestServerListenBindsLoopbackOnly(t *testing.T) {
 	})
 }
 
-// TestServerListenRefusesPortBusyOnIPv6Loopback proves a requested port that
-// another process serves on the IPv6 loopback fails the bind. Otherwise a
-// browser that resolves localhost to ::1 would reach that process.
+// TestServerListenRefusesPortBusyOnIPv6Loopback proves the port check refuses
+// a requested port that another process serves on the IPv6 loopback, before
+// any bind. Otherwise a browser that resolves localhost to ::1 would reach
+// that process.
 func TestServerListenRefusesPortBusyOnIPv6Loopback(t *testing.T) {
 	t.Parallel()
 	if !hostHasIPv6Loopback(t) {
@@ -237,8 +268,8 @@ func TestServerListenRefusesPortBusyOnIPv6Loopback(t *testing.T) {
 			continue
 		}
 		want := "listen " + net.JoinHostPort(defaults.LoopbackIPv6, strconv.Itoa(port))
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("Listen error = %v, want it to name %q", err, want)
+		if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "another process already accepts connections") {
+			t.Fatalf("Listen error = %v, want the port check to name %q", err, want)
 		}
 		return
 	}
@@ -265,6 +296,36 @@ func TestServerListenRefusesPortServedOnWildcardAddress(t *testing.T) {
 			_ = ln.Close()
 		}
 		t.Fatalf("Listen on port %d succeeded while a wildcard listener served it", port)
+	}
+	want := fmt.Sprintf("port %d", port)
+	if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "peasant web stop") {
+		t.Fatalf("Listen error = %v, want it to name %q and `peasant web stop`", err, want)
+	}
+}
+
+// TestServerListenRefusesPortServedOnIPv6WildcardAddress proves a requested
+// port that another process serves on the IPv6-only wildcard address fails
+// the start. The IPv4 loopback does not answer for that listener, so only the
+// IPv6 half of the port check sees it.
+func TestServerListenRefusesPortServedOnIPv6WildcardAddress(t *testing.T) {
+	t.Parallel()
+	if !hostHasIPv6Loopback(t) {
+		t.Skip("this host has no IPv6 loopback")
+	}
+	holder, err := net.Listen("tcp6", "[::]:0")
+	if err != nil {
+		t.Fatalf("hold an IPv6 wildcard port: %v", err)
+	}
+	defer holder.Close()
+	port := holder.Addr().(*net.TCPAddr).Port
+
+	server := NewServer(ServerConfig{Port: port})
+	err = server.Listen(context.Background())
+	if err == nil {
+		for _, ln := range server.lns {
+			_ = ln.Close()
+		}
+		t.Fatalf("Listen on port %d succeeded while an IPv6 wildcard listener served it", port)
 	}
 	want := fmt.Sprintf("port %d", port)
 	if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "peasant web stop") {

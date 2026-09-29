@@ -161,7 +161,7 @@ const ephemeralBindAttempts = 8
 // at both addresses that "localhost" can resolve to.
 //
 // A requested port (not 0) must be free on both loopbacks. The bind fails when
-// another process already accepts connections there (see CheckLoopbackPortFree)
+// another process already accepts connections there (see ServedLoopbackAddr)
 // or when the IPv6 loopback holds the port, as it fails for a busy IPv4 port.
 // Otherwise a client that resolves "localhost" to the other address would
 // reach the other process. An ephemeral port is chosen on IPv4 and used on
@@ -170,8 +170,8 @@ const ephemeralBindAttempts = 8
 // IPv4 only. Callers read the port from Server.Addr.
 func listenLoopback(port int) ([]net.Listener, error) {
 	if port != 0 {
-		if err := CheckLoopbackPortFree(port); err != nil {
-			return nil, err
+		if addr, served := ServedLoopbackAddr(port); served {
+			return nil, fmt.Errorf("listen %s: another process already accepts connections on port %d, so no server was started. %s", addr, port, PortServedHint(port))
 		}
 	}
 	for attempt := 1; ; attempt++ {
@@ -197,30 +197,36 @@ func listenLoopback(port int) ([]net.Listener, error) {
 	}
 }
 
-// CheckLoopbackPortFree returns an error when another process already accepts
-// connections on port at the IPv4 or IPv6 loopback address. On macOS, a
-// listener on the wildcard address does not make a loopback bind fail, so
-// without this check a new server could start beside an earlier one that
-// listens on every interface. The check waits up to
-// defaults.ServerPortReleaseWait, so a server that is still shutting down, as
-// right after `peasant web stop`, can release the port first.
-func CheckLoopbackPortFree(port int) error {
+// ServedLoopbackAddr reports a loopback address at port where another process
+// still accepts connections, after waiting up to
+// defaults.ServerPortReleaseWait so a server that is shutting down, as right
+// after `peasant web stop`, can release the port first. It checks the IPv4 and
+// the IPv6 loopback, because on macOS a listener on the wildcard address does
+// not make a loopback bind fail, so without this check a new server could
+// start beside an earlier one that listens on every interface. A socket that
+// holds the port without accepting connections is not reported here; the
+// bind itself fails for it.
+func ServedLoopbackAddr(port int) (string, bool) {
 	deadline := time.Now().Add(defaults.ServerPortReleaseWait)
 	for {
-		addr, served := servedLoopbackAddr(port)
-		if !served {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("listen %s: another process already accepts connections on port %d, so no server was started; if it is an earlier `peasant web start`, run `peasant web stop --port %d`, then retry", addr, port, port)
+		addr, served := probeServedLoopbackAddr(port)
+		if !served || time.Now().After(deadline) {
+			return addr, served
 		}
 		time.Sleep(defaults.ServerPortProbeInterval)
 	}
 }
 
-// servedLoopbackAddr returns the first loopback address at port that accepts
-// a connection.
-func servedLoopbackAddr(port int) (string, bool) {
+// PortServedHint tells the user what to do when port already answers: open
+// the dashboard that may be running there, restart it on this version, or
+// choose another port.
+func PortServedHint(port int) string {
+	return fmt.Sprintf("If it is a Peasant dashboard, open http://localhost:%d, or run `peasant web stop --port %d` and retry to restart it on this version (for example after an upgrade). Otherwise, choose a free port with --port.", port, port)
+}
+
+// probeServedLoopbackAddr returns the first loopback address at port that
+// accepts a connection now.
+func probeServedLoopbackAddr(port int) (string, bool) {
 	for _, host := range []string{defaults.LoopbackIPv4, defaults.LoopbackIPv6} {
 		addr := net.JoinHostPort(host, strconv.Itoa(port))
 		conn, err := net.DialTimeout("tcp", addr, defaults.ServerPortProbeTimeout)

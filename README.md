@@ -187,11 +187,13 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
 
 The server listens on the loopback interface only: `127.0.0.1`, and `::1` when the host has an
-IPv6 loopback. Other machines cannot reach it. `peasant web start` refuses to start while another
-process already accepts connections on the port, such as a dashboard started by an earlier
-version; run `peasant web stop` first.
+IPv6 loopback. Other machines cannot reach it. `peasant web start` exits with an error while
+another process already accepts connections on the port, including a dashboard that is already
+running, whether from this version or an earlier one. Open the running dashboard, or run
+`peasant web stop` and start it again, or choose another port with `--port`.
 
-Every request must name the server by a loopback `Host` (`localhost`, `127.0.0.1`, or `[::1]`).
+Every request must name the server by a loopback `Host` (`localhost`, `127.0.0.1`, or `[::1]`),
+so a proxy or port forward that passes its own hostname as `Host` gets `403`.
 A state-changing request (any method other than `GET`, `HEAD`, or `OPTIONS`) and a WebSocket
 connection that carry an `Origin` header must come from the dashboard's own origin. Other
 requests get `403`. Local clients that send no `Origin` header are accepted, such as `curl`,

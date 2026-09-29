@@ -59,6 +59,8 @@ func bindIPv6LoopbackWithoutListening(t *testing.T) (int, int) {
 	if err != nil {
 		t.Fatalf("open an IPv6 socket: %v", err)
 	}
+	// Child processes that parallel tests start must not inherit the socket.
+	syscall.CloseOnExec(fd)
 	loopback := &syscall.SockaddrInet6{}
 	copy(loopback.Addr[:], net.IPv6loopback)
 	if err := syscall.Bind(fd, loopback); err != nil {

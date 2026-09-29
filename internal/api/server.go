@@ -654,7 +654,9 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleShutdown(_ context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Only allow shutdown from localhost
+		// Only allow shutdown from localhost. This reads the peer address the
+		// kernel reports, not a header the client sets, so it stays a backstop
+		// even though the loopback bind already keeps other hosts out.
 		host, _, _ := net.SplitHostPort(r.RemoteAddr)
 		isLocal := false
 		for _, addr := range defaults.LocalhostAddrs {

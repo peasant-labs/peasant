@@ -10,12 +10,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -140,6 +142,43 @@ func TestWebCapabilitiesMatrix(t *testing.T) {
 			assertSPARouteMounted(t, baseURL+"/projects/abc123/11111111-1111-4111-8111-111111111111")
 		})
 	}
+
+	// The same real binary proves that background `web start` refuses a port
+	// another server already answers, before it forks. Without that check the
+	// readiness probe would take the other server's answer as its own.
+	t.Run("background start refuses a port another server answers", func(t *testing.T) {
+		holder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer holder.Close()
+		port := holder.Listener.Addr().(*net.TCPAddr).Port
+		env := isolatedXDGEnv(t)
+		stateHome := ""
+		for _, kv := range env {
+			if value, ok := strings.CutPrefix(kv, defaults.EnvXDGStateHome.String()+"="); ok {
+				stateHome = value
+			}
+		}
+		t.Cleanup(func() {
+			stop := exec.Command(bin, "web", "stop", "--port", strconv.Itoa(port))
+			stop.Env = env
+			_ = stop.Run()
+		})
+
+		cmd := exec.Command(bin, "web", "start", "--no-browser", "--port", strconv.Itoa(port))
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("background `peasant web start` succeeded on port %d that another server answers; output: %s", port, out)
+		}
+		if !strings.Contains(string(out), "peasant web stop") || strings.Contains(string(out), "Usage:") {
+			t.Fatalf("background `peasant web start` output = %q, want the actionable refusal without usage text", out)
+		}
+		pidFile := filepath.Join(stateHome, "peasant", fmt.Sprintf("web:%d.pid", port))
+		if _, statErr := os.Stat(pidFile); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("background `peasant web start` wrote %s for a server it did not start (stat error: %v)", pidFile, statErr)
+		}
+	})
 }
 
 // peasantCLIOnce guards the single per-test-binary CLI build. Both the web
@@ -389,18 +428,32 @@ func assertSPARouteMounted(t *testing.T, url string) {
 	}
 }
 
-// freeTCPPort reserves an ephemeral port and returns it. There is a small window
-// between closing the listener and the server binding; it is acceptable for a
-// local test and mirrors the existing free-port discovery idiom.
+// freeTCPPort reserves an ephemeral port that is free on both loopback
+// addresses, because the server binds both, and returns it. There is a small
+// window between closing the listeners and the server binding; it is
+// acceptable for a local test and mirrors the existing free-port discovery
+// idiom.
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve free TCP port: %v", err)
+	for attempt := 1; attempt <= 8; attempt++ {
+		ln, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("reserve free TCP port: %v", err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		v6, v6Err := net.Listen("tcp6", net.JoinHostPort("::1", strconv.Itoa(port)))
+		if v6Err == nil {
+			_ = v6.Close()
+		}
+		if err := ln.Close(); err != nil {
+			t.Fatalf("release reserved TCP port %d: %v", port, err)
+		}
+		// Any IPv6 failure other than a busy port means the host has no IPv6
+		// loopback, and the server then binds IPv4 only.
+		if v6Err == nil || !errors.Is(v6Err, syscall.EADDRINUSE) {
+			return port
+		}
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	if err := ln.Close(); err != nil {
-		t.Fatalf("release reserved TCP port %d: %v", port, err)
-	}
-	return port
+	t.Fatal("every reserved TCP port was already taken on the IPv6 loopback")
+	return 0
 }
