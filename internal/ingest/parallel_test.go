@@ -1,13 +1,17 @@
 package ingest
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/schema"
 )
 
@@ -366,8 +370,8 @@ func TestStagingBuffer_PanicsOnZeroCapacity(t *testing.T) {
 
 func TestStagingBuffer_RootsDrainImmediately(t *testing.T) {
 	b := NewStagingBuffer(4, 1024*1024)
-	b.Add(makeResult(sid("a"), nil))
-	b.Add(makeResult(sid("b"), nil))
+	b.Add(t.Context(), makeResult(sid("a"), nil))
+	b.Add(t.Context(), makeResult(sid("b"), nil))
 
 	batch := b.Drain()
 	if len(batch.Results) != 2 {
@@ -382,8 +386,8 @@ func TestStagingBuffer_RootsDrainImmediately(t *testing.T) {
 func TestStagingBuffer_ChildHeldUntilParentCommitted(t *testing.T) {
 	b := NewStagingBuffer(4, 1024*1024)
 	parentID := sid("parent")
-	b.Add(makeResult(sid("parent"), nil))
-	b.Add(makeResult(sid("child"), &parentID))
+	b.Add(t.Context(), makeResult(sid("parent"), nil))
+	b.Add(t.Context(), makeResult(sid("child"), &parentID))
 
 	// First drain: only parent (root) is eligible.
 	batch := b.Drain()
@@ -411,9 +415,9 @@ func TestStagingBuffer_ThreeTiers(t *testing.T) {
 	b := NewStagingBuffer(8, 1024*1024)
 	aID := sid("a")
 	bID := sid("b")
-	b.Add(makeResult(sid("a"), nil))
-	b.Add(makeResult(sid("b"), &aID))
-	b.Add(makeResult(sid("c"), &bID))
+	b.Add(t.Context(), makeResult(sid("a"), nil))
+	b.Add(t.Context(), makeResult(sid("b"), &aID))
+	b.Add(t.Context(), makeResult(sid("c"), &bID))
 
 	// Drain 1: only root "a".
 	batch := b.Drain()
@@ -438,10 +442,10 @@ func TestStagingBuffer_ThreeTiers(t *testing.T) {
 
 func TestStagingBuffer_FullReturnsFalse(t *testing.T) {
 	b := NewStagingBuffer(1, 1024*1024)
-	if !b.Add(makeResult(sid("a"), nil)) {
+	if !b.Add(t.Context(), makeResult(sid("a"), nil)) {
 		t.Fatal("first Add should succeed")
 	}
-	if b.Add(makeResult(sid("b"), nil)) {
+	if b.Add(t.Context(), makeResult(sid("b"), nil)) {
 		t.Fatal("second Add to full buffer should return false")
 	}
 }
@@ -465,7 +469,7 @@ func TestStagingBuffer_WrapGapIsReleasedWithTheCopy(t *testing.T) {
 	for cycle := 0; cycle < cycles; cycle++ {
 		result := makeResult(sid(fmt.Sprintf("wrap-%d", cycle)), nil)
 		result.transcriptData = payload
-		if !b.Add(result) {
+		if !b.Add(t.Context(), result) {
 			t.Fatalf("cycle %d: Add rejected a payload the arena can hold", cycle)
 		}
 		batch := b.Drain()
@@ -500,7 +504,7 @@ func TestStagingBuffer_WrapGapReleasedWhenTheSlotArrayIsExhausted(t *testing.T) 
 
 	first := makeResult(sid("first"), nil)
 	first.transcriptData = make([]byte, payloadLen)
-	if !b.Add(first) {
+	if !b.Add(t.Context(), first) {
 		t.Fatal("first Add should succeed")
 	}
 	batch := b.Drain()
@@ -513,7 +517,7 @@ func TestStagingBuffer_WrapGapReleasedWhenTheSlotArrayIsExhausted(t *testing.T) 
 	// first copy's bytes were acked, and it wraps the slab.
 	second := makeResult(sid("second"), nil)
 	second.transcriptData = make([]byte, payloadLen)
-	if b.Add(second) {
+	if b.Add(t.Context(), second) {
 		t.Fatal("Add into an exhausted slot array should return false")
 	}
 
@@ -532,7 +536,7 @@ func TestStagingBuffer_WrapGapReleasedWhenTheSlotArrayIsExhausted(t *testing.T) 
 
 func TestStagingBuffer_NilMetaDrainsImmediately(t *testing.T) {
 	b := NewStagingBuffer(4, 1024*1024)
-	b.Add(workerResult{meta: nil}) // no metadata — treated as root
+	b.Add(t.Context(), workerResult{meta: nil}) // no metadata — treated as root
 	batch := b.Drain()
 	if len(batch.Results) != 1 {
 		t.Fatalf("expected 1, got %d", len(batch.Results))
@@ -542,13 +546,14 @@ func TestStagingBuffer_NilMetaDrainsImmediately(t *testing.T) {
 func TestStagingBuffer_ConcurrentAdd_NoRace(t *testing.T) {
 	const n = 64
 	b := NewStagingBuffer(n, 1024*1024)
+	ctx := t.Context()
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			id := SessionID(string(rune('a' + i%26)))
-			b.Add(makeResult(id, nil))
+			b.Add(ctx, makeResult(id, nil))
 		}(i)
 	}
 	wg.Wait()
@@ -567,6 +572,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 	const arenaSize = 1024
 	const payloadSize = 600
 	b := NewStagingBuffer(4, arenaSize)
+	waitCtx := testwait.Context(t)
 
 	payload := func(id string) workerResult {
 		meta := &UnifiedMetadata{SessionID: SessionID(id)}
@@ -574,20 +580,19 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 	}
 
 	// First Add succeeds (600 of 1024 bytes).
-	if !b.Add(payload("first")) {
+	if !b.Add(waitCtx, payload("first")) {
 		t.Fatal("first Add should succeed")
 	}
 
-	// Second Add will spin on arena space. Run it in a goroutine.
+	// Second Add will wait on arena space. Run it in a goroutine.
 	done := make(chan bool, 1)
 	go func() {
-		done <- b.Add(payload("second"))
+		done <- b.Add(waitCtx, payload("second"))
 	}()
 
 	// Drain + Ack from the main goroutine — Ack frees the first entry's arena
 	// space, unblocking the spinning producer. Without concurrent Drain+Ack,
 	// the producer spins forever (the original deadlock).
-	deadline := time.After(5 * time.Second)
 	for {
 		batch := b.Drain()
 		if len(batch.Results) > 0 {
@@ -595,7 +600,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 			break
 		}
 		select {
-		case <-deadline:
+		case <-waitCtx.Done():
 			t.Fatal("deadlock: Drain never returned eligible entries; producer is stuck on full arena")
 		default:
 			runtime.Gosched()
@@ -607,7 +612,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 		if !ok {
 			t.Fatal("second Add should succeed after AckBatch frees arena space")
 		}
-	case <-time.After(5 * time.Second):
+	case <-waitCtx.Done():
 		t.Fatal("deadlock: second Add never completed after AckBatch freed arena space")
 	}
 
@@ -628,6 +633,7 @@ func TestStagingBuffer_ArenaFull_ConcurrentDrain(t *testing.T) {
 func TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered(t *testing.T) {
 	const nProducers = 32
 	b := NewStagingBuffer(nProducers, 1024*1024)
+	ctx := t.Context()
 
 	// Producers add concurrently.
 	var wg sync.WaitGroup
@@ -636,7 +642,7 @@ func TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			id := SessionID(fmt.Sprintf("s-%03d", i))
-			b.Add(makeResult(id, nil))
+			b.Add(ctx, makeResult(id, nil))
 		}()
 	}
 
@@ -683,8 +689,8 @@ func TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered(t *testing.T) {
 // Scenario 4 from the BDD spec.
 func TestStagingBuffer_MultipleInFlightBatches(t *testing.T) {
 	b := NewStagingBuffer(4, 1024*1024)
-	b.Add(makeResult(sid("a"), nil))
-	b.Add(makeResult(sid("b"), nil))
+	b.Add(t.Context(), makeResult(sid("a"), nil))
+	b.Add(t.Context(), makeResult(sid("b"), nil))
 
 	// Drain batch N — contains "a" and "b" (both roots).
 	batchN := b.Drain()
@@ -696,8 +702,8 @@ func TestStagingBuffer_MultipleInFlightBatches(t *testing.T) {
 	}
 
 	// Add two more entries while batchN is still outstanding.
-	b.Add(makeResult(sid("c"), nil))
-	b.Add(makeResult(sid("d"), nil))
+	b.Add(t.Context(), makeResult(sid("c"), nil))
+	b.Add(t.Context(), makeResult(sid("d"), nil))
 
 	// Drain batch N+1 — should return "c" and "d".
 	batchN1 := b.Drain()
@@ -720,52 +726,135 @@ func TestStagingBuffer_MultipleInFlightBatches(t *testing.T) {
 }
 
 // TestStagingBuffer_BoundedBackoff verifies that copyToArena does not
-// spin-lock when the arena is full: instead it sleeps with bounded
-// exponential backoff. We confirm that a producer blocked on a tiny arena
-// is eventually unblocked after AckBatch frees space, and that the test
-// itself completes within a reasonable wall-clock time (ruling out
-// tight-spin CPU waste). Scenario 7 from the BDD spec.
+// spin-lock when the arena is full: it waits on the bounded backoff timer as
+// the fallback that recovers a missed wake instead of parking forever. The test
+// runs in a synctest bubble, so the producer parks without wall time;
+// synctest.Wait proves it is inside the wait, and the freed signal wakes it once
+// Drain + AckBatch frees arena space.
 func TestStagingBuffer_BoundedBackoff(t *testing.T) {
-	// Arena: 512 bytes. Each payload: 300 bytes → second Add blocks.
-	const arenaSize = 512
-	const payloadSize = 300
-	b := NewStagingBuffer(4, arenaSize)
+	synctest.Test(t, func(t *testing.T) {
+		// Arena: 512 bytes. Each payload: 300 bytes → second Add waits.
+		const arenaSize = 512
+		const payloadSize = 300
+		b := NewStagingBuffer(4, arenaSize)
+		ctx := t.Context()
 
-	payload := func(id string) workerResult {
-		meta := &UnifiedMetadata{SessionID: SessionID(id)}
-		return workerResult{meta: meta, transcriptData: make([]byte, payloadSize)}
-	}
+		payload := func(id string) workerResult {
+			meta := &UnifiedMetadata{SessionID: SessionID(id)}
+			return workerResult{meta: meta, transcriptData: bytes.Repeat([]byte(id), payloadSize)}
+		}
 
-	// First Add fits.
-	if !b.Add(payload("x")) {
-		t.Fatal("first Add should succeed")
-	}
+		// First Add fits.
+		if !b.Add(ctx, payload("x")) {
+			t.Fatal("first Add should succeed")
+		}
 
-	// Second Add will block in copyToArena (arena full).
-	// Launch it in a goroutine and track when it returns.
-	addDone := make(chan bool, 1)
-	go func() {
-		addDone <- b.Add(payload("y"))
-	}()
+		// Second Add waits in copyToArena (arena full).
+		addDone := make(chan bool, 1)
+		go func() {
+			addDone <- b.Add(ctx, payload("y"))
+		}()
 
-	// Wait a moment to let the producer enter the backoff loop.
-	time.Sleep(5 * time.Millisecond)
+		// Once Wait returns, the producer is durably parked in the arena wait.
+		synctest.Wait()
+		select {
+		case <-addDone:
+			t.Fatal("second Add completed before the arena was drained")
+		default:
+		}
 
-	// Drain + AckBatch — frees arena space, unblocking the producer.
-	batch := b.Drain()
-	if len(batch.Results) == 0 {
-		t.Fatal("expected at least one result from Drain")
-	}
-	b.AckBatch(batch)
+		// Drain + AckBatch frees arena space; the freed broadcast then wakes the
+		// producer, so no fake-clock time has to pass.
+		batch := b.Drain()
+		if len(batch.Results) == 0 {
+			t.Fatal("expected at least one result from Drain")
+		}
+		start := time.Now()
+		b.AckBatch(batch)
+		synctest.Wait()
 
-	select {
-	case ok := <-addDone:
-		if !ok {
+		if !<-addDone {
 			t.Fatal("second Add should succeed after AckBatch frees arena space")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("bounded backoff: producer never unblocked after AckBatch")
-	}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("the wake took %v of fake-clock time; the freed signal must wake the producer", elapsed)
+		}
+	})
+}
+
+// TestStagingBuffer_AddStopsWaitingWhenContextEnds proves the decided stop
+// outcome for a parked producer: when its context ends it must stage the result
+// outside the arena with arenaLen 0 (no copy), still report success, and free no
+// arena bytes when acked, so a cancelled run keeps every session in its results.
+// It runs in a synctest bubble, so the ctx wake is observed at zero elapsed
+// fake-clock time.
+func TestStagingBuffer_AddStopsWaitingWhenContextEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// Arena: 512 bytes, payload: 512 bytes → the second Add cannot fit.
+		const arenaSize = 512
+		const payloadSize = 512
+		b := NewStagingBuffer(4, arenaSize)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		payload := func(id string) workerResult {
+			meta := &UnifiedMetadata{SessionID: SessionID(id)}
+			return workerResult{meta: meta, transcriptData: bytes.Repeat([]byte(id), payloadSize)}
+		}
+
+		if !b.Add(ctx, payload("x")) {
+			t.Fatal("first Add should succeed")
+		}
+
+		// Second Add is parked: the arena is full.
+		addDone := make(chan bool, 1)
+		go func() {
+			addDone <- b.Add(ctx, payload("y"))
+		}()
+		synctest.Wait()
+		select {
+		case <-addDone:
+			t.Fatal("second Add completed while the arena was full")
+		default:
+		}
+
+		start := time.Now()
+		cancel()
+		synctest.Wait()
+		select {
+		case ok := <-addDone:
+			if !ok {
+				t.Fatal("the stopped Add must still stage its result and return true")
+			}
+		default:
+			t.Fatal("Add did not stop waiting when its context ended")
+		}
+		if elapsed := time.Since(start); elapsed != 0 {
+			t.Fatalf("the ctx wake took %v of fake-clock time; it must not wait out the backoff", elapsed)
+		}
+
+		if got := b.Len(); got != 2 {
+			t.Fatalf("Len() = %d, want 2: the stopped result is still staged", got)
+		}
+
+		batch := b.Drain()
+		var stopped *workerResult
+		for i := range batch.Results {
+			if string(batch.Results[i].meta.SessionID) == "y" {
+				stopped = &batch.Results[i]
+			}
+		}
+		if stopped == nil {
+			t.Fatal("Drain did not return the stopped result")
+		}
+		if !bytes.Equal(stopped.transcriptData, bytes.Repeat([]byte("y"), payloadSize)) {
+			t.Fatal("the stopped result must keep the worker's own transcript bytes")
+		}
+		b.AckBatch(batch)
+		if got := b.ArenaUsed(); got != 0 {
+			t.Fatalf("ArenaUsed() = %d, want 0: the stopped result frees no arena bytes", got)
+		}
+	})
 }
 
 // assertIDs checks that the drained results contain exactly the given session IDs (order-insensitive).

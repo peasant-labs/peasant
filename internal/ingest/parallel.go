@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"container/heap"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -480,8 +481,9 @@ const DefaultMaxDrainBatch = 512
 // stagedEntry is a slot in the StagingBuffer's slot array. It pairs the
 // workerResult with the arena byte range that backs its transcriptData payload.
 // arenaStart..arenaStart+arenaLen is the region inside StagingBuffer.arena
-// that holds the copied transcript bytes. arenaLen==0 means no arena copy
-// (payload was nil or empty).
+// that holds the copied transcript bytes. arenaLen==0 means no arena copy: the
+// payload was nil or empty, or the arena wait ended on cancellation and the
+// slot keeps the producer's own slice.
 type stagedEntry struct {
 	result     workerResult
 	arenaStart int64 // linear arena offset where transcriptData begins
@@ -509,8 +511,9 @@ type stagedEntry struct {
 //
 // The arena is treated as a ring: arenaHead bumps forward as entries are
 // added; Drain advances arenaTail past the regions freed by released entries.
-// Producers sleep with bounded backoff when the arena has insufficient space,
-// waking as Drain + AckBatch reclaim bytes.
+// When the arena has insufficient contiguous space a producer waits on the
+// arena-freed broadcast, a bounded backoff timer, or its context, whichever
+// fires first; AckBatch frees the bytes.
 //
 // A copy never straddles the end of the slab. When one would, its producer
 // reserves the tail of the slab as a gap ahead of its own bytes, so every copy
@@ -520,8 +523,9 @@ type stagedEntry struct {
 // leave the ring permanently smaller.
 //
 // A non-nil payload larger than the whole arena cannot be made contiguous at
-// all: copyToArena panics instead of silently starving. arenaLen==0 is recorded
-// only for a payload that was nil or empty and consumed no arena space.
+// all: copyToArena panics instead of silently starving. arenaLen==0 means the
+// slot keeps the producer's own payload: either it was nil or empty, or the
+// arena wait ended on cancellation and the result was staged without a copy.
 //
 // # Concurrency model
 //
@@ -566,6 +570,17 @@ type StagingBuffer struct {
 	// of a failed parent drain independently instead of waiting forever. A
 	// failed parent is never added to committed.
 	failed map[SessionID]struct{}
+
+	// ready is a capacity-1 wake for the drain loop: a non-blocking send after
+	// a slot is published lets an idle drainer wake without polling.
+	ready chan struct{}
+	// freedMu guards freed, the arena-release broadcast generation. freed is
+	// closed and replaced each time arenaTail advances, waking every producer
+	// parked in copyToArena. It is a broadcast, not a cap-1 signal: one
+	// AckBatch may free room for several waiting producers, and each must wake
+	// to re-check the arena.
+	freedMu sync.Mutex
+	freed   chan struct{}
 }
 
 // NewStagingBuffer allocates a StagingBuffer with the given slot capacity and
@@ -587,26 +602,50 @@ func NewStagingBuffer(capacity int, arenaSizeBytes int64) *StagingBuffer {
 		arena:     make([]byte, arenaSizeBytes),
 		committed: make(map[SessionID]struct{}),
 		failed:    make(map[SessionID]struct{}),
+		ready:     make(chan struct{}, 1),
+		freed:     make(chan struct{}),
 	}
 }
 
-// copyToArena copies src into the arena ring and returns
-// (start, length, pad). start is the linear coordinate of the copy's first
-// byte; length is len(src); pad is the wrap gap the reservation skipped ahead
-// of the copy (0 unless the copy was placed after the slab wrapped), which the
-// caller must charge to this entry so the ack that frees the copy also releases
-// the gap.
+// arenaFreed returns the current arena-release broadcast generation. Read it
+// BEFORE loading arenaTail and arenaHead: a release that lands after this
+// snapshot is delivered on the returned channel, and one that landed before the
+// snapshot is already visible in the tail read that follows, so no wake can be
+// missed.
+func (b *StagingBuffer) arenaFreed() chan struct{} {
+	b.freedMu.Lock()
+	defer b.freedMu.Unlock()
+	return b.freed
+}
+
+// broadcastArenaFreed closes the current release generation and installs a new
+// one, waking every producer parked on the previous generation. A broadcast,
+// not a cap-1 signal: one ack may free room for several waiting producers.
+// Callers advance arenaTail first so a woken producer observes the freed bytes.
+func (b *StagingBuffer) broadcastArenaFreed() {
+	b.freedMu.Lock()
+	close(b.freed)
+	b.freed = make(chan struct{})
+	b.freedMu.Unlock()
+}
+
+// copyToArena copies src into the arena ring and returns (start, length, pad,
+// stopped). start is the linear coordinate of the copy's first byte; length is
+// len(src); pad is the wrap gap the reservation skipped ahead of the copy (0
+// unless the copy was placed after the slab wrapped), which the caller must
+// charge to this entry so the ack that frees the copy also releases the gap.
 //
-// If the arena has insufficient free space the call sleeps with bounded
-// backoff until Drain reclaims enough bytes. A wrapping claim fits only when
-// the payload is no larger than the physical start offset it wraps from, so a
-// payload larger than half the arena can be unplaceable when it must wrap;
-// keeping the arena at least twice the largest single payload keeps every wrap
-// satisfiable. Returns (-1, 0, 0) if src is nil or empty (no copy). Panics if
-// src is larger than the arena — size the arena appropriately.
-func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
+// If the arena has insufficient free space the call waits on the freed
+// broadcast, the bounded backoff timer, or ctx, whichever fires first, and
+// returns (-1, 0, 0, true) without copying when ctx ends. A wrapping claim fits
+// only when the payload is no larger than the physical start offset it wraps
+// from, so a payload larger than half the arena can be unplaceable when it must
+// wrap; keeping the arena at least twice the largest single payload keeps every
+// wrap satisfiable. Returns (-1, 0, 0, false) if src is nil or empty (no copy).
+// Panics if src is larger than the arena — size the arena appropriately.
+func (b *StagingBuffer) copyToArena(ctx context.Context, src []byte) (start, length, pad int64, stopped bool) {
 	if len(src) == 0 {
-		return -1, 0, 0
+		return -1, 0, 0, false
 	}
 	sz := int64(len(src))
 	arenaSize := int64(len(b.arena))
@@ -621,6 +660,11 @@ func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
 	backoff := backoffMin
 
 	for {
+		// Snapshot the release generation before reading the ring coordinates
+		// (see arenaFreed): reading them in the other order can miss a release
+		// that lands between the two and park for a full backoff until the
+		// fallback timer fires.
+		freed := b.arenaFreed()
 		tail := b.arenaTail.Load()
 		head := b.arenaHead.Load()
 		free := arenaSize - (head - tail)
@@ -643,14 +687,21 @@ func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
 				start = head + gap
 				physStart := start % arenaSize
 				copy(b.arena[physStart:physStart+sz], src)
-				return start, sz, gap
+				return start, sz, gap, false
 			}
 			// CAS lost to another producer; retry.
 			continue
 		}
-
-		// Arena full — bounded exponential sleep until Drain advances arenaTail.
-		time.Sleep(backoff)
+		// Arena full — wait for a release, the bounded backoff fallback, or ctx.
+		timer := time.NewTimer(backoff)
+		select {
+		case <-freed:
+			timer.Stop()
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return -1, 0, 0, true
+		}
 		if backoff < backoffMax {
 			backoff *= 2
 		}
@@ -659,15 +710,24 @@ func (b *StagingBuffer) copyToArena(src []byte) (start, length, pad int64) {
 
 // Add stores a completed workerResult in the buffer. The transcriptData
 // payload (if any) is copied into the arena slab; the stored result's
-// transcriptData slice points into the arena. Add sleeps with bounded backoff
-// when the arena is full and resumes as Drain + AckBatch reclaim space.
+// transcriptData slice points into the arena. If the arena is full, Add waits
+// (see copyToArena) until space is freed, the backoff fires, or ctx ends.
+//
+// When ctx ends while Add is waiting for arena space it still stages the
+// result, outside the arena: the slot keeps the worker result's own transcript
+// slice with arenaLen 0, so no session is dropped from the run and AckBatch
+// frees nothing for it. At most one transcript per worker is staged this way,
+// and only on cancellation.
 //
 // Add is safe to call from multiple producer goroutines concurrently.
 // Returns false only if the slot array is exhausted (capacity limit hit).
-func (b *StagingBuffer) Add(r workerResult) bool {
+func (b *StagingBuffer) Add(ctx context.Context, r workerResult) bool {
 	// Copy transcript bytes into the arena before claiming a slot.
 	// Arena operations are lock-free CAS-based; multiple producers copy concurrently.
-	aStart, aLen, aPad := b.copyToArena(r.transcriptData)
+	// A stopped copy reports the same arenaLen-0 shape as an empty payload, so
+	// the slot keeps r.transcriptData itself without a copy. A successful copy
+	// also returns the wrap gap it claimed, charged to the slot below.
+	aStart, aLen, aPad, _ := b.copyToArena(ctx, r.transcriptData)
 	if aLen > 0 {
 		physStart := aStart % int64(len(b.arena))
 		r.transcriptData = b.arena[physStart : physStart+aLen]
@@ -687,6 +747,7 @@ func (b *StagingBuffer) Add(r workerResult) bool {
 				// Release the rolled-back copy and the wrap gap it claimed,
 				// matching what AckBatch would have freed for this entry.
 				b.arenaTail.Add(aLen + aPad)
+				b.broadcastArenaFreed()
 			}
 			return false
 		}
@@ -698,6 +759,12 @@ func (b *StagingBuffer) Add(r workerResult) bool {
 				arenaPad:   aPad,
 			}
 			b.state[idx].Store(1) // publish: slot ready for draining
+			// Wake an idle drainer: a non-blocking send leaves at most one
+			// pending token, and the drainer re-drains everything ready.
+			select {
+			case b.ready <- struct{}{}:
+			default:
+			}
 			return true
 		}
 		// CAS lost to another producer; retry.
@@ -807,8 +874,9 @@ func (b *StagingBuffer) Drain() DrainBatch {
 }
 
 // AckBatch finalises a batch returned by Drain. It marks each claimed slot as
-// acked(3) and frees the arena space those entries occupied, allowing producers
-// blocked in copyToArena to make progress.
+// acked(3) and frees the arena space those entries occupied, advancing
+// arenaTail first and then broadcasting the release so every producer waiting
+// in copyToArena wakes to re-check the arena.
 //
 // Must be called from the same goroutine as Drain, after the consumer has
 // finished reading the batch's transcriptData slices. Multiple in-flight
@@ -825,6 +893,7 @@ func (b *StagingBuffer) AckBatch(batch DrainBatch) {
 
 	if freedArenaBytes > 0 {
 		b.arenaTail.Add(freedArenaBytes)
+		b.broadcastArenaFreed()
 	}
 }
 

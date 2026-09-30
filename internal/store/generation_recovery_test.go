@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
@@ -642,10 +643,12 @@ func assertDurableRecoveryOutcome(t *testing.T, root string, id schema.SessionID
 // signals when an exclusive lock attempt starts. It wraps the production
 // locker, so the test asserts against a genuine flock contention rather than a
 // sleep: the signal proves the waiter reached the lock boundary before the
-// test checks that it cannot complete.
+// test checks that it cannot complete. It also stamps the instant the real
+// lock call returns, for an acquisition-order assertion with no timing window.
 type lockAttemptBarrier struct {
 	SessionLocker
 	exclusiveAttempts chan struct{}
+	acquired          chan time.Time
 }
 
 func (b *lockAttemptBarrier) LockExclusive(ctx context.Context, id schema.SessionID) (func() error, error) {
@@ -653,7 +656,14 @@ func (b *lockAttemptBarrier) LockExclusive(ctx context.Context, id schema.Sessio
 	case b.exclusiveAttempts <- struct{}{}:
 	default:
 	}
-	return b.SessionLocker.LockExclusive(ctx, id)
+	release, err := b.SessionLocker.LockExclusive(ctx, id)
+	if err == nil && b.acquired != nil {
+		select {
+		case b.acquired <- time.Now():
+		default:
+		}
+	}
+	return release, err
 }
 
 // TestConcurrentReadAcrossActivation pauses a reader inside its snapshot
@@ -675,12 +685,17 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 	longToolInput := "rg parser " + strings.Repeat("y", fixture.Generation.LongTextPadding)
 	longToolResult := "parser.go:12 " + strings.Repeat("z", fixture.Generation.LongTextPadding)
 	attempts := make(chan struct{}, 4)
-	s.sessionLocker = &lockAttemptBarrier{SessionLocker: s.sessionLocker, exclusiveAttempts: attempts}
+	acquired := make(chan time.Time, 4)
+	s.sessionLocker = &lockAttemptBarrier{SessionLocker: s.sessionLocker, exclusiveAttempts: attempts, acquired: acquired}
 
 	g1, g1Blobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, longText+" G1", longToolInput, longToolResult)
 	if err := activateTestGeneration(t, s, g1, g1Blobs); err != nil {
 		t.Fatalf("activate G1: %v", err)
 	}
+	// The setup activation above took the exclusive lock and left its signal
+	// and stamp buffered; clear them so the waits below observe only contention.
+	drainExclusiveAttempts(attempts)
+	drainAcquired(acquired)
 
 	wantG1 := map[schema.SourceEntryRef]string{
 		schema.SourceEntryRef(generationRefs[0]): longText + " G1",
@@ -708,37 +723,30 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 			return nil
 		})
 	}()
-	select {
-	case got := <-readerEntered:
-		if got != fixture.Generation.CompleteID {
-			t.Fatalf("reader entered with generation %q, want G1", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("reader did not enter its snapshot callback")
+	if got := testwait.Receive(t, readerEntered, "reader entered its snapshot callback"); got != fixture.Generation.CompleteID {
+		t.Fatalf("reader entered with generation %q, want G1", got)
 	}
 
 	g2, g2Blobs := buildTestGeneration(t, id, fixture.Generation.FailedID, longText+" G2", longToolInput, longToolResult)
 	activationDone := make(chan error, 1)
 	go func() { activationDone <- activateTestGeneration(t, s, g2, g2Blobs) }()
 	waitForExclusiveAttempt(t, attempts, "activation")
-	select {
-	case err := <-activationDone:
-		close(readerRelease)
-		t.Fatalf("activation completed while the reader held the shared lock (err=%v)", err)
-	case <-time.After(200 * time.Millisecond):
-	}
 
+	// The barrier signals before the real lock call, so a completion check
+	// cannot prove the lock is held. Release the reader and assert instead that
+	// the activation acquired the exclusive lock only after that instant; its
+	// attempt above happened first, so a lock that was not held would have been
+	// acquired before releaseAt.
+	activationReleaseAt := time.Now()
 	close(readerRelease)
-	if err := <-readerDone; err != nil {
+	if err := testwait.Receive(t, readerDone, "reader left its snapshot callback"); err != nil {
 		t.Fatalf("reader: %v", err)
 	}
-	select {
-	case err := <-activationDone:
-		if err != nil {
-			t.Fatalf("activation after reader release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("activation did not complete after the reader released the shared lock")
+	if err := testwait.Receive(t, activationDone, "activation completed after the reader released the shared lock"); err != nil {
+		t.Fatalf("activation after reader release: %v", err)
+	}
+	if acquiredAt := testwait.Receive(t, acquired, "activation acquired the exclusive session lock"); acquiredAt.Before(activationReleaseAt) {
+		t.Fatal("activation acquired the exclusive session lock before the reader released the shared lock")
 	}
 	if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
 		t.Fatalf("after activation visible = %q, want G2", got)
@@ -757,33 +765,22 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 			return nil
 		})
 	}()
-	select {
-	case <-cleanupReaderEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("second reader did not enter its snapshot callback")
-	}
+	testwait.Receive(t, cleanupReaderEntered, "second reader entered its snapshot callback")
 	cleanupDone := make(chan error, 1)
 	go func() {
 		cleanupDone <- s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.CompleteID)
 	}()
 	waitForExclusiveAttempt(t, attempts, "cleanup")
-	select {
-	case err := <-cleanupDone:
-		close(cleanupReaderRelease)
-		t.Fatalf("cleanup removed the inactive generation while a reader held the shared lock (err=%v)", err)
-	case <-time.After(200 * time.Millisecond):
-	}
+	cleanupReleaseAt := time.Now()
 	close(cleanupReaderRelease)
-	if err := <-cleanupReaderDone; err != nil {
+	if err := testwait.Receive(t, cleanupReaderDone, "second reader left its snapshot callback"); err != nil {
 		t.Fatalf("second reader: %v", err)
 	}
-	select {
-	case err := <-cleanupDone:
-		if err != nil {
-			t.Fatalf("cleanup after reader release: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("cleanup did not complete after the reader released the shared lock")
+	if err := testwait.Receive(t, cleanupDone, "cleanup completed after the reader released the shared lock"); err != nil {
+		t.Fatalf("cleanup after reader release: %v", err)
+	}
+	if acquiredAt := testwait.Receive(t, acquired, "cleanup acquired the exclusive session lock"); acquiredAt.Before(cleanupReleaseAt) {
+		t.Fatal("cleanup acquired the exclusive session lock before the reader released the shared lock")
 	}
 	// Cleanup must never remove the active generation.
 	if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err == nil {
@@ -796,9 +793,34 @@ func TestConcurrentReadAcrossActivation(t *testing.T) {
 // rather than goroutine scheduling.
 func waitForExclusiveAttempt(t *testing.T, attempts <-chan struct{}, label string) {
 	t.Helper()
-	select {
-	case <-attempts:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never attempted the exclusive session lock", label)
+	testwait.Receive(t, attempts, label+" attempted the exclusive session lock")
+}
+
+// drainExclusiveAttempts clears the setup activation's exclusive-lock signal so
+// the converted waits observe only the contended operations. The attempt
+// barrier buffers that signal, and a converted wait would otherwise consume it
+// and lose the proof that activation and cleanup wait for a reader's shared
+// lock.
+func drainExclusiveAttempts(attempts chan struct{}) {
+	for {
+		select {
+		case <-attempts:
+			continue
+		default:
+			return
+		}
+	}
+}
+
+// drainAcquired clears the setup activation's lock-acquisition stamp for the
+// same reason.
+func drainAcquired(acquired chan time.Time) {
+	for {
+		select {
+		case <-acquired:
+			continue
+		default:
+			return
+		}
 	}
 }

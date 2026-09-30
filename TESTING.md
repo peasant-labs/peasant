@@ -265,6 +265,137 @@ decorator type, its capability, owner, and declaring file:line, so each
 migration's owner is explicit before any code moves; a test asserts every entry
 resolves to a real declaration and the required-name manifest matches both ways.
 
+## Waiting in tests
+
+A test wait has to end for a reason: **a test wait names its wake source or carries a deadline.** A
+fixed wait instead assumes an idle machine — it sleeps for a guessed window that a loaded machine
+can outlast, and the race detector widens every window. Prefer an explicit signal, or a bound taken
+from the test's own deadline.
+
+### Decision tree
+
+```
+       does the test start all of its goroutines and
+       touch no file, process, or network?
+                         |
+          +--------------+---------------+
+          | yes                          | no
+          v                              v
+   run it in a synctest bubble     can a channel signal
+   (fake clock, durable block)     report the condition?
+          |                              |
+          |                       +------+------+
+          |                       | yes         | no
+          |                       v             v
+          |                 wait on the    wait with the
+          |                 signal         test deadline
+          |                       |             |
+          +-----------------------+-------------+
+                                  |
+                                  v
+                        the wait has a wake
+                        source or a bound
+```
+
+### The three tools
+
+- **A channel signal from a double.** Use it when the test owns the code that produces the
+  condition. Close a channel once to report "reached" (`blockingParallelIndexer.entered`), or send
+  a buffered value per item to report each event (`serialIndexStore.wrote`). The double owns the
+  signal; the test reads it.
+- **`internal/testkit/testwait`.** Use it to bound a wait on something the test cannot signal, such
+  as a real child process. `testwait.Context(t)` returns a context that ends at the bound;
+  `testwait.Receive(t, ch, what)` returns the next value or fails; `testwait.Until(t, what, cond)`
+  returns once the condition holds. The bound is the test's deadline less a margin of
+  `min(5 s, remaining/2)`, so a stuck wait reports itself before the timeout panic; a deadline
+  already in the past clamps the bound to now, and with no deadline (`go test -timeout=0`) it is a
+  one-minute fallback. These helpers take a `*testing.T` only (`*testing.B` and `*testing.F` have
+  no `Deadline`), they call `t.Deadline()` so they are never used inside a bubble, and
+  `testwait.Context` is created once per wait scope, not once per loop iteration (its cancel is
+  registered with `t.Cleanup`).
+- **`testing/synctest`.** Use it when the test starts all of its own goroutines and touches no
+  file, process, or network. `synctest.Test(t, func(t *testing.T) { … })` runs the body in a bubble
+  whose fake clock advances only when every goroutine in the bubble is durably blocked;
+  `synctest.Wait()` blocks until that point. Waits on channels, timers, and tickers created inside
+  the bubble are durable, and a goroutine still blocked when the bubble returns fails the test with
+  a deadlock report instead of a timeout arm. The gated-filesystem bubble is the worked example.
+
+### Negative assertions
+
+To assert that something did *not* happen, reach a positive barrier first — a signal, a parked
+queue, or `synctest.Wait()` — then make the check without blocking. The write-lane test
+(`TestStreamingIndex_StoreWriteLaneSerializesDownstreamWrites`) is the reference case: it waits
+until the competing write is parked in the lane queue, and only then reads the concurrency counter.
+A negative check with no barrier before it can pass by accident.
+
+### Proving an event wake
+
+Inside a bubble, act, call `synctest.Wait()`, and assert the outcome with `time.Since(start) == 0`.
+Fake time does not advance while the root goroutine is inside `synctest.Wait()`, so a zero elapsed
+time proves the wake came from an event, not a timer or a poll. The staging-buffer backpressure
+bubbles (`TestStagingBuffer_BoundedBackoff` and its neighbours in `internal/ingest/parallel_test.go`)
+use this shape.
+
+### Pull-only state
+
+Some state is a pull model with no push signal, such as `ProgressState`. Wait for it with
+`testwait.Until`, and name at the call site why there is no signal to wait on. Do not add
+production hooks just so a test can wait.
+
+### Keep list
+
+These waits stay real, each for a stated reason:
+
+- `internal/filelock` (`flock_*.go`, `filelock_test.go`) — the holder is another process, so only a
+  real lock poll observes it; the wait is deadline-bounded (`DefaultWait`).
+- `internal/store/session_lock_test.go` — cross-process lock contention.
+- `internal/githooks/script_test.go` — the kernel reports `ETXTBSY` on a freshly written
+  executable, and only a later retry observes it cleared; the pacing is kept, the bound is the
+  test deadline.
+- `internal/village/client_timing_test.go`, `internal/perf/perf_test.go` — simulated server latency
+  is the subject under test.
+- `internal/api/server.go` — a deliberate response flush delay in production.
+- `cmd/peasant/cmd_play.go` — the hidden demo command; its pacing is the user-visible behavior.
+- `cmd/peasant/ingest_progress_test.go` `TestHarvestInterruptMounted` — the subject is a real child
+  process (its readiness text and its OS-level exit); the 10 ms poll pacing is kept, and the wait
+  bounds come from the test deadline. It is not deleted or made cancellable; the harvest-interrupt
+  entry keeps its pacing and takes the test-deadline bound.
+
+### Real waits outside this policy
+
+Two real waits are named here and otherwise untouched:
+
+- `cmd/peasant/web_capabilities_matrix_test.go` `pollCapabilities` — waits on a real, detached
+  `peasant web` child's HTTP route (30 s bound, 50 ms interval).
+- `internal/e2e/village_procdeath_linux_test.go` — polls until the kernel reports the grandchild
+  reaped (10 s bound, 50 ms interval).
+
+### Simulated latency inside doubles
+
+A sleep inside a double (for example a 10 ms write body) models duration; it is part of the
+behavior the test exercises, not an event wait. Keep it.
+
+### Fake-clock traps
+
+1. Inside a bubble `time.Now()` starts at 2000-01-01 00:00 UTC. `MemFS` modification times use it,
+   while OS files carry real mtimes, so a freshness or mtime test stays out of a bubble.
+2. The fake clock advances only when *every* bubble goroutine is durably blocked. A spinning
+   goroutine never blocks durably, so `synctest.Wait()` never returns — under `-timeout=0` an
+   unbounded hang bounded only by the CI job budget. Put code in a bubble only when its waits block
+   on channels or timers.
+3. Only channels, timers, and tickers created inside the bubble block durably. Create buffers,
+   gates, and contexts inside, and pass the inner `t.Context()`. A `select` that also watches a
+   channel from outside the bubble is not durable.
+4. Waiting on a `sync.Mutex`, a syscall, file I/O, or network I/O is not durable. A bubble has no
+   network and no external process.
+5. A package-level `sync.WaitGroup` cannot join a bubble.
+6. Do not call `t.Run`, `t.Parallel`, or `t.Deadline` inside the bubble. Call `t.Parallel()` on the
+   outer test first. `testwait` calls `t.Deadline()`, so it is not used in bubbles.
+7. A goroutine still blocked when the bubble returns makes `synctest.Test` fail with a deadlock
+   report; use that in place of a timeout arm.
+8. While the root goroutine is inside `synctest.Wait()`, fake time does not advance, so
+   `time.Since(start) == 0` after `Wait` proves the wake was an event, not a timer.
+
 ## Coverage map for the consolidation
 
 The consolidation records every moved, deleted, retained, or deferred name in a
@@ -333,7 +464,8 @@ Other packages for reference (uncached `-race`): `internal/store` ~20–26s,
    slow, non-deterministic, and often not testing what the case claims.
 4. **Real sleeps/backoff** — e.g. an HTTP client's retry backoff against a 500.
    Inject a zero/short backoff (the models test uses `bestiary.WithRetries(0)`:
-   4.17s → 0.22s).
+   4.17s → 0.22s). When the subject instead waits for a concurrent condition, name
+   a wake source or carry a deadline; see [Waiting in tests](#waiting-in-tests).
 
 ### The parallel-safe pattern (use this for new `cmd/peasant` tests)
 

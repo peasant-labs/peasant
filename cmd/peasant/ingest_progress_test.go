@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -307,14 +308,23 @@ var _ context.Context = delayedNotificationContext{}
 
 // Pause the PTY consumer after cancellation acknowledgment, so program shutdown
 // cannot accidentally stand in for capture completion just because reads are fast.
+// acknowledged closes exactly once at that point, BEFORE the writer blocks on
+// resume, so a test can observe the acknowledgment through the pause.
 type pausedProgressCapture struct {
 	*signalWriter
-	resume <-chan struct{}
+	resume       <-chan struct{}
+	acknowledged chan struct{}
+	ackOnce      sync.Once
+}
+
+func newPausedProgressCapture(w *signalWriter, resume <-chan struct{}) *pausedProgressCapture {
+	return &pausedProgressCapture{signalWriter: w, resume: resume, acknowledged: make(chan struct{})}
 }
 
 func (w *pausedProgressCapture) Write(p []byte) (int, error) {
 	n, err := w.signalWriter.Write(p)
 	if strings.Contains(w.String(), "waiting for current work to stop") {
+		w.ackOnce.Do(func() { close(w.acknowledged) })
 		<-w.resume
 	}
 	return n, err
@@ -348,7 +358,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			r.w = terminal
 			resumeCapture := make(chan struct{})
 			releaseCapture := sync.OnceFunc(func() { close(resumeCapture) })
-			capture := &pausedProgressCapture{signalWriter: out, resume: resumeCapture}
+			capture := newPausedProgressCapture(out, resumeCapture)
 			copied := make(chan struct{})
 			var copyErr error
 			go func() { _, copyErr = io.Copy(capture, master); close(copied) }()
@@ -363,21 +373,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			done := make(chan struct{})
 			go func() { r.Wait(); close(done) }()
 			defer func() { releaseNotification(); r.Finish(finalMessage(time.Now(), state, ctx.Err())); <-done }()
-			waitFor := func(text string) {
-				t.Helper()
-				deadline := time.NewTimer(5 * time.Second)
-				defer deadline.Stop()
-				tick := time.NewTicker(10 * time.Millisecond)
-				defer tick.Stop()
-				for !strings.Contains(out.String(), text) {
-					select {
-					case <-deadline.C:
-						t.Fatalf("missing %q: %s", text, out.String())
-					case <-tick.C:
-					}
-				}
-			}
-			waitFor("ctrl+c to cancel")
+			testwait.Receive(t, out.seen, "the progress renderer offered the cancel hint")
 			if c.Key {
 				if _, err := master.Write([]byte{3}); err != nil {
 					t.Fatal(err)
@@ -391,7 +387,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			}
 			if c.Key || c.External {
 				// The diff renderer reuses the initial 'c' from the old hint.
-				waitFor("waiting for current work to stop")
+				testwait.Receive(t, capture.acknowledged, "the progress renderer acknowledged cancellation and paused")
 				// The mounted renderer must recognize cancellation from ticks
 				// before its separate notification watcher is allowed to proceed.
 				releaseNotification()
@@ -405,11 +401,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 				}
 			}
 			r.Finish(finalMessage(time.Now(), state, ctx.Err()))
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("renderer did not stop after completion")
-			}
+			testwait.Receive(t, done, "the progress renderer stopped after completion")
 			if err := r.Err(); err != nil {
 				t.Fatal(err)
 			}
@@ -427,11 +419,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 				t.Fatal(err)
 			}
 			releaseCapture()
-			select {
-			case <-copied:
-			case <-time.After(5 * time.Second):
-				t.Fatal("PTY capture did not drain after progress program shutdown and slave close")
-			}
+			testwait.Receive(t, copied, "the PTY capture drained after the progress program shut down and the slave closed")
 			// Linux reports EIO on a PTY master once its last slave closes.
 			if copyErr != nil && !errors.Is(copyErr, syscall.EIO) {
 				t.Fatalf("read progress program output through PTY shutdown: %v", copyErr)
@@ -700,14 +688,7 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 
 func awaitHarvestEvent[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
-	select {
-	case value := <-ch:
-		return value
-	case <-time.After(5 * time.Second):
-		t.Fatal("harvest lifecycle did not reach expected dependency boundary")
-		var zero T
-		return zero
-	}
+	return testwait.Receive(t, ch, "harvest lifecycle reached the expected dependency boundary")
 }
 
 func TestHarvestCommandCanceledBeforeSetup(t *testing.T) {
@@ -810,6 +791,7 @@ func TestProgressRendererFailureCancelsOperation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	waitCtx := testwait.Context(t)
 	master, terminal := openTestTerminal(t)
 	defer master.Close()
 	if err := terminal.Close(); err != nil {
@@ -825,7 +807,7 @@ func TestProgressRendererFailureCancelsOperation(t *testing.T) {
 	go func() { r.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-waitCtx.Done():
 		r.Finish(finalMessage(time.Now(), state, context.Canceled))
 		<-done
 		t.Fatal("renderer setup failure did not terminate")
@@ -950,24 +932,56 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 		Total: 10,
 	})
 
-	var buf bytes.Buffer
-	r := newProgressProgram(&buf, state, nil)
-	// Force TTY mode to exercise the tick path.
+	w := newRenderSignalWriter()
+	r := newProgressProgram(w, state, nil)
+	// Force TTY mode; wait until the renderer has flushed a frame. With a
+	// zero-width writer the renderer emits only its flush sequence, so the
+	// signal proves the render path ran at least once; the subject here stays
+	// the tick loop terminating cleanly (a frame was drawn, not that a tick
+	// fired).
 	r.isTTY = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.Run(ctx)
 
-	// Allow a couple of ticks (100 ms each) so the ticker fires at least once.
-	time.Sleep(250 * time.Millisecond)
+	testwait.Receive(t, w.rendered, "TTY progress renderer flushed a frame")
 	cancel()
 	r.Finish(finalMessage(time.Now(), state, context.Canceled))
 	r.Wait()
 
 	// At least one Bubble Tea render should have occurred before shutdown.
-	if buf.Len() == 0 {
+	if w.Len() == 0 {
 		t.Error("TTY renderer wrote 0 bytes after ticks + cancel, want some output")
 	}
+}
+
+// renderSignalWriter records the renderer output and closes rendered once, on
+// its first Write. A zero-width output draws no visible text, so the signal
+// proves the render path ran at least once rather than that a particular frame
+// was drawn.
+type renderSignalWriter struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	rendered chan struct{}
+	once     sync.Once
+}
+
+func newRenderSignalWriter() *renderSignalWriter {
+	return &renderSignalWriter{rendered: make(chan struct{})}
+}
+
+func (w *renderSignalWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buf.Write(p)
+	w.once.Do(func() { close(w.rendered) })
+	return n, err
+}
+
+func (w *renderSignalWriter) Len() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Len()
 }
 
 func TestProgressModelControlCCancelsPipeline(t *testing.T) {
@@ -1071,6 +1085,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).Interrupt.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			ctx := testwait.Context(t)
 			source := testfixture.MaterializeByName(t, "native-v2-only")
 			project := testfixture.PrepareNativeCLI(t, source)
 			dir := t.TempDir()
@@ -1146,8 +1161,9 @@ func TestHarvestInterruptMounted(t *testing.T) {
 					<-done
 				}
 			})
-			deadline := time.NewTimer(20 * time.Second)
-			defer deadline.Stop()
+			// The readiness poll keeps its 10 ms pacing: the subject is a real
+			// child process announcing readiness through the filesystem, which
+			// has no push signal. The three phases below share one test bound.
 			tick := time.NewTicker(10 * time.Millisecond)
 			defer tick.Stop()
 			for {
@@ -1175,7 +1191,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 				case err := <-done:
 					waited = true
 					t.Fatalf("harvest exited before blocked dependency and renderer readiness: %v\n%s\n%s", err, stdout.String(), stderr.String())
-				case <-deadline.C:
+				case <-ctx.Done():
 					t.Fatalf("harvest did not reach blocked dependency and renderer readiness\n%s\n%s", stdout.String(), stderr.String())
 				case <-tick.C:
 				}
@@ -1208,11 +1224,9 @@ func TestHarvestInterruptMounted(t *testing.T) {
 				// Cancellation cannot interrupt an in-flight OS read. Retain the
 				// renderer until the dependency returns, then require bounded exit
 				// without another key. Backend tests cover cancellation between Stats.
-				ack := time.NewTimer(5 * time.Second)
-				defer ack.Stop()
 				for !strings.Contains(stderr.String(), "waiting for current work to stop") {
 					select {
-					case <-ack.C:
+					case <-ctx.Done():
 						t.Fatalf("DIFF did not acknowledge first key: %s", stderr.String())
 					case err := <-done:
 						waited = true
@@ -1228,7 +1242,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			select {
 			case err = <-done:
 				waited = true
-			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
 				t.Fatalf("interrupt did not stop real harvest\n%s\n%s", stdout.String(), stderr.String())
 			}
 			var exit *exec.ExitError

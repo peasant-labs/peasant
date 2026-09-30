@@ -76,6 +76,8 @@ point, not a wrapper you invoke by hand.
   name — its `Inventory` and `CoverageMap` schema, the closed destination set,
   and the validators — lives in `internal/testkit/coveragemap`. `TESTING.md` describes
   the map and the decorator owners.
+- A test wait names its wake source or carries a deadline. Real waits stay on the keep list with a
+  reason. See `TESTING.md`.
 
 ## Types and boundaries
 
