@@ -1,0 +1,88 @@
+# Root page publish-state filters, asserted on the mounted page.
+#
+# Each case serves the page a flat sync list (GET /api/v1/sync/sessions) and a
+# publications read (GET /api/v1/publications), presses `filter`, and checks the
+# four filter counts and the rows the filter lists, in order, after `load more`
+# has been pressed until the list is complete. Every case also checks that each
+# of the four filters lists exactly as many rows as its count says.
+#
+# sessions: the sync list, newest first. `count` > 1 expands one entry into that
+#   many sessions named `<id>-00`, `<id>-01`, ... A session with
+#   `publication: false` gets no publication row, and one with
+#   `outsideSelection: true` is marked outside the saved selection: the list
+#   shows neither, and neither may appear anywhere on the page.
+# expectedPages: the rows on screen after the first render and after each press
+#   of `load more`. Omitted, the whole list fits on the first page.
+# expectedLabels: the publish state each named row shows.
+requiredNames:
+  - all-counts
+  - not-published-counts
+  - published-counts
+  - auto-counts
+  - outside-selection-hidden
+  - load-more
+cases:
+  - name: all-counts
+    sessions:
+      - { id: s-new, project: alpha, syncStatus: new, state: unpublished }
+      - { id: s-pub, project: alpha, syncStatus: synced, state: published, audience: 2 }
+      - { id: s-turns, project: beta, syncStatus: updated, state: published, audience: 1 }
+      - { id: s-auto, project: beta, syncStatus: new, state: unpublished, autoPublish: true }
+    filter: all
+    expectedCounts: { all: 4, notPublished: 2, published: 2, auto: 1 }
+    expectedRows: [s-new, s-pub, s-turns, s-auto]
+    expectedLabels:
+      s-new: not published
+      s-pub: published · 2 collectives · up to date
+      s-turns: published · 1 collective · new turns
+      s-auto: auto-publish on
+
+  - name: not-published-counts
+    sessions:
+      - { id: s-a, project: alpha, syncStatus: new, state: unpublished }
+      - { id: s-b, project: alpha, syncStatus: synced, state: published }
+      - { id: s-c, project: beta, syncStatus: new, state: unpublished }
+      - { id: s-d, project: beta, syncStatus: new, state: unpublished, autoPublish: true }
+    filter: not-published
+    expectedCounts: { all: 4, notPublished: 3, published: 1, auto: 1 }
+    expectedRows: [s-a, s-c, s-d]
+
+  - name: published-counts
+    sessions:
+      - { id: s-a, project: alpha, syncStatus: synced, state: published }
+      - { id: s-b, project: alpha, syncStatus: new, state: unpublished }
+      - { id: s-c, project: beta, syncStatus: updated, state: published, autoPublish: true, audience: 0 }
+    filter: published
+    expectedCounts: { all: 3, notPublished: 1, published: 2, auto: 1 }
+    expectedRows: [s-a, s-c]
+    expectedLabels:
+      s-c: published · 0 collectives · new turns
+
+  - name: auto-counts
+    sessions:
+      - { id: s-a, project: alpha, syncStatus: new, state: unpublished, autoPublish: true }
+      - { id: s-b, project: alpha, syncStatus: new, state: unpublished }
+      - { id: s-c, project: beta, syncStatus: synced, state: published, autoPublish: true }
+    filter: auto
+    expectedCounts: { all: 3, notPublished: 2, published: 1, auto: 2 }
+    expectedRows: [s-a, s-c]
+    expectedLabels:
+      s-a: auto-publish on
+
+  - name: outside-selection-hidden
+    sessions:
+      - { id: s-seen, project: alpha, syncStatus: new, state: unpublished }
+      - { id: s-hidden, project: beta, syncStatus: synced, state: published, outsideSelection: true }
+      - { id: s-unread, project: beta, syncStatus: new, state: unpublished, publication: false }
+    filter: all
+    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
+    expectedRows: [s-seen]
+
+  - name: load-more
+    sessions:
+      - { id: bulk, count: 30, project: alpha, syncStatus: new, state: unpublished }
+      - { id: s-last, project: beta, syncStatus: synced, state: published }
+    filter: all
+    expectedCounts: { all: 31, notPublished: 30, published: 1, auto: 0 }
+    expectedPages: [25, 31]
+    expectedRows: [bulk-00, bulk-01, bulk-02, bulk-03, bulk-04, bulk-05, bulk-06, bulk-07, bulk-08, bulk-09, bulk-10, bulk-11, bulk-12, bulk-13, bulk-14, bulk-15, bulk-16, bulk-17, bulk-18, bulk-19, bulk-20, bulk-21, bulk-22, bulk-23, bulk-24, bulk-25, bulk-26, bulk-27, bulk-28, bulk-29, s-last]
