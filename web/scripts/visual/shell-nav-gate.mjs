@@ -15,7 +15,15 @@
      3. every route-only section still resolves by URL: /analytics, and /review and /map under a mock
         project, each mounting its body non-blank under the SAME quiet header;
      4. the responsive widths in src/test/testdata/shell_responsive.yaml: the same header and
-        geometry checks at every width, down to the 320px reflow width.
+        geometry checks at every width, down to the 320px reflow width;
+     5. keyboard after a click: <main> carries no tabindex at rest (chromeClearance, on every page
+        above), a click on plain text mid-page on /analytics then Tab moves to the next control
+        without jumping the page back up, and a click inside /share's session list (.swz-body) then
+        PageDown scrolls that list — a click must never make <main> the focus.
+
+   chromeClearance takes the notice-pinned media query from src/components/testdata/
+   app-shell-geometry.yaml (the one declaration globals.css makes) and also checks the root's
+   scroll-padding-top against the fixed header.
 
    Before any capture it proves the server serves THIS checkout's build (served-build.mjs: the served
    page references exactly web/out's chunks, and they carry the shell's markers; with PEASANT_BIN
@@ -61,6 +69,7 @@ import {
   chromeClearance,
   headerFailures,
   headerGeometryFailures,
+  loadNoticePinnedQuery,
   loadShellHeaderManifest,
   paletteFailures,
   shippedItems,
@@ -133,6 +142,7 @@ const loadResponsiveCases = () => {
 
 const manifest = loadShellHeaderManifest()
 const shipped = shippedItems(manifest)
+const PINNED_QUERY = loadNoticePinnedQuery()
 const RESPONSIVE_CASES = loadResponsiveCases()
 
 if (!CHROME) {
@@ -187,7 +197,7 @@ const assertHeader = async (page, theme, where, timeoutMs = 10000) => {
     // component tests run.
     const manifestFailures = await page.evaluate(headerFailures, manifest, { theme, shipped })
     const geometry = await page.evaluate(headerGeometryFailures, manifest, { shipped })
-    const clearance = await page.evaluate(chromeClearance)
+    const clearance = await page.evaluate(chromeClearance, PINNED_QUERY)
     const themeFailures = await page.evaluate((attrs, t) => attrs
       .filter((attr) => document.documentElement.getAttribute(attr) !== t)
       .map((attr) => `${attr}=${document.documentElement.getAttribute(attr)}, expected ${t}`), THEME_ATTRIBUTES, theme)
@@ -277,8 +287,10 @@ const driveTheme = async (browser, theme) => {
   for (const [path, route] of Object.entries(manifest.routes)) {
     const url = route.project ? `${path}/${SHELL_PROJECT}/` : `${path}/`
     await goto(page, url)
+    // The page may canonicalize its own trailing slash (a client-side replace); it must not leave the route.
     const landed = await page.evaluate(() => window.location.pathname)
-    if (landed !== url) throw new Error(`the route-only page ${url} redirected to ${landed}; it must resolve in place`)
+    const strip = (path) => path.replace(/\/+$/, '')
+    if (strip(landed) !== strip(url)) throw new Error(`the route-only page ${url} redirected to ${landed}; it must resolve in place`)
     await assertBodyReady(page, route.mount, url)
     await assertHeader(page, theme, url)
     files.push(await capture(page, gate, theme, `shell-route-${path.slice(1)}`))
@@ -301,6 +313,85 @@ const assertResponsive = async (browser) => {
     console.log(`OK peasant-app responsive case=${name} width=${width} header=${state.clearance.header}px one row, every item reachable`)
   }
   if (diagnostics.length) throw new Error(`client diagnostics appeared across the responsive widths: ${JSON.stringify(diagnostics.slice(0, 4))}`)
+  await page.close()
+}
+
+// A point inside `scope` (a selector, or the viewport) on plain text: an element that holds text
+// of its own (not a wrapper around the page) and is not a control, not focusable, and not in the
+// header. Clicking it must leave focus where a click on plain text leaves it, so the next Tab or
+// keyboard scroll starts from there.
+const plainPoint = (page, scope) => page.evaluate((sel) => {
+  const box = sel ? document.querySelector(sel)?.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+  if (!box) return null
+  const header = document.querySelector('header')?.getBoundingClientRect()
+  const top = Math.max(box.top, header ? header.bottom : 0) + 8
+  for (let y = top + (box.bottom - top) / 2; y > top; y -= 24) {
+    for (let x = box.left + 16; x < box.right - 16; x += 40) {
+      const hit = document.elementFromPoint(x, y)
+      if (!hit || hit === document.body || hit.closest('header')) continue
+      // Not a control, and not focusable itself (a focusable ancestor such as <main> is exactly what
+      // this check must catch, so ancestors' tabindex does not disqualify the point).
+      if (hit.hasAttribute('tabindex') || hit.closest('a, button, input, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="option"]')) continue
+      if (sel && !hit.closest(sel)) continue
+      if (!sel && !hit.closest('main')) continue
+      const ownText = [...hit.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 2)
+      if (!ownText) continue
+      return { x, y, tag: hit.tagName.toLowerCase(), text: hit.textContent.replace(/\s+/g, ' ').trim().slice(0, 30) }
+    }
+  }
+  return null
+}, scope)
+
+// <main> must never become the focus by a click (review: a resting tabindex on <main> sent Tab back
+// to the top of the page and keyboard scrolling to the document instead of the pane clicked). On a
+// page that scrolls, a click on plain text mid-page then Tab keeps the reader where they are; in an
+// inner scroller, a click on plain content then PageDown scrolls that pane.
+const assertKeyboardFromClick = async (browser) => {
+  const page = await browser.newPage()
+  await applyDeterminism(page)
+  const diagnostics = watchDiagnostics(page)
+
+  await page.setViewport({ width: 1440, height: 800, deviceScaleFactor: 1 })
+  await goto(page, '/analytics/')
+  await assertBodyReady(page, manifest.routes['/analytics'].mount, '/analytics/')
+  const scrolled = await page.evaluate(() => { window.scrollTo({ top: 500, behavior: 'instant' }); return window.scrollY })
+  if (scrolled < 200) throw new Error(`/analytics/ at 1440×800 does not scroll (reached ${scrolled}px), so the Tab-after-click check cannot run`)
+  const text = await plainPoint(page, null)
+  if (!text) throw new Error('no plain-content point to click mid-page on /analytics/')
+  await page.mouse.click(text.x, text.y)
+  await pause(150)
+  const before = await page.evaluate(() => ({ scrollY: window.scrollY, active: document.activeElement?.tagName.toLowerCase(), mainTabindex: document.querySelector('main')?.getAttribute('tabindex') }))
+  await page.keyboard.press('Tab')
+  await pause(250)
+  const after = await page.evaluate(() => ({ scrollY: window.scrollY, active: document.activeElement?.tagName.toLowerCase(), label: (document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))
+  const tabFailures = []
+  if (before.active === 'main' || after.active === 'main') tabFailures.push(`a click on plain text made <main> the focus (after click: ${before.active}, after Tab: ${after.active})`)
+  if (before.mainTabindex !== null) tabFailures.push(`<main> carries tabindex="${before.mainTabindex}" after a click`)
+  if (after.active === 'body') tabFailures.push('Tab after the click focused nothing')
+  if (after.scrollY < before.scrollY - 150) tabFailures.push(`Tab after a click at ${Math.round(before.scrollY)}px jumped the page to ${Math.round(after.scrollY)}px`)
+  if (tabFailures.length) throw new Error(`keyboard focus after a click on /analytics/: ${tabFailures.join('; ')} (clicked ${text.tag} "${text.text}" at ${text.x},${text.y})`)
+  console.log(`OK peasant-app keyboard: click on ${text.tag} "${text.text}" at ${Math.round(before.scrollY)}px then Tab focused ${after.active} "${after.label}" at ${Math.round(after.scrollY)}px (no jump, <main> not focused)`)
+
+  await page.setViewport({ width: 1440, height: 600, deviceScaleFactor: 1 })
+  await goto(page, '/share/')
+  const PANE = '.swz-body'
+  await page.waitForSelector(PANE, { visible: true, timeout: 15000 })
+  const overflow = await page.evaluate((sel) => { const el = document.querySelector(sel); return el.scrollHeight - el.clientHeight }, PANE)
+  if (overflow < 100) throw new Error(`${PANE} on /share/ at 1440×600 does not overflow (${overflow}px), so the PageDown-after-click check cannot run`)
+  const inPane = await plainPoint(page, PANE)
+  if (!inPane) throw new Error(`no plain-content point to click inside ${PANE} on /share/`)
+  await page.mouse.click(inPane.x, inPane.y)
+  await pause(150)
+  const paneBefore = await page.evaluate((sel) => ({ scrollTop: document.querySelector(sel).scrollTop, active: document.activeElement?.tagName.toLowerCase() }), PANE)
+  await page.keyboard.press('PageDown')
+  await pause(400)
+  const paneAfter = await page.evaluate((sel) => ({ scrollTop: document.querySelector(sel).scrollTop, pageY: window.scrollY, active: document.activeElement?.tagName.toLowerCase() }), PANE)
+  if (paneBefore.active === 'main' || paneAfter.scrollTop <= paneBefore.scrollTop) {
+    throw new Error(`PageDown after a click inside ${PANE} on /share/ did not scroll it: scrollTop ${paneBefore.scrollTop} → ${paneAfter.scrollTop}, page ${paneAfter.pageY}px, focus ${paneBefore.active} (clicked ${inPane.tag} at ${inPane.x},${inPane.y})`)
+  }
+  console.log(`OK peasant-app keyboard: click inside ${PANE} then PageDown scrolled it ${Math.round(paneBefore.scrollTop)} → ${Math.round(paneAfter.scrollTop)}px (focus ${paneBefore.active}, not <main>)`)
+
+  if (diagnostics.length) throw new Error(`client diagnostics appeared during the keyboard checks: ${JSON.stringify(diagnostics.slice(0, 4))}`)
   await page.close()
 }
 
@@ -334,13 +425,14 @@ const captured = []
 try {
   if (!RESPONSIVE_ONLY) {
     for (const theme of SMOKE_THEMES) captured.push(...await driveTheme(browser, theme))
+    await assertKeyboardFromClick(browser)
   }
   await assertResponsive(browser)
 } catch (e) {
   console.error(
     `ERROR [shell-nav-gate.mjs] local shell header gate failed.\n` +
     `  What failed: ${e.message}\n` +
-    `  Why: the local header must match testdata/shell-header.yaml on every page and width, the palette must offer no route-only jump, and every route-only section must still resolve.\n` +
+    `  Why: the local header must match testdata/shell-header.yaml on every page and width, the palette must offer no route-only jump, every route-only section must still resolve, and a click must never steer Tab or keyboard scrolling to <main>.\n` +
     `  Where: shell-nav-gate.mjs while driving ${ORIGIN}.\n` +
     `  Means: users may see a removed control, a dead or hidden-section link, a clipped header, or a route that stopped resolving.\n` +
     `  Fix: serve a fresh build at PEASANT_REAL_ORIGIN (make build, then bin/peasant web start with the mock store), then fix the reported header, palette or route.`,

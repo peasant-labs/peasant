@@ -10,14 +10,16 @@
         this shell introduces (the notice's height variable and the live region's own
         announcements from the manifest) — so a stale server or another checkout fails before any
         capture;
-     2. for each page case below, in both themes, one at a time (the page under test is always the
-        active tab):
+     2. for each page case in testdata/shell-offline-cases.yaml (loaded strictly, every name
+        required), in both themes, one at a time (the page under test is always the active tab):
         a. connected: the header manifest holds and no notice shows, past the socket grace period;
         b. stopped: the server process is killed with the page open. Within a few seconds the page
            shows fairtrade's LocalOfflineBanner directly under the fixed header — pinned there where
            the screen has room, at the top of the page and scrolling with it elsewhere
-           (shell-header-manifest.mjs chromeClearance decides which, and that <main> clears the
-           header plus the notice): it says the peasant app isn't running on THIS computer and that
+           (shell-header-manifest.mjs chromeClearance decides which from the notice-pinned query
+           that app-shell-geometry.yaml records, and checks that <main> clears the header plus the
+           notice, that the root's scroll padding covers what stays fixed, and that <main> carries
+           no tabindex at rest): it says the peasant app isn't running on THIS computer and that
            the internet is fine, offers `peasant web start --port <this page's port>` and
            `try again`; the always-mounted live region says the manifest's `stopped` text; the
            header manifest still holds. Case-specific checks follow (below), then the frame is
@@ -27,14 +29,14 @@
         d. back: the server restarts on the same port, `try again` is pressed, the notice goes away
            with --app-notice-height cleared, and the live region says the manifest's `back` text.
 
-   The cases: home and a transcript at 1440×900 (the transcript must not scroll the document: its
-   own stream is the scroller); home at 390×844; home at 320×256 (400% zoom on 1280×1024: the notice
-   is taller than the screen, and the document must scroll `try again` into reach below the header);
-   the transcript at 320×256 (scrolled to the bottom, the transcript host keeps its floor —
-   min(24rem, screen height − header) — fully in view below the header, so an already-loaded
-   transcript stays readable); /share at 320×568 (the share page keeps the same floor); and home at
-   1440×700 scrolled down before the server stops (the pinned notice must appear inside the screen,
-   under the header, not above the scroll position).
+   The cases (the fixture's `check` field): home and a transcript at 1440×900 (plain; the transcript
+   must not scroll the document: its own stream is the scroller); home at 390×844 (plain); home at
+   320×256 (retry-reach: 400% zoom on 1280×1024, the notice is taller than the screen, and the
+   document must scroll `try again` into reach below the header); the transcript at 320×256 and
+   /share at 320×568 (floor: scrolled to the bottom, the full-height page keeps
+   min(24rem, screen height − header) fully in view below the header, so an already-loaded
+   transcript stays readable); and home at 1440×700 (scrolled: scrolled down before the server
+   stops, the pinned notice must appear inside the screen, under the header).
 
    The tour: the gate can only see a tour overlay (`[role=dialog][aria-label^="Product tour"]`),
    and the tour never starts on its own, so this check cannot tell a mounted tour provider from an
@@ -56,7 +58,8 @@
      PUPPETEER_CORE            explicit puppeteer-core module path (optional)
  */
 import { spawn } from 'node:child_process'
-import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync } from 'node:fs'
+import YAML from 'yaml'
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -65,7 +68,7 @@ import { applyDeterminism } from './determinism.mjs'
 import { SHELL_DEFAULT_PROJECT, SHELL_DEFAULT_SESSION, SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { assertServedBuild, shellProvenanceMarkers } from './served-build.mjs'
-import { chromeClearance, headerFailures, loadShellHeaderManifest, shippedItems, WEB_ROOT } from './shell-header-manifest.mjs'
+import { chromeClearance, headerFailures, loadNoticePinnedQuery, loadShellHeaderManifest, shippedItems, WEB_ROOT } from './shell-header-manifest.mjs'
 
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
 
@@ -81,24 +84,42 @@ const NOTICE = 'section[aria-label="peasant is not running"]'
 // fairtrade's banner button (LocalOfflineBanner renders `.cx-offline-retry` for `try again`).
 const RETRY = `${NOTICE} .cx-offline-retry`
 const LIVE = 'p[role="status"].sr-only'
-const TRANSCRIPT_HOST = '[data-tour="transcript-view"]'
 const EXPECTED_COMMAND = PORT === 8690 ? 'peasant web start' : `peasant web start --port ${PORT}`
 const TRANSCRIPT_PATH = `/projects/${SHELL_DEFAULT_PROJECT}/${SHELL_DEFAULT_SESSION}/`
 /** The floor a full-height page keeps below the header while the notice shows (globals.css --app-body-height). */
 const BODY_FLOOR_REM = 24
-const PAGES = Object.freeze([
-  { id: 'home', path: '/', body: 'main', width: 1440, height: 900 },
-  { id: 'transcript', path: TRANSCRIPT_PATH, body: '.txn-app', width: 1440, height: 900, singleScroller: true },
-  { id: 'home-mobile', path: '/', body: 'main', width: 390, height: 844 },
-  // 400% zoom on a 1280×1024 screen: the notice alone is taller than the viewport, so it must scroll.
-  { id: 'home-short', path: '/', body: 'main', width: 320, height: 256, retryReach: true },
-  // The same zoom on the transcript: the page scrolls the notice away and the transcript keeps its floor.
-  { id: 'transcript-short', path: TRANSCRIPT_PATH, body: '.txn-app', width: 320, height: 256, floor: TRANSCRIPT_HOST },
-  // A small phone on /share: the share page keeps its floor below the notice.
-  { id: 'share-mobile', path: '/share/', body: '.share-page', width: 320, height: 568, floor: '.share-page' },
-  // A roomy screen scrolled down before the app stops: the pinned notice must still be on screen.
-  { id: 'home-scrolled', path: '/', body: 'main', width: 1440, height: 700, scrollFirst: true },
-])
+const CASES_FIXTURE = join(HERE, 'testdata', 'shell-offline-cases.yaml')
+const REQUIRED_CASES = ['home', 'transcript', 'home-mobile', 'home-short', 'transcript-short', 'share-mobile', 'home-scrolled']
+const CHECKS = ['plain', 'retry-reach', 'floor', 'scrolled']
+
+// The page cases: strict YAML, known fields only, one check each, and every required name.
+const loadCases = () => {
+  const fail = (what) => { throw new Error(`${CASES_FIXTURE}: ${what}`) }
+  const document = YAML.parseDocument(readFileSync(CASES_FIXTURE, 'utf8'), { strict: true, uniqueKeys: true })
+  if (document.errors.length) fail(`invalid YAML: ${document.errors.map((error) => error.message).join('; ')}`)
+  const root = document.toJS()
+  if (!root || typeof root !== 'object' || Array.isArray(root) || Object.keys(root).join() !== 'cases' || !Array.isArray(root.cases)) fail('the root must be a mapping with exactly one `cases` list')
+  const allowed = ['name', 'path', 'body', 'width', 'height', 'check', 'floor', 'singleScroller']
+  const names = new Set()
+  const cases = root.cases.map((row, index) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) fail(`cases[${index}] must be a mapping`)
+    const unknown = Object.keys(row).filter((key) => !allowed.includes(key))
+    if (unknown.length) fail(`cases[${index}] has unknown fields: ${unknown.join(', ')}`)
+    for (const key of ['name', 'path', 'body', 'check']) if (typeof row[key] !== 'string' || row[key].trim() === '') fail(`cases[${index}].${key} must be a non-empty string`)
+    for (const key of ['width', 'height']) if (!Number.isInteger(row[key]) || row[key] <= 0) fail(`cases[${index}].${key} must be a positive integer`)
+    if (names.has(row.name)) fail(`cases[${index}] duplicates name ${row.name}`)
+    names.add(row.name)
+    if (!CHECKS.includes(row.check)) fail(`case ${row.name}: check must be one of ${CHECKS.join(', ')}, got ${JSON.stringify(row.check)}`)
+    if ((row.check === 'floor') !== ('floor' in row)) fail(`case ${row.name}: \`floor\` is required with check: floor and allowed only there`)
+    if ('floor' in row && (typeof row.floor !== 'string' || row.floor.trim() === '')) fail(`case ${row.name}: floor must be a selector`)
+    if ('singleScroller' in row && typeof row.singleScroller !== 'boolean') fail(`case ${row.name}: singleScroller must be a boolean`)
+    return { ...row, path: row.path.replaceAll('$TRANSCRIPT', TRANSCRIPT_PATH) }
+  })
+  const missing = REQUIRED_CASES.filter((name) => !names.has(name))
+  if (missing.length) fail(`required cases are missing: ${missing.join(', ')}`)
+  return cases
+}
+const PAGES = Object.freeze(loadCases())
 // The socket grace in the page (useLocalAppHealth's SOCKET_GRACE_MS) plus margin: a connected page
 // must still show no notice after this long.
 const PAST_GRACE_MS = 3000
@@ -112,6 +133,7 @@ if (!CHROME) {
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 const manifest = loadShellHeaderManifest()
+const PINNED_QUERY = loadNoticePinnedQuery()
 const shipped = shippedItems(manifest)
 const ANNOUNCE = manifest.announcements
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -195,7 +217,7 @@ const noticeState = async (page) => ({
       scrollY: window.scrollY,
     }
   }, { notice: NOTICE, retry: RETRY, live: LIVE }),
-  clearance: await page.evaluate(chromeClearance),
+  clearance: await page.evaluate(chromeClearance, PINNED_QUERY),
 })
 
 const waitFor = async (page, predicate, timeoutMs, what) => {
@@ -210,7 +232,7 @@ const waitFor = async (page, predicate, timeoutMs, what) => {
 }
 
 const assertHeaderHolds = async (page, theme, where) => {
-  const failures = [...await page.evaluate(headerFailures, manifest, { theme, shipped }), ...(await page.evaluate(chromeClearance)).failures]
+  const failures = [...await page.evaluate(headerFailures, manifest, { theme, shipped }), ...(await page.evaluate(chromeClearance, PINNED_QUERY)).failures]
   if (failures.length) throw new Error(`the ${theme} header at ${where} breaks the shell manifest: ${JSON.stringify(failures)}`)
 }
 
@@ -305,7 +327,7 @@ const drivePage = async (theme, spec, seen) => {
   gate.seen = seen
   const diagnostics = []
   page.on('pageerror', (e) => diagnostics.push('pageerr: ' + (e.stack || e.message)))
-  const where = `${theme}/${spec.id} (${spec.width}×${spec.height})`
+  const where = `${theme}/${spec.name} (${spec.width}×${spec.height})`
 
   // connected: the manifest holds and no notice shows, past the socket grace period
   const response = await page.goto(ORIGIN + spec.path, { waitUntil: 'networkidle0' })
@@ -316,7 +338,7 @@ const drivePage = async (theme, spec, seen) => {
   const connected = await noticeState(page)
   if (connected.shown || connected.noticeHeight || connected.live !== '') throw new Error(`the ${where} page shows or announces the offline notice while the app is running: ${JSON.stringify(connected)}`)
   let scrolledTo = 0
-  if (spec.scrollFirst) {
+  if (spec.check === 'scrolled') {
     scrolledTo = await scrollDown(page)
     if (scrolledTo < 100) throw new Error(`the ${where} page does not scroll (reached ${scrolledTo}px), so it cannot show a notice arriving on a scrolled page`)
   }
@@ -335,8 +357,8 @@ const drivePage = async (theme, spec, seen) => {
   if (state.tour) failures.push('a tour overlay is showing')
   if (!/^\d+(\.\d+)?px$/.test(state.noticeHeight)) failures.push(`--app-notice-height is ${JSON.stringify(state.noticeHeight)}`)
   if (spec.singleScroller && state.documentOverflow > 0) failures.push(`the document scrolls ${state.documentOverflow}px under the transcript's own scroller`)
-  if (spec.retryReach && state.clearance.notice + state.clearance.header <= spec.height) failures.push(`the short-screen case does not exercise a notice taller than the viewport (${state.clearance.header}+${state.clearance.notice}px in ${spec.height}px)`)
-  if (spec.scrollFirst) {
+  if (spec.check === 'retry-reach' && state.clearance.notice + state.clearance.header <= spec.height) failures.push(`the short-screen case does not exercise a notice taller than the viewport (${state.clearance.header}+${state.clearance.notice}px in ${spec.height}px)`)
+  if (spec.check === 'scrolled') {
     const top = state.clearance.noticeTop
     if (!state.clearance.pinnedViewport || !state.clearance.noticeFixed) failures.push(`the notice is not pinned on the roomy ${spec.width}×${spec.height} screen`)
     if (top === null || top < state.clearance.header - 1 || top + state.clearance.notice > spec.height + 1) failures.push(`on a page scrolled to ${Math.round(state.scrollY)}px the notice sits at ${top}px, not on screen under the ${state.clearance.header}px header`)
@@ -346,24 +368,30 @@ const drivePage = async (theme, spec, seen) => {
   await assertHeaderHolds(page, theme, `${spec.path} ${where}, stopped`)
 
   let note = ''
-  if (spec.retryReach) {
-    const reach = await assertRetryReachable(page)
-    if (!reach.ok) throw new Error(`on the ${where} screen \`try again\` cannot be scrolled into reach: ${reach.reason}`)
-    note = `, try again reached after scrolling ${Math.round(reach.scrollY)}px`
-    captured.push(await capture(page, gate, theme, spec.id, { keepScroll: true }))
-  } else if (spec.floor) {
-    const floor = await assertFloorKept(page, spec.floor)
-    if (!floor.ok) throw new Error(`on the ${where} screen the full-height page ${spec.floor} does not keep its floor in view below the header: ${floor.reason}`)
-    note = `, ${spec.floor} keeps ${Math.round(floor.height)}px (floor ${Math.round(floor.floor)}px) after scrolling ${Math.round(floor.scrollY)}px`
-    captured.push(await capture(page, gate, theme, spec.id, { keepScroll: true }))
-  } else if (spec.scrollFirst) {
-    note = `, pinned at ${Math.round(state.clearance.noticeTop)}px on a page scrolled to ${Math.round(state.scrollY)}px`
-    captured.push(await capture(page, gate, theme, spec.id, { keepScroll: true }))
-  } else {
-    captured.push(await capture(page, gate, theme, spec.id))
+  switch (spec.check) {
+    case 'retry-reach': {
+      const reach = await assertRetryReachable(page)
+      if (!reach.ok) throw new Error(`on the ${where} screen \`try again\` cannot be scrolled into reach: ${reach.reason}`)
+      note = `, try again reached after scrolling ${Math.round(reach.scrollY)}px`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    }
+    case 'floor': {
+      const floor = await assertFloorKept(page, spec.floor)
+      if (!floor.ok) throw new Error(`on the ${where} screen the full-height page ${spec.floor} does not keep its floor in view below the header: ${floor.reason}`)
+      note = `, ${spec.floor} keeps ${Math.round(floor.height)}px (floor ${Math.round(floor.floor)}px) after scrolling ${Math.round(floor.scrollY)}px`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    }
+    case 'scrolled':
+      note = `, pinned at ${Math.round(state.clearance.noticeTop)}px on a page scrolled to ${Math.round(state.scrollY)}px`
+      captured.push(await capture(page, gate, theme, spec.name, { keepScroll: true }))
+      break
+    default:
+      captured.push(await capture(page, gate, theme, spec.name))
   }
   const c = state.clearance
-  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px header (${c.noticeFixed ? 'pinned' : 'in the page flow'}), <main> clears ${c.mainPaddingTop}px, command "${state.command}"${note}`)
+  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px header (${c.noticeFixed ? 'pinned' : 'in the page flow'}), <main> clears ${c.mainPaddingTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
 
   // still down: a failed `try again` is announced, with the time of the check
   if (!await pressRetry(page)) throw new Error(`the ${where} notice has no \`try again\` to press`)
@@ -412,7 +440,7 @@ try {
 }
 
 if (!process.exitCode) {
-  console.log(`\nOK [shell-nav-default-gate.mjs] offline notice verified on ${ORIGIN}: shows under the header when the app stops (pinned where the screen has room, in the page flow elsewhere), names this computer, offers "${EXPECTED_COMMAND}" and try again (reachable at 320×256), keeps the transcript and /share readable on short screens, stays on screen on a scrolled page, announces the stop, a failed try again and the return, clears when the app is back, in ${SMOKE_THEMES.join(' + ')} across ${PAGES.map((p) => `${p.id} ${p.width}×${p.height}`).join(', ')}.`)
+  console.log(`\nOK [shell-nav-default-gate.mjs] offline notice verified on ${ORIGIN}: shows under the header when the app stops (pinned where the screen has room, in the page flow elsewhere), names this computer, offers "${EXPECTED_COMMAND}" and try again (reachable at 320×256), keeps the transcript and /share readable on short screens, stays on screen on a scrolled page, announces the stop, a failed try again and the return, clears when the app is back, in ${SMOKE_THEMES.join(' + ')} across ${PAGES.map((p) => `${p.name} ${p.width}×${p.height}`).join(', ')}.`)
   console.log('Offline frames:')
   for (const file of captured) console.log(`  ${file}`)
 }
