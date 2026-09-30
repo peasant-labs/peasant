@@ -48,7 +48,9 @@ export async function runPush(
     body: JSON.stringify({
       sessionIds,
       redactionLevel,
-      // The commons is public by design (the wizard frames it so).
+      // The visibility a first publish opens at: the commons is public by
+      // design (the wizard frames it so). It never changes a transcript that is
+      // already published; an update keeps the audience it has on the village.
       visibility: 'public',
     }),
   });

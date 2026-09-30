@@ -802,7 +802,11 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	// Create village client.
 	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 
-	// Resolve visibility.
+	// Resolve the visibility a first publish opens at. The Share wizard sends it
+	// on every push and has no control that changes the audience of a
+	// transcript already published, so it is never a visibility change: an
+	// update keeps the audience the transcript has on the village, which its
+	// owner may have shared with collectives there.
 	visibility := schema.Visibility("private")
 	if req.Visibility != "" {
 		visibility = schema.Visibility(req.Visibility)
@@ -842,8 +846,11 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Also push annotations (best-effort).
-	_, _ = push.PushAnnotations(r.Context(), client, h.store, false)
+	// Also push annotations (best-effort), but only the ones that belong to a
+	// session this request published. The user chose those sessions; an
+	// annotation on any other session, or on no session at all, is outside what
+	// they chose to share.
+	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, push.AnnotationSelection{}.WithinPublishedSessions(result), false, push.DefaultConcurrency)
 
 	// Build response.
 	resp := pushResponse{
