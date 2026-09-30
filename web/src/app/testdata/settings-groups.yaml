@@ -1,0 +1,30 @@
+# The groups of the settings page (/settings), in page order, and whether each
+# starts open. A required-name manifest: the mounted page must show exactly
+# these groups, in this order, each open or collapsed as listed. Adding,
+# removing, renaming, moving, or opening a group changes this file on purpose.
+requiredNames:
+  - village
+  - auto-publish
+  - redaction
+  - projects
+  - sources
+  - fields sent
+  - advanced
+  - files
+groups:
+  - name: village
+    open: true
+  - name: auto-publish
+    open: true
+  - name: redaction
+    open: true
+  - name: projects
+    open: true
+  - name: sources
+    open: false
+  - name: fields sent
+    open: false
+  - name: advanced
+    open: false
+  - name: files
+    open: false

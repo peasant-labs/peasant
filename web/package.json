@@ -28,6 +28,7 @@
     "visual:context-navigation": "node scripts/visual/context-navigation-shoot.mjs",
     "shoot:peasant": "node scripts/visual/peasant-shoot.mjs",
     "shoot:changes": "node scripts/visual/changes-shoot.mjs",
+    "shoot:settings": "node scripts/visual/settings-shoot.mjs",
     "boot:peasant": "node scripts/visual/boot-peasant.mjs",
     "boot:shell": "node scripts/visual/shell-nav-gate.mjs",
     "shell:offline": "node scripts/visual/shell-nav-default-gate.mjs",
