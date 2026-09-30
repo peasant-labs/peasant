@@ -1,0 +1,240 @@
+# The steps of one publish from the local web (POST /api/v1/sync/push with
+# collectives), run through push.SharePublish against a Village double that
+# keeps a transcript's collectives the way Village does: a curated collective
+# holds a share for its owner's approval, a collective the user is not a member
+# of skips the share without an error, a live share answers 409, and taking a
+# transcript back removes the collective's access.
+#
+# Every publish here runs with a configured default license and a configured
+# public visibility, and every case asserts that neither reached Village: a
+# publish from the local web opens private with no license, and the collectives
+# decide who can read it.
+#
+# Each case names:
+#   session   ready, or missing-model: a capture the consent scan refuses.
+#   before    collectives a first publish added before the case ran (optional).
+#   request   the collectives the case adds and removes, by alias.
+#   village   faults: unreachable, requiresNewerPeasant (Village's accepted
+#             contract window starts above this build's), failShare (aliases),
+#             failShareRead, and waitingPullRequest (a pull request waiting on
+#             the session's repository).
+#   expect    the session status and counts, each step in run order with its
+#             collective alias and outcome (reason: true when the step must say
+#             why), what the session error must contain, how many publish
+#             requests the case sent, and who can read the transcript after it,
+#             as alias: status.
+requiredNames:
+  - publish-only
+  - publish-and-add-two
+  - curated-waits-for-approval
+  - remove-revokes
+  - stops-after-publish
+  - village-unreachable
+  - scan-failed-blocks-publish
+  - already-shared-is-skipped
+  - not-a-member-is-skipped
+  - share-read-back-fails
+  - removal-is-not-blocked-by-a-failing-share
+  - village-refuses-this-contract
+
+collectives:
+  platform: {id: 11111111-1111-4111-8111-111111111111, acceptance: open, member: true}
+  research: {id: 22222222-2222-4222-8222-222222222222, acceptance: open, member: true}
+  review: {id: 33333333-3333-4333-8333-333333333333, acceptance: curated, member: true}
+  outsiders: {id: 44444444-4444-4444-8444-444444444444, acceptance: open, member: false}
+
+cases:
+  - name: publish-only
+    session: ready
+    request: {}
+    village: {waitingPullRequest: true}
+    expect:
+      status: new
+      counts: {new: 1, updated: 0, skipped: 0, errors: 0}
+      steps:
+        - {step: content, outcome: succeeded}
+      transcriptUrl: true
+      waitingPullRequests: 1
+      publishes: 1
+      audience: {}
+
+  - name: publish-and-add-two
+    session: ready
+    request: {add: [platform, research]}
+    village: {}
+    expect:
+      status: new
+      counts: {new: 1, updated: 0, skipped: 0, errors: 0}
+      steps:
+        - {step: content, outcome: succeeded}
+        - {step: add_collective, collective: platform, outcome: succeeded}
+        - {step: add_collective, collective: research, outcome: succeeded}
+      transcriptUrl: true
+      publishes: 1
+      audience: {platform: approved, research: approved}
+
+  - name: curated-waits-for-approval
+    session: ready
+    request: {add: [review, platform]}
+    village: {}
+    expect:
+      status: new
+      counts: {new: 1, updated: 0, skipped: 0, errors: 0}
+      steps:
+        - {step: content, outcome: succeeded}
+        - {step: add_collective, collective: review, outcome: pending_approval}
+        - {step: add_collective, collective: platform, outcome: succeeded}
+      transcriptUrl: true
+      publishes: 1
+      audience: {review: pending, platform: approved}
+
+  - name: remove-revokes
+    session: ready
+    before: [platform, research]
+    request: {remove: [platform]}
+    village: {}
+    expect:
+      status: skipped
+      counts: {new: 0, updated: 0, skipped: 1, errors: 0}
+      steps:
+        - {step: content, outcome: skipped, reason: true}
+        - {step: remove_collective, collective: platform, outcome: succeeded}
+      transcriptUrl: true
+      publishes: 0
+      audience: {research: approved}
+
+  - name: stops-after-publish
+    session: ready
+    request: {add: [platform, research]}
+    village: {failShare: [platform]}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: succeeded}
+        - {step: add_collective, collective: platform, outcome: failed, reason: true}
+        - {step: add_collective, collective: research, outcome: not_attempted}
+      errorContains:
+        - "stopped at sharing with collective 11111111-1111-4111-8111-111111111111"
+        - "Village kept the transcript at https://village.example/transcripts/"
+        - "not attempted: share with 22222222-2222-4222-8222-222222222222"
+      transcriptUrl: true
+      publishes: 1
+      audience: {}
+
+  - name: village-unreachable
+    session: ready
+    request: {add: [platform]}
+    village: {unreachable: true}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: failed, reason: true}
+        - {step: add_collective, collective: platform, outcome: not_attempted}
+      errorContains:
+        - "stopped at sending the content"
+        - "network failure"
+        - "Village kept nothing of this session"
+        - "not attempted: share with 11111111-1111-4111-8111-111111111111"
+      publishes: 0
+      audience: {}
+
+  - name: scan-failed-blocks-publish
+    session: missing-model
+    request: {add: [platform]}
+    village: {}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: failed, reason: true}
+        - {step: add_collective, collective: platform, outcome: not_attempted}
+      errorContains:
+        - "stopped at sending the content"
+        - "Village kept nothing of this session"
+      publishes: 0
+      audience: {}
+
+  - name: already-shared-is-skipped
+    session: ready
+    before: [platform]
+    request: {add: [platform]}
+    village: {}
+    expect:
+      status: skipped
+      counts: {new: 0, updated: 0, skipped: 1, errors: 0}
+      steps:
+        - {step: content, outcome: skipped, reason: true}
+        - {step: add_collective, collective: platform, outcome: skipped, reason: true}
+      transcriptUrl: true
+      publishes: 0
+      audience: {platform: approved}
+
+  - name: not-a-member-is-skipped
+    session: ready
+    request: {add: [outsiders]}
+    village: {}
+    expect:
+      status: new
+      counts: {new: 1, updated: 0, skipped: 0, errors: 0}
+      steps:
+        - {step: content, outcome: succeeded}
+        - {step: add_collective, collective: outsiders, outcome: skipped, reason: true}
+      transcriptUrl: true
+      publishes: 1
+      audience: {}
+
+  - name: share-read-back-fails
+    session: ready
+    request: {add: [platform]}
+    village: {failShareRead: true}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: succeeded}
+        - {step: add_collective, collective: platform, outcome: failed, reason: true}
+      errorContains:
+        - "reading back whether the collective accepted it failed"
+      transcriptUrl: true
+      publishes: 1
+      audience: {platform: approved}
+
+  - name: removal-is-not-blocked-by-a-failing-share
+    session: ready
+    before: [research]
+    request: {add: [platform], remove: [research]}
+    village: {failShare: [platform]}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: skipped, reason: true}
+        - {step: remove_collective, collective: research, outcome: succeeded}
+        - {step: add_collective, collective: platform, outcome: failed, reason: true}
+      errorContains:
+        - "stopped at sharing with collective 11111111-1111-4111-8111-111111111111"
+        - "applied: take back from 22222222-2222-4222-8222-222222222222"
+      transcriptUrl: true
+      publishes: 0
+      audience: {}
+
+  - name: village-refuses-this-contract
+    session: ready
+    before: [platform]
+    request: {remove: [platform], add: [research]}
+    village: {requiresNewerPeasant: true}
+    expect:
+      status: error
+      counts: {new: 0, updated: 0, skipped: 0, errors: 1}
+      steps:
+        - {step: content, outcome: failed, reason: true}
+        - {step: remove_collective, collective: platform, outcome: not_attempted}
+        - {step: add_collective, collective: research, outcome: not_attempted}
+      errorContains:
+        - "stopped at sending the content: the push stopped before it sent this session"
+        - "Village kept the transcript at https://village.example/transcripts/"
+        - "not attempted: take back from 11111111-1111-4111-8111-111111111111, share with 22222222-2222-4222-8222-222222222222"
+      publishes: 0
+      audience: {platform: approved}
