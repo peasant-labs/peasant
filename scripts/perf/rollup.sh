@@ -23,7 +23,7 @@
 #
 # Units: every flat value and the header total are normalised to seconds. The
 # parser accepts ns, us (and the micro sign spellings), ms, and s, each
-# optionally carrying a k or M prefix. Any other unit fails the run loudly
+# optionally carrying a k, M, or G prefix. Any other unit fails the run loudly
 # instead of being read as a bare number of seconds.
 set -euo pipefail
 
@@ -52,7 +52,8 @@ for f in "$@"; do
         p = substr(rest, 1, 1)
         if (p == "k") prefix = 1000
         else if (p == "M") prefix = 1000000
-        else prefix = 1000000000
+        else if (p == "G") prefix = 1000000000
+        else fail("unknown unit prefix " p " in " u)
         rest = substr(rest, 2)
       }
       if (rest == "ns") return prefix * 1e-9
