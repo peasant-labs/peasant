@@ -9,7 +9,7 @@ interface TurnTouchedFilesProps {
    * raw wire paths to repo-relative paths); caller skips empty.
    */
   touches: TurnFileTouches;
-  /** The file-scope path, when active — its rows render underlined. */
+  /** The file-scope path, when active — its row is marked current (bold, aria-current). */
   activeFile?: string;
   className?: string;
 }
@@ -63,6 +63,7 @@ function FileGroup({
   kind: 'edit' | 'read';
   activeFile?: string;
 }) {
+  const isActive = (filePath: string) => !!activeFile && pathsMatch(activeFile, filePath);
   return (
     <div className="min-w-0">
       <p className="v2-eyebrow">{label}</p>
@@ -70,10 +71,11 @@ function FileGroup({
         {files.map((filePath) => (
           <li
             key={filePath}
+            aria-current={isActive(filePath) ? 'true' : undefined}
             className={cn(
               'break-all font-mono text-[12px] leading-5',
               kind === 'read' ? 'text-ink-3' : 'text-ink',
-              !!activeFile && pathsMatch(activeFile, filePath) && 'underline',
+              isActive(filePath) && 'font-semibold text-ink',
             )}
           >
             {filePath}

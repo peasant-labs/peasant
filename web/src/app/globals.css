@@ -8,9 +8,10 @@
    ============================================ */
 
 :root {
-  /* The fixed top chrome: the one-row header (fairtrade's --nav-h at every
-     width) plus the local offline notice while it shows. The notice writes its
-     own measured height to --app-notice-height and clears it when it goes. */
+  /* Where page content starts: the fixed one-row header (fairtrade's --nav-h at
+     every width) plus the local offline notice, which sits under it at the top
+     of the page while it shows. The notice writes its own measured height to
+     --app-notice-height and clears it when it goes. */
   --app-header-height: calc(var(--nav-h) + var(--app-notice-height, 0px));
 
   /* ─── v2 semantic palette — app-supplementary tokens (dark default) ───── */

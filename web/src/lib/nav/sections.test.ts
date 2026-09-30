@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LOCAL_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
 import {
+  headerNavSections,
   isSectionActive,
   LOCAL_SECTIONS,
   NAV_SECTIONS,
@@ -25,6 +26,8 @@ describe('local app sections', () => {
   it('link the header only to home until the settings page ships', () => {
     expect(NAV_SECTIONS.map((section) => [section.id, section.href])).toEqual([['home', '/']]);
     expect(visibleNavSections(new Set(['code_map_navigation_v1'])).map((section) => section.id)).toEqual(['home']);
+    // Home is the brand link, so the header carries no section link beside it yet.
+    expect(headerNavSections(new Set(['code_map_navigation_v1']))).toEqual([]);
   });
 
   it('keep analytics, changes and the code map on their routes, by URL only', () => {

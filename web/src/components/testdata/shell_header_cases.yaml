@@ -1,0 +1,28 @@
+# Where the component tests hold the local shell manifest
+# (scripts/visual/testdata/shell-header.yaml). The loaders in
+# TopNavbar.test.tsx and CommandPalette.test.tsx require every name below.
+#
+# pages: pathnames the header must look the same on — home, each route-only
+#   section, a transcript, and the canonical /share route.
+# paletteCapabilities: advertised capability sets the palette must hold the
+#   manifest's palette rules under; the code-map token must not bring a
+#   route-only section back.
+pages:
+  - name: home
+    pathname: /
+  - name: analytics
+    pathname: /analytics
+  - name: changes
+    pathname: /review/peasant
+  - name: code-map
+    pathname: /map/peasant
+  - name: transcript
+    pathname: /projects/peasant/sess-0001
+  - name: share
+    pathname: /share/
+paletteCapabilities:
+  - name: none
+    tokens: []
+  - name: code-map-token
+    tokens:
+      - code_map_navigation_v1

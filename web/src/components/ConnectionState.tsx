@@ -22,7 +22,7 @@ export const CONNECTION = {
   /** Content-area copy when disconnection blocks a view (initial or dropped). */
   blockedTitle: "waiting for the peasant app",
   blockedBody:
-    "It runs on this computer; nothing has left your machine. This page comes back on its own.",
+    "It runs on this computer; nothing has left your machine. This page fills in again once the app is back.",
   /** One-line note when stale data is still on screen after a drop. */
   staleNote: "connection lost; showing the last loaded data.",
 } as const;
@@ -57,8 +57,9 @@ export function Disconnected({
 
 /**
  * A single, plain disconnected strip for pages whose body is a skeleton/list
- * (not a teach state) — e.g. the Changes list. Returns null while connected, so
- * it never doubles up. One strip,
+ * (not a teach state) — e.g. the Changes list. Returns null while connected.
+ * While the app is stopped it sits under the page-level offline notice and
+ * speaks only for this page's data. One strip,
  * keyed on whether data ever loaded — replaces the old stacking
  * "Waiting for WebSocket connection…" + raw `wsError` strips.
  */

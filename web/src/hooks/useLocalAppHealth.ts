@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useConnectionState } from '@/contexts/WebSocketContext';
+import { getApiBaseUrl } from '@/lib/api/base';
 
 /** The local app's existing health route. A 2xx answer means the app is running. */
 export const LOCAL_HEALTH_ROUTE = '/api/v1/health';
@@ -31,7 +32,7 @@ async function healthAnswers(): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
-    const response = await fetch(LOCAL_HEALTH_ROUTE, { cache: 'no-store', signal: controller.signal });
+    const response = await fetch(`${getApiBaseUrl()}${LOCAL_HEALTH_ROUTE}`, { cache: 'no-store', signal: controller.signal });
     return response.ok;
   } catch {
     return false;
@@ -47,10 +48,12 @@ async function healthAnswers(): Promise<boolean> {
  * - The socket drops → check the health route at once. No answer means the app
  *   stopped, and the page says so right away.
  * - The route answers but the socket stays down past SOCKET_GRACE_MS → the page
- *   can no longer update, and says so too.
- * - While offline the page checks again every OFFLINE_RECHECK_MS. When the route
- *   answers, the socket reconnects at once instead of waiting out its backoff;
- *   the notice clears when the socket is back.
+ *   can no longer update, and says so too. A blip reconnects inside the grace
+ *   through the provider's own backoff, so it shows nothing.
+ * - While offline the page checks again every OFFLINE_RECHECK_MS (and on
+ *   `try again`). When the route answers, the socket reconnects at once instead
+ *   of waiting out its backoff; the notice clears when the socket is back.
+ * - A connected socket always wins: the app is evidently running.
  */
 export function useLocalAppHealth(): LocalAppHealth {
   const { connected, reconnect } = useConnectionState();
@@ -58,51 +61,40 @@ export function useLocalAppHealth(): LocalAppHealth {
   const [healthFailed, setHealthFailed] = useState(false);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [retrying, setRetrying] = useState(false);
-  const mounted = useRef(false);
-  const connectedRef = useRef(connected);
-  connectedRef.current = connected;
+
+  // Only the offline paths reconnect on an answer. A fresh drop leaves the
+  // reconnect to the provider's backoff, so a socket that opens and closes at
+  // once cannot be retried faster than that backoff.
+  const check = useCallback(
+    async (reconnectIfAnswered: boolean) => {
+      const answered = await healthAnswers();
+      setCheckedAt(new Date());
+      setHealthFailed(!answered);
+      if (answered && reconnectIfAnswered) reconnect();
+    },
+    [reconnect],
+  );
 
   useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  const check = useCallback(async () => {
-    const answered = await healthAnswers();
-    if (!mounted.current) return;
-    setCheckedAt(new Date());
-    // A socket that connected while the check was in flight wins: the app is
-    // evidently running, so a late failure must not raise the notice.
-    setHealthFailed(!answered && !connectedRef.current);
-    if (answered) reconnect();
-  }, [reconnect]);
-
-  useEffect(() => {
-    if (connected) {
-      setSocketDown(false);
-      setHealthFailed(false);
-      return;
-    }
-    void check();
+    setSocketDown(false);
+    setHealthFailed(false);
+    if (connected) return;
+    void check(false);
     const grace = setTimeout(() => setSocketDown(true), SOCKET_GRACE_MS);
     return () => clearTimeout(grace);
   }, [connected, check]);
 
-  const offline = socketDown || healthFailed;
+  const offline = !connected && (socketDown || healthFailed);
 
   useEffect(() => {
     if (!offline) return;
-    const recheck = setInterval(() => void check(), OFFLINE_RECHECK_MS);
+    const recheck = setInterval(() => void check(true), OFFLINE_RECHECK_MS);
     return () => clearInterval(recheck);
   }, [offline, check]);
 
   const retry = useCallback(() => {
     setRetrying(true);
-    void check().finally(() => {
-      if (mounted.current) setRetrying(false);
-    });
+    void check(true).finally(() => setRetrying(false));
   }, [check]);
 
   return { offline, checkedAt, retrying, retry };

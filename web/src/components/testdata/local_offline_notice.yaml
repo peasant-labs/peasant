@@ -3,13 +3,23 @@
 # mock fetch — step by step on fake timers (LocalOfflineNotice.test.tsx).
 #
 # Steps, in order:
-#   health: up | down     how the health route answers from now on
+#   health: up | down | error | hang
+#                         how the health route answers from now on: 200, a
+#                         refused connection, a 503, or no answer at all
 #   socket: open | close  the newest socket opens, or closes (a closed socket
-#                         schedules the provider's own reconnect)
+#                         schedules the provider's own reconnect: 1 s, then 2 s,
+#                         then 4 s …)
 #   wait: <ms>            advance the clock; also settles pending checks
 #   retry: true           press `try again` on the notice
+#   focus: retry          put keyboard focus on `try again`
 #   expect: shown | hidden
+#   checkedAt: <ms>       the notice's `last checked` time is this many ms after
+#                         the page mounted
 #   sockets: <n>          how many sockets the provider has opened so far
+#   healthChecks: <n>     how many health requests the page has made so far
+#   announce: stopped | back | none
+#                         what the always-mounted live region says now
+#   focused: main         keyboard focus is on the page body
 #
 # startCommands: the command the notice offers for the port the page came
 # from. `peasant web start` listens on 8690 unless told otherwise.
@@ -27,6 +37,8 @@ cases:
       - socket: open
       - wait: 30000
       - expect: hidden
+      - healthChecks: 1
+      - announce: none
 
   - name: first-connect-within-grace-shows-nothing
     steps:
@@ -45,6 +57,29 @@ cases:
       - socket: close
       - wait: 0
       - expect: shown
+      - checkedAt: 0
+      - announce: stopped
+
+  - name: error-status-counts-as-stopped
+    steps:
+      - health: up
+      - socket: open
+      - health: error
+      - socket: close
+      - wait: 0
+      - expect: shown
+
+  - name: unanswered-check-times-out
+    steps:
+      - health: up
+      - socket: open
+      - health: hang
+      - socket: close
+      - wait: 2000
+      - expect: shown
+      - checkedAt: 0
+      - wait: 1000
+      - checkedAt: 3000
 
   - name: socket-blip-reconnects-without-notice
     steps:
@@ -52,8 +87,10 @@ cases:
       - socket: open
       - socket: close
       - wait: 0
-      - sockets: 2
+      - sockets: 1
       - expect: hidden
+      - wait: 1000
+      - sockets: 2
       - socket: open
       - wait: 30000
       - expect: hidden
@@ -68,7 +105,30 @@ cases:
       - wait: 100
       - expect: shown
 
-  - name: notice-clears-when-app-returns
+  - name: recheck-reconnects-at-once
+    steps:
+      - health: up
+      - socket: open
+      - health: down
+      - socket: close
+      - wait: 0
+      - expect: shown
+      - healthChecks: 2
+      - wait: 1000
+      - socket: close
+      - wait: 2000
+      - socket: close
+      - sockets: 3
+      - health: up
+      - wait: 2000
+      - healthChecks: 3
+      - sockets: 4
+      - socket: open
+      - wait: 0
+      - expect: hidden
+      - announce: back
+
+  - name: returning-socket-clears-a-failed-check
     steps:
       - health: up
       - socket: open
@@ -77,11 +137,25 @@ cases:
       - wait: 0
       - expect: shown
       - wait: 1000
-      - socket: close
-      - health: up
-      - wait: 5000
       - socket: open
       - wait: 0
+      - expect: hidden
+      # The next drop starts clean: the old failure must not raise the notice
+      # while the new check is still out.
+      - health: hang
+      - socket: close
+      - wait: 0
+      - expect: hidden
+
+  - name: late-failure-loses-to-reconnected-socket
+    steps:
+      - health: up
+      - socket: open
+      - health: hang
+      - socket: close
+      - wait: 1000
+      - socket: open
+      - wait: 2500
       - expect: hidden
 
   - name: try-again-reconnects-at-once
@@ -93,9 +167,12 @@ cases:
       - wait: 0
       - expect: shown
       - health: up
+      - focus: retry
       - retry: true
       - wait: 0
       - sockets: 2
       - socket: open
       - wait: 0
       - expect: hidden
+      - announce: back
+      - focused: main

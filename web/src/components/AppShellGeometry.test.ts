@@ -23,6 +23,9 @@ const fixture = YAML.parse(
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
+/** Every place that clears the top chrome; a consumer row deleted from the fixture fails here. */
+const REQUIRED_CONSUMERS = ['src/app/layout.tsx', 'src/components/session-detail/v2/SessionDetailV2.tsx'];
+
 describe('app shell geometry', () => {
   it('declares the top chrome height once: the header row plus the offline notice', () => {
     const globals = source('src/app/globals.css');
@@ -38,6 +41,8 @@ describe('app shell geometry', () => {
   });
 
   it('clears the chrome with the same height in the main offset and the transcript bound', () => {
+    const paths = fixture.consumers.map((consumer) => consumer.path);
+    expect(REQUIRED_CONSUMERS.filter((path) => !paths.includes(path))).toEqual([]);
     for (const consumer of fixture.consumers) {
       const text = source(consumer.path);
       expect(text, `${consumer.path} must consume the canonical shell height`).toContain(consumer.token);
