@@ -265,7 +265,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			if !bytes.Contains(statusBody, []byte(`"syncStatus":"synced"`)) {
 				t.Fatalf("publication receipt did not synchronize status: %s; CLI: %s %s", statusBody, out, stderr)
 			}
-			request := fmt.Sprintf(`{"sessionIds":[%q],"visibility":"private"}`, id)
+			request := fmt.Sprintf(`{"sessionIds":[%q]}`, id)
 			resp, err := http.Post(baseURL+defaults.RouteSyncPush.String(), "application/json", strings.NewReader(request))
 			if err != nil {
 				t.Fatal(err)
