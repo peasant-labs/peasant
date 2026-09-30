@@ -74,6 +74,17 @@ cases:
     update: {door: cli}
     expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: group, villageLicense: CC-BY-4.0}
 
+  # A transcript published public, as the Share wizard used to publish, stays
+  # public when the web door updates it.
+  - name: web-update-keeps-public
+    configured: {visibility: private, license: none}
+    first: {door: cli, flags: [--visibility, public]}
+    expectFirst: {failed: false, published: true, license: none, visibilityUpdates: [public], visibility: public, villageLicense: none}
+    ownerShares: false
+    change: content
+    update: {door: web}
+    expectUpdate: {failed: false, published: true, license: none, visibilityUpdates: [], visibility: public, villageLicense: none}
+
   # The receipt says public and the configuration says private. Neither is a
   # reason to upload an unchanged session, and the hook must not narrow it.
   - name: hook-leaves-an-unchanged-public-publication-alone

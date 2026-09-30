@@ -3,6 +3,7 @@
 # from the fixture fails until it is removed here too.
 requiredNames:
   - web-update-keeps-collective-only
+  - web-update-keeps-public
   - hook-update-keeps-collective-only
   - cli-update-keeps-collective-only
   - hook-leaves-an-unchanged-public-publication-alone
