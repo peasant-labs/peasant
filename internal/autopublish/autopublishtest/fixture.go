@@ -89,6 +89,9 @@ type Case struct {
 	} `yaml:"config"`
 	// Flags are extra push flags (push).
 	Flags []string `yaml:"flags"`
+	// Again, when set, pushes a second time with these flags after the
+	// first push, which runs without Flags (push).
+	Again []string `yaml:"again"`
 	// FailShare names collectives the Village double refuses to share with
 	// (push).
 	FailShare []string `yaml:"failShare"`

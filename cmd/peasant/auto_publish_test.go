@@ -199,6 +199,12 @@ func TestAutoPublishPush(t *testing.T) {
 				w.village.FailShare(fixture.Collectives[alias].ID)
 			}
 			stdout, stderr, err := w.push(t, c.Flags...)
+			if c.Again != nil {
+				if err != nil {
+					t.Fatalf("the first push failed: %v\n%s%s", err, stdout, stderr)
+				}
+				stdout, stderr, err = w.push(t, c.Again...)
+			}
 			assertErrorContains(t, err, c.Expect.ErrorContains, stdout+stderr)
 
 			publishes := w.village.Publishes()
