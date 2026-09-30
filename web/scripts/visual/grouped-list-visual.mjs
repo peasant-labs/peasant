@@ -27,17 +27,18 @@ const THEMES = ['dark', 'light']
 // Feature bytes only this slice introduces. The app markers live in the app
 // chunk; the fairtrade primitive class lives in the design-system chunk, so
 // each signature group is located in whichever served chunk carries it, and
-// every group must also appear verbatim in the embedded binary. The retained
-// flat-disclosure group is the marker added by the cross-project filter/pager
-// fix: an export that predates that fix carries the older grouped markers but
-// not this one, so a stale build can no longer satisfy provenance.
+// every group must also appear verbatim in the embedded binary. On Home the
+// grouped list and the flat table are retained views under "more ways to
+// browse", each opened through its own disclosure; the retained-view group is
+// the marker of those disclosures, so an export from before the session list
+// can no longer satisfy provenance.
 const APP_FEATURE_BYTES = ['data-grouped-sessions-section', 'data-helper-member-paging']
 const FT_FEATURE_BYTES = ['helper-group-trigger']
-const FLAT_FEATURE_BYTES = ['data-flat-sessions-disclosure']
+const RETAINED_VIEW_BYTES = ['data-browse-view', 'sessions with their helper threads']
 const FEATURE_GROUPS = [
   { label: 'grouped-list app', signatures: APP_FEATURE_BYTES },
   { label: 'fairtrade helper-group', signatures: FT_FEATURE_BYTES },
-  { label: 'retained flat disclosure', signatures: FLAT_FEATURE_BYTES },
+  { label: 'retained home views', signatures: RETAINED_VIEW_BYTES },
 ]
 const FEATURE_BYTES = FEATURE_GROUPS.flatMap((group) => group.signatures)
 const PROJECT_HASH = 'a'.repeat(64)
@@ -124,6 +125,10 @@ function installMocks(page, diagnostics) {
     if (url.origin !== ORIGIN) return void request.continue().catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/config/mock') return void request.respond(response({ enabled: false })).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/projects/summary') return void request.respond(response(PROJECT_SUMMARY)).catch((e) => diagnostics.push(e.message))
+    // Home's session list reads the sync list from the real store; this harness
+    // shoots the retained views only, so it answers with no sessions and no
+    // real session ever reaches the page.
+    if (url.pathname === '/api/v1/sync/sessions') return void request.respond(response({ sessions: [] })).catch((e) => diagnostics.push(e.message))
     if (url.pathname === '/api/v1/sessions') {
       if (url.searchParams.get('view') === 'grouped') return void request.respond(response(GROUPED_PAYLOAD)).catch((e) => diagnostics.push(e.message))
       return void request.respond(response({ sessions: [] })).catch((e) => diagnostics.push(e.message))
@@ -146,6 +151,16 @@ async function capture(page, gate, file, selector, label) {
   await gate.assert(label, file, { sel: selector, where: 'grouped-list-visual.mjs' })
 }
 
+async function openRetainedView(page, label, theme) {
+  const opened = await page.waitForFunction((wanted) => {
+    const button = [...document.querySelectorAll('button[aria-expanded]')].find((candidate) => candidate.textContent.trim() === wanted)
+    if (!button) return false
+    if (button.getAttribute('aria-expanded') !== 'true') button.click()
+    return true
+  }, { timeout: 15000 }, label).catch(() => null)
+  if (!opened) fail(`${theme}: the retained view "${label}" never offered its disclosure`)
+}
+
 async function runTheme(page, theme, gate) {
   const diagnostics = []
   page.removeAllListeners('request')
@@ -160,6 +175,8 @@ async function runTheme(page, theme, gate) {
   const responsePage = await page.goto(`${ORIGIN}/`, { waitUntil: 'domcontentloaded' })
   if (responsePage?.status() !== 200) fail(`${theme}: HTTP ${responsePage?.status()}`)
 
+  // Home keeps the grouped list as a retained view: open it through its disclosure.
+  await openRetainedView(page, 'sessions with their helper threads', theme)
   await page.waitForSelector('[data-grouped-sessions-section]', { visible: true, timeout: 15000 }).catch(() => fail(`${theme}: the grouped session section never mounted`))
   const base = await page.evaluate(() => {
     const body = document.body.getBoundingClientRect()
@@ -234,9 +251,7 @@ async function runTheme(page, theme, gate) {
 
   // The retained flat flow: its own disclosure opens the unchanged cross-project
   // table with the filter box and the top-level pager, beside the grouped list.
-  await page.evaluate(() => {
-    document.querySelector('[data-flat-sessions-disclosure] button')?.click()
-  })
+  await openRetainedView(page, 'filter and page through every session', theme)
   await page.waitForSelector('[data-tour="all-sessions"]', { visible: true, timeout: 10000 }).catch(() => fail(`${theme}: the retained flat session table never mounted`))
   const flat = await page.evaluate(() => {
     const section = document.querySelector('[data-tour="all-sessions"]')
@@ -257,7 +272,7 @@ async function runTheme(page, theme, gate) {
     fail(`${theme}: retained flat filter probe ${JSON.stringify(flat)}`)
   }
   if (!flat.groupedStillMounted) fail(`${theme}: opening the flat table unmounted the grouped list`)
-  await capture(page, gate, join(OUT, theme, 'home-flat.png'), '[data-flat-sessions-disclosure]', `${theme}/home-flat`)
+  await capture(page, gate, join(OUT, theme, 'home-flat.png'), '[data-browse-view="flat"]', `${theme}/home-flat`)
 
   // The project route mounts the SAME grouped list scoped to one project: the
   // request must carry the project filter, and the response rows must render.
