@@ -38,6 +38,31 @@ func splitSlugRoot(encoded string) (root, rest string, ok bool) {
 	return "", "", false
 }
 
+// hasAbsolutePathForm reports whether p is an absolute path in either the POSIX
+// or the Windows form, judged by p's own shape rather than by the host OS.
+//
+// filepath.IsAbs cannot answer this question: it answers for the RUNNING
+// platform, and a recording is routinely read on a different OS than the one
+// that produced it. filepath.IsAbs("C:\\work") is false on unix and
+// filepath.IsAbs("/work") is false on Windows, so either host would reject the
+// other's absolute paths as relative.
+//
+// A bare "C:work" is drive-RELATIVE on Windows and is refused, for the same
+// reason splitSlugRoot keeps a separator on the root it returns: a drive letter
+// alone does not anchor a path.
+func hasAbsolutePathForm(p string) bool {
+	// POSIX absolute, and also the forward-slash spelling of a Windows UNC path
+	// ("//server/share").
+	if strings.HasPrefix(p, "/") {
+		return true
+	}
+	// Windows UNC ("\\server\share").
+	if strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return len(p) >= 3 && isASCIIDriveLetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\')
+}
+
 // isASCIIDriveLetter reports whether b is a single-letter Windows drive
 // designator (A-Z or a-z).
 func isASCIIDriveLetter(b byte) bool {
