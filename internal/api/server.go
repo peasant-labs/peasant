@@ -152,6 +152,12 @@ func NewServer(cfg ServerConfig) *Server {
 // and sets up routes. After Listen returns, Addr() returns the bound address.
 // Call Serve to start accepting connections.
 func (s *Server) Listen(ctx context.Context) error {
+	// The settings catalog derives from the Config type and the `peasant
+	// config` registry. A defect there is a build defect: fail the start
+	// rather than the first settings request.
+	if _, err := settingCatalog(); err != nil {
+		return fmt.Errorf("settings catalog: %w", err)
+	}
 	mux := http.NewServeMux()
 
 	// Grouped list views are opt-in over the existing flat list and search
@@ -202,8 +208,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	// Sync/push routes
 	sh := &syncHandler{
 		store:       s.cfg.Store,
-		config:      s.cfg.Config,
-		live:        s.live,
+		config:      s.live,
 		scopeIssuer: s,
 		configHome:  s.cfg.ConfigHome,
 		dataHome:    s.cfg.DataHome,
@@ -240,7 +245,7 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// Auto-publish rules: save or remove a rule, and install its hooks in one
 	// recorded repository.
-	aph := &autoPublishHandler{store: s.cfg.Store, config: s.cfg.Config, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
+	aph := &autoPublishHandler{store: s.cfg.Store, config: s.live, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
 	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
 	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
 	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)

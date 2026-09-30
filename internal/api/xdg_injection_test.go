@@ -36,7 +36,7 @@ func (hs testXDGHomes) dbPath() string {
 func (hs testXDGHomes) handler(db *store.Store, cfg *config.Config) *syncHandler {
 	return &syncHandler{
 		store:      db,
-		config:     cfg,
+		config:     newLiveConfig(cfg),
 		configHome: hs.Config,
 		dataHome:   hs.Data,
 		stateHome:  hs.State,

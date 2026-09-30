@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -36,22 +37,17 @@ type settingSpec struct {
 }
 
 // settingChoices names the keys whose value is one of a closed menu, and the
-// menu. Every other string key is free text. The redaction level offers only
-// the offered levels: a stored minimal still reads back, outside the menu.
+// menu: the values a user may choose, from each type's own closed set. A
+// stored value the menu leaves out still reads back: minimal, which applies as
+// standard, and maximum or individual, which apply nothing.
 var settingChoices = map[string]func() []string{
-	"redaction.level": func() []string { return stringsOf(config.OfferedRedactionLevels) },
-	"push.method": func() []string {
-		return stringsOf([]config.PushMethod{config.PushMethodAll, config.PushMethodBySource, config.PushMethodIndividual})
-	},
-	"push.visibility": func() []string { return stringsOf(schema.AllVisibilities) },
-	"push.sharePreference": func() []string {
-		return stringsOf([]config.SharePreference{config.SharePreferenceKeepLocal, config.SharePreferenceShareLater})
-	},
-	"push.license": func() []string { return append([]string{""}, stringsOf(schema.AllLicenses)...) },
-	"selection.mode": func() []string {
-		return stringsOf([]config.SelectionMode{config.SelectionModeAll, config.SelectionModeSelected})
-	},
-	"display.theme": func() []string { return stringsOf([]config.Theme{config.ThemeDark, config.ThemeLight}) },
+	"redaction.level":      func() []string { return stringsOf(config.OfferedRedactionLevels) },
+	"push.method":          func() []string { return stringsOf(config.OfferedPushMethods) },
+	"push.visibility":      func() []string { return stringsOf(schema.AllVisibilities) },
+	"push.sharePreference": func() []string { return stringsOf(config.AllSharePreferences) },
+	"push.license":         func() []string { return append([]string{""}, stringsOf(schema.AllLicenses)...) },
+	"selection.mode":       func() []string { return stringsOf(config.AllSelectionModes) },
+	"display.theme":        func() []string { return stringsOf(config.AllThemes) },
 }
 
 // settingReadOnly names the keys, or the key prefixes ending in a dot, that
@@ -105,6 +101,9 @@ func buildSettingCatalog() ([]settingSpec, error) {
 		spec := settingSpec{key: key, index: index, typ: typ}
 		if menu, ok := settingChoices[key]; ok {
 			spec.kind, spec.options = schema.LocalSettingChoice, menu()
+		} else if typ.Kind() == reflect.String && typ.Implements(closedSetType) {
+			walkErr = fmt.Errorf("setting %q: %s is a closed set with no menu; name its menu in settingChoices", key, typ)
+			return
 		} else if spec.kind, walkErr = settingKindOf(typ); walkErr != nil {
 			walkErr = fmt.Errorf("setting %q: %w", key, walkErr)
 			return
@@ -143,6 +142,9 @@ func buildSettingCatalog() ([]settingSpec, error) {
 	}
 	return catalog, nil
 }
+
+// closedSetType is the interface a closed string set implements.
+var closedSetType = reflect.TypeFor[interface{ IsValid() bool }]()
 
 // lookupSetting returns the catalog entry for key.
 func lookupSetting(catalog []settingSpec, key string) (settingSpec, bool) {
@@ -274,6 +276,9 @@ func (s settingSpec) row(document *yaml.Node, cfg *config.Config) (schema.LocalS
 	if err != nil {
 		return schema.LocalSetting{}, err
 	}
+	if !value.IsUnset() && effective.IsUnset() {
+		return schema.LocalSetting{}, &settingNotAppliedError{key: s.key, value: value, options: s.options}
+	}
 	return schema.LocalSetting{
 		Key:             s.key,
 		Kind:            s.kind,
@@ -300,6 +305,21 @@ func (s settingSpec) fileValue(document *yaml.Node) (schema.LocalSettingValue, e
 	return settingJSON(typed.Elem().Interface())
 }
 
+// settingNotAppliedError reports that the configuration file names a value
+// this version applies nowhere: every run that reads it refuses it. The
+// contract has no row for such a value, so the settings read refuses instead
+// of claiming a value applies.
+type settingNotAppliedError struct {
+	key     string
+	value   schema.LocalSettingValue
+	options []string
+}
+
+func (e *settingNotAppliedError) Error() string {
+	return fmt.Sprintf("config.yaml sets %s to %s, which this version refuses wherever it applies the setting; set %s to one of %s with PATCH %s or in config.yaml",
+		e.key, e.value, e.key, quotedOptions(e.options), defaults.RouteSettings)
+}
+
 // effectiveValue is the value that applies under cfg.
 func (s settingSpec) effectiveValue(cfg *config.Config) (schema.LocalSettingValue, error) {
 	var value any
@@ -308,7 +328,12 @@ func (s settingSpec) effectiveValue(cfg *config.Config) (schema.LocalSettingValu
 	} else {
 		field := reflect.ValueOf(cfg).Elem().FieldByIndex(s.index)
 		switch {
-		case s.kind == schema.LocalSettingChoice && field.String() == "" && !slices.Contains(s.options, ""):
+		case s.kind == schema.LocalSettingChoice && !slices.Contains(s.options, field.String()):
+			if field.String() != "" {
+				// A stored choice the menu leaves out and nothing replaces
+				// applies nothing: every run that reads it refuses it.
+				return schema.LocalSettingNull(), nil
+			}
 			// An empty choice means the default applies.
 			field = reflect.ValueOf(config.BaseConfig()).Elem().FieldByIndex(s.index)
 		case (field.Kind() == reflect.Slice || field.Kind() == reflect.Map) && field.IsNil():

@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -80,13 +81,16 @@ func TestSettingsSavedThroughTheDashboardApplyAtOnce(t *testing.T) {
 	}
 }
 
-// TestSettingsListTheSavedAutoPublishRules saves a rule through the mounted
-// auto-publish route and reads the settings: the GET answer lists that rule
-// exactly as the save answered it, with the recorded repository it covers and
-// its hook. A rules file that cannot be read fails the read rather than drop
-// the rule from the list.
-func TestSettingsListTheSavedAutoPublishRules(t *testing.T) {
-	t.Parallel()
+// settingsRulesWorld is a mounted server over cfg, saved as config.yaml, with
+// one git repository Peasant has recorded a session in.
+type settingsRulesWorld struct {
+	*publishingWorld
+	dir        string
+	repository string
+}
+
+func newSettingsRulesWorld(t *testing.T, cfg *config.Config) *settingsRulesWorld {
+	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -110,39 +114,81 @@ func TestSettingsListTheSavedAutoPublishRules(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	seedRecordedSession(t, db, recordedInsideSessionID, insideProject, "https://github.com/acme/tools.git", repository)
 	path := defaults.ResolveConfigFilePathWith(hs.Config).String()
-	cfg := config.BaseConfig()
 	if err := config.SaveAtomic(path, cfg); err != nil {
 		t.Fatal(err)
 	}
 	_, baseURL := startHelperGroupServerHandle(t, hs.config(ServerConfig{Store: db, Config: cfg, ConfigPath: path}))
-	world := &publishingWorld{hs: hs, db: db, baseURL: baseURL}
+	return &settingsRulesWorld{publishingWorld: &publishingWorld{hs: hs, db: db, baseURL: baseURL}, dir: dir, repository: repository}
+}
+
+// saveRule saves one rule named work that covers the world's repository.
+func (w *settingsRulesWorld) saveRule(t *testing.T) schema.AutoPublishRule {
+	t.Helper()
+	rule := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: w.dir + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}}
+	var saved schema.AutoPublishRule
+	status, body := w.request(t, http.MethodPut, strings.Replace(defaults.RouteAutoPublishRule.String(), "{id}", "work", 1), rule)
+	decodeContract(t, status, body, &saved)
+	if len(saved.Repositories) != 1 {
+		t.Fatalf("saved rule = %+v; it covers the recorded repository", saved)
+	}
+	return saved
+}
+
+// TestSettingsListTheSavedAutoPublishRules saves a rule through the mounted
+// auto-publish route and reads the settings: the GET answer lists that rule
+// exactly as the save answered it, with the recorded repository it covers and
+// its hook. A rules file that cannot be read fails the read rather than drop
+// the rule from the list.
+func TestSettingsListTheSavedAutoPublishRules(t *testing.T) {
+	t.Parallel()
+	world := newSettingsRulesWorld(t, config.BaseConfig())
 
 	var before schema.LocalSettingsResponse
 	world.decode(t, http.MethodGet, defaults.RouteSettings.String(), &before)
 	if len(before.AutoPublish) != 0 {
 		t.Fatalf("autoPublish before any rule = %+v", before.AutoPublish)
 	}
-
-	rule := schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: dir + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}}
-	var saved schema.AutoPublishRule
-	status, body := world.request(t, http.MethodPut, strings.Replace(defaults.RouteAutoPublishRule.String(), "{id}", "work", 1), rule)
-	decodeContract(t, status, body, &saved)
-	if len(saved.Repositories) != 1 {
-		t.Fatalf("saved rule = %+v; it covers the recorded repository", saved)
-	}
+	saved := world.saveRule(t)
 	var after schema.LocalSettingsResponse
 	world.decode(t, http.MethodGet, defaults.RouteSettings.String(), &after)
 	if len(after.AutoPublish) != 1 || !reflect.DeepEqual(after.AutoPublish[0], saved) {
 		t.Fatalf("autoPublish = %+v, want exactly the saved rule %+v", after.AutoPublish, saved)
 	}
 
-	rulesPath := autopublish.Path(defaults.ResolveConfigDirPathWith(hs.Config))
+	rulesPath := autopublish.Path(defaults.ResolveConfigDirPathWith(world.hs.Config))
 	if err := os.WriteFile(rulesPath, []byte("version: 1\nrules:\n  - id: work\n    kind: sideways\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	status, body = world.request(t, http.MethodGet, defaults.RouteSettings.String(), nil)
-	refusal := decodeRefusal(t, status, body, http.StatusInternalServerError, "settings_auto_publish_unreadable")
+	status, body := world.request(t, http.MethodGet, defaults.RouteSettings.String(), nil)
+	refusal := decodeRefusal(t, status, body, http.StatusInternalServerError, settingsAutoPublishUnreadableCode)
 	if !strings.Contains(refusal.Error, rulesPath) {
 		t.Errorf("the refusal does not name the rules file %s: %s", rulesPath, refusal.Error)
+	}
+}
+
+// TestSettingsSavedLevelReachesTheHookInstall starts the dashboard with a
+// redaction level this version refuses, so installing a rule's hook is
+// refused. After the level is saved through PATCH, the same install succeeds
+// without a restart: the install guard reads the saved setting.
+func TestSettingsSavedLevelReachesTheHookInstall(t *testing.T) {
+	t.Parallel()
+	cfg := config.BaseConfig()
+	cfg.Redaction.Level = redact.Maximum
+	world := newSettingsRulesWorld(t, cfg)
+	world.saveRule(t)
+	install := strings.Replace(defaults.RouteAutoPublishInstall.String(), "{id}", "work", 1)
+
+	status, body := world.request(t, http.MethodPost, install, schema.AutoPublishInstallRequest{Path: world.repository})
+	decodeRefusal(t, status, body, http.StatusBadRequest, autoPublishInvalidCode)
+
+	status, body = world.request(t, http.MethodPatch, defaults.RouteSettings.String(), map[string]any{"key": "redaction.level", "value": "standard"})
+	var saved schema.LocalSetting
+	decodeContract(t, status, body, &saved)
+
+	var installed schema.AutoPublishRepository
+	status, body = world.request(t, http.MethodPost, install, schema.AutoPublishInstallRequest{Path: world.repository})
+	decodeContract(t, status, body, &installed)
+	if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
+		t.Fatalf("install after the saved level = %+v", installed)
 	}
 }

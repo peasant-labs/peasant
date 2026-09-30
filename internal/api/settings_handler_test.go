@@ -31,12 +31,16 @@ var settingsKeysYAML []byte
 //go:embed testdata/settings-updates.yaml
 var settingsUpdatesYAML []byte
 
+//go:embed testdata/settings-reads.yaml
+var settingsReadsYAML []byte
+
 // settingsDefaultEmail is the email the stub git resolver reports, which a
 // write with no configuration file starts from.
 const settingsDefaultEmail = "settings-default@example.test"
 
 type settingsKeysFixture struct {
 	RequiredNames []string `yaml:"requiredNames"`
+	Editable      []string `yaml:"editable"`
 	ReadOnly      []string `yaml:"readOnly"`
 	PeasantConfig []string `yaml:"peasantConfig"`
 }
@@ -65,10 +69,12 @@ type settingUpdateCase struct {
 	ErrorContains string             `yaml:"errorContains"`
 }
 
-// TestSettingsServeEveryConfigKey reads testdata/settings-keys.yaml: every
-// field of config.Config that has a yaml key has an entry, every entry is such
-// a field, and GET returns exactly those keys with the read-only and `peasant
-// config` flags the fixture pins and the registry implies.
+// TestSettingsServeEveryConfigKey reads testdata/settings-keys.yaml. Every
+// path config.yaml can hold belongs to exactly one entry, and every entry owns
+// one, so a new Config field fails until it has an entry. Every entry is
+// classified editable or read-only. GET returns exactly those keys with the
+// read-only and `peasant config` flags the fixture pins and the registry
+// implies.
 func TestSettingsServeEveryConfigKey(t *testing.T) {
 	t.Parallel()
 	var fixture settingsKeysFixture
@@ -76,15 +82,30 @@ func TestSettingsServeEveryConfigKey(t *testing.T) {
 		t.Fatalf("testdata/settings-keys.yaml: %v", err)
 	}
 
-	fields := map[string]bool{}
-	for _, key := range configYAMLKeys(reflect.TypeOf(config.Config{}), "") {
-		fields[key] = true
-		if !slices.Contains(fixture.RequiredNames, key) {
-			t.Errorf("config.Config field %q has a yaml key and no entry in testdata/settings-keys.yaml; add it to requiredNames", key)
+	owned := map[string]bool{}
+	for path := range flattenConfigYAML(t, filledConfig()) {
+		var owners []string
+		for _, key := range fixture.RequiredNames {
+			if path == key || strings.HasPrefix(path, key+".") {
+				owners = append(owners, key)
+			}
+		}
+		if len(owners) != 1 {
+			t.Errorf("config.yaml path %q belongs to %v; every config.Config field with a yaml key needs exactly one entry in testdata/settings-keys.yaml requiredNames", path, owners)
+			continue
+		}
+		owned[owners[0]] = true
+	}
+	if err := testutil.RequireFixtureNames("testdata/settings-keys.yaml", "config.Config field", fixture.RequiredNames, owned); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range fixture.RequiredNames {
+		if slices.Contains(fixture.Editable, key) == slices.Contains(fixture.ReadOnly, key) {
+			t.Errorf("%s must be listed in exactly one of editable and readOnly", key)
 		}
 	}
-	if err := testutil.RequireFixtureNames("testdata/settings-keys.yaml", "config.Config field", fixture.RequiredNames, fields); err != nil {
-		t.Fatal(err)
+	if len(fixture.Editable)+len(fixture.ReadOnly) != len(fixture.RequiredNames) {
+		t.Errorf("editable and readOnly list %d keys, want exactly the %d required names", len(fixture.Editable)+len(fixture.ReadOnly), len(fixture.RequiredNames))
 	}
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -107,6 +128,11 @@ func TestSettingsServeEveryConfigKey(t *testing.T) {
 		t.Errorf("GET returned %d keys, want exactly the %d required names", len(served), len(fixture.RequiredNames))
 	}
 	assertExactSettingKeys(t, "read-only keys", readOnly, fixture.ReadOnly)
+	editable := map[string]bool{}
+	for key, isReadOnly := range readOnly {
+		editable[key] = !isReadOnly
+	}
+	assertExactSettingKeys(t, "editable keys", editable, fixture.Editable)
 	assertExactSettingKeys(t, "keys `peasant config` edits", inPeasantConfig, fixture.PeasantConfig)
 	assertExactSettingKeys(t, "keys the `peasant config` registry writes", registryWrittenKeys(t, fixture.RequiredNames), fixture.PeasantConfig)
 }
@@ -135,7 +161,7 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 			}
 			dir := t.TempDir()
 			path := filepath.Join(dir, "config.yaml")
-			before := arrangeSettingUpdate(t, c, path)
+			before := arrangeConfigPath(t, c.Setup, c.File, path)
 			handler := &settingsHandler{path: path, git: &testutil.StubGitResolver{Email: settingsDefaultEmail}, rules: noAutoPublishRules(t)}
 
 			recorder := httptest.NewRecorder()
@@ -194,6 +220,62 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 	}
 }
 
+// settingReadCase is one GET /api/v1/settings case of
+// testdata/settings-reads.yaml.
+type settingReadCase struct {
+	Name          string             `yaml:"name"`
+	Setup         settingUpdateSetup `yaml:"setup"`
+	File          string             `yaml:"file"`
+	Status        int                `yaml:"status"`
+	Key           string             `yaml:"key"`
+	Value         string             `yaml:"value"`
+	Effective     string             `yaml:"effective"`
+	Code          string             `yaml:"code"`
+	ErrorContains string             `yaml:"errorContains"`
+}
+
+// TestSettingsReadFixtures runs testdata/settings-reads.yaml through GET
+// /api/v1/settings: the value the file names beside the value that applies, and
+// the refusal when the file names a value no run applies.
+func TestSettingsReadFixtures(t *testing.T) {
+	t.Parallel()
+	var fixture struct {
+		RequiredNames []string          `yaml:"requiredNames"`
+		Cases         []settingReadCase `yaml:"cases"`
+	}
+	if err := testutil.DecodeNamedFixtureYAML(settingsReadsYAML, &fixture); err != nil {
+		t.Fatalf("testdata/settings-reads.yaml: %v", err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			if (c.Status == http.StatusOK) != (c.Key != "" && c.Code == "") || (c.Status != http.StatusOK) != (c.ErrorContains != "") {
+				t.Fatal("a 200 case names a key and its values; a refusal names its code and reason")
+			}
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			arrangeConfigPath(t, c.Setup, c.File, path)
+			handler := &settingsHandler{path: path, git: &testutil.StubGitResolver{Email: settingsDefaultEmail}, rules: noAutoPublishRules(t)}
+			if c.Status != http.StatusOK {
+				recorder := httptest.NewRecorder()
+				handler.handleGetSettings(recorder, httptest.NewRequest(http.MethodGet, defaults.RouteSettings.String(), nil))
+				decodeRefusal(t, recorder.Code, recorder.Body.Bytes(), c.Status, c.Code)
+				if !strings.Contains(recorder.Body.String(), c.ErrorContains) {
+					t.Errorf("refusal %s does not say %q", recorder.Body, c.ErrorContains)
+				}
+				return
+			}
+			listed := getSettings(t, handler).Settings
+			index := slices.IndexFunc(listed, func(s schema.LocalSetting) bool { return s.Key == c.Key })
+			if index < 0 {
+				t.Fatalf("GET does not list %s", c.Key)
+			}
+			if got := listed[index]; !sameJSON(t, got.Value, c.Value) || !sameJSON(t, got.Effective, c.Effective) {
+				t.Errorf("%s reads value %s effective %s, want value %s effective %s", c.Key, got.Value, got.Effective, c.Value, c.Effective)
+			}
+		})
+	}
+}
+
 // TestSettingsReturnNoCredential signs this computer in to Village and reads
 // the settings: the stored API key appears nowhere in the response.
 func TestSettingsReturnNoCredential(t *testing.T) {
@@ -243,28 +325,6 @@ func getSettings(t *testing.T, handler *settingsHandler) schema.LocalSettingsRes
 		t.Fatalf("GET response breaks the contract: %v", err)
 	}
 	return response
-}
-
-// configYAMLKeys walks a Config type and names each field that has a yaml
-// key by its dotted path, descending into struct fields.
-func configYAMLKeys(typ reflect.Type, prefix string) []string {
-	var keys []string
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-		name, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
-		if name == "-" || !field.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = strings.ToLower(field.Name)
-		}
-		if field.Type.Kind() == reflect.Struct {
-			keys = append(keys, configYAMLKeys(field.Type, prefix+name+".")...)
-			continue
-		}
-		keys = append(keys, prefix+name)
-	}
-	return keys
 }
 
 // registryWrittenKeys asks the `peasant config` registry which keys it writes:
@@ -341,21 +401,21 @@ func assertExactSettingKeys(t *testing.T, what string, got map[string]bool, want
 	}
 }
 
-// arrangeSettingUpdate puts the case's setup at path and returns a snapshot of
-// it.
-func arrangeSettingUpdate(t *testing.T, c settingUpdateCase, path string) string {
+// arrangeConfigPath puts setup (with file as the file's text) at path and
+// returns a snapshot of it.
+func arrangeConfigPath(t *testing.T, setup settingUpdateSetup, file, path string) string {
 	t.Helper()
-	switch c.Setup {
+	switch setup {
 	case settingUpdateMissing:
 	case settingUpdateDirectory:
 		if err := os.Mkdir(path, defaults.PrivateDirPerm); err != nil {
 			t.Fatal(err)
 		}
 	case settingUpdateFile, settingUpdateUnreadable:
-		if err := os.WriteFile(path, []byte(c.File), defaults.PublicFilePerm); err != nil {
+		if err := os.WriteFile(path, []byte(file), defaults.PublicFilePerm); err != nil {
 			t.Fatal(err)
 		}
-		if c.Setup == settingUpdateUnreadable {
+		if setup == settingUpdateUnreadable {
 			if os.Geteuid() == 0 {
 				t.Skip("root reads a file whatever its permissions, so this case cannot make it unreadable")
 			}
@@ -365,7 +425,7 @@ func arrangeSettingUpdate(t *testing.T, c settingUpdateCase, path string) string
 			t.Cleanup(func() { _ = os.Chmod(path, defaults.PublicFilePerm) })
 		}
 	default:
-		t.Fatalf("unknown setup %q", c.Setup)
+		t.Fatalf("unknown setup %q", setup)
 	}
 	return snapshotConfigPath(t, path)
 }

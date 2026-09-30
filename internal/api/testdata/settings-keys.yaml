@@ -2,13 +2,17 @@
 #
 # requiredNames names every field of config.Config that has a yaml key, by
 # its dotted yaml path. A struct field is not a key; each of its fields is. A
-# test walks config.Config and fails when a field has no entry here, and fails
-# when a name here is not a field or GET does not return it.
+# test renders a configuration with every field set and fails when a path
+# config.yaml can hold belongs to no entry, and fails when a name here owns no
+# path or GET does not return it.
 #
-# readOnly is the exact set of keys GET marks editable false and PATCH
-# refuses: the format version, the Village sign-in flag, the saved selection
-# (the settings page does not edit it), the settings the dashboard reads only
-# when it starts, and the retired keys peasant reads only to refuse or report.
+# Every name is in exactly one of editable and readOnly, so a new key fails the
+# test until someone decides whether the settings page may change it.
+# editable is the exact set of keys PATCH accepts. readOnly is the exact set of
+# keys GET marks editable false and PATCH refuses: the format version, the
+# Village sign-in flag, the saved selection (the settings page does not edit
+# it), the settings the dashboard reads only when it starts, and the retired
+# keys peasant reads only to refuse or report.
 #
 # peasantConfig is the exact set of keys the `peasant config` registry
 # writes. The test also derives the set from the registry itself; this list
@@ -57,6 +61,37 @@ requiredNames:
   - selection.autoIngestNewBranches
   - selection.harnesses
   - selection.providers
+  - display.theme
+editable:
+  - user.email
+  - redaction.level
+  - redaction.custom_patterns
+  - sources.claude-code.enabled
+  - sources.claude-code.paths
+  - sources.opencode.enabled
+  - sources.opencode.paths
+  - sources.codex.enabled
+  - sources.codex.paths
+  - sources.cursor.enabled
+  - sources.cursor.paths
+  - sources.strike.enabled
+  - sources.strike.paths
+  - sources.pi.enabled
+  - sources.pi.paths
+  - output.stalenessThresholdSec
+  - village.url
+  - daemon.projectMode
+  - push.method
+  - push.sources
+  - push.visibility
+  - push.sharePreference
+  - push.license
+  - push.fields.gitRemote
+  - push.fields.gitBranch
+  - push.fields.projectPath
+  - push.fields.hostSlug
+  - push.fields.projectName
+  - push.concurrency
   - display.theme
 readOnly:
   - version

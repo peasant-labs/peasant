@@ -16,7 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -32,10 +31,21 @@ const maxSettingUpdateBytes = 1 << 20
 // readable key.
 const refusalKeyUnnamed = "(none)"
 
-// liveConfig is the configuration the running server applies: the one it
-// started with, plus every setting saved through PATCH /api/v1/settings since.
-// A saved setting replaces the whole snapshot, so a request that read one
-// snapshot never sees half of a change.
+// Error codes of the settings read.
+const (
+	settingsUnavailableCode           = "settings_unavailable"
+	settingsCatalogInvalidCode        = "settings_catalog_invalid"
+	settingsUnreadableCode            = "settings_unreadable"
+	settingsAutoPublishUnreadableCode = "settings_auto_publish_unreadable"
+	settingsValueNotAppliedCode       = "settings_value_not_applied"
+)
+
+// liveConfig is the configuration the running server applies. It starts as the
+// configuration the server loaded. After each setting saved through PATCH
+// /api/v1/settings it is the saved file, except the read-only keys, which keep
+// what the server started with because they change another way or the server
+// binds them when it starts. A save replaces the whole snapshot, so a reader
+// never sees half of a change.
 type liveConfig struct {
 	current atomic.Pointer[config.Config]
 }
@@ -54,10 +64,9 @@ func (l *liveConfig) load() *config.Config {
 	return l.current.Load()
 }
 
-// apply copies spec's field from saved into a new snapshot. The server keeps
-// what it started with for every other key, so a setting changed in
-// config.yaml by hand still waits for a restart, as it always has.
-func (l *liveConfig) apply(spec settingSpec, saved *config.Config) {
+// apply makes the saved file the snapshot, keeping the current value of every
+// read-only key in catalog.
+func (l *liveConfig) apply(catalog []settingSpec, saved *config.Config) {
 	if l == nil {
 		return
 	}
@@ -65,8 +74,12 @@ func (l *liveConfig) apply(spec settingSpec, saved *config.Config) {
 	if current == nil {
 		return
 	}
-	next := *current
-	reflect.ValueOf(&next).Elem().FieldByIndex(spec.index).Set(reflect.ValueOf(saved).Elem().FieldByIndex(spec.index))
+	next := *saved
+	for _, spec := range catalog {
+		if spec.readOnly != "" {
+			reflect.ValueOf(&next).Elem().FieldByIndex(spec.index).Set(reflect.ValueOf(current).Elem().FieldByIndex(spec.index))
+		}
+	}
 	l.current.Store(&next)
 }
 
@@ -81,40 +94,42 @@ type settingsHandler struct {
 	// git detects the default user email when no configuration file exists,
 	// the way every command's config.Load does.
 	git ingest.GitResolver
-	// rules lists the saved auto-publish rules the GET answer carries.
-	rules autoPublishRules
+	// rules reads the saved auto-publish rules the GET answer carries.
+	rules *autoPublishHandler
 	// mu serializes updates, so two updates cannot both start from the same
 	// file and lose one of the changes.
 	mu sync.Mutex
 }
 
 // handleGetSettings answers GET /api/v1/settings: every key of config.Config
-// with its value in the file, the value that applies, and its metadata.
+// with its value in the file, the value that applies, and its metadata, and
+// every saved auto-publish rule.
 func (h *settingsHandler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	if h.path == "" {
-		writeAPIError(w, http.StatusServiceUnavailable, "The settings could not be read because this server was started without a configuration file in internal/api.handleGetSettings. Nothing was read. Start the dashboard with `peasant web start`, then retry.", "settings_unavailable")
+		writeAPIError(w, http.StatusServiceUnavailable, "The settings could not be read because this server was started without a configuration file in internal/api.handleGetSettings. Nothing was read. Start the dashboard with `peasant web start`, then retry.", settingsUnavailableCode)
 		return
 	}
 	catalog, err := settingCatalog()
 	if err != nil {
 		slog.Error("settings: build the key catalog", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "The settings could not be listed because the settings catalog is invalid in internal/api.handleGetSettings: "+err.Error()+". Nothing was read. Report this defect.", "settings_catalog_invalid")
+		writeAPIError(w, http.StatusInternalServerError, "The settings could not be listed because the settings catalog is invalid in internal/api.handleGetSettings: "+err.Error()+". Nothing was read. Report this defect.", settingsCatalogInvalidCode)
 		return
 	}
 	_, document, cfg, err := h.readConfig(r.Context())
 	if err != nil {
 		slog.Warn("settings: read the configuration file", "path", h.path, "error", err)
-		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be read from %s in internal/api.handleGetSettings: %v. Nothing was changed. Fix or restore the configuration file, then retry.", h.path, err), "settings_unreadable")
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be read from %s in internal/api.handleGetSettings: %v. Nothing was changed. Fix or restore the configuration file, then retry.", h.path, err), settingsUnreadableCode)
 		return
 	}
-	if h.rules == nil {
-		writeAPIError(w, http.StatusInternalServerError, "The settings could not be listed because this server was built without the auto-publish rules in internal/api.handleGetSettings. Nothing was read. Report this defect.", "settings_unavailable")
-		return
-	}
-	rules, err := h.rules.listRules(r.Context())
+	rules, err := h.rules.listRules(r)
 	if err != nil {
 		slog.Warn("settings: read the auto-publish rules", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be listed because the auto-publish rules could not be read in internal/api.handleGetSettings: %v. Nothing was changed. Fix or remove the rules file, then retry.", err), "settings_auto_publish_unreadable")
+		status := http.StatusInternalServerError
+		if errors.Is(err, errAutoPublishStoreUnavailable) {
+			status = http.StatusServiceUnavailable
+		}
+		writeAPIError(w, status, fmt.Sprintf("The settings could not be listed because the auto-publish rules could not be read in internal/api.handleGetSettings: %v. Nothing was changed. Fix or remove the rules file, then retry.", err), settingsAutoPublishUnreadableCode)
 		return
 	}
 	response := schema.LocalSettingsResponse{
@@ -123,15 +138,19 @@ func (h *settingsHandler) handleGetSettings(w http.ResponseWriter, r *http.Reque
 	}
 	for _, spec := range catalog {
 		row, err := spec.row(document, cfg)
+		var notApplied *settingNotAppliedError
+		if errors.As(err, &notApplied) {
+			writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The settings could not be listed: %v, then retry. Nothing was changed.", err), settingsValueNotAppliedCode)
+			return
+		}
 		if err != nil {
 			slog.Error("settings: render a setting", "key", spec.key, "error", err)
-			writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The setting %s could not be read in internal/api.handleGetSettings: %v. Nothing was changed. Fix the key in %s, then retry.", spec.key, err, h.path), "settings_unreadable")
+			writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("The setting %s could not be read in internal/api.handleGetSettings: %v. Nothing was changed. Fix the key in %s, then retry.", spec.key, err, h.path), settingsUnreadableCode)
 			return
 		}
 		response.Settings = append(response.Settings, row)
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	_ = json.NewEncoder(w).Encode(response)
+	writeContract(w, &response)
 }
 
 // handleUpdateSetting answers PATCH /api/v1/settings: it changes one editable
@@ -186,6 +205,9 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	data, document, _, err := h.readConfig(r.Context())
+	if err == nil && data != nil {
+		err = requireOneYAMLDocument(data)
+	}
 	if err != nil {
 		slog.Warn("settings: read the configuration file before an update", "path", h.path, "key", request.Key, "error", err)
 		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("The configuration file %s could not be read: %v. Nothing was changed. Fix or restore the file, then retry.", h.path, err))
@@ -225,51 +247,34 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 	}
 	if err := config.SaveAtomicYAML(h.path, updated); err != nil {
 		slog.Warn("settings: write the configuration file", "path", h.path, "key", request.Key, "error", err)
-		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, err.Error())
+		// The save error says what happened to the file, so the reason repeats
+		// it rather than claim nothing changed.
+		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be saved: %v.", request.Key, err))
 		return
 	}
-	h.live.apply(spec, saved)
+	h.live.apply(catalog, saved)
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	_ = json.NewEncoder(w).Encode(row)
+	writeContract(w, &row)
 }
 
-// autoPublishRules lists every saved auto-publish rule with the recorded
-// repositories it covers and each one's hooks.
-type autoPublishRules interface {
-	listRules(ctx context.Context) ([]schema.AutoPublishRule, error)
-}
-
-var _ autoPublishRules = (*autoPublishHandler)(nil)
-
-// listRules reads the rules the auto-publish routes save, each as the save
-// route answers it: the recorded repositories it covers, with their hooks as
-// they are. A rule that cannot be read fails the list rather than drop out of
-// it, because a rule decides who can read a transcript.
-func (h *autoPublishHandler) listRules(ctx context.Context) ([]schema.AutoPublishRule, error) {
-	rules, err := autopublish.Load(h.rulesPath())
-	if err != nil {
-		return nil, err
-	}
-	views := make([]schema.AutoPublishRule, 0, len(rules))
-	if len(rules) == 0 {
-		return views, nil
-	}
-	if h.store == nil {
-		return nil, errors.New("this server runs without its session store, which names the repositories Peasant recorded")
-	}
-	recorded, err := autopublish.Recorded(ctx, h.store, &ingest.ExecGitResolver{})
-	if err != nil {
-		return nil, fmt.Errorf("list the recorded repositories: %w", err)
-	}
-	hooks := h.hooks()
-	for _, rule := range rules {
-		view, err := hooks.View(ctx, rule, recorded)
-		if err != nil {
-			return nil, fmt.Errorf("read the hooks of auto-publish rule %s: %w", rule.ID, err)
+// requireOneYAMLDocument refuses a configuration file that holds more than one
+// YAML document. Peasant reads only the first, and writing the edited first
+// document back would drop the others.
+func requireOneYAMLDocument(data []byte) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	for count := 0; ; count++ {
+		var document yaml.Node
+		err := decoder.Decode(&document)
+		if errors.Is(err, io.EOF) {
+			return nil
 		}
-		views = append(views, view)
+		if err != nil {
+			return err
+		}
+		if count == 1 {
+			return errors.New("it holds more than one YAML document; peasant reads only the first, and a change here would drop the others; merge them into one by hand")
+		}
 	}
-	return views, nil
 }
 
 // readConfig reads the configuration file: its bytes, its YAML document, and
