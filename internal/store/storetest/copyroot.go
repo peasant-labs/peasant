@@ -18,13 +18,19 @@ import (
 // package-level constant so the literal appears once, read with os.Getenv.
 //
 // The default (unset or empty) is t.TempDir(): status-quo semantics, Go-owned
-// cleanup, OS tmpfiles under SIGKILL. A focused-run micro-measurement showed
-// no copy-speed difference between a tmpfs root and t.TempDir (100 copies of
-// the 800 KiB template: 44.8 ms vs 36.6 ms — noise next to the ~25–30 s
-// migration saving), so no RAM-backed default is worth its machinery. Set the
-// override to route copies through a managed root instead — e.g. a RAM disk,
-// or a scratch placement of choice — with per-process owner shelves and the
-// dead-owner sweep below.
+// cleanup, OS tmpfiles under SIGKILL. That default already honors TMPDIR:
+// t.TempDir() and os.MkdirTemp("") both resolve through os.TempDir(), so
+// setting TMPDIR alone (to a RAM disk, say) already routes every default copy.
+// What this override adds on top of TMPDIR placement is cleanup scoped to
+// storetest's own shelves: copies land under a per-user, scheme-versioned
+// managed root, in per-process pid-* owner directories, and the first use in
+// each process sweeps the shelves whose owner is provably dead. A focused-run
+// micro-measurement showed no copy-speed difference between a tmpfs root and
+// t.TempDir (100 copies of the 800 KiB template: 44.8 ms vs 36.6 ms — noise
+// next to the ~25–30 s migration saving), so no RAM-backed default is worth
+// its machinery. Set the override when that scoped, self-healing cleanup is
+// wanted — e.g. a RAM disk whose copies should not outlive a killed run — and
+// the dead-owner sweep below applies.
 const EnvStoretestTmpDir = "PEASANT_STORETEST_TMPDIR"
 
 // minFreeBytesForCache is the free-space floor for the template cache: below

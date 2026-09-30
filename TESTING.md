@@ -161,13 +161,20 @@ the gate. The switch is a one-line `enforcement` change in `budget.yaml`.
 
 The committed budget is **120s** under **`enforcement: warn`**, and the suite
 does **not** meet it, so `make check` prints a `WARN (non-blocking)` budget
-line **by construction** and stays green. Final consolidated measurement
-(2026-09-29, head `fc7d9c95`): race pass **13m43s** (823.1s), no-race pass
+line **by construction** and stays green. Final consolidated measurement over
+the substantive tree (2026-09-29, head `fc7d9c95`): race pass **13m43s**
+(823.1s), no-race pass
 **2m10s** (129.6s), combined **15m53s** (952.9s), L-normalised **16m42s** at
 `L` 0.951. Against the pre-epoch base `da7abd7f` (race 19m53s, no-race 1m00s,
 combined 20m53s, L-normalised 21m49s at `L` 0.957) the combined wall fell
 **24%** and the race pass **31%**; the no-race pass grew from 7 to 19 tests as
-twelve detector-taxed tests moved into it. Per-class (focused, Class A): T3 DB-setup
+twelve detector-taxed tests moved into it. The branch head `c6789de7` was
+re-gated after the two follow-up commits, which touch documentation and comment
+text only: `make check RACE=1` exited 0, the four-rule screen printed the same
+`all four rules passed`, and the gate printed `testgate: PASS`. The head run
+measured combined **16m8s** (968.9s) at `L` 0.953, L-normalised **16m56.987s**
+(capture `.agents.local/testgate/20260929T233304Z/`).
+Per-class (focused, Class A): T3 DB-setup
 conversion 946.7s → 563.9s over 22 tests; T1 no-race partition 171.2s race →
 78.7s no-race over 12 moved entries; T2 SQL/seed 79.6s → 74.0s; T4 payload
 shares reduce no fixture invariant; T6 packing `internal/api` 102.2s → 96.3s
@@ -436,7 +443,7 @@ test non-parallel).
 |---------|----------|--------------------|------------|-----|
 | `PEASANT_DB_POOL_SIZE` | `store.EnvPoolSize` | `10` (`store.DefaultPoolSize`) | `1` cmd/peasant · `2` store | Avoid the default 10-connection pool (each re-parsing the schema) per `store.Open`. `internal/store` uses **2**, not 1 — pool=1 deadlocks its tests that take a 2nd connection while holding the 1st. |
 | `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB (`64*1024*1024`) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
-| `PEASANT_STORETEST_TMPDIR` | `storetest.EnvStoretestTmpDir` | (unset → `t.TempDir()` copies) | (unset) | Opt-in: route golden copies through a managed root (e.g. a macOS hdiutil RAM disk) with per-process shelves and dead-owner sweeping. The default `t.TempDir()` showed no measured copy-speed difference (the copy micro-measurement: 100 copies 36.6 ms vs 44.8 ms tmpfs — noise). |
+| `PEASANT_STORETEST_TMPDIR` | `storetest.EnvStoretestTmpDir` | (unset → `t.TempDir()` copies) | (unset) | Opt-in: route golden copies through a managed root (e.g. a macOS hdiutil RAM disk) with per-process shelves and dead-owner sweeping. `TMPDIR` already routes the default copies — `t.TempDir()` and `os.MkdirTemp("")` resolve through `os.TempDir()`, so `TMPDIR` alone moves every default copy. This override **additionally** scopes cleanup to storetest-owned `pid-*` shelves: they sit under a per-user, scheme-versioned managed root and a dead-owner sweep reclaims them on first use. The default `t.TempDir()` showed no measured copy-speed difference (the copy micro-measurement: 100 copies 36.6 ms vs 44.8 ms tmpfs — noise). |
 
 Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
 `internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`),

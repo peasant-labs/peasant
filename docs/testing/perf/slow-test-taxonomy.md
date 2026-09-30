@@ -436,9 +436,9 @@ accounted       204 rows      7.40 s  95.73%  (total sampled 7.73s)
   exercised; why the detector is not this test's oracle; retained race coverage;
   residual risk), plus three screening-confirmed additions admitted by the same
   registry change — the large-record harness test (#31) and the two
-  build-topology guards (#32/#33), summarized after the nine. Every
-  justification is mirrored verbatim in the entry's `justification` in
-  `no-race-partition.yaml`. No registry contract change; the bulk-byte parents
+  build-topology guards (#32/#33), summarized after the nine. Each
+  justification is mirrored in substance into the entry's `justification` in
+  `no-race-partition.yaml`; wording may differ. No registry contract change; the bulk-byte parents
   inside the ingest pipeline stay in the race pass (detector tax deferred). Arguments:
   - **#4 `TestResolveStoredOriginsWritesAVerdictIntoEveryRow`** (`internal/ingest`; initial cost 41510 ms wall / 39750 ms CPU). Subject: the stored-origin backfill writes one verdict per row and a second pass rewrites nothing. Concurrency: none on the path; each fixture subtest builds its own golden-copy store and calls OriginResolver.ResolveStoredOrigins sequentially, with no goroutines, channels, or state shared across subtests (the pipeline worker pool is not reached). The detector is not the oracle: the invariant is row contents and pass counts, and the cost is store open plus SQL work taxed by instrumentation. Retained race coverage: TestConcurrentReadAcrossActivation, TestClose_ConcurrentReadersDoNotPanic (store). Residual risk: a future change that parallelises the backfill must add its own race-run test.
   - **#11 `TestMountedKickstartStoredGateAlignsViewerAndPush`** (`cmd/peasant`; initial cost 16550 ms wall / 15240 ms CPU). Subject: the kickstart stored-selection gate and the viewer/push surfaces agree on the same candidates. Concurrency: none; runModel is replaced so the model is driven synchronously and returned commands are drained in a serial queue, flowIngest is a counter stub, and each subtest owns its temp world. The detector is not the oracle: the assertions are gate state, config bytes, and candidate sets. Retained race coverage: n/a for the gate (no concurrent path); the real bubbletea runtime is not mounted here. Residual risk: races inside the live program loop are not observed by this test in either pass.

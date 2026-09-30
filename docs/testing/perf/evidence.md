@@ -748,6 +748,15 @@ construction (`budget.yaml` `enforcement: warn`). Capture:
 race/no-race `go test -json` streams). The run reported no failed test, no
 screen finding, and no invocation error.
 
+The branch head `c6789de7` was re-gated after the two follow-up commits, which
+touch documentation and comment text only (the class-aggregate record and a
+corrected ast-grep version string): `make check RACE=1` exited 0 with the same
+four-rule screen and `testgate: PASS`, and the run reported no failed test, no
+screen finding, and no invocation error. Normalized wall **16m56.987s**
+(16m8.888s combined, `L`=0.953), also `WARN (non-blocking)`. Capture:
+`.agents.local/testgate/20260929T233304Z/`. The code under test is identical to
+`fc7d9c95`; the gap between the two runs is load noise.
+
 Base pair (survey S2), head `da7abd7f`, 2026-09-29: capture
 `gate/20260929T052214Z-base-da7abd7f/` under the survey sidecar in
 `.agents.local/`.
@@ -756,7 +765,8 @@ Base pair (survey S2), head `da7abd7f`, 2026-09-29: capture
 |---|---|---|---|---|---|---|
 | base `da7abd7f` | 1192.5 s | 60.2 s | 1252.8 s | 3713 / 7 | 0.957 | 21m49s |
 | final `fc7d9c95` | 823.1 s | 129.6 s | 952.9 s | 3711 / 19 | 0.951 | 16m42s |
-| delta | −369.4 s (−31.0%) | +69.4 s | −299.9 s (−23.9%) | | | −23.4% |
+| head re-gate `c6789de7` | 829.9 s | 138.7 s | 968.9 s | 3711 / 19 | 0.953 | 16m57s |
+| delta (final − base) | −369.4 s (−31.0%) | +69.4 s | −299.9 s (−23.9%) | | | −23.4% |
 
 The no-race pass grows by design: twelve detector-taxed tests moved into it
 (the seven pre-existing partition entries become nineteen). The race pass falls

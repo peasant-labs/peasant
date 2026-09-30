@@ -90,7 +90,7 @@ lint: web-stub
 check: fmt lint
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
-	ast-grep scan --config sgconfig.yml .; \
+	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
 	RACE=$(RACE) go run ./cmd/testgate run
@@ -102,6 +102,12 @@ check: fmt lint
 	# is gated behind the "astgrep" build tag, so a plain `go test` never depends
 	# on the ast-grep binary; ast-grep is already a hard `make check` dependency
 	# via the untagged scan.
+	#
+	# That untagged scan runs with --error=unused-suppression: its config loads
+	# every ast-grep/ rule, so a suppression that no longer suppresses the code
+	# it names is an error there and fails this step. The key gate scans with
+	# only its own rules, so it cannot make that judgement - hence the flag is
+	# on the repo-wide scan, not on the key gate.
 	#
 	# The race detector (GORACE_FLAG) is on by default and gated to RACE=0 on CI
 	# feature PRs; see the RACE variable above. When RACE=0 the gate runs a single
