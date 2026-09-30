@@ -302,8 +302,9 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   its own default-mode `bin/peasant` on `PEASANT_OFFLINE_PORT` (default `8698`), so nothing else may
   hold that port; it kills that server by its own process handle on exit, failure or signal, removes the
   temp config dir it made, and rewrites `server.log` per run. `pnpm shell:gate` runs both arms.
-- **provenance first:** both gates run `served-build.mjs`'s `assertServedBuild` before any capture — the
-  served page must reference exactly `web/out/index.html`'s chunks and those chunks must carry
+- **provenance first:** both gates run `served-build.mjs`'s `assertServedBuild` before any capture —
+  `web/out` must not be older than the newest file under `web/src`, the served page must reference
+  exactly `web/out/index.html`'s chunks, and those chunks must carry
   `--app-notice-height` and the manifest's `back` and `stillStopped` announcements (the `stopped` one
   repeats fairtrade's banner headline, so it proves nothing about this build) — so a stale server or
   another worktree fails before it can produce mislabelled evidence. The offline gate also checks its
@@ -327,33 +328,41 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   clearing the header, carrying no tabindex at rest, and the root's `scroll-padding-top` equal to the
   fixed header; theme attributes; and a palette that offers no per-project or route-only jump.
   The responsive arm repeats the header checks at every width in `src/test/testdata/shell_responsive.yaml`,
-  down to the 320px `reflow` row.
+  down to the 320px `reflow` row. It checks the header's own overflow, not the page body's (the home
+  project picker already scrolls sideways at 390px; that body is rebuilt separately).
 - **keyboard after a click (header arm):** a click must never make `<main>` the focus, which would send
   Tab back to the top of the page and keyboard scrolling to the document instead of the pane clicked.
   On `/analytics` at 1440×800, scrolled down, a click on plain text (an element with text of its own,
-  not a control) then Tab must move to a control without jumping the page up, with `<main>` neither
-  focused nor carrying a tabindex; on `/share` at 1440×600, a click on plain content inside the session
-  list (`.swz-body`, which overflows in the mock store) then PageDown must scroll that list.
-  It checks the header's own overflow, not the page body's (the home project picker already scrolls
-  sideways at 390px; that body is rebuilt separately).
+  not a control, with no focusable ancestor but `<main>` — a chart's own `<g tabindex>` would take the
+  click and hide what `<main>` does) must leave focus on `<body>`, and Tab must move to a control
+  without jumping the page up; on `/share` at 1440×600, a click on plain content inside the session list
+  (`.swz-body`, which overflows in the mock store) then PageDown must scroll that list. A `tabindex` on
+  `<main>` fails either half on its own.
 - **what the offline arm asserts:** with each page open and the server killed: the notice directly under
-  the fixed header — pinned (`position: fixed`, its top at the header's bottom) where the screen has room
-  (`(min-height: 40rem) and (min-width: 48rem)`), in the page flow with no fixed ancestor elsewhere — with
+  the fixed header — pinned (`position: fixed`, its top at the header's bottom) where the `notice-pinned`
+  query matches, in the page flow with no fixed ancestor elsewhere — with
   "peasant isn't running on this computer", "your internet is fine", `peasant web start --port <port>`
   and `try again`; the live region saying the manifest's `stopped` text; the header manifest intact;
   `--app-notice-height` set; `<main>` clearing the header plus the notice; the root's
   `scroll-padding-top` equal to what stays fixed (the header plus the notice where it is pinned, the
   header alone elsewhere, so a focused element never scrolls under either); `<main>` with no tabindex
   at rest. The cases come from `testdata/shell-offline-cases.yaml` (loaded strictly: unknown fields fail
-  and every case name is required; each row has one `check`: `plain`, `retry-reach`, `floor` or
-  `scrolled`). Per case: the 1440×900
+  and the names in the gate's `REQUIRED_CASES` must all be there; each row has one `check`: `plain`,
+  `retry-reach`, `floor`, `scrolled` or `keep-place`). Per case: the 1440×900
   transcript owns the only scroller; at 320×256 (400% zoom) the notice is taller than the viewport and
   the document scrolls `try again` into view below the header, reachable by a pointer; the transcript at
-  320×256 and `/share` at 320×568, scrolled to the bottom, keep their floor (`min(24rem, screen height −
-  header)`) fully in view below the header; home at 1440×700, scrolled down before the server stops,
-  shows the pinned notice on screen under the header. Then `try again` with the server still down makes
-  the live region say the `stillStopped` text with the check time; after a restart, `try again` clears
-  the notice, returns the page under the header, and the live region says the `back` text.
+  320×256 and `/share` at 320×568, scrolled to the bottom, keep exactly their floor (`min(bodyFloor,
+  screen height − header)`, `bodyFloor` from `app-shell-geometry.yaml`) fully in view below the header,
+  which also proves the floor binds there; home at 1440×700, scrolled down before the server stops,
+  shows the pinned notice on screen under the header; `/analytics` at 1440×500 (not pinned), scrolled
+  down, scrolls by exactly the notice's height in the frame it appears and back by at least that in the
+  frame it goes (the page's own connection strip goes in the same frame), so the reader keeps their
+  place. Then `try again` with
+  the server still down makes the live region say the `stillStopped` text with the check time; after a
+  restart, `try again` clears the notice, returns the page under the header, and the live region says the
+  `back` text. On the `recover: keyboard` case `try again` is focused and pressed with Enter: focus moves
+  to `<main>` (focusable only for that move) without scrolling, and the next Tab moves on with `<main>`
+  no longer focusable.
 - **the tour:** the gate can only see a tour overlay, and the tour never starts on its own, so the
   mounted check cannot tell a mounted tour provider from an unmounted one. The unmount itself is guarded
   by `LocalOfflineNotice.test.tsx` (a mounted provider would render its marker).
@@ -362,7 +371,7 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   peasant-labs/fairtrade-design-system#139 (the demo carries this header, or fairtrade exports it) is
   what brings a demo-left / app-right arm back, for the header and the offline notice.
 - **outputs:** `scripts/visual/shell/<theme>/shell-{home,home-mobile,route-analytics,route-review,route-map}.png`
-  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile,home-short,transcript-short,share-mobile,home-scrolled}.png`
+  and `scripts/visual/shell-offline/<theme>/{home,transcript,home-mobile,home-short,transcript-short,share-mobile,home-scrolled,analytics-keep-place}.png`
   — review artifacts, never committed.
 - **mock limitation:** the mock data store cannot serve the grouped sessions route (`GET
   /api/v1/sessions?view=grouped` answers 500), so the home body shows that error panel in mock captures;
@@ -374,12 +383,12 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   - *Necessity:* jsdom computes no layout, hit-testing or real socket close; the component tests hold the
     same manifest checks but cannot see geometry, reachability or a real process exit.
   - *Production path:* the real routes, socket and health route of a running `bin/peasant`; nothing is
-    mocked but the data store. The offline gate proves its binary embeds this checkout's `web/out`; the
-    header gate proves the served chunks equal `web/out`, and the binary too only when `PEASANT_BIN` is
-    given.
+    mocked but the data store. Both gates prove `web/out` is not older than `web/src` and that the served
+    chunks equal it; the offline gate also proves its binary is not older than `web/out`, the header gate
+    only when `PEASANT_BIN` is given.
   - *Cost:* one headless browser; the header gate drives 2 themes × (home, 390px, 3 routes) + 6 widths
-    and two keyboard checks in about a minute; the offline gate runs 14 stop/restart cycles (2 themes × 7 cases) in about four
-    minutes.
+    and two keyboard checks in about a minute; the offline gate runs 16 stop/restart cycles (2 themes × 8
+    cases) in about five minutes.
   - *Lifetime:* the header gate spawns no server; the offline gate kills its server and removes its temp
     config dir on exit, failure, SIGINT and SIGTERM. A SIGKILL of the gate itself orphans the server and
     leaks the temp config dir; the next run then fails loudly on the busy port.
@@ -390,13 +399,17 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   - *CI parity:* neither runs in CI; both need `make build` and a Chrome binary, and run from a clean
     checkout.
   - *Evidence:* full-frame captures of the mounted shell in both themes: desktop, 390px, 320×256 (home and
-    transcript), 320×568 (`/share`) and a scrolled 1440×700 page.
+    transcript), 320×568 (`/share`), a scrolled 1440×700 page and a scrolled 1440×500 `/analytics`; the keyboard
+    recovery (focus to `<main>`, then Tab) is asserted on the real browser.
   - *Mutation:* a re-added pill or share link, any link to a route-only section outside `<main>` (and
     fairtrade's section sub-nav anywhere), a dead settings link, a notice fixed on a small screen or
     unpinned on a roomy one, a missing or wrong `scroll-padding-top` (focused elements scrolling under
     the fixed header or pinned notice), a resting tabindex on `<main>` (a click would steer Tab and
-    keyboard scrolling to it), a crushed full-height page, a missing live-region announcement, an
-    unreachable `try again`, or a deleted offline case each fail a named check.
+    keyboard scrolling to it — caught by the click-then-Tab and click-then-PageDown checks themselves, not
+    only the attribute check), a crushed full-height page or a floor that no longer binds, a scrolled
+    reader losing their place, a keyboard recovery that leaves focus on `<body>` or `<main>` focusable, a
+    missing live-region announcement, an unreachable `try again`, a stale `web/out`, or a deleted offline
+    case each fail a named check.
   - *Exit condition:* when the visual harness is consolidated into one toolkit, or the shell header gets
     a fairtrade demo counterpart, fold these gates into it and retire the duplicated boot/probe code.
 

@@ -317,9 +317,9 @@ const assertResponsive = async (browser) => {
 }
 
 // A point inside `scope` (a selector, or the viewport) on plain text: an element that holds text
-// of its own (not a wrapper around the page) and is not a control, not focusable, and not in the
-// header. Clicking it must leave focus where a click on plain text leaves it, so the next Tab or
-// keyboard scroll starts from there.
+// of its own (not a wrapper around the page), is not a control, and has no focusable ancestor other
+// than <main> (a chart's `<g tabindex>` would take the click itself and hide what <main> does). A
+// click there must leave focus on <body>, so the next Tab or keyboard scroll starts from there.
 const plainPoint = (page, scope) => page.evaluate((sel) => {
   const box = sel ? document.querySelector(sel)?.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
   if (!box) return null
@@ -329,9 +329,11 @@ const plainPoint = (page, scope) => page.evaluate((sel) => {
     for (let x = box.left + 16; x < box.right - 16; x += 40) {
       const hit = document.elementFromPoint(x, y)
       if (!hit || hit === document.body || hit.closest('header')) continue
-      // Not a control, and not focusable itself (a focusable ancestor such as <main> is exactly what
-      // this check must catch, so ancestors' tabindex does not disqualify the point).
-      if (hit.hasAttribute('tabindex') || hit.closest('a, button, input, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="option"]')) continue
+      // Not a control, and no focusable ancestor but <main> (a focusable <main> is exactly what this
+      // check must catch, so <main> alone does not disqualify the point).
+      if (hit.closest('a, button, input, select, textarea, summary, [contenteditable], [role="button"], [role="checkbox"], [role="option"]')) continue
+      const focusable = hit.closest('[tabindex]')
+      if (focusable && focusable.tagName !== 'MAIN') continue
       if (sel && !hit.closest(sel)) continue
       if (!sel && !hit.closest('main')) continue
       const ownText = [...hit.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 2)
@@ -365,7 +367,8 @@ const assertKeyboardFromClick = async (browser) => {
   await pause(250)
   const after = await page.evaluate(() => ({ scrollY: window.scrollY, active: document.activeElement?.tagName.toLowerCase(), label: (document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))
   const tabFailures = []
-  if (before.active === 'main' || after.active === 'main') tabFailures.push(`a click on plain text made <main> the focus (after click: ${before.active}, after Tab: ${after.active})`)
+  if (before.active !== 'body') tabFailures.push(`a click on plain text focused ${before.active}, not <body>`)
+  if (after.active === 'main') tabFailures.push('Tab after the click focused <main>')
   if (before.mainTabindex !== null) tabFailures.push(`<main> carries tabindex="${before.mainTabindex}" after a click`)
   if (after.active === 'body') tabFailures.push('Tab after the click focused nothing')
   if (after.scrollY < before.scrollY - 150) tabFailures.push(`Tab after a click at ${Math.round(before.scrollY)}px jumped the page to ${Math.round(after.scrollY)}px`)
