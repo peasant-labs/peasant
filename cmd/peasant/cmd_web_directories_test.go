@@ -23,7 +23,7 @@ func TestWebServerRunsWithTheCommandsDirectories(t *testing.T) {
 	var got api.ServerConfig
 	root := newTestRoot()
 	root.AddCommand(&cobra.Command{Use: "serve", RunE: func(cmd *cobra.Command, args []string) error {
-		got = webServerConfig(cmd, appconfig.BaseConfig(), 1, false, "", false, "", nil, nil, nil, nil)
+		got = webServerConfig(cmd, appconfig.BaseConfig(), "settings.yaml", 1, false, "", false, "", nil, nil, nil, nil)
 		return nil
 	}})
 	root.SetArgs([]string{"--config-dir", config, "--data-dir", data, "--state-dir", state, "serve"})

@@ -44,6 +44,7 @@ requiredNames:
   - delete from a foreign origin is refused
   - put from a foreign origin is refused
   - patch from a foreign origin is refused
+  - settings change from a foreign origin is refused
   - shutdown from a foreign origin is refused
   - sign-out from a foreign origin is refused
   - auto-publish rule save from a foreign origin is refused
@@ -82,6 +83,7 @@ cases:
   - {name: delete from a foreign origin is refused, method: DELETE, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: put from a foreign origin is refused, method: PUT, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: patch from a foreign origin is refused, method: PATCH, path: /api/v1/annotations, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
+  - {name: settings change from a foreign origin is refused, method: PATCH, path: /api/v1/settings, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: shutdown from a foreign origin is refused, method: POST, path: /api/v1/shutdown, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: sign-out from a foreign origin is refused, method: POST, path: /api/v1/sync/logout, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}
   - {name: auto-publish rule save from a foreign origin is refused, method: PUT, path: /api/v1/settings/auto-publish/work, host: "localhost:{port}", origin: "https://site.example", status: 403, code: request_origin_not_local}

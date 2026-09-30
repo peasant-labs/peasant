@@ -60,6 +60,10 @@ type ServerConfig struct {
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
+	// ConfigPath is the configuration file Config was loaded from. The settings
+	// routes read and write it, and a setting saved through them applies to
+	// the sync handler at once. Empty disables the settings routes.
+	ConfigPath string
 	// RepositoryIdentityResolver resolves private discovery rows into logical
 	// repository cohorts. Nil uses the production Git topology resolver.
 	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
@@ -99,6 +103,10 @@ type Server struct {
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
 
+	// live is the configuration the handlers apply: Config plus every setting
+	// saved through the settings routes since the server started.
+	live *liveConfig
+
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
 	// the store after the owner closes it.
@@ -132,6 +140,7 @@ func NewServer(cfg ServerConfig) *Server {
 		hub:             cfg.Hub,
 		groupedVariants: make(map[GroupedRouteVariant]GroupedVariantSource),
 		memberScopes:    newMemberScopeCache(memberScopeTTL, memberScopeMaxEntries),
+		live:            newLiveConfig(cfg.Config),
 	}
 	if provider, ok := cfg.Provider.(groupedCandidateProvider); ok {
 		s.groupedRevision = provider.GroupedScopeRevision()
@@ -194,6 +203,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	sh := &syncHandler{
 		store:       s.cfg.Store,
 		config:      s.cfg.Config,
+		live:        s.live,
 		scopeIssuer: s,
 		configHome:  s.cfg.ConfigHome,
 		dataHome:    s.cfg.DataHome,
@@ -234,6 +244,11 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
 	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
 	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)
+
+	// Settings routes: every configuration key, and one key changed at a time.
+	settingsRoutes := &settingsHandler{path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}}
+	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
+	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
