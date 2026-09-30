@@ -148,7 +148,6 @@ function sessionCheckbox(id: string): HTMLInputElement {
 async function goToSubmit(user: ReturnType<typeof userEvent.setup>) {
   const footer = document.querySelector('.swz-foot') as HTMLElement;
   await user.click(within(footer).getByRole('button', { name: 'Continue' }));
-  await user.click(await within(footer).findByRole('button', { name: 'Skip' }));
   const continueRedaction = await waitFor(() => {
     const action = within(footer).getByRole('button', { name: 'Continue' });
     expect(action).toBeEnabled();

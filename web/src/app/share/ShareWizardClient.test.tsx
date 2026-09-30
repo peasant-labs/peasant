@@ -9,7 +9,7 @@ import * as mockData from '@/lib/share/mock-data';
 vi.mock('@/hooks/useMockConfig');
 vi.mock('@/lib/share/mock-data');
 
-// Four visible steps: Choose → Labels → Redact → Submit. RedactionStep is
+// Three visible steps: Choose → Redact → Submit. RedactionStep is
 // the heaviest leaf (simulated pipeline + diff views); stub it so the
 // deep-link test can assert the wizard reached the Redact step without
 // standing up that machinery.
@@ -511,7 +511,7 @@ describe('ShareWizardClient', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows all four visible steps in the indicator (choose / labels / redact / submit)', async () => {
+  it('shows the three visible steps in the indicator (choose / redact / submit), with no labels step', async () => {
     const mockConfig = { enabled: true, web: ['sessions'], tui: [] };
     mockConfigSpy.mockReturnValue({
       config: mockConfig,
@@ -543,9 +543,11 @@ describe('ShareWizardClient', () => {
     const nav = await screen.findByRole('navigation', {
       name: 'Contribute progress',
     });
-    for (const label of ['choose', 'labels', 'redact', 'submit']) {
+    for (const label of ['choose', 'redact', 'submit']) {
       expect(within(nav).getByText(label)).toBeInTheDocument();
     }
+    // The labels step asked for labels the push never sent, so it is gone.
+    expect(within(nav).queryByText('labels')).not.toBeInTheDocument();
   });
 
   it('keeps the first-run tour anchor on the retained Contribute route', async () => {

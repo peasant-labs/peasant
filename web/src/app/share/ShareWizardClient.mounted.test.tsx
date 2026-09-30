@@ -85,11 +85,9 @@ describe('mounted Share production boundary', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
   it('decodes, joins, groups, tri-state selects eligible IDs, and submits them through PushStep', async () => {
-    let releaseAnnotations!: () => void;
     let releaseRedactions!: () => void;
-    const annotationsGate = new Promise<void>((resolve) => { releaseAnnotations = resolve; });
     const redactionsGate = new Promise<void>((resolve) => { releaseRedactions = resolve; });
-    const fetchMock = installFetch(fixture.items, annotationsGate, redactionsGate);
+    const fetchMock = installFetch(fixture.items, Promise.resolve(), redactionsGate);
     const user = userEvent.setup();
     render(<ShareWizardClient />);
     const projects = await screen.findAllByRole('region', { name: 'project alpha' });
@@ -130,13 +128,10 @@ describe('mounted Share production boundary', () => {
     const footer = document.querySelector('.swz-foot') as HTMLElement;
     expect(within(footer).getByRole('button', { name: 'Continue' })).toBeEnabled();
     expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
+    // Choose leads straight to Redact: there is no labels step to skip.
     await user.click(within(footer).getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
-    releaseAnnotations();
-    const skip = await within(footer).findByRole('button', { name: 'Skip' });
-    expect(screen.getAllByRole('button', { name: 'Skip' })).toHaveLength(1);
-    await user.click(skip);
-    await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
+    expect(screen.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
     releaseRedactions();
     const review = await screen.findByRole('region', { name: 'redaction review' });
     expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
@@ -149,7 +144,7 @@ describe('mounted Share production boundary', () => {
     });
     expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
     await user.click(continueRedaction);
-    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded.') === true)).toBeInTheDocument();
+    expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded to village.') === true)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Submit' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/sync/push'), expect.objectContaining({ body: JSON.stringify({ sessionIds: ['sess-new', 'sess-updated', 'sess-repo-main', 'sess-repo-feature'], redactionLevel: 'standard' }) })));
     expect(await screen.findByRole('link', { name: /View in the commons/i })).toHaveAttribute(
